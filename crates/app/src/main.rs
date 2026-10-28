@@ -1,0 +1,65 @@
+//! nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in
+//! the `femcore` crate).
+//!
+//! Command line: `nyx [FILE]` opens the window (and a project or HDF5 results file), `--size WxH` sets the window size,
+//! `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.xml` solves
+//! without a window (see `batch`). Modules: `app` (state and layout), `tabs` (the inspector), `viewport` and `scene` (drawing),
+//! `worker` (background jobs), `state` (the saved project), `examples`, `colormap`, `theme`.
+mod app;
+mod batch;
+mod colormap;
+mod examples;
+mod scene;
+mod script;
+mod state;
+mod tabs;
+mod theme;
+mod viewport;
+mod worker;
+
+fn main() -> eframe::Result {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(|a| a.as_str()) == Some("--batch") {
+        if let Err(e) = batch::run(&args[1..]) {
+            eprintln!("nyx: {e}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+    let mut script = None;
+    if let Some(i) = args.iter().position(|a| a == "--script") {
+        if i + 1 < args.len() {
+            script = Some(args[i + 1].clone());
+            args.drain(i..i + 2);
+        }
+    }
+    let mut size = [1400.0, 860.0];
+    if let Some(i) = args.iter().position(|a| a == "--size") {
+        if i + 1 < args.len() {
+            let v: Vec<f32> = args[i + 1].split('x').filter_map(|x| x.parse().ok()).collect();
+            if v.len() == 2 {
+                size = [v[0], v[1]];
+            }
+            args.drain(i..i + 2);
+        }
+    }
+    let arg = args.first().cloned();
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default().with_inner_size(size).with_min_inner_size([900.0, 600.0]).with_title("nyx").with_drag_and_drop(true),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "nyx",
+        options,
+        Box::new(move |cc| {
+            let mut a = app::App::new(cc);
+            if let Some(p) = &arg {
+                a.open_path(std::path::PathBuf::from(p));
+            }
+            if let Some(s) = &script {
+                a.script = s.split(';').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
+            }
+            Ok(Box::new(a))
+        }),
+    )
+}

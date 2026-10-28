@@ -1,0 +1,596 @@
+//! Electromagnetic eigenmodes of 3D cavities and resonators (the `Eigenfrequency` study of EM waves
+//! on a tetrahedral mesh): `curl(1/mu curl E) = (2 pi f / c)^2 eps E` with perfect electric
+//! conductor on the exterior boundary and optional perfectly matched layers.
+//!
+//! Elements are Nedelec elements of the first kind on tetrahedra, tangentially continuous:
+//! order 1 has one degree of freedom per edge (the Whitney function `N_ab = l_a grad l_b - l_b grad l_a`),
+//! order 2 has 20 per tetrahedron: per edge `N_ab` and the gradient `grad(l_a l_b)`, per face the two
+//! functions `l_c N_ab` and `l_a N_bc`. Vertices of an edge or face are always taken in the order of
+//! their global numbers, so neighbouring tetrahedra agree on shared edges and faces.
+//!
+//! With a complex stretch (PML) the matrices are complex symmetric and the eigenvalues complex; the
+//! frequencies then carry a quality factor.
+
+use crate::csparse::{c, CCoo, CCsr, C};
+use crate::eigen::EigOpts;
+use crate::emw::C0;
+use crate::emw_pml::cell_stretches;
+use crate::fem::*;
+use crate::fields::{local_bary, node_average};
+use crate::mesh::SimplexMesh;
+use crate::problem::*;
+use crate::sparse::Csr;
+use rayon::prelude::*;
+use std::collections::HashMap;
+use std::time::Instant;
+
+const EDGES: [(usize, usize); 6] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+const FACES: [[usize; 3]; 4] = [[1, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]];
+
+/// Global numbering of the degrees of freedom.
+pub struct Ned3 {
+    pub order: usize,
+    pub n_edges: usize,
+    pub n_faces: usize,
+    /// sorted vertex triples of all faces
+    pub faces: Vec<[u32; 3]>,
+    face_id: HashMap<[u32; 3], u32>,
+    /// per cell, the global dofs of its basis functions (edge functions first, then face functions)
+    pub cell_dofs: Vec<Vec<usize>>,
+    /// ordering key of every vertex: edges and faces are oriented by it. Equal to the vertex number,
+    /// except that the vertices of periodic boundaries share the key of their counterpart so that the
+    /// basis functions of matching edges and faces correspond one to one
+    pub vkey: Vec<u32>,
+}
+
+fn sorted3(a: u32, b: u32, c: u32) -> [u32; 3] {
+    let mut t = [a, b, c];
+    t.sort_unstable();
+    t
+}
+
+impl Ned3 {
+    pub fn new(mesh: &SimplexMesh, order: usize, vkey: Vec<u32>) -> Ned3 {
+        let mut face_id: HashMap<[u32; 3], u32> = HashMap::new();
+        let mut faces: Vec<[u32; 3]> = vec![];
+        let mut cell_faces: Vec<[u32; 4]> = Vec::with_capacity(mesh.n_cells());
+        for ci in 0..mesh.n_cells() {
+            let v = mesh.cell(ci);
+            let mut cf = [0u32; 4];
+            for (k, f) in FACES.iter().enumerate() {
+                let key = sorted3(v[f[0]], v[f[1]], v[f[2]]);
+                let id = *face_id.entry(key).or_insert_with(|| {
+                    faces.push(key);
+                    (faces.len() - 1) as u32
+                });
+                cf[k] = id;
+            }
+            cell_faces.push(cf);
+        }
+        let ne = mesh.n_edges();
+        let nf = faces.len();
+        let nb = if order == 1 { 6 } else { 20 };
+        let mut cell_dofs = Vec::with_capacity(mesh.n_cells());
+        for ci in 0..mesh.n_cells() {
+            let mut d = Vec::with_capacity(nb);
+            let eids = mesh.cell_edge_ids(ci);
+            if order == 1 {
+                d.extend(eids.iter().map(|&e| e as usize));
+            } else {
+                for &e in eids {
+                    d.push(2 * e as usize);
+                    d.push(2 * e as usize + 1);
+                }
+                for &f in &cell_faces[ci] {
+                    d.push(2 * ne + 2 * f as usize);
+                    d.push(2 * ne + 2 * f as usize + 1);
+                }
+            }
+            cell_dofs.push(d);
+        }
+        Ned3 { order, n_edges: ne, n_faces: nf, faces, face_id, cell_dofs, vkey }
+    }
+
+    pub fn n_dofs(&self) -> usize {
+        if self.order == 1 { self.n_edges } else { 2 * self.n_edges + 2 * self.n_faces }
+    }
+
+    /// Ordering keys of the vertices of cell `ci`.
+    pub fn keys(&self, mesh: &SimplexMesh, ci: usize) -> [u32; 4] {
+        let v = mesh.cell(ci);
+        [self.vkey[v[0] as usize], self.vkey[v[1] as usize], self.vkey[v[2] as usize], self.vkey[v[3] as usize]]
+    }
+
+    /// Dofs of the functions of face `v` (sorted triple of vertex numbers).
+    pub fn face_dofs(&self, v: [u32; 3]) -> [usize; 2] {
+        let f = self.face_id[&sorted3(v[0], v[1], v[2])] as usize;
+        [2 * self.n_edges + 2 * f, 2 * self.n_edges + 2 * f + 1]
+    }
+
+    pub fn nb(&self) -> usize {
+        if self.order == 1 { 6 } else { 20 }
+    }
+
+    /// Dofs of the tangential trace on a boundary face with vertices `v`: the face functions and the
+    /// functions of its three edges.
+    pub fn boundary_dofs(&self, mesh: &SimplexMesh, v: [u32; 3]) -> Vec<usize> {
+        let mut out = vec![];
+        for (a, b) in [(v[0], v[1]), (v[1], v[2]), (v[0], v[2])] {
+            let e = mesh.edge_index(a, b);
+            if self.order == 1 {
+                out.push(e);
+            } else {
+                out.push(2 * e);
+                out.push(2 * e + 1);
+            }
+        }
+        if self.order == 2 {
+            let f = self.face_id[&sorted3(v[0], v[1], v[2])] as usize;
+            out.push(2 * self.n_edges + 2 * f);
+            out.push(2 * self.n_edges + 2 * f + 1);
+        }
+        out
+    }
+}
+
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+fn axpy(s: f64, x: [f64; 3], y: [f64; 3]) -> [f64; 3] {
+    [s * x[0] + y[0], s * x[1] + y[1], s * x[2] + y[2]]
+}
+fn scale3(s: f64, x: [f64; 3]) -> [f64; 3] {
+    [s * x[0], s * x[1], s * x[2]]
+}
+
+/// Basis functions and their curls at the barycentric point `lam` of a tetrahedron with vertex
+/// gradients `g` and global vertex numbers `gid`.
+pub fn basis3(order: usize, lam: &[f64; 4], g: &[[f64; 3]; 4], gid: &[u32; 4], w: &mut Vec<[f64; 3]>, curl: &mut Vec<[f64; 3]>) {
+    w.clear();
+    curl.clear();
+    // Whitney function of the (a, b) pair and its curl
+    let whitney = |a: usize, b: usize| -> ([f64; 3], [f64; 3]) {
+        (sub3(scale3(lam[a], g[b]), scale3(lam[b], g[a])), scale3(2.0, cross(g[a], g[b])))
+    };
+    for &(i, j) in EDGES.iter() {
+        let (a, b) = if gid[i] < gid[j] { (i, j) } else { (j, i) };
+        let (n, cn) = whitney(a, b);
+        w.push(n);
+        curl.push(cn);
+        if order == 2 {
+            w.push(axpy(lam[a], g[b], scale3(lam[b], g[a])));
+            curl.push([0.0; 3]);
+        }
+    }
+    if order == 2 {
+        for f in FACES.iter() {
+            let mut t = [f[0], f[1], f[2]];
+            t.sort_by_key(|&k| gid[k]);
+            let (a, b, cc) = (t[0], t[1], t[2]);
+            let (nab, cab) = whitney(a, b);
+            let (nbc, cbc) = whitney(b, cc);
+            // l_c N_ab and l_a N_bc
+            w.push(scale3(lam[cc], nab));
+            curl.push(axpy(lam[cc], cab, cross(g[cc], nab)));
+            w.push(scale3(lam[a], nbc));
+            curl.push(axpy(lam[a], cbc, cross(g[a], nbc)));
+        }
+    }
+}
+
+type C3 = [[C; 3]; 3];
+
+fn assemble_complex<F>(nc: usize, n: usize, f: F) -> CCsr
+where
+    F: Fn(std::ops::Range<usize>, &mut CCoo) + Sync,
+{
+    let nt = if nc < 500 { 1 } else { crate::par::threads_up_to(16) };
+    let chunk = nc.div_ceil(nt).max(1);
+    let parts: Vec<CCsr> = (0..nt)
+        .into_par_iter()
+        .map(|t| {
+            let mut coo = CCoo::new(n, n);
+            f((t * chunk).min(nc)..((t + 1) * chunk).min(nc), &mut coo);
+            coo.to_csr()
+        })
+        .collect();
+    let mut it = parts.into_iter();
+    let mut acc = it.next().unwrap();
+    for p in it {
+        acc = acc.add_scaled(&p, c(1.0, 0.0));
+    }
+    acc
+}
+
+/// The curl-curl matrix `K` (weights `1/mu` per axis) and the mass matrix `M` (permittivity tensor)
+/// over all dofs.
+pub fn assemble_maxwell(mesh: &SimplexMesh, ned: &Ned3, eps: &[C3], mu_inv: &[[C; 3]]) -> (CCsr, CCsr) {
+    let geo = geometry(mesh);
+    let quad = quad_rule(3, 4);
+    let nb = ned.nb();
+    let n = ned.n_dofs();
+    let nc = mesh.n_cells();
+    let run = |which: usize| -> CCsr {
+        assemble_complex(nc, n, |range, coo| {
+            let (mut w, mut cu) = (Vec::new(), Vec::new());
+            let mut ke = vec![c(0.0, 0.0); nb * nb];
+            let mut gs = [[0.0; 3]; 4];
+            for ci in range {
+                let gid = ned.keys(mesh, ci);
+                for b in 0..4 {
+                    for k in 0..3 {
+                        gs[b][k] = geo.g[ci * 12 + b * 3 + k];
+                    }
+                }
+                ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
+                for q in 0..quad.w.len() {
+                    let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
+                    basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                    let wq = quad.w[q] * geo.vol[ci];
+                    for i in 0..nb {
+                        if which == 0 {
+                            let ci_ = cu[i];
+                            for j in 0..nb {
+                                let cj = cu[j];
+                                let mut acc = c(0.0, 0.0);
+                                for a in 0..3 {
+                                    acc += mu_inv[ci][a] * (ci_[a] * cj[a]);
+                                }
+                                ke[i * nb + j] += acc * wq;
+                            }
+                        } else {
+                            let wi = w[i];
+                            for j in 0..nb {
+                                let wj = w[j];
+                                let mut acc = c(0.0, 0.0);
+                                for a in 0..3 {
+                                    for b in 0..3 {
+                                        acc += eps[ci][a][b] * (wi[a] * wj[b]);
+                                    }
+                                }
+                                ke[i * nb + j] += acc * wq;
+                            }
+                        }
+                    }
+                }
+                coo.push_block(&ned.cell_dofs[ci], &ned.cell_dofs[ci], &ke);
+            }
+        })
+    };
+    (run(0), run(1))
+}
+
+/// The discrete gradient over all nodes: one column per vertex (the Whitney edge coefficients
+/// `phi_b - phi_a`, oriented by the vertex keys, of the gradient of its hat function) and, for order 2,
+/// one per edge (the gradient of the edge bubble is the second function of the edge). Its columns lie
+/// in the null space of the curl-curl matrix.
+fn gradient_full(mesh: &SimplexMesh, ned: &Ned3) -> Csr {
+    let nv = mesh.n_points();
+    let ncols = if ned.order == 2 { nv + mesh.n_edges() } else { nv };
+    let mut coo = crate::sparse::Coo::new(ned.n_dofs(), ncols);
+    for (e, &(a, b)) in mesh.edges().iter().enumerate() {
+        let (lo, hi) = if ned.vkey[a as usize] < ned.vkey[b as usize] { (a, b) } else { (b, a) };
+        let dof = if ned.order == 1 { e } else { 2 * e };
+        coo.push(dof, hi as usize, 1.0);
+        coo.push(dof, lo as usize, -1.0);
+        if ned.order == 2 {
+            coo.push(2 * e + 1, nv + e, 1.0);
+        }
+    }
+    coo.to_csr()
+}
+
+fn to_real(a: &CCsr) -> Csr {
+    Csr { nrows: a.nrows, ncols: a.ncols, indptr: a.indptr.clone(), indices: a.indices.clone(), data: a.data.iter().map(|z| z.re).collect() }
+}
+
+fn is_real(a: &CCsr) -> bool {
+    a.data.iter().all(|z| z.im == 0.0)
+}
+
+fn to_complex(a: &Csr) -> CCsr {
+    CCsr { nrows: a.nrows, ncols: a.ncols, indptr: a.indptr.clone(), indices: a.indices.clone(), data: a.data.iter().map(|&v| c(v, 0.0)).collect() }
+}
+
+/// Equivalence classes of the vertices of periodic boundaries: the key of a vertex is the smallest
+/// vertex number of its class.
+fn vertex_keys(mesh: &SimplexMesh, matches: &[crate::periodic::Match]) -> Vec<u32> {
+    let n = mesh.n_points();
+    let mut parent: Vec<u32> = (0..n as u32).collect();
+    fn find(p: &mut [u32], mut i: u32) -> u32 {
+        while p[i as usize] != i {
+            p[i as usize] = p[p[i as usize] as usize];
+            i = p[i as usize];
+        }
+        i
+    }
+    for m in matches {
+        for (&s, &t) in &m.map {
+            let (rs, rt) = (find(&mut parent, s), find(&mut parent, t));
+            if rs != rt {
+                let (lo, hi) = (rs.min(rt), rs.max(rt));
+                parent[hi as usize] = lo;
+            }
+        }
+    }
+    (0..n as u32).map(|i| find(&mut parent, i)).collect()
+}
+
+/// Relations between the dofs of the two sides of a periodic pair (all one to one because the basis
+/// functions are oriented by the vertex keys).
+fn ned_relations(mesh: &SimplexMesh, ned: &Ned3, m: &crate::periodic::Match, phase: f64) -> Result<Vec<(usize, usize, C)>, String> {
+    let f = crate::periodic::phase_factor(phase);
+    let mut out = vec![];
+    let mut done_edges = std::collections::BTreeSet::new();
+    for &fc in &m.src_facets {
+        let v = mesh.facet(fc);
+        let vs = [v[0], v[1], v[2]];
+        let vt = [m.map[&vs[0]], m.map[&vs[1]], m.map[&vs[2]]];
+        for (i, j) in [(0, 1), (1, 2), (0, 2)] {
+            let key = (vs[i].min(vs[j]), vs[i].max(vs[j]));
+            if !done_edges.insert(key) {
+                continue;
+            }
+            let es = mesh.edge_index(vs[i], vs[j]);
+            let et = mesh.edges().binary_search(&(vt[i].min(vt[j]), vt[i].max(vt[j]))).map_err(|_| "an edge of the source boundary has no counterpart on the destination boundary".to_string())?;
+            if ned.order == 1 {
+                out.push((et, es, f));
+            } else {
+                out.push((2 * et, 2 * es, f));
+                out.push((2 * et + 1, 2 * es + 1, f));
+            }
+        }
+        if ned.order == 2 {
+            // the face functions are oriented by the vertex keys, which agree on both sides
+            let ds = ned.face_dofs(vs);
+            let dt = ned.face_dofs(vt);
+            out.push((dt[0], ds[0], f));
+            out.push((dt[1], ds[1], f));
+        }
+    }
+    Ok(out)
+}
+
+/// Eigenfrequencies of the cavity.
+pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    if mesh.dim != 3 {
+        return Err("the Eigenfrequency study of EM waves needs a 3D mesh".into());
+    }
+    let Study::Eigenfrequency { n_modes, f_search } = spec.study.clone() else {
+        return Err("EM waves on a 3D mesh use the Eigenfrequency study".into());
+    };
+    let order = if spec.order == 1 { 1 } else { 2 };
+    let tens = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+    let mur = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
+    let has_pml = spec.materials.has_pml();
+    let stretch = if has_pml { Some(cell_stretches(mesh, &spec.materials.pml)) } else { None };
+    let mut eps: Vec<C3> = Vec::with_capacity(mesh.n_cells());
+    let mut mu_inv: Vec<[C; 3]> = Vec::with_capacity(mesh.n_cells());
+    for ci in 0..mesh.n_cells() {
+        let (sx, sy, sz) = stretch.as_ref().map_or((c(1.0, 0.0), c(1.0, 0.0), c(1.0, 0.0)), |s| (s[ci][0], s[ci][1], s[ci][2]));
+        // PML: eps' = Lambda eps, mu' = Lambda mu with Lambda = diag(sy sz / sx, sx sz / sy, sx sy / sz)
+        let lam = [sy * sz / sx, sx * sz / sy, sx * sy / sz];
+        let pml_here = stretch.is_some() && (sx.re != 1.0 || sx.im != 0.0 || sy.re != 1.0 || sy.im != 0.0 || sz.re != 1.0 || sz.im != 0.0);
+        let t = tens[ci];
+        // a stretch S = diag(sx, sy, sz) turns eps into det(S) eps_ab / (s_a s_b): the diagonal gets `lam`, off-diagonal terms of an
+        // anisotropic crystal are scaled consistently
+        let (sv, det) = ([sx, sy, sz], sx * sy * sz);
+        let mut e = [[c(0.0, 0.0); 3]; 3];
+        for a in 0..3 {
+            for b in 0..3 {
+                e[a][b] = if pml_here { det * t[a][b] / (sv[a] * sv[b]) } else { c(t[a][b], 0.0) };
+            }
+        }
+        eps.push(e);
+        let one = c(1.0, 0.0);
+        let mu0 = c(1.0 / mur[ci], 0.0);
+        mu_inv.push([mu0 / if pml_here { lam[0] } else { one }, mu0 / if pml_here { lam[1] } else { one }, mu0 / if pml_here { lam[2] } else { one }]);
+    }
+    let mut tl = Instant::now();
+    // periodic pairs
+    let mut matches = vec![];
+    for p in &spec.periodic {
+        matches.push(crate::periodic::match_vertices(mesh, p)?);
+    }
+    let vkey = vertex_keys(mesh, &matches);
+    let ned = Ned3::new(mesh, order, vkey);
+    let n = ned.n_dofs();
+    let (k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
+    crate::solid::lap(&mut tl, "emw3d: numbering and assembly");
+    // perfect electric conductor on the exterior boundary, except the periodic boundaries
+    let exterior = mesh.exterior_facets();
+    let periodic_labels: Vec<i32> = spec.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
+    let mut fixed_set = std::collections::BTreeSet::new();
+    let mut pec_vertex = std::collections::BTreeSet::new();
+    let mut pec_edge = std::collections::BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if exterior[f] && !periodic_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            for d in ned.boundary_dofs(mesh, [fv[0], fv[1], fv[2]]) {
+                fixed_set.insert(d);
+            }
+            for &v in fv {
+                pec_vertex.insert(v as usize);
+            }
+            for (a, b) in [(fv[0], fv[1]), (fv[1], fv[2]), (fv[0], fv[2])] {
+                pec_edge.insert(mesh.edge_index(a, b));
+            }
+        }
+    }
+    let fixed: Vec<usize> = fixed_set.into_iter().collect();
+    // reduction of the dofs (PEC removed, periodic dofs merged)
+    let mut relations = vec![];
+    for (p, mt) in spec.periodic.iter().zip(&matches) {
+        relations.extend(ned_relations(mesh, &ned, mt, p.phase)?);
+    }
+    let red = crate::periodic::Reduction::build(n, &relations, &fixed);
+    let pmat = red.prolong();
+    let nred = red.n_reduced();
+    if n_modes < 1 || n_modes + 1 >= nred {
+        return Err("number of modes must be between 1 and the number of free dofs".into());
+    }
+    let kc = crate::periodic::congruence(&pmat, &k);
+    let mc = crate::periodic::congruence(&pmat, &m);
+    // null space of the curl-curl operator: gradients of the interior (non-PEC) nodal functions with the same periodic structure
+    let nv = mesh.n_points();
+    let n_nodes = if order == 2 { nv + mesh.n_edges() } else { nv };
+    let mut node_fixed: Vec<usize> = pec_vertex.iter().copied().collect();
+    if order == 2 {
+        node_fixed.extend(pec_edge.iter().map(|&e| nv + e));
+    }
+    let mut node_rel = vec![];
+    for (p, mt) in spec.periodic.iter().zip(&matches) {
+        node_rel.extend(crate::periodic::nodal_relations(mesh, order, 1, mt, p.phase)?);
+    }
+    // nodal_relations numbers nodes as vertices then edge midpoints, as `gradient_full` does
+    let nred_nodes = crate::periodic::Reduction::build(n_nodes, &node_rel, &node_fixed);
+    let g_full = to_complex(&gradient_full(mesh, &ned));
+    let g_nodes = crate::periodic::ccsr_mul(&g_full, &nred_nodes.prolong());
+    // rows of the reduced dofs: x_full = P x_red has x_red equal to the root dofs
+    let g_red = {
+        let (mut indptr, mut indices, mut data) = (vec![0usize], vec![], vec![]);
+        for &r in &red.roots {
+            for q in g_nodes.indptr[r]..g_nodes.indptr[r + 1] {
+                indices.push(g_nodes.indices[q]);
+                data.push(g_nodes.data[q]);
+            }
+            indptr.push(indices.len());
+        }
+        CCsr { nrows: nred, ncols: nred_nodes.n_reduced(), indptr, indices, data }
+    };
+    let g_h = crate::periodic::ccsr_adjoint(&g_red);
+    crate::solid::lap(&mut tl, "emw3d: reduction and gradient matrix");
+    // shift: the requested frequency; without one, the frequency of a wave that fits the cavity
+    let (lo, hi) = mesh.bbox();
+    let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
+    let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
+    let sigma = (2.0 * std::f64::consts::PI * f0 / C0).powi(2);
+    // eigenvalue lambda = k0^2: K x = lambda M x
+    let mut freqs: Vec<(C, usize)> = vec![];
+    let (vectors, dim, converged): (Vec<Vec<C>>, usize, bool);
+    if is_real(&kc) && is_real(&mc) && is_real(&g_red) {
+        let (kr, mr, gr) = (to_real(&kc), to_real(&mc), to_real(&g_red));
+        crate::solid::lap(&mut tl, "emw3d: matrices");
+        let gt = gr.transpose();
+        let s_mat = crate::amg::spmm(&gt, &crate::amg::spmm(&mr, &gr));
+        let s_solver = crate::linalg::SparseSolver::new(&s_mat, true)?;
+        let project = |x: &mut Vec<f64>| {
+            let t = mr.matvec(x);
+            let g = gt.matvec(&t);
+            let y = s_solver.solve(&g);
+            let gy = gr.matvec(&y);
+            for (a, b) in x.iter_mut().zip(&gy) {
+                *a -= b;
+            }
+        };
+        crate::solid::lap(&mut tl, "emw3d: projection factorisation");
+        let shifted = kr.add_scaled(&mr, -sigma);
+        let solver = crate::linalg::SparseSolver::new(&shifted, false)?;
+        crate::solid::lap(&mut tl, "emw3d: shift-invert factorisation");
+        let pairs = crate::eigen::eigs_sym_projected(&kr, &mr, sigma, n_modes, &EigOpts::default(), &|b: &[f64]| Ok(solver.solve(b)), Some(&project))?;
+        for (i, l) in pairs.values.iter().enumerate() {
+            freqs.push((c(l.max(0.0).sqrt() * (C0 / (2.0 * std::f64::consts::PI)), 0.0), i));
+        }
+        vectors = pairs.vectors.iter().map(|v| v.iter().map(|&x| c(x, 0.0)).collect()).collect();
+        dim = pairs.dim;
+        converged = pairs.converged;
+    } else {
+        // complex: absorbing layers or Floquet phases. Projection x - G S^-1 G^H M x with S = G^H M G
+        let s_c = crate::periodic::ccsr_mul(&g_h, &crate::periodic::ccsr_mul(&mc, &g_red));
+        let s_solver = crate::csparse::CSolver::new(&s_c)?;
+        let project = |x: &mut Vec<C>| {
+            let t = mc.matvec(x);
+            let g = g_h.matvec(&t);
+            let y = s_solver.solve(&g);
+            let gy = g_red.matvec(&y);
+            for (a, b) in x.iter_mut().zip(&gy) {
+                *a -= *b;
+            }
+        };
+        crate::solid::lap(&mut tl, "emw3d: projection factorisation");
+        let pairs = crate::csparse::eigs_complex_projected(&kc, &mc, c(sigma, 0.0), n_modes, 1e-9, 500, Some(&project))?;
+        for (i, l) in pairs.values.iter().enumerate() {
+            if pairs.residuals.get(i).is_some_and(|r| *r > 1e-6) {
+                continue;
+            }
+            let mut f = l.sqrt() * (C0 / (2.0 * std::f64::consts::PI));
+            if f.re < 0.0 {
+                f = -f;
+            }
+            freqs.push((f, i));
+        }
+        vectors = pairs.vectors.clone();
+        dim = pairs.dim;
+        converged = pairs.converged;
+    }
+    crate::solid::lap(&mut tl, "emw3d: eigenvalue iteration");
+    freqs.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
+    // fields at the quadratic nodes
+    let geo = geometry(mesh);
+    let lamn = local_bary(3, 2);
+    let nloc = lamn.len();
+    let nc = mesh.n_cells();
+    let nb = ned.nb();
+    let mut solutions = vec![];
+    let mut scalars = vec![];
+    for (j, (f, i)) in freqs.iter().enumerate() {
+        let x = red.expand(&vectors[*i]);
+        let mut e = vec![[c(0.0, 0.0); 3]; nc * nloc];
+        let (mut w, mut cu) = (Vec::new(), Vec::new());
+        let mut gs = [[0.0; 3]; 4];
+        for ci in 0..nc {
+            let gid = ned.keys(mesh, ci);
+            for b in 0..4 {
+                for kk in 0..3 {
+                    gs[b][kk] = geo.g[ci * 12 + b * 3 + kk];
+                }
+            }
+            for (a, l) in lamn.iter().enumerate() {
+                basis3(order, &[l[0], l[1], l[2], l[3]], &gs, &gid, &mut w, &mut cu);
+                let mut val = [c(0.0, 0.0); 3];
+                for s in 0..nb {
+                    let coef = x[ned.cell_dofs[ci][s]];
+                    for kk in 0..3 {
+                        val[kk] += coef * w[s][kk];
+                    }
+                }
+                e[ci * nloc + a] = val;
+            }
+        }
+        let big = e.iter().flat_map(|v| v.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+        let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+        let mag: Vec<f64> = e.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
+        let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
+        let avg = |vals: Vec<f64>| node_average(mesh, &vals.iter().map(|x| x * s).collect::<Vec<f64>>(), 1, 2);
+        let fields = vec![
+            Field { name: "|E|".into(), unit: "a.u.".into(), values: avg(mag.clone()) },
+            Field { name: "Re Ex".into(), unit: "a.u.".into(), values: avg(e.iter().map(|v| (v[0] * rot).re).collect()) },
+            Field { name: "Re Ey".into(), unit: "a.u.".into(), values: avg(e.iter().map(|v| (v[1] * rot).re).collect()) },
+            Field { name: "Re Ez".into(), unit: "a.u.".into(), values: avg(e.iter().map(|v| (v[2] * rot).re).collect()) },
+        ];
+        if f.im.abs() > 1e-12 * f.re.abs().max(1.0) {
+            let q = f.re / (2.0 * f.im.abs());
+            solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q), fields, value: Some(f.re), ..Default::default() });
+            scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
+            scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
+        } else {
+            solutions.push(Solution { label: format!("mode {}: {:.6} GHz", j + 1, f.re / 1e9), fields, value: Some(f.re), ..Default::default() });
+            scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(f.re)));
+        }
+    }
+    if solutions.is_empty() {
+        return Err("no eigenfrequencies converged near the shift".into());
+    }
+    let mut log = vec![format!("Nedelec order {order}, {n} dofs ({nred} after constraints), shift {:.4e} Hz, Krylov dimension {dim}{}", f0, if converged { "" } else { " (not every pair converged; those are omitted)" })];
+    if !spec.periodic.is_empty() {
+        log.push(format!("{} Floquet-periodic pair(s)", spec.periodic.len()));
+    }
+    if f_search <= 0.0 {
+        log.push("no search frequency given: modes nearest the fundamental of a box of this size".into());
+    }
+    Ok(SolveResult { order: 2, dim: 3, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n })
+}

@@ -1,0 +1,12 @@
+# build output and local artefacts
+/target/
+/dist/
+/shots/
+/out/
+# generated result files and autosaved runs
+*.h5
+*.hdf5
+*.xdmf
+temp_untitled_*
+# no Python files are shipped (the app's optional "Python (optional)" menu runs a script of the user's own)
+*.py

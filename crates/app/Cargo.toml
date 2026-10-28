@@ -1,0 +1,21 @@
+[package]
+name = "nyx"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+femcore = { path = "../femcore" }
+rayon = "1"
+eframe = "0.37"
+rfd = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+egui_plot = "0.38"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[features]
+# HDF5 results files (needs the HDF5 library; set HDF5_DIR to its install prefix)
+hdf5 = ["femcore/hdf5-metno"]
+# parallel HDF5 (MPI-IO) output as well; needs an MPI-enabled HDF5 and an MPI SDK to build
+phdf5 = ["hdf5", "femcore/phdf5"]
