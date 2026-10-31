@@ -317,6 +317,6 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
     if fixed.is_empty() {
         log.push("no fixed boundary: the lowest modes may be rigid-body-like".into());
     }
-    let result = SolveResult { order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n };
+    let result = SolveResult { order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() };
     Ok((result, KzModes { kz, freqs: out_freqs, vectors: out_vectors, c6, rho, converged: pairs.converged }))
 }

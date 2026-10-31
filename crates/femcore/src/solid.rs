@@ -406,6 +406,7 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
                 log: note.into_iter().collect(),
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
+                ..Default::default()
             })
         }
         Study::Eigenfrequency { n_modes, f_search } => {
@@ -496,7 +497,7 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
             if st.fixed.is_empty() {
                 log.push("no fixed boundary: the first six (3D) or three (2D) modes are rigid-body motions at ~0 Hz".into());
             }
-            Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n })
+            Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() })
         }
         _ => Err("solid mechanics supports Static and Eigenfrequency studies".into()),
     }

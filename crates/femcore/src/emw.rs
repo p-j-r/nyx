@@ -378,7 +378,13 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
     if modes.neff.len() < n_modes {
         log.push(format!("only {} of {} real-valued modes were found near the target", modes.neff.len(), n_modes));
     }
-    Ok(SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order) })
+    let mut result = SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order), ..Default::default() };
+    if !modes.neff.is_empty() {
+        if let Ok(set) = crate::brillouin::optical_set_real(mesh, spec, &modes, freq) {
+            crate::analysis::analyze_optical(mesh, &set, &Default::default()).attach(&mut result);
+        }
+    }
+    Ok(result)
 }
 
 /// Number of edge-element dofs plus phi dofs (for reporting).

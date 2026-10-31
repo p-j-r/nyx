@@ -537,6 +537,8 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     let nb = ned.nb();
     let mut solutions = vec![];
     let mut scalars = vec![];
+    let (axes, left_handed) = crate::analysis::axes_of_3d_problem(spec, mesh);
+    let mut pol_modes: Vec<crate::analysis::ModeInput> = vec![];
     for (j, (f, i)) in freqs.iter().enumerate() {
         let x = red.expand(&vectors[*i]);
         let mut e = vec![[c(0.0, 0.0); 3]; nc * nloc];
@@ -561,6 +563,16 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
                 e[ci * nloc + a] = val;
             }
         }
+        // polarization: the field at the vertices of every cell, each standing for a quarter of its volume
+        let mut samples = Vec::with_capacity(4 * nc);
+        for ci in 0..nc {
+            for a in 0..4 {
+                let v = e[ci * nloc + a];
+                let cx = |z: C| [z.re, z.im];
+                samples.push(crate::polarization::Sample { ex: cx(v[axes[0]]), ey: cx(v[axes[1]]), ez: cx(v[axes[2]]), w: geo.vol[ci] / 4.0 });
+            }
+        }
+        pol_modes.push(crate::analysis::ModeInput { label: format!("mode {}", j + 1), neff: (f.re / 1e12, f.im / 1e12), samples });
         let big = e.iter().flat_map(|v| v.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
         let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
         let mag: Vec<f64> = e.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
@@ -592,5 +604,14 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     if f_search <= 0.0 {
         log.push("no search frequency given: modes nearest the fundamental of a box of this size".into());
     }
-    Ok(SolveResult { order: 2, dim: 3, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n })
+    let mut result = SolveResult { order: 2, dim: 3, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() };
+    // Stokes parameters of the modes with respect to the (lateral, normal, propagation) axes of the problem
+    let fmax = pol_modes.iter().map(|m| m.neff.0.abs()).fold(0.0, f64::max);
+    let mut opts = crate::analysis::AnalysisOptions { value_label: "f (THz)".into(), degeneracy_tol: 1e-6 * fmax, ..Default::default() };
+    if left_handed {
+        opts.class.time = crate::polarization::TimeConvention::MinusI;
+    }
+    result.log.push(format!("polarization axes: lateral {}, normal {}, propagation {}", ["x", "y", "z"][axes[0]], ["x", "y", "z"][axes[1]], ["x", "y", "z"][axes[2]]));
+    crate::analysis::analyze_modes(&pol_modes, &opts).attach(&mut result);
+    Ok(result)
 }

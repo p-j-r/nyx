@@ -169,5 +169,5 @@ pub fn solve_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     if st.fixed.is_empty() {
         log.push("no fixed boundary: the lowest modes are rigid-body motions".into());
     }
-    Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n })
+    Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() })
 }

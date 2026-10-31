@@ -69,5 +69,5 @@ pub(crate) fn solve_floquet(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, 
     }
     let _ = (node_average, free_dofs);
     let log = vec![format!("{} Floquet-periodic pair(s): {n} dofs, {nred} after constraints; complex Hermitian eigenproblem, Krylov dimension {}{}", spec.periodic.len(), pairs.dim, if pairs.converged { "" } else { " (not every pair converged; those are omitted)" })];
-    Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n })
+    Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() })
 }

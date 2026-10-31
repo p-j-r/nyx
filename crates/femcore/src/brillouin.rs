@@ -290,6 +290,40 @@ pub fn sample_mode_e(mesh: &SimplexMesh, set: &OpticalSet, j: usize, pts: &[[f64
         .collect()
 }
 
+/// The electric field of optical mode `j` at the quadrature points of every cell outside the PML, as the samples of a
+/// polarization analysis (`polarization::Sample`: `(Ex, Ey, Ez)` with `x` lateral, `y` the surface normal, `z` the propagation axis, and
+/// the area each point stands for). The 24-point rule of `fine_rule` is exact for `|E|^2` of the quadratic elements.
+pub fn mode_samples(mesh: &SimplexMesh, set: &OpticalSet, j: usize) -> Vec<crate::polarization::Sample> {
+    let fc = FieldCtx::new(mesh, set.order, set.freq);
+    let (pts, wts) = fine_rule();
+    let mut out = Vec::with_capacity(mesh.n_cells() * pts.len());
+    for ci in 0..mesh.n_cells() {
+        if set.in_pml[ci] {
+            continue;
+        }
+        for (l, w) in pts.iter().zip(&wts) {
+            let f = fc.at(set, &set.modes[j], ci, l);
+            let cx = |z: C| [z.re, z.im];
+            out.push(crate::polarization::Sample { ex: cx(f.e[0]), ey: cx(f.e[1]), ez: cx(f.e[2]), w: w * fc.geo.vol[ci] });
+        }
+    }
+    out
+}
+
+/// The optical modes found by `emw::solve_modes_tensor` for `spec` as an `OpticalSet`, to evaluate their fields.
+pub(crate) fn optical_set_real(mesh: &SimplexMesh, spec: &ProblemSpec, m: &Modes, freq: f64) -> Result<OpticalSet, String> {
+    let (eps, mu) = cell_materials(mesh, &spec.materials)?;
+    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_real(m), converged: m.converged, in_pml: vec![false; mesh.n_cells()] })
+}
+
+/// The modes of `emw_pml::solve_modes_complex` for `spec` as an `OpticalSet`.
+pub(crate) fn optical_set_complex(mesh: &SimplexMesh, spec: &ProblemSpec, m: &ModesC, freq: f64) -> Result<OpticalSet, String> {
+    let (eps, mu) = cell_materials(mesh, &spec.materials)?;
+    let in_pml = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off)).collect();
+    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_complex(m), converged: m.converged, in_pml })
+}
+
+
 /// The relative permittivity of a cell as a 3 x 3 matrix in the order x, y, z (the propagation axis).
 pub(crate) fn eps_matrix(e: &EpsC) -> [[C; 3]; 3] {
     [[e.xx, e.xy, e.xz], [e.xy, e.yy, e.yz], [e.xz, e.yz, e.zz]]
@@ -1246,7 +1280,7 @@ fn solve_ring(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, r_ref:
     if sols.is_empty() {
         return Err("no pair of optical modes gave an elastic problem to solve".into());
     }
-    Ok(SolveResult { order: spec.order, dim: 2, solutions: sols, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: 3 * mesh.n_dofs(spec.order) })
+    Ok(SolveResult { order: spec.order, dim: 2, solutions: sols, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: 3 * mesh.n_dofs(spec.order), ..Default::default() })
 }
 
 /// Brillouin study from a `Physics::Brillouin` problem: the optical modes from `brillouin.refractive_index`
@@ -1292,7 +1326,12 @@ pub fn solve_brillouin(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveStat
     if sols.is_empty() {
         return Err("no pair of optical modes gave an elastic problem to solve".into());
     }
-    Ok(SolveResult { order: spec.order, dim: 2, solutions: sols, scalars, log: study.log, seconds: t0.elapsed().as_secs_f64(), dofs: 3 * mesh.n_dofs(spec.order) })
+    let mut result = SolveResult { order: spec.order, dim: 2, solutions: sols, scalars, log: study.log, seconds: t0.elapsed().as_secs_f64(), dofs: 3 * mesh.n_dofs(spec.order), ..Default::default() };
+    if let Some(a) = study.analysis {
+        // the analysis describes the optical modes the pump and Stokes waves are taken from
+        a.attach(&mut result);
+    }
+    Ok(result)
 }
 
 /// One pump/Stokes pair of a straight-waveguide study: the elastic modes at the phase-matched wave number and their gains.
@@ -1311,6 +1350,8 @@ pub struct StraightStudy {
     pub neff: Vec<C>,
     pub pairs: Vec<PairOutput>,
     pub log: Vec<String>,
+    /// polarization of the optical modes (pump and Stokes)
+    pub analysis: Option<crate::analysis::Analysis>,
 }
 
 /// The straight-waveguide Brillouin study of a `Physics::Brillouin` problem (a 2D mesh, `ring_radius` ignored), with the
@@ -1404,5 +1445,6 @@ pub fn study_straight(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState
             pairs.push(PairOutput { tag, q, group_index: cp.group_index(), rows, rows_alt, res: res.clone() });
         }
     }
-    Ok(StraightStudy { neff: set.modes.iter().map(|m| m.neff).collect(), pairs, log })
+    let analysis = Some(crate::analysis::analyze_optical(mesh, &set, &Default::default()));
+    Ok(StraightStudy { neff: set.modes.iter().map(|m| m.neff).collect(), pairs, log, analysis })
 }

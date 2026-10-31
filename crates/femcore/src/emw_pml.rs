@@ -413,7 +413,13 @@ pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Solve
     if !modes.converged {
         log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
     }
-    Ok(SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order) })
+    let mut result = SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order), ..Default::default() };
+    if !modes.neff.is_empty() {
+        if let Ok(set) = crate::brillouin::optical_set_complex(mesh, spec, &modes, freq) {
+            crate::analysis::analyze_optical(mesh, &set, &Default::default()).attach(&mut result);
+        }
+    }
+    Ok(result)
 }
 
 #[allow(dead_code)]

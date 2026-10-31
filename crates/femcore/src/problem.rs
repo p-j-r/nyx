@@ -618,6 +618,8 @@ pub struct SolveResult {
     pub log: Vec<String>,
     pub seconds: f64,
     pub dofs: usize,
+    /// polarization of the modes of an optical mode study (Stokes parameters, Poincare sphere), see `analysis`
+    pub analysis: Option<crate::analysis::Analysis>,
 }
 
 impl SolveResult {

@@ -24,6 +24,7 @@
 //! description (each marked where it applies).
 #![allow(clippy::needless_range_loop)]
 pub mod amg;
+pub mod analysis;
 pub mod brillouin;
 pub mod chips;
 pub mod csparse;
@@ -47,6 +48,7 @@ pub mod mesher3d;
 pub mod cellmesh;
 pub mod par;
 pub mod periodic;
+pub mod polarization;
 pub mod problem;
 pub mod progress;
 pub mod refine3d;
@@ -62,5 +64,6 @@ pub mod solve;
 pub mod solvers;
 pub mod validate;
 pub mod sparse;
+pub mod usecases;
 pub mod view;
 pub mod xmlio;

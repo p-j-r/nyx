@@ -149,6 +149,7 @@ pub fn solve_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<So
         log: solver_note.into_iter().collect(),
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        ..Default::default()
     })
 }
 
@@ -235,6 +236,7 @@ pub fn solve_heat(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState
                 log,
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
+                ..Default::default()
             })
         }
         Study::Transient { t_end, n_out, t0: t0_expr } => {
@@ -376,6 +378,7 @@ pub fn solve_heat(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState
                 log,
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
+                ..Default::default()
             })
         }
         _ => Err("heat transfer supports Stationary and Transient studies".into()),

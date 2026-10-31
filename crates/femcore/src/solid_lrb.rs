@@ -215,5 +215,5 @@ pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, 
         }
     }
     let log = vec![format!("low-reflecting boundaries: quadratic eigenproblem solved as a pencil of size {}, Krylov dimension {dim}{}", 2 * free.len(), if converged { "" } else { " (not every pair converged; those are omitted)" })];
-    Ok(SolveResult { order: spec.order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n })
+    Ok(SolveResult { order: spec.order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() })
 }
