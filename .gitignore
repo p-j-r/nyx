@@ -10,3 +10,8 @@
 temp_untitled_*
 # no Python files are shipped (the app's optional "Python (optional)" menu runs a script of the user's own)
 *.py
+
+# outputs of the photonic example programs (run from the repository folder)
+/soi_modes.csv
+/soi_poincare.svg
+/bragg_*_poincare.svg
