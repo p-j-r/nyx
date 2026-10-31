@@ -7,6 +7,7 @@ description = "Finite-element core: meshes, sparse/eigen solvers and physics (el
 
 [dependencies]
 faer = "0.24"
+num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 spade = "2.15.1"
@@ -21,3 +22,7 @@ ndarray = { version = "0.17", optional = true }
 hdf5-metno = ["dep:hdf5-metno", "dep:ndarray"]
 # parallel HDF5 (MPI-IO) writer; needs an MPI-enabled HDF5 library and an MPI SDK at build time
 phdf5 = ["hdf5-metno", "hdf5-metno/mpio", "dep:mpi-sys"]
+# solvers: use only the portable kernels. The default routes the restart multiply V <- V*Q of the block
+# Krylov-Schur eigensolver through faer GEMM, which is much faster but picks FMA/blocking by CPU, so its last bits
+# can differ between machines (never between thread counts).
+portable-kernels = []

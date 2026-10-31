@@ -8,7 +8,7 @@ solvers are checked against closed forms and self-consistency tests (see "What i
 nyx/
   crates/femcore   the solver library (meshes, sparse + eigen solvers, physics)
   crates/app       the egui application (binary `nyx`)
-  docs/            HOW_IT_WORKS.md and the Brillouin chip report
+  docs/            HOW_IT_WORKS.md, the Brillouin chip report and docs/ports (provenance of the ported libraries)
 ```
 
 ## Build and run
@@ -143,6 +143,16 @@ solve. Both eigensolvers now orthogonalise, form the projected matrix and run th
 (23 000 cells, 141 000 elastic dofs, 24 modes) the optical solve went from 165 s to 14 s (asking for 2 optical modes instead of 6 matters most:
 the clustered substrate modes make the sixth slow) and the elastic solve from 68 s to 34 s (the factorisation, 12 s, is serial).
 **Curved edges:** the mesh boundary vertices lie on the true outline, so a circular boundary becomes a polygon whose perimeter is short by `theta^2 / 24` and whose area is short by `theta^2 / 6` for an element of arc angle `theta` (0.04 % and 0.17 % for an element of one tenth of the radius, 0.17 % and 0.7 % for one fifth): second order in the element size, below the other errors of a moving-boundary integral at the sizes used here. Isoparametric elements (midside nodes moved onto the curve with a curved geometry map) are not implemented; they would only matter for strongly curved boundaries on coarse meshes.
+
+## Ported solver and mesher libraries
+
+`femcore::solvers` (Krylov methods, block Krylov-Schur / Jacobi-Davidson / LOBPCG / contour eigensolvers, AMG / AMS / ADS / ILU /
+Schwarz preconditioners, time steppers, nonlinear solvers, optimisers, for real and complex systems) and `femcore::meshers`
+(metric-based 2D mesh adaptation, structured PML meshes with quadrilaterals, prisms and hexahedra, the lossless `.fmsh` file format) were
+merged from the `inspired-rust-port` repository (BSD-2-Clause). They have their own tests (`tests/solvers`, `tests/meshers.rs`, the unit
+tests of both modules) and are **not yet wired into the physics modules**, which still use the older `eigen`, `lobpcg`, `amg` and `linalg`.
+`meshers::interop` converts between the mesher's mesh types and the nyx ones and turns PML regions into `Pml` domains.
+Provenance, licences, what the authors measured and the plan for swapping the solvers in: `docs/ports/README.md`.
 
 ## Axes: the wafer frame
 

@@ -13,6 +13,8 @@
 //!   `solid_lrb` (absorbing boundaries), `solid_floquet` and `periodic` (periodic cells), `solid_axisym` (bodies of
 //!   revolution); `emw` (2D waveguide modes), `emw_pml` (complex modes, tilted crystals), `emw_axisym`, `emw3d` (3D cavities)
 //! * Brillouin scattering: `brillouin` (overlap integrals and gain), `ring_brillouin` (rings), `chips` (the four ring chips)
+//! * ported libraries: `solvers` (Krylov, eigen, preconditioner, time-stepping and optimisation library for real and complex
+//!   systems) and `meshers` (metric mesh adaptation, structured PML meshes, `.fmsh` files), see docs/ports
 //! * files: `xmlio` (project XML), `h5io` (HDF5/XDMF results, feature `hdf5`)
 //!
 //! Lint note: `clippy::needless_range_loop` is allowed crate-wide. The numerical kernels (element matrices, orthogonalisation,
@@ -39,6 +41,7 @@ pub mod linalg;
 pub mod material;
 pub mod lobpcg;
 pub mod mesh;
+pub mod meshers;
 pub mod mesher;
 pub mod mesher3d;
 pub mod cellmesh;
@@ -56,6 +59,7 @@ pub mod solid_kz;
 pub mod solid_lrb;
 pub mod solid_pml;
 pub mod solve;
+pub mod solvers;
 pub mod validate;
 pub mod sparse;
 pub mod view;

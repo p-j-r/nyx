@@ -1340,6 +1340,7 @@ dependencies = [
  "hdf5-metno",
  "mpi-sys",
  "ndarray",
+ "num-complex",
  "quick-xml",
  "rayon",
  "serde",
