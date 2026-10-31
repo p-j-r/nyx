@@ -79,3 +79,16 @@ fn silicon_strip_on_sapphire_guided_mode_is_converged() {
     assert!((coarse.0 - fine.0).abs() < 1e-3, "coarse {coarse:?} against fine {fine:?}");
     assert!((fine.0 - 2.3175).abs() < 1e-3, "fine neff = {fine:?}");
 }
+
+#[test]
+fn the_complex_mode_solver_with_pml_returns_the_polarization_of_the_guided_mode() {
+    // the strip is x polarized (quasi-TE): the analysis comes from the complex field and leaves the absorbing layers out
+    let r = femcore::solve::solve(&sos_mesh(0.5e-6, 0.12e-6, 40e-9), &optical_spec(), &mut SolveState::default()).unwrap();
+    let a = r.analysis.as_ref().expect("a polarization analysis");
+    let m = a.rows[0].report.as_ref().unwrap();
+    assert!(m.te_fraction > 0.9 && m.dop > 0.9 && m.sphere[0] > 0.8, "{m:?}");
+    assert!(m.sphere[2].abs() < 0.05, "a lossless guided mode of a mirror-symmetric strip is not circular: {m:?}");
+    assert_eq!(m.class.label(), "quasi-TE (x)");
+    assert!(r.scalars.iter().any(|(n, _)| n == "polarization 1"));
+    assert!(r.log.iter().any(|l| l.contains("Stokes")));
+}

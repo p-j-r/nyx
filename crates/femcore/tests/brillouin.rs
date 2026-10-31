@@ -442,6 +442,14 @@ fn the_brillouin_physics_solves_a_ring_and_a_straight_waveguide_with_the_same_se
     assert!(best(&straight) > 0.0);
     assert!((best(&ring) - best(&straight)).abs() < 0.03 * best(&straight), "{} against {}", best(&ring), best(&straight));
     assert!(ring.scalar("azimuthal order of the optical modes").unwrap() > 1e5);
+    // the polarization analysis of the optical mode: the ring maps (E_r, E_z, E_theta) onto (lateral, normal, propagation), so a
+    // ring of 20 mm radius has the Stokes vector of the straight guide
+    let pol = |r: &SolveResult| r.analysis.as_ref().expect("the optical mode has a polarization analysis").rows[0].report.clone().unwrap();
+    let (ps, pr) = (pol(&straight), pol(&ring));
+    assert_eq!(ps.class.label(), "quasi-TE (x)");
+    assert_eq!(pr.class.label(), ps.class.label());
+    assert!((pr.te_fraction - ps.te_fraction).abs() < 0.01 && (pr.long_fraction - ps.long_fraction).abs() < 0.01, "{:?} against {:?}", pr, ps);
+    assert!(ring.scalars.iter().any(|(n, _)| n == "polarization 1"));
 }
 
 fn ring_with_pml(radius_um: f64, w_um: f64, h_um: f64) -> femcore::mesh::SimplexMesh {

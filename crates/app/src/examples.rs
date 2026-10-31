@@ -64,7 +64,7 @@ fn set(p: &mut Project, phys: Physics, props: &[(&str, f64)]) {
     }
 }
 
-pub const NAMES: [&str; 15] = [
+pub const NAMES: [&str; 19] = [
     "Parallel-plate capacitor with two dielectrics (electrostatics, 2D)",
     "Cantilever beam (solid mechanics, static + eigenfrequencies, 2D)",
     "Heated plate with convective cooling (heat transfer, 2D, transient)",
@@ -80,6 +80,10 @@ pub const NAMES: [&str; 15] = [
     "Silicon strip on sapphire at 1550 nm: optical modes (EM waves) and acoustic modes with out-of-plane wave number (solid mechanics)",
     "Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)",
     "Brillouin gain of a silicon rib on sapphire (300TE ring chip, backward, 1550 nm): optical mode, phonons, photoelastic and moving-boundary gain",
+    "Silicon wire on 300 nm SOI at 1550 nm: TE0 and TM0 modes with Stokes parameters and Poincare sphere (EM waves, 2D cross-section)",
+    "300 nm SOI wire with a sloped left wall: hybrid modes tilted on the Poincare sphere (EM waves, 2D cross-section)",
+    "Symmetric Bragg grating in a 300 nm SOI wire: band-edge modes of a 3D Floquet cell (teeth on both sides)",
+    "Asymmetric Bragg grating in a 300 nm SOI wire: band-edge modes of a 3D Floquet cell (teeth on one side)",
 ];
 
 /// An empty project to build a simulation from: the chosen physics active, default materials, no boundary conditions, a
@@ -128,7 +132,11 @@ fn by_index_model(i: usize) -> Project {
         11 => drilled_plate(),
         12 => sos_strip(),
         13 => box_cavity(),
-        _ => brillouin_rib(),
+        14 => brillouin_rib(),
+        15 => soi_wire(),
+        16 => soi_hybrid_wire(),
+        17 => bragg_symmetric(),
+        _ => bragg_asymmetric(),
     }
 }
 
@@ -441,4 +449,46 @@ pub fn brillouin_rib() -> Project {
     let mut p = base(g, Physics::Brillouin);
     *p.spec_mut(Physics::Brillouin) = spec;
     p
+}
+
+/// A project for the optical modes of a `SoiWire`: its shape mesh and its mode study, in the wafer frame.
+fn soi_project(wire: &femcore::usecases::soi::SoiWire) -> Project {
+    let g = GeometrySpec { geometry: Geometry::Shapes { spec: wire.shapes(), extrude: None }, domains: vec![], boundaries: vec![] };
+    let mut p = base(g, Physics::Emw);
+    *p.spec_mut(Physics::Emw) = wire.spec();
+    p
+}
+
+/// Modes of a 500 nm x 300 nm silicon wire in oxide on 300 nm silicon-on-insulator at 1550 nm (`femcore::usecases::soi`): the quasi-TE and
+/// quasi-TM modes with their Stokes parameters and Poincare points in the Analysis tab. Domains 1 buried oxide, 2 silicon, 3 cladding.
+pub fn soi_wire() -> Project {
+    soi_project(&femcore::usecases::soi::SoiWire::default())
+}
+
+/// The same 300 nm SOI film with a 300 nm wide wire whose left wall is sloped to 75 degrees: the quasi-TE/quasi-TM pair of the square core is
+/// mixed into two hybrid modes, tilted by about 45 degrees on the Poincare sphere.
+pub fn soi_hybrid_wire() -> Project {
+    soi_project(&femcore::usecases::soi::SoiWire { width: 300e-9, sidewall_left_deg: Some(75.0), ..Default::default() })
+}
+
+/// One period of a Bragg grating in the SOI wire as a 3D Floquet cell at the band edge (phase pi), with the coarse mesh of
+/// `BraggGrating::coarse` (about 40 s): the two lowest modes bound the stop band. z is the propagation axis, x lateral, y normal.
+fn bragg_project(grating: &femcore::usecases::bragg::BraggGrating) -> Project {
+    let (_, src, dst) = grating.mesh().expect("the grating mesh");
+    let f_search = 0.95 * grating.bragg_frequency_estimate().expect("the Bragg frequency of the wire");
+    let g = GeometrySpec { geometry: Geometry::Shapes { spec: grating.cross_section(), extrude: Some(grating.layers()) }, domains: vec![], boundaries: vec![] };
+    let mut p = base(g, Physics::Emw);
+    *p.spec_mut(Physics::Emw) = grating.spec(src, dst, f_search);
+    p.active = Physics::Emw;
+    p
+}
+
+/// Symmetric Bragg grating: 80 nm deep teeth on both sides of a 500 nm x 300 nm wire, 280 nm period, 50 % duty (`femcore::usecases::bragg`).
+pub fn bragg_symmetric() -> Project {
+    bragg_project(&femcore::usecases::bragg::BraggGrating { kind: femcore::usecases::bragg::GratingKind::Symmetric, ..femcore::usecases::bragg::BraggGrating::coarse() })
+}
+
+/// Asymmetric Bragg grating: the same teeth on one side only, so the mirror symmetry of the wire is gone and the stop band is narrower.
+pub fn bragg_asymmetric() -> Project {
+    bragg_project(&femcore::usecases::bragg::BraggGrating { kind: femcore::usecases::bragg::GratingKind::Asymmetric, ..femcore::usecases::bragg::BraggGrating::coarse() })
 }

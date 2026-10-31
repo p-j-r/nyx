@@ -417,6 +417,23 @@ impl App {
         }
     }
 
+    /// Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere).
+    pub fn export_analysis(&mut self, kind: &str) {
+        let Some(a) = self.current.and_then(|i| self.results[i].result.analysis.as_ref()) else {
+            self.set_error("This result has no polarization analysis.");
+            return;
+        };
+        let (text, filter, name) = match kind {
+            "svg" => (a.sphere_svg(480.0), "SVG", "poincare_sphere.svg"),
+            _ => (a.csv(), "CSV", "polarization.csv"),
+        };
+        let Some(path) = rfd::FileDialog::new().add_filter(filter, &[kind]).set_file_name(name).save_file() else { return };
+        match std::fs::write(&path, text) {
+            Ok(()) => self.status = format!("Exported {}", path.display()),
+            Err(e) => self.set_error(format!("Could not write the file: {e}")),
+        }
+    }
+
     pub fn run_python_script(&mut self) {
         let Some(script) = rfd::FileDialog::new().add_filter("Python script", &["py"]).pick_file() else { return };
         self.proj.geometry = self.geom_edit.clone();

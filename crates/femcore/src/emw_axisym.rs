@@ -295,3 +295,25 @@ pub fn solve_axisym_modes(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, f_targe
 
 #[allow(dead_code)]
 fn _unused(_: &Physics) {}
+
+/// The electric field of mode `j` at the quadrature points of every cell outside the absorbing layers (`in_pml`), as the samples of a
+/// polarization analysis: `ex` = E_r (the in-plane, "TE-like" direction), `ey` = E_z (normal to the plane of the ring), `ez` = E_theta (the
+/// direction of propagation). Each point carries the weight `r * area` of the volume of revolution it stands for. The triple (r, z, theta)
+/// is left-handed, so the analysis of a ring reads the sense of rotation with `TimeConvention::MinusI`.
+pub fn mode_samples(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: usize, in_pml: &[bool]) -> Vec<crate::polarization::Sample> {
+    let ctx = AxiCtx::new(mesh, modes.order);
+    let (pts, wts) = crate::brillouin::fine_rule();
+    let omega = 2.0 * std::f64::consts::PI * modes.freqs[j];
+    let mut out = Vec::with_capacity(mesh.n_cells() * pts.len());
+    for ci in 0..mesh.n_cells() {
+        if in_pml.get(ci).copied().unwrap_or(false) {
+            continue;
+        }
+        for (l, w) in pts.iter().zip(&wts) {
+            let f = ctx.fields(&modes.vectors[j], modes.m, omega, mat, ci, l);
+            let cx = |z: C| [z.re, z.im];
+            out.push(crate::polarization::Sample { ex: cx(f.e[0]), ey: cx(f.e[1]), ez: cx(f.e[2]), w: w * ctx.geo.vol[ci] * ctx.radius(ci, l) });
+        }
+    }
+    out
+}

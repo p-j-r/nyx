@@ -1280,7 +1280,20 @@ fn solve_ring(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, r_ref:
     if sols.is_empty() {
         return Err("no pair of optical modes gave an elastic problem to solve".into());
     }
-    Ok(SolveResult { order: spec.order, dim: 2, solutions: sols, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: 3 * mesh.n_dofs(spec.order), ..Default::default() })
+    let mut result = SolveResult { order: spec.order, dim: 2, solutions: sols, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: 3 * mesh.n_dofs(spec.order), ..Default::default() };
+    // polarization of the whispering-gallery modes: (E_r, E_z, E_theta) as (lateral, normal, propagation); neff at the reference radius
+    let in_pml: Vec<bool> = (0..mesh.n_cells()).map(|ci| b.optical_pml.contains_key(&mesh.cell_labels[ci])).collect();
+    let pol: Vec<crate::analysis::ModeInput> = (0..modes.freqs.len())
+        .map(|j| crate::analysis::ModeInput {
+            label: format!("mode {}", j + 1),
+            neff: (m_pump * C0 / (2.0 * std::f64::consts::PI * modes.freqs[j] * r_ref), 0.0),
+            samples: crate::emw_axisym::mode_samples(mesh, &mat, &modes, j, &in_pml),
+        })
+        .collect();
+    let mut opts = crate::analysis::AnalysisOptions::default();
+    opts.class.time = crate::polarization::TimeConvention::MinusI;
+    crate::analysis::analyze_modes(&pol, &opts).attach(&mut result);
+    Ok(result)
 }
 
 /// Brillouin study from a `Physics::Brillouin` problem: the optical modes from `brillouin.refractive_index`

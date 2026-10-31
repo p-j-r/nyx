@@ -16,8 +16,8 @@ nyx/
 ```
 cargo run --release -p nyx                 # start the application
 cargo run --release -p nyx -- project.nyx.xml   # ... and open a project or HDF5 results file
-cargo test --release --workspace              # about 175 tests against closed forms and self-consistency checks, ~40 s
-cargo test --release --workspace -- --ignored # 7 slow Brillouin tests (30-60 s each; ~50 s together)
+cargo test --release --workspace              # about 500 tests (about 200 of them for the ported solvers) against closed forms and self-consistency checks, ~2.5 min
+cargo test --release --workspace -- --ignored # 10 slow tests: 7 Brillouin (30-60 s each), 2 of the solver library, the Bragg grating comparison (~1.5 min)
 cargo clippy --release --workspace --all-targets -- -D warnings   # clean
 ```
 
@@ -153,6 +153,19 @@ merged from the `inspired-rust-port` repository (BSD-2-Clause). They have their 
 tests of both modules) and are **not yet wired into the physics modules**, which still use the older `eigen`, `lobpcg`, `amg` and `linalg`.
 `meshers::interop` converts between the mesher's mesh types and the nyx ones and turns PML regions into `Pml` domains.
 Provenance, licences, what the authors measured and the plan for swapping the solvers in: `docs/ports/README.md`.
+
+## Polarization analysis and the photonic use cases
+
+Every optical mode solver (2D real and complex, 3D eigenmodes and Floquet cells, the Brillouin study of straight guides and rings) now returns the **Stokes
+parameters and the Poincare-sphere point of each mode**, computed from the complex field the solver found: degree of polarization, ellipticity and
+orientation, TE and longitudinal shares, a class (quasi-TE, quasi-TM, linear, elliptical, circular, hybrid), and for degenerate modes the group Stokes vector and the
+resolved pair (the eigensolver returns an arbitrary mixture of degenerate modes). The application shows it in the **Analysis** tab (sphere, mode list, table, CSV and SVG
+export); the table is also in the solver log and the batch output. Modules `femcore::polarization` and `femcore::analysis`.
+
+Use cases (Examples 16 to 19, modules `femcore::usecases::{soi, bragg}`, studies `soi_modes` and `bragg_gratings` in `crates/femcore/examples`):
+the modes of a wire on **300 nm SOI** at 1550 nm (TE0 2.6718, TM0 2.3337, against the infinite slab's 3.049 and 2.616; a sloped wall mixes the nearly degenerate pair of a 300 nm
+wire into two states tilted by 45 degrees), and **symmetric and asymmetric Bragg gratings** in that wire as 3D Floquet cells at the band edge (stop band 5.8 nm for
+80 nm teeth on both sides, 3.2 nm for one side, coarse mesh). Numbers, checks and limits: `docs/photonic_use_cases.md`.
 
 ## Axes: the wafer frame
 

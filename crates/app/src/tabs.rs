@@ -746,6 +746,9 @@ impl App {
                 if t == Tab::Results && self.results.is_empty() {
                     continue;
                 }
+                if t == Tab::Analysis && !self.has_analysis() {
+                    continue;
+                }
                 if ui.selectable_label(self.tab == t, RichText::new(t.name()).strong()).clicked() {
                     self.tab = t;
                     if t != Tab::Physics {
@@ -761,6 +764,7 @@ impl App {
             Tab::Physics => self.tab_physics(ui),
             Tab::Study => self.tab_study(ui),
             Tab::Results => self.tab_results(ui),
+            Tab::Analysis => self.tab_analysis(ui),
         });
     }
 
@@ -1655,6 +1659,155 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------------------ analysis
+
+    /// Whether the result on show carries a polarization analysis.
+    pub fn has_analysis(&self) -> bool {
+        self.current.is_some_and(|i| self.results[i].result.analysis.is_some())
+    }
+
+    /// The analysis section: Stokes parameters of every optical mode, the Poincare sphere and the table of `femcore::analysis`.
+    fn tab_analysis(&mut self, ui: &mut Ui) {
+        use femcore::polarization::{mode_markers, sphere_drawing, SphereState, MODE_COLOURS};
+        let Some(cur) = self.current else {
+            ui.weak("No results yet. Press Compute.");
+            return;
+        };
+        ui.heading("Analysis");
+        let mut export: Option<&'static str> = None;
+        {
+            let rv = &mut self.results[cur];
+            let selectable = rv.physics == Some(Physics::Emw);
+            let Some(a) = rv.result.analysis.as_ref() else {
+                ui.weak("This result has no polarization analysis. Mode studies of the electromagnetic waves physics and the Brillouin study (optical modes) have one.");
+                return;
+            };
+            ui.label(RichText::new(if rv.physics == Some(Physics::Brillouin) { "Polarization of the optical modes (pump and Stokes)" } else { "Polarization of the modes" }).strong());
+            ui.weak("Stokes parameters from the complex field of each mode, summed over the cross-section. s1 > 0 is x (lateral, quasi-TE), s1 < 0 is y (normal, quasi-TM), s2 the diagonals, s3 the sense of rotation (+ counter-clockwise). P is the degree of polarization: below 1 where the polarization changes across the mode.");
+            // the picture
+            let side = ui.available_width().clamp(220.0, 360.0);
+            let (resp, painter) = ui.allocate_painter(egui::vec2(side, side), egui::Sense::hover());
+            let dark = ui.visuals().dark_mode;
+            let ink = if dark { Color32::from_rgb(155, 183, 217) } else { Color32::from_rgb(59, 91, 130) };
+            let with_alpha = |c: Color32, o: f64| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (o.clamp(0.0, 1.0) * 255.0) as u8);
+            let hex = |s: &str| {
+                let v = u32::from_str_radix(s.trim_start_matches('#'), 16).unwrap_or(0);
+                Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+            };
+            let d = sphere_drawing(side as f64);
+            let origin = resp.rect.min;
+            let pt = |x: f64, y: f64| origin + egui::vec2(x as f32, y as f32);
+            let centre = pt(d.centre.0, d.centre.1);
+            let states: Vec<(usize, SphereState)> = a.rows.iter().enumerate().filter_map(|(i, r)| r.report.as_ref().map(|m| (i, SphereState { label: (i + 1).to_string(), s: m.sphere, dashed: r.group.is_some() }))).collect();
+            let markers = mode_markers(&states.iter().map(|(_, s)| s.clone()).collect::<Vec<_>>(), side as f64);
+            let selected = if selectable { Some(rv.sol) } else { None };
+            let draw_markers = |front: bool| {
+                for (m, (row, _)) in markers.iter().zip(&states) {
+                    if m.front != front {
+                        continue;
+                    }
+                    let col = with_alpha(hex(MODE_COLOURS[m.colour]), if front { 1.0 } else { 0.6 });
+                    let (tip, c0) = (pt(m.tip.0, m.tip.1), pt(m.centre.0, m.centre.1));
+                    if (tip - c0).length() >= 1.0 {
+                        let stroke = egui::Stroke::new(1.8, col);
+                        if m.dashed {
+                            painter.extend(egui::Shape::dashed_line(&[c0, tip], stroke, 4.0, 3.0));
+                        } else {
+                            painter.line_segment([c0, tip], stroke);
+                        }
+                    }
+                    let big = selected == Some(*row);
+                    painter.circle(tip, side * if big { 0.040 } else { 0.030 }, col, egui::Stroke::new(if big { 2.0 } else { 0.8 }, Color32::WHITE));
+                    painter.text(tip, egui::Align2::CENTER_CENTER, &m.label, egui::FontId::proportional(side * 0.036), Color32::WHITE);
+                }
+            };
+            let line = |l: &femcore::polarization::WireLine| -> Vec<egui::Shape> {
+                let pts: Vec<egui::Pos2> = l.pts.iter().map(|p| pt(p.0, p.1)).collect();
+                if l.front {
+                    vec![egui::Shape::line(pts, egui::Stroke::new(l.width as f32, with_alpha(ink, l.opacity)))]
+                } else {
+                    egui::Shape::dashed_line(&pts, egui::Stroke::new(l.width as f32, with_alpha(ink, l.opacity * 0.6)), 2.0, 3.0)
+                }
+            };
+            // far side, the translucent ball, near side, labels
+            for l in d.lines.iter().filter(|l| !l.front) {
+                painter.extend(line(l));
+            }
+            draw_markers(false);
+            painter.circle(centre, d.radius as f32, with_alpha(Color32::from_rgb(141, 179, 221), if dark { 0.10 } else { 0.22 }), egui::Stroke::new(1.0, with_alpha(ink, 0.6)));
+            for l in d.lines.iter().filter(|l| l.front) {
+                painter.extend(line(l));
+            }
+            draw_markers(true);
+            for lab in &d.labels {
+                painter.text(pt(lab.x, lab.y), egui::Align2::CENTER_CENTER, &lab.text, egui::FontId::proportional(side * 0.05), with_alpha(ui.visuals().text_color(), if lab.front { 0.9 } else { 0.5 }));
+            }
+            // the modes
+            ui.add_space(4.0);
+            let mut pick = None;
+            for (i, r) in a.rows.iter().enumerate() {
+                let colour = states.iter().position(|(k, _)| *k == i).map(|p| hex(MODE_COLOURS[p % MODE_COLOURS.len()])).unwrap_or(Color32::GRAY);
+                let text = match &r.report {
+                    Some(m) => format!("{:>2}  {} {:.5}  {}  P {:.2}  TE {:.2}{}", i + 1, a.value_label, r.neff.0, m.class.label(), m.dop, m.te_fraction, r.group.map_or(String::new(), |g| format!("  G{}", g + 1))),
+                    None => format!("{:>2}  {} {:.5}  no intensity", i + 1, a.value_label, r.neff.0),
+                };
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("\u{25cf}").color(colour));
+                    let on = selected == Some(i);
+                    let resp = ui.selectable_label(on, RichText::new(text).monospace().size(11.5));
+                    if selectable && resp.clicked() {
+                        pick = Some(i);
+                    }
+                });
+            }
+            if let Some(i) = pick {
+                if i < rv.result.solutions.len() {
+                    rv.sol = i;
+                    rv.values_cache = None;
+                }
+            }
+            for (gi, g) in a.groups.iter().enumerate() {
+                let names: Vec<String> = g.members.iter().map(|i| (i + 1).to_string()).collect();
+                egui::CollapsingHeader::new(format!("G{}: modes {} are degenerate", gi + 1, names.join(", "))).default_open(true).show(ui, |ui| {
+                    ui.weak("The eigensolver returns some mixture of degenerate modes, so their own points on the sphere are not unique. The group state and the resolved pair are.");
+                    if let Some(m) = &g.invariant {
+                        ui.label(RichText::new(format!("group: {}", m.summary_line())).monospace().size(11.0));
+                    }
+                    if let Some(r) = &g.resolved {
+                        for (k, rep) in r.reports.iter().enumerate() {
+                            if let Some(m) = rep {
+                                ui.label(RichText::new(format!("resolved {}: {}", k + 1, m.summary_line())).monospace().size(11.0));
+                            }
+                        }
+                    }
+                    if let Some(n) = &g.note {
+                        ui.weak(n.clone());
+                    }
+                });
+            }
+            egui::CollapsingHeader::new("Table").default_open(false).show(ui, |ui| {
+                egui::ScrollArea::horizontal().id_salt("pol_table").show(ui, |ui| {
+                    ui.add(egui::Label::new(RichText::new(a.table()).monospace().size(10.5)).extend());
+                });
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("Export CSV...").clicked() {
+                    export = Some("csv");
+                }
+                if ui.button("Export sphere (SVG)...").clicked() {
+                    export = Some("svg");
+                }
+                if ui.button("Copy table").clicked() {
+                    ui.ctx().copy_text(a.table());
+                }
+            });
+        }
+        if let Some(kind) = export {
+            self.export_analysis(kind);
+        }
+    }
+
     /// Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the
     /// solutions of the current result.
     pub fn results_panel(&mut self, ui: &mut Ui) {
@@ -1672,7 +1825,8 @@ impl App {
         let fname = rv.result.solutions[rv.sol.min(nsol - 1)].fields.get(rv.field).map(|f| f.name.clone()).unwrap_or_default();
         let xs: Vec<f64> = rv.result.solutions.iter().enumerate().map(|(i, s)| s.value.unwrap_or(i as f64 + 1.0)).collect();
         let is_modes = rv.result.solutions[0].neff.is_some();
-        let is_eigen_plot = (rv.physics == Some(Physics::Solid) || rv.physics == Some(Physics::Brillouin)) && rv.result.solutions[0].value.is_some();
+        // eigenfrequencies: solids, Brillouin, and the 3D electromagnetic eigenmodes (frequency, no effective index)
+        let is_eigen_plot = (rv.physics == Some(Physics::Solid) || rv.physics == Some(Physics::Brillouin) || (rv.physics == Some(Physics::Emw) && rv.result.solutions[0].neff.is_none())) && rv.result.solutions[0].value.is_some();
         let xlabel = if is_eigen_plot || is_modes { "mode number" } else if rv.result.solutions[0].value.is_some() { "time (s)" } else { "solution" };
         let mut max_pts = vec![];
         let mut min_pts = vec![];

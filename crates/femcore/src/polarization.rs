@@ -365,11 +365,9 @@ fn push_curve(v: &View, pts: &[[f64; 3]], back: &mut String, front: &mut String,
     flush(&mut run, is_front, back, front);
 }
 
-/// The empty sphere: returns (defs, back layer, front layer, labels). Layers are drawn back, then the translucent ball,
-/// then front, then labels, so that everything behind the ball is seen through it.
-fn sphere_frame(v: &View) -> (String, String, String, String) {
-    let mut back = String::new();
-    let mut front = String::new();
+/// The curves of the empty sphere in drawing order, as `(points on the unit sphere, stroke width, opacity)`: a fine grid (meridians every 30
+/// degrees, parallels at +-30 and +-60 degrees), the two vertical great circles and the bold equator of the linear polarizations.
+fn frame_curves() -> Vec<(Vec<[f64; 3]>, f64, f64)> {
     let great = |k: usize, t: f64| -> [f64; 3] {
         let (c, s) = (t.cos(), t.sin());
         match k {
@@ -380,21 +378,32 @@ fn sphere_frame(v: &View) -> (String, String, String, String) {
     };
     let n = 120;
     let ring = |f: &dyn Fn(f64) -> [f64; 3]| -> Vec<[f64; 3]> { (0..=n).map(|i| f(std::f64::consts::TAU * i as f64 / n as f64)).collect() };
-    // fine grid: meridians every 30 degrees and parallels at +-30 and +-60 degrees
+    let mut out = vec![];
     for m in 0..6 {
         if m % 3 == 0 {
             continue; // the planes s2 = 0 and s1 = 0 are drawn stronger below
         }
         let phi = std::f64::consts::PI * m as f64 / 6.0;
-        push_curve(v, &ring(&|t| [t.cos() * phi.cos(), t.cos() * phi.sin(), t.sin()]), &mut back, &mut front, 0.5, 0.28);
+        out.push((ring(&|t| [t.cos() * phi.cos(), t.cos() * phi.sin(), t.sin()]), 0.5, 0.28));
     }
     for lat in [-60.0f64, -30.0, 30.0, 60.0] {
         let (z, rr) = (lat.to_radians().sin(), lat.to_radians().cos());
-        push_curve(v, &ring(&|t| [rr * t.cos(), rr * t.sin(), z]), &mut back, &mut front, 0.5, 0.28);
+        out.push((ring(&|t| [rr * t.cos(), rr * t.sin(), z]), 0.5, 0.28));
     }
-    push_curve(v, &ring(&|t| great(1, t)), &mut back, &mut front, 0.8, 0.5);
-    push_curve(v, &ring(&|t| great(2, t)), &mut back, &mut front, 0.8, 0.5);
-    push_curve(v, &ring(&|t| great(0, t)), &mut back, &mut front, 1.4, 0.85); // equator: linear polarizations
+    out.push((ring(&|t| great(1, t)), 0.8, 0.5));
+    out.push((ring(&|t| great(2, t)), 0.8, 0.5));
+    out.push((ring(&|t| great(0, t)), 1.4, 0.85)); // equator: linear polarizations
+    out
+}
+
+/// The empty sphere: returns (defs, back layer, front layer, labels). Layers are drawn back, then the translucent ball,
+/// then front, then labels, so that everything behind the ball is seen through it.
+fn sphere_frame(v: &View) -> (String, String, String, String) {
+    let mut back = String::new();
+    let mut front = String::new();
+    for (curve, width, opacity) in frame_curves() {
+        push_curve(v, &curve, &mut back, &mut front, width, opacity);
+    }
     // axes through the centre
     for a in 0..3 {
         let mut dir = [0.0; 3];
@@ -520,6 +529,118 @@ pub fn poincare_modes_svg(states: &[SphereState], size: f64) -> String {
     s.push_str(&labels);
     s.push_str("</svg>");
     s
+}
+
+// ------------------------------------------------------------------ the sphere as primitives
+
+/// A polyline of the sphere picture in picture coordinates (x to the right, y down, the picture is a square of side `size`).
+#[derive(Clone, Debug)]
+pub struct WireLine {
+    pub pts: Vec<(f64, f64)>,
+    /// on the side facing the viewer (the far side is drawn dashed and paler)
+    pub front: bool,
+    pub width: f64,
+    pub opacity: f64,
+}
+
+/// A label at a point of the picture.
+#[derive(Clone, Debug)]
+pub struct WireLabel {
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub front: bool,
+}
+
+/// The empty Poincare sphere as lines and labels, for programs that draw it themselves (the SVG functions draw the same picture).
+#[derive(Clone, Debug)]
+pub struct SphereDrawing {
+    pub size: f64,
+    pub centre: (f64, f64),
+    pub radius: f64,
+    pub lines: Vec<WireLine>,
+    pub labels: Vec<WireLabel>,
+}
+
+/// One mode on the picture: its tip, the colour (index into `MODE_COLOURS`) and whether it ends on the surface (`len` = 1) or inside.
+#[derive(Clone, Debug)]
+pub struct ModeMarker {
+    pub label: String,
+    pub centre: (f64, f64),
+    pub tip: (f64, f64),
+    pub front: bool,
+    pub dashed: bool,
+    pub colour: usize,
+}
+
+/// The colours of the mode markers, in the order of the numbers (as `#rrggbb`).
+pub const MODE_COLOURS: [&str; 8] = ["#d9480f", "#1971c2", "#2f9e44", "#9c36b5", "#e67700", "#0c8599", "#c2255c", "#5f3dc4"];
+
+/// Splits a curve into runs on the near and the far side of the sphere.
+fn curve_runs(v: &View, pts: &[[f64; 3]]) -> Vec<(Vec<(f64, f64)>, bool)> {
+    let mut out: Vec<(Vec<(f64, f64)>, bool)> = vec![];
+    let mut run: Vec<(f64, f64)> = vec![];
+    let mut is_front = true;
+    for p in pts {
+        let (x, y, d) = v.proj(*p);
+        let f = d >= 0.0;
+        if f != is_front {
+            run.push((x, y));
+            if run.len() > 1 {
+                out.push((std::mem::take(&mut run), is_front));
+            }
+            run.clear();
+            is_front = f;
+        }
+        run.push((x, y));
+    }
+    if run.len() > 1 {
+        out.push((run, is_front));
+    }
+    out
+}
+
+/// The picture of the empty sphere in a square of side `size`.
+pub fn sphere_drawing(size: f64) -> SphereDrawing {
+    let v = View::new(size);
+    let mut lines = vec![];
+    for (curve, width, opacity) in frame_curves() {
+        for (pts, front) in curve_runs(&v, &curve) {
+            lines.push(WireLine { pts, front, width, opacity });
+        }
+    }
+    let (xc, yc, _) = v.proj([0.0; 3]);
+    for a in 0..3 {
+        let mut dir = [0.0; 3];
+        dir[a] = 1.0;
+        for sign in [1.0, -1.0] {
+            let (x, y, d) = v.proj(dir.map(|c| sign * 1.12 * c));
+            lines.push(WireLine { pts: vec![(xc, yc), (x, y)], front: d >= 0.0, width: 0.9, opacity: if d >= 0.0 { 0.7 } else { 0.45 } });
+        }
+    }
+    let mut labels = vec![];
+    for (p, text) in [([1.0, 0.0, 0.0], "x"), ([-1.0, 0.0, 0.0], "y"), ([0.0, 1.0, 0.0], "+45\u{b0}"), ([0.0, -1.0, 0.0], "\u{2212}45\u{b0}"), ([0.0, 0.0, 1.0], "CCW"), ([0.0, 0.0, -1.0], "CW")] {
+        let (x, y, d) = v.proj(p.map(|c| 1.27 * c));
+        labels.push(WireLabel { text: text.to_string(), x, y, front: d >= 0.0 });
+    }
+    SphereDrawing { size, centre: (v.cx, v.cy), radius: v.r, lines, labels }
+}
+
+/// The markers of `states` on the picture of `sphere_drawing(size)`; states with a non-finite coordinate are skipped.
+pub fn mode_markers(states: &[SphereState], size: f64) -> Vec<ModeMarker> {
+    let v = View::new(size);
+    let (cx, cy, _) = v.proj([0.0; 3]);
+    states
+        .iter()
+        .enumerate()
+        .filter(|(_, st)| st.s.iter().all(|c| c.is_finite()))
+        .map(|(i, st)| {
+            let n = (st.s[0] * st.s[0] + st.s[1] * st.s[1] + st.s[2] * st.s[2]).sqrt();
+            let p = if n > 1.0 { st.s.map(|c| c / n) } else { st.s };
+            let (x, y, d) = v.proj(p);
+            ModeMarker { label: st.label.clone(), centre: (cx, cy), tip: (x, y), front: d >= 0.0, dashed: st.dashed, colour: i % MODE_COLOURS.len() }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -716,5 +837,21 @@ mod tests {
         assert_eq!(svg.matches("fill=\"#e8590c\"").count(), 2);
         assert!(!svg.contains("NaN"));
         assert!(poincare_svg(&[], 400.0).ends_with("</svg>"));
+    }
+
+    #[test]
+    fn the_drawing_primitives_match_the_svg_picture() {
+        let d = sphere_drawing(300.0);
+        assert!((d.centre.0 - 150.0).abs() < 1e-9 && d.radius > 100.0);
+        // every polyline point lies within the ball or on its outline, the equator is among the bold lines
+        assert!(d.lines.iter().all(|l| l.pts.iter().all(|p| ((p.0 - d.centre.0).powi(2) + (p.1 - d.centre.1).powi(2)).sqrt() <= 1.13 * d.radius)));
+        assert!(d.lines.iter().any(|l| l.width > 1.3 && l.front));
+        assert_eq!(d.labels.len(), 6);
+        let m = mode_markers(&[SphereState { label: "1".into(), s: [1.0, 0.0, 0.0], dashed: false }, SphereState { label: "2".into(), s: [f64::NAN, 0.0, 0.0], dashed: true }], 300.0);
+        assert_eq!(m.len(), 1);
+        // the x pole is drawn to the left of the centre (view from 35 degrees azimuth), facing the viewer, at radius * sin(35 degrees) from it
+        assert!(m[0].front && (m[0].centre.0 - m[0].tip.0 - d.radius * 35f64.to_radians().sin()).abs() < 1e-9, "{:?}", m[0]);
+        let svg = poincare_modes_svg(&[SphereState { label: "1".into(), s: [1.0, 0.0, 0.0], dashed: false }], 300.0);
+        assert!(svg.contains(&format!("cx=\"{:.1}\" cy=\"{:.1}\"", m[0].tip.0, m[0].tip.1)));
     }
 }

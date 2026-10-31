@@ -113,10 +113,12 @@ pub enum Tab {
     Physics,
     Study,
     Results,
+    /// polarization of the optical modes (Stokes parameters, Poincare sphere)
+    Analysis,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [Tab::Geometry, Tab::Materials, Tab::Physics, Tab::Study, Tab::Results];
+    pub const ALL: [Tab; 6] = [Tab::Geometry, Tab::Materials, Tab::Physics, Tab::Study, Tab::Results, Tab::Analysis];
     pub fn name(self) -> &'static str {
         match self {
             Tab::Geometry => "Geometry",
@@ -124,6 +126,7 @@ impl Tab {
             Tab::Physics => "Physics",
             Tab::Study => "Study",
             Tab::Results => "Results",
+            Tab::Analysis => "Analysis",
         }
     }
 }

@@ -134,3 +134,23 @@ fn floquet_periodic_waveguide_cell_gives_the_guided_dispersion() {
         assert!(got.iter().any(|f| (f / f_te10 - 1.0).abs() < 3e-3), "phase {phase}: {got:?} vs TE10 {f_te10}");
     }
 }
+
+#[test]
+fn cavity_modes_carry_a_polarization_analysis() {
+    // the lowest mode of the 40 x 30 x 20 mm box has E along z only (all of its field is "longitudinal" for the z axis), the second one (indices
+    // 1, 0, 1) has E along y only; the lateral axis is x, the normal axis y, the propagation axis z
+    let (a, b, d) = (0.04, 0.03, 0.02);
+    let mesh = SimplexMesh::block(a, b, d, 5, 4, 3);
+    let exact = cavity_modes(a, b, d, 20e9);
+    let r = femcore::solve::solve(&mesh, &spec(2, 0.9 * exact[0], 3), &mut SolveState::default()).unwrap();
+    let an = r.analysis.as_ref().expect("a polarization analysis");
+    assert_eq!(an.value_label, "f (THz)");
+    let zero = an.rows[0].report.as_ref().unwrap();
+    assert!(zero.long_fraction > 0.99, "{zero:?}");
+    let first = an.rows[1].report.as_ref().unwrap();
+    assert!(first.sphere[0] < -0.99 && first.te_fraction < 0.01 && first.long_fraction < 0.01, "{first:?}");
+    assert_eq!(first.class.label(), "quasi-TM (y)");
+    // a standing wave of a closed cavity has real fields: no handedness
+    assert!(first.sphere[2].abs() < 1e-6);
+    assert!(r.log.iter().any(|l| l.contains("polarization axes: lateral x, normal y, propagation z")));
+}

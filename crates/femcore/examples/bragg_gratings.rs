@@ -20,6 +20,8 @@ fn main() -> Result<(), String> {
         let width = std::env::var("WIDTH_NM").ok().and_then(|v| v.parse::<f64>().ok()).map(|w| w * 1e-9);
         let g = if std::env::var("COARSE").is_ok() { BraggGrating { kind, ..BraggGrating::coarse() } } else { BraggGrating { kind, ..Default::default() } };
         let g = BraggGrating { width: width.unwrap_or(g.width), ..g };
+        // "square": the 300 nm wide wire, where TE0 and TM0 are almost degenerate, at its own matched period
+        let g = if std::env::var("SQUARE").is_ok() { let g = BraggGrating { width: 300e-9, ..g }; BraggGrating { period: g.matched_period()?, ..g } } else { g };
         let g = BraggGrating { order: std::env::var("ORDER").ok().and_then(|v| v.parse().ok()).unwrap_or(g.order), ..g };
         println!("== {} ==", kind.name());
         println!("matched period for 1550 nm: {:.1} nm (used: {:.1} nm)", 1e9 * g.matched_period()?, 1e9 * g.period);
