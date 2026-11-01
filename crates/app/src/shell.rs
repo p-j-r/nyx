@@ -82,6 +82,10 @@ pub struct OpenWf {
     pub notes: String,
     pub function: String,
     pub compare_metric: String,
+    pub draft_buf: String,
+    pub focus: Option<String>,
+    pub card_for: String,
+    pub card_summary: String,
 }
 
 impl OpenWf {
@@ -115,6 +119,10 @@ impl OpenWf {
             notes: String::new(),
             function: "Metric vs parameter".into(),
             compare_metric: String::new(),
+            draft_buf: String::new(),
+            focus: None,
+            card_for: String::new(),
+            card_summary: String::new(),
         }
     }
 
@@ -194,6 +202,8 @@ pub struct Shell {
     pub last_refresh: Instant,
     pub closed: Vec<String>,
     pub notice: Option<String>,
+    /// the "cancel this run?" question is on screen
+    pub confirm_cancel: bool,
 }
 
 impl Shell {
@@ -230,6 +240,7 @@ impl Shell {
             last_refresh: Instant::now() - Duration::from_secs(60),
             closed: vec![],
             notice: None,
+            confirm_cancel: false,
         }
     }
 
@@ -358,7 +369,7 @@ impl App {
         self.refresh_entries();
     }
 
-    fn persist_draft(&mut self, wid: &str, xml: &str) -> Result<(), String> {
+    pub fn persist_draft(&mut self, wid: &str, xml: &str) -> Result<(), String> {
         let Some(root) = self.shell.ws.as_ref().map(|w| w.root.clone()) else { return Err("no workspace".into()) };
         let Some(w) = self.shell.open.get_mut(wid) else { return Err("no such workflow".into()) };
         let title = if w.draft_title.trim().is_empty() { "Untitled workflow".to_string() } else { w.draft_title.trim().to_string() };
@@ -527,7 +538,7 @@ impl App {
     /// A solve finished well: writes its run record and keeps the log with it. Returns the run id.
     pub fn record_ok(&mut self, res: &femcore::problem::SolveResult) -> Option<String> {
         let rc = self.shell.run.take()?;
-        let rec = RunRecord { sec: res.seconds.max(rc.started.elapsed().as_secs_f64() * 0.0), status: RunStatus::Ok, params: rc.params.clone(), metrics: nyx_store::runs::metrics_of(res), ..Default::default() };
+        let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: nyx_store::runs::metrics_of(res), ..Default::default() };
         self.write_run(rc, rec, Some(res.log.join("\n")))
     }
 
@@ -540,25 +551,26 @@ impl App {
 
     fn write_run(&mut self, rc: RunCtx, mut rec: RunRecord, log: Option<String>) -> Option<String> {
         let w = self.shell.open.get_mut(&rc.wf_id)?;
-        let d = w.dir.as_mut()?;
         if log.is_some() {
             rec.artifacts.push(nyx_store::runs::Artifact { kind: "log".into(), path: "log.txt".into(), bytes: 0 });
         }
-        match d.record_run(&rc.exp, rec, &rc.spec_xml) {
+        let res = w.dir.as_mut()?.record_run(&rc.exp, rec, &rc.spec_xml);
+        match res {
             Ok(r) => {
+                let d = w.dir.as_mut()?;
                 if let Some(text) = log {
                     let dir = d.run_dir(&rc.exp, &r.id);
                     let _ = std::fs::create_dir_all(&dir);
                     let _ = std::fs::write(dir.join("log.txt"), text);
                 }
-                if w.exp == rc.exp {
-                    w.reload_runs();
-                }
-                w.saved_at = Some(Instant::now());
                 if let Some(ws) = &self.shell.ws {
                     // housekeeping after each run, by the person's own settings (the defaults delete nothing)
                     let _ = ws.housekeeping(d, now_secs());
                 }
+                if w.exp == rc.exp {
+                    w.reload_runs();
+                }
+                w.saved_at = Some(Instant::now());
                 self.refresh_entries();
                 Some(r.id)
             }
@@ -588,6 +600,7 @@ impl App {
             Page::Settings => self.settings_ui(ui),
         }
         self.sheets_ui(&ctx);
+        self.cancel_dialog(&ctx);
         if let Some(n) = self.shell.notice.clone() {
             egui::Area::new(egui::Id::new("notice")).order(egui::Order::Tooltip).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0]).show(&ctx, |ui| {
                 crate::kit::card(ui, theme::INK, theme::INK, 12, |ui| {
@@ -775,4 +788,37 @@ fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     Some(ctx.load_texture("nyx-mark", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR))
+}
+
+impl App {
+    /// "Stop this run?": every way of cancelling a solve (Esc, the Cancel buttons) asks first.
+    fn cancel_dialog(&mut self, ctx: &egui::Context) {
+        if !self.shell.confirm_cancel {
+            return;
+        }
+        if self.busy.is_none() {
+            self.shell.confirm_cancel = false;
+            return;
+        }
+        let (mut stop, mut keep) = (false, false);
+        let esc_closed = crate::kit::modal(ctx, "cancel", 460.0, |ui| {
+            ui.label(RichText::new("Stop this run?").strong().size(18.0));
+            ui.label(crate::kit::muted(ui, "The solver stops at its next safe point; a factorisation in progress has to finish first. Earlier results stay as they are, and the run is recorded as cancelled."));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if crate::kit::danger(ui, "Stop the run").clicked() {
+                    stop = true;
+                }
+                if crate::kit::primary(ui, "Keep running").clicked() {
+                    keep = true;
+                }
+            });
+        });
+        if stop {
+            self.cancel_job();
+        }
+        if stop || keep || esc_closed {
+            self.shell.confirm_cancel = false;
+        }
+    }
 }

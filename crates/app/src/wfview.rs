@@ -104,7 +104,7 @@ impl App {
             return true;
         }
         let Ok(xml) = self.spec_xml() else { return false };
-        self.persist_draft_pub(id, &xml)
+        self.persist_draft(id, &xml).is_ok()
     }
 
     fn apply_act(&mut self, id: &str, a: Act) {
@@ -166,7 +166,7 @@ impl App {
                 self.refresh_entries();
             }
             Act::Compute => self.shell_compute(),
-            Act::Cancel => self.cancel_job(),
+            Act::Cancel => self.shell.confirm_cancel = true,
             Act::Star(rid, star) => {
                 let r = self.shell.open.get_mut(id).and_then(|w| {
                     let eid = w.exp.clone();
@@ -269,7 +269,8 @@ impl App {
                 let eid = egui::Id::new(("title_edit", &w.id));
                 let focused = ctx.memory(|m| m.has_focus(eid));
                 let mut buf = if focused { w.draft_buf.clone() } else { w.title() };
-                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(buf.chars().count().max(10) as f32 * 14.0).text_color(theme::accent(&ctx)));
+                let width = buf.chars().count().max(10) as f32 * 14.0;
+                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width).text_color(theme::accent(&ctx)));
                 if focused || r.has_focus() {
                     w.draft_buf = buf.clone();
                 }
@@ -805,10 +806,10 @@ impl App {
         mk.sort();
         mk.dedup();
         mk.retain(|k| !w.hidden_cols.contains(&format!("metrics.{k}")));
-        let mut rows: Vec<&RunRecord> = w.runs.iter().filter(|r| filter.matches(r) && (w.show_failed || r.status == RunStatus::Ok)).collect();
+        let mut rows: Vec<(usize, &RunRecord)> = w.runs.iter().enumerate().filter(|(_, r)| filter.matches(r) && (w.show_failed || r.status == RunStatus::Ok)).collect();
         let hidden = w.runs.len() - rows.len();
         let sort = w.sort.clone();
-        rows.sort_by(|a, b| {
+        rows.sort_by(|(_, a), (_, b)| {
             let key = |r: &RunRecord| -> f64 {
                 if let Some(k) = sort.strip_prefix("params.") { r.params.get(k).copied().unwrap_or(f64::NAN) } else if let Some(k) = sort.strip_prefix("metrics.") { r.metrics.get(k).copied().unwrap_or(f64::NAN) } else if sort == "version" { r.version as f64 } else if sort == "time" { r.sec } else { parse_iso(&r.t).unwrap_or(0) as f64 }
             };
@@ -818,8 +819,10 @@ impl App {
         });
         if w.by_version {
             // newest version first, runs inside a version in the chosen order
-            rows.sort_by_key(|r| std::cmp::Reverse(r.version));
+            rows.sort_by_key(|r| std::cmp::Reverse(r.1.version));
         }
+        let order: Vec<usize> = rows.iter().map(|r| r.0).collect();
+        let n_rows = order.len();
         if w.runs.is_empty() {
             kit::plain_card(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -855,8 +858,9 @@ impl App {
             });
             ui.separator();
             let h = 26.0;
-            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 40.0).show_rows(ui, h, rows.len(), |ui, range| {
-                for r in &rows[range] {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 40.0).show_rows(ui, h, n_rows, |ui, range| {
+                for &ri in &order[range] {
+                    let r = w.runs[ri].clone();
                     let sel = w.selected.contains(&r.id);
                     let fill = if sel { theme::tint(&ctx) } else { Color32::TRANSPARENT };
                     let rect_resp = egui::Frame::new().fill(fill).corner_radius(6).show(ui, |ui| {
@@ -888,7 +892,7 @@ impl App {
                 }
             });
         });
-        ui.label(kit::muted(ui, format!("{} of {} runs match · {} hidden by the filter{}", rows.len(), w.runs.len(), hidden, if w.show_failed { "" } else { " · failed and cancelled runs are hidden unless you ask for them" })).size(12.5));
+        ui.label(kit::muted(ui, format!("{} of {} runs match · {} hidden by the filter{}", n_rows, w.runs.len(), hidden, if w.show_failed { "" } else { " · failed and cancelled runs are hidden unless you ask for them" })).size(12.5));
     }
 
     // ------------------------------------------------------------------------------------------------------ compare, fields, model

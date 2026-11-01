@@ -73,6 +73,7 @@ pub struct App {
     pub script: VecDeque<String>,
     pub settle: u32,
     pub shot_pending: Arc<AtomicBool>,
+    pub shell: crate::shell::Shell,
     pub ctx: egui::Context,
 }
 
@@ -83,7 +84,11 @@ pub fn default_runs_dir() -> String {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        Self::with_context(cc.egui_ctx.clone())
+        crate::theme::install_fonts(&cc.egui_ctx);
+        let mut app = Self::with_context(cc.egui_ctx.clone());
+        let root = std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_store::workspace::default_root);
+        app.attach_workspace(root);
+        app
     }
 
     /// The application state on an egui context; no window is needed (tests use a default context).
@@ -124,6 +129,7 @@ impl App {
             script: VecDeque::new(),
             settle: 6,
             shot_pending: Arc::new(AtomicBool::new(false)),
+            shell: crate::shell::Shell::detached(),
             ctx,
         };
         app.rebuild_mesh();
@@ -251,6 +257,7 @@ impl App {
                     let dim = self.doc.mesh.as_ref().map(|m| m.dim).unwrap_or(2);
                     let name = physics.name().to_string();
                     let secs = s.result.seconds;
+                    self.shell.live_run = self.record_ok(&s.result);
                     let s_output = s.output;
                     let rv = ResultView::new(name.clone(), Some(physics), s.result, s.display, dim);
                     self.push_result(rv);
@@ -264,9 +271,13 @@ impl App {
                 }
                 Msg::Solved { res: Err(e), .. } if e == femcore::progress::CANCELLED => {
                     self.error = None;
+                    self.record_end(nyx_store::runs::RunStatus::Cancelled, None);
                     self.status = format!("Solve cancelled after {took:.1} s; the previous results are unchanged");
                 }
-                Msg::Solved { res: Err(e), .. } => self.set_error(e),
+                Msg::Solved { res: Err(e), .. } => {
+                    self.record_end(nyx_store::runs::RunStatus::Failed, Some(e.clone()));
+                    self.set_error(e)
+                }
                 Msg::H5(name, Ok((mesh, s))) => {
                     self.doc.view = Some(Arc::new(femcore::view::ViewMesh::from_simplex(&mesh)));
                     self.doc.mesh = Some(mesh.clone());
@@ -641,7 +652,7 @@ impl App {
         });
     }
 
-    fn viewport_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn viewport_ui(&mut self, ui: &mut egui::Ui) {
         let bg = Color32::from_rgb(24, 26, 30);
         let mut bc_colors: HashMap<i32, Color32> = HashMap::new();
         let phys = self.proj.active;
@@ -720,15 +731,24 @@ impl eframe::App for App {
         }
         let (f5, esc) = ctx.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::F5), i.key_pressed(egui::Key::Escape)));
         if f5 {
-            self.compute();
+            self.shell_compute();
         }
         if esc && self.busy.is_some() {
-            self.cancel_job();
+            if self.shell.active() {
+                // Esc never cancels silently in the shell: it asks first
+                self.shell.confirm_cancel = true;
+            } else {
+                self.cancel_job();
+            }
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let t_ui = Instant::now();
+        if self.shell.active() {
+            self.shell_ui(ui);
+            return;
+        }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
             self.new_dialog = Some(NewDialog { physics: self.proj.active, three_d: false, structured: true });
         }

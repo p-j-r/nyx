@@ -203,7 +203,7 @@ impl App {
                     }
                 });
                 if cancel {
-                    self.cancel_job();
+                    self.shell.confirm_cancel = true;
                 }
                 ui.add_space(6.0);
             }
