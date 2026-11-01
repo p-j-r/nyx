@@ -487,6 +487,25 @@ mod tests {
         assert!(rules >= 15, "{rules} rules");
     }
 
+    /// Clicking a boundary gives rules that pick exactly it, simplest first, and the ends of a swept model are named.
+    #[test]
+    fn picked_boundaries_come_back_as_rules() {
+        let p = cantilever();
+        let mesh = p.geometry.build().unwrap();
+        let names = p.geometry.names(&mesh).unwrap();
+        let left = names.select("outer & plane(x = 0)").unwrap();
+        let rules = names.suggest(&left);
+        assert!(!rules.is_empty(), "no rule for the left edge");
+        for r in &rules {
+            assert_eq!(names.select(r).unwrap(), left, "{r}");
+        }
+        let b = block_cantilever();
+        let mesh = b.geometry.build().unwrap();
+        let names = b.geometry.names(&mesh).unwrap();
+        let far = mesh.facet_labels.iter().copied().max().unwrap();
+        assert_eq!(names.suggest(&[far]), ["ymax"]);
+    }
+
     /// The same rule follows the geometry: a longer plate has its right edge at a new place but the rule still finds it.
     #[test]
     fn a_rule_follows_a_changed_geometry() {

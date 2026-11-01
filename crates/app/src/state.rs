@@ -119,6 +119,27 @@ impl Names {
         }
     }
 
+    /// Rules, simplest first, that pick exactly the boundaries with these numbers; empty when no rule does.
+    pub fn suggest(&self, labels: &[i32]) -> Vec<String> {
+        if let Some((a, b)) = self.ends {
+            if labels == [a] {
+                return vec!["ymin".into()];
+            }
+            if labels == [b] {
+                return vec!["ymax".into()];
+            }
+        }
+        let ids: Vec<u32> = self.labels.boundaries.iter().filter(|b| labels.contains(&b.id)).flat_map(|b| b.entities.iter().copied()).collect();
+        if ids.is_empty() {
+            return vec![];
+        }
+        let set = geom::select::EntitySet::new(geom::select::EntityKind::Edges, ids);
+        let mut out: Vec<String> = self.ev.suggest(&set).iter().map(|s| s.to_string()).collect();
+        out.dedup();
+        out.truncate(6);
+        out
+    }
+
     /// Region numbers with their names.
     pub fn domains(&self) -> Vec<(i32, String)> {
         self.labels.domains.iter().map(|d| (d.id, d.name.clone())).collect()

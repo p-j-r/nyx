@@ -840,6 +840,7 @@ impl App {
                         let picking = self.picking == Some(i);
                         if ui.selectable_label(picking, "Pick on mesh").on_hover_text("click boundaries in the viewport to add or remove them").clicked() {
                             self.picking = if picking { None } else { Some(i) };
+                            self.suggestions.clear();
                             self.show_results = false;
                         }
                     });
@@ -867,6 +868,18 @@ impl App {
                         ui.colored_label(Color32::from_rgb(235, 110, 100), e);
                     }
                 });
+                if self.picking == Some(i) && !self.suggestions.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("write the picks as a rule:");
+                        for s in self.suggestions.clone() {
+                            if ui.small_button(RichText::new(&s).monospace()).clicked() {
+                                spec.bcs[i].on = Some(s);
+                                self.rules_dirty = true;
+                                self.suggestions.clear();
+                            }
+                        }
+                    });
+                }
                 match &mut spec.bcs[i].kind {
                     BcKind::Potential(v) => {
                         ui.horizontal(|ui| {

@@ -69,6 +69,8 @@ pub struct App {
     pub domain_names: Vec<(i32, String)>,
     /// a rule was edited: resolve them again
     pub rules_dirty: bool,
+    /// rules that pick what was just clicked in the viewport
+    pub suggestions: Vec<String>,
     pub bottom_open: bool,
     /// the File > New dialog while it is open
     pub new_dialog: Option<NewDialog>,
@@ -103,6 +105,7 @@ impl App {
             rule_errors: HashMap::new(),
             domain_names: vec![],
             rules_dirty: false,
+            suggestions: vec![],
             proj,
             doc: Doc::default(),
             tab: Tab::Geometry,
@@ -731,6 +734,7 @@ impl App {
         };
         if let (Some(label), Some(i)) = (out.picked, self.picking) {
             let bcs = &mut self.proj.spec_mut(phys).bcs;
+            let mut now = vec![];
             if let Some(bc) = bcs.get_mut(i) {
                 if let Some(p) = bc.labels.iter().position(|&l| l == label) {
                     bc.labels.remove(p);
@@ -738,7 +742,14 @@ impl App {
                     bc.labels.push(label);
                     bc.labels.sort();
                 }
+                // a hand-picked set is not a rule any more; the suggestions below write it as one
+                bc.on = None;
+                now = bc.labels.clone();
             }
+            self.suggestions = match self.doc.mesh.clone() {
+                Some(mesh) => self.proj.geometry.names(&mesh).map(|n| n.suggest(&now)).unwrap_or_default(),
+                None => vec![],
+            };
         }
     }
 }
