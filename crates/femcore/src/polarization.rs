@@ -155,7 +155,7 @@ impl PolClass {
     pub fn label(&self) -> &'static str {
         match self {
             PolClass::QuasiTe => "quasi-TE (x)",
-            PolClass::QuasiTm => "quasi-TM (y)",
+            PolClass::QuasiTm => "quasi-TM (z)",
             PolClass::LinearPlus45 => "linear +45 deg",
             PolClass::LinearMinus45 => "linear -45 deg",
             PolClass::Elliptical { ccw: true } => "elliptical CCW",
@@ -196,7 +196,7 @@ pub struct ModeReport {
     pub psi_deg: f64,
     /// `integral |Ex|^2 / integral (|Ex|^2 + |Ey|^2)`; equals `(1 + s1) / 2` of the integrated vector
     pub te_fraction: f64,
-    /// `integral |Ez|^2 / integral |E|^2`
+    /// share of the field along the propagation axis (y in the wafer frame): `integral |E_y|^2 / integral |E|^2`
     pub long_fraction: f64,
     pub class: PolClass,
 }
@@ -204,7 +204,7 @@ pub struct ModeReport {
 impl ModeReport {
     pub fn summary_line(&self) -> String {
         format!(
-            "s = ({:+.3}, {:+.3}, {:+.3})  P = {:.3}  chi = {:+.1} deg  psi = {:+.1} deg  TE = {:.3}  Ez = {:.3}  {}",
+            "s = ({:+.3}, {:+.3}, {:+.3})  P = {:.3}  chi = {:+.1} deg  psi = {:+.1} deg  TE = {:.3}  Ey = {:.3}  {}",
             self.sphere[0], self.sphere[1], self.sphere[2], self.dop, self.chi_deg, self.psi_deg, self.te_fraction, self.long_fraction, self.class.label()
         )
     }

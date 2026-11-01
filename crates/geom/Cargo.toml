@@ -1,0 +1,22 @@
+[package]
+name = "geom"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Lean CSG-over-B-rep geometry kernel for FEM: feature lists, named regions, selectors, exact projection oracles"
+license = "BSD-2-Clause"
+repository = "https://github.com/p-j-r/inspired-rust-port"
+
+[features]
+default = []
+# Threaded pair finding in the arrangement; results are collected in index order, so output is bit-identical.
+parallel = ["dep:rayon"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+rayon = { version = "1", optional = true }
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
+proptest = "1"
+

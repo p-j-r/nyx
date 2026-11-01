@@ -13,12 +13,23 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
-    Rectangle { lx: f64, ly: f64, nx: usize, ny: usize },
+    /// structured triangles on the x-z cross-section (width `lx`, height `lz`)
+    Rectangle {
+        lx: f64,
+        #[serde(alias = "ly")]
+        lz: f64,
+        nx: usize,
+        #[serde(alias = "ny")]
+        nz: usize,
+    },
     Block { lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize },
     /// 2D shapes meshed with triangles, optionally extruded through layers into 3D
     Shapes { spec: femcore::mesher::Spec2d, extrude: Option<Vec<femcore::mesher::Layer>> },
     /// 3D bodies (box, sphere, cylinder, extrusion) meshed with tetrahedra by isosurface stuffing
     Solids { spec: femcore::mesher3d::Spec3d },
+    /// A `geom` model: exact regions and edges with names and rules (see `femcore::geomdrive`). A 2D model is the x-z cross-section,
+    /// meshed with triangles of size `h`; with `extrude` layers it is swept along y (the propagation axis) into tetrahedra.
+    Model { list: geom::model::FeatureList, h: f64, extrude: Option<Vec<femcore::mesher::Layer>> },
 }
 
 impl Geometry {
@@ -28,6 +39,7 @@ impl Geometry {
             Geometry::Block { .. } => 3,
             Geometry::Shapes { extrude, .. } => if extrude.is_some() { 3 } else { 2 },
             Geometry::Solids { .. } => 3,
+            Geometry::Model { list, extrude, .. } => if extrude.is_some() { 3 } else { list.dim as usize },
         }
     }
 }
@@ -47,8 +59,16 @@ pub struct GeometrySpec {
 }
 
 impl GeometrySpec {
-    pub fn rectangle(lx: f64, ly: f64, nx: usize, ny: usize) -> Self {
-        GeometrySpec { geometry: Geometry::Rectangle { lx, ly, nx, ny }, domains: vec![], boundaries: vec![] }
+    pub fn rectangle(lx: f64, lz: f64, nx: usize, nz: usize) -> Self {
+        GeometrySpec { geometry: Geometry::Rectangle { lx, lz, nx, nz }, domains: vec![], boundaries: vec![] }
+    }
+    /// A model of the x-z cross-section (a 2D feature list) meshed with element size `h`.
+    pub fn model(list: geom::model::FeatureList, h: f64) -> Self {
+        GeometrySpec { geometry: Geometry::Model { list, h, extrude: None }, domains: vec![], boundaries: vec![] }
+    }
+    /// A 2D model swept along y through `layers` (see `femcore::mesher::extrude_y`).
+    pub fn model_extruded(list: geom::model::FeatureList, h: f64, layers: Vec<femcore::mesher::Layer>) -> Self {
+        GeometrySpec { geometry: Geometry::Model { list, h, extrude: Some(layers) }, domains: vec![], boundaries: vec![] }
     }
     pub fn shapes() -> Self {
         use femcore::mesher::*;
@@ -67,20 +87,30 @@ impl GeometrySpec {
     pub fn build(&self) -> Result<femcore::mesh::SimplexMesh, String> {
         use femcore::mesh::SimplexMesh;
         let mut mesh = match &self.geometry {
-            Geometry::Rectangle { lx, ly, nx, ny } => {
-                if !(*lx > 0.0 && *ly > 0.0 && lx.is_finite() && ly.is_finite()) || *nx < 1 || *ny < 1 {
+            Geometry::Rectangle { lx, lz, nx, nz } => {
+                if !(*lx > 0.0 && *lz > 0.0 && lx.is_finite() && lz.is_finite()) || *nx < 1 || *nz < 1 {
                     return Err("sizes must be positive finite numbers and element counts at least 1".into());
                 }
-                if nx * ny > 4_000_000 {
+                if nx * nz > 4_000_000 {
                     return Err("that is too many elements (limit 4 million)".into());
                 }
-                SimplexMesh::rectangle(*lx, *ly, *nx, *ny)
+                SimplexMesh::rectangle(*lx, *lz, *nx, *nz)
             }
             Geometry::Shapes { spec, extrude } => {
                 let m2 = femcore::mesher::mesh_2d(spec)?;
                 match extrude {
-                    Some(layers) => femcore::mesher::extrude(&m2, layers, 0.0)?,
+                    Some(layers) => femcore::mesher::extrude_y(&m2, layers, 0.0)?,
                     None => m2,
+                }
+            }
+            Geometry::Model { list, h, extrude } => {
+                if list.dim != 2 {
+                    return Err("a 3D model cannot be meshed yet: model the x-z cross-section in 2D and extrude it along y with layers".into());
+                }
+                let g = femcore::geomdrive::mesh_geom_2d(femcore::geomdrive::evaluate(list)?, &femcore::geomdrive::GeomMeshOpts::new(*h))?;
+                match extrude {
+                    Some(layers) => femcore::mesher::extrude_y(&g.mesh, layers, 0.0)?,
+                    None => g.mesh,
                 }
             }
             Geometry::Solids { spec } => femcore::mesher3d::mesh_3d(spec)?.0,

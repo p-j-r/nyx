@@ -1,10 +1,11 @@
 //! Use case: Bragg gratings in a 300 nm SOI wire, symmetric and asymmetric.
 //!
 //! A silicon wire (`soi::SoiWire` cross-section) whose side walls carry rectangular teeth of depth `tooth` with period
-//! `period` and duty cycle `duty` along the propagation axis z. One period is meshed as a 3D cell: the 2D cross-section of the
-//! widest part is extruded through two layers (teeth present, teeth absent), and the domain numbers of the layers pick the material
-//! of each tooth, so the two ends of the cell carry identical meshes and a Floquet-periodic pair (`Periodic`) closes it. All other
-//! walls are perfect conductors, far enough from the wire for the guided field to have died out.
+//! `period` and duty cycle `duty` along the propagation axis y. One period is meshed as a 3D cell: the x-z cross-section of the
+//! widest part (a `geom` model with the regions `BOX`, `Si`, `clad`, `tooth_left`, `tooth_right`) is extruded along y through two layers
+//! (teeth present, teeth absent), and the layer picks the material of each tooth, so the two ends of the cell carry identical meshes and
+//! a Floquet-periodic pair (`Periodic`) closes it. All other walls are perfect conductors, far enough from the wire for the guided field
+//! to have died out.
 //!
 //! * [`GratingKind::Symmetric`]: teeth on both sides, in phase (mirror symmetric about the plane x = 0). The fundamental TE mode couples
 //!   to its own backward wave. Its standing waves are even and odd about the tooth plane and stay quasi-TE.
@@ -18,13 +19,17 @@
 //! strength `kappa = pi n_g (f_high - f_low) / c`, with `n_g` the group index of the wire; a coupled-mode estimate
 //! `kappa ~ 2 |n_wide - n_narrow| sin(pi duty) / lambda` from the two effective indices of the unperturbed sections is the check.
 //!
-//! The mesh is in the model frame with the propagation axis along z, x lateral and y the surface normal: the polarization analysis in the
-//! result uses exactly these axes.
+//! Everything is in the wafer frame: x lateral, y the propagation axis, z the surface normal. The polarization analysis in the result
+//! uses exactly these axes.
 
 use super::soi::{Cladding, SoiWire};
+use crate::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
 use crate::mesh::SimplexMesh;
-use crate::mesher::{extrude, mesh_2d, Layer, Part, Shape, Spec2d};
+use crate::mesher::{extrude_y, Layer};
 use crate::problem::*;
+use geom::labels::LabelMap;
+use geom::model::Model;
+use geom::select::Selector;
 
 const C0: f64 = 299_792_458.0;
 
@@ -102,13 +107,19 @@ impl Default for BraggGrating {
     }
 }
 
-/// Domain numbers: the layer with teeth uses these, the layer without them the same plus `NO_TEETH`.
-pub const OXIDE_BOX: i32 = 1;
-pub const CORE: i32 = 2;
-pub const CLADDING: i32 = 3;
-pub const LEFT_TOOTH: i32 = 4;
-pub const RIGHT_TOOTH: i32 = 5;
-pub const NO_TEETH: i32 = 10;
+/// Added to the domain numbers of the layer without teeth (larger than the number of regions of the cross-section).
+pub const NO_TEETH: i32 = 100;
+
+/// One period of the grating meshed: the tetrahedra, the names of the cross-section, and the boundary numbers of its two ends.
+pub struct BraggCell {
+    pub mesh: SimplexMesh,
+    /// the names of the cross-section: a domain of the layer with teeth is `labels.domain(name)`, the same region without teeth `+ NO_TEETH`
+    pub labels: LabelMap,
+    /// the end at y = 0
+    pub source: i32,
+    /// the end at y = period
+    pub dest: i32,
+}
 
 /// Stop band of a grating from the two band-edge modes.
 #[derive(Clone, Debug)]
@@ -157,26 +168,26 @@ impl BraggGrating {
         self.width + teeth * self.tooth * self.duty
     }
 
-    /// The cross-section of the widest part: domains 1 box, 2 core, 3 cladding, 4 and 5 left and right tooth. x lateral, y normal.
-    pub fn cross_section(&self) -> Spec2d {
+    /// The cross-section of the widest part as a geom model in the x-z plane: `BOX`, `Si` (the core), `clad`, `tooth_left`, `tooth_right`,
+    /// and the finer-meshed `BOX_near` and `clad_near` around the wire.
+    pub fn cross_section(&self) -> Model {
         let (w, t, d) = (self.width, self.thickness, self.tooth);
         let half = 0.5 * w + d + self.margin;
-        let (y0, y1) = (-self.margin - 0.1e-6, t + self.margin);
-        let rect = |xa: f64, ya: f64, xb: f64, yb: f64, dom: i32, h: Option<f64>| Part { shape: Shape::Rect { x0: xa, y0: ya, x1: xb, y1: yb }, domain: dom, h };
+        let (z0, z1) = (-self.margin - 0.1e-6, t + self.margin);
         let zone = 0.5 * w + d + 0.3e-6;
-        Spec2d {
-            parts: vec![
-                rect(-half, y0, half, y1, CLADDING, None),
-                rect(-half, y0, half, 0.0, OXIDE_BOX, None),
-                rect(-zone, -0.3e-6, zone, 0.0, OXIDE_BOX, Some(self.h_near)),
-                rect(-zone, t, zone, t + 0.3e-6, CLADDING, Some(self.h_near)),
-                rect(-0.5 * w, 0.0, 0.5 * w, t, CORE, Some(self.h_core)),
-                rect(-0.5 * w - d, 0.0, -0.5 * w, t, LEFT_TOOTH, Some(self.h_core)),
-                rect(0.5 * w, 0.0, 0.5 * w + d, t, RIGHT_TOOTH, Some(self.h_core)),
-            ],
-            h: self.h_far,
-            min_angle_deg: 25.0,
-        }
+        let mut m = Model::new_2d();
+        let clad = m.rect("clad_rect", (-half, z0), (half, z1));
+        let bx = m.rect("box_rect", (-half, z0), (half, 0.0));
+        let box_near = m.rect("box_near_rect", (-zone, -0.3e-6), (zone, 0.0));
+        let clad_near = m.rect("clad_near_rect", (-zone, t), (zone, t + 0.3e-6));
+        let core = m.rect("core_rect", (-0.5 * w, 0.0), (0.5 * w, t));
+        let left = m.rect("tooth_left_rect", (-0.5 * w - d, 0.0), (-0.5 * w, t));
+        let right = m.rect("tooth_right_rect", (0.5 * w, 0.0), (0.5 * w + d, t));
+        m.overlay(&[("clad", clad), ("BOX", bx), ("BOX_near", box_near), ("clad_near", clad_near), ("Si", core), ("tooth_left", left), ("tooth_right", right)]);
+        let sel = |s: &str| Selector::parse(s).expect("a valid selector");
+        m.size("size_near", sel("region(BOX_near) | region(clad_near)"), Some(self.h_near.into()), None, None);
+        m.size("size_core", sel("region(Si) | region(tooth_left) | region(tooth_right)"), Some(self.h_core.into()), None, None);
+        m
     }
 
     /// The extrusion layers: teeth present (domains as they are), then absent (domain numbers plus `NO_TEETH`).
@@ -187,19 +198,19 @@ impl BraggGrating {
         ]
     }
 
-    /// The mesh of one period and the boundary numbers of its two ends (`source` z = 0, `dest` z = period).
-    pub fn mesh(&self) -> Result<(SimplexMesh, i32, i32), String> {
+    /// The mesh of one period (y from 0 to the period) and the boundary numbers of its two ends.
+    pub fn mesh(&self) -> Result<BraggCell, String> {
         if !(self.duty > 0.0 && self.duty < 1.0) || self.period <= 0.0 {
             return Err("the duty cycle must lie between 0 and 1 and the period must be positive".into());
         }
-        let m2 = mesh_2d(&self.cross_section())?;
-        let nb = m2.facet_labels.iter().copied().max().unwrap_or(0);
-        let m3 = extrude(&m2, &self.layers(), 0.0)?;
-        Ok((m3, nb + 1, nb + 2))
+        let g = mesh_geom_2d(evaluate(&self.cross_section().list)?, &GeomMeshOpts::new(self.h_far))?;
+        let nb = g.mesh.facet_labels.iter().copied().max().unwrap_or(0);
+        let mesh = extrude_y(&g.mesh, &self.layers(), 0.0)?;
+        Ok(BraggCell { mesh, labels: g.labels, source: nb + 1, dest: nb + 2 })
     }
 
-    /// Relative permittivity of each domain of the cell.
-    fn permittivities(&self) -> Vec<(i32, f64)> {
+    /// Relative permittivity of each domain of the cell, by region name.
+    fn permittivities(&self, labels: &LabelMap) -> Vec<(i32, f64)> {
         let (si, ox) = (self.n_si * self.n_si, self.n_sio2 * self.n_sio2);
         let top = match self.cladding {
             Cladding::Oxide => ox,
@@ -207,31 +218,35 @@ impl BraggGrating {
         };
         // (left tooth with teeth, right tooth with teeth, left without, right without)
         let (l_with, r_with, l_without, r_without) = match self.kind {
-            GratingKind::Symmetric => (si, si, ox, ox),
-            GratingKind::Asymmetric => (si, ox, ox, ox),
-            GratingKind::HalfPeriodShifted => (si, ox, ox, si),
-            GratingKind::Uniform => (ox, ox, ox, ox),
+            GratingKind::Symmetric => (si, si, top, top),
+            GratingKind::Asymmetric => (si, top, top, top),
+            GratingKind::HalfPeriodShifted => (si, top, top, si),
+            GratingKind::Uniform => (top, top, top, top),
         };
+        let id = |n: &str| labels.domain(n).expect("a region of the cross-section");
         let mut v = vec![];
         for off in [0, NO_TEETH] {
-            v.push((OXIDE_BOX + off, ox));
-            v.push((CORE + off, si));
-            v.push((CLADDING + off, top));
+            v.push((id("BOX") + off, ox));
+            v.push((id("BOX_near") + off, ox));
+            v.push((id("Si") + off, si));
+            v.push((id("clad") + off, top));
+            v.push((id("clad_near") + off, top));
         }
-        v.extend([(LEFT_TOOTH, l_with), (RIGHT_TOOTH, r_with), (LEFT_TOOTH + NO_TEETH, l_without), (RIGHT_TOOTH + NO_TEETH, r_without)]);
+        v.extend([(id("tooth_left"), l_with), (id("tooth_right"), r_with), (id("tooth_left") + NO_TEETH, l_without), (id("tooth_right") + NO_TEETH, r_without)]);
         v
     }
 
     /// The eigenmode problem of the cell: Floquet pair on the two ends, modes near `f_search` (default: just below the
     /// frequency at which the unperturbed wire of mean width satisfies the Bragg condition for this period).
-    pub fn spec(&self, source: i32, dest: i32, f_search: f64) -> ProblemSpec {
+    pub fn spec(&self, cell: &BraggCell, f_search: f64) -> ProblemSpec {
         let mut s = ProblemSpec::new(Physics::Emw);
         s.order = self.order;
-        for (d, eps) in self.permittivities() {
+        s.materials.frame = Frame::Wafer;
+        for (d, eps) in self.permittivities(&cell.labels) {
             s.materials.set(d, "eps_r", eps);
             s.materials.set(d, "mu_r", 1.0);
         }
-        s.periodic = vec![Periodic { source: vec![source], dest: vec![dest], phase: self.phase }];
+        s.periodic = vec![Periodic { source: vec![cell.source], dest: vec![cell.dest], phase: self.phase }];
         s.study = Study::Eigenfrequency { n_modes: self.n_modes, f_search };
         s
     }
@@ -249,9 +264,9 @@ impl BraggGrating {
 
     /// Meshes and solves the cell at the configured Floquet phase.
     pub fn solve(&self) -> Result<SolveResult, String> {
-        let (mesh, src, dst) = self.mesh()?;
+        let cell = self.mesh()?;
         let f0 = 0.95 * self.bragg_frequency_estimate()?;
-        crate::solve::solve(&mesh, &self.spec(src, dst, f0), &mut SolveState::default())
+        crate::solve::solve(&cell.mesh, &self.spec(&cell, f0), &mut SolveState::default())
     }
 
     /// The stop band: solves the cell at the band edge (phase `pi`) and measures the splitting of the two lowest modes.

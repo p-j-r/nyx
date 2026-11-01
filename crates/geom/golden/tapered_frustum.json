@@ -1,0 +1,62 @@
+{
+  "dim": 3,
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "outline",
+      "op": {
+        "Rect": {
+          "min": [
+            0.0,
+            0.0
+          ],
+          "max": [
+            2.0,
+            2.0
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "frustum",
+      "op": {
+        "Extrude": {
+          "profile": 1,
+          "axis": "Y",
+          "from": 0.0,
+          "to": 1.0,
+          "taper_deg": 10.0
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "frustum",
+              "input": 2,
+              "kind": "Material",
+              "pinned_id": null
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

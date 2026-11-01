@@ -4,7 +4,7 @@
 //!   cargo run --release -p femcore --example bragg_gratings -- symmetric    # one kind: symmetric | asymmetric | shifted
 //!
 //! Each grating is one 3D Floquet cell at the band edge (phase pi); the two lowest modes bound the stop band. The table is the
-//! Stokes/Poincare analysis of those two modes with respect to (x lateral, y normal, z propagation); the Poincare sphere of all gratings is
+//! Stokes/Poincare analysis of those two modes with respect to (x lateral, y propagation, z normal); the Poincare sphere of all gratings is
 //! written to `bragg_poincare.svg`.
 use femcore::usecases::bragg::*;
 

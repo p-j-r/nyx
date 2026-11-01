@@ -1,0 +1,183 @@
+{
+  "dim": 2,
+  "params": [
+    {
+      "name": "w",
+      "value": 5e-7
+    },
+    {
+      "name": "t",
+      "value": 3e-7
+    },
+    {
+      "name": "slab",
+      "value": 1e-7
+    },
+    {
+      "name": "margin",
+      "value": 1e-6
+    },
+    {
+      "name": "box_t",
+      "value": 2e-6
+    },
+    {
+      "name": "deg_r",
+      "value": 80.0
+    },
+    {
+      "name": "deg_l",
+      "value": 75.0
+    },
+    {
+      "name": "inset_r",
+      "value": "(t-slab)/tan(deg_r*pi/180)"
+    },
+    {
+      "name": "inset_l",
+      "value": "(t-slab)/tan(deg_l*pi/180)"
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "clad",
+      "op": {
+        "Rect": {
+          "min": [
+            "-w/2-margin",
+            "-box_t"
+          ],
+          "max": [
+            "w/2+margin",
+            "t+margin"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "box",
+      "op": {
+        "Rect": {
+          "min": [
+            "-w/2-margin",
+            "-box_t"
+          ],
+          "max": [
+            "w/2+margin",
+            0.0
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "slab",
+      "op": {
+        "Rect": {
+          "min": [
+            "-w/2-margin",
+            0.0
+          ],
+          "max": [
+            "w/2+margin",
+            "slab"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 4,
+      "name": "core",
+      "op": {
+        "Polygon": {
+          "pts": [
+            [
+              "-w/2",
+              "slab"
+            ],
+            [
+              "w/2",
+              "slab"
+            ],
+            [
+              "w/2-inset_r",
+              "t"
+            ],
+            [
+              "-w/2+inset_l",
+              "t"
+            ]
+          ],
+          "names": [
+            "foot",
+            "right",
+            "top",
+            "left"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 5,
+      "name": "si",
+      "op": {
+        "Union": {
+          "ids": [
+            3,
+            4
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 6,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "clad",
+              "input": 1,
+              "kind": "Material",
+              "pinned_id": 3
+            },
+            {
+              "name": "BOX",
+              "input": 2,
+              "kind": "Material",
+              "pinned_id": 1
+            },
+            {
+              "name": "Si",
+              "input": 5,
+              "kind": "Material",
+              "pinned_id": 2
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

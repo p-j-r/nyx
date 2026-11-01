@@ -1,0 +1,113 @@
+{
+  "dim": 2,
+  "params": [
+    {
+      "name": "w",
+      "value": 5e-7
+    },
+    {
+      "name": "t",
+      "value": 3e-7
+    },
+    {
+      "name": "margin",
+      "value": 1e-6
+    },
+    {
+      "name": "box_t",
+      "value": 2e-6
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "clad",
+      "op": {
+        "Rect": {
+          "min": [
+            "-w/2-margin",
+            "-box_t"
+          ],
+          "max": [
+            "w/2+margin",
+            "t+margin"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "box",
+      "op": {
+        "Rect": {
+          "min": [
+            "-w/2-margin",
+            "-box_t"
+          ],
+          "max": [
+            "w/2+margin",
+            0.0
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "core",
+      "op": {
+        "Rect": {
+          "min": [
+            "-w/2",
+            0.0
+          ],
+          "max": [
+            "w/2",
+            "t"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 4,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "clad",
+              "input": 1,
+              "kind": "Material",
+              "pinned_id": 3
+            },
+            {
+              "name": "BOX",
+              "input": 2,
+              "kind": "Material",
+              "pinned_id": 1
+            },
+            {
+              "name": "Si",
+              "input": 3,
+              "kind": "Material",
+              "pinned_id": 2
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

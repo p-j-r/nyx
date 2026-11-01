@@ -1,0 +1,22 @@
+{
+  "note": "torus in a box",
+  "regions": [
+    [
+      "vacuum",
+      30.76629944986383
+    ],
+    [
+      "ring",
+      1.2337005501361697
+    ]
+  ],
+  "names": [
+    "host.xmax",
+    "host.xmin",
+    "host.ymax",
+    "host.ymin",
+    "host.zmax",
+    "host.zmin",
+    "ring|vacuum"
+  ]
+}

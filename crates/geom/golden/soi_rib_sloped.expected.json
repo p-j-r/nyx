@@ -1,0 +1,29 @@
+{
+  "note": "rib on a slab with unequal side-wall angles; core is a polygon with named edges",
+  "regions": [
+    [
+      "clad",
+      2.908885523462791e-12
+    ],
+    [
+      "BOX",
+      5e-12
+    ],
+    [
+      "Si",
+      3.411144765372082e-13
+    ]
+  ],
+  "names": [
+    "BOX|Si",
+    "Si|clad",
+    "box.bottom",
+    "box.left",
+    "box.right",
+    "clad.left",
+    "clad.right",
+    "clad.top",
+    "slab.left",
+    "slab.right"
+  ]
+}

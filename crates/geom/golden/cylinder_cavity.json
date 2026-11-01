@@ -1,0 +1,82 @@
+{
+  "dim": 3,
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "block",
+      "op": {
+        "Box": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            2.0,
+            2.0,
+            1.0
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "cav",
+      "op": {
+        "Cylinder": {
+          "base": [
+            1.0,
+            1.0,
+            -1.0
+          ],
+          "axis": "Z",
+          "r": 0.3,
+          "h": 3.0
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "d",
+      "op": {
+        "Difference": {
+          "a": 1,
+          "b": [
+            2
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 4,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "block",
+              "input": 3,
+              "kind": "Material",
+              "pinned_id": null
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "note": "box with a slanted plane cut: 5 faces, 9 edges, 6 vertices",
+  "regions": [
+    [
+      "block",
+      0.5
+    ]
+  ],
+  "names": [
+    "block.xmin",
+    "block.ymax",
+    "block.ymin",
+    "block.zmin",
+    "slant.cut"
+  ]
+}

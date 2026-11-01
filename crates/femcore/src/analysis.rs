@@ -295,7 +295,7 @@ impl Analysis {
     #[allow(clippy::write_literal)] // the header cells are literals next to the label of the first column
     pub fn table(&self) -> String {
         let mut s = String::new();
-        let _ = writeln!(s, "{:>3}  {:<14} {:>10} {:>9} {:>6} {:>6} {:>6} {:>7} {:>7} {:>7} {:>6}  {}", "#", "mode", self.value_label, format!("Im {}", self.value_label), "TE", "Ez", "P", "s1", "s2", "s3", "group", "class");
+        let _ = writeln!(s, "{:>3}  {:<14} {:>10} {:>9} {:>6} {:>6} {:>6} {:>7} {:>7} {:>7} {:>6}  {}", "#", "mode", self.value_label, format!("Im {}", self.value_label), "TE", "Ey", "P", "s1", "s2", "s3", "group", "class");
         for (i, r) in self.rows.iter().enumerate() {
             let g = r.group.map_or("-".to_string(), |g| format!("G{}", g + 1));
             match &r.report {
@@ -364,7 +364,7 @@ impl Analysis {
 
 /// Polarization analysis of the modes of a 2D mode study, from the complex fields the solver found (not from the plotted
 /// fields, which are real and lose the phase between `Ex` and `Ey`). Cells inside a PML are left out. The axes are those of
-/// the cross-section: `x` lateral (quasi-TE), `y` the surface normal (quasi-TM), `z` the propagation axis.
+/// the cross-section in the wafer frame: `x` lateral (quasi-TE), `z` the surface normal (quasi-TM), `y` the propagation axis.
 pub fn analyze_optical(mesh: &SimplexMesh, set: &OpticalSet, opts: &AnalysisOptions) -> Analysis {
     let modes: Vec<ModeInput> = (0..set.modes.len())
         .map(|j| ModeInput { label: format!("mode {}", j + 1), neff: (set.modes[j].neff.re, set.modes[j].neff.im), samples: mode_samples(mesh, set, j) })
@@ -415,11 +415,11 @@ impl Analysis {
     pub fn attach(self, result: &mut SolveResult) {
         for (i, r) in self.rows.iter().enumerate() {
             if let Some(m) = &r.report {
-                let text = format!("{}  TE {:.3}  Ez {:.3}  P {:.3}  s = ({:+.3}, {:+.3}, {:+.3})", m.class.label(), m.te_fraction, m.long_fraction, m.dop, m.sphere[0], m.sphere[1], m.sphere[2]);
+                let text = format!("{}  TE {:.3}  Ey {:.3}  P {:.3}  s = ({:+.3}, {:+.3}, {:+.3})", m.class.label(), m.te_fraction, m.long_fraction, m.dop, m.sphere[0], m.sphere[1], m.sphere[2]);
                 result.scalars.push((format!("polarization {}", i + 1), Scalar::Text(text)));
             }
         }
-        result.log.push("polarization of the modes (Stokes parameters; s1 > 0 is x, the lateral direction):".into());
+        result.log.push("polarization of the modes (Stokes parameters; s1 > 0 is x, the lateral direction, s1 < 0 is z, the surface normal):".into());
         result.log.extend(self.table().lines().filter(|l| !l.is_empty()).map(|l| l.to_string()));
         result.analysis = Some(self);
     }

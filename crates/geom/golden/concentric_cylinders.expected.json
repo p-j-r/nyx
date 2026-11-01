@@ -1,0 +1,21 @@
+{
+  "note": "concentric cylinders",
+  "regions": [
+    [
+      "dielectric",
+      1.319468914507713
+    ],
+    [
+      "conductor",
+      0.25132741228718347
+    ]
+  ],
+  "names": [
+    "conductor|dielectric",
+    "inner.bottom",
+    "inner.top",
+    "outer.bottom",
+    "outer.side",
+    "outer.top"
+  ]
+}

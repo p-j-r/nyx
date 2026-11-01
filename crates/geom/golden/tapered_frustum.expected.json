@@ -1,0 +1,17 @@
+{
+  "note": "tapered extrusion",
+  "regions": [
+    [
+      "frustum",
+      3.3361470160004916
+    ]
+  ],
+  "names": [
+    "frustum.side:bottom",
+    "frustum.side:left",
+    "frustum.side:right",
+    "frustum.side:top",
+    "frustum.ymax",
+    "frustum.ymin"
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "dim": 2,
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "outer",
+      "op": {
+        "Circle": {
+          "center": [
+            0.0,
+            0.0
+          ],
+          "r": 0.5
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "inner",
+      "op": {
+        "Circle": {
+          "center": [
+            0.0,
+            0.0
+          ],
+          "r": 0.3
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "ring",
+      "op": {
+        "Difference": {
+          "a": 1,
+          "b": [
+            2
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 4,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "ring",
+              "input": 3,
+              "kind": "Material",
+              "pinned_id": null
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

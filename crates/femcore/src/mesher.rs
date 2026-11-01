@@ -78,10 +78,11 @@ pub struct Layer {
 }
 
 /// One closed polyline edge chain: sample points and the boundary label of every segment.
-struct Chain {
-    pts: Vec<[f64; 2]>,
-    label: i32,
-    part: usize,
+pub(crate) struct Chain {
+    pub pts: Vec<[f64; 2]>,
+    pub label: i32,
+    /// ties between chains on the same segment go to the larger `part`
+    pub part: usize,
 }
 
 pub(crate) fn dist_point_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -307,6 +308,64 @@ pub fn mesh_2d(spec: &Spec2d) -> Result<SimplexMesh, String> {
             }
         }
     }
+    // interior lattices where a shape asks for a finer size than the global one; a point is inserted only where this shape is the
+    // one that paints the cell (later shapes override)
+    let fills: Vec<Fill> = spec
+        .parts
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.domain > 0)
+        .filter_map(|(pi, part)| {
+            let h = part.h.filter(|h| *h < spec.h * 0.999)?;
+            let (blo, bhi) = match &part.shape {
+                Shape::Rect { x0, y0, x1, y1 } => ([x0.min(*x1), y0.min(*y1)], [x0.max(*x1), y0.max(*y1)]),
+                Shape::Circle { cx, cy, r } => ([cx - r, cy - r], [cx + r, cy + r]),
+                Shape::Polygon(v) => (
+                    [v.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min), v.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min)],
+                    [v.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max), v.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max)],
+                ),
+            };
+            Some(Fill { lo: blo, hi: bhi, h, owner: Box::new(move |p| spec.parts.iter().rposition(|q| q.shape.contains(p)) == Some(pi)) })
+        })
+        .collect();
+    let h_fine_min = spec.parts.iter().filter_map(|p| p.h).fold(spec.h, f64::min);
+    let h_reach = spec.parts.iter().filter_map(|p| p.h).fold(0.0, f64::max).max(spec.h);
+    // cells: the last shape containing the centroid wins
+    let domain_at = |cen: [f64; 2]| spec.parts.iter().rev().find(|p| p.shape.contains(cen)).filter(|p| p.domain > 0).map(|p| p.domain);
+    mesh_chains(&chains, &fills, &MeshParams { h: spec.h, h_fine_min, h_reach, min_angle_deg: spec.min_angle_deg, lo, hi }, &domain_at)
+}
+
+/// One lattice fill: a region that wants elements of size `h` (finer than the global size) inside the box `lo..hi`; `owner` says whether a point is
+/// painted by this region.
+pub(crate) struct Fill<'a> {
+    pub lo: [f64; 2],
+    pub hi: [f64; 2],
+    pub h: f64,
+    pub owner: Box<dyn Fn([f64; 2]) -> bool + 'a>,
+}
+
+pub(crate) struct MeshParams {
+    /// global element size (the area limit of the refinement)
+    pub h: f64,
+    /// the smallest size asked for anywhere (spacing of the lattice test) and the largest (reach of the boundary test)
+    pub h_fine_min: f64,
+    pub h_reach: f64,
+    pub min_angle_deg: f64,
+    /// bounding box of the chains
+    pub lo: [f64; 2],
+    pub hi: [f64; 2],
+}
+
+/// The shared tail of the meshers: constrained Delaunay triangulation of the chains (conforming, labelled), lattice points, Ruppert refinement,
+/// cells labelled by `domain_at` (None: no cell) and boundary facets labelled by the chain they lie on.
+pub(crate) fn mesh_chains(
+    chains: &[Chain],
+    fills: &[Fill],
+    mp: &MeshParams,
+    domain_at: &dyn Fn([f64; 2]) -> Option<i32>,
+) -> Result<SimplexMesh, String> {
+    let (lo, hi, h_global) = (mp.lo, mp.hi, mp.h);
+    let scale = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-300);
     // triangulate in coordinates centred on the shapes and scaled to about one, so rounding errors are
     // relative to the size of the model whatever its units or position (nanometre structures
     // sit at 1e-6 offsets and would otherwise get slivers)
@@ -314,7 +373,7 @@ pub fn mesh_2d(spec: &Spec2d) -> Result<SimplexMesh, String> {
     let nrm = |p: [f64; 2]| [(p[0] - c0[0]) / scale, (p[1] - c0[1]) / scale];
     let den = |p: [f64; 2]| [p[0] * scale + c0[0], p[1] * scale + c0[1]];
     let mut cdt: ConstrainedDelaunayTriangulation<Point2<f64>> = ConstrainedDelaunayTriangulation::new();
-    for ch in &chains {
+    for ch in chains {
         let mut prev = None;
         for p in &ch.pts {
             let pn = nrm(*p);
@@ -331,15 +390,15 @@ pub fn mesh_2d(spec: &Spec2d) -> Result<SimplexMesh, String> {
     // inserted only where this shape is the one that paints the cell (later shapes override), so
     // overlapping shapes do not interleave two lattices, and never close to a boundary sample or to
     // an earlier lattice point (which would give needle triangles)
-    let h_fine_min = spec.parts.iter().filter_map(|p| p.h).fold(spec.h, f64::min).max(1e-300);
-    let reach = 0.5 * spec.parts.iter().filter_map(|p| p.h).fold(0.0, f64::max).max(spec.h);
+    let h_fine_min = mp.h_fine_min.max(1e-300);
+    let reach = 0.5 * mp.h_reach;
     let gcell = reach.max(1e-9 * scale);
     let gk = |x: f64| (x / gcell).floor() as i64;
     let lcell = (0.6 * h_fine_min).max(1e-9 * scale);
     let lk = |x: f64| (x / lcell).floor() as i64;
     type Segment = ([f64; 2], [f64; 2]);
     let mut seg_grid: HashMap<(i64, i64), Vec<Segment>> = HashMap::new();
-    for ch in &chains {
+    for ch in chains {
         for w in ch.pts.windows(2) {
             let (x0, x1) = (w[0][0].min(w[1][0]) - reach, w[0][0].max(w[1][0]) + reach);
             let (y0, y1) = (w[0][1].min(w[1][1]) - reach, w[0][1].max(w[1][1]) + reach);
@@ -351,61 +410,48 @@ pub fn mesh_2d(spec: &Spec2d) -> Result<SimplexMesh, String> {
         }
     }
     let mut lattice_pts: HashMap<(i64, i64), Vec<[f64; 2]>> = HashMap::new();
-    for (pi, part) in spec.parts.iter().enumerate() {
-        if part.domain <= 0 {
-            continue;
-        }
-        if let Some(h) = part.h.filter(|h| *h < spec.h * 0.999) {
-            let (blo, bhi) = match &part.shape {
-                Shape::Rect { x0, y0, x1, y1 } => ([x0.min(*x1), y0.min(*y1)], [x0.max(*x1), y0.max(*y1)]),
-                Shape::Circle { cx, cy, r } => ([cx - r, cy - r], [cx + r, cy + r]),
-                Shape::Polygon(v) => (
-                    [v.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min), v.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min)],
-                    [v.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max), v.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max)],
-                ),
-            };
-            let dy = h * 3f64.sqrt() / 2.0;
-            let mut row = 0;
-            let mut y = blo[1] + dy;
-            while y < bhi[1] {
-                let mut x = blo[0] + if row % 2 == 0 { 0.5 * h } else { h };
-                while x < bhi[0] {
-                    let owner = spec.parts.iter().rposition(|p| p.shape.contains([x, y]));
-                    if owner == Some(pi) {
-                        let (kx, ky) = (gk(x), gk(y));
-                        let (lx, ly) = (lk(x), lk(y));
-                        let span = (0.6 * h / lcell).ceil() as i64 + 1;
-                        let near_boundary = seg_grid.get(&(kx, ky)).is_some_and(|l| l.iter().any(|s| dist_point_segment([x, y], s.0, s.1) < 0.4 * h));
-                        let mut near_point = false;
-                        'o: for dx in -span..=span {
-                            for dyy in -span..=span {
-                                if let Some(l) = lattice_pts.get(&(lx + dx, ly + dyy)) {
-                                    if l.iter().any(|q| (q[0] - x).hypot(q[1] - y) < 0.6 * h) {
-                                        near_point = true;
-                                        break 'o;
-                                    }
+    for fill in fills {
+        let (h, blo, bhi) = (fill.h, fill.lo, fill.hi);
+        let dy = h * 3f64.sqrt() / 2.0;
+        let mut row = 0;
+        let mut y = blo[1] + dy;
+        while y < bhi[1] {
+            let mut x = blo[0] + if row % 2 == 0 { 0.5 * h } else { h };
+            while x < bhi[0] {
+                if (fill.owner)([x, y]) {
+                    let (kx, ky) = (gk(x), gk(y));
+                    let (lx, ly) = (lk(x), lk(y));
+                    let span = (0.6 * h / lcell).ceil() as i64 + 1;
+                    let near_boundary = seg_grid.get(&(kx, ky)).is_some_and(|l| l.iter().any(|s| dist_point_segment([x, y], s.0, s.1) < 0.4 * h));
+                    let mut near_point = false;
+                    'o: for dx in -span..=span {
+                        for dyy in -span..=span {
+                            if let Some(l) = lattice_pts.get(&(lx + dx, ly + dyy)) {
+                                if l.iter().any(|q| (q[0] - x).hypot(q[1] - y) < 0.6 * h) {
+                                    near_point = true;
+                                    break 'o;
                                 }
                             }
                         }
-                        if !near_boundary && !near_point {
-                            let pn = nrm([x, y]);
-                            let _ = cdt.insert(Point2::new(pn[0], pn[1]));
-                            lattice_pts.entry((lx, ly)).or_default().push([x, y]);
-                        }
                     }
-                    x += h;
+                    if !near_boundary && !near_point {
+                        let pn = nrm([x, y]);
+                        let _ = cdt.insert(Point2::new(pn[0], pn[1]));
+                        lattice_pts.entry((lx, ly)).or_default().push([x, y]);
+                    }
                 }
-                y += dy;
-                row += 1;
+                x += h;
             }
+            y += dy;
+            row += 1;
         }
     }
     let params = RefinementParameters::<f64>::new()
         // no exclude_outer_faces: it decides inside/outside by constraint parity, which nested or
         // overlapping shapes break; unwanted cells are dropped by the shape test below instead
         .keep_constraint_edges()
-        .with_angle_limit(AngleLimit::from_deg(spec.min_angle_deg.clamp(0.0, 33.0)))
-        .with_max_allowed_area(0.5 * (spec.h / scale) * (spec.h / scale));
+        .with_angle_limit(AngleLimit::from_deg(mp.min_angle_deg.clamp(0.0, 33.0)))
+        .with_max_allowed_area(0.5 * (h_global / scale) * (h_global / scale));
     cdt.refine(params);
 
     // cells: faces whose centroid is inside some shape (the last containing shape wins)
@@ -423,13 +469,13 @@ pub fn mesh_2d(spec: &Spec2d) -> Result<SimplexMesh, String> {
             continue;
         }
         let cen = den([(pos[0].x + pos[1].x + pos[2].x) / 3.0, (pos[0].y + pos[1].y + pos[2].y) / 3.0]);
-        if let Some(part) = spec.parts.iter().rev().find(|p| p.shape.contains(cen)).filter(|p| p.domain > 0) {
+        if let Some(domain) = domain_at(cen) {
             cells.extend_from_slice(&[a.fix().index() as u32, b.fix().index() as u32, c.fix().index() as u32]);
-            cell_labels.push(part.domain);
+            cell_labels.push(domain);
         }
     }
     if cells.is_empty() {
-        return Err("the shapes enclose no area".into());
+        return Err("the geometry encloses no area".into());
     }
     // compact vertex numbering
     let mut used = vec![u32::MAX; nvert];
@@ -460,7 +506,7 @@ pub fn mesh_2d(spec: &Spec2d) -> Result<SimplexMesh, String> {
         let mid = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0];
         // the chain segment closest to the midpoint; the last shape wins ties
         let mut best: Option<(f64, usize, i32)> = None;
-        for ch in &chains {
+        for ch in chains {
             for s in ch.pts.windows(2) {
                 let d = dist_point_segment(mid, s[0], s[1]);
                 if d < tol * 10.0 + 1e-12 && best.is_none_or(|(bd, bp, _)| d < bd - tol || (d <= bd + tol && ch.part >= bp)) {
@@ -482,6 +528,17 @@ pub fn mesh_2d(spec: &Spec2d) -> Result<SimplexMesh, String> {
 /// boundaries keep the 2D boundary numbers; the bottom is `nb + 1` and the top `nb + 2`, with
 /// `nb` the largest 2D boundary number.
 pub fn extrude(m2: &SimplexMesh, layers: &[Layer], z0: f64) -> Result<SimplexMesh, String> {
+    extrude_with(m2, layers, z0, |p, t| [p[0], p[1], t])
+}
+
+/// Extrudes the x-z cross-section of the wafer frame (a 2D mesh with the columns `(x, z)`) along the propagation axis y: a point
+/// `(x, z)` becomes `(x, y, z)`. The boundary numbers are those of `extrude`: the side walls keep the 2D numbers, the end at `y0` is
+/// `nb + 1` and the far end `nb + 2`. The domain offsets of the layers act as in `extrude`.
+pub fn extrude_y(m2: &SimplexMesh, layers: &[Layer], y0: f64) -> Result<SimplexMesh, String> {
+    extrude_with(m2, layers, y0, |p, t| [p[0], t, p[1]])
+}
+
+fn extrude_with(m2: &SimplexMesh, layers: &[Layer], z0: f64, place: impl Fn([f64; 2], f64) -> [f64; 3]) -> Result<SimplexMesh, String> {
     if m2.dim != 2 {
         return Err("only 2D meshes can be extruded".into());
     }
@@ -501,7 +558,7 @@ pub fn extrude(m2: &SimplexMesh, layers: &[Layer], z0: f64) -> Result<SimplexMes
     let mut points = Vec::with_capacity((nslab + 1) * n2 * 3);
     for zk in &z {
         for p in m2.points.chunks(2) {
-            points.extend_from_slice(&[p[0], p[1], *zk]);
+            points.extend_from_slice(&place([p[0], p[1]], *zk));
         }
     }
     let id = |v: u32, k: usize| (k * n2) as u32 + v;

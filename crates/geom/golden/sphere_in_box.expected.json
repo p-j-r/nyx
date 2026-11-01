@@ -1,0 +1,22 @@
+{
+  "note": "sphere in a box",
+  "regions": [
+    [
+      "air",
+      62.563244959758265
+    ],
+    [
+      "ball",
+      1.4367550402417322
+    ]
+  ],
+  "names": [
+    "air.xmax",
+    "air.xmin",
+    "air.ymax",
+    "air.ymin",
+    "air.zmax",
+    "air.zmin",
+    "air|ball"
+  ]
+}

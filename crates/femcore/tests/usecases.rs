@@ -27,7 +27,7 @@ fn a_300_nm_soi_wire_has_quasi_te_and_quasi_tm_modes_between_the_slab_limits() {
     assert!(rtm.te_fraction < 0.06 && rtm.dop > 0.9 && rtm.sphere[0] < -0.9, "{rtm:?}");
     assert!(rte.sphere[2].abs() < 1e-6 && rtm.sphere[2].abs() < 1e-6, "lossless modes of a symmetric wire are not circular");
     assert_eq!(rte.class.label(), "quasi-TE (x)");
-    assert_eq!(rtm.class.label(), "quasi-TM (y)");
+    assert_eq!(rtm.class.label(), "quasi-TM (z)");
     // the longitudinal field is a sizeable part of the energy at this index contrast
     assert!(rte.long_fraction > 0.05 && rte.long_fraction < 0.4);
     // the result carries the summary and the table

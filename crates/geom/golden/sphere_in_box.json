@@ -1,0 +1,71 @@
+{
+  "dim": 3,
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "air",
+      "op": {
+        "Box": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            4.0,
+            4.0,
+            4.0
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "ball",
+      "op": {
+        "Sphere": {
+          "center": [
+            2.0,
+            2.0,
+            2.0
+          ],
+          "r": 0.7
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "air",
+              "input": 1,
+              "kind": "Material",
+              "pinned_id": null
+            },
+            {
+              "name": "ball",
+              "input": 2,
+              "kind": "Material",
+              "pinned_id": null
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

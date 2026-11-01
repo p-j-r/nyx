@@ -6,6 +6,7 @@ rust-version.workspace = true
 description = "Finite-element core: meshes, sparse/eigen solvers and physics (electrostatics, heat, solid mechanics, EMW modes)"
 
 [dependencies]
+geom = { path = "../geom" }
 faer = "0.24"
 num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }

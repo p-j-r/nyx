@@ -1,0 +1,42 @@
+{
+  "note": "one Bragg period: layers with and without teeth, identical end faces, Floquet pair",
+  "regions": [
+    [
+      "clad",
+      2.822400000000001e-19
+    ],
+    [
+      "BOX",
+      8.736e-19
+    ],
+    [
+      "Si",
+      4.2e-20
+    ],
+    [
+      "left_tooth",
+      3.36e-21
+    ]
+  ],
+  "names": [
+    "BOX|Si",
+    "BOX|clad",
+    "BOX|left_tooth",
+    "Si|clad",
+    "Si|left_tooth",
+    "box.xmax",
+    "box.xmin",
+    "box.ymin",
+    "box.zmax",
+    "box.zmin",
+    "clad.xmax",
+    "clad.xmin",
+    "clad.ymax",
+    "clad.zmax",
+    "clad.zmin",
+    "clad|left_tooth",
+    "core.zmax",
+    "core.zmin",
+    "left_tooth.zmin"
+  ]
+}

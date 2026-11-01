@@ -1,0 +1,219 @@
+{
+  "dim": 3,
+  "params": [
+    {
+      "name": "w",
+      "value": 5e-7
+    },
+    {
+      "name": "t",
+      "value": 3e-7
+    },
+    {
+      "name": "period",
+      "value": 2.8e-7
+    },
+    {
+      "name": "duty",
+      "value": 0.5
+    },
+    {
+      "name": "tooth",
+      "value": 8e-8
+    },
+    {
+      "name": "margin",
+      "value": 4.5e-7
+    },
+    {
+      "name": "box_t",
+      "value": 2e-6
+    },
+    {
+      "name": "x",
+      "value": "w/2+tooth+margin"
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "clad",
+      "op": {
+        "Box": {
+          "min": [
+            "-x",
+            "-box_t",
+            0.0
+          ],
+          "max": [
+            "x",
+            "t+margin",
+            "period"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "box",
+      "op": {
+        "Box": {
+          "min": [
+            "-x",
+            "-box_t",
+            0.0
+          ],
+          "max": [
+            "x",
+            0.0,
+            "period"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "core",
+      "op": {
+        "Box": {
+          "min": [
+            "-w/2",
+            0.0,
+            0.0
+          ],
+          "max": [
+            "w/2",
+            "t",
+            "period"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 4,
+      "name": "left_tooth",
+      "op": {
+        "Box": {
+          "min": [
+            "-w/2-tooth",
+            0.0,
+            0.0
+          ],
+          "max": [
+            "-w/2",
+            "t",
+            "duty*period"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 5,
+      "name": "right_tooth",
+      "op": {
+        "Box": {
+          "min": [
+            "w/2",
+            0.0,
+            0.0
+          ],
+          "max": [
+            "w/2+tooth",
+            "t",
+            "duty*period"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 6,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "clad",
+              "input": 1,
+              "kind": "Material",
+              "pinned_id": 3
+            },
+            {
+              "name": "BOX",
+              "input": 2,
+              "kind": "Material",
+              "pinned_id": 1
+            },
+            {
+              "name": "Si",
+              "input": 3,
+              "kind": "Material",
+              "pinned_id": 2
+            },
+            {
+              "name": "left_tooth",
+              "input": 4,
+              "kind": "Material",
+              "pinned_id": 4
+            },
+            {
+              "name": "right_tooth",
+              "input": 5,
+              "kind": "Material",
+              "pinned_id": 5
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 7,
+      "name": "floquet",
+      "op": {
+        "Periodic": {
+          "sel_a": {
+            "Plane": [
+              "Z",
+              0.0,
+              null
+            ]
+          },
+          "sel_b": {
+            "Plane": [
+              "Z",
+              "period",
+              null
+            ]
+          },
+          "translation": [
+            0.0,
+            0.0,
+            "period"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

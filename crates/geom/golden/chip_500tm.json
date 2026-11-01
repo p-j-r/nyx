@@ -1,0 +1,210 @@
+{
+  "dim": 2,
+  "params": [
+    {
+      "name": "um",
+      "value": 1e-6
+    },
+    {
+      "name": "htot",
+      "value": 0.5
+    },
+    {
+      "name": "etch",
+      "value": 0.325
+    },
+    {
+      "name": "width",
+      "value": 0.5
+    },
+    {
+      "name": "xin",
+      "value": 2.0
+    },
+    {
+      "name": "hslab",
+      "value": "(htot-etch)*um"
+    },
+    {
+      "name": "w",
+      "value": "width*um"
+    },
+    {
+      "name": "xi",
+      "value": "xin*um"
+    },
+    {
+      "name": "hin",
+      "value": "2*um"
+    },
+    {
+      "name": "lp",
+      "value": "1*um"
+    },
+    {
+      "name": "ha",
+      "value": "1.2*um"
+    },
+    {
+      "name": "x",
+      "value": "xi+lp"
+    },
+    {
+      "name": "ytop",
+      "value": "htot*um+ha"
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "air",
+      "op": {
+        "Rect": {
+          "min": [
+            "-x",
+            "-hin-lp"
+          ],
+          "max": [
+            "x",
+            "ytop+lp"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "sapphire",
+      "op": {
+        "Rect": {
+          "min": [
+            "-x",
+            "-hin-lp"
+          ],
+          "max": [
+            "x",
+            0.0
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "slab",
+      "op": {
+        "Rect": {
+          "min": [
+            "-x",
+            0.0
+          ],
+          "max": [
+            "x",
+            "hslab"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 4,
+      "name": "rib",
+      "op": {
+        "Rect": {
+          "min": [
+            "-w/2",
+            "hslab"
+          ],
+          "max": [
+            "w/2",
+            "htot*um"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 5,
+      "name": "window",
+      "op": {
+        "Rect": {
+          "min": [
+            "-xi",
+            "-hin"
+          ],
+          "max": [
+            "xi",
+            "ytop"
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 6,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "air",
+              "input": 1,
+              "kind": "Material",
+              "pinned_id": null
+            },
+            {
+              "name": "sapphire",
+              "input": 2,
+              "kind": "Material",
+              "pinned_id": null
+            },
+            {
+              "name": "slab",
+              "input": 3,
+              "kind": "Material",
+              "pinned_id": null
+            },
+            {
+              "name": "rib",
+              "input": 4,
+              "kind": "Material",
+              "pinned_id": null
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 7,
+      "name": "pml",
+      "op": {
+        "Pml": {
+          "window": 5,
+          "sides": [],
+          "thickness": "lp",
+          "layers": 4.0,
+          "grading": 2.0,
+          "regions": []
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

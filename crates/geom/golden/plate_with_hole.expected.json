@@ -1,0 +1,16 @@
+{
+  "note": "plate with a circular hole",
+  "regions": [
+    [
+      "plate",
+      0.07497345175425635
+    ]
+  ],
+  "names": [
+    "hole.edge",
+    "plate.bottom",
+    "plate.left",
+    "plate.right",
+    "plate.top"
+  ]
+}

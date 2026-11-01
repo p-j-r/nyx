@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0f120867a0c824eec5358678bf7acdaa438e178884975202112d1616e48b1512 # shrinks to shapes = [Ellipse(0.0, 0.0, 2.5864608171133345, 1.9240637670574532, 0.0)], ops = [4, 3]

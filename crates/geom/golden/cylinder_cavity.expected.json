@@ -1,0 +1,18 @@
+{
+  "note": "block with a through cylinder cavity",
+  "regions": [
+    [
+      "block",
+      3.7172566611769184
+    ]
+  ],
+  "names": [
+    "block.xmax",
+    "block.xmin",
+    "block.ymax",
+    "block.ymin",
+    "block.zmax",
+    "block.zmin",
+    "cav.side"
+  ]
+}

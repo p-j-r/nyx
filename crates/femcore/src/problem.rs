@@ -7,10 +7,11 @@
 //! plane stress/strain and thickness in 2D, thermal expansion, out-of-plane wave number, inactive domains, Floquet-periodic
 //! pairs, Brillouin settings, results file). Everything derives serde, so it is saved as JSON or, through `xmlio`, as XML.
 //!
-//! `Frame` says in which axes a problem is written. The model frame is the library's own (a 2D mesh is the x-y plane, z out of
-//! it); the wafer frame is the waveguide frame (a 2D cross-section is the x-z plane, y is the propagation direction, z the surface
-//! normal). The solvers always work in the model frame: `ProblemSpec::to_model_frame` translates a wafer-frame problem
-//! and `solve::rename_wafer_fields` gives the result fields their wafer names again.
+//! `Frame` says in which axes a problem is written. The wafer frame is the default and the one the geometry is built in (a 2D
+//! cross-section is the x-z plane, y is the propagation direction, z the surface normal); the model frame (a 2D mesh is the x-y plane,
+//! z out of it) is kept for old project files. The 2D kernels work in the model frame internally: `ProblemSpec::to_model_frame`
+//! translates a wafer-frame problem and `solve::rename_wafer_fields` gives the result fields their wafer names again, so no caller
+//! ever sees the model axes.
 //!
 //! A solve returns a `SolveResult`: one or more `Solution`s with named fields (one value per dof, P2: vertices then edge
 //! midpoints) and optional displacement, scalar results, a text log (the stage log of `progress`), the time and the
@@ -49,8 +50,9 @@ impl Physics {
 /// source), `E`, `nu`, `alpha`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Materials {
-    /// the axes of the model: see `Frame`
-    #[serde(default)]
+    /// the axes of the model: see `Frame`. New problems are written in the wafer frame; a saved problem without the field predates it and
+    /// keeps the model frame.
+    #[serde(default = "legacy_frame")]
     pub frame: Frame,
     pub domains: BTreeMap<i32, BTreeMap<String, f64>>,
     pub default: BTreeMap<String, f64>,
@@ -73,9 +75,15 @@ pub struct Materials {
 /// * `Model`: a 2D mesh is the x-y plane with z out of the plane (the usual convention for 2D models); 3D meshes are the same in both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
-    #[default]
+    /// the legacy axes of 2D models, kept for old project files
     Model,
+    /// the default: geometry, materials, conditions and results are in the axes of the wafer, with nothing to convert
+    #[default]
     Wafer,
+}
+
+fn legacy_frame() -> Frame {
+    Frame::Model
 }
 
 /// The rotation from the wafer axes (x, y, z) to the axes of a 2D model (mesh x, mesh y = z, out of plane = -y).

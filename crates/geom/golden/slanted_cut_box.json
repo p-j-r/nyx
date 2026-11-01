@@ -1,0 +1,66 @@
+{
+  "dim": 3,
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "block",
+      "op": {
+        "Box": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 2,
+      "name": "overlay",
+      "op": {
+        "Overlay": {
+          "regions": [
+            {
+              "name": "block",
+              "input": 1,
+              "kind": "Material",
+              "pinned_id": null
+            }
+          ],
+          "pins": [],
+          "naming": "Feature"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    },
+    {
+      "id": 3,
+      "name": "slant",
+      "op": {
+        "Cut": {
+          "normal": [
+            1.0,
+            0.0,
+            1.0
+          ],
+          "offset": 1.0,
+          "keep": "Below"
+        }
+      },
+      "suppressed": false,
+      "origin": "Code",
+      "tags": []
+    }
+  ]
+}

@@ -12,46 +12,11 @@ fn base(geometry: GeometrySpec, active: Physics) -> Project {
         }
         s.materials.default.insert("rho".into(), if s.physics == Physics::Solid { 7850.0 } else { 1000.0 });
     }
-    Project { version: 1, geometry, source: Source::Generated, active, specs, colormap: Colormap::Viridis }
-}
-
-/// Turns a project written for the 2D model frame (mesh x-y, z out of plane) into the wafer frame (mesh x-z, y out of
-/// plane): constraints, loads and crystal orientations keep their physical meaning.
-fn to_wafer(mut p: Project) -> Project {
-    let is_2d = p.geometry.geometry.dim() == 2;
-    for s in &mut p.specs {
+    // everything is written in the wafer frame: x lateral, y propagation, z surface normal; a 2D mesh is the x-z cross-section
+    for s in &mut specs {
         s.materials.frame = Frame::Wafer;
-        if !is_2d {
-            continue;
-        }
-        // model components (1, 2, 3) = (x, z, -y): wafer = (c1, -c3, c2)
-        for bc in &mut s.bcs {
-            match &mut bc.kind {
-                BcKind::Fixed { fixed, values } => {
-                    *fixed = [fixed[0], fixed[2], fixed[1]];
-                    *values = [values[0], -values[2], values[1]];
-                }
-                BcKind::Load(f) => *f = [f[0], -f[2], f[1]],
-                _ => {}
-            }
-        }
-        for a in s.materials.aniso.values_mut() {
-            // wafer orientation = S^-1 R_model
-            let r = femcore::material::rotation(a.euler_deg);
-            let st = femcore::problem::WAFER_TO_MODEL;
-            let sinv = [[st[0][0], st[1][0], st[2][0]], [st[0][1], st[1][1], st[2][1]], [st[0][2], st[1][2], st[2][2]]];
-            let mut m = [[0.0; 3]; 3];
-            for i in 0..3 {
-                for j in 0..3 {
-                    for k in 0..3 {
-                        m[i][j] += sinv[i][k] * r[k][j];
-                    }
-                }
-            }
-            a.euler_deg = femcore::material::euler_from_rotation(&m);
-        }
     }
-    p
+    Project { version: 1, geometry, source: Source::Generated, active, specs, colormap: Colormap::Viridis }
 }
 
 fn bc(labels: &[i32], kind: BcKind) -> Bc {
@@ -87,7 +52,7 @@ pub const NAMES: [&str; 19] = [
 ];
 
 /// An empty project to build a simulation from: the chosen physics active, default materials, no boundary conditions, a
-/// unit rectangle or block (`structured`) or a one-shape/one-body geometry for the shape and solid meshers, wafer axes.
+/// unit rectangle (x-z) or block (`structured`) or a one-shape/one-body geometry for the shape and solid meshers, wafer axes.
 pub fn blank(physics: Physics, three_d: bool, structured: bool) -> Project {
     let three_d = three_d && physics != Physics::Brillouin;
     let g = match (three_d, structured) {
@@ -100,23 +65,10 @@ pub fn blank(physics: Physics, three_d: bool, structured: bool) -> Project {
     if three_d && physics == Physics::Emw {
         p.spec_mut(physics).study = Study::Eigenfrequency { n_modes: 6, f_search: 10e9 };
     }
-    to_wafer(p)
+    p
 }
 
 pub fn by_index(i: usize) -> Project {
-    let p = by_index_model(i);
-    // the 3D examples and the Brillouin example are described in the wafer frame already
-    if i == 14 {
-        let mut p = p;
-        for s in &mut p.specs {
-            s.materials.frame = Frame::Wafer;
-        }
-        return p;
-    }
-    to_wafer(p)
-}
-
-fn by_index_model(i: usize) -> Project {
     match i {
         0 => capacitor(),
         1 => cantilever(),
@@ -153,7 +105,7 @@ pub fn capacitor() -> Project {
 
 pub fn cantilever() -> Project {
     let mut p = base(GeometrySpec::rectangle(1.0, 0.1, 60, 6), Physics::Solid);
-    p.spec_mut(Physics::Solid).bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }), bc(&[4], BcKind::Load([0.0, -1e5, 0.0]))];
+    p.spec_mut(Physics::Solid).bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }), bc(&[4], BcKind::Load([0.0, 0.0, -1e5]))];
     p.spec_mut(Physics::Solid).plane = Plane::Stress;
     p
 }
@@ -251,7 +203,7 @@ pub fn plate_with_hole() -> Project {
     let mut p = base(g, Physics::Solid);
     let s = p.spec_mut(Physics::Solid);
     s.plane = Plane::Stress;
-    s.bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] }), bc(&[2], BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] }), bc(&[4], BcKind::Load([1e6, 0.0, 0.0]))];
+    s.bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] }), bc(&[2], BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] }), bc(&[4], BcKind::Load([1e6, 0.0, 0.0]))];
     p
 }
 
@@ -407,7 +359,7 @@ pub fn sos_strip() -> Project {
             so.materials.set(d, "nu", 0.25);
             so.materials.set(d, "rho", 3980.0);
         }
-        let saph = Anisotropy { stiffness: Some(Stiffness::Trigonal { c11: 497.73e9, c12: 162.8e9, c13: 116.0e9, c14: -21.9e9, c33: 500.9e9, c44: 146.8e9 }), euler_deg: femcore::problem::euler_to_model_frame(femcore::material::euler_from_rotation(&femcore::chips::crystal_rotations(0.0).1)), ..Default::default() };
+        let saph = Anisotropy { stiffness: Some(Stiffness::Trigonal { c11: 497.73e9, c12: 162.8e9, c13: 116.0e9, c14: -21.9e9, c33: 500.9e9, c44: 146.8e9 }), euler_deg: femcore::material::euler_from_rotation(&femcore::chips::crystal_rotations(0.0).1), ..Default::default() };
         for d in [1, 4, 5, 6, 8, 9] {
             so.materials.aniso.insert(d, saph.clone());
         }
@@ -441,26 +393,28 @@ pub fn box_cavity() -> Project {
 /// 0.13 um slab, silicon on r-plane sapphire, 1550 nm), in the wafer frame (x lateral, y propagation, z normal; the
 /// cross-section is the x-z plane): the optical TE0 mode, the phonons at q = 2 beta and the photoelastic and
 /// moving-boundary gain, with the full anisotropic stiffness, photoelastic and permittivity tensors of the crystals.
-/// See `femcore::chips` for the layers (domains 1 sapphire, 2 slab, 3 rib, 4 air, 11-15, 21-22, 41-45 absorbing layers).
+/// The geometry is a `geom` model (`femcore::chips::chip_geometry`: regions air, sapphire, slab, rib and their absorbing layers).
 pub fn brillouin_rib() -> Project {
     let chip = femcore::chips::CHIPS[0];
-    let (_, spec) = femcore::chips::chip_model(&chip, 0.0, 1.0, 24, 18.35e9).expect("the chip mesh");
-    let g = GeometrySpec { geometry: Geometry::Shapes { spec: femcore::chips::chip_shapes(&chip, 1.0), extrude: None }, domains: vec![], boundaries: vec![] };
-    let mut p = base(g, Physics::Brillouin);
+    let g = femcore::chips::chip_mesh(&chip, 1.0).expect("the chip mesh");
+    let spec = femcore::chips::chip_problem(&chip, 0.0, 24, 18.35e9, &g);
+    let geometry = GeometrySpec::model(femcore::chips::chip_geometry(&chip, 1.0).list, 0.12e-6);
+    let mut p = base(geometry, Physics::Brillouin);
     *p.spec_mut(Physics::Brillouin) = spec;
     p
 }
 
-/// A project for the optical modes of a `SoiWire`: its shape mesh and its mode study, in the wafer frame.
+/// A project for the optical modes of a `SoiWire`: its model and its mode study, in the wafer frame.
 fn soi_project(wire: &femcore::usecases::soi::SoiWire) -> Project {
-    let g = GeometrySpec { geometry: Geometry::Shapes { spec: wire.shapes(), extrude: None }, domains: vec![], boundaries: vec![] };
-    let mut p = base(g, Physics::Emw);
-    *p.spec_mut(Physics::Emw) = wire.spec();
+    let g = wire.mesh().expect("the wire mesh");
+    let geometry = GeometrySpec::model(wire.model().list, wire.h_far);
+    let mut p = base(geometry, Physics::Emw);
+    *p.spec_mut(Physics::Emw) = wire.spec(&g);
     p
 }
 
 /// Modes of a 500 nm x 300 nm silicon wire in oxide on 300 nm silicon-on-insulator at 1550 nm (`femcore::usecases::soi`): the quasi-TE and
-/// quasi-TM modes with their Stokes parameters and Poincare points in the Analysis tab. Domains 1 buried oxide, 2 silicon, 3 cladding.
+/// quasi-TM modes with their Stokes parameters and Poincare points in the Analysis tab. Regions `BOX`, `Si`, `clad` (and `_near` zones).
 pub fn soi_wire() -> Project {
     soi_project(&femcore::usecases::soi::SoiWire::default())
 }
@@ -472,13 +426,14 @@ pub fn soi_hybrid_wire() -> Project {
 }
 
 /// One period of a Bragg grating in the SOI wire as a 3D Floquet cell at the band edge (phase pi), with the coarse mesh of
-/// `BraggGrating::coarse` (about 40 s): the two lowest modes bound the stop band. z is the propagation axis, x lateral, y normal.
+/// `BraggGrating::coarse` (about 40 s): the two lowest modes bound the stop band. The x-z cross-section is a `geom` model swept along y,
+/// the propagation axis.
 fn bragg_project(grating: &femcore::usecases::bragg::BraggGrating) -> Project {
-    let (_, src, dst) = grating.mesh().expect("the grating mesh");
+    let cell = grating.mesh().expect("the grating mesh");
     let f_search = 0.95 * grating.bragg_frequency_estimate().expect("the Bragg frequency of the wire");
-    let g = GeometrySpec { geometry: Geometry::Shapes { spec: grating.cross_section(), extrude: Some(grating.layers()) }, domains: vec![], boundaries: vec![] };
-    let mut p = base(g, Physics::Emw);
-    *p.spec_mut(Physics::Emw) = grating.spec(src, dst, f_search);
+    let geometry = GeometrySpec::model_extruded(grating.cross_section().list, grating.h_far, grating.layers());
+    let mut p = base(geometry, Physics::Emw);
+    *p.spec_mut(Physics::Emw) = grating.spec(&cell, f_search);
     p.active = Physics::Emw;
     p
 }

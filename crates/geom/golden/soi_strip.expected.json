@@ -1,0 +1,28 @@
+{
+  "note": "SoiWire::default(): three regions, BOX/Si/clad = legacy domains 1/2/3",
+  "regions": [
+    [
+      "clad",
+      3.0999999999999993e-12
+    ],
+    [
+      "BOX",
+      5e-12
+    ],
+    [
+      "Si",
+      1.5e-13
+    ]
+  ],
+  "names": [
+    "BOX|Si",
+    "BOX|clad",
+    "Si|clad",
+    "box.bottom",
+    "box.left",
+    "box.right",
+    "clad.left",
+    "clad.right",
+    "clad.top"
+  ]
+}

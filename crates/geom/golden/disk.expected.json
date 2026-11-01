@@ -1,0 +1,12 @@
+{
+  "note": "disc of radius 0.5",
+  "regions": [
+    [
+      "disk",
+      0.7853981633974483
+    ]
+  ],
+  "names": [
+    "disk.edge"
+  ]
+}

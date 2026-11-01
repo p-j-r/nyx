@@ -1,0 +1,22 @@
+{
+  "note": "three nested discs",
+  "regions": [
+    [
+      "outer",
+      0.6283185307179586
+    ],
+    [
+      "mid",
+      0.37699111843077515
+    ],
+    [
+      "core",
+      0.12566370614359174
+    ]
+  ],
+  "names": [
+    "c3.edge",
+    "core|mid",
+    "mid|outer"
+  ]
+}

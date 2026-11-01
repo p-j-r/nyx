@@ -1,6 +1,7 @@
 //! Optical modes of a crystal whose axes are tilted against the propagation axis: the permittivity has xz/yz terms,
 //! the 2D mode problem becomes quadratic in the propagation constant and is solved exactly. Checked against the 3D
-//! eigenmode solver on a periodic cell of the same PEC guide (a different formulation sharing only the tensor).
+//! eigenmode solver on a periodic cell of the same PEC guide (a different formulation sharing only the tensor). The 2D problems are
+//! written in the model axes (propagation along z, the crystal tilted in the x-z plane) so that they match the 3D cell, whose axis is z.
 use femcore::material::*;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
@@ -32,6 +33,7 @@ fn a_tilted_uniaxial_crystal_in_a_pec_guide_has_the_same_modes_in_2d_and_in_a_3d
     let mut matched = 0;
     for &f in &f3 {
         let mut s2 = ProblemSpec::new(Physics::Emw);
+        s2.materials.frame = Frame::Model;
         s2.order = 2;
         s2.materials.aniso.insert(1, crystal(tilt));
         let k0 = 2.0 * std::f64::consts::PI * f / C0;
@@ -52,6 +54,7 @@ fn the_coupled_solver_reduces_to_the_uncoupled_one_without_tilt() {
     // complex solver must give the same effective indices
     let mesh = SimplexMesh::rectangle(0.03, 0.015, 12, 6);
     let mut s = ProblemSpec::new(Physics::Emw);
+    s.materials.frame = Frame::Model;
     s.order = 2;
     s.materials.aniso.insert(1, crystal(0.0));
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };

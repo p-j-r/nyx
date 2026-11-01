@@ -20,7 +20,8 @@ fn main() {
         _ => 19.0e9,
     };
     let t = std::time::Instant::now();
-    let (mesh, spec) = chip_model(&chip, psi, 1.0, 40, f_search).expect("chip model");
+    let scale: f64 = std::env::var("MESH_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    let (mesh, spec) = chip_model(&chip, psi, scale, 40, f_search).expect("chip model");
     let inner = spec.to_model_frame(2);
     let study = study_straight(&mesh, &inner, &SolveState::default()).expect("study");
     eprintln!("{name} psi {psi}: {:.1} s", t.elapsed().as_secs_f64());

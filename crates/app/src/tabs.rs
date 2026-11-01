@@ -587,7 +587,7 @@ fn solids_editor(ui: &mut Ui, spec: &mut femcore::mesher3d::Spec3d) {
 
 fn shapes_editor(ui: &mut Ui, spec: &mut femcore::mesher::Spec2d, extrude: &mut Option<Vec<femcore::mesher::Layer>>, wafer: bool) {
     let second = if wafer { "z" } else { "y" };
-    use femcore::mesher::{Layer, Part, Shape};
+    use femcore::mesher::{Part, Shape};
     ui.horizontal(|ui| {
         ui.label("element size h");
         num(ui, &mut spec.h);
@@ -685,8 +685,14 @@ fn shapes_editor(ui: &mut Ui, spec: &mut femcore::mesher::Spec2d, extrude: &mut 
             spec.parts.push(Part { shape: Shape::Polygon(vec![[0.0, 0.0], [0.5, 0.0], [0.25, 0.4]]), domain: spec.parts.len() as i32 + 1, h: None });
         }
     });
+    extrude_editor(ui, extrude);
+}
+
+/// Layers along y (the propagation axis) of a swept cross-section.
+fn extrude_editor(ui: &mut Ui, extrude: &mut Option<Vec<femcore::mesher::Layer>>) {
+    use femcore::mesher::Layer;
     let mut on = extrude.is_some();
-    if ui.checkbox(&mut on, "Extrude into 3D layers").changed() {
+    if ui.checkbox(&mut on, "Sweep along y into 3D layers").changed() {
         *extrude = if on { Some(vec![Layer { thickness: 0.1, n: 2, domain_offset: 0 }]) } else { None };
     }
     if let Some(layers) = extrude {
@@ -713,8 +719,70 @@ fn shapes_editor(ui: &mut Ui, spec: &mut femcore::mesher::Spec2d, extrude: &mut 
         if ui.small_button("+ layer").clicked() {
             layers.push(Layer { thickness: 0.1, n: 2, domain_offset: 0 });
         }
-        ui.weak("Side boundaries keep the 2D numbers; the bottom is the next number, the top the one after.");
+        ui.weak("Side boundaries keep the 2D numbers; the end at y = 0 is the next number, the far end the one after.");
     }
+}
+
+/// A `geom` model: element size, sweep, the names of its regions and edges with the integers the solvers use, and the feature list as JSON.
+fn model_editor(ui: &mut Ui, list: &mut geom::model::FeatureList, h: &mut f64, extrude: &mut Option<Vec<femcore::mesher::Layer>>) {
+    ui.horizontal(|ui| {
+        ui.label("element size h (m)");
+        num(ui, h);
+        ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", list.dim));
+    });
+    extrude_editor(ui, extrude);
+    ui.collapsing("Names and numbers", |ui| match femcore::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map_err(|e| e.to_string())) {
+        Ok(lm) => {
+            ui.weak("Problems refer to these names (materials, boundary conditions, selectors); the integers are what the solvers store. Read-only.");
+            egui::Grid::new("model_domains").num_columns(2).show(ui, |ui| {
+                ui.label(RichText::new("domain").strong());
+                ui.label(RichText::new("number").strong());
+                ui.end_row();
+                for d in &lm.domains {
+                    ui.label(&d.name);
+                    ui.label(d.id.to_string());
+                    ui.end_row();
+                }
+            });
+            ui.add_space(4.0);
+            egui::Grid::new("model_boundaries").num_columns(2).show(ui, |ui| {
+                ui.label(RichText::new("boundary").strong());
+                ui.label(RichText::new("number").strong());
+                ui.end_row();
+                for b in &lm.boundaries {
+                    ui.label(&b.name);
+                    ui.label(b.id.to_string());
+                    ui.end_row();
+                }
+            });
+        }
+        Err(e) => {
+            ui.colored_label(Color32::from_rgb(220, 100, 100), e);
+        }
+    });
+    ui.collapsing("Feature list (JSON)", |ui| {
+        let id = ui.next_auto_id().with("model_json");
+        let mut text: String = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| serde_json::to_string_pretty(&*list).unwrap_or_default());
+        ui.add(egui::TextEdit::multiline(&mut text).code_editor().desired_rows(12).desired_width(f32::INFINITY));
+        let parsed = serde_json::from_str::<geom::model::FeatureList>(&text);
+        ui.horizontal(|ui| {
+            if ui.add_enabled(parsed.is_ok(), egui::Button::new("Apply")).clicked() {
+                if let Ok(l) = &parsed {
+                    *list = l.clone();
+                }
+                ui.data_mut(|d| d.remove::<String>(id));
+                return;
+            }
+            if ui.button("Reset").clicked() {
+                ui.data_mut(|d| d.remove::<String>(id));
+                return;
+            }
+            if let Err(e) = &parsed {
+                ui.colored_label(Color32::from_rgb(220, 100, 100), e.to_string());
+            }
+        });
+        ui.data_mut(|d| d.insert_temp(id, text));
+    });
 }
 
 fn v_len_ok(_k: usize) -> bool {
@@ -777,8 +845,8 @@ impl App {
             let mut w = wafer;
             ui.horizontal(|ui| {
                 ui.label("Axes");
-                ui.selectable_value(&mut w, true, "wafer: x-y plane, z normal (2D = x-z)");
-                ui.selectable_value(&mut w, false, "model: 2D = x-y, z out of plane");
+                ui.selectable_value(&mut w, true, "wafer: x lateral, y propagation, z normal (2D = x-z)");
+                ui.selectable_value(&mut w, false, "legacy model axes: 2D = x-y, z out of plane");
             });
             if w != wafer {
                 for sp in &mut self.proj.specs {
@@ -803,21 +871,27 @@ impl App {
             if ui.selectable_label(matches!(g.geometry, Geometry::Shapes { .. }), "Shapes (mesher)").clicked() && !matches!(g.geometry, Geometry::Shapes { .. }) {
                 g = GeometrySpec::shapes();
             }
+            if ui.selectable_label(matches!(g.geometry, Geometry::Model { .. }), "Model (geom)").clicked() && !matches!(g.geometry, Geometry::Model { .. }) {
+                let mut m = geom::model::Model::new_2d();
+                let r = m.rect("plate", (0.0, 0.0), (1.0, 0.5));
+                m.overlay(&[("plate", r)]);
+                g = GeometrySpec::model(m.list, 0.05);
+            }
         });
         egui::Grid::new("geom_grid").num_columns(4).show(ui, |ui| match &mut g.geometry {
-            Geometry::Rectangle { lx, ly, nx, ny } => {
+            Geometry::Rectangle { lx, lz, nx, nz } => {
                 ui.label("width x (m)");
                 num(ui, lx);
                 ui.label("elements");
                 ui.add(DragValue::new(nx).range(1..=2000));
                 ui.end_row();
-                ui.label("height y (m)");
-                num(ui, ly);
+                ui.label("height z (m)");
+                num(ui, lz);
                 ui.label("elements");
-                ui.add(DragValue::new(ny).range(1..=2000));
+                ui.add(DragValue::new(nz).range(1..=2000));
                 ui.end_row();
             }
-            Geometry::Shapes { .. } | Geometry::Solids { .. } => {}
+            Geometry::Shapes { .. } | Geometry::Solids { .. } | Geometry::Model { .. } => {}
             Geometry::Block { lx, ly, lz, nx, ny, nz } => {
                 for (name, l, n) in [("length x (m)", lx, nx), ("width y (m)", ly, ny), ("height z (m)", lz, nz)] {
                     ui.label(name);
@@ -834,7 +908,10 @@ impl App {
         if let Geometry::Solids { spec } = &mut g.geometry {
             solids_editor(ui, spec);
         }
-        ui.label(RichText::new("Boundary numbers: rectangle 1 x=0, 2 y=0, 3 y=ly, 4 x=lx; block 1 x=0, 2 y=0, 3 z=0, 4 z=lz, 5 y=ly, 6 x=lx.").weak().small());
+        if let Geometry::Model { list, h, extrude } = &mut g.geometry {
+            model_editor(ui, list, h, extrude);
+        }
+        ui.label(RichText::new("Boundary numbers: rectangle 1 x=0, 2 z=0, 3 z=lz, 4 x=lx; block 1 x=0, 2 y=0, 3 z=0, 4 z=lz, 5 y=ly, 6 x=lx.").weak().small());
         ui.add_space(6.0);
 
         // regions
@@ -867,9 +944,9 @@ impl App {
                 }
                 if ui.button("+ add region").clicked() {
                     let (lo, hi) = match &g.geometry {
-                        Geometry::Rectangle { lx, ly, .. } => (vec![0.0, 0.0], vec![*lx, *ly]),
+                        Geometry::Rectangle { lx, lz, .. } => (vec![0.0, 0.0], vec![*lx, *lz]),
                         Geometry::Block { lx, ly, lz, .. } => (vec![0.0, 0.0, 0.0], vec![*lx, *ly, *lz]),
-                        Geometry::Shapes { .. } | Geometry::Solids { .. } => (vec![0.0; dim], vec![1.0; dim]),
+                        Geometry::Shapes { .. } | Geometry::Solids { .. } | Geometry::Model { .. } => (vec![0.0; dim], vec![1.0; dim]),
                     };
                     let mut b = lo.clone();
                     b.extend(hi.iter().enumerate().map(|(k, h)| if k == 0 { 0.5 * h } else { *h }));
@@ -896,9 +973,9 @@ impl App {
             }
         });
         let elements = match &self.geom_edit.geometry {
-            Geometry::Rectangle { nx, ny, .. } => 2 * nx * ny,
+            Geometry::Rectangle { nx, nz, .. } => 2 * nx * nz,
             Geometry::Block { nx, ny, nz, .. } => 6 * nx * ny * nz,
-            Geometry::Shapes { .. } | Geometry::Solids { .. } => 0,
+            Geometry::Shapes { .. } | Geometry::Solids { .. } | Geometry::Model { .. } => 0,
         };
         if elements > 0 {
             ui.weak(format!("{elements} elements when built"));
@@ -1683,7 +1760,7 @@ impl App {
                 return;
             };
             ui.label(RichText::new(if rv.physics == Some(Physics::Brillouin) { "Polarization of the optical modes (pump and Stokes)" } else { "Polarization of the modes" }).strong());
-            ui.weak("Stokes parameters from the complex field of each mode, summed over the cross-section. s1 > 0 is x (lateral, quasi-TE), s1 < 0 is y (normal, quasi-TM), s2 the diagonals, s3 the sense of rotation (+ counter-clockwise). P is the degree of polarization: below 1 where the polarization changes across the mode.");
+            ui.weak("Stokes parameters from the complex field of each mode, summed over the cross-section. s1 > 0 is x (lateral, quasi-TE), s1 < 0 is z (normal, quasi-TM), s2 the diagonals, s3 the sense of rotation (+ counter-clockwise). P is the degree of polarization: below 1 where the polarization changes across the mode.");
             // the picture
             let side = ui.available_width().clamp(220.0, 360.0);
             let (resp, painter) = ui.allocate_painter(egui::vec2(side, side), egui::Sense::hover());

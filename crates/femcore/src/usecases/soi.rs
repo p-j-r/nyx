@@ -1,21 +1,23 @@
 //! Use case: the optical modes of a silicon wire on 300 nm silicon-on-insulator at 1550 nm.
 //!
 //! A silicon core of thickness `thickness` (300 nm by default) and `width` on a buried oxide (BOX), under an oxide or air
-//! cladding. The cross-section is meshed with the shape mesher, the modes come from the full-vector solver of `emw` (Nedelec
+//! cladding. The cross-section is a geom model (exact lines, named regions) meshed by `geomdrive`, the modes come from the full-vector solver of `emw` (Nedelec
 //! degree 2 + P2, perfectly conducting walls far from the core) and every solve carries the Stokes/Poincare analysis of
 //! `analysis`: the quasi-TE and quasi-TM modes sit at the two ends of the equator of the sphere, hybrid modes (sloped
 //! side walls, rib slab, near the TE-TM crossing) move off the poles of the x/y axis and lose degree of polarization.
 //!
-//! Domains: 1 buried oxide, 2 silicon (core and rib slab), 3 upper cladding. Wafer axes: x lateral, the 2D mesh y is the surface normal.
+//! Regions (by name; the integers are the solver's business): `BOX` buried oxide, `Si` core, `Si_slab` rib slab, `clad` upper cladding, and
+//! the `_near` zones of finer elements. Wafer axes: x lateral, the cross-section is the x-z plane, z the surface normal, y the propagation.
 //!
 //! Refractive indices at 1550 nm: Si 3.4757 (Li, 1980), SiO2 1.4440 (Malitson, 1965).
 //!
 //! The thin-slab limit gives an analytic reference: for a very wide wire the quasi-TE mode tends to the TE0 mode of the
 //! symmetric slab and the quasi-TM mode to its TM0 mode (`slab_neff`).
 
-use crate::mesh::SimplexMesh;
-use crate::mesher::{mesh_2d, Part, Shape, Spec2d};
+use crate::geomdrive::{mesh_geom_2d, GeomMeshOpts, MeshedGeom};
 use crate::problem::*;
+use geom::model::Model;
+use geom::select::Selector;
 
 const C0: f64 = 299_792_458.0;
 
@@ -122,41 +124,59 @@ impl Default for SoiWire {
 }
 
 impl SoiWire {
-    /// The shape specification of the cross-section: x lateral, y the surface normal, the silicon starts at y = 0.
-    pub fn shapes(&self) -> Spec2d {
-        let (w, t) = (self.width, self.thickness);
-        let half = 0.5 * w + self.margin;
-        let (y0, y1) = (-self.box_thickness, t + self.margin);
-        let rect = |xa: f64, ya: f64, xb: f64, yb: f64, d: i32, h: Option<f64>| Part { shape: Shape::Rect { x0: xa, y0: ya, x1: xb, y1: yb }, domain: d, h };
+    /// The cross-section as a geom model in the wafer frame: x lateral, z the surface normal, the silicon starts at z = 0. Regions are
+    /// `BOX`, `Si` (the core), `Si_slab`, `clad`, plus `BOX_near` and `clad_near`, the same oxides with finer elements on both sides of
+    /// the oxide interface.
+    pub fn model(&self) -> Model {
+        let mut m = Model::new_2d();
+        m.param("w", self.width)
+            .param("t", self.thickness)
+            .param("slab", self.slab)
+            .param("margin", self.margin)
+            .param("boxt", self.box_thickness)
+            .param("zone", 0.5 * self.width + 0.4e-6);
         let (right, left) = (self.sidewall_deg, self.sidewall_left_deg.unwrap_or(self.sidewall_deg));
+        m.param("ar", right).param("al", left);
+        let clad = m.rect("clad", ("-w/2-margin", "-boxt"), ("w/2+margin", "t+margin"));
+        let bx = m.rect("box", ("-w/2-margin", "-boxt"), ("w/2+margin", 0.0));
+        let box_near = m.rect("box_near", ("-zone", -0.4e-6), ("zone", 0.0));
+        let clad_near = m.rect("clad_near", ("-zone", "t"), ("zone", "t+0.4e-6"));
         // the top corners move inwards by (height of the core above the slab) / tan(angle)
-        let inset = |deg: f64| if deg < 90.0 { (t - self.slab) / deg.to_radians().tan() } else { 0.0 };
-        let core = if inset(right) == 0.0 && inset(left) == 0.0 {
-            Shape::Rect { x0: -0.5 * w, y0: self.slab, x1: 0.5 * w, y1: t }
+        let vertical = right >= 90.0 && left >= 90.0;
+        let core = if vertical {
+            m.rect("core", ("-w/2", "slab"), ("w/2", "t"))
         } else {
-            Shape::Polygon(vec![[-0.5 * w, self.slab], [0.5 * w, self.slab], [0.5 * w - inset(right), t], [-0.5 * w + inset(left), t]])
+            let inset = |a: &str| if (if a == "ar" { right } else { left }) < 90.0 { format!("(t-slab)/tan({a}*pi/180)") } else { "0".to_string() };
+            let pts: [(String, String); 4] = [
+                ("-w/2".into(), "slab".into()),
+                ("w/2".into(), "slab".into()),
+                (format!("w/2-{}", inset("ar")), "t".into()),
+                (format!("-w/2+{}", inset("al")), "t".into()),
+            ];
+            m.polygon_named("core", &pts, &["bottom", "right", "top", "left"])
         };
-        let zone = 0.5 * w + 0.4e-6;
-        let mut parts = vec![
-            rect(-half, y0, half, y1, 3, None),
-            rect(-half, y0, half, 0.0, 1, None),
-            // finer cells where the field lives, on both sides of the oxide interface
-            rect(-zone, -0.4e-6, zone, 0.0, 1, Some(self.h_near)),
-            rect(-zone, t, zone, t + 0.4e-6, 3, Some(self.h_near)),
-        ];
+        let mut regions = vec![("clad", clad), ("BOX", bx), ("BOX_near", box_near), ("clad_near", clad_near)];
+        let mut near = "region(BOX_near) | region(clad_near)".to_string();
         if self.slab > 0.0 {
-            parts.push(rect(-half, 0.0, half, self.slab, 2, Some(self.h_near)));
+            let slab = m.rect("slab_rect", ("-w/2-margin", 0.0), ("w/2+margin", "slab"));
+            regions.push(("Si_slab", slab));
+            near.push_str(" | region(Si_slab)");
         }
-        parts.push(Part { shape: core, domain: 2, h: Some(self.h_core) });
-        Spec2d { parts, h: self.h_far, min_angle_deg: 25.0 }
+        regions.push(("Si", core));
+        m.overlay(&regions);
+        m.size("size_near", Selector::parse(&near).expect("a valid selector"), Some(self.h_near.into()), None, None);
+        m.size("size_core", Selector::parse("region(Si)").expect("a valid selector"), Some(self.h_core.into()), None, None);
+        m
     }
 
-    pub fn mesh(&self) -> Result<SimplexMesh, String> {
-        mesh_2d(&self.shapes())
+    /// The cross-section meshed from the exact model: the mesh, the names of its domains and boundaries, and the evaluation.
+    pub fn mesh(&self) -> Result<MeshedGeom, String> {
+        let ev = crate::geomdrive::evaluate(&self.model().list)?;
+        mesh_geom_2d(ev, &GeomMeshOpts::new(self.h_far))
     }
 
-    /// Optical problem: wafer axes, permittivity per domain, `n_modes` modes near the index of the silicon.
-    pub fn spec(&self) -> ProblemSpec {
+    /// Optical problem: wafer axes, permittivity per region (by name), `n_modes` modes near the index of the silicon.
+    pub fn spec(&self, g: &MeshedGeom) -> ProblemSpec {
         let mut s = ProblemSpec::new(Physics::Emw);
         s.order = 2;
         s.materials.frame = Frame::Wafer;
@@ -164,9 +184,9 @@ impl SoiWire {
             Cladding::Oxide => self.n_sio2,
             Cladding::Air => 1.0,
         };
-        for (d, n) in [(1, self.n_sio2), (2, self.n_si), (3, n_top)] {
-            s.materials.set(d, "eps_r", n * n);
-            s.materials.set(d, "mu_r", 1.0);
+        for (regions, n) in [("BOX, BOX_near", self.n_sio2), ("Si, Si_slab", self.n_si), ("clad, clad_near", n_top)] {
+            g.set_material(&mut s, regions, "eps_r", n * n);
+            g.set_material(&mut s, regions, "mu_r", 1.0);
         }
         s.study = Study::Modes { freq: C0 / self.wavelength, n_target: self.n_target, evanescent: false, n_modes: self.n_modes };
         s
@@ -174,8 +194,8 @@ impl SoiWire {
 
     /// Meshes and solves; the result carries the polarization analysis (`SolveResult::analysis`).
     pub fn solve(&self) -> Result<SolveResult, String> {
-        let mesh = self.mesh()?;
-        crate::solve::solve(&mesh, &self.spec(), &mut SolveState::default())
+        let g = self.mesh()?;
+        crate::solve::solve(&g.mesh, &self.spec(&g), &mut SolveState::default())
     }
 
     /// The same silicon thickness as an infinite slab: reference for very wide wires.

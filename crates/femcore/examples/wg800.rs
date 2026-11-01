@@ -8,7 +8,7 @@ use femcore::chips::*;
 use femcore::csparse::C;
 use femcore::material::Anisotropy;
 use femcore::mesh::SimplexMesh;
-use femcore::mesher::*;
+use femcore::geomdrive::MeshedGeom;
 use femcore::problem::*;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -22,55 +22,15 @@ fn envf(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(d)
 }
 
-/// strip (domain 3) on sapphire (1) in air (4) with absorbing layers around, the layout of `chip_shapes` without the slab
-fn shapes(scale: f64) -> Spec2d {
-    let (w, htot) = (WIDTH * UM, HEIGHT * UM);
-    let (xin, hin, lp, ha) = (2.0 * UM, 2.0 * UM, 1.0 * UM, 1.2 * UM);
-    let x = xin + lp;
-    let (h_si, h_sap, h_pml, h_far) = (0.028 * scale * UM, 0.05 * scale * UM, 0.07 * scale * UM, 0.12 * UM);
-    let rect = |x0: f64, y0: f64, x1: f64, y1: f64, d: i32, h: Option<f64>| Part { shape: Shape::Rect { x0, y0, x1, y1 }, domain: d, h };
-    let ytop = htot + ha;
-    Spec2d {
-        parts: vec![
-            rect(-x, -hin - lp, x, ytop + lp, 4, None),
-            rect(-x, 0.0, -xin, ytop, 41, Some(h_pml)),
-            rect(xin, 0.0, x, ytop, 42, Some(h_pml)),
-            rect(-xin, ytop, xin, ytop + lp, 43, Some(h_pml)),
-            rect(-x, ytop, -xin, ytop + lp, 44, Some(h_pml)),
-            rect(xin, ytop, x, ytop + lp, 45, Some(h_pml)),
-            rect(-xin, -hin, xin, 0.0, 1, Some(h_sap)),
-            rect(-x, -hin, -xin, 0.0, 11, Some(h_pml)),
-            rect(xin, -hin, x, 0.0, 12, Some(h_pml)),
-            rect(-xin, -hin - lp, xin, -hin, 13, Some(h_pml)),
-            rect(-x, -hin - lp, -xin, -hin, 14, Some(h_pml)),
-            rect(xin, -hin - lp, x, -hin, 15, Some(h_pml)),
-            rect(-w / 2.0, 0.0, w / 2.0, htot, 3, Some(h_si)),
-        ],
-        h: h_far,
-        min_angle_deg: 25.0,
-    }
-}
-
-fn model(psi: f64, scale: f64, n_modes: usize, f_search: f64) -> (SimplexMesh, ProblemSpec) {
-    let mesh = mesh_2d(&shapes(scale)).unwrap();
-    let (xo, ybottom) = (3.0 * UM, -3.0 * UM);
-    let mut labels = vec![];
-    for f in 0..mesh.n_facets() {
-        let (pa, pb) = (mesh.point(mesh.facet(f)[0] as usize), mesh.point(mesh.facet(f)[1] as usize));
-        let (mx, my) = (0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1]));
-        if ((mx.abs() - xo).abs() < 1e-12 || (my - ybottom).abs() < 1e-12) && my < 1e-12 {
-            labels.push(mesh.facet_labels[f]);
-        }
-    }
-    labels.sort();
-    labels.dedup();
+/// the strip (`rib`) on sapphire in air with absorbing layers around: the chip of `chip_geometry` without the slab
+fn model(psi: f64, scale: f64, n_modes: usize, f_search: f64) -> (MeshedGeom, ProblemSpec) {
     let c = ChipSpec { name: "WG800", htot: HEIGHT, etch: HEIGHT, width: WIDTH, xin: 2.0, n_eff: 2.6, polarisation: "TE" };
-    let mut spec = chip_problem(&c, psi, n_modes, f_search, labels);
+    let g = chip_mesh(&c, scale).unwrap();
+    let mut spec = chip_problem(&c, psi, n_modes, f_search, &g);
     let b = spec.brillouin.as_mut().unwrap();
-    b.moving = vec![3];
+    b.moving = g.domains("rib");
     b.backward = false;
-    b.photoelastic.retain(|d, _| *d == 1 || *d == 3);
-    (mesh, spec)
+    (g, spec)
 }
 
 fn optical_spec(inner: &ProblemSpec, mesh: &SimplexMesh, lambda: f64, n_target: f64, n_modes: usize) -> ProblemSpec {
@@ -104,10 +64,9 @@ struct Info {
 
 /// polarisation (dominant lateral or normal field), fraction of |E|^2 in the silicon and the numbers of sign changes of the dominant field
 /// along x at mid-height and along y through the silicon
-fn classify(mesh: &SimplexMesh, set: &OpticalSet, j: usize) -> Info {
-    let si: BTreeSet<i32> = [3].into_iter().collect();
+fn classify(mesh: &SimplexMesh, si: &BTreeSet<i32>, set: &OpticalSet, j: usize) -> Info {
     let all = mode_energy_parts(mesh, set, j, None);
-    let in_si = mode_energy_parts(mesh, set, j, Some(&si));
+    let in_si = mode_energy_parts(mesh, set, j, Some(si));
     let tot: f64 = all.iter().sum();
     let (px, py) = (all[0] / tot, all[1] / tot);
     let te = px >= py;
@@ -152,10 +111,21 @@ fn classify(mesh: &SimplexMesh, set: &OpticalSet, j: usize) -> Info {
 
 fn solve_modes(mesh: &SimplexMesh, inner: &ProblemSpec, lambda: f64) -> (OpticalSet, Vec<usize>) {
     let n_modes = envf("OPT_MODES", 24.0) as usize;
-    let opt = optical_spec(inner, mesh, lambda, 3.4, n_modes);
+    let opt = optical_spec(inner, mesh, lambda, envf("N_TARGET", 3.4), n_modes);
     let set = solve_optical(mesh, &opt).unwrap();
+    if std::env::var_os("DEBUG").is_some() {
+        println!("raw: {}", set.modes.iter().map(|m| format!("{:.5}{:+.1e}i", m.neff.re, m.neff.im)).collect::<Vec<_>>().join(" "));
+    }
     let mut idx: Vec<usize> = (0..set.modes.len()).filter(|&j| set.modes[j].neff.re > N_CUT + 0.002 && set.modes[j].neff.im.abs() < 1e-3).collect();
     idx.sort_by(|&a, &b| set.modes[b].neff.re.partial_cmp(&set.modes[a].neff.re).unwrap());
+    // the Krylov solver can return the same mode several times: keep one of each effective index
+    let mut kept: Vec<usize> = vec![];
+    for j in idx {
+        if kept.last().is_none_or(|&k| (set.modes[k].neff.re - set.modes[j].neff.re).abs() > 1e-5) {
+            kept.push(j);
+        }
+    }
+    let idx = kept;
     let lowest = set.modes.iter().map(|m| m.neff.re).fold(f64::MAX, f64::min);
     if lowest > N_CUT || !set.converged {
         eprintln!("warning at {:.0} nm: lowest neff found {lowest:.4}, converged {} - guided modes may be missing", lambda * 1e9, set.converged);
@@ -172,7 +142,9 @@ fn main() {
     let psi = envf("PSI", 0.0);
     let f0 = envf("F_SEARCH", 8.0) * 1e9;
     let t0 = std::time::Instant::now();
-    let (mesh, spec) = model(psi, scale, envf("N_ELASTIC", 40.0) as usize, f0);
+    let (g, spec) = model(psi, scale, envf("N_ELASTIC", 40.0) as usize, f0);
+    let si: BTreeSet<i32> = g.domains("rib").into_iter().collect();
+    let mesh = g.mesh;
     println!("mesh: {} cells, {} points", mesh.n_cells(), mesh.n_points());
     let inner = spec.to_model_frame(2);
     if what == "optics" {
@@ -181,7 +153,7 @@ fn main() {
         let mut lam = l0;
         while lam <= l1 + 1e-9 {
             let (set, idx) = solve_modes(&mesh, &inner, lam * 1e-9);
-            let infos: Vec<Info> = idx.iter().map(|&j| classify(&mesh, &set, j)).collect();
+            let infos: Vec<Info> = idx.iter().map(|&j| classify(&mesh, &si, &set, j)).collect();
             print!("{lam:6.0} nm:");
             for i in &infos {
                 print!("  {} {:.4}", i.label, i.neff);
@@ -191,6 +163,9 @@ fn main() {
             lam += dl;
         }
         std::fs::write(out.join("optical_modes.csv"), csv).unwrap();
+        if std::env::var_os("NO_FIELDS").is_some() {
+            return;
+        }
         // field maps at the centre wavelength
         let lam = 1550e-9;
         let (set, idx) = solve_modes(&mesh, &inner, lam);
@@ -199,7 +174,7 @@ fn main() {
         let pts: Vec<[f64; 2]> = (0..ny).flat_map(|jy| (0..nx).map(move |ix| [xa + (xb - xa) * ix as f64 / (nx - 1) as f64, yb - (yb - ya) * jy as f64 / (ny - 1) as f64])).collect();
         let mut fields = String::from("label,neff,nx,ny,xa_um,xb_um,ya_um,yb_um\n");
         for (k, &j) in idx.iter().enumerate() {
-            let info = classify(&mesh, &set, j);
+            let info = classify(&mesh, &si, &set, j);
             let e = sample_mode_e(&mesh, &set, j, &pts);
             let mut rows = String::new();
             for comp in 0..3 {
@@ -212,10 +187,79 @@ fn main() {
             writeln!(fields, "{},{:.6},{nx},{ny},{},{},{},{}", info.label, info.neff, xa / UM, xb / UM, ya / UM, yb / UM).unwrap();
         }
         std::fs::write(out.join("fields_index.csv"), fields).unwrap();
+    } else if what == "shapes" {
+        // displacement fields of chosen elastic modes: shapes <out> <pump> <stokes> <f_GHz,...>
+        let lambda = 1550e-9;
+        let (set, idx) = solve_modes(&mesh, &inner, lambda);
+        let pump_k = args.get(2).and_then(|s| s.parse::<usize>().ok()).unwrap_or(1) - 1;
+        let stokes_k = args.get(3).and_then(|s| s.parse::<usize>().ok()).unwrap_or(2) - 1;
+        let freqs: Vec<f64> = args.get(4).map(|s| s.split(',').filter_map(|x| x.parse::<f64>().ok()).collect()).unwrap_or_default();
+        let b = inner.brillouin.as_ref().unwrap();
+        let photoelastic: std::collections::BTreeMap<i32, PhotoElastic> = b.photoelastic.iter().map(|(d, p)| (*d, photo_from_spec(p, inner.materials.aniso.get(d).map(|a| a.euler_deg)))).collect();
+        let moving: BTreeSet<i32> = si.clone();
+        let cp = coupling(&PairInput { mesh: &mesh, pump: (&set, idx[pump_k]), stokes: (&set, idx[stokes_k]), backward: false, mirror_pump: false, photoelastic: &photoelastic, moving: &moving }).unwrap();
+        let q = cp.q();
+        let (nx, ny) = (96usize, 60usize);
+        let (xa, xb, ya, yb) = (-1.2 * UM, 1.2 * UM, -0.7 * UM, 0.9 * UM);
+        let pts: Vec<[f64; 2]> = (0..ny).flat_map(|jy| (0..nx).map(move |ix| [xa + (xb - xa) * ix as f64 / (nx - 1) as f64, yb - (yb - ya) * jy as f64 / (ny - 1) as f64])).collect();
+        let tris: Vec<[[f64; 2]; 3]> = (0..mesh.n_cells()).map(|ci| { let v = mesh.cell(ci); let p = |i: usize| { let r = mesh.point(v[i] as usize); [r[0], r[1]] }; [p(0), p(1), p(2)] }).collect();
+        let locate: Vec<Option<(usize, [f64; 3])>> = pts.iter().map(|&[x, y]| {
+            for (ci, t) in tris.iter().enumerate() {
+                let det = (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1]);
+                let l1 = ((x - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (y - t[0][1])) / det;
+                let l2 = ((t[1][0] - t[0][0]) * (y - t[0][1]) - (x - t[0][0]) * (t[1][1] - t[0][1])) / det;
+                let l0 = 1.0 - l1 - l2;
+                if l0 >= -1e-9 && l1 >= -1e-9 && l2 >= -1e-9 {
+                    return Some((ci, [l0, l1, l2]));
+                }
+            }
+            None
+        }).collect();
+        let n1 = mesh.n_dofs(2);
+        println!("pair {} -> {}: q = {:.4} /um", infos_label(&set, &mesh, idx[pump_k]), infos_label(&set, &mesh, idx[stokes_k]), q * 1e-6);
+        for &fg in &freqs {
+            let mut mech = inner.clone();
+            mech.physics = Physics::Solid;
+            mech.brillouin = None;
+            mech.study = Study::Eigenfrequency { n_modes: 10, f_search: fg * 1e9 };
+            let (_r, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
+            let j = (0..modes.freqs.len()).min_by(|&a, &b| (modes.freqs[a].re - fg * 1e9).abs().partial_cmp(&(modes.freqs[b].re - fg * 1e9).abs()).unwrap()).unwrap();
+            let u = &modes.vectors[j];
+            println!("  target {fg} GHz -> mode at {:.4} GHz", modes.freqs[j].re * 1e-9);
+            // phase so that the largest component is real
+            let mut big = (0.0, C::new(1.0, 0.0));
+            for v in u.iter() {
+                if v.norm() > big.0 {
+                    big = (v.norm(), *v / v.norm());
+                }
+            }
+            let ph = big.1.conj();
+            let mut pd = Vec::new();
+            let mut rows = String::new();
+            for comp in 0..3 {
+                for loc in &locate {
+                    let val = match loc {
+                        Some((ci, l)) => {
+                            mesh.cell_dofs(*ci, 2, &mut pd);
+                            let sh = femcore::fem::shape(l, 2).0;
+                            let mut acc = C::new(0.0, 0.0);
+                            for a in 0..sh.len() {
+                                acc += u[comp * n1 + pd[a]] * sh[a];
+                            }
+                            (acc * ph).re / big.0
+                        }
+                        None => f64::NAN,
+                    };
+                    write!(rows, "{val:.5e},").unwrap();
+                }
+                rows.push('\n');
+            }
+            std::fs::write(out.join(format!("shape_p{}s{}_{:.2}GHz.csv", pump_k + 1, stokes_k + 1, modes.freqs[j].re * 1e-9)), rows).unwrap();
+        }
     } else {
         let lambda = 1550e-9;
         let (set, idx) = solve_modes(&mesh, &inner, lambda);
-        let infos: Vec<Info> = idx.iter().map(|&j| classify(&mesh, &set, j)).collect();
+        let infos: Vec<Info> = idx.iter().map(|&j| classify(&mesh, &si, &set, j)).collect();
         for (k, i) in infos.iter().enumerate() {
             println!("optical mode {}: {} neff {:.5}", k + 1, i.label, i.neff);
         }
@@ -223,11 +267,11 @@ fn main() {
         let searches: Vec<f64> = args.get(3).map(|s| s.split(',').filter_map(|x| x.parse::<f64>().ok()).collect()).unwrap_or_else(|| vec![f0 * 1e-9]);
         let b = inner.brillouin.as_ref().unwrap();
         let photoelastic: std::collections::BTreeMap<i32, PhotoElastic> = b.photoelastic.iter().map(|(d, p)| (*d, photo_from_spec(p, inner.materials.aniso.get(d).map(|a| a.euler_deg)))).collect();
-        let moving: BTreeSet<i32> = [3].into_iter().collect();
+        let moving: BTreeSet<i32> = si.clone();
         let pml_domains: BTreeSet<i32> = inner.materials.pml.keys().copied().collect();
         let mut report = String::new();
         for (ks, i_s) in infos.iter().enumerate() {
-            if ks == pump_k {
+            if ks == pump_k || std::env::var("STOKES").ok().and_then(|v| v.parse::<usize>().ok()).is_some_and(|v| v != ks + 1) {
                 continue;
             }
             let cp = coupling(&PairInput { mesh: &mesh, pump: (&set, idx[pump_k]), stokes: (&set, idx[ks]), backward: false, mirror_pump: false, photoelastic: &photoelastic, moving: &moving }).unwrap();
@@ -243,18 +287,25 @@ fn main() {
                 let (_r, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
                 let opts = GainOptions { body_domains: moving.clone(), pml_domains: pml_domains.clone(), strain: StrainConvention::Conjugate, q_cap: 1000.0, ..Default::default() };
                 let rows = gains(&mesh, &cp, &modes, &opts);
-                let mut order: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].frac_body > 0.3).collect();
+                let mut order: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].frac_body > 0.15).collect();
                 order.sort_by(|&a, &b| rows[b].gain_total.partial_cmp(&rows[a].gain_total).unwrap());
                 println!("  search {fs} GHz ({:.0} s): {} modes, f from {:.3} to {:.3} GHz", t.elapsed().as_secs_f64(), rows.len(), rows.iter().map(|r| r.freq.re).fold(f64::MAX, f64::min) * 1e-9, rows.iter().map(|r| r.freq.re).fold(0.0, f64::max) * 1e-9);
                 println!("  f (GHz)   Q         body/pml   MB        PE        total");
-                for &i in order.iter().take(8) {
+                for (n_shown, &i) in order.iter().enumerate() {
                     let r = &rows[i];
+                    if n_shown >= 6 && r.gain_total < 1e-3 {
+                        continue;
+                    }
                     println!("  {:8.4}  {:9.2e} {:.2}/{:.2}  {:9.3e} {:9.3e} {:9.3e}", r.freq.re * 1e-9, r.q_eig, r.frac_body, r.frac_pml, r.gain_mb, r.gain_pe, r.gain_total);
                     writeln!(report, "{},{},{:.5},{:.4e},{:.4},{:.4},{:.5e},{:.5e},{:.5e}", infos[pump_k].label, i_s.label, r.freq.re * 1e-9, r.q_eig, r.frac_body, r.frac_pml, r.gain_mb, r.gain_pe, r.gain_total).unwrap();
                 }
             }
         }
-        std::fs::write(out.join(format!("acoustics_pump{}.txt", pump_k + 1)), report).unwrap();
+        std::fs::write(out.join(format!("acoustics_pump{}_stokes{}.txt", pump_k + 1, std::env::var("STOKES").unwrap_or_default())), report).unwrap();
     }
     println!("total {:.0} s", t0.elapsed().as_secs_f64());
+}
+
+fn infos_label(set: &OpticalSet, _mesh: &SimplexMesh, j: usize) -> String {
+    format!("mode with neff {:.4}", set.modes[j].neff.re)
 }

@@ -38,7 +38,7 @@ fn iterative_thermal_expansion_and_prescribed_displacement() {
     s.materials.default.insert("alpha".into(), 1e-5);
     s.bcs = vec![
         Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
         Bc { labels: vec![4], kind: BcKind::Fixed { fixed: [true, false, false], values: [1e-3, 0.0, 0.0] } },
     ];
     s.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(350.0), t_ref: 293.15 });

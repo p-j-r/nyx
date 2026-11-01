@@ -3,7 +3,7 @@
 //!
 //! * entry and plumbing: `solve` (one entry point for every physics), `problem` (what is solved: the problem and result
 //!   types), `validate` (refuses NaN/infinity), `progress` (stage log, cancel), `par` (the shared thread pools)
-//! * meshes: `mesh` (simplex meshes, numbering of unknowns), `mesher` (2D shapes to triangles, extrusion), `mesher3d` and
+//! * meshes: `mesh` (simplex meshes, numbering of unknowns), `geomdrive` (geom models to meshes and named problems), `mesher` (2D shapes to triangles, extrusion), `mesher3d` and
 //!   `refine3d` (3D solids to tetrahedra), `view` (surface for drawing), `cellmesh` (mixed-cell meshes)
 //! * finite-element basics: `fem` (quadrature, shape functions, scalar matrices, constraints), `fields` (gradients, node
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
@@ -36,6 +36,7 @@ pub mod emw_pml;
 pub mod expr;
 pub mod fem;
 pub mod fields;
+pub mod geomdrive;
 #[cfg(feature = "hdf5-metno")]
 pub mod h5io;
 pub mod linalg;
