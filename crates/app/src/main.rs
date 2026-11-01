@@ -9,6 +9,7 @@ mod app;
 mod batch;
 mod colormap;
 mod examples;
+mod geomui;
 mod scene;
 mod script;
 mod state;

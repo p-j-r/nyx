@@ -62,6 +62,7 @@ pub struct App {
     pub label_buffers: HashMap<(Physics, usize), String>,
     pub geometry_dirty: bool,
     pub geom_edit: GeometrySpec,
+    pub geom_ui: crate::geomui::State,
     pub bottom_open: bool,
     /// the File > New dialog while it is open
     pub new_dialog: Option<NewDialog>,
@@ -92,6 +93,7 @@ impl App {
         let proj = Project::default_project();
         let mut app = App {
             geom_edit: proj.geometry.clone(),
+            geom_ui: Default::default(),
             proj,
             doc: Doc::default(),
             tab: Tab::Geometry,

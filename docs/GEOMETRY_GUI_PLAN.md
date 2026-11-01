@@ -1,6 +1,6 @@
 # Geometry in the nyx GUI: inventory and plan
 
-Status: plan only (2026-11-01). No code is written until it is approved. Written against the `geom` crate in the wafer update (about 10.4k lines of Rust, identical to the uncommitted `crates/geom` in the main checkout) and `main` at `54b8829`.
+Status (2026-11-01): approved. P0 is committed on branch `geometry-gui`; the legacy kinds are removed (see `crates/app/src/state.rs`); P1 is in `crates/app/src/geomui.rs` except the viewport preview. P2 to P4 are open. Written against the `geom` crate in the wafer update (about 10.4k lines of Rust, identical to the uncommitted `crates/geom` in the main checkout) and `main` at `54b8829`.
 
 ## 1. Where things stand
 

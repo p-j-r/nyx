@@ -459,66 +459,16 @@ fn extrude_editor(ui: &mut Ui, extrude: &mut Option<Vec<femcore::mesher::Layer>>
     }
 }
 
-/// A `geom` model: element size, sweep, the names of its regions and edges with the integers the solvers use, and the feature list as JSON.
-fn model_editor(ui: &mut Ui, list: &mut geom::model::FeatureList, h: &mut f64, extrude: &mut Option<Vec<femcore::mesher::Layer>>) {
+/// A `geom` model: element size, sweep along y, and the model editor (parameters, features, names, code).
+fn model_editor(ui: &mut Ui, ed: &mut crate::geomui::State, g: &mut GeometrySpec) {
     ui.horizontal(|ui| {
         ui.label("element size h (m)");
-        num(ui, h);
-        ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", list.dim));
+        num(ui, &mut g.h);
+        ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", g.list.dim));
     });
-    extrude_editor(ui, extrude);
-    ui.collapsing("Names and numbers", |ui| match femcore::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map_err(|e| e.to_string())) {
-        Ok(lm) => {
-            ui.weak("Problems refer to these names (materials, boundary conditions, selectors); the integers are what the solvers store. Read-only.");
-            egui::Grid::new("model_domains").num_columns(2).show(ui, |ui| {
-                ui.label(RichText::new("domain").strong());
-                ui.label(RichText::new("number").strong());
-                ui.end_row();
-                for d in &lm.domains {
-                    ui.label(&d.name);
-                    ui.label(d.id.to_string());
-                    ui.end_row();
-                }
-            });
-            ui.add_space(4.0);
-            egui::Grid::new("model_boundaries").num_columns(2).show(ui, |ui| {
-                ui.label(RichText::new("boundary").strong());
-                ui.label(RichText::new("number").strong());
-                ui.end_row();
-                for b in &lm.boundaries {
-                    ui.label(&b.name);
-                    ui.label(b.id.to_string());
-                    ui.end_row();
-                }
-            });
-        }
-        Err(e) => {
-            ui.colored_label(Color32::from_rgb(220, 100, 100), e);
-        }
-    });
-    ui.collapsing("Feature list (JSON)", |ui| {
-        let id = ui.next_auto_id().with("model_json");
-        let mut text: String = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| serde_json::to_string_pretty(&*list).unwrap_or_default());
-        ui.add(egui::TextEdit::multiline(&mut text).code_editor().desired_rows(12).desired_width(f32::INFINITY));
-        let parsed = serde_json::from_str::<geom::model::FeatureList>(&text);
-        ui.horizontal(|ui| {
-            if ui.add_enabled(parsed.is_ok(), egui::Button::new("Apply")).clicked() {
-                if let Ok(l) = &parsed {
-                    *list = l.clone();
-                }
-                ui.data_mut(|d| d.remove::<String>(id));
-                return;
-            }
-            if ui.button("Reset").clicked() {
-                ui.data_mut(|d| d.remove::<String>(id));
-                return;
-            }
-            if let Err(e) = &parsed {
-                ui.colored_label(Color32::from_rgb(220, 100, 100), e.to_string());
-            }
-        });
-        ui.data_mut(|d| d.insert_temp(id, text));
-    });
+    extrude_editor(ui, &mut g.extrude);
+    ui.add_space(4.0);
+    crate::geomui::show(ui, ed, &mut g.list);
 }
 
 impl App {
@@ -597,7 +547,7 @@ impl App {
                 g = GeometrySpec::plate(1.0, 0.5, 0.1, Some(1.0));
             }
         });
-        model_editor(ui, &mut g.list, &mut g.h, &mut g.extrude);
+        model_editor(ui, &mut self.geom_ui, &mut g);
         ui.add_space(6.0);
         let changed = g != self.geom_edit;
         self.geom_edit = g;
