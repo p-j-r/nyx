@@ -1,0 +1,17 @@
+[package]
+name = "nyx-connect"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "One-click connection of nyx-mcp to AI hosts (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf): detect, write the config entry with a backup, remove, test"
+
+[lib]
+name = "nyx_connect"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nyx-connect"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }

@@ -1,0 +1,11 @@
+[package]
+name = "nyx-session"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "nyx session layer: typed capabilities, handles, assumptions ledger and the tools an AI host can call"
+
+[dependencies]
+femcore = { path = "../../crates/femcore" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }

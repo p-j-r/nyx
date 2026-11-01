@@ -15,3 +15,5 @@ temp_untitled_*
 /soi_modes.csv
 /soi_poincare.svg
 /bragg_*_poincare.svg
+/ai/target/
+/runs/

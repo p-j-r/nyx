@@ -8,7 +8,7 @@
   solid), with a circle edge at every corner off the axis. Exact volume by Pappus, signed distance, projection and parametrisation. Same
   clear-of-everything rule as the other curved bodies. A profile that crosses the axis or itself is refused. Golden: stepped bell; tests: tube,
   bell, revolve about x, refusals, `to_rust` round trip.
-* The remaining work is in [`../TODO.md`](../TODO.md).
+* What is still refused is pinned in `tests/refusals.rs`; the open work is in [`../docs/GEOMETRY_ARCHITECTURE.md`](../docs/GEOMETRY_ARCHITECTURE.md).
 
 ## Any sweep axis, cone bodies, Pml in the polyhedral path
 
