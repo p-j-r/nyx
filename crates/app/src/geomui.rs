@@ -4,7 +4,11 @@
 //! typical model); meshing stays behind the Build button.
 
 use eframe::egui::{self, Color32, ComboBox, RichText, TextEdit, Ui};
+use femcore::view::ViewMesh;
+use geom::eval::Evaluated;
 use geom::expr::{Env, Expr};
+use geom::labels::LabelMap;
+use std::sync::Arc;
 use geom::model::*;
 use geom::select::Selector;
 
@@ -22,6 +26,9 @@ pub struct State {
     boundaries: Vec<(String, i32)>,
     code: String,
     json: Option<String>,
+    ev: Option<Evaluated>,
+    /// the exact regions and edges as a display mesh (2D models), for the viewport before any meshing
+    pub preview: Option<Arc<ViewMesh>>,
 }
 
 impl State {
@@ -52,15 +59,62 @@ impl State {
             self.error = Some(e.to_string());
             return;
         }
-        match femcore::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map(|lm| (ev.warnings.clone(), lm)).map_err(|e| e.to_string())) {
-            Ok((w, lm)) => {
-                self.warnings = w;
+        self.ev = None;
+        self.preview = None;
+        match femcore::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map(|lm| (ev, lm)).map_err(|e| e.to_string())) {
+            Ok((ev, lm)) => {
+                self.warnings = ev.warnings.clone();
+                self.preview = preview(&ev, &lm).map(Arc::new);
+                self.ev = Some(ev);
                 self.domains = lm.domains.iter().map(|d| (d.name.clone(), d.id, d.kind)).collect();
                 self.boundaries = lm.boundaries.iter().map(|b| (b.name.clone(), b.id)).collect();
             }
             Err(e) => self.error = Some(e),
         }
     }
+}
+
+/// The exact regions and edges of a 2D model as a display mesh, numbered like the compiled labels (region = domain, edge = boundary), so the
+/// viewport draws it as it draws a mesh.
+fn preview(ev: &Evaluated, lm: &LabelMap) -> Option<ViewMesh> {
+    if ev.list.dim != 2 {
+        return None;
+    }
+    let dm = ev.tessellate(ev.bounds().diagonal() / 400.0);
+    let points: Vec<[f32; 3]> = dm.points.iter().map(|p| [p[0] as f32, p[2] as f32, 0.0]).collect();
+    let domain = |r: u32| lm.domains.get(r as usize).filter(|d| matches!(d.kind, RegionKind::Material | RegionKind::Pml)).map(|d| d.id);
+    let (mut tris, mut tri_label) = (vec![], vec![]);
+    for (t, &r) in dm.tris.iter().zip(&dm.tri_face) {
+        if let Some(d) = domain(r) {
+            tris.push(*t);
+            tri_label.push(d);
+        }
+    }
+    let (mut segs, mut seg_label) = (vec![], vec![]);
+    for (s, &e) in dm.segs.iter().zip(&dm.seg_edge) {
+        if let Some(l) = lm.label_of_edge(e) {
+            segs.push(*s);
+            seg_label.push(l);
+        }
+    }
+    let mut domain_labels = tri_label.clone();
+    domain_labels.sort_unstable();
+    domain_labels.dedup();
+    let mut boundary_labels = seg_label.clone();
+    boundary_labels.sort_unstable();
+    boundary_labels.dedup();
+    let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for p in &points {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    if points.is_empty() {
+        return None;
+    }
+    let n_cells = tris.len();
+    Some(ViewMesh { dim: 2, points, tris, tri_label, segs, seg_label, domain_labels, boundary_labels, n_cells, bbox: (lo, hi), types: vec!["geometry".into()], view_only: None })
 }
 
 /// Edits a number-or-expression field in place. While the field has the keyboard the typed text is kept as it is, so half-typed input like `1e-` survives.
@@ -84,7 +138,7 @@ fn expr_edit(ui: &mut Ui, e: &mut Expr) -> bool {
 }
 
 /// A selector as text: edits that parse replace the selector, others are shown in red and leave it as it was.
-fn selector_edit(ui: &mut Ui, s: &mut Selector) -> bool {
+fn selector_edit(ui: &mut Ui, s: &mut Selector, ev: Option<&Evaluated>) -> bool {
     let id = ui.next_auto_id();
     let focused = ui.memory(|m| m.has_focus(id));
     let mut text = if focused { ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| s.to_string()) } else { s.to_string() };
@@ -101,6 +155,13 @@ fn selector_edit(ui: &mut Ui, s: &mut Selector) -> bool {
             ui.colored_label(RED, e.to_string());
         }
         ui.data_mut(|d| d.insert_temp(id, text));
+    }
+    if let Some(ev) = ev {
+        match ev.resolve(s) {
+            Ok(r) if r.set.ids.is_empty() => ui.colored_label(RED, "selects nothing"),
+            Ok(r) => ui.label(RichText::new(format!("{} {:?}", r.set.ids.len(), r.set.kind).to_lowercase()).weak()),
+            Err(e) => ui.colored_label(RED, e.to_string()),
+        };
     }
     changed
 }
@@ -224,7 +285,7 @@ fn zero3() -> [Expr; 3] {
 }
 
 /// The form of one feature: a field per number, feature reference or selector it has. Returns whether anything changed.
-fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)]) -> bool {
+fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&Evaluated>) -> bool {
     let mut c = false;
     match op {
         Op::Rect { min, max } => {
@@ -474,18 +535,18 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)]) -> bool {
             });
         }
         Op::Periodic { sel_a, sel_b, translation } => {
-            c |= row(ui, "face A", |ui| selector_edit(ui, sel_a));
-            c |= row(ui, "face B", |ui| selector_edit(ui, sel_b));
+            c |= row(ui, "face A", |ui| selector_edit(ui, sel_a, ev));
+            c |= row(ui, "face B", |ui| selector_edit(ui, sel_b, ev));
             c |= exprs(ui, "translation A to B", translation);
         }
         Op::Size { sel, h, max_deviation, min_layers } => {
-            c |= row(ui, "applies to", |ui| selector_edit(ui, sel));
+            c |= row(ui, "applies to", |ui| selector_edit(ui, sel, ev));
             c |= optional(ui, "element size", h);
             c |= optional(ui, "largest chord deviation", max_deviation);
             c |= optional(ui, "layers across thin parts", min_layers);
         }
         Op::Tag { sel, name } => {
-            c |= row(ui, "applies to", |ui| selector_edit(ui, sel));
+            c |= row(ui, "applies to", |ui| selector_edit(ui, sel, ev));
             c |= row(ui, "tag", |ui| ui.add(TextEdit::singleline(name).desired_width(120.0)).changed());
         }
     }
@@ -635,7 +696,7 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
                     ui.weak("made by code");
                 }
             });
-            op_form(ui, &mut f.op, prior);
+            op_form(ui, &mut f.op, prior, st.ev.as_ref());
         });
     }
     st.notice = None;
@@ -816,6 +877,23 @@ mod tests {
         st.refresh(&list);
         assert!(st.error.is_none(), "{:?}", st.error);
         assert_eq!(st.domains.iter().map(|d| d.0.as_str()).collect::<Vec<_>>(), ["clad", "Si"]);
+    }
+
+    /// The preview of a model carries the same numbers the mesh will: one domain per material region, one boundary label per edge.
+    #[test]
+    fn the_preview_is_numbered_like_the_mesh_and_selectors_report_their_hits() {
+        let p = crate::examples::soi_wire();
+        let mut st = State::default();
+        st.refresh(&p.geometry.list);
+        let v = st.preview.clone().expect("a 2D model has a preview");
+        let mesh = p.geometry.build().unwrap();
+        assert_eq!(v.domain_labels, mesh.domain_labels());
+        // the preview also draws the interfaces between regions, which the mesh has no boundary facets on
+        assert!(mesh.boundary_labels().iter().all(|l| v.boundary_labels.contains(l)));
+        assert!(v.tris.len() > 5 && v.segs.len() > 5);
+        let ev = st.ev.as_ref().unwrap();
+        assert!(!ev.resolve(&Selector::parse("outer").unwrap()).unwrap().set.ids.is_empty());
+        assert!(ev.resolve(&Selector::parse("plane(z = 123)").unwrap()).unwrap().set.ids.is_empty());
     }
 
     #[test]

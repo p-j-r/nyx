@@ -652,7 +652,10 @@ impl App {
         let picking = self.picking.is_some();
         let cmap = self.proj.colormap;
         let (show_edges, show_numbers, show_results) = (self.show_edges, self.show_numbers, self.show_results);
-        let view = self.doc.view.clone();
+        // while the geometry is being edited the exact model is drawn, not the mesh of an earlier version
+        let preview = if self.tab == Tab::Geometry && (self.geometry_dirty || self.geom_edit != self.proj.geometry) { self.geom_ui.preview.clone() } else { None };
+        let show_results = show_results && preview.is_none();
+        let view = preview.or_else(|| self.doc.view.clone());
         
         let out = match (self.current, view) {
             (Some(i), Some(view)) if show_results => {
