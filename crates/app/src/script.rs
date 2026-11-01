@@ -72,7 +72,47 @@ impl App {
                     _ => Tab::Geometry,
                 }
             }
-            "compute" => self.compute(),
+            "compute" => self.shell_compute(),
+            // shell layout: `wf example N`, `page dashboard|settings|N`, `section concept|build|analysis`, `sheet new|palette|versions|share`
+            "wf" => {
+                if let Some(i) = arg.strip_prefix("example ").and_then(|n| n.trim().parse::<usize>().ok()).filter(|i| *i < crate::examples::NAMES.len()) {
+                    let t = crate::examples::NAMES[i].split('(').next().unwrap_or("Example").trim().to_string();
+                    self.new_draft(&t, crate::examples::by_index(i));
+                }
+            }
+            "page" => match arg.as_str() {
+                "dashboard" => {
+                    self.flush();
+                    self.refresh_entries();
+                    self.shell.page = crate::shell::Page::Dashboard;
+                }
+                "settings" => self.shell.page = crate::shell::Page::Settings,
+                n => {
+                    if let Some(id) = n.parse::<usize>().ok().and_then(|i| self.shell.tabs.get(i).cloned()) {
+                        self.show_workflow(&id);
+                    }
+                }
+            },
+            "section" => {
+                if let Some(w) = self.shell.current_mut() {
+                    w.sub = crate::shell::Sub::Main;
+                    w.part = match arg.as_str() {
+                        "build" => crate::shell::Part::Build,
+                        "analysis" => crate::shell::Part::Analysis,
+                        _ => crate::shell::Part::Concept,
+                    };
+                }
+            }
+            "sheet" => {
+                use crate::shell::Sheet;
+                self.shell.sheet = match arg.as_str() {
+                    "new" => Sheet::New,
+                    "palette" => Sheet::Palette,
+                    "versions" => Sheet::Versions,
+                    "share" => Sheet::Share,
+                    _ => Sheet::None,
+                };
+            }
             "cancel_after" => self.cancel_at = arg.parse::<f64>().ok().map(|s| Instant::now() + std::time::Duration::from_secs_f64(s)),
             "field" => {
                 if let Some(i) = self.current {

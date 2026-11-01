@@ -8,14 +8,19 @@
 mod app;
 mod batch;
 mod colormap;
+mod dashboard;
 mod examples;
 mod geomui;
+mod kit;
 mod scene;
 mod script;
+mod sheets;
+mod shell;
 mod state;
 mod tabs;
 mod theme;
 mod viewport;
+mod wfview;
 mod worker;
 
 fn main() -> eframe::Result {

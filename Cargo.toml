@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/geom", "crates/femcore", "crates/app"]
+members = ["crates/geom", "crates/femcore", "crates/app", "crates/nyx-store"]
 
 [workspace.package]
 version = "0.1.0"

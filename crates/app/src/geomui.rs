@@ -818,9 +818,10 @@ mod tests {
 
     fn draw(list: &mut FeatureList, st: &mut State) {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             show(ui, st, list);
         });
+        out.textures_delta.clear();
     }
 
     /// Every kind in the Add menu gets a form that draws and a default that the list accepts.

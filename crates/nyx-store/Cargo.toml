@@ -1,0 +1,13 @@
+[package]
+name = "nyx-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Workspace, workflow, experiment and run storage for nyx: manifests, run records, versions, search, share and .nyx files"
+
+[dependencies]
+femcore = { path = "../femcore" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+blake3 = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
