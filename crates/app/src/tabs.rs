@@ -770,6 +770,18 @@ impl App {
 
     // ------------------------------------------------------------------ geometry
 
+    /// One inspector tab on its own: the workflow view lays the six tabs out in its three sections.
+    pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab) {
+        match t {
+            Tab::Geometry => self.tab_geometry(ui),
+            Tab::Materials => self.tab_materials(ui),
+            Tab::Physics => self.tab_physics(ui),
+            Tab::Study => self.tab_study(ui),
+            Tab::Results => self.tab_results(ui),
+            Tab::Analysis => self.tab_analysis(ui),
+        }
+    }
+
     fn tab_geometry(&mut self, ui: &mut Ui) {
         ui.heading("Geometry");
         {

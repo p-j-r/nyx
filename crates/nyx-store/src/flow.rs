@@ -68,7 +68,15 @@ impl WorkflowDir {
 
     /// Creates the folder `<workspace>/<slug>_<id>` with one experiment holding `spec_xml` (the first version).
     pub fn create(workspace: &Path, title: &str, origin: &str, spec_xml: &str) -> Result<WorkflowDir, String> {
+        Self::create_as(workspace, None, title, origin, spec_xml)
+    }
+
+    /// Like `create` with a chosen id (a draft that has lived in a tab keeps the id it was shown under).
+    pub fn create_as(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_xml: &str) -> Result<WorkflowDir, String> {
         let mut wf = Workflow::new(title, origin);
+        if let Some(id) = id {
+            wf.id = id.to_string();
+        }
         let root = workspace.join(format!("{}_{}", slug(title), wf.id));
         std::fs::create_dir_all(&root).map_err(|e| io_err(&root, e))?;
         wf.experiments.clear();
