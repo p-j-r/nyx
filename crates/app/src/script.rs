@@ -49,8 +49,7 @@ impl App {
                     _ => Physics::Emw,
                 };
                 let three_d = words.contains(&"3d");
-                let structured = !words.contains(&"meshed");
-                self.new_project(crate::examples::blank(physics, three_d, structured), physics.name());
+                self.new_project(crate::examples::blank(physics, three_d), physics.name());
             }
             "open" => self.open_path(arg.into()),
             "physics" => {

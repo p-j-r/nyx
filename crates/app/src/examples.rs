@@ -1,8 +1,15 @@
 //! Ready-made projects (geometry, materials, boundary conditions, studies) to start from.
+//!
+//! Every geometry is a `geom` model. Regions and boundaries are looked up by name (`MeshedGeom::domains`, `select`) on the mesh the
+//! model gives, so no example types a region or boundary number. A 3D example is a 2D x-z section swept along y, the propagation axis.
 
 use crate::colormap::Colormap;
 use crate::state::*;
+use femcore::geomdrive::MeshedGeom;
+use femcore::mesher::Layer;
 use femcore::problem::*;
+use geom::model::Model;
+use geom::select::Selector;
 
 fn base(geometry: GeometrySpec, active: Physics) -> Project {
     let mut specs: Vec<ProblemSpec> = Physics::ALL.iter().map(|p| ProblemSpec::new(*p)).collect();
@@ -19,6 +26,26 @@ fn base(geometry: GeometrySpec, active: Physics) -> Project {
     Project { version: 1, geometry, source: Source::Generated, active, specs, colormap: Colormap::Viridis }
 }
 
+/// The model meshed once, for the names of its regions and boundaries.
+fn named(m: Model, h: f64) -> (GeometrySpec, MeshedGeom) {
+    let g = GeometrySpec::model(m.list, h);
+    let mg = g.build_named().expect("the example geometry meshes");
+    (g, mg)
+}
+
+/// A 2D model swept along y through one layer of `len` and `n` element layers: the geometry, the names, and the boundary numbers of the
+/// end at y = 0 and the far end (the side walls keep their 2D numbers).
+fn swept(m: Model, h: f64, len: f64, n: usize) -> (GeometrySpec, MeshedGeom, i32, i32) {
+    let (g, mg) = named(m, h);
+    let nb = mg.mesh.facet_labels.iter().copied().max().unwrap_or(0);
+    let g = GeometrySpec::model_extruded(g.list, h, vec![Layer { thickness: len, n, domain_offset: 0 }]);
+    (g, mg, nb + 1, nb + 2)
+}
+
+fn sel(g: &MeshedGeom, rule: &str) -> Vec<i32> {
+    g.select(rule).unwrap_or_else(|e| panic!("selector '{rule}': {e}"))
+}
+
 fn bc(labels: &[i32], kind: BcKind) -> Bc {
     Bc { labels: labels.to_vec(), kind }
 }
@@ -29,19 +56,35 @@ fn set(p: &mut Project, phys: Physics, props: &[(&str, f64)]) {
     }
 }
 
+fn fixed_all() -> BcKind {
+    BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }
+}
+
+/// A model of one rectangle `plate` from the origin to `(lx, lz)`.
+fn plate(lx: f64, lz: f64) -> Model {
+    let mut m = Model::new_2d();
+    let r = m.rect("plate", (0.0, 0.0), (lx, lz));
+    m.overlay(&[("plate", r)]);
+    m
+}
+
+fn selector(s: &str) -> Selector {
+    Selector::parse(s).expect("a valid selector")
+}
+
 pub const NAMES: [&str; 19] = [
     "Parallel-plate capacitor with two dielectrics (electrostatics, 2D)",
     "Cantilever beam (solid mechanics, static + eigenfrequencies, 2D)",
     "Heated plate with convective cooling (heat transfer, 2D, transient)",
     "Thermal expansion of a bar (heat + solid, 2D)",
-    "Block cantilever (solid mechanics, 3D)",
+    "Block cantilever (solid mechanics, 3D, a square section swept along y)",
     "WR-90 rectangular waveguide modes (EM waves, 2D cross-section)",
     "Dielectric-loaded waveguide (EM waves, 2D cross-section)",
     "Sapphire cantilever, anisotropic crystal (solid mechanics, 3D eigenfrequencies)",
     "Dielectric slab guide with PML ends (EM waves, complex modes)",
-    "Plate with a hole, meshed from shapes (solid mechanics, stress concentration)",
+    "Plate with a hole (solid mechanics, stress concentration)",
     "Beam on a PML substrate: anchor loss (solid eigenfrequencies, complex frequency and Q)",
-    "Plate with a drilled hole in 3D, from the 3D mesher (solid mechanics, stress concentration)",
+    "Plate with a drilled hole in 3D, the section swept along y (solid mechanics, stress concentration)",
     "Silicon strip on sapphire at 1550 nm: optical modes (EM waves) and acoustic modes with out-of-plane wave number (solid mechanics)",
     "Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)",
     "Brillouin gain of a silicon rib on sapphire (300TE ring chip, backward, 1550 nm): optical mode, phonons, photoelastic and moving-boundary gain",
@@ -51,16 +94,11 @@ pub const NAMES: [&str; 19] = [
     "Asymmetric Bragg grating in a 300 nm SOI wire: band-edge modes of a 3D Floquet cell (teeth on one side)",
 ];
 
-/// An empty project to build a simulation from: the chosen physics active, default materials, no boundary conditions, a
-/// unit rectangle (x-z) or block (`structured`) or a one-shape/one-body geometry for the shape and solid meshers, wafer axes.
-pub fn blank(physics: Physics, three_d: bool, structured: bool) -> Project {
+/// An empty project to build a simulation from: the chosen physics active, default materials, no boundary conditions and a unit
+/// plate (one region `plate`, x-z) or, in 3D, the unit cube made by sweeping it along y. Wafer axes.
+pub fn blank(physics: Physics, three_d: bool) -> Project {
     let three_d = three_d && physics != Physics::Brillouin;
-    let g = match (three_d, structured) {
-        (false, true) => GeometrySpec::rectangle(1.0, 1.0, 20, 20),
-        (false, false) => GeometrySpec::shapes(),
-        (true, true) => GeometrySpec::block(1.0, 1.0, 1.0, 8, 8, 8),
-        (true, false) => GeometrySpec::solids(),
-    };
+    let g = if three_d { GeometrySpec::plate(1.0, 1.0, 0.125, Some(1.0)) } else { GeometrySpec::plate(1.0, 1.0, 0.05, None) };
     let mut p = base(g, physics);
     if three_d && physics == Physics::Emw {
         p.spec_mut(physics).study = Study::Eigenfrequency { n_modes: 6, f_search: 10e9 };
@@ -93,294 +131,267 @@ pub fn by_index(i: usize) -> Project {
 }
 
 pub fn capacitor() -> Project {
-    let mut g = GeometrySpec::rectangle(1.0, 0.5, 40, 20);
-    g.domains = vec![Region { bbox: vec![0.5, 0.0, 1.0, 0.5], label: 2 }];
+    let mut m = Model::new_2d();
+    let a = m.rect("left_box", (0.0, 0.0), (0.5, 0.5));
+    let b = m.rect("right_box", (0.5, 0.0), (1.0, 0.5));
+    m.overlay(&[("left", a), ("right", b)]);
+    let (g, mg) = named(m, 0.025);
     let mut p = base(g, Physics::Electrostatics);
     let es = p.spec_mut(Physics::Electrostatics);
-    es.materials.set(1, "eps_r", 2.0);
-    es.materials.set(2, "eps_r", 8.0);
-    es.bcs = vec![bc(&[1], BcKind::Potential(1.0)), bc(&[4], BcKind::Ground)];
+    for (name, eps) in [("left", 2.0), ("right", 8.0)] {
+        mg.set_material(es, name, "eps_r", eps);
+    }
+    es.bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), BcKind::Potential(1.0)), bc(&sel(&mg, "outer & plane(x = 1)"), BcKind::Ground)];
     p
 }
 
 pub fn cantilever() -> Project {
-    let mut p = base(GeometrySpec::rectangle(1.0, 0.1, 60, 6), Physics::Solid);
-    p.spec_mut(Physics::Solid).bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }), bc(&[4], BcKind::Load([0.0, 0.0, -1e5]))];
-    p.spec_mut(Physics::Solid).plane = Plane::Stress;
+    let (g, mg) = named(plate(1.0, 0.1), 0.02);
+    let mut p = base(g, Physics::Solid);
+    let s = p.spec_mut(Physics::Solid);
+    s.bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), fixed_all()), bc(&sel(&mg, "outer & plane(x = 1)"), BcKind::Load([0.0, 0.0, -1e5]))];
+    s.plane = Plane::Stress;
     p
 }
 
 pub fn heated_plate() -> Project {
-    let mut p = base(GeometrySpec::rectangle(1.0, 0.2, 40, 8), Physics::Heat);
+    let (g, mg) = named(plate(1.0, 0.2), 0.025);
+    let mut p = base(g, Physics::Heat);
     set(&mut p, Physics::Heat, &[("k", 50.0), ("rho", 7800.0), ("Cp", 470.0)]);
     let h = p.spec_mut(Physics::Heat);
-    h.bcs = vec![bc(&[1], BcKind::Temperature(500.0)), bc(&[2, 3, 4], BcKind::Convection { h: 25.0, text: 293.15 })];
+    h.bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), BcKind::Temperature(500.0)), bc(&sel(&mg, "outer - plane(x = 0)"), BcKind::Convection { h: 25.0, text: 293.15 })];
     h.study = Study::Transient { t_end: 20000.0, n_out: 20, t0: "293.15".into() };
     p
 }
 
 pub fn thermal_bar() -> Project {
-    let mut p = base(GeometrySpec::rectangle(1.0, 0.1, 50, 5), Physics::Solid);
+    let (g, mg) = named(plate(1.0, 0.1), 0.02);
+    let mut p = base(g, Physics::Solid);
     set(&mut p, Physics::Heat, &[("k", 160.0)]);
     set(&mut p, Physics::Solid, &[("E", 70e9), ("nu", 0.33), ("alpha", 23e-6), ("rho", 2700.0)]);
-    p.spec_mut(Physics::Heat).bcs = vec![bc(&[1], BcKind::Temperature(293.15)), bc(&[4], BcKind::Temperature(393.15))];
+    let (left, right) = (sel(&mg, "outer & plane(x = 0)"), sel(&mg, "outer & plane(x = 1)"));
+    p.spec_mut(Physics::Heat).bcs = vec![bc(&left, BcKind::Temperature(293.15)), bc(&right, BcKind::Temperature(393.15))];
     let s = p.spec_mut(Physics::Solid);
-    s.bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] })];
+    s.bcs = vec![bc(&left, BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] })];
     s.thermal = Some(ThermalExpansion { source: ThermalSource::FromHeat, t_ref: 293.15 });
     s.plane = Plane::Stress;
     p
 }
 
+/// A 0.1 m square bar 1 m long: its section swept along y, clamped at y = 0 and loaded across at the far end.
 pub fn block_cantilever() -> Project {
-    let mut p = base(GeometrySpec::block(1.0, 0.1, 0.1, 16, 3, 3), Physics::Solid);
-    p.spec_mut(Physics::Solid).bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }), bc(&[6], BcKind::Load([0.0, 0.0, -1e5]))];
+    let (g, _mg, start, end) = swept(plate(0.1, 0.1), 0.035, 1.0, 16);
+    let mut p = base(g, Physics::Solid);
+    p.spec_mut(Physics::Solid).bcs = vec![bc(&[start], fixed_all()), bc(&[end], BcKind::Load([0.0, 0.0, -1e5]))];
     p
 }
 
 pub fn waveguide() -> Project {
-    let mut p = base(GeometrySpec::rectangle(22.86e-3, 10.16e-3, 24, 12), Physics::Emw);
+    let (g, _) = named(plate(22.86e-3, 10.16e-3), 1.0e-3);
+    let mut p = base(g, Physics::Emw);
     p.spec_mut(Physics::Emw).study = Study::Modes { freq: 20e9, n_target: 0.9, evanescent: false, n_modes: 4 };
     p
 }
 
 pub fn loaded_waveguide() -> Project {
-    let mut g = GeometrySpec::rectangle(22.86e-3, 10.16e-3, 36, 12);
-    g.domains = vec![Region { bbox: vec![0.0, 0.0, 11.43e-3, 10.16e-3], label: 2 }];
+    let (lx, lz) = (22.86e-3, 10.16e-3);
+    let mut m = Model::new_2d();
+    let air = m.rect("air_box", (0.0, 0.0), (lx, lz));
+    let diel = m.rect("dielectric_box", (0.0, 0.0), (11.43e-3, lz));
+    m.overlay(&[("air", air), ("dielectric", diel)]);
+    let (g, mg) = named(m, 0.7e-3);
     let mut p = base(g, Physics::Emw);
     let e = p.spec_mut(Physics::Emw);
-    e.materials.set(1, "eps_r", 1.0);
-    e.materials.set(2, "eps_r", 4.0);
+    mg.set_material(e, "air", "eps_r", 1.0);
+    mg.set_material(e, "dielectric", "eps_r", 4.0);
     e.study = Study::Modes { freq: 8e9, n_target: 1.7, evanescent: false, n_modes: 3 };
     p
 }
 
+/// A sapphire beam 1 mm long, 0.2 mm wide and 0.1 mm thick, clamped at y = 0: its eigenfrequencies with the full anisotropic stiffness.
 pub fn sapphire_cantilever() -> Project {
-    let mut p = base(GeometrySpec::block(1.0e-3, 0.2e-3, 0.1e-3, 20, 4, 2), Physics::Solid);
+    // 1 mm long, 0.2 mm wide (x), 0.1 mm thick (z), swept along y
+    let (g, mg, start, _end) = swept(plate(0.2e-3, 0.1e-3), 0.05e-3, 1.0e-3, 20);
+    let mut p = base(g, Physics::Solid);
     let (st, eps, k, alpha, rho) = femcore::material::sapphire();
     let an = femcore::material::Anisotropy { stiffness: Some(st), conductivity: Some(k), permittivity: Some(eps), expansion: Some(alpha), euler_deg: [0.0, 90.0, 0.0] };
+    let plate_domains = mg.domains("plate");
     for s in &mut p.specs {
-        s.materials.aniso.insert(1, an.clone());
+        for &d in &plate_domains {
+            s.materials.aniso.insert(d, an.clone());
+        }
         s.materials.default.insert("rho".into(), rho);
     }
     let s = p.spec_mut(Physics::Solid);
-    s.bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] })];
+    s.bcs = vec![bc(&[start], fixed_all())];
     s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     p
 }
 
+/// A 40 mm x 10 mm window of air with a dielectric slab in the middle and an absorbing layer at each end.
 pub fn pml_slab() -> Project {
-    let (lx, ly) = (40e-3, 10e-3);
-    let mut g = GeometrySpec::rectangle(lx, ly, 80, 8);
-    g.domains = vec![
-        Region { bbox: vec![15e-3, 0.0, 25e-3, ly], label: 2 },
-        Region { bbox: vec![0.0, 0.0, 8e-3, ly], label: 3 },
-        Region { bbox: vec![32e-3, 0.0, lx, ly], label: 4 },
-    ];
+    let (lx, lz) = (40e-3, 10e-3);
+    let mut m = Model::new_2d();
+    let air = m.rect("air_box", (0.0, 0.0), (lx, lz));
+    let slab = m.rect("slab_box", (15e-3, 0.0), (25e-3, lz));
+    let left = m.rect("pml_left_box", (0.0, 0.0), (8e-3, lz));
+    let right = m.rect("pml_right_box", (32e-3, 0.0), (lx, lz));
+    m.overlay(&[("air", air), ("slab", slab), ("pml_left", left), ("pml_right", right)]);
+    let (g, mg) = named(m, 0.8e-3);
     let mut p = base(g, Physics::Emw);
     for s in &mut p.specs {
-        s.materials.set(1, "eps_r", 1.0);
-        s.materials.set(2, "eps_r", 4.0);
-        s.materials.set(3, "eps_r", 1.0);
-        s.materials.set(4, "eps_r", 1.0);
-        s.materials.pml.insert(3, Pml { x: PmlDir::Minus, y: PmlDir::Off, z: PmlDir::Off, strength: 4.0, order: 2.0, re: 1.0 });
-        s.materials.pml.insert(4, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 4.0, order: 2.0, re: 1.0 });
+        for (name, eps) in [("air", 1.0), ("slab", 4.0), ("pml_left", 1.0), ("pml_right", 1.0)] {
+            mg.set_material(s, name, "eps_r", eps);
+            mg.set_material(s, name, "mu_r", 1.0);
+        }
+        for (name, dir) in [("pml_left", PmlDir::Minus), ("pml_right", PmlDir::Plus)] {
+            for d in mg.domains(name) {
+                s.materials.pml.insert(d, Pml { x: dir, y: PmlDir::Off, z: PmlDir::Off, strength: 4.0, order: 2.0, re: 1.0 });
+            }
+        }
     }
     p.spec_mut(Physics::Emw).study = Study::Modes { freq: 12e9, n_target: 1.9, evanescent: false, n_modes: 6 };
     p
 }
 
+/// A 0.4 x 0.2 plate with a hole of radius 0.04 at the centre, pulled along x.
 pub fn plate_with_hole() -> Project {
-    use femcore::mesher::*;
-    let spec = Spec2d {
-        parts: vec![
-            Part { shape: Shape::Rect { x0: 0.0, y0: 0.0, x1: 0.4, y1: 0.2 }, domain: 1, h: None },
-            Part { shape: Shape::Circle { cx: 0.2, cy: 0.1, r: 0.04 }, domain: 0, h: Some(0.004) },
-        ],
-        h: 0.012,
-        min_angle_deg: 25.0,
-    };
-    let g = GeometrySpec { geometry: Geometry::Shapes { spec, extrude: None }, domains: vec![], boundaries: vec![] };
+    let mut m = Model::new_2d();
+    let r = m.rect("plate_box", (0.0, 0.0), (0.4, 0.2));
+    let hole = m.circle("hole", (0.2, 0.1), 0.04);
+    let p = m.difference("plate", r, &[hole]);
+    m.overlay(&[("plate", p)]);
+    m.size("size_hole", selector("kind(circle)"), Some(0.004.into()), None, None);
+    let (g, mg) = named(m, 0.012);
     let mut p = base(g, Physics::Solid);
     let s = p.spec_mut(Physics::Solid);
     s.plane = Plane::Stress;
-    s.bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] }), bc(&[2], BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] }), bc(&[4], BcKind::Load([1e6, 0.0, 0.0]))];
+    s.bcs = vec![
+        bc(&sel(&mg, "outer & plane(x = 0)"), BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] }),
+        bc(&sel(&mg, "outer & plane(z = 0)"), BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] }),
+        bc(&sel(&mg, "outer & plane(x = 0.4)"), BcKind::Load([1e6, 0.0, 0.0])),
+    ];
     p
 }
 
+/// The substrate (a 1 x 0.5 block with absorbing layers on the left, right and bottom) carrying a thin beam on its top face.
 pub fn anchor_loss() -> Project {
-    use femcore::mesher::*;
-    let rect = |x0, y0, x1, y1, d| Part { shape: Shape::Rect { x0, y0, x1, y1 }, domain: d, h: None };
-    let spec = Spec2d {
-        parts: vec![
-            rect(0.0, 0.0, 1.0, 0.5, 2),
-            rect(0.0, 0.15, 0.2, 0.5, 3),
-            rect(0.8, 0.15, 1.0, 0.5, 4),
-            rect(0.2, 0.0, 0.8, 0.15, 5),
-            rect(0.0, 0.0, 0.2, 0.15, 6),
-            rect(0.8, 0.0, 1.0, 0.15, 7),
-            rect(0.49, 0.5, 0.51, 0.8, 1),
-        ],
-        h: 0.03,
-        min_angle_deg: 25.0,
-    };
-    // the outer edge of the layers: every boundary facet below the substrate surface
-    let mut outer: Vec<i32> = vec![];
-    if let Ok(m) = mesh_2d(&spec) {
-        for f in 0..m.n_facets() {
-            let (a, b) = (m.point(m.facet(f)[0] as usize), m.point(m.facet(f)[1] as usize));
-            if (a[1] + b[1]) / 2.0 < 0.5 - 1e-9 {
-                outer.push(m.facet_labels[f]);
+    let mut m = Model::new_2d();
+    let sub = m.rect("substrate_box", (0.0, 0.0), (1.0, 0.5));
+    let pl = m.rect("pml_left_box", (0.0, 0.15), (0.2, 0.5));
+    let pr = m.rect("pml_right_box", (0.8, 0.15), (1.0, 0.5));
+    let pb = m.rect("pml_bottom_box", (0.2, 0.0), (0.8, 0.15));
+    let pbl = m.rect("pml_bottom_left_box", (0.0, 0.0), (0.2, 0.15));
+    let pbr = m.rect("pml_bottom_right_box", (0.8, 0.0), (1.0, 0.15));
+    let beam = m.rect("beam_box", (0.49, 0.5), (0.51, 0.8));
+    m.overlay(&[("substrate", sub), ("pml_left", pl), ("pml_right", pr), ("pml_bottom", pb), ("pml_bottom_left", pbl), ("pml_bottom_right", pbr), ("beam", beam)]);
+    let (g, mg) = named(m, 0.03);
+    let mut p = base(g, Physics::Solid);
+    let pieces = [
+        ("pml_left", PmlDir::Minus, PmlDir::Off),
+        ("pml_right", PmlDir::Plus, PmlDir::Off),
+        ("pml_bottom", PmlDir::Off, PmlDir::Minus),
+        ("pml_bottom_left", PmlDir::Minus, PmlDir::Minus),
+        ("pml_bottom_right", PmlDir::Plus, PmlDir::Minus),
+    ];
+    for s in &mut p.specs {
+        for (name, x, y) in pieces {
+            for d in mg.domains(name) {
+                s.materials.pml.insert(d, Pml { x, y, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 });
             }
         }
     }
-    outer.sort();
-    outer.dedup();
-    let g = GeometrySpec { geometry: Geometry::Shapes { spec, extrude: None }, domains: vec![], boundaries: vec![] };
-    let mut p = base(g, Physics::Solid);
-    for s in &mut p.specs {
-        let st = |x, y| Pml { x, y, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 };
-        s.materials.pml.insert(3, st(PmlDir::Minus, PmlDir::Off));
-        s.materials.pml.insert(4, st(PmlDir::Plus, PmlDir::Off));
-        s.materials.pml.insert(5, st(PmlDir::Off, PmlDir::Minus));
-        s.materials.pml.insert(6, st(PmlDir::Minus, PmlDir::Minus));
-        s.materials.pml.insert(7, st(PmlDir::Plus, PmlDir::Minus));
-    }
+    // clamped on the outer edge of the layers: every boundary below the substrate surface
+    let outer = sel(&mg, "(outer & in_box([-1, 0, -1], [2, 0, 0.5000000001], within)) - plane(z = 0.5)");
     let s = p.spec_mut(Physics::Solid);
-    s.bcs = vec![bc(&outer, BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] })];
+    s.bcs = vec![bc(&outer, fixed_all())];
     s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     s.plane = Plane::Strain;
     p
 }
 
+/// A plate 0.4 x 0.2 x 0.04 with a drilled hole (axis along y, through the thickness): the section with the hole swept along y.
 pub fn drilled_plate() -> Project {
-    use femcore::mesher3d::*;
-    let spec = Spec3d {
-        bodies: vec![
-            Body3d { solid: Solid::Box { min: [0.0, 0.0, 0.0], max: [0.4, 0.2, 0.04] }, domain: 1, h: None },
-            Body3d { solid: Solid::Cylinder { base: [0.2, 0.1, -0.01], axis: 2, r: 0.04, len: 0.06 }, domain: 0, h: None },
-        ],
-        h: 0.01,
-        alpha: 0.3,
-        snap_features: true, min_layers: 2.0
-    };
-    let g = GeometrySpec { geometry: Geometry::Solids { spec }, domains: vec![], boundaries: vec![] };
+    let mut m = Model::new_2d();
+    let r = m.rect("plate_box", (0.0, 0.0), (0.4, 0.2));
+    let hole = m.circle("hole", (0.2, 0.1), 0.04);
+    let p = m.difference("plate", r, &[hole]);
+    m.overlay(&[("plate", p)]);
+    m.size("size_hole", selector("kind(circle)"), Some(0.01.into()), None, None);
+    let (g, mg, _start, _end) = swept(m, 0.02, 0.04, 4);
     let mut p = base(g, Physics::Solid);
-    let s = p.spec_mut(Physics::Solid);
-    // faces: 1 x=0, 2 x=0.4, 7 the wall of the hole
-    s.bcs = vec![bc(&[1], BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }), bc(&[2], BcKind::Load([1e6, 0.0, 0.0]))];
+    p.spec_mut(Physics::Solid).bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), fixed_all()), bc(&sel(&mg, "outer & plane(x = 0.4)"), BcKind::Load([1e6, 0.0, 0.0]))];
     p
 }
 
 /// The cross-section of a silicon strip (450 nm x 230 nm) on a sapphire substrate under air, at 1550 nm:
-/// optical modes with PML on all sides (domain 3 air, 1 sapphire, 2 silicon, 4..11 the absorbing layers) and
+/// optical modes with PML on all sides (regions `air`, `sapphire`, `silicon` and the absorbing pieces `<region>.pml_xmin`, ...) and
 /// acoustic modes of the solid (silicon and sapphire, rotated crystal, PML in the sapphire) at a small
 /// out-of-plane wave number (forward Brillouin scattering).
 pub fn sos_strip() -> Project {
     use femcore::material::*;
-    use femcore::mesher::*;
     let um = 1e-6;
-    let (w_sapph, h_sapph, h_air, w_pml) = (12.0 * um, 10.0 * um, 3.0 * um, 1.0 * um);
-    let (w_si, h_si) = (450e-9, 230e-9);
-    let (x0, x1, y0, y1) = (-w_sapph / 2.0, w_sapph / 2.0, -h_sapph / 2.0, h_sapph / 2.0 + h_air);
-    let ys = h_sapph / 2.0;
-    let rect = |xa: f64, ya: f64, xb: f64, yb: f64, d: i32, h: Option<f64>| Part { shape: Shape::Rect { x0: xa, y0: ya, x1: xb, y1: yb }, domain: d, h };
-    let zone = 1.5 * um;
-    let spec2 = Spec2d {
-        parts: vec![
-            rect(x0 - w_pml, y0 - w_pml, x1 + w_pml, y1 + w_pml, 3, None),
-            rect(x0, y0, x1, ys, 1, None),
-            rect(-zone, ys - zone, zone, ys, 1, Some(0.08 * um)),
-            rect(-zone, ys, zone, ys + zone, 3, Some(0.08 * um)),
-            rect(-w_si / 2.0, ys, w_si / 2.0, ys + h_si, 2, Some(40e-9)),
-            // absorbing layers: sapphire side below the substrate surface, air above it
-            rect(x0 - w_pml, y0, x0, ys, 4, None),
-            rect(x1, y0, x1 + w_pml, ys, 5, None),
-            rect(x0, y0 - w_pml, x1, y0, 6, None),
-            rect(x0, y1, x1, y1 + w_pml, 7, None),
-            rect(x0 - w_pml, y0 - w_pml, x0, y0, 8, None),
-            rect(x1, y0 - w_pml, x1 + w_pml, y0, 9, None),
-            rect(x0 - w_pml, ys, x0, y1, 12, None),
-            rect(x1, ys, x1 + w_pml, y1, 13, None),
-            rect(x0 - w_pml, y1, x0, y1 + w_pml, 10, None),
-            rect(x1, y1, x1 + w_pml, y1 + w_pml, 11, None),
-        ],
-        h: 0.4 * um,
-        min_angle_deg: 25.0,
-    };
-    // boundaries of the solid: the outer sides and bottom of the sapphire block
-    let mut outer: Vec<i32> = vec![];
-    if let Ok(m) = mesh_2d(&spec2) {
-        for f in 0..m.n_facets() {
-            let (pa, pb) = (m.point(m.facet(f)[0] as usize), m.point(m.facet(f)[1] as usize));
-            let (mx, my) = (0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1]));
-            let side = (mx - (x0 - w_pml)).abs() < 1e-9 || (mx - (x1 + w_pml)).abs() < 1e-9 || (my - (y0 - w_pml)).abs() < 1e-9;
-            if side && my < ys + 1e-9 {
-                outer.push(m.facet_labels[f]);
-            }
-        }
-    }
-    outer.sort();
-    outer.dedup();
-    let g = GeometrySpec { geometry: Geometry::Shapes { spec: spec2, extrude: None }, domains: vec![], boundaries: vec![] };
+    let (xin, hin, ztop, lp) = (6.0 * um, 10.0 * um, 3.0 * um, 1.0 * um);
+    let (w_si, h_si, zone) = (450e-9, 230e-9, 1.5 * um);
+    let x = xin + lp;
+    let mut m = Model::new_2d();
+    let air = m.rect("air_box", (-x, -hin - lp), (x, ztop + lp));
+    let sapphire = m.rect("sapphire_box", (-x, -hin - lp), (x, 0.0));
+    let sap_near = m.rect("sapphire_near_box", (-zone, -zone), (zone, 0.0));
+    let air_near = m.rect("air_near_box", (-zone, 0.0), (zone, zone));
+    let si = m.rect("silicon_box", (-w_si / 2.0, 0.0), (w_si / 2.0, h_si));
+    let window = m.rect("window", (-xin, -hin), (xin, ztop));
+    m.overlay(&[("air", air), ("sapphire", sapphire), ("sapphire_near", sap_near), ("air_near", air_near), ("silicon", si)]);
+    m.pml("pml", window, &[], lp, 3.0, 2.0);
+    m.size("size_near", selector("region(sapphire_near) | region(air_near)"), Some((0.08 * um).into()), None, None);
+    m.size("size_si", selector("region(silicon)"), Some(40e-9.into()), None, None);
+    let (g, mg) = named(m, 0.4 * um);
     let mut p = base(g, Physics::Emw);
-    let pml = |x, y, strength| Pml { x, y, z: PmlDir::Off, strength, order: 2.0, re: 1.0 };
-    let absorbing = |strength: f64| -> Vec<(i32, Pml)> {
-        vec![
-            (4, pml(PmlDir::Minus, PmlDir::Off, strength)),
-            (5, pml(PmlDir::Plus, PmlDir::Off, strength)),
-            (6, pml(PmlDir::Off, PmlDir::Minus, strength)),
-            (7, pml(PmlDir::Off, PmlDir::Plus, strength)),
-            (8, pml(PmlDir::Minus, PmlDir::Minus, strength)),
-            (9, pml(PmlDir::Plus, PmlDir::Minus, strength)),
-            (10, pml(PmlDir::Minus, PmlDir::Plus, strength)),
-            (11, pml(PmlDir::Plus, PmlDir::Plus, strength)),
-            (12, pml(PmlDir::Minus, PmlDir::Off, strength)),
-            (13, pml(PmlDir::Plus, PmlDir::Off, strength)),
-        ]
-    };
+    let (sapphire, air, silicon) = (mg.domains("sapphire*, sapphire_near*"), mg.domains("air*, air_near*"), mg.domains("silicon"));
+    let pml = mg.pml_materials(3.0);
     // optical: sapphire n = 1.746, silicon 3.45, air 1
     {
         let e = p.spec_mut(Physics::Emw);
-        for (d, n) in [(1, 1.746), (2, 3.45), (3, 1.0), (4, 1.746), (5, 1.746), (6, 1.746), (7, 1.0), (8, 1.746), (9, 1.746), (10, 1.0), (11, 1.0), (12, 1.0), (13, 1.0)] {
-            e.materials.set(d, "eps_r", n * n);
-            e.materials.set(d, "mu_r", 1.0);
+        for (ds, n) in [(&sapphire, 1.746), (&silicon, 3.45), (&air, 1.0)] {
+            for &d in ds {
+                e.materials.set(d, "eps_r", n * n);
+                e.materials.set(d, "mu_r", 1.0);
+            }
         }
-        for (d, pm) in absorbing(3.0) {
-            e.materials.pml.insert(d, pm);
-        }
+        e.materials.pml.extend(pml.clone());
         e.study = Study::Modes { freq: 299792458.0 / 1550e-9, n_target: 2.4, evanescent: false, n_modes: 4 };
     }
     // acoustic: silicon strip and sapphire block (rotated), the layers above the surface are not solid
     {
         let so = p.spec_mut(Physics::Solid);
-        so.inactive = vec![3, 7, 10, 11, 12, 13];
-        for d in 1..=13 {
-            so.materials.set(d, "E", 100e9);
-            so.materials.set(d, "nu", 0.25);
-            so.materials.set(d, "rho", 3980.0);
+        so.inactive = air.clone();
+        for d in sapphire.iter().chain(&silicon).chain(&air) {
+            so.materials.set(*d, "E", 100e9);
+            so.materials.set(*d, "nu", 0.25);
+            so.materials.set(*d, "rho", 3980.0);
         }
         let saph = Anisotropy { stiffness: Some(Stiffness::Trigonal { c11: 497.73e9, c12: 162.8e9, c13: 116.0e9, c14: -21.9e9, c33: 500.9e9, c44: 146.8e9 }), euler_deg: femcore::material::euler_from_rotation(&femcore::chips::crystal_rotations(0.0).1), ..Default::default() };
-        for d in [1, 4, 5, 6, 8, 9] {
+        for &d in &sapphire {
             so.materials.aniso.insert(d, saph.clone());
         }
-        so.materials.aniso.insert(2, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 166e9, c12: 64e9, c44: 79e9 }), euler_deg: [0.0; 3], ..Default::default() });
-        so.materials.set(2, "rho", 2329.0);
-        for (d, pm) in absorbing(3.0) {
-            if [4, 5, 6, 8, 9].contains(&d) {
-                so.materials.pml.insert(d, pm);
-            }
+        for &d in &silicon {
+            so.materials.aniso.insert(d, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 166e9, c12: 64e9, c44: 79e9 }), euler_deg: [0.0; 3], ..Default::default() });
+            so.materials.set(d, "rho", 2329.0);
         }
-        so.bcs = vec![Bc { labels: outer, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+        so.materials.pml.extend(pml.into_iter().filter(|(d, _)| sapphire.contains(d)));
+        // clamped: the outer sides and bottom of the sapphire block
+        let outer = sel(&mg, "outer & in_box([-1, 0, -1], [1, 0, 1e-12], within)");
+        so.bcs = vec![Bc { labels: outer, kind: fixed_all() }];
         so.study = Study::Eigenfrequency { n_modes: 8, f_search: 9.47e9 };
         so.out_of_plane = Some(2.3172 * 2.0 * std::f64::consts::PI * 9.47e9 / 299792458.0);
     }
     p
 }
 
-/// A 40 x 30 x 20 mm air-filled cavity with perfectly conducting walls; the modes are TE101 at 6.2457 GHz,
-/// then 8.3795, 9.0076 (twice) GHz and so on (f = c/2 sqrt((m/a)^2 + (n/b)^2 + (p/d)^2)).
+/// A 40 x 30 x 20 mm air-filled cavity with perfectly conducting walls (the 40 x 20 mm section swept 30 mm along y); the modes are TE101
+/// at 6.2457 GHz, then 8.3795, 9.0076 (twice) GHz and so on (f = c/2 sqrt((m/a)^2 + (n/b)^2 + (p/d)^2)).
 pub fn box_cavity() -> Project {
-    let g = GeometrySpec::block(0.04, 0.03, 0.02, 8, 6, 4);
+    let (g, _mg, _s, _e) = swept(plate(0.04, 0.02), 0.005, 0.03, 6);
     let mut p = base(g, Physics::Emw);
     let e = p.spec_mut(Physics::Emw);
     e.materials.default.insert("eps_r".into(), 1.0);

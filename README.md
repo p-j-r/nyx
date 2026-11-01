@@ -227,7 +227,7 @@ elements; it still wins for static solves, and the eigenfrequency study then cho
 
 ## 3D mesher (Solids)
 
-Geometry > Solids builds tetrahedral meshes of boxes, spheres, cylinders and extruded outlines, painted
+The Solids geometry kind has been removed from the application (every geometry is now a `geom` model); the mesher itself stays in `femcore::mesher3d` and builds tetrahedral meshes of boxes, spheres, cylinders and extruded outlines, painted
 in order (a later body overrides earlier ones, domain 0 is a hole). The method is isosurface stuffing
 (Labelle and Shewchuk, 2007, as implemented in Quartet): fill the solid with the tetrahedra of a
 body-centred cubic lattice, move lattice vertices that lie within alpha of an edge length of the surface onto
@@ -295,11 +295,8 @@ reads such files back. The writer is `femcore::h5io`.
 
 ## Using the application
 
-* **File > New (Ctrl+N)** starts a simulation from scratch: choose the physics, 2D or 3D, and either a structured rectangle/block or the shape/solid
-  meshers; you get default materials and no boundary conditions, then fill in the tabs below and press Compute (F5).
-* **Geometry** - rectangle (2D) or block (3D), element counts, optional *domain regions* and
-  *boundary regions* (boxes that relabel cells/boundaries, so you can have several materials or
-  split a boundary). Boundary numbers: rectangle 1 x=0, 2 y=0, 3 y=ly, 4 x=lx; block 1 x=0, 2 y=0, 3 z=0, 4 z=lz, 5 y=ly, 6 x=lx.
+* **File > New (Ctrl+N)** starts a simulation from scratch: choose the physics and 2D or 3D (a 3D project is the 2D section swept along y); you get a plate as a `geom` model, default materials and no boundary conditions, then fill in the tabs below and press Compute (F5).
+* **Geometry** - one `geom` model (regions and boundaries are named; a selector such as `outer & plane(x = 0)` picks boundaries), an element size, and optionally a sweep along y into 3D layers. The rectangle, block, shapes and solids kinds no longer exist; the removed ones in an old project are named in the error when it is opened.
   **File > Open** (or drag a file in) reads saved projects (`.nyx.xml`, `.nyx.json`) and HDF5 results.
 * **Materials** - per domain, with a small library (Si, SiO2, Si3N4, sapphire (isotropic), Al,
   Cu, steel, water, FR-4, air). Values are shared between the physics that use them.
@@ -337,5 +334,5 @@ this project (it finds repeated eigenvalues such as the degenerate modes of a sq
 ## Limits
 
 * Linear materials only (no contact or nonlinear solids). Perfectly matched layers are available for the waveguide modes and for solid eigenfrequencies (complex coordinate stretching, complex neff or frequency); low-reflecting boundaries need a search frequency (they make the problem quadratic) and cannot be combined with periodic conditions yet. Anisotropic data is supported: crystal stiffness (cubic, hexagonal, trigonal, orthotropic) with Euler-angle orientation, and tensor conductivity, permittivity and thermal expansion. For the waveguide modes the crystal must be oriented with the propagation axis z as a principal axis.
-* Meshes: the app generates rectangles and blocks. Quadrilaterals, hexahedra and prisms given as a `CellMesh` are split into triangles/tetrahedra (exact for straight-sided cells; a hexahedron becomes 6 tetrahedra (24 with the old star split, see above)). Pyramids are not supported (view only). The built-in mesher (Geometry > Shapes) meshes 2D rectangles, circles and polygons (overlapping shapes, holes, per-shape element size, boundaries numbered per shape edge) with constrained Delaunay triangulation and Ruppert refinement (the `spade` crate), and can extrude the 2D mesh through layers into 3D tetrahedra. Geometry > Solids meshes boxes, spheres, cylinders and extruded outlines in 3D (see the 3D mesher section).
+* Meshes: the app meshes `geom` models (2D, optionally swept along y). Quadrilaterals, hexahedra and prisms given as a `CellMesh` are split into triangles/tetrahedra (exact for straight-sided cells; a hexahedron becomes 6 tetrahedra (24 with the old star split, see above)). Pyramids are not supported (view only). The 2D mesher (`femcore::mesher`) meshes 2D rectangles, circles and polygons (overlapping shapes, holes, per-shape element size, boundaries numbered per shape edge) with constrained Delaunay triangulation and Ruppert refinement (the `spade` crate), and can extrude the 2D mesh through layers into 3D tetrahedra. `femcore::mesher3d` meshes boxes, spheres, cylinders and extruded outlines in 3D (see the 3D mesher section); the application no longer offers it.
 * Dense eigendecomposition is used for transient heat up to about 2500 free dofs.

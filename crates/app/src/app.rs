@@ -26,7 +26,6 @@ use std::time::Instant;
 pub struct NewDialog {
     pub physics: Physics,
     pub three_d: bool,
-    pub structured: bool,
 }
 
 pub enum Queued {
@@ -458,7 +457,7 @@ impl App {
             ui.menu_button("File", |ui| {
                 if ui.button("New... (Ctrl+N)").clicked() {
                     ui.close();
-                    self.new_dialog = Some(NewDialog { physics: self.proj.active, three_d: false, structured: true });
+                    self.new_dialog = Some(NewDialog { physics: self.proj.active, three_d: false });
                 }
                 if ui.button("Open... (Ctrl+O)").clicked() {
                     ui.close();
@@ -545,13 +544,7 @@ impl App {
                 ui.label("Space");
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut d.three_d, false, "2D (cross-section)");
-                    ui.add_enabled_ui(d.physics != Physics::Brillouin, |ui| ui.selectable_value(&mut d.three_d, true, "3D"));
-                });
-                ui.end_row();
-                ui.label("Geometry");
-                ui.vertical(|ui| {
-                    ui.selectable_value(&mut d.structured, true, if d.three_d { "Block with a structured mesh" } else { "Rectangle with a structured mesh" });
-                    ui.selectable_value(&mut d.structured, false, if d.three_d { "Solids: boxes, spheres, cylinders (meshed for you)" } else { "Shapes: rectangles, circles, polygons (meshed for you)" });
+                    ui.add_enabled_ui(d.physics != Physics::Brillouin, |ui| ui.selectable_value(&mut d.three_d, true, "3D (the section swept along y)"));
                 });
                 ui.end_row();
             });
@@ -569,7 +562,7 @@ impl App {
         });
         if create {
             let what = format!("{}, {}", d.physics.name(), if d.three_d { "3D" } else { "2D" });
-            self.new_project(examples::blank(d.physics, d.three_d, d.structured), &what);
+            self.new_project(examples::blank(d.physics, d.three_d), &what);
         } else if open && !cancel {
             self.new_dialog = Some(d);
         }
@@ -730,7 +723,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let t_ui = Instant::now();
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
-            self.new_dialog = Some(NewDialog { physics: self.proj.active, three_d: false, structured: true });
+            self.new_dialog = Some(NewDialog { physics: self.proj.active, three_d: false });
         }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::O)) {
             self.open_dialog();
@@ -806,21 +799,23 @@ mod tests {
         wait_idle(&mut a, 30);
         for physics in Physics::ALL {
             for three_d in [false, true] {
-                for structured in [true, false] {
-                    let p = crate::examples::blank(physics, three_d, structured);
+                {
+                    let p = crate::examples::blank(physics, three_d);
                     assert_eq!(p.active, physics);
                     assert!(p.specs.iter().all(|s| s.bcs.is_empty()), "no boundary conditions in a new project");
-                    let mesh = p.geometry.build().unwrap_or_else(|e| panic!("{physics:?} 3d={three_d} structured={structured}: {e}"));
+                    let mesh = p.geometry.build().unwrap_or_else(|e| panic!("{physics:?} 3d={three_d}: {e}"));
                     assert_eq!(mesh.dim, if three_d && physics != Physics::Brillouin { 3 } else { 2 });
                 }
             }
         }
-        a.new_project(crate::examples::blank(Physics::Electrostatics, false, true), "test");
+        a.new_project(crate::examples::blank(Physics::Electrostatics, false), "test");
         wait_idle(&mut a, 30);
         assert!(a.results.is_empty() && a.doc.mesh.is_some() && a.project_path.is_none());
         // set up from scratch: plates on the left and right, then compute
+        let names = a.proj.geometry.build_named().unwrap();
+        let (left, right) = (names.select("outer & plane(x = 0)").unwrap(), names.select("outer & plane(x = 1)").unwrap());
         let es = a.proj.spec_mut(Physics::Electrostatics);
-        es.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![4], kind: BcKind::Ground }];
+        es.bcs = vec![Bc { labels: left, kind: BcKind::Potential(1.0) }, Bc { labels: right, kind: BcKind::Ground }];
         a.compute();
         wait_idle(&mut a, 60);
         assert!(a.error.is_none(), "{:?}", a.error);
@@ -883,7 +878,7 @@ mod tests {
         // a big 3D eigenfrequency problem on the same window
         a.load_example(4);
         wait_idle(&mut a, 30);
-        a.geom_edit = GeometrySpec { geometry: Geometry::Block { lx: 6.0, ly: 1.2, lz: 1.2, nx: 60, ny: 12, nz: 12 }, domains: vec![], boundaries: vec![] };
+        a.geom_edit = GeometrySpec::plate(1.2, 1.2, 0.1, Some(6.0));
         a.rebuild_mesh();
         wait_idle(&mut a, 60);
         let kept = a.results.len();

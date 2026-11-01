@@ -1,8 +1,8 @@
 //! The project (what is saved) and the run-time state around it.
 //!
-//! A `Project` is the geometry (`GeometrySpec`: rectangle, block, 2D shapes, 3D solids, or a model file), one `ProblemSpec`
-//! per physics, the active physics and the colour map. It is written as XML (`xmlio`) or JSON. `ResultView` wraps a
-//! `SolveResult` with what the plots need (selected solution and field, range, deformation scale, cached values).
+//! A `Project` is the geometry (`GeometrySpec`: a `geom` feature list), one `ProblemSpec` per physics, the active physics and the
+//! colour map. It is written as XML (`xmlio`) or JSON. `ResultView` wraps a `SolveResult` with what the plots need (selected solution
+//! and field, range, deformation scale, cached values).
 
 use crate::colormap::Colormap;
 use femcore::fields::Display;
@@ -11,125 +11,88 @@ use femcore::view::ViewMesh;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// The geometry of a project: one `geom` model (exact regions and edges with names and rules, see `femcore::geomdrive`). A 2D model is
+/// the x-z cross-section, meshed with triangles of size `h`; with `extrude` layers it is swept along y (the propagation axis) into
+/// tetrahedra, which is how 3D problems are made until `geom` meshes general 3D models.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Geometry {
-    /// structured triangles on the x-z cross-section (width `lx`, height `lz`)
-    Rectangle {
-        lx: f64,
-        #[serde(alias = "ly")]
-        lz: f64,
-        nx: usize,
-        #[serde(alias = "ny")]
-        nz: usize,
-    },
-    Block { lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize },
-    /// 2D shapes meshed with triangles, optionally extruded through layers into 3D
-    Shapes { spec: femcore::mesher::Spec2d, extrude: Option<Vec<femcore::mesher::Layer>> },
-    /// 3D bodies (box, sphere, cylinder, extrusion) meshed with tetrahedra by isosurface stuffing
-    Solids { spec: femcore::mesher3d::Spec3d },
-    /// A `geom` model: exact regions and edges with names and rules (see `femcore::geomdrive`). A 2D model is the x-z cross-section,
-    /// meshed with triangles of size `h`; with `extrude` layers it is swept along y (the propagation axis) into tetrahedra.
-    Model { list: geom::model::FeatureList, h: f64, extrude: Option<Vec<femcore::mesher::Layer>> },
-}
-
-impl Geometry {
-    pub fn dim(&self) -> usize {
-        match self {
-            Geometry::Rectangle { .. } => 2,
-            Geometry::Block { .. } => 3,
-            Geometry::Shapes { extrude, .. } => if extrude.is_some() { 3 } else { 2 },
-            Geometry::Solids { .. } => 3,
-            Geometry::Model { list, extrude, .. } => if extrude.is_some() { 3 } else { list.dim as usize },
-        }
-    }
-}
-
-/// A box (min per axis, then max per axis) that relabels the cells or boundary facets inside it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Region {
-    pub bbox: Vec<f64>,
-    pub label: i32,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "serde_json::Value")]
 pub struct GeometrySpec {
-    pub geometry: Geometry,
-    pub domains: Vec<Region>,
-    pub boundaries: Vec<Region>,
+    pub list: geom::model::FeatureList,
+    /// global element size
+    pub h: f64,
+    pub extrude: Option<Vec<femcore::mesher::Layer>>,
+}
+
+impl TryFrom<serde_json::Value> for GeometrySpec {
+    type Error = String;
+
+    /// Reads the current form, and the `{"geometry": {"Model": ...}}` form of earlier files. The removed kinds (rectangle, block, shapes,
+    /// solids) are named in the error.
+    fn try_from(v: serde_json::Value) -> Result<Self, String> {
+        #[derive(Deserialize)]
+        struct Fields {
+            list: geom::model::FeatureList,
+            h: f64,
+            #[serde(default)]
+            extrude: Option<Vec<femcore::mesher::Layer>>,
+        }
+        let inner = match v.get("geometry") {
+            Some(g) => match g.get("Model") {
+                Some(m) => m.clone(),
+                None => {
+                    let kind = g.as_object().and_then(|o| o.keys().next().cloned()).unwrap_or_default();
+                    return Err(format!(
+                        "this project uses the geometry kind '{kind}', which has been removed: build the geometry as a model (Geometry tab) instead"
+                    ));
+                }
+            },
+            None => v,
+        };
+        let f: Fields = serde_json::from_value(inner).map_err(|e| e.to_string())?;
+        Ok(GeometrySpec { list: f.list, h: f.h, extrude: f.extrude })
+    }
 }
 
 impl GeometrySpec {
-    pub fn rectangle(lx: f64, lz: f64, nx: usize, nz: usize) -> Self {
-        GeometrySpec { geometry: Geometry::Rectangle { lx, lz, nx, nz }, domains: vec![], boundaries: vec![] }
-    }
     /// A model of the x-z cross-section (a 2D feature list) meshed with element size `h`.
     pub fn model(list: geom::model::FeatureList, h: f64) -> Self {
-        GeometrySpec { geometry: Geometry::Model { list, h, extrude: None }, domains: vec![], boundaries: vec![] }
+        GeometrySpec { list, h, extrude: None }
     }
+
     /// A 2D model swept along y through `layers` (see `femcore::mesher::extrude_y`).
     pub fn model_extruded(list: geom::model::FeatureList, h: f64, layers: Vec<femcore::mesher::Layer>) -> Self {
-        GeometrySpec { geometry: Geometry::Model { list, h, extrude: Some(layers) }, domains: vec![], boundaries: vec![] }
+        GeometrySpec { list, h, extrude: Some(layers) }
     }
-    pub fn shapes() -> Self {
-        use femcore::mesher::*;
-        let spec = Spec2d { parts: vec![Part { shape: Shape::Rect { x0: 0.0, y0: 0.0, x1: 1.0, y1: 0.5 }, domain: 1, h: None }], h: 0.05, min_angle_deg: 25.0 };
-        GeometrySpec { geometry: Geometry::Shapes { spec, extrude: None }, domains: vec![], boundaries: vec![] }
+
+    /// A rectangle `lx` wide (x) and `lz` high (z), one region `plate`, with element size `h`; swept `len` along y into a block when `len` is given.
+    pub fn plate(lx: f64, lz: f64, h: f64, len: Option<f64>) -> Self {
+        let mut m = geom::model::Model::new_2d();
+        let r = m.rect("plate", (0.0, 0.0), (lx, lz));
+        m.overlay(&[("plate", r)]);
+        let layers = len.map(|l| vec![femcore::mesher::Layer { thickness: l, n: ((l / h).round() as usize).clamp(1, 200), domain_offset: 0 }]);
+        GeometrySpec { list: m.list, h, extrude: layers }
     }
-    pub fn solids() -> Self {
-        use femcore::mesher3d::*;
-        let spec = Spec3d { bodies: vec![Body3d { solid: Solid::Box { min: [0.0, 0.0, 0.0], max: [1.0, 0.5, 0.25] }, domain: 1, h: None }], h: 0.05, alpha: 0.3, snap_features: true, min_layers: 2.0 };
-        GeometrySpec { geometry: Geometry::Solids { spec }, domains: vec![], boundaries: vec![] }
-    }
-    pub fn block(lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize) -> Self {
-        GeometrySpec { geometry: Geometry::Block { lx, ly, lz, nx, ny, nz }, domains: vec![], boundaries: vec![] }
+
+    /// Evaluates and meshes the model: the mesh with the names of its regions and boundaries.
+    pub fn build_named(&self) -> Result<femcore::geomdrive::MeshedGeom, String> {
+        if self.list.dim != 2 {
+            return Err("a 3D model cannot be meshed yet: model the x-z cross-section in 2D and sweep it along y with layers".into());
+        }
+        if !(self.h > 0.0 && self.h.is_finite()) {
+            return Err("the element size must be a positive finite number".into());
+        }
+        let mut g = femcore::geomdrive::mesh_geom_2d(femcore::geomdrive::evaluate(&self.list)?, &femcore::geomdrive::GeomMeshOpts::new(self.h))?;
+        if let Some(layers) = &self.extrude {
+            g.mesh = femcore::mesher::extrude_y(&g.mesh, layers, 0.0)?;
+        }
+        Ok(g)
     }
 
     pub fn build(&self) -> Result<femcore::mesh::SimplexMesh, String> {
-        use femcore::mesh::SimplexMesh;
-        let mut mesh = match &self.geometry {
-            Geometry::Rectangle { lx, lz, nx, nz } => {
-                if !(*lx > 0.0 && *lz > 0.0 && lx.is_finite() && lz.is_finite()) || *nx < 1 || *nz < 1 {
-                    return Err("sizes must be positive finite numbers and element counts at least 1".into());
-                }
-                if nx * nz > 4_000_000 {
-                    return Err("that is too many elements (limit 4 million)".into());
-                }
-                SimplexMesh::rectangle(*lx, *lz, *nx, *nz)
-            }
-            Geometry::Shapes { spec, extrude } => {
-                let m2 = femcore::mesher::mesh_2d(spec)?;
-                match extrude {
-                    Some(layers) => femcore::mesher::extrude_y(&m2, layers, 0.0)?,
-                    None => m2,
-                }
-            }
-            Geometry::Model { list, h, extrude } => {
-                if list.dim != 2 {
-                    return Err("a 3D model cannot be meshed yet: model the x-z cross-section in 2D and extrude it along y with layers".into());
-                }
-                let g = femcore::geomdrive::mesh_geom_2d(femcore::geomdrive::evaluate(list)?, &femcore::geomdrive::GeomMeshOpts::new(*h))?;
-                match extrude {
-                    Some(layers) => femcore::mesher::extrude_y(&g.mesh, layers, 0.0)?,
-                    None => g.mesh,
-                }
-            }
-            Geometry::Solids { spec } => femcore::mesher3d::mesh_3d(spec)?.0,
-            Geometry::Block { lx, ly, lz, nx, ny, nz } => {
-                if !(*lx > 0.0 && *ly > 0.0 && *lz > 0.0 && lx.is_finite() && ly.is_finite() && lz.is_finite()) || *nx < 1 || *ny < 1 || *nz < 1 {
-                    return Err("sizes must be positive finite numbers and element counts at least 1".into());
-                }
-                if nx * ny * nz * 6 > 6_000_000 {
-                    return Err("that is too many elements (limit 6 million tetrahedra)".into());
-                }
-                SimplexMesh::block(*lx, *ly, *lz, *nx, *ny, *nz)
-            }
-        };
-        let dom: Vec<(Vec<f64>, i32)> = self.domains.iter().map(|r| (r.bbox.clone(), r.label)).collect();
-        let bnd: Vec<(Vec<f64>, i32)> = self.boundaries.iter().map(|r| (r.bbox.clone(), r.label)).collect();
-        mesh.relabel(&dom, &bnd)?;
-        Ok(mesh)
+        Ok(self.build_named()?.mesh)
     }
 }
+
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Source {
