@@ -11,7 +11,7 @@ fn solid_spec(mesh: &SimplexMesh) -> ProblemSpec {
         s.materials.default.insert(k.into(), v);
     }
     let labels = mesh.boundary_labels();
-    s.bcs = vec![Bc { labels: vec![labels[0]], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![*labels.last().unwrap()], kind: BcKind::Load([0.0, -1e5, 0.0]) }];
+    s.bcs = vec![Bc { on: None, labels: vec![labels[0]], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![*labels.last().unwrap()], kind: BcKind::Load([0.0, -1e5, 0.0]) }];
     s
 }
 
@@ -64,11 +64,11 @@ fn electrostatics_and_heat_refuse_nan_materials_too() {
     let m = SimplexMesh::rectangle(1.0, 1.0, 6, 6);
     let mut es = ProblemSpec::new(Physics::Electrostatics);
     es.materials.default.insert("eps_r".into(), f64::NAN);
-    es.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![3], kind: BcKind::Ground }];
+    es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
     assert!(solve(&m, &es, &mut SolveState::default()).unwrap_err().contains("'eps_r'"));
     let mut heat = ProblemSpec::new(Physics::Heat);
     heat.materials.default.insert("k".into(), f64::NAN);
-    heat.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(1.0) }];
+    heat.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(1.0) }];
     assert!(solve(&m, &heat, &mut SolveState::default()).unwrap_err().contains("'k'"));
 }
 

@@ -10,7 +10,7 @@ fn bar_spec(plane: Plane, nm: usize) -> ProblemSpec {
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         s.materials.default.insert(k.into(), v);
     }
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     s
 }
 
@@ -53,7 +53,7 @@ fn complex_stretch_gives_the_analytic_complex_axial_frequencies() {
     let mut s = bar_spec(Plane::Stress, 3);
     s.materials.default.insert("nu".into(), 0.0);
     // roller along y: uy = 0 on the long sides, so only axial motion exists
-    s.bcs.push(Bc { labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } });
+    s.bcs.push(Bc { on: None, labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } });
     s.materials.pml.insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.1, order: 0.0, re: 1.0 });
     let r = solve_solid(&mesh, &s, &SolveState::default()).unwrap();
     let cs = (e / rho).sqrt();
@@ -109,7 +109,7 @@ fn beam_on_a_pml_substrate_loses_energy_but_keeps_its_frequency() {
     outer.sort();
     outer.dedup();
     let mut s = bar_spec(Plane::Strain, 4);
-    s.bcs = vec![Bc { labels: outer, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    s.bcs = vec![Bc { on: None, labels: outer, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     let st = |x, y| Pml { x, y, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 };
     s.materials.pml.insert(3, st(PmlDir::Minus, PmlDir::Off));
     s.materials.pml.insert(4, st(PmlDir::Plus, PmlDir::Off));
@@ -121,7 +121,7 @@ fn beam_on_a_pml_substrate_loses_energy_but_keeps_its_frequency() {
     // the beam alone, clamped at its foot
     let beam = mesh_2d(&Spec2d { parts: vec![rect(0.49, 0.5, 0.51, 0.8, 1)], h: 0.01, min_angle_deg: 25.0 }).unwrap();
     let mut b = bar_spec(Plane::Strain, 1);
-    b.bcs = vec![Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    b.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     let fb = solve_solid(&beam, &b, &SolveState::default()).unwrap().solutions[0].value.unwrap();
     let f = freqs(&r);
     let near = f.iter().cloned().min_by(|a, c| (a - fb).abs().partial_cmp(&(c - fb).abs()).unwrap()).unwrap();
@@ -149,10 +149,10 @@ fn low_reflecting_boundary_gives_the_analytic_damped_bar_modes() {
         s.materials.set(2, k, v);
     }
     s.bcs = vec![
-        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
         // rollers along the long sides: uy = 0, so the motion is uniaxial
-        Bc { labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { labels: vec![4], kind: BcKind::LowReflecting },
+        Bc { on: None, labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![4], kind: BcKind::LowReflecting },
     ];
     let c = (e / rho).sqrt();
     s.study = Study::Eigenfrequency { n_modes: 4, f_search: 1.05 * c / (2.0 * l) };

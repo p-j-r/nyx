@@ -24,7 +24,7 @@ fn cubic_with_isotropic_constants_reproduces_the_isotropic_solution() {
     let (e, nu) = (70e9, 0.33);
     let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
     let mu = e / (2.0 * (1.0 + nu));
-    let bcs = vec![Bc { labels: vec![1], kind: fixed([true; 3]) }, Bc { labels: vec![6], kind: BcKind::Load([1e6, 2e5, -3e5]) }];
+    let bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true; 3]) }, Bc { on: None, labels: vec![6], kind: BcKind::Load([1e6, 2e5, -3e5]) }];
     let mut iso = solid_spec(Plane::Strain, Study::Static);
     iso.materials.default.insert("E".into(), e);
     iso.materials.default.insert("nu".into(), nu);
@@ -54,9 +54,9 @@ fn cubic_plate_stiffness_depends_on_orientation_like_the_compliance_formula() {
         let mut spec = solid_spec(Plane::Stress, Study::Static);
         spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(Stiffness::Cubic { c11, c12, c44 }), euler_deg: [theta, 0.0, 0.0], ..Default::default() });
         spec.bcs = vec![
-            Bc { labels: vec![1], kind: fixed([true, false, false]) },
-            Bc { labels: vec![2], kind: fixed([false, true, false]) },
-            Bc { labels: vec![4], kind: BcKind::Load([sigma, 0.0, 0.0]) },
+            Bc { on: None, labels: vec![1], kind: fixed([true, false, false]) },
+            Bc { on: None, labels: vec![2], kind: fixed([false, true, false]) },
+            Bc { on: None, labels: vec![4], kind: BcKind::Load([sigma, 0.0, 0.0]) },
         ];
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
         let ux = &r.solutions[0].field("ux").unwrap().values;
@@ -80,7 +80,7 @@ fn sapphire_modes_follow_the_crystal_symmetry() {
         let mut spec = solid_spec(Plane::Strain, Study::Eigenfrequency { n_modes: 5, f_search: 0.0 });
         spec.materials.default.insert("rho".into(), 3980.0);
         spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(st.clone()), euler_deg: euler, ..Default::default() });
-        spec.bcs = vec![Bc { labels: vec![1], kind: fixed([true; 3]) }];
+        spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true; 3]) }];
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
         r.solutions.iter().map(|s| s.value.unwrap()).collect::<Vec<f64>>()
     };
@@ -104,7 +104,7 @@ fn anisotropic_thermal_expansion_of_a_free_plate_gives_no_stress() {
         spec.materials.default.insert("nu".into(), 0.25);
         spec.materials.aniso.insert(1, Anisotropy { expansion: Some(Tensor::Diagonal { x: ax, y: ay, z: ay }), ..Default::default() });
         spec.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(293.15 + dt), t_ref: 293.15 });
-        spec.bcs = vec![Bc { labels: vec![1], kind: fixed([true, false, false]) }, Bc { labels: vec![2], kind: fixed([false, true, false]) }];
+        spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true, false, false]) }, Bc { on: None, labels: vec![2], kind: fixed([false, true, false]) }];
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
         let s = &r.solutions[0];
         let x = mesh.dof_coordinates(2);
@@ -136,7 +136,7 @@ fn isotropic_plane_strain_free_expansion_is_stress_free() {
         spec.materials.default.insert(k.into(), v);
     }
     spec.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(393.15), t_ref: 293.15 });
-    spec.bcs = vec![Bc { labels: vec![1], kind: fixed([true, false, false]) }, Bc { labels: vec![2], kind: fixed([false, true, false]) }];
+    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true, false, false]) }, Bc { on: None, labels: vec![2], kind: fixed([false, true, false]) }];
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
     // in-plane stress vanishes; the constrained out-of-plane direction carries -E alpha dT
     for name in ["sxx", "syy", "sxy"] {
@@ -158,7 +158,7 @@ fn anisotropic_conductivity_is_exact_for_linear_temperature() {
     // linear field T = 300 + 20 x + 10 y imposed on all four sides through two values per side
     // (Dirichlet only supports constants, so use a 1D gradient in x and insulated sides: not exact
     // for a tensor with kxy != 0) -> instead check the flux of the 1D x-solution directly
-    spec.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(300.0) }, Bc { labels: vec![4], kind: BcKind::Temperature(320.0) }];
+    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Temperature(320.0) }];
     let r = femcore::scalar::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
     let t = &r.solutions[0].field("T").unwrap().values;
     let (tmin, tmax) = (t.iter().cloned().fold(f64::MAX, f64::min), t.iter().cloned().fold(f64::MIN, f64::max));
@@ -188,7 +188,7 @@ fn anisotropic_permittivity_sets_the_capacitance() {
     let mesh = SimplexMesh::rectangle(1.0, 0.5, 8, 4);
     let mut spec = ProblemSpec::new(Physics::Electrostatics);
     spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 3.0 }), ..Default::default() });
-    spec.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![4], kind: BcKind::Ground }];
+    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
     let r = femcore::scalar::solve_electrostatics(&mesh, &spec).unwrap();
     let c = r.scalar("capacitance").unwrap();
     assert!((c / (femcore::scalar::EPS0 * 7.0 * 0.5) - 1.0).abs() < 1e-9, "{c}");
@@ -230,7 +230,7 @@ fn nonpositive_definite_stiffness_is_rejected() {
     let mesh = SimplexMesh::rectangle(1.0, 0.2, 4, 2);
     let mut spec = solid_spec(Plane::Strain, Study::Static);
     spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 10e9, c12: 60e9, c44: 5e9 }), ..Default::default() });
-    spec.bcs = vec![Bc { labels: vec![1], kind: fixed([true; 3]) }];
+    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true; 3]) }];
     assert!(solve_solid(&mesh, &spec, &SolveState::default()).unwrap_err().contains("positive definite"));
 }
 

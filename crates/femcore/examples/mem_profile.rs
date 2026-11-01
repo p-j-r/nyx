@@ -65,7 +65,7 @@ fn main() {
     }
     s.order = order;
     s.solver = solver;
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) }];
     if eigen {
         s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     }

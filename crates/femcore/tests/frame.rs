@@ -16,14 +16,14 @@ fn a_permittivity_tensor_in_the_wafer_frame_acts_on_the_vertical_axis_of_the_x_z
     let mesh = SimplexMesh::rectangle(1.0, 0.5, 8, 4);
     let mut spec = ProblemSpec::new(Physics::Electrostatics);
     spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 5.0 }), ..Default::default() });
-    spec.bcs = vec![Bc { labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { labels: vec![3], kind: BcKind::Ground }];
+    spec.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
     let r = femcore::solve::solve(&mesh, &wafer(spec.clone()), &mut SolveState::default()).unwrap();
     let c = r.scalar("capacitance").unwrap();
     assert!((c / (femcore::scalar::EPS0 * 5.0 * 1.0 / 0.5) - 1.0).abs() < 1e-9, "{c}");
     // the field of a uniform vertical field is called Ez
     assert!(r.solutions[0].field("Ez").is_some() && r.solutions[0].field("Ey").is_none());
     // plates on the sides see eps_xx
-    spec.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![4], kind: BcKind::Ground }];
+    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
     let r = femcore::solve::solve(&mesh, &wafer(spec), &mut SolveState::default()).unwrap();
     assert!((r.scalar("capacitance").unwrap() / (femcore::scalar::EPS0 * 7.0 * 0.5 / 1.0) - 1.0).abs() < 1e-9);
 }
@@ -91,12 +91,12 @@ fn a_loaded_cubic_plate_in_the_x_z_plane_deflects_like_the_same_plate_in_the_mod
     spec.materials.set(1, "nu", 0.3);
     spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 165.7e9, c12: 63.9e9, c44: 79.6e9 }), euler_deg: eul, ..Default::default() });
     let mut w = wafer(spec.clone());
-    w.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } }, Bc { labels: vec![4], kind: BcKind::Load([0.0, 0.0, -1e6]) }];
+    w.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, 0.0, -1e6]) }];
     let rw = femcore::solve::solve(&mesh, &w, &mut SolveState::default()).unwrap();
     // the model-frame description: the same rotation expressed in (x, z)
     let mut m = spec;
     m.materials.aniso.get_mut(&1).unwrap().euler_deg = euler_to_model_frame(eul);
-    m.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, false], values: [0.0; 3] } }, Bc { labels: vec![4], kind: BcKind::Load([0.0, -1e6, 0.0]) }];
+    m.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, false], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e6, 0.0]) }];
     let rm = femcore::solid::solve_solid(&mesh, &m, &SolveState::default()).unwrap();
     let (uz_w, uy_m) = (&rw.solutions[0].field("uz").unwrap().values, &rm.solutions[0].field("uy").unwrap().values);
     let scale = uy_m.iter().fold(0.0f64, |a, b| a.max(b.abs()));

@@ -90,7 +90,7 @@ fn poisson_on_a_meshed_disk_matches_the_exact_solution() {
     let m = mesh_2d(&Spec2d { parts: vec![Part { shape: Shape::Circle { cx: 0.0, cy: 0.0, r }, domain: 1, h: None }], h: 0.05, min_angle_deg: 25.0 }).unwrap();
     let mut s = ProblemSpec::new(Physics::Electrostatics);
     s.materials.default.insert("rho_v".into(), femcore::scalar::EPS0);
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Ground }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Ground }];
     let res = femcore::scalar::solve_electrostatics(&m, &s).unwrap();
     let vmax = res.scalar("V max").unwrap();
     assert!((vmax / (r * r / 4.0) - 1.0).abs() < 5e-3, "{vmax} vs {}", r * r / 4.0);
@@ -139,7 +139,7 @@ fn extrusion_is_conforming_and_solves_exactly() {
     assert_eq!(m3.boundary_labels(), vec![1, 2, 3, 4, 5, 6]);
     // potential 1 on x = 0 (boundary 1), ground on x = 1 (boundary 4): V = 1 - x exactly
     let mut s = ProblemSpec::new(Physics::Electrostatics);
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![4], kind: BcKind::Ground }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
     let r = femcore::scalar::solve_electrostatics(&m3, &s).unwrap();
     let v = &r.solutions[0].field("V").unwrap().values;
     let x = m3.dof_coordinates(2);
@@ -170,9 +170,9 @@ fn plate_with_a_hole_has_the_textbook_stress_concentration() {
     s.materials.default.insert("E".into(), 200e9);
     s.materials.default.insert("nu".into(), 0.3);
     s.bcs = vec![
-        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
     ];
     let r = femcore::solve::solve(&m, &s, &mut SolveState::default()).unwrap();
     let sxx_max = r.solutions[0].field("sxx").unwrap().values.iter().cloned().fold(0.0, f64::max);

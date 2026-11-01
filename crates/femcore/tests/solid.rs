@@ -17,7 +17,7 @@ fn cantilever(plane: Plane, study: Study) -> ProblemSpec {
     s.materials = steel();
     s.plane = plane;
     s.study = study;
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     s
 }
 
@@ -40,7 +40,7 @@ fn cantilever_tip_deflection_matches_beam_theory() {
     let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.1, 40, 4);
     for (plane, name) in planes() {
         let mut spec = cantilever(plane, Study::Static);
-        spec.bcs.push(Bc { labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) });
+        spec.bcs.push(Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) });
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
         let uy = &r.solutions[0].field("uy").unwrap().values;
         let tip = uy.iter().fold(0.0f64, |m, v| m.max(v.abs()));
@@ -87,9 +87,9 @@ fn stress_at_triangle_centroids_is_uniaxial() {
         spec.materials.default.insert("E".into(), 1e9);
         spec.materials.default.insert("nu".into(), nu);
         spec.bcs = vec![
-            Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-            Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-            Bc { labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
+            Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+            Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+            Bc { on: None, labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
         ];
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
         let s = &r.solutions[0];
@@ -123,8 +123,8 @@ fn thermal_expansion_of_a_free_bar() {
             spec.materials.default.insert(k.into(), v);
         }
         spec.bcs = vec![
-            Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-            Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+            Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+            Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
         ];
         spec.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(393.15), t_ref: 293.15 });
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
@@ -147,7 +147,7 @@ fn heat_result_drives_thermal_expansion() {
     let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.1, 10, 2);
     let mut heat = ProblemSpec::new(Physics::Heat);
     heat.materials.default.insert("k".into(), 1.0);
-    heat.bcs = vec![Bc { labels: vec![1, 4], kind: BcKind::Temperature(393.15) }];
+    heat.bcs = vec![Bc { on: None, labels: vec![1, 4], kind: BcKind::Temperature(393.15) }];
     let mut state = SolveState::default();
     femcore::scalar::solve_heat(&mesh, &heat, &mut state).unwrap();
     let mk = |source| {
@@ -169,7 +169,7 @@ fn block_3d_matches_beam_theory() {
     // block 1 x 0.1 x 0.1, fixed at x = 0 (boundary 1), load (0, 0, -1e5) N/m^2 on x = 1 (boundary 6): F = 1e3 N
     let mesh = femcore::mesh::SimplexMesh::block(1.0, 0.1, 0.1, 12, 2, 2);
     let mut spec = cantilever(Plane::Strain, Study::Static);
-    spec.bcs.push(Bc { labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) });
+    spec.bcs.push(Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) });
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
     let uz = &r.solutions[0].field("uz").unwrap().values;
     let tip = uz.iter().fold(0.0f64, |m, v| m.max(v.abs()));
@@ -196,9 +196,9 @@ fn roller_constraint_gives_uniaxial_strain_field() {
     spec.materials.default.insert("E".into(), 1e9);
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
-        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
     ];
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
     let ux = &r.solutions[0].field("ux").unwrap().values;
@@ -220,9 +220,9 @@ fn prescribed_displacement_and_two_materials() {
     spec.materials.set(2, "E", 400e9);
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
-        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { labels: vec![4], kind: BcKind::Fixed { fixed: [true, false, false], values: [1e-3, 0.0, 0.0] } },
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![4], kind: BcKind::Fixed { fixed: [true, false, false], values: [1e-3, 0.0, 0.0] } },
     ];
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
     // strain split: sigma = E1 e1 = E2 e2, e1 * 0.5 + e2 * 0.5 = 1e-3

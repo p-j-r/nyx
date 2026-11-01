@@ -196,7 +196,7 @@ fn uniaxial_tension_of_a_block_is_exact() {
     let mut sp = ProblemSpec::new(Physics::Solid);
     sp.materials.default.insert("E".into(), 1e9);
     sp.materials.default.insert("nu".into(), 0.0);
-    sp.bcs = vec![Bc { labels: vec![5], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![6], kind: BcKind::Load([0.0, 0.0, 1e6]) }];
+    sp.bcs = vec![Bc { on: None, labels: vec![5], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, 1e6]) }];
     let r = femcore::solid::solve_solid(&m, &sp, &SolveState::default()).unwrap();
     let uz = &r.solutions[0].field("uz").unwrap().values;
     let x = m.dof_coordinates(2);
@@ -216,7 +216,7 @@ fn tension_of_a_bar_with_a_locally_refined_slab_is_exact() {
     let mut sp = ProblemSpec::new(Physics::Solid);
     sp.materials.default.insert("E".into(), 1e9);
     sp.materials.default.insert("nu".into(), 0.0);
-    sp.bcs = vec![Bc { labels: vec![5], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![6], kind: BcKind::Load([0.0, 0.0, 1e6]) }];
+    sp.bcs = vec![Bc { on: None, labels: vec![5], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, 1e6]) }];
     let r = femcore::solid::solve_solid(&m, &sp, &SolveState::default()).unwrap();
     let uz = &r.solutions[0].field("uz").unwrap().values;
     let x = m.dof_coordinates(2);
@@ -234,7 +234,7 @@ fn tension_of_a_cylinder_is_close_to_the_bar_solution() {
     let mut sp = ProblemSpec::new(Physics::Solid);
     sp.materials.default.insert("E".into(), 1e9);
     sp.materials.default.insert("nu".into(), 0.0);
-    sp.bcs = vec![Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![3], kind: BcKind::Load([0.0, 0.0, 1e6]) }];
+    sp.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![3], kind: BcKind::Load([0.0, 0.0, 1e6]) }];
     let r = femcore::solid::solve_solid(&m, &sp, &SolveState::default()).unwrap();
     let uz = &r.solutions[0].field("uz").unwrap().values;
     let x = m.dof_coordinates(2);

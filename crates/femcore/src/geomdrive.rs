@@ -81,18 +81,7 @@ impl MeshedGeom {
 
     /// Boundary labels of whatever a selector text picks (`"outer & plane(z = -3e-6)"`).
     pub fn select(&self, selector: &str) -> Result<Vec<i32>, String> {
-        let sel = Selector::parse(selector).map_err(|e| e.to_string())?;
-        let r = self.eval.resolve(&sel).map_err(|e| e.to_string())?;
-        match r.set.kind {
-            EntityKind::Regions => Ok(r.set.ids.iter().map(|&i| self.labels.domains[i as usize].id).collect()),
-            EntityKind::Vertices => Err(format!("'{selector}' selects vertices, which have no label")),
-            _ => {
-                let mut v: Vec<i32> = r.set.ids.iter().filter_map(|&e| self.labels.label_of_edge(e)).collect();
-                v.sort_unstable();
-                v.dedup();
-                Ok(v)
-            }
-        }
+        select_labels(&self.eval, &self.labels, selector)
     }
 
     /// Sets a material property on a region or family (see `domains`).
@@ -217,4 +206,20 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
     )?;
     drop(fills);
     Ok(MeshedGeom { mesh, labels, eval: ev })
+}
+
+/// Labels of whatever a selector text picks in an evaluated model: boundary labels for edges, domain labels for regions.
+pub fn select_labels(ev: &Evaluated, labels: &LabelMap, selector: &str) -> Result<Vec<i32>, String> {
+    let sel = Selector::parse(selector).map_err(|e| e.to_string())?;
+    let r = ev.resolve(&sel).map_err(|e| e.to_string())?;
+    match r.set.kind {
+        EntityKind::Regions => Ok(r.set.ids.iter().map(|&i| labels.domains[i as usize].id).collect()),
+        EntityKind::Vertices => Err(format!("'{selector}' selects vertices, which have no label")),
+        _ => {
+            let mut v: Vec<i32> = r.set.ids.iter().filter_map(|&e| labels.label_of_edge(e)).collect();
+            v.sort_unstable();
+            v.dedup();
+            Ok(v)
+        }
+    }
 }

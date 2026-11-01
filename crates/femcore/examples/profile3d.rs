@@ -11,7 +11,7 @@ fn main() {
         s.materials.default.insert(k.into(), v);
     }
     s.order = if a.get(3).map(|x| x.as_str()) == Some("p1") { 1 } else { 2 };
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) }];
     let t = std::time::Instant::now();
     let r = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
     println!("{} cells, {} dofs, total {:.2} s | {}", mesh.n_cells(), r.dofs, t.elapsed().as_secs_f64(), r.log.first().cloned().unwrap_or_default());

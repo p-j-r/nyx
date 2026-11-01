@@ -46,8 +46,14 @@ fn sel(g: &MeshedGeom, rule: &str) -> Vec<i32> {
     g.select(rule).unwrap_or_else(|e| panic!("selector '{rule}': {e}"))
 }
 
-fn bc(labels: &[i32], kind: BcKind) -> Bc {
-    Bc { labels: labels.to_vec(), kind }
+/// A boundary condition on what a selector rule picks in the model (the integers are filled in from the mesh).
+fn rule(g: &MeshedGeom, rule: &str, kind: BcKind) -> Bc {
+    Bc { on: Some(rule.into()), labels: sel(g, rule), kind }
+}
+
+/// A boundary condition on a swept model's end (`ymin` or `ymax`) with the number it has in the built mesh.
+fn end(label: i32, which: &str, kind: BcKind) -> Bc {
+    Bc { on: Some(which.into()), labels: vec![label], kind }
 }
 
 fn set(p: &mut Project, phys: Physics, props: &[(&str, f64)]) {
@@ -141,7 +147,7 @@ pub fn capacitor() -> Project {
     for (name, eps) in [("left", 2.0), ("right", 8.0)] {
         mg.set_material(es, name, "eps_r", eps);
     }
-    es.bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), BcKind::Potential(1.0)), bc(&sel(&mg, "outer & plane(x = 1)"), BcKind::Ground)];
+    es.bcs = vec![rule(&mg, "outer & plane(x = 0)", BcKind::Potential(1.0)), rule(&mg, "outer & plane(x = 1)", BcKind::Ground)];
     p
 }
 
@@ -149,7 +155,7 @@ pub fn cantilever() -> Project {
     let (g, mg) = named(plate(1.0, 0.1), 0.02);
     let mut p = base(g, Physics::Solid);
     let s = p.spec_mut(Physics::Solid);
-    s.bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), fixed_all()), bc(&sel(&mg, "outer & plane(x = 1)"), BcKind::Load([0.0, 0.0, -1e5]))];
+    s.bcs = vec![rule(&mg, "outer & plane(x = 0)", fixed_all()), rule(&mg, "outer & plane(x = 1)", BcKind::Load([0.0, 0.0, -1e5]))];
     s.plane = Plane::Stress;
     p
 }
@@ -159,7 +165,7 @@ pub fn heated_plate() -> Project {
     let mut p = base(g, Physics::Heat);
     set(&mut p, Physics::Heat, &[("k", 50.0), ("rho", 7800.0), ("Cp", 470.0)]);
     let h = p.spec_mut(Physics::Heat);
-    h.bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), BcKind::Temperature(500.0)), bc(&sel(&mg, "outer - plane(x = 0)"), BcKind::Convection { h: 25.0, text: 293.15 })];
+    h.bcs = vec![rule(&mg, "outer & plane(x = 0)", BcKind::Temperature(500.0)), rule(&mg, "outer - plane(x = 0)", BcKind::Convection { h: 25.0, text: 293.15 })];
     h.study = Study::Transient { t_end: 20000.0, n_out: 20, t0: "293.15".into() };
     p
 }
@@ -169,10 +175,9 @@ pub fn thermal_bar() -> Project {
     let mut p = base(g, Physics::Solid);
     set(&mut p, Physics::Heat, &[("k", 160.0)]);
     set(&mut p, Physics::Solid, &[("E", 70e9), ("nu", 0.33), ("alpha", 23e-6), ("rho", 2700.0)]);
-    let (left, right) = (sel(&mg, "outer & plane(x = 0)"), sel(&mg, "outer & plane(x = 1)"));
-    p.spec_mut(Physics::Heat).bcs = vec![bc(&left, BcKind::Temperature(293.15)), bc(&right, BcKind::Temperature(393.15))];
+    p.spec_mut(Physics::Heat).bcs = vec![rule(&mg, "outer & plane(x = 0)", BcKind::Temperature(293.15)), rule(&mg, "outer & plane(x = 1)", BcKind::Temperature(393.15))];
     let s = p.spec_mut(Physics::Solid);
-    s.bcs = vec![bc(&left, BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] })];
+    s.bcs = vec![rule(&mg, "outer & plane(x = 0)", fixed_all())];
     s.thermal = Some(ThermalExpansion { source: ThermalSource::FromHeat, t_ref: 293.15 });
     s.plane = Plane::Stress;
     p
@@ -180,9 +185,9 @@ pub fn thermal_bar() -> Project {
 
 /// A 0.1 m square bar 1 m long: its section swept along y, clamped at y = 0 and loaded across at the far end.
 pub fn block_cantilever() -> Project {
-    let (g, _mg, start, end) = swept(plate(0.1, 0.1), 0.035, 1.0, 16);
+    let (g, _mg, start, far) = swept(plate(0.1, 0.1), 0.035, 1.0, 16);
     let mut p = base(g, Physics::Solid);
-    p.spec_mut(Physics::Solid).bcs = vec![bc(&[start], fixed_all()), bc(&[end], BcKind::Load([0.0, 0.0, -1e5]))];
+    p.spec_mut(Physics::Solid).bcs = vec![end(start, "ymin", fixed_all()), end(far, "ymax", BcKind::Load([0.0, 0.0, -1e5]))];
     p
 }
 
@@ -223,7 +228,7 @@ pub fn sapphire_cantilever() -> Project {
         s.materials.default.insert("rho".into(), rho);
     }
     let s = p.spec_mut(Physics::Solid);
-    s.bcs = vec![bc(&[start], fixed_all())];
+    s.bcs = vec![end(start, "ymin", fixed_all())];
     s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     p
 }
@@ -267,9 +272,9 @@ pub fn plate_with_hole() -> Project {
     let s = p.spec_mut(Physics::Solid);
     s.plane = Plane::Stress;
     s.bcs = vec![
-        bc(&sel(&mg, "outer & plane(x = 0)"), BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] }),
-        bc(&sel(&mg, "outer & plane(z = 0)"), BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] }),
-        bc(&sel(&mg, "outer & plane(x = 0.4)"), BcKind::Load([1e6, 0.0, 0.0])),
+        rule(&mg, "outer & plane(x = 0)", BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] }),
+        rule(&mg, "outer & plane(z = 0)", BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] }),
+        rule(&mg, "outer & plane(x = 0.4)", BcKind::Load([1e6, 0.0, 0.0])),
     ];
     p
 }
@@ -302,9 +307,8 @@ pub fn anchor_loss() -> Project {
         }
     }
     // clamped on the outer edge of the layers: every boundary below the substrate surface
-    let outer = sel(&mg, "(outer & in_box([-1, 0, -1], [2, 0, 0.5000000001], within)) - plane(z = 0.5)");
     let s = p.spec_mut(Physics::Solid);
-    s.bcs = vec![bc(&outer, fixed_all())];
+    s.bcs = vec![rule(&mg, "(outer & in_box([-1, 0, -1], [2, 0, 0.5000000001], within)) - plane(z = 0.5)", fixed_all())];
     s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     s.plane = Plane::Strain;
     p
@@ -320,7 +324,7 @@ pub fn drilled_plate() -> Project {
     m.size("size_hole", selector("kind(circle)"), Some(0.01.into()), None, None);
     let (g, mg, _start, _end) = swept(m, 0.02, 0.04, 4);
     let mut p = base(g, Physics::Solid);
-    p.spec_mut(Physics::Solid).bcs = vec![bc(&sel(&mg, "outer & plane(x = 0)"), fixed_all()), bc(&sel(&mg, "outer & plane(x = 0.4)"), BcKind::Load([1e6, 0.0, 0.0]))];
+    p.spec_mut(Physics::Solid).bcs = vec![rule(&mg, "outer & plane(x = 0)", fixed_all()), rule(&mg, "outer & plane(x = 0.4)", BcKind::Load([1e6, 0.0, 0.0]))];
     p
 }
 
@@ -380,8 +384,7 @@ pub fn sos_strip() -> Project {
         }
         so.materials.pml.extend(pml.into_iter().filter(|(d, _)| sapphire.contains(d)));
         // clamped: the outer sides and bottom of the sapphire block
-        let outer = sel(&mg, "outer & in_box([-1, 0, -1], [1, 0, 1e-12], within)");
-        so.bcs = vec![Bc { labels: outer, kind: fixed_all() }];
+        so.bcs = vec![rule(&mg, "outer & in_box([-1, 0, -1], [1, 0, 1e-12], within)", fixed_all())];
         so.study = Study::Eigenfrequency { n_modes: 8, f_search: 9.47e9 };
         so.out_of_plane = Some(2.3172 * 2.0 * std::f64::consts::PI * 9.47e9 / 299792458.0);
     }
@@ -457,4 +460,50 @@ pub fn bragg_symmetric() -> Project {
 /// Asymmetric Bragg grating: the same teeth on one side only, so the mirror symmetry of the wire is gone and the stop band is narrower.
 pub fn bragg_asymmetric() -> Project {
     bragg_project(&femcore::usecases::bragg::BraggGrating { kind: femcore::usecases::bragg::GratingKind::Asymmetric, ..femcore::usecases::bragg::BraggGrating::coarse() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A rule and the integers stored next to it always agree on the mesh the project builds, so a project can be solved from either.
+    #[test]
+    fn the_rules_of_every_example_give_the_stored_numbers() {
+        let mut rules = 0;
+        for i in 0..NAMES.len().min(14) {
+            let p = by_index(i);
+            let mesh = p.geometry.build().unwrap();
+            let names = p.geometry.names(&mesh).unwrap();
+            for s in &p.specs {
+                for b in &s.bcs {
+                    if let Some(r) = &b.on {
+                        assert_eq!(names.select(r).unwrap(), b.labels, "example {i}: '{r}'");
+                        assert!(!b.labels.is_empty(), "example {i}: '{r}' selects nothing");
+                        rules += 1;
+                    }
+                }
+            }
+        }
+        assert!(rules >= 15, "{rules} rules");
+    }
+
+    /// The same rule follows the geometry: a longer plate has its right edge at a new place but the rule still finds it.
+    #[test]
+    fn a_rule_follows_a_changed_geometry() {
+        let mut p = cantilever();
+        let mut m = geom::model::Model::from_list(p.geometry.list.clone());
+        m.param("len", 2.0);
+        let mut list = m.list;
+        for f in &mut list.features {
+            if let geom::model::Op::Rect { max, .. } = &mut f.op {
+                max[0] = "len".into();
+            }
+        }
+        p.geometry.list = list;
+        let mesh = p.geometry.build().unwrap();
+        let names = p.geometry.names(&mesh).unwrap();
+        let right = names.select("outer & plane(x = 2)").unwrap();
+        assert!(!right.is_empty());
+        assert!(names.select("ymax").is_err());
+    }
 }

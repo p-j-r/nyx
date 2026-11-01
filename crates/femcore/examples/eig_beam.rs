@@ -22,7 +22,7 @@ fn main() {
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         s.materials.default.insert(k.into(), v);
     }
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     s.solver = solver;
     s.order = order;

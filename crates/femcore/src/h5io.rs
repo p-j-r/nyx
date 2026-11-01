@@ -564,7 +564,7 @@ mod tests {
         let mesh = SimplexMesh::rectangle(1.0, 0.5, 6, 3);
         let mut spec = ProblemSpec::new(Physics::Heat);
         spec.materials.default.insert("k".into(), 2.0);
-        spec.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(300.0) }];
+        spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }];
         let r = crate::scalar::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
         let path = std::env::temp_dir().join(format!("nyx-h5-test-{}.h5", std::process::id()));
         write_results(&path, H5Mode::Serial, &mesh, Some(&spec), &r).unwrap();
@@ -591,11 +591,11 @@ mod tests {
             let r = if mesh.dim == 2 {
                 spec.materials.default.insert("E".into(), 1e9);
                 spec.materials.default.insert("nu".into(), 0.3);
-                spec.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![4], kind: BcKind::Load([1e5, 0.0, 0.0]) }];
+                spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([1e5, 0.0, 0.0]) }];
                 crate::solid::solve_solid(&mesh, &spec, &SolveState::default()).unwrap()
             } else {
                 spec.materials.default.insert("k".into(), 1.0);
-                spec.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(1.0) }, Bc { labels: vec![6], kind: BcKind::Temperature(0.0) }];
+                spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Temperature(0.0) }];
                 crate::scalar::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap()
             };
             let path = std::env::temp_dir().join(format!("nyx-xdmf-{name}-{}.h5", std::process::id()));
@@ -672,7 +672,7 @@ mod tests {
         let mesh = SimplexMesh::block(1.0, 0.5, 0.4, 3, 2, 2);
         let mut spec = ProblemSpec::new(Physics::Heat);
         spec.materials.default.insert("k".into(), 1.0);
-        spec.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(1.0) }, Bc { labels: vec![6], kind: BcKind::Temperature(0.0) }];
+        spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Temperature(0.0) }];
         let r = crate::scalar::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
         let tmp = |n: &str| std::env::temp_dir().join(format!("nyx-part-{n}-{}.h5", std::process::id()));
         let (pa, pb) = (tmp("serial"), tmp("three"));

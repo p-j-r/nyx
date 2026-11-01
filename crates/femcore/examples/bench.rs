@@ -20,13 +20,13 @@ fn main() {
     let m2 = SimplexMesh::rectangle(1.0, 0.5, 300, 150);
     println!("2D mesh: {} cells", m2.n_cells());
     let mut es = ProblemSpec::new(Physics::Electrostatics);
-    es.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![4], kind: BcKind::Ground }];
+    es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
     run("electrostatics 2D", &m2, &es);
     let mut so = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         so.materials.default.insert(k.into(), v);
     }
-    so.bcs = vec![Bc { labels: vec![1], kind: fixed() }, Bc { labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) }];
+    so.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed() }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) }];
     run("solid static 2D", &m2, &so);
     so.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     run("solid 6 eigenfrequencies 2D", &m2, &so);
@@ -37,7 +37,7 @@ fn main() {
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         s3.materials.default.insert(k.into(), v);
     }
-    s3.bcs = vec![Bc { labels: vec![1], kind: fixed() }, Bc { labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) }];
+    s3.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed() }, Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) }];
     run("solid static 3D", &m3, &s3);
     s3.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     run("solid 6 eigenfrequencies 3D", &m3, &s3);

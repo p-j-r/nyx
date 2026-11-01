@@ -63,6 +63,12 @@ pub struct App {
     pub geometry_dirty: bool,
     pub geom_edit: GeometrySpec,
     pub geom_ui: crate::geomui::State,
+    /// why a boundary rule (physics, index) does not resolve
+    pub rule_errors: HashMap<(Physics, usize), String>,
+    /// region numbers with their names, for the Materials tab
+    pub domain_names: Vec<(i32, String)>,
+    /// a rule was edited: resolve them again
+    pub rules_dirty: bool,
     pub bottom_open: bool,
     /// the File > New dialog while it is open
     pub new_dialog: Option<NewDialog>,
@@ -94,6 +100,9 @@ impl App {
         let mut app = App {
             geom_edit: proj.geometry.clone(),
             geom_ui: Default::default(),
+            rule_errors: HashMap::new(),
+            domain_names: vec![],
+            rules_dirty: false,
             proj,
             doc: Doc::default(),
             tab: Tab::Geometry,
@@ -198,6 +207,12 @@ impl App {
 
     pub fn compute(&mut self) {
         if self.refuse_while_busy() {
+            return;
+        }
+        self.sync_rules();
+        if let Some(((_, i), e)) = self.rule_errors.iter().find(|((p, _), _)| *p == self.proj.active) {
+            let msg = format!("Boundary condition {}: {e}", i + 1);
+            self.set_error(msg);
             return;
         }
         let Some(mesh) = self.doc.mesh.clone() else {
@@ -316,6 +331,28 @@ impl App {
         self.solve_state = SolveState::default();
         self.picking = None;
         self.vp.fit_token += 1;
+        self.sync_rules();
+    }
+
+    /// Turns the selector rules of the boundary conditions into the integers of the built mesh, and reads the names of the regions.
+    pub fn sync_rules(&mut self) {
+        self.rules_dirty = false;
+        self.rule_errors.clear();
+        let Some(mesh) = self.doc.mesh.clone() else { return };
+        let Ok(names) = self.proj.geometry.names(&mesh) else { return };
+        self.domain_names = names.domains();
+        for spec in &mut self.proj.specs {
+            for (i, bc) in spec.bcs.iter_mut().enumerate() {
+                if let Some(rule) = bc.on.clone() {
+                    match names.select(&rule) {
+                        Ok(l) => bc.labels = l,
+                        Err(e) => {
+                            self.rule_errors.insert((spec.physics, i), e);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------- files
@@ -710,6 +747,9 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll();
         self.run_queued();
+        if self.rules_dirty {
+            self.sync_rules();
+        }
         let c = ctx.clone();
         self.script_step(&c);
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
@@ -820,7 +860,7 @@ mod tests {
         let names = a.proj.geometry.build_named().unwrap();
         let (left, right) = (names.select("outer & plane(x = 0)").unwrap(), names.select("outer & plane(x = 1)").unwrap());
         let es = a.proj.spec_mut(Physics::Electrostatics);
-        es.bcs = vec![Bc { labels: left, kind: BcKind::Potential(1.0) }, Bc { labels: right, kind: BcKind::Ground }];
+        es.bcs = vec![Bc { on: None, labels: left, kind: BcKind::Potential(1.0) }, Bc { on: None, labels: right, kind: BcKind::Ground }];
         a.compute();
         wait_idle(&mut a, 60);
         assert!(a.error.is_none(), "{:?}", a.error);

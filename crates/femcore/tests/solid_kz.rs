@@ -18,7 +18,7 @@ fn clamped_plate_shear_modes_at_zero_wave_number() {
     let (a, b) = (0.02, 0.01);
     let mesh = SimplexMesh::rectangle(a, b, 24, 12);
     let mut s = spec(0.0, 0.0, 4);
-    s.bcs = vec![Bc { labels: vec![1, 2, 3, 4], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    s.bcs = vec![Bc { on: None, labels: vec![1, 2, 3, 4], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     let r = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
     let mu = 70e9 / (2.0 * 1.3);
     let want = 0.5 * (mu / 2700.0f64).sqrt() * (1.0 / (a * a) + 1.0 / (b * b)).sqrt();
@@ -59,8 +59,8 @@ fn pml_in_the_cross_section_gives_the_analytic_complex_frequency() {
         s.materials.default.insert(k.into(), v);
     }
     s.bcs = vec![
-        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
-        Bc { labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
     ];
     s.materials.pml.insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.1, order: 0.0, re: 1.0 });
     let cs = (e / rho).sqrt();

@@ -6,7 +6,7 @@ use femcore::problem::*;
 fn es_spec(eps: f64) -> ProblemSpec {
     let mut s = ProblemSpec::new(Physics::Electrostatics);
     s.materials.default.insert("eps_r".into(), eps);
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![4], kind: BcKind::Ground }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
     s
 }
 
@@ -29,7 +29,7 @@ fn es3d_parallel_plates_have_a_linear_potential() {
     // V = 1 on the face x = 0 (boundary 1), ground on x = lx (boundary 4 of the block is z = lz, so use 6)
     let mesh = femcore::mesh::SimplexMesh::block(1.0, 0.4, 0.3, 4, 2, 2);
     let mut s = es_spec(4.2);
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![6], kind: BcKind::Ground }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Ground }];
     let r = femcore::scalar::solve_electrostatics(&mesh, &s).unwrap();
     let v = &r.solutions[0].field("V").unwrap().values;
     let x = mesh.dof_coordinates(2);
@@ -62,7 +62,7 @@ fn heat_convection_gives_the_1d_profile() {
     let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 8, 2);
     let (k, h, text, t0) = (2.0, 5.0, 20.0, 100.0);
     let mut s = heat_spec(k);
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(t0) }, Bc { labels: vec![4], kind: BcKind::Convection { h, text } }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(t0) }, Bc { on: None, labels: vec![4], kind: BcKind::Convection { h, text } }];
     let r = femcore::scalar::solve_heat(&mesh, &s, &mut SolveState::default()).unwrap();
     let t = &r.solutions[0].field("T").unwrap().values;
     let x = mesh.dof_coordinates(2);
@@ -77,7 +77,7 @@ fn heat_source_gives_the_parabolic_profile() {
     let (k, q) = (2.0, 3.0);
     let mut s = heat_spec(k);
     s.materials.default.insert("Q".into(), q);
-    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(0.0) }];
+    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(0.0) }];
     let r = femcore::scalar::solve_heat(&mesh, &s, &mut SolveState::default()).unwrap();
     let t = &r.solutions[0].field("T").unwrap().values;
     let x = mesh.dof_coordinates(2);
@@ -93,7 +93,7 @@ fn transient_heat_follows_the_decaying_sine() {
     let mut s = heat_spec(2.0);
     s.materials.default.insert("rho".into(), 1.0);
     s.materials.default.insert("Cp".into(), 1.0);
-    s.bcs = vec![Bc { labels: vec![1, 4], kind: BcKind::Temperature(0.0) }];
+    s.bcs = vec![Bc { on: None, labels: vec![1, 4], kind: BcKind::Temperature(0.0) }];
     s.study = Study::Transient { t_end: 0.2, n_out: 20, t0: "sin(pi*x)".into() };
     let r = femcore::scalar::solve_heat(&mesh, &s, &mut SolveState::default()).unwrap();
     assert_eq!(r.solutions.len(), 21);
@@ -115,7 +115,7 @@ fn transient_bdf2_agrees_with_decay() {
     let mut s = heat_spec(2.0);
     s.materials.default.insert("rho".into(), 1.0);
     s.materials.default.insert("Cp".into(), 1.0);
-    s.bcs = vec![Bc { labels: vec![1, 4], kind: BcKind::Temperature(0.0) }];
+    s.bcs = vec![Bc { on: None, labels: vec![1, 4], kind: BcKind::Temperature(0.0) }];
     s.study = Study::Transient { t_end: 0.2, n_out: 10, t0: "sin(pi*x)".into() };
     let r = femcore::scalar::solve_heat(&mesh, &s, &mut SolveState::default()).unwrap();
     assert!(r.log[0].starts_with("BDF2"), "{:?}", r.log);
@@ -132,7 +132,7 @@ fn transient_convection_cools_to_ambient() {
     let mut s = heat_spec(100.0);
     s.materials.default.insert("rho".into(), 1000.0);
     s.materials.default.insert("Cp".into(), 500.0);
-    s.bcs = vec![Bc { labels: vec![1, 2, 3, 4], kind: BcKind::Convection { h: 2.0, text: 300.0 } }];
+    s.bcs = vec![Bc { on: None, labels: vec![1, 2, 3, 4], kind: BcKind::Convection { h: 2.0, text: 300.0 } }];
     s.study = Study::Transient { t_end: 1e5, n_out: 4, t0: "400".into() };
     let r = femcore::scalar::solve_heat(&mesh, &s, &mut SolveState::default()).unwrap();
     let maxes: Vec<f64> = r.solutions.iter().map(|s| s.field("T").unwrap().values.iter().cloned().fold(f64::MIN, f64::max)).collect();
@@ -152,7 +152,7 @@ fn errors_are_reported() {
     assert!(femcore::scalar::solve_electrostatics(&mesh, &s).unwrap_err().contains("do not exist"));
     assert!(femcore::scalar::solve_heat(&mesh, &heat_spec(1.0), &mut SolveState::default()).is_err());
     let mut h = heat_spec(1.0);
-    h.bcs = vec![Bc { labels: vec![1], kind: BcKind::Temperature(1.0) }];
+    h.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(1.0) }];
     h.study = Study::Transient { t_end: 1.0, n_out: 2, t0: "foo(x)".into() };
     assert!(femcore::scalar::solve_heat(&mesh, &h, &mut SolveState::default()).unwrap_err().contains("initial temperature"));
 }

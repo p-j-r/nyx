@@ -121,7 +121,7 @@ fn viscous_loss_proportional_to_stiffness_gives_the_exact_quality_factor() {
     sp.materials.default.insert("E".into(), 70e9);
     sp.materials.default.insert("nu".into(), 0.3);
     sp.materials.default.insert("rho".into(), 2700.0);
-    sp.bcs = vec![Bc { labels: vec![1, 2, 3, 4], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    sp.bcs = vec![Bc { on: None, labels: vec![1, 2, 3, 4], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     sp.study = Study::Eigenfrequency { n_modes: 4, f_search: 3000.0 };
     let (_, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &sp, 5.0).unwrap();
     let tau = 2e-9;
@@ -198,7 +198,7 @@ fn wire_elastic(mesh: &femcore::mesh::SimplexMesh, f_search: f64, n_modes: usize
     }
     labels.sort();
     labels.dedup();
-    sp.bcs = vec![Bc { labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    sp.bcs = vec![Bc { on: None, labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     sp.study = Study::Eigenfrequency { n_modes, f_search };
     sp
 }
@@ -258,7 +258,7 @@ fn modes_of_a_symmetric_plate_are_classified_by_parity_and_followed_across_wave_
     let mut labels: Vec<i32> = mesh.facet_labels.clone();
     labels.sort();
     labels.dedup();
-    sp.bcs = vec![Bc { labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    sp.bcs = vec![Bc { on: None, labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     sp.study = Study::Eigenfrequency { n_modes: 6, f_search: 2000.0 };
     let (_, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &sp, 3.0).unwrap();
     let map = mirror_map(&mesh, 2, 0);

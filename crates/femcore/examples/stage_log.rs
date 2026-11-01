@@ -27,14 +27,14 @@ fn main() {
     let rect = SimplexMesh::rectangle(1.0, 0.5, 20, 10);
     let mut es = ProblemSpec::new(Physics::Electrostatics);
     es.materials.default.insert("eps_r".into(), 4.0);
-    es.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![3], kind: BcKind::Ground }];
+    es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
     show("electrostatics, 2D", &rect, &es);
 
     let mut so = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         so.materials.default.insert(k.into(), v);
     }
-    so.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) }];
+    so.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) }];
     show("solid mechanics, static, 2D", &rect, &so);
     so.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
     show("solid mechanics, 4 eigenfrequencies, 2D", &rect, &so);

@@ -144,7 +144,7 @@ pub fn chip_problem(c: &ChipSpec, psi_deg: f64, n_modes: usize, f_search: f64, g
     // the clamped walls: the outer boundary of the sapphire and the slab (not the air above)
     let hslab = (c.htot - c.etch) * 1e-6;
     let outer = g.select(&format!("outer & in_box([-1, 0, -1], [1, 0, {}], within)", hslab + 1e-12)).expect("a valid selector");
-    s.bcs = vec![Bc { labels: outer, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    s.bcs = vec![Bc { on: None, labels: outer, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     s.study = Study::Eigenfrequency { n_modes, f_search };
     let b = s.brillouin.as_mut().unwrap();
     b.wavelength = 1.55e-6;

@@ -68,7 +68,7 @@ fn main() {
     }
     labels.sort();
     labels.dedup();
-    spec.bcs = vec![Bc { labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    spec.bcs = vec![Bc { on: None, labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     if std::env::var_os("PML").is_some() {
         let st = envf("PML_STRENGTH", 3.0);
         let pml = |x, y| Pml { x, y, z: PmlDir::Off, strength: st, order: 2.0, re: 1.0 };

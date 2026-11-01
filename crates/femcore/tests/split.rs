@@ -179,9 +179,9 @@ fn quads_become_triangles_and_solve_exactly() {
     spec.materials.default.insert("E".into(), 1e9);
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
-        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
     ];
     let r = solve_solid(&m, &spec, &SolveState::default()).unwrap();
     let ux = &r.solutions[0].field("ux").unwrap().values;
@@ -197,10 +197,10 @@ fn uniaxial_3d(m: &SimplexMesh, volume_expected: f64) {
     spec.materials.default.insert("E".into(), 1e9);
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
-        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { labels: vec![3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { labels: vec![5], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
-        Bc { labels: vec![2], kind: BcKind::Load([1e6, 0.0, 0.0]) },
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![5], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2], kind: BcKind::Load([1e6, 0.0, 0.0]) },
     ];
     let r = solve_solid(m, &spec, &SolveState::default()).unwrap();
     let ux = &r.solutions[0].field("ux").unwrap().values;

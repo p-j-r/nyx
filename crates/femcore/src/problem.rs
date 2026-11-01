@@ -317,6 +317,9 @@ pub struct Periodic {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Bc {
+    /// a selector over the geometry model (`outer & plane(x = 0)`); when set the labels are what it resolves to, refreshed whenever the model or mesh changes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<String>,
     pub labels: Vec<i32>,
     pub kind: BcKind,
 }

@@ -619,7 +619,11 @@ impl App {
         for &d in &domains {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Domain {d}")).strong());
+                    let title = match self.domain_names.iter().find(|(i, _)| *i == d) {
+                        Some((_, n)) => format!("{n}  (domain {d})"),
+                        None => format!("Domain {d}"),
+                    };
+                    ui.label(RichText::new(title).strong());
                     egui::ComboBox::from_id_salt(format!("mat_{d}")).selected_text("material...").show_ui(ui, |ui| {
                         for (i, m) in MATERIALS.iter().enumerate() {
                             if ui.selectable_label(false, m.name).clicked() {
@@ -852,6 +856,17 @@ impl App {
                         ui.colored_label(Color32::from_rgb(235, 110, 100), "numbers separated by commas");
                     }
                 });
+                ui.horizontal(|ui| {
+                    ui.label("or by rule");
+                    let mut rule = spec.bcs[i].on.clone().unwrap_or_default();
+                    if ui.add(egui::TextEdit::singleline(&mut rule).desired_width(220.0).font(egui::TextStyle::Monospace).hint_text("outer & plane(x = 0)")).on_hover_text("a selector over the model: names, planes, normals, boxes, interfaces; ymin and ymax are the ends of a swept model. The numbers above follow the rule.").changed() {
+                        spec.bcs[i].on = if rule.trim().is_empty() { None } else { Some(rule) };
+                        self.rules_dirty = true;
+                    }
+                    if let Some(e) = self.rule_errors.get(&(phys, i)) {
+                        ui.colored_label(Color32::from_rgb(235, 110, 100), e);
+                    }
+                });
                 match &mut spec.bcs[i].kind {
                     BcKind::Potential(v) => {
                         ui.horizontal(|ui| {
@@ -923,7 +938,7 @@ impl App {
             ui.menu_button("+ Add boundary condition", |ui| {
                 for k in avail {
                     if ui.button(k.name()).clicked() {
-                        spec.bcs.push(Bc { labels: vec![], kind: k });
+                        spec.bcs.push(Bc { on: None, labels: vec![], kind: k });
                         self.label_buffers.clear();
                         ui.close();
                     }

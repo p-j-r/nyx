@@ -91,6 +91,38 @@ impl GeometrySpec {
     pub fn build(&self) -> Result<femcore::mesh::SimplexMesh, String> {
         Ok(self.build_named()?.mesh)
     }
+
+    /// The names of the model for the mesh built from it: what a rule can select. `ymin` and `ymax` name the two ends of a swept model.
+    pub fn names(&self, mesh: &femcore::mesh::SimplexMesh) -> Result<Names, String> {
+        let ev = femcore::geomdrive::evaluate(&self.list)?;
+        let labels = ev.label_map().map_err(|e| e.to_string())?;
+        let top = mesh.facet_labels.iter().copied().max().unwrap_or(0);
+        let ends = self.extrude.is_some().then_some((top - 1, top));
+        Ok(Names { ev, labels, ends })
+    }
+}
+
+/// An evaluated model and its compiled labels, to turn a rule (a selector text) into the integers the solvers take.
+pub struct Names {
+    ev: geom::eval::Evaluated,
+    labels: geom::labels::LabelMap,
+    ends: Option<(i32, i32)>,
+}
+
+impl Names {
+    pub fn select(&self, rule: &str) -> Result<Vec<i32>, String> {
+        match (rule.trim(), self.ends) {
+            ("ymin", Some((a, _))) => Ok(vec![a]),
+            ("ymax", Some((_, b))) => Ok(vec![b]),
+            ("ymin" | "ymax", None) => Err("ymin and ymax are the ends of a model swept along y; this model is not swept".into()),
+            (r, _) => femcore::geomdrive::select_labels(&self.ev, &self.labels, r),
+        }
+    }
+
+    /// Region numbers with their names.
+    pub fn domains(&self) -> Vec<(i32, String)> {
+        self.labels.domains.iter().map(|d| (d.id, d.name.clone())).collect()
+    }
 }
 
 
