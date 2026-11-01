@@ -204,6 +204,8 @@ pub struct Shell {
     pub notice: Option<String>,
     /// the "cancel this run?" question is on screen
     pub confirm_cancel: bool,
+    /// scripts left out of the file being shared
+    pub share_exclude: Vec<String>,
 }
 
 impl Shell {
@@ -241,6 +243,7 @@ impl Shell {
             closed: vec![],
             notice: None,
             confirm_cancel: false,
+            share_exclude: vec![],
         }
     }
 

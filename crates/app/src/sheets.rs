@@ -65,12 +65,12 @@ impl App {
                     let (title, text, ex) = TEMPLATES[i];
                     let on = sel == i;
                     let avail = ex.is_some() || i == 7;
-                    let r = egui::Frame::new().fill(if on { theme::tint(&ctx) } else { theme::card(&ctx) }).stroke(egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { theme::accent(&ctx) } else { theme::line(&ctx) })).corner_radius(12).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+                    let r = egui::Frame::new().fill(if on { theme::tint(&ctx) } else { theme::card(&ctx) }).stroke(egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { theme::accent(&ctx) } else { theme::line(&ctx) })).corner_radius(12).inner_margin(egui::Margin::same(12)).show(ui, |ui| ui.vertical(|ui| {
                         ui.set_width(w - 26.0);
                         ui.set_min_height(86.0);
                         ui.label(RichText::new(title).strong().color(if avail { theme::text(&ctx) } else { theme::muted(&ctx) }));
                         ui.label(kit::muted(ui, if avail { text.to_string() } else { format!("{text} (template coming soon)") }).size(12.5));
-                    });
+                    }));
                     let resp = ui.interact(r.response.rect, ui.id().with(("tpl", i)), egui::Sense::click());
                     if resp.clicked() && avail {
                         self.shell.new.template = i;
@@ -392,10 +392,12 @@ impl App {
         let sizes = nyx_store::archive::sizes(d, only_opt).unwrap_or([(ShareLevel::Recipe, 0), (ShareLevel::Results, 0), (ShareLevel::Meshes, 0)]);
         let n_exp = d.wf.experiments.len();
         let exp_title = d.wf.experiment(&w.exp).map(|e| e.title.clone()).unwrap_or_default();
-        let scripts = d.root.join("analysis").read_dir().map(|r| r.filter_map(|f| f.ok()).count()).unwrap_or(0);
+        let script_names = nyx_store::archive::scripts_of(d);
+        let scripts = script_names.iter().filter(|s| !self.shell.share_exclude.contains(s)).count();
         let paths = nyx_store::archive::count_personal_paths(d);
         let file_name = format!("{}.nyx", nyx_store::util::slug(&d.wf.title));
         let strip = self.shell.settings().strip_paths;
+        let exclude = self.shell.share_exclude.clone();
         let mut save = None;
         ui.label(kit::title("Share this workflow", 34.0).color(theme::accent(&ctx)));
         ui.label(kit::muted(ui, "One small file. The other person opens it in nyx and it rebuilds the setup on their machine."));
@@ -443,10 +445,17 @@ impl App {
             kit::plain_card(&mut cols[1], |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new("CHECK BEFORE SENDING").size(12.5).strong());
-                if scripts > 0 {
-                    ui.label(format!("{scripts} custom script(s) in analysis/ are included. They stay switched off until the recipient approves them."));
-                } else {
+                if script_names.is_empty() {
                     ui.label("No custom scripts are included.");
+                } else {
+                    ui.label("Custom scripts. They stay switched off until the recipient approves them; untick any you do not want to send.");
+                    for s in &script_names {
+                        let mut on = !self.shell.share_exclude.contains(s);
+                        if ui.checkbox(&mut on, s.as_str()).changed() {
+                            if on { self.shell.share_exclude.retain(|x| x != s); } else { self.shell.share_exclude.push(s.clone()); }
+                        }
+                    }
+                    ui.label(kit::muted(ui, format!("{scripts} of {} will be sent.", script_names.len())).size(12.5));
                 }
                 ui.label(kit::muted(ui, if strip { format!("Personal paths are reduced to file names ({paths} found).") } else { format!("Personal paths are kept as they are ({paths} found); turn on stripping in Settings.") }));
             });
@@ -469,7 +478,7 @@ impl App {
         if let Some((ext, level, strip)) = save {
             let Some(path) = rfd::FileDialog::new().add_filter(ext, &[ext]).set_file_name(if ext == "zip" { file_name.replace(".nyx", ".zip") } else { file_name.clone() }).save_file() else { return };
             let d = self.shell.open.get(&id).and_then(|w| w.dir.as_ref());
-            let r = d.map(|d| nyx_store::archive::export_file(d, &ExportOptions { level, only: only_opt, strip_paths: strip }, &path));
+            let r = d.map(|d| nyx_store::archive::export_file(d, &ExportOptions { level, only: only_opt, strip_paths: strip, exclude: &exclude }, &path));
             match r {
                 Some(Ok(n)) => self.shell.share_msg = format!("Saved {} ({})", path.display(), human(n)),
                 Some(Err(e)) => self.set_error(e),
@@ -672,8 +681,15 @@ impl App {
                     kit::plain_card(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new("ASSISTANT").size(12.5).strong());
-                        ui.add_enabled(false, egui::Checkbox::new(&mut s.assistant, "Let an AI assistant work in nyx"));
-                        ui.label(kit::muted(ui, "Coming soon. Off by default; when on it will read results and queue runs, and ask before changing a setup.").size(12.5));
+                        ui.checkbox(&mut s.assistant, "Let an AI assistant work in nyx");
+                        ui.add_enabled_ui(s.assistant, |ui| {
+                            egui::ComboBox::from_id_salt("assist_level").selected_text(s.assistant_level.clone()).show_ui(ui, |ui| {
+                                for l in ["Read results only", "Read results and queue runs", "Ask before changing a setup"] {
+                                    ui.selectable_value(&mut s.assistant_level, l.to_string(), l);
+                                }
+                            });
+                        });
+                        ui.label(kit::muted(ui, "Off by default. This records what you allow; no assistant is connected in this version, so nothing can act yet.").size(12.5));
                     });
                 });
             });

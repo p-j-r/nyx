@@ -4,7 +4,7 @@ use crate::theme;
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Margin, Response, RichText, Sense, Stroke, Ui, Vec2};
 
 pub fn card<R>(ui: &mut Ui, fill: Color32, stroke: Color32, pad: i8, f: impl FnOnce(&mut Ui) -> R) -> R {
-    egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, stroke)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(pad)).show(ui, f).inner
+    egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, stroke)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(pad)).show(ui, |ui| ui.vertical(f).inner).inner
 }
 
 /// A white card with the line colour.
@@ -26,7 +26,9 @@ pub fn primary_enabled(ui: &mut Ui, enabled: bool, text: impl Into<String>) -> R
 /// A white card; returns the response of the whole card (for clicks).
 pub fn plain_card_r(ui: &mut Ui, f: impl FnOnce(&mut Ui)) -> Response {
     let (fill, line) = (theme::card(ui.ctx()), theme::line(ui.ctx()));
-    egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, line)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(14)).show(ui, f).response
+    egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, line)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(14)).show(ui, |ui| {
+        ui.vertical(f);
+    }).response
 }
 
 /// Outlined button.

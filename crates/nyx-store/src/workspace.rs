@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// hide a workflow from the dashboard after this many days without an edit, run or note
     pub hide_after_days: u32,
@@ -32,6 +33,8 @@ pub struct Settings {
     /// "system", "light" or "dark"
     pub theme: String,
     pub assistant: bool,
+    /// what the assistant may do when it is switched on
+    pub assistant_level: String,
     /// workflow ids open as tabs, in order
     pub open_tabs: Vec<String>,
 }
@@ -51,6 +54,7 @@ impl Default for Settings {
             frequency_unit: "THz".into(),
             theme: "system".into(),
             assistant: false,
+            assistant_level: "Ask before changing a setup".into(),
             open_tabs: vec![],
         }
     }

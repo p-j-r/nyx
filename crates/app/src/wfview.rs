@@ -270,7 +270,7 @@ impl App {
                 let focused = ctx.memory(|m| m.has_focus(eid));
                 let mut buf = if focused { w.draft_buf.clone() } else { w.title() };
                 let width = buf.chars().count().max(10) as f32 * 14.0;
-                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width).text_color(theme::accent(&ctx)));
+                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width.min(460.0)).text_color(theme::accent(&ctx)));
                 if focused || r.has_focus() {
                     w.draft_buf = buf.clone();
                 }
@@ -387,7 +387,7 @@ impl App {
                     let indent = if parent.is_some() { 14.0 } else { 0.0 };
                     ui.horizontal(|ui| {
                         ui.add_space(indent);
-                        let r = egui::Frame::new().fill(if on { theme::card(&ctx) } else { Color32::TRANSPARENT }).stroke(egui::Stroke::new(if on { 1.5 } else { 0.0 }, theme::accent(&ctx))).corner_radius(10).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
+                        let r = egui::Frame::new().fill(if on { theme::card(&ctx) } else { Color32::TRANSPARENT }).stroke(egui::Stroke::new(if on { 1.5 } else { 0.0 }, theme::accent(&ctx))).corner_radius(10).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| ui.vertical(|ui| {
                             ui.set_width(ui.available_width());
                             ui.label(RichText::new(&title).strong());
                             let sub = match &parent {
@@ -398,7 +398,7 @@ impl App {
                             for (to, label) in &links {
                                 ui.label(kit::muted(ui, format!("{label} {to}")).size(12.0));
                             }
-                        });
+                        }));
                         if ui.interact(r.response.rect, ui.id().with(("exp", &eid)), Sense::click()).clicked() && !on && !locked {
                             acts.push(Act::LoadExp(eid.clone()));
                         }
@@ -457,7 +457,7 @@ impl App {
                         }
                     } else {
                         let can = self.busy.is_none() && self.doc.mesh.is_some();
-                        if kit::primary_enabled(ui, can, "▶  Compute   F5").on_disabled_hover_text(if self.busy.is_some() { "Something else is running" } else { "There is no mesh to solve on yet" }).clicked() {
+                        if kit::primary_enabled(ui, can, "Compute   F5").on_disabled_hover_text(if self.busy.is_some() { "Something else is running" } else { "There is no mesh to solve on yet" }).clicked() {
                             acts.push(Act::Compute);
                         }
                         if w.part == Part::Analysis && w.selected.len() >= 2 && kit::ghost(ui, format!("Compare {} selected", w.selected.len())).clicked() {
@@ -528,7 +528,7 @@ impl App {
     fn wf_concept(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, locked: bool) {
         let ctx = ui.ctx().clone();
         let line = self.card_line(w);
-        egui::Panel::right("wf_concept_inspector").exact_size(400.0).resizable(false).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::right("wf_concept_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.add_enabled_ui(!locked, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     for p in Physics::ALL {
@@ -546,7 +546,7 @@ impl App {
                     }
                 });
                 ui.separator();
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                     self.tab = w.concept_tab;
                     self.inspector_tab(ui, w.concept_tab);
                     ui.add_space(10.0);
@@ -563,7 +563,7 @@ impl App {
             self.wf_live(ui, w, acts);
             return;
         }
-        egui::Panel::right("wf_build_inspector").exact_size(400.0).resizable(false).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::right("wf_build_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 for (t, l) in [(Tab::Physics, "Boundaries and conditions"), (Tab::Study, "Study and solver")] {
                     if kit::pill(ui, w.build_tab == t, l).clicked() {
@@ -572,7 +572,7 @@ impl App {
                 }
             });
             ui.separator();
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                 self.tab = w.build_tab;
                 self.inspector_tab(ui, w.build_tab);
                 ui.add_space(12.0);
@@ -838,7 +838,7 @@ impl App {
         let head = |ui: &mut egui::Ui, w: &mut OpenWf, label: &str, key: &str, width: f32| {
             let on = w.sort == key;
             let t = format!("{}{}", label.to_uppercase().replace('_', " "), if on { if w.desc { " ▾" } else { " ▴" } } else { "" });
-            if ui.add_sized([width, 22.0], egui::Label::new(RichText::new(t).size(11.5).strong().color(theme::muted(&ctx))).sense(Sense::click())).clicked() {
+            if ui.add_sized([width, 22.0], egui::Label::new(RichText::new(t).size(12.0).strong().color(theme::muted(&ctx))).sense(Sense::click())).clicked() {
                 if on { w.desc = !w.desc } else { w.sort = key.into(); w.desc = true }
             }
         };
@@ -847,12 +847,12 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.add_space(52.0);
                 head(ui, w, "run", "run", 120.0);
-                for k in &pk {
-                    head(ui, w, k, &format!("params.{k}"), widths(k));
-                }
                 head(ui, w, "version", "version", 64.0);
                 for k in &mk {
                     head(ui, w, k, &format!("metrics.{k}"), widths(k));
+                }
+                for k in &pk {
+                    head(ui, w, k, &format!("params.{k}"), widths(k));
                 }
                 head(ui, w, "time", "time", 70.0);
             });
@@ -870,7 +870,7 @@ impl App {
                             if ui.checkbox(&mut s, "").changed() {
                                 if s { w.selected.insert(r.id.clone()); } else { w.selected.remove(&r.id); }
                             }
-                            if ui.add(egui::Label::new(RichText::new(if r.star { "★" } else { "☆" }).color(if r.star { theme::AMBER } else { theme::muted(&ctx) })).sense(Sense::click())).on_hover_text("Star: kept forever, never cleaned up").clicked() {
+                            if ui.add(egui::Label::new(RichText::new(if r.star { "*" } else { "·" }).strong().size(16.0).color(if r.star { theme::AMBER } else { theme::muted(&ctx) })).sense(Sense::click())).on_hover_text("Star: kept forever, never cleaned up").clicked() {
                                 acts.push(Act::Star(r.id.clone(), !r.star));
                             }
                             let id_text = if r.status == RunStatus::Ok { kit::mono(r.id.split('_').next().unwrap_or(&r.id)) } else { kit::mono(format!("{} ({:?})", r.id.split('_').next().unwrap_or(&r.id), r.status).to_lowercase()).color(theme::RED) };
@@ -878,12 +878,12 @@ impl App {
                             if open.clicked() {
                                 acts.push(Act::Field(r.id.clone()));
                             }
-                            for k in &pk {
-                                ui.add_sized([widths(k), h - 4.0], egui::Label::new(kit::mono(r.params.get(k).map(|v| fmt_value(k, *v)).unwrap_or_default())));
-                            }
                             ui.add_sized([64.0, h - 4.0], egui::Label::new(kit::mono(format!("v{}", r.version))));
                             for k in &mk {
                                 ui.add_sized([widths(k), h - 4.0], egui::Label::new(kit::mono(r.metrics.get(k).map(|v| fmt_value(k, *v)).unwrap_or_default())));
+                            }
+                            for k in &pk {
+                                ui.add_sized([widths(k), h - 4.0], egui::Label::new(kit::mono(r.params.get(k).map(|v| fmt_value(k, *v)).unwrap_or_default())));
                             }
                             ui.add_sized([70.0, h - 4.0], egui::Label::new(kit::mono(format!("{:.2} s", r.sec))));
                         });

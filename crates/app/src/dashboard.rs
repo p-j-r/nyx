@@ -342,14 +342,14 @@ fn workflow_card(ui: &mut egui::Ui, e: &Entry, spark: &[f64], width: f32) -> egu
     let colors = [theme::PLUM, Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0xC9, 0x7F, 0x1F), Color32::from_rgb(0x2F, 0x7A, 0x66)];
     let color = colors[e.wf.id.bytes().last().unwrap_or(0) as usize % colors.len()];
     let ok_last = e.wf.experiments.last().is_some_and(|x| x.runs.ok > 0 && x.runs.failed == 0);
-    let r = egui::Frame::new().fill(theme::card(&ctx)).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).corner_radius(12).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+    let r = egui::Frame::new().fill(theme::card(&ctx)).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).corner_radius(12).inner_margin(egui::Margin::same(14)).show(ui, |ui| ui.vertical(|ui| {
         ui.set_width(width - 30.0);
         ui.set_min_height(150.0);
         ui.horizontal(|ui| {
             kit::dot(ui, if ok_last { theme::GREEN } else { theme::line(&ctx) });
             ui.add(egui::Label::new(RichText::new(&e.wf.title).strong().size(16.0)).truncate());
             if e.wf.pinned {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new("pinned").size(11.0).color(theme::accent(&ctx))));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new("pinned").size(12.0).color(theme::accent(&ctx))));
             }
         });
         ui.add(egui::Label::new(kit::muted(ui, e.wf.summary())).truncate());
@@ -361,7 +361,7 @@ fn workflow_card(ui: &mut egui::Ui, e: &Entry, spark: &[f64], width: f32) -> egu
             ui.label(kit::muted(ui, format!("{n} experiment{} · {} run{}", if n == 1 { "" } else { "s" }, e.wf.run_count(), if e.wf.run_count() == 1 { "" } else { "s" })));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, ago(e.wf.touched_secs(), now_secs()))));
         });
-    });
+    }));
     let resp = ui.interact(r.response.rect, ui.id().with(("card", &e.wf.id)), Sense::click());
     if resp.hovered() {
         ui.painter().rect_stroke(r.response.rect, 12.0, egui::Stroke::new(1.5, theme::accent(&ctx)), egui::StrokeKind::Inside);

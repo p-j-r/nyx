@@ -218,12 +218,17 @@ pub struct ExportOptions<'a> {
     pub level: ShareLevel,
     pub only: Option<&'a [String]>,
     pub strip_paths: bool,
+    /// relative names left out of the file (scripts the sender chose not to share)
+    pub exclude: &'a [String],
 }
 
 /// Writes the `.nyx` of `w` to `out`. The same workflow and options always give the same bytes.
 pub fn export<W: Write + Seek>(w: &WorkflowDir, opt: &ExportOptions, out: W) -> Result<(), String> {
     let mut contents: Vec<(String, Vec<u8>)> = vec![];
     for (name, path) in plan(w, opt.level, opt.only)? {
+        if opt.exclude.contains(&name) {
+            continue;
+        }
         let mut data = std::fs::read(&path).map_err(|e| io_err(&path, e))?;
         if opt.strip_paths && name.ends_with(".nyx.xml") {
             let (x, n) = strip_paths_xml(&String::from_utf8_lossy(&data))?;
@@ -515,7 +520,7 @@ mod tests {
     }
 
     fn opt(level: ShareLevel) -> ExportOptions<'static> {
-        ExportOptions { level, only: None, strip_paths: true }
+        ExportOptions { level, only: None, strip_paths: true, exclude: &[] }
     }
 
     #[test]
@@ -543,7 +548,7 @@ mod tests {
         let mut d2 = WorkflowDir::open(&d.root).unwrap();
         d2.fork("e1", "second").unwrap();
         let only = vec!["e1".to_string()];
-        let sub = export_bytes(&d2, &ExportOptions { level: ShareLevel::Recipe, only: Some(&only), strip_paths: true }).unwrap();
+        let sub = export_bytes(&d2, &ExportOptions { level: ShareLevel::Recipe, only: Some(&only), strip_paths: true, exclude: &[] }).unwrap();
         assert!(!names(&sub).iter().any(|x| x.starts_with("e2/")));
         let _ = std::fs::remove_dir_all(&ws);
     }
@@ -668,6 +673,31 @@ mod tests {
         m["format"] = 99.into();
         let refs2: Vec<(&str, Vec<u8>)> = entries.iter().map(|(n, b)| (n.as_str(), if n == MANIFEST { serde_json::to_vec(&m).unwrap() } else { b.clone() })).collect();
         assert!(try_open(&build(&refs2), &Limits::default()).unwrap_err().contains("newer nyx"));
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+}
+
+/// The scripts a share would carry (relative names under `analysis/`).
+pub fn scripts_of(w: &WorkflowDir) -> Vec<String> {
+    plan(w, ShareLevel::Recipe, None).map(|p| p.into_iter().map(|(n, _)| n).filter(|n| is_script(n)).collect()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod exclude_tests {
+    use super::*;
+    use crate::flow::tests::{spec_xml, tmp};
+
+    #[test]
+    fn a_script_can_be_left_out() {
+        let ws = tmp("excl");
+        let d = WorkflowDir::create(&ws, "x", "gui", &spec_xml(5e-7, 4)).unwrap();
+        std::fs::create_dir_all(d.root.join("analysis")).unwrap();
+        std::fs::write(d.root.join("analysis/a.py"), "print(1)").unwrap();
+        assert_eq!(scripts_of(&d), ["analysis/a.py"]);
+        let ex = vec!["analysis/a.py".to_string()];
+        let b = export_bytes(&d, &ExportOptions { level: ShareLevel::Recipe, only: None, strip_paths: true, exclude: &ex }).unwrap();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(b)).unwrap();
+        assert!((0..z.len()).all(|i| !z.by_index(i).unwrap().name().starts_with("analysis/")));
         let _ = std::fs::remove_dir_all(&ws);
     }
 }
