@@ -2728,6 +2728,7 @@ dependencies = [
  "egui_plot",
  "femcore",
  "image",
+ "nyx-store",
  "rayon",
  "rfd",
  "serde",
