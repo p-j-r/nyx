@@ -7,6 +7,7 @@
 //! it writes is part of the result. `with_context` builds the state without a window, which is how the tests drive it.
 
 use crate::colormap::Colormap;
+use crate::connect::{self, Client};
 use crate::examples;
 use crate::state::*;
 use crate::viewport::{Content, Viewport};
@@ -82,6 +83,11 @@ pub struct App {
     pub settle: u32,
     pub shot_pending: Arc<AtomicBool>,
     pub shell: crate::shell::Shell,
+    /// the `nyx-mcp` program the Connect menu registers with Claude (found at start, or picked by the user)
+    pub mcp_server: Option<PathBuf>,
+    /// the Connect menu: what each client's config says (same order as `Client::ALL`) and the last thing done
+    pub connect_status: Vec<connect::Status>,
+    pub connect_note: Option<String>,
     pub ctx: egui::Context,
 }
 
@@ -143,8 +149,12 @@ impl App {
             settle: 6,
             shot_pending: Arc::new(AtomicBool::new(false)),
             shell: crate::shell::Shell::detached(),
+            mcp_server: connect::find_server(),
+            connect_status: vec![],
+            connect_note: None,
             ctx,
         };
+        app.refresh_connect();
         app.rebuild_mesh();
         app
     }
@@ -539,6 +549,10 @@ impl App {
                     }
                 }
             });
+            let connect_menu = ui.menu_button("Connect", |ui| self.connect_menu(ui));
+            if connect_menu.response.clicked() {
+                self.refresh_connect();
+            }
             ui.menu_button("Python (optional)", |ui| {
                 ui.label("Run your own Python script on the current project and result.");
                 ui.label("It receives the project JSON and the result CSV as arguments.");
@@ -561,6 +575,93 @@ impl App {
                 ui.label("Pick boundaries on the mesh: Physics tab > a condition > 'Pick on mesh'.");
                 ui.label("The numerics are Rust (femcore); no Python is needed.");
             });
+        });
+    }
+
+    /// Re-reads what Claude Code's and Claude Desktop's config files say about nyx.
+    fn refresh_connect(&mut self) {
+        self.connect_status = Client::ALL
+            .iter()
+            .map(|c| match (c.config_path(), &self.mcp_server) {
+                (Some(p), Some(s)) => connect::status(&p, s),
+                _ => connect::Status::NotConnected,
+            })
+            .collect();
+    }
+
+    /// The Connect menu: one row per Claude app with a Connect/Disconnect button, so the AI interface (`nyx-mcp`)
+    /// is registered without editing a config file.
+    fn connect_menu(&mut self, ui: &mut egui::Ui) {
+        ui.set_min_width(320.0);
+        ui.label(RichText::new("Let Claude run nyx").strong());
+        ui.weak("Registers the nyx MCP server with the app, so Claude can set up and solve simulations here.");
+        ui.separator();
+        let Some(server) = self.mcp_server.clone() else {
+            ui.colored_label(Color32::from_rgb(200, 120, 20), "nyx-mcp was not found next to nyx.");
+            ui.weak("Build it (cd ai; cargo build --release -p nyx-mcp) or point to it:");
+            if ui.button("Locate nyx-mcp...").clicked() {
+                ui.close();
+                if let Some(p) = rfd::FileDialog::new().set_title("nyx-mcp").pick_file() {
+                    self.mcp_server = Some(connect::plain_path(p));
+                    self.refresh_connect();
+                }
+            }
+            return;
+        };
+        for (i, client) in Client::ALL.into_iter().enumerate() {
+            let Some(path) = client.config_path() else { continue };
+            let status = self.connect_status.get(i).cloned().unwrap_or(connect::Status::NotConnected);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(client.name()).strong());
+                match &status {
+                    connect::Status::Connected => ui.colored_label(Color32::from_rgb(40, 150, 70), "connected"),
+                    connect::Status::NotConnected => ui.weak("not connected"),
+                    connect::Status::OtherPath(_) => ui.colored_label(Color32::from_rgb(200, 120, 20), "points to another nyx-mcp"),
+                    connect::Status::Unreadable(_) => ui.colored_label(Color32::from_rgb(200, 60, 60), "config unreadable"),
+                };
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let unreadable = matches!(status, connect::Status::Unreadable(_));
+                    let connected = status == connect::Status::Connected;
+                    if connected {
+                        if ui.button("Disconnect").clicked() {
+                            self.connect_note = Some(match connect::disconnect(&path) {
+                                Ok(()) => format!("{}: disconnected.", client.name()),
+                                Err(e) => e,
+                            });
+                            self.refresh_connect();
+                        }
+                    } else if ui.add_enabled(!unreadable, egui::Button::new(if matches!(status, connect::Status::OtherPath(_)) { "Reconnect" } else { "Connect" })).clicked() {
+                        self.connect_note = Some(match connect::connect(&path, &server) {
+                            Ok(()) => format!("{}: connected. {}", client.name(), client.after_connect()),
+                            Err(e) => e,
+                        });
+                        self.refresh_connect();
+                    }
+                });
+            });
+            ui.weak(path.display().to_string());
+            if let connect::Status::Unreadable(e) = &status {
+                ui.colored_label(Color32::from_rgb(200, 60, 60), e);
+            }
+            ui.add_space(4.0);
+        }
+        if let Some(n) = &self.connect_note {
+            ui.separator();
+            ui.label(n);
+        }
+        ui.separator();
+        ui.weak(format!("Server: {}", server.display()));
+        ui.horizontal(|ui| {
+            if ui.button("Copy config JSON").clicked() {
+                ui.ctx().copy_text(connect::snippet(&server));
+                self.connect_note = Some("Config JSON copied; paste it into the mcpServers of any MCP client.".into());
+            }
+            if ui.button("Locate nyx-mcp...").clicked() {
+                if let Some(p) = rfd::FileDialog::new().set_title("nyx-mcp").pick_file() {
+                    self.mcp_server = Some(connect::plain_path(p));
+                    self.refresh_connect();
+                }
+            }
         });
     }
 
@@ -988,4 +1089,4 @@ mod tests {
         assert!(b.doc.mesh.is_some());
         let _ = std::fs::remove_file(&path);
     }
-}
+}
