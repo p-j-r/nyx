@@ -22,6 +22,8 @@ plane); `femcore::frame_adapter` is the only place the two vocabularies meet, so
 
 Ten tests are `#[ignore]`d throughout (slow Brillouin and ring studies; the seven ported ones were re-run in release at the end).
 
+Step 4 test arithmetic (the commit message of step 4 words it loosely): 614 - 8 (`tests/mesher.rs`) - 2 (`mesh.rs` counts) - 1 (`Solid::Extrusion`) - 1 (the legacy-frame refusal test of step 3, removed with the shim) + 3 (`tests/geom_meshes.rs`) = 605.
+
 ## Behaviour that changed for users
 
 * **Positive out-of-plane wave number `k` now means a wave along +y** (into the page). It used to mean "towards the viewer, -y". The
