@@ -1,0 +1,18 @@
+# Kernel port to wafer axes: status
+
+Plan: `nyx_frames/KERNEL_PORT_PLAN.md` in the project files. Oracle: `crates/femcore/tests/golden_frames/*.json`, frozen from the kernels before they were ported (`tests/golden_frames.rs`; `NYX_WRITE_GOLDEN=1` rewrites them, only do that on a kernel known to be right).
+
+| Phase | Kernels | State |
+|---|---|---|
+| 0 | `section` module, golden files | done |
+| 1 | `scalar` (electrostatics, heat) | done, adapter bypassed, golden files match to 1e-9 |
+| 1 pilot / 3 | `emw`, `emw_pml` (real, tilted-crystal and PML paths), `Physics::Emw` on a cross-section | done, golden files match to 1e-8 / 1e-7 |
+| 2 | `solid`, `solid_pml`, `solid_floquet`, `solid_lrb` | open |
+| 4 | `solid_kz` | open |
+| 5 | `brillouin` | open; its optical part goes through `frame_adapter::to_wafer_frame` (transitional) |
+| 6 | axisymmetric family | open |
+| 7 | delete the adapter | open |
+
+`section` is the one place with axis numbers: `plane_tensor` (x, z, y; for diffusion and in-plane elasticity), `local_tensor` and `LOCAL_AXES` (lateral, normal, propagation; for the mode solvers), `component_names`, `wafer_point`. `PROP_SIGN = -1` is the open propagation-direction decision of the optical modes (they carry `exp(-j beta z_local)` with `z_local = -y`).
+
+Known: `solid_pml::low_reflecting_boundary_gives_the_analytic_damped_bar_modes` fails on this machine's cloud container before and after the port (Re f1 = 4e-7, a rigid-body mode); not caused by the port.

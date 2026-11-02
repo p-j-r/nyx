@@ -38,7 +38,9 @@ fn solve_checked(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState)
     }
     progress::check()?;
     crate::validate::check_inputs(mesh, spec)?;
-    let result = if mesh.dim == 2 {
+    // kernels that already read the problem in wafer axes (`section`) need no model-frame translation
+    let wafer_native = matches!(spec.physics, Physics::Electrostatics | Physics::Heat | Physics::Emw);
+    let result = if mesh.dim == 2 && !wafer_native {
         // solve in the axes of the 2D model and name the results in the wafer axes
         let inner = crate::frame_adapter::to_model_frame(spec, 2);
         let mut result = solve_model_frame(mesh, &inner, state)?;

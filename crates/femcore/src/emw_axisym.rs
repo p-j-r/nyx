@@ -67,7 +67,7 @@ impl AxiMaterial {
                     cen[k] += mesh.point(v as usize)[k] / 3.0;
                 }
             }
-            let (sr, sz) = crate::emw_pml::stretch(p, cen, *lo, *hi);
+            let (sr, sz) = crate::emw_pml::stretch(p, [p.x, p.y], cen, *lo, *hi);
             // r~ at the centre of the cell
             let r = cen[0];
             let len = (hi[0] - lo[0]).max(1e-300);

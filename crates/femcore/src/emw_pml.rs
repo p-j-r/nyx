@@ -28,6 +28,7 @@ use crate::fem::*;
 use crate::fields::{local_bary, node_average};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
+use crate::section::{local_component, local_tensor};
 use std::time::Instant;
 
 /// Relative change of the propagation constant at which the coupled (tilted-crystal) fixed-point iteration stops.
@@ -65,8 +66,9 @@ pub struct ModesC {
     pub converged: bool,
 }
 
-/// Stretch factors of a cell centre for a PML specification and the bounding box of its domain.
-pub fn stretch(p: &Pml, centre: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> (C, C) {
+/// Stretch factors along the two axes of the mesh (`dirs`, the layer directions of each) of a cell centre for a PML specification and the
+/// bounding box of its domain.
+pub fn stretch(p: &Pml, dirs: [PmlDir; 2], centre: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> (C, C) {
     let one = |dir: PmlDir, x: f64, lo: f64, hi: f64| -> C {
         let t = match dir {
             PmlDir::Off => return c(1.0, 0.0),
@@ -77,18 +79,19 @@ pub fn stretch(p: &Pml, centre: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> (C, C) 
         let prof = if p.order == 0.0 { 1.0 } else { t.powf(p.order) };
         c(p.re, -p.strength * prof)
     };
-    (one(p.x, centre[0], lo[0], hi[0]), one(p.y, centre[1], lo[1], hi[1]))
+    (one(dirs[0], centre[0], lo[0], hi[0]), one(dirs[1], centre[1], lo[1], hi[1]))
 }
 
-/// Complex material tensors of every cell including the PML stretching.
+/// Complex material tensors of every cell including the PML stretching, in the local axes of the mode solvers (`section::local_tensor`).
+/// The layers of a cross-section absorb along the wafer axes x and z.
 pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
-    let tens = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+    let tens: Vec<_> = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(local_tensor).collect();
     let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
     // bounding boxes of the PML domains
     let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
     for c in 0..mesh.n_cells() {
         let l = mesh.cell_labels[c];
-        if m.pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off) {
+        if m.pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off) {
             let e = boxes.entry(l).or_insert(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]));
             for &v in mesh.cell(c) {
                 let p = mesh.point(v as usize);
@@ -113,7 +116,7 @@ pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, V
                     cen[k] += mesh.point(i as usize)[k] / 3.0;
                 }
             }
-            let s = stretch(p, cen, *lo, *hi);
+            let s = stretch(p, [p.x, p.z], cen, *lo, *hi);
             sx = s.0;
             sy = s.1;
         }
@@ -336,8 +339,8 @@ pub fn solve_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[Mu
     })
 }
 
-/// Nodal magnitude fields of a complex mode, scaled to max |E| = 1: `|E|, |Et|, |Ez|, Re Etx,
-/// Re Ety, Re Ez` (real parts after rotating the phase so that the largest component is real).
+/// Nodal magnitude fields of a complex mode, scaled to max |E| = 1, under wafer names: `|E|, |Exz|, |Ey|, Re Ex,
+/// Re Ez, Re Ey` (real parts after rotating the phase so that the largest component is real).
 pub fn mode_fields_complex(mesh: &SimplexMesh, modes: &ModesC, j: usize, freq: f64, order: usize) -> Vec<Field> {
     let k0 = 2.0 * std::f64::consts::PI * freq / C0;
     let (nc, nloc) = (mesh.n_cells(), mesh.nloc(order));
@@ -383,7 +386,16 @@ pub fn mode_fields_complex(mesh: &SimplexMesh, modes: &ModesC, j: usize, freq: f
     let tot: Vec<f64> = (0..n).map(|i| etn[i].hypot(ezn[i])).collect();
     let s = 1.0 / tot.iter().cloned().fold(0.0, f64::max).max(1e-300);
     let f = |name: &str, v: Vec<f64>| Field { name: name.into(), unit: "a.u.".into(), values: v.iter().map(|x| x * s).collect() };
-    vec![f("|E|", tot.clone()), f("|Et|", etn), f("|Ez|", ezn), f("Re Etx", avg(&re(&ex))), f("Re Ety", avg(&re(&ey))), f("Re Ez", avg(&re(&ez)))]
+    let (lat, nor, prop) = (local_component(0), local_component(1), local_component(2));
+    let signed = |c: &[C], sign: f64| -> Vec<f64> { avg(&re(c)).iter().map(|x| x * sign).collect() };
+    vec![
+        f("|E|", tot.clone()),
+        f("|Exz|", etn),
+        f(&format!("|E{}|", prop.0), ezn),
+        f(&format!("Re E{}", lat.0), signed(&ex, lat.1)),
+        f(&format!("Re E{}", nor.0), signed(&ey, nor.1)),
+        f(&format!("Re E{}", prop.0), signed(&ez, prop.1)),
+    ]
 }
 
 pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {

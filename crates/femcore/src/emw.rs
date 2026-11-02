@@ -1,6 +1,10 @@
 //! Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed),
 //! perfectly conducting walls.
 //!
+//! The solver works in the local axes of the guide, (lateral, normal, propagation) = (x, z, `PROP_SIGN` y) of the wafer (`section`); its
+//! internal names for them are x, y, z below. The problem comes in wafer axes (tensors are turned into the local axes by
+//! `section::local_tensor`) and the result fields leave under wafer names (`Ex`, `Ez` in the plane, `Ey` along the guide).
+//!
 //! Fields E = (Et + z Ez) exp(-j beta z). Inserting this in the curl-curl equation documented
 //! for the electromagnetic-waves problem, curl(mu_r^-1 curl E) - k0^2 eps_r E = 0, gives
 //! the textbook mixed formulation with Nedelec edge elements for Et and Lagrange elements of
@@ -22,6 +26,7 @@ use crate::fem::*;
 use crate::fields::{local_bary, node_average};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
+use crate::section::{local_component, local_tensor};
 use crate::sparse::{Coo, Csr};
 use std::time::Instant;
 
@@ -63,8 +68,8 @@ pub(crate) fn edge_basis(l: &[f64], g: &[[f64; 2]; 3], sign: &[f64; 3], order: u
     }
 }
 
-/// Relative permittivity of one cell: the transverse 2x2 block (xx, xy, yy) and zz. The
-/// cross-section must be oriented so that the z axis (propagation) is a principal axis of the
+/// Relative permittivity of one cell in the local axes (lateral x, normal y, propagation z): the transverse 2x2 block (xx, xy, yy) and zz. The
+/// cross-section must be oriented so that the propagation axis is a principal axis of the
 /// permittivity (no xz or yz terms).
 #[derive(Clone, Copy, Debug)]
 pub struct EpsCell {
@@ -268,7 +273,7 @@ pub fn solve_modes_tensor(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r
 }
 
 /// Nodal fields of one mode: transverse and longitudinal field at every dof (node average of
-/// the element values), scaled to max |E| = 1. Returns `(|E|, |Et|, |Ez|, Ez, Etx, Ety)`.
+/// the element values), scaled to max |E| = 1, under wafer names: `|E|`, `|Exz|` (in the plane), `|Ey|` and `Ey` (along the guide), `Ex`, `Ez`.
 pub fn mode_fields(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order: usize) -> Vec<Field> {
     let k0 = 2.0 * std::f64::consts::PI * freq / C0;
     let (nc, nloc) = (mesh.n_cells(), mesh.nloc(order));
@@ -322,13 +327,14 @@ pub fn mode_fields(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order
     let big = etxn.iter().chain(etyn.iter()).cloned().fold(0.0f64, |m, x| if x.abs() > m.abs() { x } else { m });
     let sg = if big < 0.0 { -1.0 } else { 1.0 };
     let f = |name: &str, v: Vec<f64>| Field { name: name.into(), unit: "a.u.".into(), values: v };
+    let (lat, nor, prop) = (local_component(0), local_component(1), local_component(2));
     vec![
         f("|E|", sc(&tot)),
-        f("|Et|", sc(&etn)),
-        f("|Ez|", sc(&ezn)),
-        f("Ez", ez_nodal_signed.iter().map(|x| x * s).collect()),
-        f("Etx", etxn.iter().map(|x| x * s * sg).collect()),
-        f("Ety", etyn.iter().map(|x| x * s * sg).collect()),
+        f("|Exz|", sc(&etn)),
+        f(&format!("|E{}|", prop.0), sc(&ezn)),
+        f(&format!("E{}", prop.0), ez_nodal_signed.iter().map(|x| x * s * prop.1).collect()),
+        f(&format!("E{}", lat.0), etxn.iter().map(|x| x * s * sg * lat.1).collect()),
+        f(&format!("E{}", nor.0), etyn.iter().map(|x| x * s * sg * nor.1).collect()),
     ]
 }
 
@@ -346,7 +352,7 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
     if n_modes < 1 {
         return Err("at least one mode is needed".into());
     }
-    let tens = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+    let tens: Vec<_> = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(local_tensor).collect();
     for t in &tens {
         let scale = t[0][0].abs().max(t[1][1].abs()).max(t[2][2].abs()).max(1e-300);
         if t[0][2].abs() > 1e-9 * scale || t[1][2].abs() > 1e-9 * scale {

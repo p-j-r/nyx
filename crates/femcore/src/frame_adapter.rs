@@ -68,6 +68,12 @@ pub fn euler_to_model_frame(euler_deg: [f64; 3]) -> [f64; 3] {
     material::euler_from_rotation(&mul3(&WAFER_TO_MODEL, &material::rotation(euler_deg)))
 }
 
+/// Euler angles in the wafer frame of a crystal given in the 2D model frame (the inverse of `euler_to_model_frame`).
+pub fn euler_from_model_frame(euler_deg: [f64; 3]) -> [f64; 3] {
+    let st: M3 = [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]; // transpose of WAFER_TO_MODEL
+    material::euler_from_rotation(&mul3(&st, &material::rotation(euler_deg)))
+}
+
 /// A layer of a 2D cross-section written along the wafer axes x and z, along the mesh axes x and y of the solvers.
 fn pml_to_model_frame(p: &Pml) -> Pml {
     Pml { y: p.z, z: PmlDir::Off, ..p.clone() }
@@ -117,6 +123,19 @@ pub fn to_model_frame(spec: &ProblemSpec, mesh_dim: usize) -> ProblemSpec {
         for a in b.viscosity.values_mut() {
             a.euler_deg = euler_to_model_frame(a.euler_deg);
         }
+    }
+    s
+}
+
+/// Transitional: the optical part of a model-frame problem (`to_model_frame` of a Brillouin problem) turned back into wafer axes, for the
+/// optical mode solvers that already read wafer axes. Crystal orientations and layer directions are inverted; nothing else changes.
+pub fn to_wafer_frame(spec: &ProblemSpec) -> ProblemSpec {
+    let mut s = spec.clone();
+    for p in s.materials.pml.values_mut() {
+        *p = Pml { z: p.y, y: PmlDir::Off, ..p.clone() };
+    }
+    for a in s.materials.aniso.values_mut() {
+        a.euler_deg = euler_from_model_frame(a.euler_deg);
     }
     s
 }
@@ -283,6 +302,14 @@ pub fn axes_of_3d_problem(spec: &ProblemSpec, mesh: &SimplexMesh) -> ([usize; 3]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_frame_orientations_come_back() {
+        let e = [30.0, 40.0, 10.0];
+        let back = euler_from_model_frame(euler_to_model_frame(e));
+        let (r0, r1) = (material::rotation(e), material::rotation(back));
+        assert!((0..3).all(|i| (0..3).all(|j| (r0[i][j] - r1[i][j]).abs() < 1e-12)));
+    }
 
     #[test]
     fn the_rotation_is_the_table() {

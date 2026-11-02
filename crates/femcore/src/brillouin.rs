@@ -145,9 +145,16 @@ fn from_complex(m: &ModesC) -> Vec<OptMode> {
     (0..m.neff.len()).map(|j| OptMode { neff: m.neff[j], et: m.et[j].clone(), phi: m.phi[j].clone() }).collect()
 }
 
-/// Solves the optical modes of `spec` (a `Physics::Emw` problem with a `Modes` study); complex
-/// materials and PMLs go through the complex solver.
+/// Solves the optical modes of `spec` (a `Physics::Emw` problem with a `Modes` study) given in the model frame of the Brillouin
+/// kernel. Transitional: the Brillouin kernels still work in model axes (phase 5 of the kernel port), while the optical mode solvers
+/// read wafer axes, so the problem is turned back into wafer axes here (`frame_adapter::to_wafer_frame`).
 pub fn solve_optical(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<OpticalSet, String> {
+    solve_optical_wafer(mesh, &crate::frame_adapter::to_wafer_frame(spec))
+}
+
+/// Solves the optical modes of `spec` (a `Physics::Emw` problem with a `Modes` study in wafer axes); complex
+/// materials and PMLs go through the complex solver.
+pub fn solve_optical_wafer(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<OpticalSet, String> {
     let Study::Modes { freq, n_target, evanescent, n_modes } = spec.study.clone() else {
         return Err("the optical problem needs a Modes study".into());
     };
@@ -155,14 +162,14 @@ pub fn solve_optical(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<OpticalSe
         return Err("frequency must be positive and at least one mode is needed".into());
     }
     let (eps, mu) = cell_materials(mesh, &spec.materials)?;
-    let in_pml: Vec<bool> = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off)).collect();
+    let in_pml: Vec<bool> = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off)).collect();
     let coupled = eps.iter().any(|e| e.xz.norm() > 0.0 || e.yz.norm() > 0.0);
     let (modes, converged) = if spec.materials.has_pml() || coupled {
         let target = if evanescent { c(0.0, n_target) } else { c(n_target, 0.0) };
         let m = solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, spec.order)?;
         (from_complex(&m), m.converged)
     } else {
-        let tens = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+        let tens: Vec<_> = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(crate::section::local_tensor).collect();
         let e: Vec<EpsCell> = tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
         let mur = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
         let m = crate::emw::solve_modes_tensor(mesh, freq, &e, &mur, n_target, evanescent, n_modes, spec.order)?;
@@ -319,7 +326,7 @@ pub(crate) fn optical_set_real(mesh: &SimplexMesh, spec: &ProblemSpec, m: &Modes
 /// The modes of `emw_pml::solve_modes_complex` for `spec` as an `OpticalSet`.
 pub(crate) fn optical_set_complex(mesh: &SimplexMesh, spec: &ProblemSpec, m: &ModesC, freq: f64) -> Result<OpticalSet, String> {
     let (eps, mu) = cell_materials(mesh, &spec.materials)?;
-    let in_pml = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off)).collect();
+    let in_pml = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off)).collect();
     Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_complex(m), converged: m.converged, in_pml })
 }
 

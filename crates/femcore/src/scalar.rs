@@ -17,6 +17,11 @@ use std::time::Instant;
 
 pub const EPS0: f64 = 8.8541878128e-12;
 
+/// The wafer tensors of the cells in the axes of the mesh (on a cross-section the x-z block comes first, see `section::plane_tensor`).
+fn plane_tensors(mesh: &SimplexMesh, t: Vec<M3>) -> Vec<M3> {
+    t.iter().map(|m| crate::section::plane_tensor(m, mesh.dim)).collect()
+}
+
 pub(crate) fn check_labels(mesh: &SimplexMesh, bcs: &[Bc]) -> Result<(), String> {
     let known = mesh.boundary_labels();
     let mut bad: Vec<i32> = bcs.iter().flat_map(|b| b.labels.iter().copied()).filter(|l| !known.contains(l)).collect();
@@ -27,10 +32,6 @@ pub(crate) fn check_labels(mesh: &SimplexMesh, bcs: &[Bc]) -> Result<(), String>
     } else {
         Err(format!("boundary number(s) {bad:?} do not exist in this mesh (it has {known:?})"))
     }
-}
-
-fn comp_names(d: usize) -> &'static [&'static str] {
-    &["x", "y", "z"][..d]
 }
 
 /// Nodal field and gradient components of a scalar field: `[value, g_x, g_y, (g_z)]` per dof.
@@ -86,7 +87,7 @@ pub fn solve_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<So
     let eps = spec.materials.cell_values(mesh, "eps_r", Some(1.0))?;
     let rho = spec.materials.cell_values(mesh, "rho_v", Some(0.0))?;
     let k = if spec.materials.has_tensor(TensorKind::Permittivity) {
-        let mut t = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+        let mut t = plane_tensors(mesh, spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?);
         t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
         assemble_laplace_tensor(mesh, order, &t)
     } else {
@@ -138,7 +139,7 @@ pub fn solve_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<So
         scalars.push(("capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(), Scalar::Num(2.0 * w / (dv[1] - dv[0]).powi(2))));
     }
     let mut fields = vec![Field { name: "V".into(), unit: "V".into(), values: v }, Field { name: "|E|".into(), unit: "V/m".into(), values: en }];
-    for (name, c) in comp_names(mesh.dim).iter().zip(ec) {
+    for (name, c) in crate::section::component_names(mesh.dim).iter().zip(ec) {
         fields.push(Field { name: format!("E{name}"), unit: "V/m".into(), values: c });
     }
     Ok(SolveResult {
@@ -167,7 +168,7 @@ struct HeatSystem {
 fn heat_system(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<HeatSystem, String> {
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
-    let ktensor = spec.materials.cell_tensor(mesh, TensorKind::Conductivity, None)?;
+    let ktensor = plane_tensors(mesh, spec.materials.cell_tensor(mesh, TensorKind::Conductivity, None)?);
     let mut k = if spec.materials.has_tensor(TensorKind::Conductivity) {
         assemble_laplace_tensor(mesh, order, &ktensor)
     } else {
@@ -209,7 +210,7 @@ fn heat_fields(mesh: &SimplexMesh, t: &[f64], ktensor: &[M3], order: usize) -> V
     let q = nodal_tensor_gradient(mesh, t, order, ktensor, -1.0);
     let qc = components(&q, mesh.dim);
     let mut fields = vec![Field { name: "T".into(), unit: "K".into(), values: t.to_vec() }, Field { name: "|q|".into(), unit: "W/m^2".into(), values: norm_of(&qc) }];
-    for (name, c) in comp_names(mesh.dim).iter().zip(qc) {
+    for (name, c) in crate::section::component_names(mesh.dim).iter().zip(qc) {
         fields.push(Field { name: format!("q{name}"), unit: "W/m^2".into(), values: c });
     }
     fields

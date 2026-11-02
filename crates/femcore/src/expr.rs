@@ -251,10 +251,17 @@ impl Expr {
     }
 }
 
-/// Evaluates `text` at dof coordinates (flat, `dim` per point).
+/// Evaluates `text` at dof coordinates (flat, `dim` per point) in the wafer axes: `x`, `y`, `z`. On a 2D cross-section the mesh is the x-z
+/// plane, so the second mesh axis is `z` and `y` is 0.
 pub fn eval_at(text: &str, coords: &[f64], dim: usize) -> Result<Vec<f64>, String> {
     let e = Expr::parse(text)?;
-    Ok(coords.chunks(dim).map(|p| e.eval(p[0], p.get(1).copied().unwrap_or(0.0), p.get(2).copied().unwrap_or(0.0))).collect())
+    Ok(coords
+        .chunks(dim)
+        .map(|p| {
+            let w = crate::section::wafer_point(p, dim);
+            e.eval(w[0], w[1], w[2])
+        })
+        .collect())
 }
 
 #[cfg(test)]

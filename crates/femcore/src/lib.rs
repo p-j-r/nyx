@@ -57,6 +57,7 @@ pub mod progress;
 pub mod refine3d;
 pub mod ring_brillouin;
 pub mod scalar;
+pub mod section;
 pub mod solid;
 pub mod solid_axisym;
 pub mod solid_floquet;
