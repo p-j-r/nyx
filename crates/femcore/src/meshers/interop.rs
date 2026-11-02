@@ -27,13 +27,16 @@ pub fn simplex_to_adapt<const D: usize>(m: &NyxMesh) -> Result<SimplexMesh<D>, S
         return Err(format!("the mesh is {}D, not {D}D", m.dim));
     }
     let points = (0..m.n_points()).map(|i| std::array::from_fn(|a| m.points[i * D + a])).collect();
-    Ok(SimplexMesh::<D> {
+    let mut out = SimplexMesh::<D> {
         points,
         cells: m.cells.clone(),
         cell_label: m.cell_labels.clone(),
         facets: m.facets.clone(),
         facet_label: m.facet_labels.clone(),
-    })
+    };
+    // meshes read from files may be clockwise; the working mesh needs positive cells
+    out.orient_positive();
+    Ok(out)
 }
 
 /// The mesher's simplex mesh as a nyx mesh (edges and numbering of unknowns are rebuilt).

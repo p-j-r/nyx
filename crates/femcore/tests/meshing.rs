@@ -185,3 +185,127 @@ fn soi_wire_modes_on_the_simple_and_the_adaptive_mesh() {
     assert_eq!(l_simple, l_ad2);
     assert!((n_ad2 - n_ref).abs() < 2e-3);
 }
+
+// ------------------------------------------------------------------ estimator and loop
+
+use femcore::estimate::{recovered_hessians, solve_adaptively, Estimator, LoopSettings};
+
+#[test]
+fn the_recovered_hessian_of_a_quadratic_is_its_constant_hessian() {
+    // u = x^2 + 3 z^2 + x z has the Hessian [[2, 1], [1, 6]] (positive definite, so its absolute value is itself)
+    let m = Model::new_2d();
+    let mut m = m;
+    let r = m.rect("plate", (0.0, 0.0), (1.0, 1.0));
+    m.overlay(&[("plate", r)]);
+    let g = mesh_model(&m.list, &MeshPlan::simple(0.08)).unwrap();
+    let u: Vec<f64> = (0..g.mesh.n_points()).map(|i| {
+        let (x, z) = (g.mesh.points[2 * i], g.mesh.points[2 * i + 1]);
+        x * x + 3.0 * z * z + x * z
+    }).collect();
+    let h = recovered_hessians(&g.mesh, &u).unwrap();
+    let mut worst: f64 = 0.0;
+    let mut n = 0;
+    for i in 0..g.mesh.n_points() {
+        let (x, z) = (g.mesh.points[2 * i], g.mesh.points[2 * i + 1]);
+        if x > 0.2 && x < 0.8 && z > 0.2 && z < 0.8 {
+            n += 1;
+            for (a, b, e) in [(0, 0, 2.0), (0, 1, 1.0), (1, 1, 6.0)] {
+                worst = worst.max((h[i][a][b] - e).abs() / e);
+            }
+        }
+    }
+    assert!(n > 20);
+    assert!(worst < 0.1, "worst relative error of the interior Hessian {worst}");
+}
+
+#[test]
+fn recovery_does_not_smear_a_kink_over_an_interface() {
+    // u = x on the left, 3x on the right of x = 0: continuous, each side linear. One-sided recovery sees no curvature anywhere.
+    let mut m = Model::new_2d();
+    let l = m.rect("left", (-1.0, 0.0), (0.0, 1.0));
+    let r = m.rect("right", (0.0, 0.0), (1.0, 1.0));
+    m.overlay(&[("left", l), ("right", r)]);
+    let g = mesh_model(&m.list, &MeshPlan::simple(0.1)).unwrap();
+    let u: Vec<f64> = (0..g.mesh.n_points()).map(|i| {
+        let x = g.mesh.points[2 * i];
+        if x > 0.0 { 3.0 * x } else { x }
+    }).collect();
+    let h = recovered_hessians(&g.mesh, &u).unwrap();
+    let on_interface: Vec<usize> = (0..g.mesh.n_points()).filter(|&i| g.mesh.points[2 * i].abs() < 1e-12).collect();
+    assert!(on_interface.len() > 5);
+    for i in on_interface {
+        let n = h[i][0][0].abs() + h[i][1][1].abs() + h[i][0][1].abs();
+        assert!(n < 1e-9, "Hessian {:?} at the interface vertex {i}", h[i]);
+    }
+}
+
+#[test]
+fn the_loop_improves_poisson_on_a_disk_and_reports_its_cycles() {
+    let r = 0.5;
+    let m = disk(r);
+    let mut st = LoopSettings::new(0.25);
+    st.max_cycles = 4;
+    st.rel_tol = 1e-6;
+    let mut solve = |g: &femcore::geomdrive::MeshedGeom| {
+        let mut s = ProblemSpec::new(Physics::Electrostatics);
+        s.materials.default.insert("rho_v".into(), femcore::scalar::EPS0);
+        s.bcs = vec![Bc { on: None, labels: g.select("outer").unwrap(), kind: BcKind::Ground }];
+        let res = femcore::scalar::solve_electrostatics(&g.mesh, &s)?;
+        let v = res.scalar("V max").ok_or("no V max")?;
+        Ok((res, v))
+    };
+    let out = solve_adaptively(&m.list, &st, &mut solve).unwrap();
+    let exact = r * r / 4.0;
+    for c in &out.cycles {
+        eprintln!("  cells {:6}  Vmax err {:.2e}  change {:?}  mesh {:.2}s solve {:.2}s", c.cells, (c.quantity / exact - 1.0).abs(), c.change, c.mesh_seconds, c.solve_seconds);
+    }
+    assert!(out.cycles.len() >= 2);
+    let first = (out.cycles[0].quantity / exact - 1.0).abs();
+    let last = (out.cycles.last().unwrap().quantity / exact - 1.0).abs();
+    assert!(last < first, "{last} vs {first}");
+    assert!(out.cycles.last().unwrap().cells > out.cycles[0].cells);
+}
+
+#[test]
+fn the_loop_on_the_soi_wire_converges_n_eff() {
+    use femcore::usecases::soi::SoiWire;
+    let wire = SoiWire::default();
+    let mut st = LoopSettings::new(wire.h_far);
+    st.estimator = Estimator { fields: vec!["|E|".into()], ..Estimator::default() };
+    st.max_cycles = 4;
+    st.rel_tol = 2e-6;
+    let mut solve = |g: &femcore::geomdrive::MeshedGeom| {
+        let res = femcore::solve::solve(&g.mesh, &wire.spec(g), &mut SolveState::default())?;
+        let n = res.solutions.iter().filter_map(|s| s.neff.map(|n| n.0)).fold(0.0, f64::max);
+        Ok((res, n))
+    };
+    let out = solve_adaptively(&wire.model().list, &st, &mut solve).unwrap();
+    // reference: every size times 0.22 on the simple mesher (16k cells; the study below shows it still drifts by about 1e-5)
+    let fine = SoiWire { h_core: wire.h_core * 0.22, h_near: wire.h_near * 0.22, h_far: wire.h_far * 0.22, ..wire.clone() };
+    let gref = mesh_model(&fine.model().list, &MeshPlan::simple(fine.h_far)).unwrap();
+    let rr = femcore::solve::solve(&gref.mesh, &fine.spec(&gref), &mut SolveState::default()).unwrap();
+    let nref = rr.solutions.iter().filter_map(|s| s.neff.map(|n| n.0)).fold(0.0, f64::max);
+    eprintln!("SOI loop, reference n_eff {nref:.6} on {} cells", gref.mesh.n_cells());
+    for c in &out.cycles {
+        eprintln!("  cells {:6}  n_eff {:.6}  err {:.1e}  change {:?}  mesh {:.2}s solve {:.2}s", c.cells, c.quantity, (c.quantity - nref).abs(), c.change, c.mesh_seconds, c.solve_seconds);
+    }
+    let last = out.cycles.last().unwrap();
+    assert!((last.quantity - nref).abs() < 2e-5, "{} vs {nref}", last.quantity);
+}
+
+/// Study, not a check (run with `--ignored --nocapture`): n_eff of the SOI wire on uniformly scaled simple meshes, to see what the
+/// adaptive loop is converging to.
+#[test]
+#[ignore]
+fn soi_uniform_convergence_table() {
+    use femcore::usecases::soi::SoiWire;
+    let wire = SoiWire::default();
+    for f in [1.0, 0.6, 0.4, 0.3, 0.22, 0.16] {
+        let w = SoiWire { h_core: wire.h_core * f, h_near: wire.h_near * f, h_far: wire.h_far * f, ..wire.clone() };
+        let g = mesh_model(&w.model().list, &MeshPlan::simple(w.h_far)).unwrap();
+        let t = std::time::Instant::now();
+        let r = femcore::solve::solve(&g.mesh, &w.spec(&g), &mut SolveState::default()).unwrap();
+        let n = r.solutions.iter().filter_map(|s| s.neff.map(|n| n.0)).fold(0.0, f64::max);
+        eprintln!("uniform x{f:<5} cells {:6}  n_eff {n:.7}  solve {:.1}s", g.mesh.n_cells(), t.elapsed().as_secs_f64());
+    }
+}

@@ -22,6 +22,7 @@ use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
 use geom::eval::Evaluated;
 use geom::labels::LabelMap;
 use geom::model::FeatureList;
+use geom::select::EntityKind;
 use std::collections::HashMap;
 
 /// Settings of the adaptive mesher.
@@ -101,6 +102,16 @@ pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGe
 /// to, the `Size` rules of the edges it lies on, and on a curved edge the size at which a chord stays within `max_dev` of the curve. All
 /// times `a.scale`.
 pub fn a_priori_metrics(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Result<Vec<Sym<2>>, String> {
+    Ok(vertex_sizes(g, opts, a, false)?.iter().map(|&h| isotropic::<2>(h.max(1e-300))).collect())
+}
+
+/// The sizes the geometry insists on whatever the solution does: `Size` rules on regions and edges, the layers of an absorbing region, and
+/// the curvature limit of the edges. Everywhere else the size is the global `opts.h` (a ceiling). Used as the floor of an estimator metric.
+pub fn geometry_floor(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Result<Vec<Sym<2>>, String> {
+    Ok(vertex_sizes(g, opts, a, true)?.iter().map(|&h| isotropic::<2>(h.max(1e-300))).collect())
+}
+
+fn vertex_sizes(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive, geometry_only: bool) -> Result<Vec<f64>, String> {
     if !(a.scale > 0.0 && a.scale.is_finite()) {
         return Err("the adaptation scale must be positive".into());
     }
@@ -112,7 +123,10 @@ pub fn a_priori_metrics(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Re
     let region_of: HashMap<i32, usize> = g.labels.domains.iter().map(|d| (d.id, d.region as usize)).collect();
     let mut vh = vec![f64::INFINITY; m.n_points()];
     for c in 0..m.n_cells() {
-        let h = region_of.get(&m.cell_labels[c]).map_or(opts.h, |&r| sizes.region_h[r]);
+        let mut h = region_of.get(&m.cell_labels[c]).map_or(opts.h, |&r| sizes.region_h[r]);
+        if geometry_only && h >= opts.h * 0.999 {
+            h = opts.h;
+        }
         for &v in m.cell(c) {
             vh[v as usize] = vh[v as usize].min(h);
         }
@@ -143,7 +157,7 @@ pub fn a_priori_metrics(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Re
             }
         }
     }
-    Ok(vh.iter().map(|&h| isotropic::<2>((h * a.scale).max(1e-300))).collect())
+    Ok(vh.iter().map(|&h| h * a.scale).collect())
 }
 
 /// Vertices of the mesh that lie on a boundary facet or between cells of different domains.
@@ -192,6 +206,7 @@ pub fn adapt_to_metrics(g: MeshedGeom, metrics: &[Sym<2>], a: &Adaptive) -> Resu
     let field = BackgroundMetric2::new_graded(&old, metrics, a.grade);
     let mut opts = AdaptOptions { max_cells: a.max_cells, ..AdaptOptions::default() };
     opts.topo.fixed_vertices = geometry_vertices(&g);
+    opts.topo.frozen_labels = periodic_labels(&g);
     let result = {
         let ev = &g.eval;
         let labels = &g.labels;
@@ -199,6 +214,22 @@ pub fn adapt_to_metrics(g: MeshedGeom, metrics: &[Sym<2>], a: &Adaptive) -> Resu
     };
     let mesh = simplex_from_adapt(&result.mesh);
     Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval }, result.report))
+}
+
+/// Boundary labels of the edges that take part in a periodic pair of the model. Their chains stay exactly as the start mesh has them, so
+/// the two sides of a pair keep matching vertex for vertex (the start mesh cuts congruent edges identically).
+fn periodic_labels(g: &MeshedGeom) -> Vec<i32> {
+    let mut v: Vec<i32> = vec![];
+    for p in g.eval.periodic_pairs() {
+        for set in [&p.a, &p.b] {
+            if set.kind == EntityKind::Edges {
+                v.extend(set.ids.iter().filter_map(|&e| g.labels.label_of_edge(e)));
+            }
+        }
+    }
+    v.sort_unstable();
+    v.dedup();
+    v
 }
 
 /// Indices of the mesh vertices that sit on a vertex of the geometry.
