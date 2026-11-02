@@ -60,11 +60,10 @@ fn ring_mesh() -> femcore::mesh::SimplexMesh {
 }
 
 /// Sapphire ring with its crystal axes given by the rotation `r`, in the frame `frame`.
-fn sapphire_ring(r: &R3, frame: Frame, m: f64) -> ProblemSpec {
+fn sapphire_ring(r: &R3, m: f64) -> ProblemSpec {
     let (stiffness, _, _, _, rho) = sapphire();
     let mut sp = ProblemSpec::new(Physics::Solid);
     sp.order = 2;
-    sp.materials.frame = frame;
     sp.materials.default.insert("rho".into(), rho);
     sp.materials.aniso.insert(1, Anisotropy { stiffness: Some(stiffness), euler_deg: euler_from_rotation(r), ..Default::default() });
     sp.study = Study::Eigenfrequency { n_modes: 6, f_search: 40.0 * (1.0 + m) };
@@ -73,8 +72,12 @@ fn sapphire_ring(r: &R3, frame: Frame, m: f64) -> ProblemSpec {
 
 /// Lowest elastic frequencies of the ring at azimuthal order `m`, the way `solve` hands a wafer-frame problem to the ring kernels.
 fn ring_frequencies(spec: &ProblemSpec, m: f64) -> Vec<f64> {
-    let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
-    let (_, modes) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), &inner, m).unwrap();
+    kernel_frequencies(&femcore::frame_adapter::to_model_frame(spec, 2), m)
+}
+
+/// The same for a problem already written in the axes of the kernel (x = r, y = z, third axis theta).
+fn kernel_frequencies(inner: &ProblemSpec, m: f64) -> Vec<f64> {
+    let (_, modes) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), inner, m).unwrap();
     let mut f: Vec<f64> = modes.freqs.iter().map(|z| z.re).collect();
     f.sort_by(|a, b| a.total_cmp(b));
     f
@@ -91,15 +94,15 @@ fn assert_same(a: &[f64], b: &[f64], what: &str) {
 fn the_elastic_modes_of_a_crystal_ring_do_not_depend_on_the_azimuth_of_its_c_axis() {
     let m = 2.0;
     let b = 57.6;
-    let reference = ring_frequencies(&sapphire_ring(&tilt_about_x(b), Frame::Wafer, m), m);
+    let reference = ring_frequencies(&sapphire_ring(&tilt_about_x(b), m), m);
     assert!(reference.len() >= 4, "{reference:?}");
     // a rotation of the whole crystal about the ring axis z (a rotation applied in the lab frame, on the left) cannot matter
     for deg in [37.0, 90.0, -90.0, 180.0] {
-        let f = ring_frequencies(&sapphire_ring(&mul(&turn_about_z(deg), &tilt_about_x(b)), Frame::Wafer, m), m);
+        let f = ring_frequencies(&sapphire_ring(&mul(&turn_about_z(deg), &tilt_about_x(b)), m), m);
         assert_same(&f, &reference, &format!("crystal turned {deg} degrees about z"));
     }
     // the check can fail: a different angle between the c axis and the normal is a different crystal ring
-    let other = ring_frequencies(&sapphire_ring(&tilt_about_x(20.0), Frame::Wafer, m), m);
+    let other = ring_frequencies(&sapphire_ring(&tilt_about_x(20.0), m), m);
     let worst = other.iter().zip(&reference).map(|(a, b)| (a - b).abs() / b.abs()).fold(0.0, f64::max);
     assert!(worst > 1e-3, "a 20 degree tilt gave the same modes as 57.6 degrees: {other:?} against {reference:?}");
 }
@@ -109,7 +112,7 @@ fn a_ring_described_in_the_wafer_frame_and_in_the_model_axes_has_the_same_modes(
     let m = 2.0;
     let b = 57.6;
     // wafer axes: c axis tilted from the normal z towards x (the radial direction)
-    let wafer = ring_frequencies(&sapphire_ring(&tilt_about_y(b), Frame::Wafer, m), m);
+    let wafer = ring_frequencies(&sapphire_ring(&tilt_about_y(b), m), m);
     // model axes of the (r, z) half-plane: x = r, y = z (the ring axis), the c axis (sin b, cos b, 0) is tilted from y towards x
     let to_model_y: R3 = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]; // sends the crystal c axis to model y
     let (s, c) = b.to_radians().sin_cos();
@@ -117,8 +120,20 @@ fn a_ring_described_in_the_wafer_frame_and_in_the_model_axes_has_the_same_modes(
     let r_model = mul(&about_model_z, &to_model_y);
     let c_axis = [r_model[0][2], r_model[1][2], r_model[2][2]];
     assert!((c_axis[0] - s).abs() < 1e-12 && (c_axis[1] - c).abs() < 1e-12 && c_axis[2].abs() < 1e-12, "{c_axis:?}");
-    let model = ring_frequencies(&sapphire_ring(&r_model, Frame::Model, m), m);
+    // the model-axes description goes to the kernel as it is (no wafer frame any more)
+    let model = kernel_frequencies(&sapphire_ring(&r_model, m), m);
     assert_same(&model, &wafer, "model-axes description");
+    // and its frequencies are frozen: they were computed when the model axes were still a public frame (NYX_WRITE_GOLDEN=1 rewrites the file)
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden_frames/ring_model_axes.json");
+    if std::env::var("NYX_WRITE_GOLDEN").is_ok() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let text = format!("{{\"description\": \"sapphire ring, c axis 57.6 deg from z towards r, model axes (r, z, theta), azimuthal order 2: lowest elastic frequencies (Hz)\", \"m\": 2, \"frequencies\": {:?}}}
+", model);
+        std::fs::write(&path, text).unwrap();
+    }
+    let golden: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("tests/golden_frames/ring_model_axes.json")).unwrap();
+    let frozen: Vec<f64> = golden["frequencies"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert_same(&model, &frozen, "frozen model-axes frequencies");
 }
 
 #[test]

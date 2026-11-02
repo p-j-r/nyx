@@ -5,11 +5,6 @@ use femcore::material::*;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 
-fn wafer(mut s: ProblemSpec) -> ProblemSpec {
-    s.materials.frame = Frame::Wafer;
-    s
-}
-
 #[test]
 fn a_permittivity_tensor_in_the_wafer_frame_acts_on_the_vertical_axis_of_the_x_z_plane() {
     // plates on the bottom (z = 0) and top (z = H) of an x-z section of length L: C = eps0 eps_zz L / H per metre
@@ -17,14 +12,14 @@ fn a_permittivity_tensor_in_the_wafer_frame_acts_on_the_vertical_axis_of_the_x_z
     let mut spec = ProblemSpec::new(Physics::Electrostatics);
     spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 5.0 }), ..Default::default() });
     spec.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
-    let r = femcore::solve::solve(&mesh, &wafer(spec.clone()), &mut SolveState::default()).unwrap();
+    let r = femcore::solve::solve(&mesh, &spec.clone(), &mut SolveState::default()).unwrap();
     let c = r.scalar("capacitance").unwrap();
     assert!((c / (femcore::scalar::EPS0 * 5.0 * 1.0 / 0.5) - 1.0).abs() < 1e-9, "{c}");
     // the field of a uniform vertical field is called Ez
     assert!(r.solutions[0].field("Ez").is_some() && r.solutions[0].field("Ey").is_none());
     // plates on the sides see eps_xx
     spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
-    let r = femcore::solve::solve(&mesh, &wafer(spec), &mut SolveState::default()).unwrap();
+    let r = femcore::solve::solve(&mesh, &spec, &mut SolveState::default()).unwrap();
     assert!((r.scalar("capacitance").unwrap() / (femcore::scalar::EPS0 * 7.0 * 0.5 / 1.0) - 1.0).abs() < 1e-9);
 }
 
@@ -90,7 +85,7 @@ fn a_loaded_cubic_plate_in_the_x_z_plane_deflects_like_the_same_plate_in_the_mod
     spec.materials.set(1, "E", 1e9);
     spec.materials.set(1, "nu", 0.3);
     spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 165.7e9, c12: 63.9e9, c44: 79.6e9 }), euler_deg: eul, ..Default::default() });
-    let mut w = wafer(spec.clone());
+    let mut w = spec.clone();
     w.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, 0.0, -1e6]) }];
     let rw = femcore::solve::solve(&mesh, &w, &mut SolveState::default()).unwrap();
     // the model-frame description: the same rotation expressed in (x, z)
@@ -102,7 +97,7 @@ fn a_loaded_cubic_plate_in_the_x_z_plane_deflects_like_the_same_plate_in_the_mod
     let scale = uy_m.iter().fold(0.0f64, |a, b| a.max(b.abs()));
     assert!(scale > 0.0 && maxdiff(uz_w, uy_m) < 1e-9 * scale, "{} of {scale}", maxdiff(uz_w, uy_m));
     // turning the crystal about the normal z instead changes the answer (a different rotation)
-    let mut other = wafer(m.clone());
+    let mut other = m.clone();
     other.materials.aniso.get_mut(&1).unwrap().euler_deg = [20.0, 0.0, 0.0];
     other.bcs = w.bcs.clone();
     let ro = femcore::solve::solve(&mesh, &other, &mut SolveState::default()).unwrap();
@@ -179,4 +174,25 @@ fn the_absorbing_pieces_of_a_geom_model_come_out_in_wafer_names() {
     assert_eq!((corner.x, corner.y, corner.z), (PmlDir::Minus, PmlDir::Off, PmlDir::Minus));
     let top = pml[&g.domain("air.pml_zmax").unwrap()].clone();
     assert_eq!((top.x, top.y, top.z), (PmlDir::Off, PmlDir::Off, PmlDir::Plus));
+}
+
+#[test]
+fn a_problem_saved_in_the_legacy_model_axes_is_refused_and_the_wafer_key_is_not_written() {
+    let mut s = ProblemSpec::new(Physics::Electrostatics);
+    s.materials.default.insert("eps_r".into(), 1.0);
+    s.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
+    let json = serde_json::to_value(&s).unwrap();
+    assert!(json["materials"].get("frame").is_none(), "there is no frame to save any more");
+    // files of the brief window with an Axes toggle say what they are
+    let mut old = json.clone();
+    old["materials"]["frame"] = serde_json::json!("Model");
+    let legacy: ProblemSpec = serde_json::from_value(old).unwrap();
+    let mesh = SimplexMesh::rectangle(1.0, 0.5, 4, 2);
+    let e = femcore::solve::solve(&mesh, &legacy, &mut SolveState::default()).err().unwrap();
+    assert!(e.contains("legacy model axes"), "{e}");
+    // and the old default, "Wafer", is simply what every problem is
+    let mut wafer = json;
+    wafer["materials"]["frame"] = serde_json::json!("Wafer");
+    let ok: ProblemSpec = serde_json::from_value(wafer).unwrap();
+    assert!(femcore::solve::solve(&mesh, &ok, &mut SolveState::default()).is_ok());
 }

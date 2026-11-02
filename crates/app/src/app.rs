@@ -398,12 +398,9 @@ impl App {
                 let source = p.source.clone();
                 self.geom_edit = p.geometry.clone();
                 self.proj = p;
-                let frame = self.proj.specs.first().map(|s| s.materials.frame).unwrap_or_default();
                 for ph in Physics::ALL {
                     if !self.proj.specs.iter().any(|s| s.physics == ph) {
-                        let mut ns = ProblemSpec::new(ph);
-                        ns.materials.frame = frame;
-                        self.proj.specs.push(ns);
+                        self.proj.specs.push(ProblemSpec::new(ph));
                     }
                 }
                 self.project_path = Some(path.to_path_buf());

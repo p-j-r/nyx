@@ -29,7 +29,6 @@ pub fn silicon_stiffness() -> Stiffness {
 
 /// Elastic materials of the wafer-frame problem: `sapphire` and `silicon` are lists of domain numbers.
 pub fn set_materials(spec: &mut ProblemSpec, psi_deg: f64, domains: &[i32], sapphire: &[i32], silicon: &[i32]) {
-    spec.materials.frame = Frame::Wafer;
     let (r_si, r_sap) = crystal_rotations(psi_deg);
     for &d in domains {
         spec.materials.set(d, "E", 100e9);

@@ -1089,13 +1089,12 @@ impl App {
                         if ui.checkbox(&mut on, "Out-of-plane wave number (waveguide cross-section)").changed() {
                             spec.out_of_plane = if on { Some(0.0) } else { None };
                         }
-                        let wafer = spec.materials.frame == Frame::Wafer;
                         if let Some(kz) = &mut spec.out_of_plane {
                             ui.horizontal(|ui| {
-                                ui.label(if wafer { "k (rad/m), propagation along the page normal: positive along +y (into the page)" } else { "kz (rad/m)" });
+                                ui.label("k (rad/m), propagation along the page normal: positive along +y (into the page)");
                                 num(ui, kz);
                             });
-                            ui.weak("Three displacement components on the cross-section, u(x, y) exp(-i kz z); anisotropic crystals use their full stiffness. For backward Brillouin scattering kz = 2 n_eff 2π/λ; for forward scattering kz = n_eff 2π f_acoustic / c.");
+                            ui.weak("Three displacement components on the cross-section, u(x, z) exp(-i k y); anisotropic crystals use their full stiffness. For backward Brillouin scattering k = 2 n_eff 2π/λ; for forward scattering k = n_eff 2π f_acoustic / c.");
                         }
                     }
                 }

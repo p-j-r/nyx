@@ -1,7 +1,8 @@
 //! Optical modes of a crystal whose axes are tilted against the propagation axis: the permittivity has xz/yz terms,
 //! the 2D mode problem becomes quadratic in the propagation constant and is solved exactly. Checked against the 3D
 //! eigenmode solver on a periodic cell of the same PEC guide (a different formulation sharing only the tensor). The 2D problems are
-//! written in the model axes (propagation along z, the crystal tilted in the x-z plane) so that they match the 3D cell, whose axis is z.
+//! written in the kernel's own axes (propagation along z, the crystal tilted in the x-z plane) and go to the kernel directly (`emw::solve_emw`,
+//! not `solve::solve`, which expects wafer axes) so that they match the 3D cell, whose axis is z.
 use femcore::material::*;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
@@ -33,12 +34,11 @@ fn a_tilted_uniaxial_crystal_in_a_pec_guide_has_the_same_modes_in_2d_and_in_a_3d
     let mut matched = 0;
     for &f in &f3 {
         let mut s2 = ProblemSpec::new(Physics::Emw);
-        s2.materials.frame = Frame::Model;
         s2.order = 2;
         s2.materials.aniso.insert(1, crystal(tilt));
         let k0 = 2.0 * std::f64::consts::PI * f / C0;
         s2.study = Study::Modes { freq: f, n_target: beta / k0, evanescent: false, n_modes: 3 };
-        let r2 = femcore::solve::solve(&mesh2, &s2, &mut SolveState::default()).unwrap();
+        let r2 = femcore::emw::solve_emw(&mesh2, &s2).unwrap();
         let betas: Vec<f64> = r2.solutions.iter().map(|s| s.neff.unwrap().0 * k0).collect();
         println!("f = {:.4} GHz: 2D betas {betas:.2?} (cell: {beta:.2})", f / 1e9);
         if betas.iter().any(|x| (x / beta - 1.0).abs() < 4e-3) {
@@ -54,11 +54,10 @@ fn the_coupled_solver_reduces_to_the_uncoupled_one_without_tilt() {
     // complex solver must give the same effective indices
     let mesh = SimplexMesh::rectangle(0.03, 0.015, 12, 6);
     let mut s = ProblemSpec::new(Physics::Emw);
-    s.materials.frame = Frame::Model;
     s.order = 2;
     s.materials.aniso.insert(1, crystal(0.0));
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-    let real = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
+    let real = femcore::emw::solve_emw(&mesh, &s).unwrap();
     let (eps, mu) = femcore::emw_pml::cell_materials(&mesh, &s.materials).unwrap();
     let cm = femcore::emw_pml::solve_modes_complex(&mesh, 12e9, &eps, &mu, femcore::csparse::c(1.6, 0.0), 3, 2).unwrap();
     for (r, z) in real.solutions.iter().zip(&cm.neff) {

@@ -241,7 +241,6 @@ impl BraggGrating {
     pub fn spec(&self, cell: &BraggCell, f_search: f64) -> ProblemSpec {
         let mut s = ProblemSpec::new(Physics::Emw);
         s.order = self.order;
-        s.materials.frame = Frame::Wafer;
         for (d, eps) in self.permittivities(&cell.labels) {
             s.materials.set(d, "eps_r", eps);
             s.materials.set(d, "mu_r", 1.0);

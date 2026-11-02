@@ -113,7 +113,6 @@ pub fn crystal_rotations(psi_deg: f64) -> (M3, M3) {
 pub fn chip_problem(c: &ChipSpec, psi_deg: f64, n_modes: usize, f_search: f64, g: &MeshedGeom) -> ProblemSpec {
     let mut s = ProblemSpec::new(Physics::Brillouin);
     s.order = 2;
-    s.materials.frame = Frame::Wafer;
     let (sapphire, silicon, air) = (g.domains("sapphire*"), g.domains("slab*, rib*"), g.domains("air*"));
     s.inactive = air.clone();
     let (r_si, r_sap) = crystal_rotations(psi_deg);

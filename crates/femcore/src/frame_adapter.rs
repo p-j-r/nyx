@@ -73,16 +73,14 @@ fn pml_to_model_frame(p: &Pml) -> Pml {
     Pml { y: p.z, z: PmlDir::Off, ..p.clone() }
 }
 
-/// The problem in the axes the solvers use. For `Frame::Wafer` on a 2D mesh the crystal orientations, the components of constraints and
+/// The problem in the axes the solvers use. On a 2D mesh the crystal orientations, the components of constraints and
 /// loads, the layers and the sign of the out-of-plane wave number are turned into the model frame; everything else is unchanged.
 pub fn to_model_frame(spec: &ProblemSpec, mesh_dim: usize) -> ProblemSpec {
     let mut s = spec.clone();
-    if spec.materials.frame != Frame::Wafer || mesh_dim != 2 {
-        s.materials.frame = Frame::Model;
+    if mesh_dim != 2 {
         return s;
     }
     let axes = Kernel::of(spec).axes();
-    s.materials.frame = Frame::Model;
     // exp(-i k y) with the model's third axis z = sign * y is exp(-i (sign k) z): a positive k is a wave along +y
     s.out_of_plane = s.out_of_plane.map(|k| k * axes[2].1);
     for p in s.materials.pml.values_mut() {
@@ -125,7 +123,7 @@ pub fn to_model_frame(spec: &ProblemSpec, mesh_dim: usize) -> ProblemSpec {
 
 /// Refuses what a wafer-frame 2D problem cannot say: there is no y axis in the plane of a cross-section.
 pub fn check_wafer_input(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String> {
-    if mesh.dim == 2 && spec.materials.frame == Frame::Wafer {
+    if mesh.dim == 2 {
         let bad = spec
             .materials
             .pml
@@ -250,10 +248,9 @@ pub fn rename_wafer_fields(r: &mut SolveResult, kernel: Kernel) -> Vec<String> {
 /// and whether that triple is left-handed (then the sense of rotation of the field must be read the other way round).
 ///
 /// The propagation axis is the axis a Floquet pair of the problem is periodic along (the first one found); without periodic
-/// conditions it is `y` in the wafer frame and `z` otherwise. The surface normal is `z` in the wafer frame and `y` otherwise.
+/// conditions it is `y`. The surface normal is `z` unless the problem is periodic along z, then `y`.
 pub fn axes_of_3d_problem(spec: &ProblemSpec, mesh: &SimplexMesh) -> ([usize; 3], bool) {
-    let wafer = spec.materials.frame == Frame::Wafer;
-    let mut long = if wafer { 1 } else { 2 };
+    let mut long = 1;
     // a Floquet pair maps the facets of `source` onto those of `dest`: the periodic axis is the one the two groups differ in
     if let Some(p) = spec.periodic.first() {
         let centre = |labels: &[i32]| -> [f64; 3] {
@@ -276,7 +273,7 @@ pub fn axes_of_3d_problem(spec: &ProblemSpec, mesh: &SimplexMesh) -> ([usize; 3]
             long = (0..3).max_by(|&i, &j| d[i].total_cmp(&d[j])).unwrap_or(long);
         }
     }
-    let normal = if wafer && long != 2 { 2 } else if long != 1 { 1 } else { 2 };
+    let normal = if long != 2 { 2 } else { 1 };
     let lateral = (0..3).find(|&k| k != long && k != normal).unwrap_or(0);
     // (lateral, normal, long) is right-handed when it is an even permutation of (x, y, z)
     let even = matches!((lateral, normal, long), (0, 1, 2) | (1, 2, 0) | (2, 0, 1));

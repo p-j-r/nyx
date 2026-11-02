@@ -179,7 +179,6 @@ impl SoiWire {
     pub fn spec(&self, g: &MeshedGeom) -> ProblemSpec {
         let mut s = ProblemSpec::new(Physics::Emw);
         s.order = 2;
-        s.materials.frame = Frame::Wafer;
         let n_top = match self.cladding {
             Cladding::Oxide => self.n_sio2,
             Cladding::Air => 1.0,

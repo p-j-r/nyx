@@ -211,12 +211,9 @@ impl Project {
         } else {
             serde_json::from_str::<Project>(&s).map_err(|e| format!("not a nyx project: {e}"))?
         };
-        let frame = p.specs.first().map(|s| s.materials.frame).unwrap_or_default();
         for ph in Physics::ALL {
             if !p.specs.iter().any(|s| s.physics == ph) {
-                let mut ns = ProblemSpec::new(ph);
-                ns.materials.frame = frame;
-                p.specs.push(ns);
+                p.specs.push(ProblemSpec::new(ph));
             }
         }
         Ok(p)

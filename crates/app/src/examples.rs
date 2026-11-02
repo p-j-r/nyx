@@ -19,10 +19,6 @@ fn base(geometry: GeometrySpec, active: Physics) -> Project {
         }
         s.materials.default.insert("rho".into(), if s.physics == Physics::Solid { 7850.0 } else { 1000.0 });
     }
-    // everything is written in the wafer frame: x lateral, y propagation, z surface normal; a 2D mesh is the x-z cross-section
-    for s in &mut specs {
-        s.materials.frame = Frame::Wafer;
-    }
     Project { version: 1, geometry, source: Source::Generated, active, specs, colormap: Colormap::Viridis }
 }
 

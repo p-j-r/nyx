@@ -7,9 +7,8 @@
 //! plane stress/strain and thickness in 2D, thermal expansion, out-of-plane wave number, inactive domains, Floquet-periodic
 //! pairs, Brillouin settings, results file). Everything derives serde, so it is saved as JSON or, through `xmlio`, as XML.
 //!
-//! `Frame` says in which axes a problem is written. The wafer frame is the default and the one the geometry is built in (a 2D
-//! cross-section is the x-z plane, y is the propagation direction, z the surface normal); the model frame (a 2D mesh is the x-y plane,
-//! z out of it) is kept for old project files. The 2D kernels work in the model frame internally: `frame_adapter::to_model_frame`
+//! A problem is written in the axes of the wafer: x lateral, y the propagation direction, z the surface normal (right-handed; a 2D
+//! cross-section is the x-z plane, with y into the page). A wave along `+y` has a positive out-of-plane wave number `k`. The 2D kernels still work in an older model frame internally (a 2D mesh is the x-y plane, z out of it): `frame_adapter::to_model_frame`
 //! translates a wafer-frame problem and `frame_adapter::rename_wafer_fields` gives the result fields their wafer names again, so no
 //! caller ever sees the model axes (that module is the only place the two vocabularies meet).
 //!
@@ -50,9 +49,10 @@ impl Physics {
 /// source), `E`, `nu`, `alpha`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Materials {
-    /// the axes of the model: see `Frame`; a saved problem without the field is a wafer-frame problem
-    #[serde(default)]
-    pub frame: Frame,
+    /// Read from files only: projects saved while the Geometry tab still had an Axes toggle may say `"frame": "Model"`. They are refused
+    /// when solved (`validate`); there is no legacy frame any more.
+    #[serde(default, rename = "frame", skip_serializing)]
+    pub(crate) legacy_frame: LegacyFrame,
     pub domains: BTreeMap<i32, BTreeMap<String, f64>>,
     pub default: BTreeMap<String, f64>,
     /// Anisotropic data per domain (crystal stiffness, tensor conductivity, permittivity and
@@ -64,21 +64,12 @@ pub struct Materials {
     pub pml: BTreeMap<i32, Pml>,
 }
 
-/// The axes in which a problem is described.
-///
-/// * `Wafer`: the wafer lies in the x-y plane, z is the surface normal and y is the direction of propagation of a
-///   waveguide. A 2D cross-section is the x-z plane (mesh coordinates `(x, z)`) with y out of the plane; crystal
-///   orientations (Euler angles, photoelastic tensors, permittivity), boundary-condition components and the names
-///   of the result fields refer to the right-handed axes x, y, z. A wave that travels along `+y` (into the page, away from the
-///   viewer) has a positive out-of-plane wave number `k` (the adapter hands the solvers `-k` of their z = -y axis).
-/// * `Model`: a 2D mesh is the x-y plane with z out of the plane (the usual convention for 2D models); 3D meshes are the same in both.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Frame {
-    /// the legacy axes of 2D models, kept for old project files
-    Model,
-    /// the default: geometry, materials, conditions and results are in the axes of the wafer, with nothing to convert
+/// The `frame` key of old project files: `Wafer` is what every problem is, `Model` (a 2D mesh as the x-y plane, z out of it) is refused.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+pub(crate) enum LegacyFrame {
     #[default]
     Wafer,
+    Model,
 }
 
 /// Which side of a domain a perfectly matched layer absorbs towards, per axis.
