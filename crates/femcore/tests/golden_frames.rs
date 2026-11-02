@@ -408,3 +408,100 @@ fn golden_solid_kz_sapphire_with_a_pml_along_z() {
     s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
     golden("solid_kz_pml_z", &solve(&mesh, &s), 1e-7);
 }
+
+// ---------------------------------------------------------------------- Brillouin scattering of a straight waveguide
+
+/// Rotates every crystal of the problem by half a turn about the wafer axis y. Even-rank tensors do not change under an inversion, so this
+/// is the mirror image of the crystal across the x-z plane. The golden files of the Brillouin cases were written with the kernels that
+/// still propagated along -y: a pump along -y in a crystal is the pump along +y in its mirror image (`NYX_GOLDEN_LEGACY_MIRROR=1`).
+fn mirror_crystals_in_y(spec: &mut ProblemSpec) {
+    let flip = |e: [f64; 3]| -> [f64; 3] {
+        let half_turn_y: M3 = [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
+        let r = rotation(e);
+        let mut m = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                for k in 0..3 {
+                    m[i][j] += half_turn_y[i][k] * r[k][j];
+                }
+            }
+        }
+        euler_from_rotation(&m)
+    };
+    for a in spec.materials.aniso.values_mut() {
+        a.euler_deg = flip(a.euler_deg);
+    }
+    if let Some(b) = spec.brillouin.as_mut() {
+        for p in b.photoelastic.values_mut() {
+            p.euler_deg = flip(p.euler_deg);
+        }
+        for a in b.viscosity.values_mut() {
+            a.euler_deg = flip(a.euler_deg);
+        }
+    }
+}
+
+fn wire_mesh() -> femcore::mesh::SimplexMesh {
+    let um = 1e-6;
+    let rect = |x0: f64, z0: f64, x1: f64, z1: f64, d: i32, h: Option<f64>| common::part(x0 * um, z0 * um, x1 * um, z1 * um, d, h.map(|v| v * um));
+    common::parts_mesh(&[rect(-1.2, -1.0, 1.2, 1.0, 1, None), rect(-0.225, -0.11, 0.225, 0.11, 2, Some(0.04))], 0.3 * um)
+}
+
+/// A silicon wire in silica with the elastic, optical and photoelastic data of the crystal in the orientation `euler`.
+fn wire_brillouin(mesh: &femcore::mesh::SimplexMesh, euler: [f64; 3], backward: bool, n_optical: usize) -> ProblemSpec {
+    let mut sp = ProblemSpec::new(Physics::Brillouin);
+    sp.order = 2;
+    for d in mesh.domain_labels() {
+        if d == 2 {
+            sp.materials.aniso.insert(d, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 165.7e9, c12: 63.9e9, c44: 79.6e9 }), euler_deg: euler, ..Default::default() });
+            sp.materials.set(d, "rho", 2329.0);
+        } else {
+            sp.materials.set(d, "rho", 2203.0);
+        }
+        sp.materials.set(d, "E", 73.1e9);
+        sp.materials.set(d, "nu", 0.17);
+    }
+    let mut labels: Vec<i32> = (0..mesh.n_facets()).map(|f| mesh.facet_labels[f]).collect();
+    labels.sort();
+    labels.dedup();
+    sp.bcs = vec![Bc { on: None, labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    sp.study = Study::Eigenfrequency { n_modes: 8, f_search: 16e9 };
+    let mut b = BrillouinSpec::default();
+    b.wavelength = 1.55e-6;
+    b.n_target = 2.35;
+    b.n_optical_modes = n_optical;
+    b.backward = backward;
+    b.pump_modes = vec![1];
+    b.stokes_modes = vec![if backward { 1 } else { 2 }];
+    b.refractive_index.insert(1, 1.444);
+    b.refractive_index.insert(2, 3.476);
+    b.photoelastic.insert(2, PhotoSpec { kind: PhotoKind::Cubic { p11: -0.094, p12: 0.017, p44: -0.051 }, euler_deg: [0.0; 3], follow_stiffness: true });
+    b.photoelastic.insert(1, PhotoSpec { kind: PhotoKind::Isotropic { p11: 0.121, p12: 0.270 }, euler_deg: [0.0; 3], follow_stiffness: false });
+    b.moving = vec![2];
+    b.viscosity.insert(2, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 1.0e-3, c12: 0.4e-3, c44: 0.5e-3 }), euler_deg: euler, ..Default::default() });
+    sp.brillouin = Some(b);
+    sp
+}
+
+fn golden_brillouin(name: &str, mut spec: ProblemSpec) {
+    if std::env::var("NYX_GOLDEN_LEGACY_MIRROR").is_ok() {
+        mirror_crystals_in_y(&mut spec);
+    }
+    golden(name, &solve(&wire_mesh(), &spec), 1e-6);
+}
+
+#[test]
+fn golden_brillouin_wire_in_a_cubic_crystal() {
+    // silicon along x, y and z: backward scattering of the quasi-TE mode (a crystal this symmetric is its own mirror image)
+    golden_brillouin("brillouin_wire_cubic", wire_brillouin(&wire_mesh(), [0.0; 3], true, 1));
+}
+
+#[test]
+fn golden_brillouin_wire_in_a_tilted_crystal() {
+    golden_brillouin("brillouin_wire_tilted", wire_brillouin(&wire_mesh(), [30.0, 40.0, 10.0], true, 1));
+}
+
+#[test]
+fn golden_brillouin_forward_scattering_in_a_tilted_crystal() {
+    golden_brillouin("brillouin_wire_forward", wire_brillouin(&wire_mesh(), [30.0, 40.0, 10.0], false, 2));
+}
