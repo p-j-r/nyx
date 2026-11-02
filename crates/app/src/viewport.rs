@@ -336,7 +336,7 @@ impl Viewport {
                         }
                     } else if !view.tris.is_empty() && view.dim == 2 {
                         let w = cam.unproject_2d(h, center);
-                        out.probe = Some(format!("x = {:.4e}, y = {:.4e}", w[0], w[1]));
+                        out.probe = Some(format!("x = {:.4e}, z = {:.4e}", w[0], w[1]));
                     }
                 }
                 if log {

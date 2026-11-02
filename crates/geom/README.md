@@ -24,8 +24,10 @@ defaults to the propagation axis, y, with the profile `(x, z)`.
   out of the x-z plane and a 2D `Cut` normal with a y component are errors.
 * `Pml` sides are `xmin xmax zmin zmax` in 2D (`ymin ymax` too in 3D); pieces are `<region>.pml_zmin`, `.pml_xmax_zmin`, ...
 * Selectors: `plane(z = 0)`, `extreme(+z)`, `normal(+z)`, `in_box([x0, 0, z0], [x1, 0, z1])` (2D ignores y).
-* Inside, a prismatic model is stacked along an internal axis `w` that is mapped to a world axis by `scene::axis_perm`; that mapping is the
-  only place the frame shows, and every query (`bbox`, vertices, `classify`, `project`, `facet_normals`, `Oracle`) answers in world coordinates.
+* Internal design (the only one): a prismatic model is built in a *sweep frame* (profile plane first, sweep axis last), a permutation of the world axes
+  fixed by `scene::axis_perm`; `Complex` keeps its data in that frame and its fields are `pub(crate)`. Every public query (`bbox`, vertices, `classify`,
+  `project`, `facet_normals`, `Oracle`, the `Evaluated` accessors) answers in world coordinates, and the test `a_y_sweep_and_a_z_sweep_answer_alike`
+  pins that the choice of sweep axis does not change any answer.
 
 ```rust
 use geom::{eval::Tier, model::*, select::Selector};

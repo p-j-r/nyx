@@ -169,7 +169,7 @@ wire into two states tilted by 45 degrees), and **symmetric and asymmetric Bragg
 
 ## Axes: the wafer frame
 
-Projects are described in the axes of the wafer (Geometry tab > Axes, on by default for new projects and the examples): x and y span the
+Projects are described in the axes of the wafer (there is no other frame): x and y span the
 wafer, **z is the surface normal and y is the direction of propagation** of a waveguide, so a 2D cross-section is the **x-z plane**
 (mesh coordinates `(x, z)`, `y` out of the page; the frame is right-handed, so a wave travelling towards the viewer travels along `-y`). Crystal
 orientations (Euler Z-X-Z angles of the crystal axes in x, y, z), photoelastic tensors, permittivity, constraint and load components and

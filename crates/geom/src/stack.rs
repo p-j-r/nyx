@@ -33,10 +33,18 @@ pub struct LayerStack {
     pub axis: Axis,
     pub layers: Vec<Layer>,
     /// the common refinement of all layer partitions
-    pub overlay: Complex,
+    pub(crate) overlay: Complex,
 }
 
 impl LayerStack {
+    /// Number of cells of the common refinement (a count: the overlay itself lives in the internal sweep frame).
+    pub fn overlay_region_count(&self) -> usize {
+        self.overlay.regions.len()
+    }
+    pub fn overlay_edge_count(&self) -> usize {
+        self.overlay.edges.len()
+    }
+
     /// Z levels where layers start or end, ascending.
     pub fn levels(&self) -> Vec<f64> {
         let mut v: Vec<f64> = self.layers.iter().flat_map(|l| [l.z0, l.z1]).collect();

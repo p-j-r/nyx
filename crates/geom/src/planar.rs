@@ -115,7 +115,7 @@ fn prism_rings(
     Ok(rings)
 }
 
-/// Rings built in the profile frame `(u, v, w)` of a sweep along `axis`, in world coordinates, with the caps named after the axis.
+/// Rings built in the profile frame of a sweep along `axis`, in world coordinates, with the caps named after the axis.
 fn world_rings(rings: Vec<(Vec<V3>, String)>, axis: Axis) -> Vec<(Vec<V3>, String)> {
     let perm = crate::scene::axis_perm(axis.index());
     rings

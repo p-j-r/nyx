@@ -54,10 +54,10 @@ fn golden_models_match_their_invariants() {
         let ev = geom::eval::Evaluator::new().eval(&list, Tier::Complex).unwrap();
         let cx = ev.complex();
         cx.check().unwrap();
-        let names: Vec<&str> = cx.regions.iter().map(|r| r.name.as_str()).collect();
+        let names: Vec<&str> = ev.regions().iter().map(|r| r.name.as_str()).collect();
         let want: Vec<&str> = exp.regions.iter().map(|r| r.0.as_str()).collect();
         assert_eq!(names, want, "{}: regions", g.name);
-        for (r, (n, a)) in cx.regions.iter().zip(&exp.regions) {
+        for (r, (n, a)) in ev.regions().iter().zip(&exp.regions) {
             assert!(
                 (r.measure - a).abs() <= 1e-10 * a,
                 "{}: region {n}: area {} vs closed form {a}",

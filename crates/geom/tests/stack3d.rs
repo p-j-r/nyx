@@ -98,9 +98,9 @@ fn bragg_cell_is_a_layer_stack_with_periodic_ends() {
     assert_eq!(st.layers.len(), 2);
     assert!(close(st.layers[0].z1, d * p) && close(st.layers[1].z1, p));
     // the overlay is the common refinement: it has the tooth cells even though the second layer has none
-    assert!(st.overlay.regions.len() > ev.regions().len() - 2);
+    assert!(st.overlay_region_count() > ev.regions().len() - 2);
     for l in &st.layers {
-        assert_eq!(l.region_of.len(), st.overlay.regions.len());
+        assert_eq!(l.region_of.len(), st.overlay_region_count());
     }
     // identical end faces: one Periodic pair, verified congruent
     let pp = &ev.periodic_pairs()[0];

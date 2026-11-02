@@ -130,15 +130,14 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
         return Err("the element size must be positive".into());
     }
     let labels = ev.label_map().map_err(|e| e.to_string())?;
-    let cx = ev.complex();
     let max_dev = opts.max_dev.unwrap_or(opts.h / 50.0);
 
     // element size per region: the global size, the Size rules, and thickness / layers in an absorbing piece
-    let mut region_h = vec![opts.h; cx.regions.len()];
+    let mut region_h = vec![opts.h; ev.regions().len()];
     for p in ev.pml_regions() {
         region_h[p.region as usize] = region_h[p.region as usize].min(p.thickness / p.layers);
     }
-    let mut edge_rule: Vec<Option<f64>> = vec![None; cx.edges.len()];
+    let mut edge_rule: Vec<Option<f64>> = vec![None; ev.edges().len()];
     for rule in ev.size_rules() {
         let Some(h) = rule.h else { continue };
         match rule.entities.kind {
@@ -158,8 +157,8 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
 
     // chains: one per edge, with the end points of the vertices so that neighbours share them exactly
     let w2 = |p: [f64; 3]| [p[0], p[2]];
-    let mut chains = Vec::with_capacity(cx.edges.len());
-    for (i, ed) in cx.edges.iter().enumerate() {
+    let mut chains = Vec::with_capacity(ev.edges().len());
+    for (i, ed) in ev.edges().iter().enumerate() {
         let mut h = [ed.left, ed.right].iter().flatten().map(|&r| region_h[r as usize]).fold(opts.h, f64::min);
         if let Some(x) = edge_rule[i] {
             h = h.min(x);
@@ -167,8 +166,8 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
         let mut pts: Vec<[f64; 2]> =
             ev.discretize_edge(i as u32, DiscretizeOpts { max_dev, max_len: h }).into_iter().map(|(_, p)| w2(p)).collect();
         let last = pts.len() - 1;
-        pts[0] = w2(cx.vertices[ed.v0 as usize].p);
-        pts[last] = w2(cx.vertices[ed.v1 as usize].p);
+        pts[0] = w2(ev.vertices()[ed.v0 as usize].p);
+        pts[last] = w2(ev.vertices()[ed.v1 as usize].p);
         let label = labels.label_of_edge(i as u32).ok_or_else(|| format!("edge '{}' has no boundary label", ed.name))?;
         chains.push(Chain { pts, label, part: i });
     }
@@ -183,10 +182,10 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
     let (lo, hi) = ([b.lo[0], b.lo[2]], [b.hi[0], b.hi[2]]);
 
     // finer regions get a lattice of interior points
-    let fills: Vec<Fill> = (0..cx.regions.len())
+    let fills: Vec<Fill> = (0..ev.regions().len())
         .filter(|&r| domain_of[r].is_some() && region_h[r] < opts.h * 0.999)
         .map(|r| {
-            let bb = cx.regions[r].bbox;
+            let bb = ev.regions()[r].bbox;
             let ev = &ev;
             Fill {
                 lo: [bb.lo[0], bb.lo[2]],

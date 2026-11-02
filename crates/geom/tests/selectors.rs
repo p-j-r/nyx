@@ -101,10 +101,10 @@ fn resolves_the_documented_examples() {
 fn suggest_returns_only_exact_selectors() {
     let ev = soi();
     let cx = ev.complex();
-    for e in 0..cx.edges.len() as u32 {
+    for e in 0..ev.edges().len() as u32 {
         let picked = EntitySet::new(EntityKind::Edges, vec![e]);
         let s = ev.suggest(&picked);
-        assert!(!s.is_empty(), "no selector for edge {e} ({})", cx.edges[e as usize].name);
+        assert!(!s.is_empty(), "no selector for edge {e} ({})", ev.edges()[e as usize].name);
         for sel in &s {
             assert_eq!(ev.resolve(sel).unwrap().set, picked, "{sel}");
         }
@@ -117,8 +117,8 @@ fn suggest_returns_only_exact_selectors() {
     let two = EntitySet::new(
         EntityKind::Edges,
         vec![
-            cx.edges.iter().position(|e| e.name == "Si|clad").unwrap() as u32,
-            cx.edges.iter().position(|e| e.name == "box.bottom").unwrap() as u32,
+            ev.edges().iter().position(|e| e.name == "Si|clad").unwrap() as u32,
+            ev.edges().iter().position(|e| e.name == "box.bottom").unwrap() as u32,
         ],
     );
     for sel in ev.suggest(&two) {

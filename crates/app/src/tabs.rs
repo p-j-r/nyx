@@ -376,7 +376,7 @@ fn brillouin_editor(ui: &mut Ui, spec: &mut ProblemSpec, domains: &[i32], bufs: 
             let active = pml.x != PmlDir::Off || pml.y != PmlDir::Off;
             let mut edited = false;
             egui::CollapsingHeader::new(if active { "Optical PML (active)" } else { "Optical PML" }).id_salt(format!("brill_pml_{d}")).default_open(active).show(ui, |ui| {
-                for (axis, dir) in [("x", &mut pml.x), ("y", &mut pml.y)] {
+                for (axis, dir) in [("x", &mut pml.x), ("z", &mut pml.y)] {
                     ui.horizontal(|ui| {
                         ui.label(format!("absorb along {axis}"));
                         for (v, name) in [(PmlDir::Off, "off"), (PmlDir::Plus, "towards +"), (PmlDir::Minus, "towards −")] {
@@ -415,7 +415,7 @@ fn brillouin_editor(ui: &mut Ui, spec: &mut ProblemSpec, domains: &[i32], bufs: 
     });
     ui.horizontal(|ui| {
         ui.label("mode parity under the mirror");
-        for (v, name) in [(None, "off"), (Some(0usize), "x → −x"), (Some(1usize), "y → −y")] {
+        for (v, name) in [(None, "off"), (Some(0usize), "x → −x"), (Some(1usize), "z → −z")] {
             ui.selectable_value(&mut b.mirror_axis, v, name);
         }
     });
@@ -534,21 +534,7 @@ impl App {
 
     fn tab_geometry(&mut self, ui: &mut Ui) {
         ui.heading("Geometry");
-        {
-            let wafer = self.proj.active_spec().materials.frame == Frame::Wafer;
-            let mut w = wafer;
-            ui.horizontal(|ui| {
-                ui.label("Axes");
-                ui.selectable_value(&mut w, true, "wafer: x lateral, y propagation, z normal (2D = x-z)");
-                ui.selectable_value(&mut w, false, "legacy model axes: 2D = x-y, z out of plane");
-            });
-            if w != wafer {
-                for sp in &mut self.proj.specs {
-                    sp.materials.frame = if w { Frame::Wafer } else { Frame::Model };
-                }
-            }
-            ui.weak(if w { "Crystal orientations (Euler angles), photoelastic tensors, permittivities, constraint and load components and the names of result fields use the right-handed axes x, y, z of the wafer; a 2D cross-section is drawn in x-z and y (the direction of propagation) points into the page. A wave travelling towards the viewer travels along -y." } else { "Model axes: a 2D mesh is the x-y plane and z is the out-of-plane direction." });
-        }
+        ui.weak("Axes: x lateral, y the direction of propagation, z the surface normal (right-handed). A 2D cross-section is drawn in x-z with y pointing into the page; crystal orientations, photoelastic tensors, permittivities, constraint and load components and the names of result fields use x, y, z.");
         let mut g = self.geom_edit.clone();
         ui.horizontal(|ui| {
             ui.label("Start from");

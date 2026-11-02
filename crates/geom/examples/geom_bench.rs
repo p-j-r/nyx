@@ -121,7 +121,7 @@ fn main() {
     println!(
         "photonic-crystal slab: {} faces, {} overlay edges",
         e.faces().len(),
-        e.layer_stack().unwrap().overlay.edges.len()
+        e.layer_stack().unwrap().overlay_edge_count()
     );
     time("evaluate the 100-hole photonic-crystal slab (3D)", 5, || Evaluator::new().eval(&pc, Tier::Complex).unwrap());
     time("tessellate it (max_dev 1e-3)", 5, || e.tessellate(1e-3));

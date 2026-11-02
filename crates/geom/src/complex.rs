@@ -157,29 +157,29 @@ pub struct Loop {
 
 #[derive(Clone, Debug, Default)]
 pub struct Complex {
-    pub dim: u8,
-    pub tol: f64,
+    pub(crate) dim: u8,
+    pub(crate) tol: f64,
     /// point about which area integrals are taken (centre of the model)
-    pub origin: V2,
-    pub curves: Vec<Curve>,
-    pub regions: Vec<Region>,
-    pub edges: Vec<Edge>,
-    pub vertices: Vec<Vertex>,
-    pub loops: Vec<Loop>,
+    pub(crate) origin: V2,
+    pub(crate) curves: Vec<Curve>,
+    pub(crate) regions: Vec<Region>,
+    pub(crate) edges: Vec<Edge>,
+    pub(crate) vertices: Vec<Vertex>,
+    pub(crate) loops: Vec<Loop>,
     /// scene region index -> final region id (`None` for holes and for dropped empty generated regions)
-    pub scene_to_region: Vec<Option<u32>>,
+    pub(crate) scene_to_region: Vec<Option<u32>>,
     /// 3D only: named face fragments, and the layer stack they were derived from
-    pub faces: Vec<Face>,
+    pub(crate) faces: Vec<Face>,
     /// 3D only: crease edges between face fragments (see `topo3.rs`); `vertices` holds their end points
-    pub edges3: Vec<Edge3>,
+    pub(crate) edges3: Vec<Edge3>,
     /// polyhedral models: the planes that carry faces, each with the 2D complex of its cells
-    pub planar: Vec<PlaneData>,
+    pub(crate) planar: Vec<PlaneData>,
     /// The sweep axis (0, 1, 2) of a 3D stack model, or the out-of-plane axis (y) of a 2D model. Overlay, layers and body data are
-    /// stored in the internal frame `(u, v, w)` of `scene::axis_perm`; everything the API returns is in world coordinates
+    /// stored in the sweep frame of `scene::axis_perm` (profile plane first, sweep axis last); everything the API returns is in world coordinates
     /// (`wv` / `iv` convert). A 2D model's world frame is the wafer cross-section: `(x, 0, z)`, with the curves themselves
     /// parametrised in `(x, z)`.
-    pub axis: usize,
-    pub stack: Option<Box<crate::stack::LayerStack>>,
+    pub(crate) axis: usize,
+    pub(crate) stack: Option<Box<crate::stack::LayerStack>>,
 }
 
 pub fn curve_kind(c: &Curve) -> &'static str {
@@ -237,7 +237,7 @@ impl Complex {
     }
 
     /// Internal-frame vector to world coordinates.
-    pub fn wv(&self, v: V3) -> V3 {
+    pub(crate) fn wv(&self, v: V3) -> V3 {
         let p = crate::scene::axis_perm(self.axis);
         let mut o = [0.0; 3];
         for i in 0..3 {
@@ -246,7 +246,7 @@ impl Complex {
         o
     }
     /// World vector to the internal frame.
-    pub fn iv(&self, v: V3) -> V3 {
+    pub(crate) fn iv(&self, v: V3) -> V3 {
         let p = crate::scene::axis_perm(self.axis);
         [v[p[0]], v[p[1]], v[p[2]]]
     }

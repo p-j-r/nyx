@@ -264,8 +264,8 @@ pub fn stack_axis(list: &FeatureList) -> GeomResult<usize> {
     Ok(found.map_or(2, |x| x.0))
 }
 
-/// Internal axis `i` is world axis `perm[i]`. The internal frame is `(u, v, w)` with `w` the sweep axis and `(u, v)` the plane of
-/// the 2D profiles. A sweep along y (the wafer frame's propagation direction) has the profile in the x-z plane, `(u, v) = (x, z)`,
+/// Sweep-frame axis `i` is world axis `perm[i]`. The sweep frame has the sweep axis last and the plane of the 2D profiles (the
+/// profile frame) first. A sweep along y (the wafer frame's propagation direction) has the profile in the x-z plane (profile axes x, z),
 /// which is the cross-section as it is drawn; the other axes keep the cyclic order.
 pub fn axis_perm(a: usize) -> [usize; 3] {
     if a == 1 {
@@ -275,8 +275,8 @@ pub fn axis_perm(a: usize) -> [usize; 3] {
     }
 }
 
-/// -1 when the internal frame `(u, v, w)` of this sweep axis is left-handed in world coordinates (the wafer frame's
-/// x-z-y), so that an internal counter-clockwise turn is a clockwise one about the world axis.
+/// -1 when the sweep frame of this sweep axis is left-handed in world coordinates (the wafer frame's
+/// x-z-y), so that a counter-clockwise turn in the profile frame is a clockwise one about the world axis.
 pub fn axis_handedness(a: usize) -> f64 {
     if a == 1 {
         -1.0

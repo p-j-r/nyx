@@ -50,9 +50,8 @@ impl Physics {
 /// source), `E`, `nu`, `alpha`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Materials {
-    /// the axes of the model: see `Frame`. New problems are written in the wafer frame; a saved problem without the field predates it and
-    /// keeps the model frame.
-    #[serde(default = "legacy_frame")]
+    /// the axes of the model: see `Frame`; a saved problem without the field is a wafer-frame problem
+    #[serde(default)]
     pub frame: Frame,
     pub domains: BTreeMap<i32, BTreeMap<String, f64>>,
     pub default: BTreeMap<String, f64>,
@@ -80,10 +79,6 @@ pub enum Frame {
     /// the default: geometry, materials, conditions and results are in the axes of the wafer, with nothing to convert
     #[default]
     Wafer,
-}
-
-fn legacy_frame() -> Frame {
-    Frame::Model
 }
 
 /// The rotation from the wafer axes (x, y, z) to the axes of a 2D model (mesh x, mesh y = z, out of plane = -y).
