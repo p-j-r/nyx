@@ -122,6 +122,9 @@ pub fn assemble_stiffness_kz(mesh: &SimplexMesh, c6: &[M6], order: usize, kz: f6
     coo.to_csr()
 }
 
+/// The wafer axis (0 = x, 1 = y, 2 = z) of each displacement block of `CrossSection::KzWafer`: x, z, y.
+const PLANE_AXES: [usize; 3] = [0, 2, 1];
+
 /// The complex eigenvectors behind a `solve_solid_kz` result (for coupling integrals such as the
 /// Brillouin gain): displacement over all `3 * n_dofs(order)` dofs (component blocks), the complex
 /// frequencies in Hz, in the order of the solutions.
@@ -134,12 +137,14 @@ pub struct KzModes {
     pub converged: bool,
 }
 
-/// Eigenfrequencies of the cross-section at the out-of-plane wave number `kz` (rad/m).
-pub fn solve_solid_kz(mesh: &SimplexMesh, spec: &ProblemSpec, kz: f64) -> Result<SolveResult, String> {
-    solve_solid_kz_full(mesh, spec, kz).map(|r| r.0)
+/// Eigenfrequencies of a cross-section in wafer axes (mesh x, z; out of the plane y) for a wave `exp(-j k y)` along `+y` with wave number
+/// `k` (rad/m). The constraints, crystal orientations and layers of `spec` are in wafer axes, the fields come back under wafer names.
+pub fn solve_solid_kz(mesh: &SimplexMesh, spec: &ProblemSpec, k: f64) -> Result<SolveResult, String> {
+    solve_cross_section(mesh, spec, CrossSection::KzWafer(k)).map(|r| r.0)
 }
 
-/// Like `solve_solid_kz`, and also returns the complex mode shapes.
+/// Transitional (the Brillouin kernels, until phase 5 of the kernel port): the same eigenproblem for a problem in the model axes (mesh
+/// x, y; out of the plane z = -y), with the complex mode shapes.
 pub fn solve_solid_kz_full(mesh: &SimplexMesh, spec: &ProblemSpec, kz: f64) -> Result<(SolveResult, KzModes), String> {
     solve_cross_section(mesh, spec, CrossSection::Kz(kz))
 }
@@ -149,6 +154,9 @@ pub fn solve_solid_kz_full(mesh: &SimplexMesh, spec: &ProblemSpec, kz: f64) -> R
 /// (mesh coordinates x = r, y = z).
 #[derive(Clone, Copy, Debug)]
 pub enum CrossSection {
+    /// A cross-section in wafer axes: the displacement components are (x, z, y) and the wave is `exp(-j k y)`.
+    KzWafer(f64),
+    /// Transitional: model axes (x, y, z out of the plane), see `solve_solid_kz_full`.
     Kz(f64),
     Axisymmetric(f64),
 }
@@ -161,9 +169,10 @@ pub fn solve_solid_axisym(mesh: &SimplexMesh, spec: &ProblemSpec, m: f64) -> Res
 
 pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSection) -> Result<(SolveResult, KzModes), String> {
     let kz = match kind {
-        CrossSection::Kz(k) => k,
+        CrossSection::KzWafer(k) | CrossSection::Kz(k) => k,
         CrossSection::Axisymmetric(m) => m,
     };
+    let wafer = matches!(kind, CrossSection::KzWafer(_));
     let t0 = Instant::now();
     if mesh.dim != 2 {
         return Err("an out-of-plane wave number applies to a 2D cross-section".into());
@@ -174,6 +183,10 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
     let mut c6 = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?;
+    if wafer {
+        // the blocks of the displacement are (x, z, y): the stiffness in the Voigt order of those axes
+        c6 = c6.iter().map(|c| crate::section::plane_stiffness(c, 2)).collect();
+    }
     if let CrossSection::Axisymmetric(_) = kind {
         // a crystal's axes stay fixed while the local frame turns around the ring: the stiffness of the axisymmetric
         // model is the average over rotations about the ring axis (the y direction of the (r, z) plane); exact for isotropic materials
@@ -189,7 +202,8 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         if let BcKind::Fixed { fixed, .. } = &bc.kind {
             let bd = boundary_dofs(mesh, &bc.labels, order);
             for k in 0..3 {
-                if fixed[k] {
+                // block k is wafer axis `PLANE_AXES[k]` for a wafer-frame problem
+                if fixed[if wafer { PLANE_AXES[k] } else { k }] {
                     for &dof in &bd {
                         fixed_set.insert(dof + k * n1);
                     }
@@ -198,9 +212,13 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let stretch = if spec.materials.has_pml() { Some(crate::emw_pml::cell_stretches_model_frame(mesh, &spec.materials.pml)) } else { None };
+    let stretch = match (spec.materials.has_pml(), wafer) {
+        (false, _) => None,
+        (true, true) => Some(crate::emw_pml::cell_stretches(mesh, &spec.materials.pml)),
+        (true, false) => Some(crate::emw_pml::cell_stretches_model_frame(mesh, &spec.materials.pml)),
+    };
     let k = match kind {
-        CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
+        CrossSection::KzWafer(_) | CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
         CrossSection::Axisymmetric(m) => crate::solid_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
     };
     let mut rho = spec.materials.cell_values(mesh, "rho", None)?;
@@ -284,12 +302,14 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         let (ux, uy, uz) = (comp(0), comp(1), comp(2));
         let mag: Vec<f64> = (0..n1).map(|a| (ux[a].norm_sqr() + uy[a].norm_sqr() + uz[a].norm_sqr()).sqrt()).collect();
         let re = |v: &[C]| -> Vec<f64> { v.iter().map(|z| z.re).collect() };
+        // the names of the three blocks: wafer (x, z, y) for a wafer-frame problem, the model's (x, y, z) otherwise
+        let names = if wafer { ["ux", "uz", "uy"] } else { ["ux", "uy", "uz"] };
         let fields = vec![
             Field { name: "|u|".into(), unit: "a.u.".into(), values: mag },
-            Field { name: "ux".into(), unit: "a.u.".into(), values: re(&ux) },
-            Field { name: "uy".into(), unit: "a.u.".into(), values: re(&uy) },
-            Field { name: "uz".into(), unit: "a.u.".into(), values: re(&uz) },
-            Field { name: "|uz|".into(), unit: "a.u.".into(), values: uz.iter().map(|z| z.norm()).collect() },
+            Field { name: names[0].into(), unit: "a.u.".into(), values: re(&ux) },
+            Field { name: names[1].into(), unit: "a.u.".into(), values: re(&uy) },
+            Field { name: names[2].into(), unit: "a.u.".into(), values: re(&uz) },
+            Field { name: format!("|{}|", names[2]), unit: "a.u.".into(), values: uz.iter().map(|z| z.norm()).collect() },
         ];
         let mut disp = vec![0.0; n1 * 2];
         for a in 0..n1 {
@@ -310,6 +330,7 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         return Err("no eigenfrequencies converged near the shift".into());
     }
     let what = match kind {
+        CrossSection::KzWafer(_) => format!("wave number k = {kz:.6e} rad/m along y"),
         CrossSection::Kz(_) => format!("out-of-plane wave number kz = {kz:.6e} rad/m"),
         CrossSection::Axisymmetric(_) => format!("axisymmetric, azimuthal order m = {kz}"),
     };

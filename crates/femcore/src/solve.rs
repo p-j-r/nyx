@@ -41,8 +41,7 @@ fn solve_checked(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState)
     // kernels that already read the problem in wafer axes (`section`) need no model-frame translation
     let wafer_native = match spec.physics {
         Physics::Electrostatics | Physics::Heat | Physics::Emw => true,
-        // a solid cross-section with an out-of-plane wave number is the kz kernel (phase 4 of the kernel port)
-        Physics::Solid => spec.out_of_plane.is_none(),
+        Physics::Solid => true,
         Physics::Brillouin => false,
     };
     let result = if mesh.dim == 2 && !wafer_native {

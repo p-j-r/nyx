@@ -100,8 +100,39 @@ fn golden(name: &str, r: &SolveResult, tol: f64) {
         }
         v
     };
+    let (want, got) = (strip(&want), strip(&got));
     let mut diffs = vec![];
-    compare(name, &strip(&want), &strip(&got), 1.0, tol, &mut diffs);
+    compare(name, &want, &got, 1.0, tol, &mut diffs);
+    if !diffs.is_empty() {
+        // an eigenvector is fixed only up to its sign when two of its entries tie in modulus: accept a solution whose signed fields
+        // are all negated (the other fields, scalars and the rest of the record must still agree)
+        let mut gauged = got.clone();
+        if let (Some(ws), Some(gs)) = (want["solutions"].as_array(), gauged["solutions"].as_array_mut()) {
+            for (w, g) in ws.iter().zip(gs.iter_mut()) {
+                let mut d = vec![];
+                compare("", w, g, 1.0, tol, &mut d);
+                let mut flipped = g.clone();
+                if !d.is_empty() {
+                    if let Some(fs) = flipped["fields"].as_object_mut() {
+                        for (fname, f) in fs.iter_mut() {
+                            if !fname.starts_with('|') && fname != "von Mises" {
+                                if let Some(pr) = f["probe"].as_array_mut() {
+                                    pr.iter_mut().for_each(|x| *x = json!(-x.as_f64().unwrap()));
+                                }
+                            }
+                        }
+                    }
+                    let mut d2 = vec![];
+                    compare("", w, &flipped, 1.0, tol, &mut d2);
+                    if d2.is_empty() {
+                        *g = flipped;
+                    }
+                }
+            }
+        }
+        diffs.clear();
+        compare(name, &want, &gauged, 1.0, tol, &mut diffs);
+    }
     assert!(diffs.is_empty(), "{} differences from the golden file {name}:\n{}", diffs.len(), diffs.iter().take(12).cloned().collect::<Vec<_>>().join("\n"));
 }
 
