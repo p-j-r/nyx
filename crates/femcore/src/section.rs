@@ -54,15 +54,28 @@ pub fn plane_tensor(t: &M3, dim: usize) -> M3 {
     permute(t, &[0, 2, 1], &[1.0, 1.0, 1.0])
 }
 
-/// Sign of the propagation axis of the mode solvers against wafer y.
-pub const PROP_SIGN: f64 = -1.0;
+/// Sign of the propagation axis of the mode solvers against wafer y: everything propagates along `+y`.
+pub const PROP_SIGN: f64 = 1.0;
+
+/// The propagation axis of the Brillouin kernels, which still work in the model frame (x, z, -y) until phase 5 of the kernel port.
+pub const LEGACY_PROP_SIGN: f64 = -1.0;
 
 /// The wafer axis behind each axis of the local frame (lateral, normal, propagation) and its sign.
 pub const LOCAL_AXES: [(usize, f64); 3] = [(0, 1.0), (2, 1.0), (1, PROP_SIGN)];
 
 /// A wafer tensor in the local axes (lateral, normal, propagation) of the mode solvers.
 pub fn local_tensor(t: &M3) -> M3 {
-    permute(t, &[LOCAL_AXES[0].0, LOCAL_AXES[1].0, LOCAL_AXES[2].0], &[LOCAL_AXES[0].1, LOCAL_AXES[1].1, LOCAL_AXES[2].1])
+    local_tensor_signed(t, PROP_SIGN)
+}
+
+/// As `local_tensor` for a propagation axis along `prop_sign * y`.
+pub fn local_tensor_signed(t: &M3, prop_sign: f64) -> M3 {
+    permute(t, &[0, 2, 1], &[1.0, 1.0, prop_sign])
+}
+
+/// Whether the local triple (lateral, normal, propagation) of a mode solver with propagation `prop_sign * y` is left-handed.
+pub fn is_left_handed(prop_sign: f64) -> bool {
+    prop_sign > 0.0
 }
 
 fn permute(t: &M3, axis: &[usize; 3], sign: &[f64; 3]) -> M3 {
@@ -100,18 +113,24 @@ mod tests {
         // lateral, normal, propagation = x, z, PROP_SIGN y
         assert_eq!([l[0][0], l[1][1], l[2][2], l[0][1]], [T[0][0], T[2][2], T[1][1], T[0][2]]);
         assert_eq!([l[0][2], l[1][2]], [PROP_SIGN * T[0][1], PROP_SIGN * T[2][1]]);
+        let b = local_tensor_signed(&T, LEGACY_PROP_SIGN);
+        assert_eq!([b[0][2], b[1][2]], [-T[0][1], -T[2][1]]);
     }
 
     #[test]
-    fn local_axes_are_right_handed() {
-        let a = LOCAL_AXES;
-        let e = |i: usize| {
-            let mut v = [0.0; 3];
-            v[a[i].0] = a[i].1;
-            v
-        };
-        let (x, z) = (e(0), e(1));
-        let cross = [x[1] * z[2] - x[2] * z[1], x[2] * z[0] - x[0] * z[2], x[0] * z[1] - x[1] * z[0]];
-        assert_eq!(cross, e(2));
+    fn handedness_of_the_local_axes_is_known() {
+        for sign in [PROP_SIGN, LEGACY_PROP_SIGN] {
+            let a = [(0usize, 1.0), (2, 1.0), (1, sign)];
+            let e = |i: usize| {
+                let mut v = [0.0; 3];
+                v[a[i].0] = a[i].1;
+                v
+            };
+            let (x, z) = (e(0), e(1));
+            let cross = [x[1] * z[2] - x[2] * z[1], x[2] * z[0] - x[0] * z[2], x[0] * z[1] - x[1] * z[0]];
+            let right = cross == e(2);
+            assert_eq!(is_left_handed(sign), !right, "sign {sign}");
+        }
+        assert_eq!(LOCAL_AXES[2].1, PROP_SIGN);
     }
 }

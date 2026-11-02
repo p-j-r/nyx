@@ -90,6 +90,12 @@ fn golden(name: &str, r: &SolveResult, tol: f64) {
         let mut v = v.clone();
         if let Some(sc) = v["scalars"].as_object_mut() {
             sc.retain(|k, x| !(k.starts_with("Q ") || x.is_string() && k.starts_with("neff")));
+            // a Stokes parameter that is zero prints with either sign
+            for x in sc.values_mut() {
+                if let Some(t) = x.as_str() {
+                    *x = Value::String(t.replace("-0.000", "+0.000"));
+                }
+            }
         }
         v
     };

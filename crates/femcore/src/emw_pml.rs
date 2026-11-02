@@ -28,7 +28,7 @@ use crate::fem::*;
 use crate::fields::{local_bary, node_average};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::section::{local_component, local_tensor};
+use crate::section::local_component;
 use std::time::Instant;
 
 /// Relative change of the propagation constant at which the coupled (tilted-crystal) fixed-point iteration stops.
@@ -85,7 +85,12 @@ pub fn stretch(p: &Pml, dirs: [PmlDir; 2], centre: [f64; 2], lo: [f64; 2], hi: [
 /// Complex material tensors of every cell including the PML stretching, in the local axes of the mode solvers (`section::local_tensor`).
 /// The layers of a cross-section absorb along the wafer axes x and z.
 pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
-    let tens: Vec<_> = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(local_tensor).collect();
+    cell_materials_signed(mesh, m, crate::section::PROP_SIGN)
+}
+
+/// As `cell_materials` for a propagation axis along `prop_sign * y` (the Brillouin kernels still use `section::LEGACY_PROP_SIGN`).
+pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
+    let tens: Vec<_> = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(|t| crate::section::local_tensor_signed(t, prop_sign)).collect();
     let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
     // bounding boxes of the PML domains
     let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();

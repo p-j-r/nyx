@@ -369,7 +369,11 @@ pub fn analyze_optical(mesh: &SimplexMesh, set: &OpticalSet, opts: &AnalysisOpti
     let modes: Vec<ModeInput> = (0..set.modes.len())
         .map(|j| ModeInput { label: format!("mode {}", j + 1), neff: (set.modes[j].neff.re, set.modes[j].neff.im), samples: mode_samples(mesh, set, j) })
         .collect();
-    analyze_modes(&modes, opts)
+    let mut opts = opts.clone();
+    if set.left_handed {
+        opts.class.time = crate::polarization::TimeConvention::MinusI;
+    }
+    analyze_modes(&modes, &opts)
 }
 
 impl Analysis {

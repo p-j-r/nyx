@@ -65,3 +65,24 @@ fn the_coupled_solver_reduces_to_the_uncoupled_one_without_tilt() {
         assert!((r.neff.unwrap().0 - z.re).abs() < 1e-8 && z.im.abs() < 1e-8, "{} against {}", r.neff.unwrap().0, z.re);
     }
 }
+
+#[test]
+fn modes_along_plus_y_and_minus_y_have_the_same_effective_indices_and_different_longitudinal_fields() {
+    // everything propagates along +y; the Brillouin kernels still use -y until their phase of the port. A lossless reciprocal guide has the
+    // same neff both ways, but the longitudinal field of a tilted crystal (xz/yz terms) is not simply the mirror image
+    let mesh = common::rect(0.03, 0.015, 12, 6);
+    let mut s = ProblemSpec::new(Physics::Emw);
+    s.order = 2;
+    s.materials.aniso.insert(1, crystal(40.0));
+    s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
+    let fwd = femcore::brillouin::solve_optical_wafer(&mesh, &s, 1.0).unwrap();
+    let bwd = femcore::brillouin::solve_optical_wafer(&mesh, &s, -1.0).unwrap();
+    assert!(fwd.left_handed && !bwd.left_handed);
+    for (a, b) in fwd.modes.iter().zip(&bwd.modes) {
+        assert!((a.neff.re - b.neff.re).abs() < 1e-7, "{} against {}", a.neff.re, b.neff.re);
+    }
+    // the couplings of the permittivity to the propagation axis change sign
+    for (a, b) in fwd.eps.iter().zip(&bwd.eps) {
+        assert!((a.xz + b.xz).norm() < 1e-12 && (a.yz + b.yz).norm() < 1e-12 && a.xz.norm() + a.yz.norm() > 0.0);
+    }
+}

@@ -13,6 +13,6 @@ Plan: `nyx_frames/KERNEL_PORT_PLAN.md` in the project files. Oracle: `crates/fem
 | 6 | axisymmetric family | open |
 | 7 | delete the adapter | open |
 
-`section` is the one place with axis numbers: `plane_tensor` (x, z, y; for diffusion and in-plane elasticity), `local_tensor` and `LOCAL_AXES` (lateral, normal, propagation; for the mode solvers), `component_names`, `wafer_point`. `PROP_SIGN = -1` is the open propagation-direction decision of the optical modes (they carry `exp(-j beta z_local)` with `z_local = -y`).
+`section` is the one place with axis numbers: `plane_tensor` (x, z, y; for diffusion and in-plane elasticity), `local_tensor` and `LOCAL_AXES` (lateral, normal, propagation; for the mode solvers), `component_names`, `wafer_point`. Everything propagates along `+y` (decided 2026-11-02): the mode solvers carry `exp(-j beta y)` (`PROP_SIGN = +1`; their local triple (x, z, y) is left-handed, which only reverses the reading of the polarization sense, `TimeConvention::MinusI`). Neff did not change, only the sign of `Ey` (golden files regenerated for that). The Brillouin kernels still use `LEGACY_PROP_SIGN = -1` through `brillouin::solve_optical` until phase 5, when the pump moves to `+y` as well.
 
 Known: `solid_pml::low_reflecting_boundary_gives_the_analytic_damped_bar_modes` fails on this machine's cloud container before and after the port (Re f1 = 4e-7, a rigid-body mode); not caused by the port.
