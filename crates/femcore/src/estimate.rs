@@ -36,11 +36,24 @@ pub struct Estimator {
     pub hmin_fraction: f64,
     /// Largest ratio of the long to the short side of an element.
     pub max_aspect: f64,
+    /// Treat the named fields of one solution as the components of one vector field: their absolute Hessians are added at each vertex and a
+    /// single metric is made from the sum, so the cell target is met once. Without it every field gets its own metric at the full target
+    /// and the metrics are intersected, which asks for more cells than the target (each extra component adds its own refinement).
+    pub combine: bool,
 }
 
 impl Default for Estimator {
     fn default() -> Self {
-        Estimator { fields: vec![], p: 2.0, hmin_fraction: 0.005, max_aspect: 20.0 }
+        Estimator { fields: vec![], p: 2.0, hmin_fraction: 0.005, max_aspect: 20.0, combine: false }
+    }
+}
+
+impl Estimator {
+    /// For the mode fields of electromagnetic studies: the signed Cartesian components of E as one vector field. The magnitude `|E|` is the
+    /// default first field, but it has a kink wherever the field changes sign and its recovered Hessian there is noise; the components
+    /// are smooth.
+    pub fn e_field() -> Self {
+        Estimator { fields: vec!["Ex".into(), "Ey".into(), "Ez".into()], combine: true, ..Estimator::default() }
     }
 }
 
@@ -170,7 +183,10 @@ pub fn estimator_metrics(g: &MeshedGeom, result: &SolveResult, est: &Estimator, 
     };
     let mut asked: Vec<Sym<2>> = vec![[[1.0 / (opts.h * opts.h), 0.0], [0.0, 1.0 / (opts.h * opts.h)]]; n];
     let mut used = 0;
+    // `combine`: the sum over the components of |H| at every vertex, per solution
+    let mut sum: Vec<Sym<2>> = vec![[[0.0; 2]; 2]; n];
     for sol in &result.solutions {
+        let mut any = false;
         let names: Vec<&str> = if est.fields.is_empty() { sol.fields.first().map(|f| f.name.as_str()).into_iter().collect() } else { est.fields.iter().map(String::as_str).collect() };
         for name in names {
             let Some(f) = sol.field(name) else { continue };
@@ -179,11 +195,32 @@ pub fn estimator_metrics(g: &MeshedGeom, result: &SolveResult, est: &Estimator, 
             if !(norm > 1e-300 && norm.is_finite()) {
                 continue;
             }
-            let m = lp_metrics::<2>(&hess, &vol, &lp);
-            for (a, b) in asked.iter_mut().zip(&m.metrics) {
-                *a = intersect(a, b);
+            if est.combine {
+                for (acc, h) in sum.iter_mut().zip(&hess) {
+                    let a = map_eig(h, f64::abs);
+                    for i in 0..2 {
+                        for j in 0..2 {
+                            acc[i][j] += a[i][j];
+                        }
+                    }
+                }
+                any = true;
+            } else {
+                let m = lp_metrics::<2>(&hess, &vol, &lp);
+                for (a, b) in asked.iter_mut().zip(&m.metrics) {
+                    *a = intersect(a, b);
+                }
+                used += 1;
             }
+        }
+        if est.combine && any {
             used += 1;
+        }
+    }
+    if est.combine && used > 0 {
+        let m = lp_metrics::<2>(&sum, &vol, &lp);
+        for (a, b) in asked.iter_mut().zip(&m.metrics) {
+            *a = intersect(a, b);
         }
     }
     if used == 0 {

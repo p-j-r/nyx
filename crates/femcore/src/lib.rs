@@ -49,6 +49,7 @@ pub mod mesher;
 pub mod mesher3d;
 pub mod meshing;
 pub mod meshing_pml;
+pub mod physics_size;
 pub mod cellmesh;
 pub mod par;
 pub mod periodic;

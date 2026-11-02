@@ -17,7 +17,9 @@ pub use crate::meshing_pml::{structured_pml, PmlMode, PmlReport};
 use crate::meshers::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
 use crate::meshers::adapt::field::{BackgroundMetric2, MetricField};
 use crate::meshers::adapt::geom::Geometry2;
-use crate::meshers::adapt::metric::{isotropic, Sym};
+use crate::meshers::adapt::metric::{intersect, isotropic, Sym};
+use crate::physics_size::{self, PhysicsSizing};
+use crate::problem::ProblemSpec;
 use crate::meshers::adapt::topo::{Sig, Work2};
 use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
 use geom::diff::{diff, ChangeKind};
@@ -96,6 +98,46 @@ pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGe
         Mesher::Simple => (start, None),
         Mesher::Adaptive(a) => {
             let metrics = a_priori_metrics(&start, &plan.opts, &a)?;
+            let (g, r) = adapt_to_metrics(start, &metrics, &a)?;
+            (g, Some(r))
+        }
+    };
+    match plan.pml {
+        PmlMode::Inline => Ok((g, report)),
+        PmlMode::Structured => Ok((structured_pml(g)?.0, report)),
+    }
+}
+
+/// Meshes a model for a study: the sizes the model asks for, and in addition the sizes the waves of `spec` need
+/// (`physics_size`: points per wavelength by element order). The adaptive mesher intersects the two metrics, so each is a floor on
+/// the resolution. The simple mesher cannot vary the size by the wavelength, so it takes the smallest physics size as its global size
+/// when that is below the plan's.
+pub fn mesh_for_problem(list: &FeatureList, plan: &MeshPlan, spec: &ProblemSpec, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    let mut opts = plan.opts;
+    let (g, report) = match plan.mesher {
+        Mesher::Simple => {
+            let probe = mesh_geom_2d(evaluate(list)?, &opts)?;
+            let hmin = physics_size::vertex_sizes(spec, &probe.mesh, sz)?.into_iter().fold(f64::INFINITY, f64::min);
+            if hmin < opts.h {
+                opts.h = hmin;
+                (mesh_geom_2d(evaluate(list)?, &opts)?, None)
+            } else {
+                (probe, None)
+            }
+        }
+        Mesher::Adaptive(a) => {
+            let start = mesh_geom_2d(evaluate(list)?, &opts)?;
+            let geo = a_priori_metrics(&start, &opts, &a)?;
+            let phys = physics_size::metrics(spec, &start.mesh, sz, opts.h)?;
+            let metrics: Vec<Sym<2>> = geo
+                .iter()
+                .zip(&phys)
+                .map(|(g, p)| {
+                    // the physics size is scaled like the geometry sizes, so `Adaptive::scale` stays one knob for the whole mesh
+                    let p = [[p[0][0] / (a.scale * a.scale), p[0][1] / (a.scale * a.scale)], [p[1][0] / (a.scale * a.scale), p[1][1] / (a.scale * a.scale)]];
+                    intersect(g, &p)
+                })
+                .collect();
             let (g, r) = adapt_to_metrics(start, &metrics, &a)?;
             (g, Some(r))
         }
