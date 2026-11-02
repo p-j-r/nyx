@@ -126,9 +126,9 @@ fn poisson_on_the_adapted_disk_is_at_least_as_accurate_as_on_the_simple_one() {
     let run = |plan: &MeshPlan| {
         let g = mesh_model(&m.list, plan).unwrap();
         let mut s = ProblemSpec::new(Physics::Electrostatics);
-        s.materials.default.insert("rho_v".into(), femcore::scalar::EPS0);
+        s.materials.default.insert("rho_v".into(), femcore::dfs::EPS0);
         s.bcs = vec![Bc { on: None, labels: g.select("outer").unwrap(), kind: BcKind::Ground }];
-        let res = femcore::scalar::solve_electrostatics(&g.mesh, &s).unwrap();
+        let res = femcore::dfs::solve_electrostatics(&g.mesh, &s).unwrap();
         ((res.scalar("V max").unwrap() / (r * r / 4.0) - 1.0).abs(), g.mesh.n_cells())
     };
     let (e_simple, n_simple) = run(&MeshPlan::simple(0.15));
@@ -248,9 +248,9 @@ fn the_loop_improves_poisson_on_a_disk_and_reports_its_cycles() {
     st.rel_tol = 1e-6;
     let mut solve = |g: &femcore::geomdrive::MeshedGeom| {
         let mut s = ProblemSpec::new(Physics::Electrostatics);
-        s.materials.default.insert("rho_v".into(), femcore::scalar::EPS0);
+        s.materials.default.insert("rho_v".into(), femcore::dfs::EPS0);
         s.bcs = vec![Bc { on: None, labels: g.select("outer").unwrap(), kind: BcKind::Ground }];
-        let res = femcore::scalar::solve_electrostatics(&g.mesh, &s)?;
+        let res = femcore::dfs::solve_electrostatics(&g.mesh, &s)?;
         let v = res.scalar("V max").ok_or("no V max")?;
         Ok((res, v))
     };
@@ -514,7 +514,7 @@ fn a_model_without_layers_is_left_alone_and_a_round_window_is_refused() {
 #[test]
 #[ignore = "study (about a minute): cargo test -p femcore --test meshing --release chip_pml -- --ignored --nocapture"]
 fn chip_pml_structured_study() {
-    use femcore::brillouin::study_straight;
+    use femcore::sbs::study_straight;
     use femcore::chips::{chip_by_name, chip_geometry, chip_problem};
     let chip = chip_by_name("300TE").unwrap();
     let list = chip_geometry(&chip, 1.0).list;
@@ -523,8 +523,7 @@ fn chip_pml_structured_study() {
         let g = femcore::meshing::mesh_evaluated(evaluate(&list).unwrap(), &plan).unwrap();
         let tm = t.elapsed().as_secs_f64();
         let spec = chip_problem(&chip, 0.0, 40, 18.35e9, &g);
-        let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
-        let study = study_straight(&g.mesh, &inner, &SolveState::default()).unwrap();
+        let study = study_straight(&g.mesh, &spec, &SolveState::default()).unwrap();
         let pr = &study.pairs[0];
         let mut rows: Vec<usize> = (0..pr.rows.len()).filter(|&i| pr.rows[i].gain_pe.max(pr.rows[i].gain_mb) > 1e-2).collect();
         rows.sort_by(|&a, &b| pr.rows[a].freq.re.partial_cmp(&pr.rows[b].freq.re).unwrap());
@@ -533,5 +532,42 @@ fn chip_pml_structured_study() {
             let r = &pr.rows[i];
             eprintln!("   f {:.6e}  Q {:.4e}  total gain {:.6e}", r.freq.re, r.q_eig, r.gain_total);
         }
+    }
+}
+
+/// 3D by sweeping the 2D section: the adapted (and the structured-layer) section extruded along y fills the right volume with positive tets.
+#[test]
+fn an_adapted_section_extruded_to_3d_has_the_volume_and_the_labels() {
+    use femcore::mesher::Layer;
+    let layers = vec![Layer { thickness: 0.6, n: 3, domain_offset: 0 }];
+    let vol = |m: &femcore::mesh::SimplexMesh| -> (f64, f64) {
+        let (mut total, mut min) = (0.0, f64::INFINITY);
+        for c in 0..m.n_cells() {
+            let v = m.cell(c);
+            let p = |i: usize| -> [f64; 3] { std::array::from_fn(|k| m.points[3 * v[i] as usize + k]) };
+            let (a, b, c2, d) = (p(0), p(1), p(2), p(3));
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let w = [c2[0] - a[0], c2[1] - a[1], c2[2] - a[2]];
+            let x = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+            let det = u[0] * (w[1] * x[2] - w[2] * x[1]) - u[1] * (w[0] * x[2] - w[2] * x[0]) + u[2] * (w[0] * x[1] - w[1] * x[0]);
+            total += det.abs() / 6.0;
+            min = f64::min(min, det.abs() / 6.0);
+        }
+        (total, min)
+    };
+    for (name, list, plan) in [
+        ("adaptive disk", core_in_clad(0.4).list, MeshPlan::adaptive(0.2, 0.5)),
+        ("structured layers", boxed_pml().list, structured(MeshPlan::adaptive(0.25, 0.5))),
+    ] {
+        let mut cache = MeshCache::default();
+        let (g2, _) = cache.mesh(&list, &plan).unwrap();
+        let (g3, _) = cache.mesh_extruded(&list, &plan, &layers).unwrap();
+        let (v, min) = vol(&g3.mesh);
+        let expect = area(&g2.mesh, None) * 0.6;
+        assert!((v - expect).abs() < 1e-9 * expect.max(1.0), "{name}: volume {v} vs {expect}");
+        assert!(min > 0.0, "{name}: smallest tet {min}");
+        assert_eq!(g3.mesh.dim, 3);
+        assert_eq!(g3.mesh.n_cells(), 3 * 3 * g2.mesh.n_cells(), "{name}: three tets per prism, three layers");
+        eprintln!("{name}: {} triangles -> {} tets", g2.mesh.n_cells(), g3.mesh.n_cells());
     }
 }
