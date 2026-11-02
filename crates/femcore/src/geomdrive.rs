@@ -121,19 +121,15 @@ pub fn evaluate(list: &FeatureList) -> Result<Evaluated, String> {
     geom::eval::Evaluator::new().eval(list, Tier::Complex).map_err(|e| e.to_string())
 }
 
-/// Meshes a 2D model (the x-z cross-section) with triangles.
-pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, String> {
-    if ev.list.dim != 2 {
-        return Err("mesh_geom_2d needs a 2D model".into());
-    }
-    if !(opts.h > 0.0 && opts.h.is_finite()) {
-        return Err("the element size must be positive".into());
-    }
-    let labels = ev.label_map().map_err(|e| e.to_string())?;
-    let max_dev = opts.max_dev.unwrap_or(opts.h / 50.0);
+/// The element sizes a model asks for: per region (the global size, the `Size` rules on regions, and thickness / layers in an absorbing
+/// piece) and per edge (a `Size` rule on edges). Shared by the simple mesher and by the adaptive one, which starts from the same sizes.
+pub(crate) struct SizeMap {
+    pub region_h: Vec<f64>,
+    pub edge_rule: Vec<Option<f64>>,
+}
 
-    // element size per region: the global size, the Size rules, and thickness / layers in an absorbing piece
-    let mut region_h = vec![opts.h; ev.regions().len()];
+pub(crate) fn size_map(ev: &Evaluated, h: f64) -> SizeMap {
+    let mut region_h = vec![h; ev.regions().len()];
     for p in ev.pml_regions() {
         region_h[p.region as usize] = region_h[p.region as usize].min(p.thickness / p.layers);
     }
@@ -154,6 +150,21 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
             _ => {}
         }
     }
+    SizeMap { region_h, edge_rule }
+}
+
+/// Meshes a 2D model (the x-z cross-section) with triangles.
+pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, String> {
+    if ev.list.dim != 2 {
+        return Err("mesh_geom_2d needs a 2D model".into());
+    }
+    if !(opts.h > 0.0 && opts.h.is_finite()) {
+        return Err("the element size must be positive".into());
+    }
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let max_dev = opts.max_dev.unwrap_or(opts.h / 50.0);
+
+    let SizeMap { region_h, edge_rule } = size_map(&ev, opts.h);
 
     // chains: one per edge, with the end points of the vertices so that neighbours share them exactly
     let w2 = |p: [f64; 3]| [p[0], p[2]];

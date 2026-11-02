@@ -46,6 +46,7 @@ pub mod mesh;
 pub mod meshers;
 pub mod mesher;
 pub mod mesher3d;
+pub mod meshing;
 pub mod cellmesh;
 pub mod par;
 pub mod periodic;

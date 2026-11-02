@@ -82,11 +82,14 @@ pub struct TopoOptions {
     pub corner_angle_deg: f64,
     /// Boundary-facet labels whose chains are frozen.
     pub frozen_labels: Vec<i32>,
+    /// Vertices that are corners whatever their neighbours look like: the vertices of the exact geometry (a tangent junction of a
+    /// line and an arc would otherwise count as a smooth chain vertex and be free to slide off its junction).
+    pub fixed_vertices: Vec<u32>,
 }
 
 impl Default for TopoOptions {
     fn default() -> Self {
-        TopoOptions { corner_angle_deg: 40.0, frozen_labels: Vec::new() }
+        TopoOptions { corner_angle_deg: 40.0, frozen_labels: Vec::new(), fixed_vertices: Vec::new() }
     }
 }
 
@@ -175,10 +178,17 @@ impl Work2 {
             }
         }
         let cos_lim = (opt.corner_angle_deg.to_radians()).cos();
+        let mut fixed = vec![false; w.pts.len()];
+        for &v in &opt.fixed_vertices {
+            if let Some(f) = fixed.get_mut(v as usize) {
+                *f = true;
+            }
+        }
         for v in 0..w.pts.len() {
             let es = &vedges[v];
             w.vclass[v] = match es.len() {
                 0 => VClass::Interior,
+                _ if fixed[v] => VClass::Corner,
                 2 if sig_of[&es[0]] == sig_of[&es[1]] => {
                     let other = |e: &Edge| if e[0] as usize == v { e[1] } else { e[0] } as usize;
                     let (a, b) = (other(&es[0]), other(&es[1]));

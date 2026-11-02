@@ -12,7 +12,7 @@
 //! elastic and optical modes have the same frequencies and gains.
 //! The sapphire permittivity is the uniaxial tensor `diag(n_o^2, n_o^2, n_e^2)` of the same crystal.
 
-use crate::geomdrive::{mesh_geom_2d, GeomMeshOpts, MeshedGeom};
+use crate::geomdrive::MeshedGeom;
 use crate::material::*;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
@@ -86,7 +86,7 @@ pub fn chip_geometry(c: &ChipSpec, scale: f64) -> Model {
 /// The mesh of a chip: global element size 0.12 um.
 pub fn chip_mesh(c: &ChipSpec, scale: f64) -> Result<MeshedGeom, String> {
     let ev = crate::geomdrive::evaluate(&chip_geometry(c, scale).list)?;
-    mesh_geom_2d(ev, &GeomMeshOpts::new(0.12e-6))
+    crate::meshing::mesh_evaluated(ev, &crate::meshing::MeshPlan::simple(0.12e-6))
 }
 
 fn cross(u: [f64; 3], v: [f64; 3]) -> [f64; 3] {

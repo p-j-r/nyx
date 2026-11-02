@@ -21,6 +21,10 @@ pub struct GeometrySpec {
     /// global element size
     pub h: f64,
     pub extrude: Option<Vec<femcore::mesher::Layer>>,
+    /// Mesh adaptively (`femcore::meshing::Mesher::Adaptive`): the factor on the element sizes the model asks for, smaller than one for a
+    /// finer mesh whose boundary and interface vertices lie on the exact curves. `None` is the simple mesher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapt_scale: Option<f64>,
 }
 
 impl TryFrom<serde_json::Value> for GeometrySpec {
@@ -35,6 +39,8 @@ impl TryFrom<serde_json::Value> for GeometrySpec {
             h: f64,
             #[serde(default)]
             extrude: Option<Vec<femcore::mesher::Layer>>,
+            #[serde(default)]
+            adapt_scale: Option<f64>,
         }
         let inner = match v.get("geometry") {
             Some(g) => match g.get("Model") {
@@ -49,19 +55,19 @@ impl TryFrom<serde_json::Value> for GeometrySpec {
             None => v,
         };
         let f: Fields = serde_json::from_value(inner).map_err(|e| e.to_string())?;
-        Ok(GeometrySpec { list: f.list, h: f.h, extrude: f.extrude })
+        Ok(GeometrySpec { list: f.list, h: f.h, extrude: f.extrude, adapt_scale: f.adapt_scale })
     }
 }
 
 impl GeometrySpec {
     /// A model of the x-z cross-section (a 2D feature list) meshed with element size `h`.
     pub fn model(list: geom::model::FeatureList, h: f64) -> Self {
-        GeometrySpec { list, h, extrude: None }
+        GeometrySpec { list, h, extrude: None, adapt_scale: None }
     }
 
     /// A 2D model swept along y through `layers` (see `femcore::mesher::extrude_y`).
     pub fn model_extruded(list: geom::model::FeatureList, h: f64, layers: Vec<femcore::mesher::Layer>) -> Self {
-        GeometrySpec { list, h, extrude: Some(layers) }
+        GeometrySpec { list, h, extrude: Some(layers), adapt_scale: None }
     }
 
     /// A rectangle `lx` wide (x) and `lz` high (z), one region `plate`, with element size `h`; swept `len` along y into a block when `len` is given.
@@ -70,7 +76,7 @@ impl GeometrySpec {
         let r = m.rect("plate", (0.0, 0.0), (lx, lz));
         m.overlay(&[("plate", r)]);
         let layers = len.map(|l| vec![femcore::mesher::Layer { thickness: l, n: ((l / h).round() as usize).clamp(1, 200), domain_offset: 0 }]);
-        GeometrySpec { list: m.list, h, extrude: layers }
+        GeometrySpec { list: m.list, h, extrude: layers, adapt_scale: None }
     }
 
     /// Evaluates and meshes the model: the mesh with the names of its regions and boundaries.
@@ -81,7 +87,11 @@ impl GeometrySpec {
         if !(self.h > 0.0 && self.h.is_finite()) {
             return Err("the element size must be a positive finite number".into());
         }
-        let mut g = femcore::geomdrive::mesh_geom_2d(femcore::geomdrive::evaluate(&self.list)?, &femcore::geomdrive::GeomMeshOpts::new(self.h))?;
+        let plan = match self.adapt_scale {
+            Some(scale) => femcore::meshing::MeshPlan::adaptive(self.h, scale),
+            None => femcore::meshing::MeshPlan::simple(self.h),
+        };
+        let mut g = femcore::meshing::mesh_model(&self.list, &plan)?;
         if let Some(layers) = &self.extrude {
             g.mesh = femcore::mesher::extrude_y(&g.mesh, layers, 0.0)?;
         }

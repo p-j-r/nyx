@@ -23,7 +23,7 @@
 //! uses exactly these axes.
 
 use super::soi::{Cladding, SoiWire};
-use crate::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+
 use crate::mesh::SimplexMesh;
 use crate::mesher::{extrude_y, Layer};
 use crate::problem::*;
@@ -203,7 +203,7 @@ impl BraggGrating {
         if !(self.duty > 0.0 && self.duty < 1.0) || self.period <= 0.0 {
             return Err("the duty cycle must lie between 0 and 1 and the period must be positive".into());
         }
-        let g = mesh_geom_2d(evaluate(&self.cross_section().list)?, &GeomMeshOpts::new(self.h_far))?;
+        let g = crate::meshing::mesh_model(&self.cross_section().list, &crate::meshing::MeshPlan::simple(self.h_far))?;
         let nb = g.mesh.facet_labels.iter().copied().max().unwrap_or(0);
         let mesh = extrude_y(&g.mesh, &self.layers(), 0.0)?;
         Ok(BraggCell { mesh, labels: g.labels, source: nb + 1, dest: nb + 2 })
