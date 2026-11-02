@@ -68,7 +68,7 @@ fn the_coupled_solver_reduces_to_the_uncoupled_one_without_tilt() {
 
 #[test]
 fn modes_along_plus_y_and_minus_y_have_the_same_effective_indices_and_different_longitudinal_fields() {
-    // everything propagates along +y; the Brillouin kernels still use -y until their phase of the port. A lossless reciprocal guide has the
+    // everything propagates along +y; the other direction is kept as a test hook. A lossless reciprocal guide has the
     // same neff both ways, but the longitudinal field of a tilted crystal (xz/yz terms) is not simply the mirror image
     let mesh = common::rect(0.03, 0.015, 12, 6);
     let mut s = ProblemSpec::new(Physics::Emw);

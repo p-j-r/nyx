@@ -127,19 +127,6 @@ pub fn to_model_frame(spec: &ProblemSpec, mesh_dim: usize) -> ProblemSpec {
     s
 }
 
-/// Transitional: the optical part of a model-frame problem (`to_model_frame` of a Brillouin problem) turned back into wafer axes, for the
-/// optical mode solvers that already read wafer axes. Crystal orientations and layer directions are inverted; nothing else changes.
-pub fn to_wafer_frame(spec: &ProblemSpec) -> ProblemSpec {
-    let mut s = spec.clone();
-    for p in s.materials.pml.values_mut() {
-        *p = Pml { z: p.y, y: PmlDir::Off, ..p.clone() };
-    }
-    for a in s.materials.aniso.values_mut() {
-        a.euler_deg = euler_from_model_frame(a.euler_deg);
-    }
-    s
-}
-
 /// Refuses what a wafer-frame 2D problem cannot say: there is no y axis in the plane of a cross-section.
 pub fn check_wafer_input(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String> {
     if mesh.dim == 2 {

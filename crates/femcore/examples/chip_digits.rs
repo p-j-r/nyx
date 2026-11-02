@@ -22,7 +22,7 @@ fn main() {
     let t = std::time::Instant::now();
     let scale: f64 = std::env::var("MESH_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
     let (mesh, spec) = chip_model(&chip, psi, scale, 40, f_search).expect("chip model");
-    let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
+    let inner = spec.clone();
     let study = study_straight(&mesh, &inner, &SolveState::default()).expect("study");
     eprintln!("{name} psi {psi}: {:.1} s", t.elapsed().as_secs_f64());
     println!("chip {name} psi {psi}");

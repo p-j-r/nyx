@@ -9,13 +9,13 @@
 //!
 //! * `plane_tensor`: axes (x, z, y), no signs. The leading 2x2 block is the x-z block that diffusion and in-plane elasticity use, entry
 //!   `[2][2]` is the yy (out-of-plane) value and `[0][2]`, `[1][2]` are the couplings of x and z to y. For a 3D mesh it is the tensor itself.
-//! * `local_tensor`: the axes (x, z, `PROP_SIGN` y) the waveguide mode solvers work in (lateral, normal, propagation; right-handed because
-//!   `PROP_SIGN` is -1). A mode solver's own equations are written in these local axes, so the optical kernels read their tensors and
-//!   name their fields through this module and nothing else.
+//! * `local_tensor`: the axes (x, z, `PROP_SIGN` y) the waveguide mode solvers work in (lateral, normal, propagation). Everything
+//!   propagates along `+y` (`PROP_SIGN = 1`), so the local triple is left-handed: the curl-curl equations of the optical kernels do not
+//!   care, a Poynting vector written with the same component formulas keeps its sign, and only the sense of rotation of a polarization
+//!   is read the other way (`OpticalSet::left_handed`). The Brillouin kernels run in the same axes: the optical fields, the elastic modes
+//!   (displacement blocks x, z, y, stiffness in the Voigt order of `plane_stiffness`) and the photoelastic tensor all use (x, z, y).
 //!
-//! `PROP_SIGN` is the one open frame decision of the optical modes: the mode solvers carry the field as `exp(-j beta z_local)`, which with
-//! `z_local = -y` is a wave along `-y` in wafer terms. Everything that depends on it is written in terms of `PROP_SIGN`, so flipping it is
-//! a one-line change that the golden tests (`tests/golden_frames.rs`) will show.
+//! The mode solvers carry the field as `exp(-j beta y)`, the elastic kz kernel as `exp(-j k y)`; a positive wave number is a wave along `+y`.
 
 use crate::material::{M3, M6};
 use crate::problem::{Pml, PmlDir};
@@ -93,9 +93,6 @@ pub fn mesh_pml_dirs(p: &Pml, dim: usize) -> [PmlDir; 3] {
 /// Sign of the propagation axis of the mode solvers against wafer y: everything propagates along `+y`.
 pub const PROP_SIGN: f64 = 1.0;
 
-/// The propagation axis of the Brillouin kernels, which still work in the model frame (x, z, -y) until phase 5 of the kernel port.
-pub const LEGACY_PROP_SIGN: f64 = -1.0;
-
 /// The wafer axis behind each axis of the local frame (lateral, normal, propagation) and its sign.
 pub const LOCAL_AXES: [(usize, f64); 3] = [(0, 1.0), (2, 1.0), (1, PROP_SIGN)];
 
@@ -104,7 +101,7 @@ pub fn local_tensor(t: &M3) -> M3 {
     local_tensor_signed(t, PROP_SIGN)
 }
 
-/// As `local_tensor` for a propagation axis along `prop_sign * y`.
+/// As `local_tensor` for a propagation axis along `prop_sign * y` (the reciprocity test runs a guide both ways).
 pub fn local_tensor_signed(t: &M3, prop_sign: f64) -> M3 {
     permute(t, &[0, 2, 1], &[1.0, 1.0, prop_sign])
 }
@@ -165,13 +162,11 @@ mod tests {
         // lateral, normal, propagation = x, z, PROP_SIGN y
         assert_eq!([l[0][0], l[1][1], l[2][2], l[0][1]], [T[0][0], T[2][2], T[1][1], T[0][2]]);
         assert_eq!([l[0][2], l[1][2]], [PROP_SIGN * T[0][1], PROP_SIGN * T[2][1]]);
-        let b = local_tensor_signed(&T, LEGACY_PROP_SIGN);
-        assert_eq!([b[0][2], b[1][2]], [-T[0][1], -T[2][1]]);
     }
 
     #[test]
     fn handedness_of_the_local_axes_is_known() {
-        for sign in [PROP_SIGN, LEGACY_PROP_SIGN] {
+        for sign in [PROP_SIGN, -PROP_SIGN] {
             let a = [(0usize, 1.0), (2, 1.0), (1, sign)];
             let e = |i: usize| {
                 let mut v = [0.0; 3];

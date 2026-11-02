@@ -21,7 +21,7 @@
 
 use crate::csparse::{c, C};
 use crate::emw::{cell_data, edge_basis, tri_g, CellData, EpsCell, Modes, C0};
-use crate::emw_pml::{cell_materials_signed, solve_modes_complex, EpsC, ModesC, MuC};
+use crate::emw_pml::{cell_materials, cell_materials_signed, solve_modes_complex, EpsC, ModesC, MuC};
 use crate::fem::*;
 use crate::material::M3;
 use crate::mesh::SimplexMesh;
@@ -148,16 +148,13 @@ fn from_complex(m: &ModesC) -> Vec<OptMode> {
     (0..m.neff.len()).map(|j| OptMode { neff: m.neff[j], et: m.et[j].clone(), phi: m.phi[j].clone() }).collect()
 }
 
-/// Solves the optical modes of `spec` (a `Physics::Emw` problem with a `Modes` study) given in the model frame of the Brillouin
-/// kernel. Transitional: the Brillouin kernels still work in model axes (phase 5 of the kernel port), while the optical mode solvers
-/// read wafer axes, so the problem is turned back into wafer axes here (`frame_adapter::to_wafer_frame`) and the modes propagate along
-/// the model's `z = -y` (`section::LEGACY_PROP_SIGN`) until the Brillouin kernels move to `+y` with everything else.
+/// Solves the optical modes of `spec` (a `Physics::Emw` problem with a `Modes` study in wafer axes), propagating along `+y`; complex
+/// materials and PMLs go through the complex solver.
 pub fn solve_optical(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<OpticalSet, String> {
-    solve_optical_wafer(mesh, &crate::frame_adapter::to_wafer_frame(spec), crate::section::LEGACY_PROP_SIGN)
+    solve_optical_wafer(mesh, spec, crate::section::PROP_SIGN)
 }
 
-/// Solves the optical modes of `spec` (a `Physics::Emw` problem with a `Modes` study in wafer axes) for a propagation axis along
-/// `prop_sign * y`; complex materials and PMLs go through the complex solver.
+/// Like `solve_optical` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
 pub fn solve_optical_wafer(mesh: &SimplexMesh, spec: &ProblemSpec, prop_sign: f64) -> Result<OpticalSet, String> {
     let Study::Modes { freq, n_target, evanescent, n_modes } = spec.study.clone() else {
         return Err("the optical problem needs a Modes study".into());
@@ -323,17 +320,15 @@ pub fn mode_samples(mesh: &SimplexMesh, set: &OpticalSet, j: usize) -> Vec<crate
 
 /// The optical modes found by `emw::solve_modes_tensor` for `spec` as an `OpticalSet`, to evaluate their fields.
 pub(crate) fn optical_set_real(mesh: &SimplexMesh, spec: &ProblemSpec, m: &Modes, freq: f64) -> Result<OpticalSet, String> {
-    let prop = crate::section::PROP_SIGN;
-    let (eps, mu) = cell_materials_signed(mesh, &spec.materials, prop)?;
-    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_real(m), converged: m.converged, in_pml: vec![false; mesh.n_cells()], left_handed: crate::section::is_left_handed(prop) })
+    let (eps, mu) = cell_materials(mesh, &spec.materials)?;
+    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_real(m), converged: m.converged, in_pml: vec![false; mesh.n_cells()], left_handed: crate::section::is_left_handed(crate::section::PROP_SIGN) })
 }
 
 /// The modes of `emw_pml::solve_modes_complex` for `spec` as an `OpticalSet`.
 pub(crate) fn optical_set_complex(mesh: &SimplexMesh, spec: &ProblemSpec, m: &ModesC, freq: f64) -> Result<OpticalSet, String> {
-    let prop = crate::section::PROP_SIGN;
-    let (eps, mu) = cell_materials_signed(mesh, &spec.materials, prop)?;
+    let (eps, mu) = cell_materials(mesh, &spec.materials)?;
     let in_pml = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off)).collect();
-    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_complex(m), converged: m.converged, in_pml, left_handed: crate::section::is_left_handed(prop) })
+    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_complex(m), converged: m.converged, in_pml, left_handed: crate::section::is_left_handed(crate::section::PROP_SIGN) })
 }
 
 
@@ -948,7 +943,7 @@ pub fn cell_viscosity(mesh: &SimplexMesh, viscosity: &BTreeMap<i32, crate::mater
     (0..mesh.n_cells())
         .map(|ci| match viscosity.get(&mesh.cell_labels[ci]) {
             Some(a) => match &a.stiffness {
-                Some(s) => crate::material::stiffness_global(s, a.euler_deg),
+                Some(s) => crate::section::plane_stiffness(&crate::material::stiffness_global(s, a.euler_deg), 2),
                 None => [[0.0; 6]; 6],
             },
             None => [[0.0; 6]; 6],
@@ -1170,8 +1165,23 @@ impl BrillouinStudy<'_> {
 
 // ------------------------------------------------------------------ the study as a physics
 
+/// The photoelastic tensor of a domain of a cross-section in wafer axes, in the axes (x, z, y) of the elastic modes and the optical fields
+/// (`section::plane_tensor`): the crystal orientation `euler_deg` is a wafer orientation.
 pub fn photo_from_spec(p: &PhotoSpec, stiffness_euler: Option<[f64; 3]>) -> PhotoElastic {
+    let w = crate::material::rotation(if p.follow_stiffness { stiffness_euler.unwrap_or(p.euler_deg) } else { p.euler_deg });
+    // the crystal axes as columns, written in the axes (x, z, y): the rows of the wafer rotation in that order
+    let r = [w[0], w[2], w[1]];
+    photo_with_rotation(p, &r)
+}
+
+/// Transitional (the ring until phase 6 of the kernel port): as `photo_from_spec` for an orientation in the model axes of the ring.
+pub fn photo_from_spec_model(p: &PhotoSpec, stiffness_euler: Option<[f64; 3]>) -> PhotoElastic {
     let r = crate::material::rotation(if p.follow_stiffness { stiffness_euler.unwrap_or(p.euler_deg) } else { p.euler_deg });
+    photo_with_rotation(p, &r)
+}
+
+fn photo_with_rotation(p: &PhotoSpec, r: &M3) -> PhotoElastic {
+    let r = *r;
     match &p.kind {
         PhotoKind::Isotropic { p11, p12 } => PhotoElastic::cubic(*p11, *p12, (p11 - p12) / 2.0, &r),
         PhotoKind::Cubic { p11, p12, p44 } => PhotoElastic::cubic(*p11, *p12, *p44, &r),
@@ -1251,7 +1261,7 @@ fn solve_ring(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, r_ref:
     mech.physics = Physics::Solid;
     mech.brillouin = None;
     mech.out_of_plane = None;
-    let photoelastic: BTreeMap<i32, PhotoElastic> = b.photoelastic.iter().map(|(d, p)| (*d, photo_from_spec(p, spec.materials.aniso.get(d).map(|a| a.euler_deg)).average_about_axis(1, 16))).collect();
+    let photoelastic: BTreeMap<i32, PhotoElastic> = b.photoelastic.iter().map(|(d, p)| (*d, photo_from_spec_model(p, spec.materials.aniso.get(d).map(|a| a.euler_deg)).average_about_axis(1, 16))).collect();
     let moving: BTreeSet<i32> = b.moving.iter().copied().collect();
     let pml_domains: BTreeSet<i32> = spec.materials.pml.keys().copied().collect();
     let opts = GainOptions { q_cap: b.q_cap, length: 2.0 * std::f64::consts::PI * r_ref, strain: if b.conjugate_strain { StrainConvention::Conjugate } else { StrainConvention::AsIs }, body_domains: moving.clone(), pml_domains, ..Default::default() };

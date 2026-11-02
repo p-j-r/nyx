@@ -89,6 +89,18 @@ fn golden(name: &str, r: &SolveResult, tol: f64) {
     // the text of an effective index and Q = Re/(2|Im|) carry the round-off of an imaginary part that is zero: the numbers are in `neff`
     let strip = |v: &Value| -> Value {
         let mut v = v.clone();
+        // a field that is zero up to round-off (the longitudinal displacement of a Brillouin mode is a quarter period out of phase, so its
+        // real part vanishes) is noise: leave it out
+        if name.starts_with("brillouin") {
+            if let Some(sols) = v["solutions"].as_array_mut() {
+                for sol in sols {
+                    if let Some(fs) = sol["fields"].as_object_mut() {
+                        let big = fs.values().filter_map(|f| f["max"].as_f64()).fold(0.0, f64::max);
+                        fs.retain(|_, f| f["max"].as_f64().is_some_and(|m| m > 1e-9 * big));
+                    }
+                }
+            }
+        }
         if let Some(sc) = v["scalars"].as_object_mut() {
             sc.retain(|k, x| !(k.starts_with("Q ") || x.is_string() && k.starts_with("neff")));
             // a Stokes parameter that is zero prints with either sign

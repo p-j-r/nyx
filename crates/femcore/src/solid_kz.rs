@@ -122,7 +122,7 @@ pub fn assemble_stiffness_kz(mesh: &SimplexMesh, c6: &[M6], order: usize, kz: f6
     coo.to_csr()
 }
 
-/// The wafer axis (0 = x, 1 = y, 2 = z) of each displacement block of `CrossSection::KzWafer`: x, z, y.
+/// The wafer axis (0 = x, 1 = y, 2 = z) of each displacement block of `CrossSection::Kz`: x, z, y.
 const PLANE_AXES: [usize; 3] = [0, 2, 1];
 
 /// The complex eigenvectors behind a `solve_solid_kz` result (for coupling integrals such as the
@@ -140,13 +140,13 @@ pub struct KzModes {
 /// Eigenfrequencies of a cross-section in wafer axes (mesh x, z; out of the plane y) for a wave `exp(-j k y)` along `+y` with wave number
 /// `k` (rad/m). The constraints, crystal orientations and layers of `spec` are in wafer axes, the fields come back under wafer names.
 pub fn solve_solid_kz(mesh: &SimplexMesh, spec: &ProblemSpec, k: f64) -> Result<SolveResult, String> {
-    solve_cross_section(mesh, spec, CrossSection::KzWafer(k)).map(|r| r.0)
+    solve_solid_kz_full(mesh, spec, k).map(|r| r.0)
 }
 
-/// Transitional (the Brillouin kernels, until phase 5 of the kernel port): the same eigenproblem for a problem in the model axes (mesh
-/// x, y; out of the plane z = -y), with the complex mode shapes.
-pub fn solve_solid_kz_full(mesh: &SimplexMesh, spec: &ProblemSpec, kz: f64) -> Result<(SolveResult, KzModes), String> {
-    solve_cross_section(mesh, spec, CrossSection::Kz(kz))
+/// Like `solve_solid_kz`, and also returns the complex mode shapes (displacement blocks in the order x, z, y, and the stiffness in the
+/// Voigt order of those axes).
+pub fn solve_solid_kz_full(mesh: &SimplexMesh, spec: &ProblemSpec, k: f64) -> Result<(SolveResult, KzModes), String> {
+    solve_cross_section(mesh, spec, CrossSection::Kz(k))
 }
 
 /// What the third displacement component and the third dimension are: the out-of-plane direction
@@ -155,8 +155,6 @@ pub fn solve_solid_kz_full(mesh: &SimplexMesh, spec: &ProblemSpec, kz: f64) -> R
 #[derive(Clone, Copy, Debug)]
 pub enum CrossSection {
     /// A cross-section in wafer axes: the displacement components are (x, z, y) and the wave is `exp(-j k y)`.
-    KzWafer(f64),
-    /// Transitional: model axes (x, y, z out of the plane), see `solve_solid_kz_full`.
     Kz(f64),
     Axisymmetric(f64),
 }
@@ -169,10 +167,10 @@ pub fn solve_solid_axisym(mesh: &SimplexMesh, spec: &ProblemSpec, m: f64) -> Res
 
 pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSection) -> Result<(SolveResult, KzModes), String> {
     let kz = match kind {
-        CrossSection::KzWafer(k) | CrossSection::Kz(k) => k,
+        CrossSection::Kz(k) => k,
         CrossSection::Axisymmetric(m) => m,
     };
-    let wafer = matches!(kind, CrossSection::KzWafer(_));
+    let wafer = matches!(kind, CrossSection::Kz(_));
     let t0 = Instant::now();
     if mesh.dim != 2 {
         return Err("an out-of-plane wave number applies to a 2D cross-section".into());
@@ -212,13 +210,14 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
+    // (the axisymmetric kind still reads its layers in the model axes until phase 6)
     let stretch = match (spec.materials.has_pml(), wafer) {
         (false, _) => None,
         (true, true) => Some(crate::emw_pml::cell_stretches(mesh, &spec.materials.pml)),
         (true, false) => Some(crate::emw_pml::cell_stretches_model_frame(mesh, &spec.materials.pml)),
     };
     let k = match kind {
-        CrossSection::KzWafer(_) | CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
+        CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
         CrossSection::Axisymmetric(m) => crate::solid_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
     };
     let mut rho = spec.materials.cell_values(mesh, "rho", None)?;
@@ -330,8 +329,7 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         return Err("no eigenfrequencies converged near the shift".into());
     }
     let what = match kind {
-        CrossSection::KzWafer(_) => format!("wave number k = {kz:.6e} rad/m along y"),
-        CrossSection::Kz(_) => format!("out-of-plane wave number kz = {kz:.6e} rad/m"),
+        CrossSection::Kz(_) => format!("wave number k = {kz:.6e} rad/m along y"),
         CrossSection::Axisymmetric(_) => format!("axisymmetric, azimuthal order m = {kz}"),
     };
     let mut log = vec![format!("{what}; complex Hermitian eigenproblem, Krylov dimension {}{}", pairs.dim, if pairs.converged { "" } else { " (not every pair converged; those are omitted)" })];

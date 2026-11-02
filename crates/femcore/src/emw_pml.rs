@@ -88,7 +88,7 @@ pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, V
     cell_materials_signed(mesh, m, crate::section::PROP_SIGN)
 }
 
-/// As `cell_materials` for a propagation axis along `prop_sign * y` (the Brillouin kernels still use `section::LEGACY_PROP_SIGN`).
+/// As `cell_materials` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
 pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
     let tens: Vec<_> = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(|t| crate::section::local_tensor_signed(t, prop_sign)).collect();
     let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;

@@ -42,7 +42,8 @@ fn solve_checked(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState)
     let wafer_native = match spec.physics {
         Physics::Electrostatics | Physics::Heat | Physics::Emw => true,
         Physics::Solid => true,
-        Physics::Brillouin => false,
+        // a ring (`ring_radius`) is the axisymmetric family, ported in phase 6
+        Physics::Brillouin => spec.brillouin.as_ref().is_some_and(|b| b.ring_radius.is_none()),
     };
     let result = if mesh.dim == 2 && !wafer_native {
         // solve in the axes of the 2D model and name the results in the wafer axes

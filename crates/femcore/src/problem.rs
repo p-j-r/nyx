@@ -461,7 +461,7 @@ pub struct BrillouinSpec {
     /// is the reference radius (m) for the per-length quantities (the mean radius of the mode)
     #[serde(default)]
     pub ring_radius: Option<f64>,
-    /// report the parity of the elastic modes under the mirror x -> -x (0) or y -> -y (1) of a mesh whose vertices are symmetric
+    /// report the parity of the elastic modes under the mirror x -> -x (0) or z -> -z (1) of a mesh (mesh axes of the cross-section: x and the surface normal z) whose vertices are symmetric
     #[serde(default)]
     pub mirror_axis: Option<usize>,
 }

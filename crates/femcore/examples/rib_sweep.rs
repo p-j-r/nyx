@@ -135,7 +135,7 @@ fn main() {
     let t0 = std::time::Instant::now();
     let chip = ChipSpec { name: "RIB", htot: HTOT, etch: ETCH, width: w_um, xin: 1.75 + 0.5 * w_um, n_eff: 2.7, polarisation: "TE" };
     let (mesh, spec) = chip_model(&chip, envf("PSI", 0.0), envf("MESH_SCALE", 1.0), n_el, 8e9).unwrap();
-    let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
+    let inner = spec.clone();
     println!("width {w_um} um: mesh {} cells", mesh.n_cells());
 
     // ---- optical modes

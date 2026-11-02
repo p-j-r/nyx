@@ -146,7 +146,7 @@ fn main() {
     let si: BTreeSet<i32> = g.domains("rib").into_iter().collect();
     let mesh = g.mesh;
     println!("mesh: {} cells, {} points", mesh.n_cells(), mesh.n_points());
-    let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
+    let inner = spec.clone();
     if what == "optics" {
         let mut csv = String::from("lambda_nm,label,neff,pol,frac_Ex,frac_Ey,frac_in_Si,m,v\n");
         let (l0, l1, dl) = (envf("L0", 1300.0), envf("L1", 1640.0), envf("DL", 20.0));
