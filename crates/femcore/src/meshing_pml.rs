@@ -14,6 +14,7 @@
 //! Needs a window that is a box and a physical mesh whose boundary lies on it (`build_pml` says so when it does not).
 
 use crate::geomdrive::MeshedGeom;
+use crate::cellmesh::CellMesh;
 use crate::mesh::SimplexMesh;
 use crate::meshers::adapt::pml::{build_pml, PmlSpec};
 use crate::meshers::interop::{cells_to_nyx, simplex_to_adapt};
@@ -43,13 +44,38 @@ pub struct PmlReport {
     pub layers: [[usize; 2]; 2],
 }
 
-/// Replaces the absorbing layers of a meshed 2D model by structured ones. A model without a `Pml` comes back unchanged.
+/// Replaces the absorbing layers of a meshed 2D model by structured ones, cut into triangles for the simplex solvers. A model without a
+/// `Pml` comes back unchanged.
 pub fn structured_pml(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String> {
+    let ev = g.eval.clone();
+    let labels = g.labels.clone();
+    match structured_pml_native(g)? {
+        Native::Unchanged(g, report) => Ok((g, report)),
+        Native::Cells(cells, report) => {
+            let (mesh, _) = SimplexMesh::from_cells_split(&cells)?;
+            Ok((MeshedGeom { mesh, labels, eval: ev }, report))
+        }
+    }
+}
+
+/// What `structured_pml_native` returns.
+#[derive(Clone)]
+pub enum Native {
+    /// the model has no absorbing layer: the meshed model as it was
+    Unchanged(MeshedGeom, PmlReport),
+    /// the physical triangles and the quadrilateral layers, uncut, with the labels of `structured_pml` (boundary facets are 0-based
+    /// entities of the lower dimension, as `CellMesh` has them)
+    Cells(CellMesh, PmlReport),
+}
+
+/// The structured layers without the final cut: a mixed triangle/quadrilateral `CellMesh`, for solvers that take quadrilaterals natively.
+/// Same labels, same facets, same requirements as `structured_pml`, whose result is this mesh with every quadrilateral split.
+pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String> {
     let ev = g.eval.clone();
     let pieces = ev.pml_regions();
     if pieces.is_empty() {
         let n = g.mesh.n_cells();
-        return Ok((g, PmlReport { physical_cells: n, layer_quads: 0, dropped_cells: 0, layers: [[0; 2]; 2] }));
+        return Ok(Native::Unchanged(g, PmlReport { physical_cells: n, layer_quads: 0, dropped_cells: 0, layers: [[0; 2]; 2] }));
     }
     if g.mesh.dim != 2 {
         return Err("structured absorbing layers are only built for 2D meshes".into());
@@ -183,9 +209,8 @@ pub fn structured_pml(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String> 
         built.mesh.push_facet(&f, label);
     }
 
-    let (mesh, _) = SimplexMesh::from_cells_split(&cells_to_nyx(&built.mesh))?;
     let report = PmlReport { physical_cells: n_phys_cells, layer_quads, dropped_cells, layers: spec.layers };
-    Ok((MeshedGeom { mesh, labels: g.labels.clone(), eval: g.eval.clone() }, report))
+    Ok(Native::Cells(cells_to_nyx(&built.mesh), report))
 }
 
 fn sorted_pair(a: u32, b: u32) -> (u32, u32) {
