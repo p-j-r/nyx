@@ -17,7 +17,8 @@
 //! `z_local = -y` is a wave along `-y` in wafer terms. Everything that depends on it is written in terms of `PROP_SIGN`, so flipping it is
 //! a one-line change that the golden tests (`tests/golden_frames.rs`) will show.
 
-use crate::material::M3;
+use crate::material::{M3, M6};
+use crate::problem::{Pml, PmlDir};
 
 /// Wafer axis (0 = x, 1 = y, 2 = z) of each axis of a mesh of dimension `dim`.
 pub fn wafer_axes(dim: usize) -> &'static [usize] {
@@ -52,6 +53,41 @@ pub fn plane_tensor(t: &M3, dim: usize) -> M3 {
         return *t;
     }
     permute(t, &[0, 2, 1], &[1.0, 1.0, 1.0])
+}
+
+/// For each entry of the Voigt order of the axes (x, z, y) of a cross-section, (xx, zz, yy, xz, zy, xy), the entry of the wafer Voigt order
+/// (xx, yy, zz, xy, yz, xz) it is. The solid kernels work in the first order: their in-plane block is `[0, 1, 3]` (xx, zz, xz) and the
+/// out-of-plane normal strain (plane strain: zero, plane stress: condensed out) is entry 2 (yy).
+pub const PLANE_VOIGT: [usize; 6] = [0, 2, 1, 5, 4, 3];
+
+/// A wafer stiffness (Voigt order xx, yy, zz, xy, yz, xz, engineering shear) in the Voigt order of the axes (x, z, y) of a cross-section;
+/// the identity on a 3D mesh.
+pub fn plane_stiffness(c: &M6, dim: usize) -> M6 {
+    if dim != 2 {
+        return *c;
+    }
+    let mut r = [[0.0; 6]; 6];
+    for i in 0..6 {
+        for j in 0..6 {
+            r[i][j] = c[PLANE_VOIGT[i]][PLANE_VOIGT[j]];
+        }
+    }
+    r
+}
+
+/// Wafer name of stress component `idx` of the solid kernels (their Voigt order: wafer order in 3D, `PLANE_VOIGT` on a cross-section).
+pub fn stress_name(dim: usize, idx: usize) -> &'static str {
+    const WAFER: [&str; 6] = ["sxx", "syy", "szz", "sxy", "syz", "sxz"];
+    WAFER[if dim == 2 { PLANE_VOIGT[idx] } else { idx }]
+}
+
+/// The directions of a perfectly matched layer along the axes of a mesh: (x, z) on a cross-section, (x, y, z) in 3D.
+pub fn mesh_pml_dirs(p: &Pml, dim: usize) -> [PmlDir; 3] {
+    if dim == 2 {
+        [p.x, p.z, PmlDir::Off]
+    } else {
+        [p.x, p.y, p.z]
+    }
 }
 
 /// Sign of the propagation axis of the mode solvers against wafer y: everything propagates along `+y`.
@@ -105,6 +141,22 @@ mod tests {
         assert_eq!([p[0][0], p[0][1], p[1][1]], [T[0][0], T[0][2], T[2][2]]);
         assert_eq!([p[2][2], p[0][2], p[1][2]], [T[1][1], T[0][1], T[2][1]]);
         assert_eq!(plane_tensor(&T, 3), T);
+    }
+
+    #[test]
+    fn plane_voigt_is_the_voigt_order_of_x_z_y() {
+        // an isotropic-like pattern: c[i][j] labelled by the tensor indices of Voigt entries i and j
+        let vp = [(0, 0), (1, 1), (2, 2), (0, 1), (1, 2), (0, 2)]; // wafer order
+        let pl = [(0, 0), (2, 2), (1, 1), (0, 2), (2, 1), (0, 1)]; // plane order, as wafer axes
+        for k in 0..6 {
+            let (a, b) = pl[k];
+            let w = PLANE_VOIGT[k];
+            assert!(vp[w] == (a, b) || vp[w] == (b, a), "entry {k}");
+        }
+        assert_eq!(stress_name(2, 1), "szz");
+        assert_eq!(stress_name(2, 2), "syy");
+        assert_eq!(stress_name(2, 3), "sxz");
+        assert_eq!(stress_name(3, 5), "sxz");
     }
 
     #[test]

@@ -446,6 +446,15 @@ fn _unused(_: &CCsr) {}
 /// `pml` (cells of other domains get 1). The profile is evaluated at the cell centre against the
 /// bounding box of its domain.
 pub fn cell_stretches(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C; 3]> {
+    cell_stretches_by(mesh, pml, |p, d| crate::section::mesh_pml_dirs(p, d))
+}
+
+/// Transitional (`solid_kz` until phase 4): the layers of a 2D mesh given along the model axes x, y.
+pub(crate) fn cell_stretches_model_frame(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C; 3]> {
+    cell_stretches_by(mesh, pml, |p, _| [p.x, p.y, p.z])
+}
+
+fn cell_stretches_by(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>, dirs: impl Fn(&Pml, usize) -> [PmlDir; 3]) -> Vec<[C; 3]> {
     let d = mesh.dim;
     let mut boxes: std::collections::BTreeMap<i32, ([f64; 3], [f64; 3])> = Default::default();
     for ci in 0..mesh.n_cells() {
@@ -471,7 +480,7 @@ pub fn cell_stretches(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, 
                         cen[k] += mesh.point(v as usize)[k] / (d as f64 + 1.0);
                     }
                 }
-                for (k, dir) in [p.x, p.y, p.z].into_iter().enumerate().take(d) {
+                for (k, dir) in dirs(p, d).into_iter().enumerate().take(d) {
                     s[k] = stretch_one(p, dir, cen[k], lo[k], hi[k]);
                 }
             }

@@ -151,7 +151,7 @@ pub fn solve_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
         let mag: Vec<f64> = (0..n1).map(|k| (0..d).map(|comp| u[comp * n1 + k].norm_sqr()).sum::<f64>().sqrt()).collect();
         fields.push(Field { name: "|u|".into(), unit: "a.u.".into(), values: mag });
         let mut disp = vec![0.0; n1 * d];
-        for (comp, ax) in ["x", "y", "z"][..d].iter().enumerate() {
+        for (comp, ax) in crate::section::component_names(d).iter().enumerate() {
             let v: Vec<f64> = (0..n1).map(|k| u[comp * n1 + k].re).collect();
             for k in 0..n1 {
                 disp[k * d + comp] = v[k];

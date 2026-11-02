@@ -104,26 +104,26 @@ fn anisotropic_thermal_expansion_of_a_free_plate_gives_no_stress() {
         spec.materials.default.insert("nu".into(), 0.25);
         spec.materials.aniso.insert(1, Anisotropy { expansion: Some(Tensor::Diagonal { x: ax, y: ay, z: ay }), ..Default::default() });
         spec.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(293.15 + dt), t_ref: 293.15 });
-        spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true, false, false]) }, Bc { on: None, labels: vec![2], kind: fixed([false, true, false]) }];
+        spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true, false, false]) }, Bc { on: None, labels: vec![2], kind: fixed([false, false, true]) }];
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
         let s = &r.solutions[0];
         let x = mesh.dof_coordinates(2);
         let ux = &s.field("ux").unwrap().values;
-        let uy = &s.field("uy").unwrap().values;
-        // plane stress: free expansion alpha dT; plane strain: eps_zz = 0 adds nu alpha_z dT in plane
-        let (az, nu) = (ay, 0.25);
+        let uz = &s.field("uz").unwrap().values;
+        // plane stress: free expansion alpha dT; plane strain: eps_yy = 0 (y is out of the section) adds nu alpha_y dT in plane
+        let (az, nu) = (ay, 0.25); // az: the expansion along the axis out of the section (y)
         let (kx, ky) = if plane == Plane::Stress { (ax, ay) } else { (ax + nu * az, ay + nu * az) };
         let ex: Vec<f64> = (0..ux.len()).map(|i| kx * dt * x[2 * i]).collect();
         let ey: Vec<f64> = (0..ux.len()).map(|i| ky * dt * x[2 * i + 1]).collect();
         assert!(maxdiff(ux, &ex) < 1e-9 * kx * dt, "{plane:?} ux {}", maxdiff(ux, &ex));
-        assert!(maxdiff(uy, &ey) < 1e-9 * ky * dt, "{plane:?} uy {}", maxdiff(uy, &ey));
-        for name in ["sxx", "syy", "sxy"] {
+        assert!(maxdiff(uz, &ey) < 1e-9 * ky * dt, "{plane:?} uz {}", maxdiff(uz, &ey));
+        for name in ["sxx", "szz", "sxz"] {
             let v = s.field(name).unwrap().values.iter().fold(0.0f64, |m, x| m.max(x.abs()));
             assert!(v < 1e-3, "{plane:?} {name} should vanish, got {v} Pa");
         }
-        let szz = s.field("szz").unwrap().values.iter().cloned().fold(0.0f64, |m, x| if x.abs() > m.abs() { x } else { m });
+        let syy = s.field("syy").unwrap().values.iter().cloned().fold(0.0f64, |m, x| if x.abs() > m.abs() { x } else { m });
         let want = if plane == Plane::Stress { 0.0 } else { -100e9 * az * dt };
-        assert!((szz - want).abs() < 1e-6 * want.abs().max(1.0), "{plane:?} szz {szz} vs {want}");
+        assert!((syy - want).abs() < 1e-6 * want.abs().max(1.0), "{plane:?} syy {syy} vs {want}");
     }
 }
 
@@ -136,15 +136,15 @@ fn isotropic_plane_strain_free_expansion_is_stress_free() {
         spec.materials.default.insert(k.into(), v);
     }
     spec.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(393.15), t_ref: 293.15 });
-    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true, false, false]) }, Bc { on: None, labels: vec![2], kind: fixed([false, true, false]) }];
+    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true, false, false]) }, Bc { on: None, labels: vec![2], kind: fixed([false, false, true]) }];
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
-    // in-plane stress vanishes; the constrained out-of-plane direction carries -E alpha dT
-    for name in ["sxx", "syy", "sxy"] {
+    // in-plane stress vanishes; the constrained out-of-plane direction (y) carries -E alpha dT
+    for name in ["sxx", "szz", "sxz"] {
         let v = r.solutions[0].field(name).unwrap().values.iter().fold(0.0f64, |m, x| m.max(x.abs()));
         assert!(v < 1e-3, "{name}: {v} Pa");
     }
-    let szz = r.solutions[0].field("szz").unwrap().values[0];
-    assert!((szz + 70e9 * 23e-6 * 100.0).abs() < 1e-3, "{szz}");
+    let syy = r.solutions[0].field("syy").unwrap().values[0];
+    assert!((syy + 70e9 * 23e-6 * 100.0).abs() < 1e-3, "{syy}");
 }
 
 #[test]

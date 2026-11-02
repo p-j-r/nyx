@@ -200,7 +200,7 @@ pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, 
         let mag: Vec<f64> = (0..n1).map(|a| (0..d).map(|kk| u[kk * n1 + a].norm_sqr()).sum::<f64>().sqrt() * scale).collect();
         let mut fields = vec![Field { name: "|u|".into(), unit: "a.u.".into(), values: mag }];
         let mut disp = vec![0.0; n1 * d];
-        for (comp, ax) in ["x", "y", "z"][..d].iter().enumerate() {
+        for (comp, ax) in crate::section::component_names(d).iter().enumerate() {
             let v: Vec<f64> = (0..n1).map(|a| (u[comp * n1 + a] * rot * scale).re).collect();
             for a in 0..n1 {
                 disp[a * d + comp] = v[a];

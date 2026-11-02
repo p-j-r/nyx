@@ -3,11 +3,13 @@
 //! prescribed displacements and thermal expansion, eigenfrequencies, stress and von Mises.
 //! Materials may be anisotropic (a 6x6 stiffness per domain, see `material`).
 //!
-//! Dof layout: all x displacements, then all y (then all z). Voigt order of stresses and
-//! strains: (xx, yy, zz, xy, yz, xz) with engineering shear strains, in 2D too.
+//! Everything is in the wafer axes (`section`): a 2D mesh is the x-z cross-section, y the axis out of it. Dof layout: all displacements
+//! along the first mesh axis, then along the second (then the third): (x, z) on a cross-section, (x, y, z) in 3D. Voigt order of stresses
+//! and strains with engineering shear strains: (xx, yy, zz, xy, yz, xz) in 3D; on a cross-section the Voigt order of the axes (x, z, y),
+//! (xx, zz, yy, xz, zy, xy), that `section::plane_stiffness` gives the stiffness in.
 //!
-//! 2D: plane strain uses the (xx, yy, xy) block of the stiffness with eps_zz = 0; plane stress
-//! condenses eps_zz out (sigma_zz = 0). Out-of-plane shear strains are taken as zero. The
+//! 2D: plane strain uses the (xx, zz, xz) block of the stiffness with eps_yy = 0; plane stress
+//! condenses eps_yy out (sigma_yy = 0). Out-of-plane shear strains are taken as zero. The
 //! thermal strain is `alpha (T - Tref)` (a tensor for anisotropic expansion); in plane strain
 //! its out-of-plane part loads the in-plane stress through the stiffness, which for an isotropic
 //! material is the (1 + nu) alpha dT in-plane free expansion that plane strain gives.
@@ -23,7 +25,7 @@ use crate::sparse::Csr;
 use rayon::prelude::*;
 use std::time::Instant;
 
-/// Indices of the in-plane components (xx, yy, xy) in the solver's Voigt order.
+/// Indices of the in-plane components (xx, zz, xz) in the solver's Voigt order on a cross-section.
 const INPLANE: [usize; 3] = [0, 1, 3];
 
 /// Constitutive matrix, row-major `ns x ns` (ns = 3 in 2D, 6 in 3D).
@@ -257,7 +259,7 @@ pub(crate) fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, Str
     let d = mesh.dim;
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
-    let c6 = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?;
+    let c6: Vec<M6> = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?.iter().map(|c| crate::section::plane_stiffness(c, d)).collect();
     let n1 = mesh.n_dofs(order);
     let mut seen = std::collections::BTreeMap::new();
     for dof in untouched_dofs(mesh, order, d, &spec.inactive) {
@@ -266,10 +268,10 @@ pub(crate) fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, Str
     for bc in &spec.bcs {
         if let BcKind::Fixed { fixed, values } = &bc.kind {
             let bd = boundary_dofs(mesh, &bc.labels, order);
-            for k in 0..d {
-                if fixed[k] {
+            for (k, &w) in crate::section::wafer_axes(d).iter().enumerate() {
+                if fixed[w] {
                     for &dof in &bd {
-                        seen.entry(dof + k * n1).or_insert(values[k]);
+                        seen.entry(dof + k * n1).or_insert(values[w]);
                     }
                 }
             }
@@ -312,16 +314,16 @@ fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Pla
         lap(&mut tl, "  stress at nodes");
         let vm: Vec<f64> = s.iter().map(von_mises).collect();
         fields.push(Field { name: "von Mises".into(), unit: "Pa".into(), values: node_average(mesh, &vm, 1, order) });
-        for (k, ax) in ["x", "y", "z"][..d].iter().enumerate() {
+        for (k, ax) in crate::section::component_names(d).iter().enumerate() {
             fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
         }
-        let comps: &[(&str, usize)] = if d == 2 { &[("sxx", 0), ("syy", 1), ("sxy", 3), ("szz", 2)] } else { &[("sxx", 0), ("syy", 1), ("szz", 2), ("sxy", 3), ("syz", 4), ("sxz", 5)] };
-        for (name, idx) in comps {
-            let v: Vec<f64> = s.iter().map(|x| x[*idx]).collect();
-            fields.push(Field { name: (*name).into(), unit: "Pa".into(), values: node_average(mesh, &v, 1, order) });
+        let comps: &[usize] = if d == 2 { &[0, 1, 3, 2] } else { &[0, 1, 2, 3, 4, 5] };
+        for &idx in comps {
+            let v: Vec<f64> = s.iter().map(|x| x[idx]).collect();
+            fields.push(Field { name: crate::section::stress_name(d, idx).into(), unit: "Pa".into(), values: node_average(mesh, &v, 1, order) });
         }
     } else {
-        for (k, ax) in ["x", "y", "z"][..d].iter().enumerate() {
+        for (k, ax) in crate::section::component_names(d).iter().enumerate() {
             fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
         }
     }
@@ -369,9 +371,9 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
             let mut f = vec![0.0; n];
             for bc in &spec.bcs {
                 if let BcKind::Load(t) = &bc.kind {
-                    for comp in 0..d {
-                        if t[comp] != 0.0 {
-                            let tc = t[comp] * if d == 2 { thk } else { 1.0 };
+                    for (comp, &w) in crate::section::wafer_axes(d).iter().enumerate() {
+                        if t[w] != 0.0 {
+                            let tc = t[w] * if d == 2 { thk } else { 1.0 };
                             add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f, d, comp);
                         }
                     }
@@ -379,7 +381,7 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
             }
             let mut thermal: Option<Thermal> = None;
             if let Some(th) = &spec.thermal {
-                let alpha = spec.materials.cell_tensor(mesh, TensorKind::Expansion, Some(0.0))?;
+                let alpha: Vec<M3> = spec.materials.cell_tensor(mesh, TensorKind::Expansion, Some(0.0))?.iter().map(|a| crate::section::plane_tensor(a, d)).collect();
                 let t = match &th.source {
                     ThermalSource::Uniform(tv) => vec![*tv; n1],
                     ThermalSource::FromHeat => match &state.heat_t {
@@ -504,7 +506,7 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
 }
 
 /// Element-wise stress at the centroid of every cell, one row per cell:
-/// `[sxx, sxy, syx, syy, szz, von Mises]` in 2D, `[s (3x3 row-major), von Mises]` in 3D.
+/// `[sxx, sxz, szx, szz, syy, von Mises]` in 2D (the in-plane axes are x and z), `[s (3x3 row-major), von Mises]` in 3D.
 pub fn centroid_stress(mesh: &SimplexMesh, u: &[f64], c6: &[M6], plane: Plane, order: usize) -> Vec<Vec<f64>> {
     let d = mesh.dim;
     let n1 = mesh.n_dofs(order);

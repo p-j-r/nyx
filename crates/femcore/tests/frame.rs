@@ -71,37 +71,33 @@ fn the_stiffness_of_a_tilted_crystal_in_the_model_frame_is_the_wafer_tensor_turn
 }
 
 #[test]
-fn a_loaded_cubic_plate_in_the_x_z_plane_deflects_like_the_same_plate_in_the_model_frame() {
+fn a_loaded_cubic_plate_in_the_x_z_plane_feels_a_turn_of_the_crystal_about_y_but_not_about_z_in_the_same_way() {
     // wafer description: fixed at x = 0 (x and z components), a load along -z on the right end; the crystal is turned by 20 degrees about y
+    // (a rotation in the plane of the section) or by 20 degrees about the normal z (a rotation that mixes the in-plane axis x with the
+    // axis y out of the section): the two are different crystals and give different deflections
     let mesh = common::rect(1.0, 0.2, 10, 2);
     let rot_y = |t: f64| -> M3 {
         let (s, c) = t.to_radians().sin_cos();
         [[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]]
     };
-    let eul = euler_from_rotation(&rot_y(20.0));
     let mut spec = ProblemSpec::new(Physics::Solid);
     spec.plane = Plane::Stress;
     spec.materials.set(1, "E", 1e9);
     spec.materials.set(1, "nu", 0.3);
-    spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 165.7e9, c12: 63.9e9, c44: 79.6e9 }), euler_deg: eul, ..Default::default() });
-    let mut w = spec.clone();
-    w.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, 0.0, -1e6]) }];
-    let rw = femcore::solve::solve(&mesh, &w, &mut SolveState::default()).unwrap();
-    // the model-frame description: the same rotation expressed in (x, z)
-    let mut m = spec;
-    m.materials.aniso.get_mut(&1).unwrap().euler_deg = femcore::frame_adapter::euler_to_model_frame(eul);
-    m.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, false], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e6, 0.0]) }];
-    let rm = femcore::solid::solve_solid(&mesh, &m, &SolveState::default()).unwrap();
-    let (uz_w, uy_m) = (&rw.solutions[0].field("uz").unwrap().values, &rm.solutions[0].field("uy").unwrap().values);
-    let scale = uy_m.iter().fold(0.0f64, |a, b| a.max(b.abs()));
-    assert!(scale > 0.0 && maxdiff(uz_w, uy_m) < 1e-9 * scale, "{} of {scale}", maxdiff(uz_w, uy_m));
-    // turning the crystal about the normal z instead changes the answer (a different rotation)
-    let mut other = m.clone();
-    other.materials.aniso.get_mut(&1).unwrap().euler_deg = [20.0, 0.0, 0.0];
-    other.bcs = w.bcs.clone();
-    let ro = femcore::solve::solve(&mesh, &other, &mut SolveState::default()).unwrap();
-    let uz_o = &ro.solutions[0].field("uz").unwrap().values;
-    assert!(maxdiff(uz_w, uz_o) > 1e-6 * scale);
+    spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 165.7e9, c12: 63.9e9, c44: 79.6e9 }), euler_deg: euler_from_rotation(&rot_y(20.0)), ..Default::default() });
+    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, 0.0, -1e6]) }];
+    let tip = |spec: &ProblemSpec| -> f64 {
+        let r = femcore::solve::solve(&mesh, spec, &mut SolveState::default()).unwrap();
+        r.solutions[0].field("uz").unwrap().values.iter().fold(0.0f64, |a, b| a.max(b.abs()))
+    };
+    let about_y = tip(&spec);
+    spec.materials.aniso.get_mut(&1).unwrap().euler_deg = [20.0, 0.0, 0.0];
+    let about_z = tip(&spec);
+    spec.materials.aniso.get_mut(&1).unwrap().euler_deg = [0.0; 3];
+    let straight = tip(&spec);
+    assert!(about_y > 0.0 && (about_y / straight - 1.0).abs() > 1e-3, "{about_y} against {straight}");
+    // the turn about z is not the turn about y
+    assert!((about_z / about_y - 1.0).abs() > 1e-4, "{about_z} against {about_y}");
 }
 
 #[test]

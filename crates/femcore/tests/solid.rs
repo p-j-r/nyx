@@ -40,10 +40,10 @@ fn cantilever_tip_deflection_matches_beam_theory() {
     let mesh = common::rect(1.0, 0.1, 40, 4);
     for (plane, name) in planes() {
         let mut spec = cantilever(plane, Study::Static);
-        spec.bcs.push(Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) });
+        spec.bcs.push(Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, 0.0, -1e5]) });
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
-        let uy = &r.solutions[0].field("uy").unwrap().values;
-        let tip = uy.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        let uz = &r.solutions[0].field("uz").unwrap().values;
+        let tip = uz.iter().fold(0.0f64, |m, v| m.max(v.abs()));
         let (f, l, h, e, nu) = (1e4f64, 1.0f64, 0.1f64, 200e9f64, 0.3f64);
         let ep = plane_modulus(plane, e, nu);
         let g = e / (2.0 * (1.0 + nu));
@@ -88,7 +88,7 @@ fn stress_at_triangle_centroids_is_uniaxial() {
         spec.materials.default.insert("nu".into(), nu);
         spec.bcs = vec![
             Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-            Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+            Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
             Bc { on: None, labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
         ];
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
@@ -96,11 +96,11 @@ fn stress_at_triangle_centroids_is_uniaxial() {
         let n1 = mesh.n_dofs(2);
         let mut u = vec![0.0; 2 * n1];
         u[..n1].copy_from_slice(&s.field("ux").unwrap().values);
-        u[n1..].copy_from_slice(&s.field("uy").unwrap().values);
+        u[n1..].copy_from_slice(&s.field("uz").unwrap().values);
         let nc = mesh.n_cells();
         let c6 = vec![femcore::material::isotropic_stiffness(1e9, nu); nc];
         let cs = femcore::solid::centroid_stress(&mesh, &u, &c6, plane, 2);
-        // our row: [sxx, sxy, syx, syy, szz, vm]
+        // our row: [sxx, sxz, szx, szz, syy (out of the plane), vm]
         let szz = if plane == Plane::Strain { nu * 1e6 } else { 0.0 };
         let vm = (0.5 * ((1e6f64 - 0.0).powi(2) + (0.0 - szz).powi(2) + (szz - 1e6).powi(2))).sqrt();
         for (c, row) in cs.iter().enumerate() {
@@ -124,18 +124,18 @@ fn thermal_expansion_of_a_free_bar() {
         }
         spec.bcs = vec![
             Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-            Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+            Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
         ];
         spec.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(393.15), t_ref: 293.15 });
         let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
         let s = &r.solutions[0];
         let a = if plane == Plane::Strain { (1.0 + nu) * alpha * dt } else { alpha * dt };
         let x = mesh.dof_coordinates(2);
-        let (ux, uy) = (&s.field("ux").unwrap().values, &s.field("uy").unwrap().values);
+        let (ux, uz) = (&s.field("ux").unwrap().values, &s.field("uz").unwrap().values);
         let ex: Vec<f64> = (0..ux.len()).map(|i| a * x[2 * i]).collect();
         let ey: Vec<f64> = (0..ux.len()).map(|i| a * x[2 * i + 1]).collect();
         assert!(maxdiff(ux, &ex) < 1e-9 * a, "{name} ux {}", maxdiff(ux, &ex));
-        assert!(maxdiff(uy, &ey) < 1e-9 * a, "{name} uy {}", maxdiff(uy, &ey));
+        assert!(maxdiff(uz, &ey) < 1e-9 * a, "{name} uz {}", maxdiff(uz, &ey));
         let vm = s.field("von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);
         let want = if plane == Plane::Strain { e * alpha * dt } else { 0.0 };
         assert!((vm - want).abs() < 1e-6 * e * alpha * dt, "{name} von Mises {vm} against {want}");
@@ -197,7 +197,7 @@ fn roller_constraint_gives_uniaxial_strain_field() {
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
         Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
         Bc { on: None, labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
     ];
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
@@ -220,7 +220,7 @@ fn prescribed_displacement_and_two_materials() {
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
         Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
         Bc { on: None, labels: vec![4], kind: BcKind::Fixed { fixed: [true, false, false], values: [1e-3, 0.0, 0.0] } },
     ];
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();

@@ -55,8 +55,8 @@ fn complex_stretch_gives_the_analytic_complex_axial_frequencies() {
     let mesh = common::rect(l, 0.1, 80, 2);
     let mut s = bar_spec(Plane::Stress, 3);
     s.materials.default.insert("nu".into(), 0.0);
-    // roller along y: uy = 0 on the long sides, so only axial motion exists
-    s.bcs.push(Bc { on: None, labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } });
+    // roller: uz = 0 on the long sides, so only axial motion exists
+    s.bcs.push(Bc { on: None, labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } });
     s.materials.pml.insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.1, order: 0.0, re: 1.0 });
     let r = solve_solid(&mesh, &s, &SolveState::default()).unwrap();
     let cs = (e / rho).sqrt();
@@ -154,8 +154,8 @@ fn low_reflecting_boundary_gives_the_analytic_damped_bar_modes() {
     }
     s.bcs = vec![
         Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
-        // rollers along the long sides: uy = 0, so the motion is uniaxial
-        Bc { on: None, labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        // rollers along the long sides: uz = 0, so the motion is uniaxial
+        Bc { on: None, labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
         Bc { on: None, labels: vec![4], kind: BcKind::LowReflecting },
     ];
     let c = (e / rho).sqrt();

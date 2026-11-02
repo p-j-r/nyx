@@ -198,7 +198,7 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let stretch = if spec.materials.has_pml() { Some(crate::emw_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
+    let stretch = if spec.materials.has_pml() { Some(crate::emw_pml::cell_stretches_model_frame(mesh, &spec.materials.pml)) } else { None };
     let k = match kind {
         CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
         CrossSection::Axisymmetric(m) => crate::solid_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
