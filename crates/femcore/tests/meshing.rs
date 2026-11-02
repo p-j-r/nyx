@@ -309,3 +309,229 @@ fn soi_uniform_convergence_table() {
         eprintln!("uniform x{f:<5} cells {:6}  n_eff {n:.7}  solve {:.1}s", g.mesh.n_cells(), t.elapsed().as_secs_f64());
     }
 }
+
+// ------------------------------------------------------------------ caching
+
+use femcore::meshing::{MeshCache, Reuse};
+
+#[test]
+fn the_cache_answers_repeats_and_equal_models_without_meshing() {
+    let mut cache = MeshCache::new(4);
+    let plan = MeshPlan::simple(0.15);
+    let (a, r1) = cache.mesh(&core_in_clad(0.4).list, &plan).unwrap();
+    assert!(matches!(r1, Reuse::Meshed { change: None }));
+    // a separately built, equal model hits
+    let (b, r2) = cache.mesh(&core_in_clad(0.4).list, &plan).unwrap();
+    assert_eq!(r2, Reuse::Hit);
+    assert_eq!(a.mesh.cells, b.mesh.cells);
+    assert_eq!(a.mesh.points, b.mesh.points);
+    // a changed radius, and a changed plan, mesh again; the change report says what kind of change it was
+    let (_, r3) = cache.mesh(&core_in_clad(0.45).list, &plan).unwrap();
+    assert!(matches!(r3, Reuse::Meshed { change: Some(_) }));
+    let (_, r4) = cache.mesh(&core_in_clad(0.4).list, &MeshPlan::simple(0.2)).unwrap();
+    assert!(matches!(r4, Reuse::Meshed { .. }));
+    assert_eq!(cache.stats.requests, 4);
+    assert_eq!(cache.stats.hits, 1);
+}
+
+#[test]
+fn extruding_through_other_layers_reuses_the_section() {
+    use femcore::mesher::Layer;
+    let mut cache = MeshCache::default();
+    let plan = MeshPlan::simple(0.2);
+    let list = core_in_clad(0.4).list;
+    let layers = |t: f64| vec![Layer { thickness: t, n: 3, domain_offset: 0 }];
+    let (a, r1) = cache.mesh_extruded(&list, &plan, &layers(1.0)).unwrap();
+    let (b, r2) = cache.mesh_extruded(&list, &plan, &layers(2.0)).unwrap();
+    assert!(matches!(r1, Reuse::Meshed { .. }));
+    assert_eq!(r2, Reuse::Hit);
+    assert_eq!(a.mesh.n_cells(), b.mesh.n_cells());
+    let top = |g: &femcore::geomdrive::MeshedGeom| (0..g.mesh.n_points()).map(|i| g.mesh.points[3 * i + 1]).fold(0.0, f64::max);
+    assert!((top(&a) - 1.0).abs() < 1e-12 && (top(&b) - 2.0).abs() < 1e-12);
+}
+
+/// Study (run with `--ignored --nocapture`): a 20-point sweep of the SOI wire width, meshed with and without the cache, then the same sweep
+/// again as a repeat.
+#[test]
+#[ignore]
+fn cache_sweep_timing() {
+    use femcore::usecases::soi::SoiWire;
+    let widths: Vec<f64> = (0..20).map(|i| 400e-9 + 10e-9 * i as f64).collect();
+    let lists: Vec<_> = widths.iter().map(|&w| SoiWire { width: w, ..SoiWire::default() }.model().list).collect();
+    let plan = MeshPlan::simple(0.3e-6);
+    let t = std::time::Instant::now();
+    for l in &lists {
+        mesh_model(l, &plan).unwrap();
+    }
+    let cold = t.elapsed().as_secs_f64();
+    let mut cache = MeshCache::new(32);
+    let t = std::time::Instant::now();
+    for l in &lists {
+        cache.mesh(l, &plan).unwrap();
+    }
+    let first = t.elapsed().as_secs_f64();
+    let t = std::time::Instant::now();
+    for l in &lists {
+        cache.mesh(l, &plan).unwrap();
+    }
+    let again = t.elapsed().as_secs_f64();
+    eprintln!("20 widths: no cache {cold:.3}s; cache first pass {first:.3}s (eval {:.3}s, mesh {:.3}s); repeat {again:.4}s", cache.stats.eval_seconds, cache.stats.mesh_seconds);
+}
+
+/// Study (run with `--ignored --nocapture`): the adaptive loop at a new SOI width, cold and warm-started from the neighbouring width.
+#[test]
+#[ignore]
+fn warm_start_study() {
+    use femcore::usecases::soi::SoiWire;
+    let run = |w: f64, warm: Option<femcore::estimate::WarmStart>| {
+        let wire = SoiWire { width: w, ..SoiWire::default() };
+        let mut st = LoopSettings::new(wire.h_far);
+        st.estimator = Estimator { fields: vec!["|E|".into()], ..Estimator::default() };
+        st.max_cycles = 5;
+        st.rel_tol = 3e-6;
+        st.warm = warm;
+        let mut solves = 0;
+        let mut solve = |g: &femcore::geomdrive::MeshedGeom| {
+            solves += 1;
+            let res = femcore::solve::solve(&g.mesh, &wire.spec(g), &mut SolveState::default())?;
+            let n = res.solutions.iter().filter_map(|s| s.neff.map(|n| n.0)).fold(0.0, f64::max);
+            Ok((res, n))
+        };
+        let t = std::time::Instant::now();
+        let out = solve_adaptively(&wire.model().list, &st, &mut solve).unwrap();
+        (out, solves, t.elapsed().as_secs_f64())
+    };
+    let (a, sa, ta) = run(450e-9, None);
+    eprintln!("w=450 cold: {sa} solves, {:.1}s, n_eff {:.7}, {} cells", ta, a.cycles.last().unwrap().quantity, a.geom.mesh.n_cells());
+    let (b, sb, tb) = run(470e-9, None);
+    eprintln!("w=470 cold: {sb} solves, {:.1}s, n_eff {:.7}, {} cells", tb, b.cycles.last().unwrap().quantity, b.geom.mesh.n_cells());
+    let (c, sc, tc) = run(470e-9, Some(a.warm.clone()));
+    for cy in &c.cycles {
+        eprintln!("    warm cycle: cells {} n_eff {:.7} change {:?}", cy.cells, cy.quantity, cy.change);
+    }
+    eprintln!("w=470 warm: {sc} solves, {:.1}s, n_eff {:.7}, {} cells", tc, c.cycles.last().unwrap().quantity, c.geom.mesh.n_cells());
+}
+
+// ---------------------------------------------------------------- structured absorbing layers
+
+/// A two-material box with an absorbing frame of thickness 0.5 and four layers, window x in [-1.5, 1.5], z in [-0.5, 0.8].
+fn boxed_pml() -> Model {
+    let mut m = Model::new_2d();
+    let air = m.rect("air", (-2.0, -1.0), (2.0, 1.3));
+    let sub = m.rect("sub", (-2.0, -1.0), (2.0, 0.0));
+    let win = m.rect("window", (-1.5, -0.5), (1.5, 0.8));
+    m.overlay(&[("air", air), ("sub", sub)]);
+    m.pml("pml", win, &[], 0.5, 4.0, 2.0);
+    m
+}
+
+fn label_areas(mesh: &femcore::mesh::SimplexMesh) -> std::collections::BTreeMap<i32, f64> {
+    mesh.cell_labels.iter().copied().collect::<BTreeSet<_>>().into_iter().map(|l| (l, area(mesh, Some(l)))).collect()
+}
+
+fn structured(plan: MeshPlan) -> MeshPlan {
+    MeshPlan { pml: femcore::meshing::PmlMode::Structured, ..plan }
+}
+
+#[test]
+fn structured_layers_have_the_labels_areas_and_walls_of_the_inline_ones() {
+    let m = boxed_pml();
+    let inline = mesh_model(&m.list, &MeshPlan::simple(0.25)).unwrap();
+    let st = mesh_model(&m.list, &structured(MeshPlan::simple(0.25))).unwrap();
+    // the same names mean the same numbers, and each piece fills the same area
+    assert_eq!(st.labels, inline.labels);
+    let (ai, as_) = (label_areas(&inline.mesh), label_areas(&st.mesh));
+    assert_eq!(ai.keys().collect::<Vec<_>>(), as_.keys().collect::<Vec<_>>());
+    for (l, a) in &ai {
+        assert!((a - as_[l]).abs() < 1e-9 * 16.0, "label {l}: inline {a} structured {}", as_[l]);
+    }
+    assert!(!st.domains("air*").is_empty() && st.pml_materials(3.0).len() == inline.pml_materials(3.0).len());
+    // every outer edge has exactly one facet, interior edges none, and the facets carry the labels of the inline mesh's walls
+    let fc = |mesh: &femcore::mesh::SimplexMesh| {
+        let mut count = std::collections::HashMap::new();
+        for c in 0..mesh.n_cells() {
+            let v = mesh.cell(c);
+            for k in 0..3 {
+                let (a, b) = (v[k].min(v[(k + 1) % 3]), v[k].max(v[(k + 1) % 3]));
+                *count.entry((a, b)).or_insert(0usize) += 1;
+            }
+        }
+        count
+    };
+    let count = fc(&st.mesh);
+    let mut seen = BTreeSet::new();
+    for f in 0..st.mesh.n_facets() {
+        let v = st.mesh.facet(f);
+        let key = (v[0].min(v[1]), v[0].max(v[1]));
+        assert_eq!(count[&key], 1, "a facet on an interior edge");
+        assert!(seen.insert(key), "a facet twice");
+    }
+    assert_eq!(seen.len(), count.values().filter(|&&n| n == 1).count(), "an outer edge without a facet");
+    assert_eq!(labels(&st.mesh).1, labels(&inline.mesh).1, "the same boundary numbers");
+    // four layers across the thickness on the right: the x coordinates beyond the window are 4 distinct values
+    let mut xs: Vec<f64> = (0..st.mesh.n_points()).map(|i| st.mesh.points[2 * i]).filter(|&x| x > 1.5 + 1e-9).collect();
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    xs.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    assert_eq!(xs.len(), 4, "{xs:?}");
+    assert!((xs[3] - 2.0).abs() < 1e-12);
+    // no cell is inverted
+    let q = mesh_quality_of(&st.mesh);
+    assert!(q > 0.0, "worst cell quality {q}");
+}
+
+#[test]
+fn structured_layers_follow_an_adaptive_window() {
+    let m = boxed_pml();
+    let plan = structured(MeshPlan::adaptive(0.25, 0.5));
+    let st = mesh_model(&m.list, &plan).unwrap();
+    let inline = mesh_model(&m.list, &MeshPlan::adaptive(0.25, 0.5)).unwrap();
+    assert_eq!(labels(&st.mesh).0, labels(&inline.mesh).0);
+    let (ai, as_) = (label_areas(&inline.mesh), label_areas(&st.mesh));
+    for (l, a) in &ai {
+        assert!((a - as_[l]).abs() < 1e-8, "label {l}: {a} vs {}", as_[l]);
+    }
+    // the physical window kept its refinement; the layers are one quad column per boundary edge, so there are far fewer layer cells
+    assert!(st.mesh.n_cells() <= inline.mesh.n_cells(), "{} vs {}", st.mesh.n_cells(), inline.mesh.n_cells());
+}
+
+#[test]
+fn a_model_without_layers_is_left_alone_and_a_round_window_is_refused() {
+    let m = core_in_clad(0.4);
+    let plain = mesh_model(&m.list, &MeshPlan::simple(0.2)).unwrap();
+    let st = mesh_model(&m.list, &structured(MeshPlan::simple(0.2))).unwrap();
+    assert_eq!(plain.mesh.cells, st.mesh.cells);
+    // a window with round corners is not a box: the structured builder says so instead of making a bad mesh
+    let mut r = Model::new_2d();
+    let air = r.rect("air", (-2.0, -2.0), (2.0, 2.0));
+    let win = r.circle("window", (0.0, 0.0), 1.2);
+    r.overlay(&[("air", air)]);
+    r.pml("pml", win, &[], 0.5, 4.0, 2.0);
+    let e = mesh_model(&r.list, &structured(MeshPlan::simple(0.25))).err();
+    assert!(e.is_some(), "a round window must be refused");
+}
+
+/// The Brillouin chip with inline and with structured absorbing layers: cells, effective index, and the Q and gain of the strongest elastic modes.
+#[test]
+#[ignore = "study (about a minute): cargo test -p femcore --test meshing --release chip_pml -- --ignored --nocapture"]
+fn chip_pml_structured_study() {
+    use femcore::brillouin::study_straight;
+    use femcore::chips::{chip_by_name, chip_geometry, chip_problem};
+    let chip = chip_by_name("300TE").unwrap();
+    let list = chip_geometry(&chip, 1.0).list;
+    for (name, plan) in [("inline", MeshPlan::simple(0.12e-6)), ("structured", structured(MeshPlan::simple(0.12e-6)))] {
+        let t = std::time::Instant::now();
+        let g = femcore::meshing::mesh_evaluated(evaluate(&list).unwrap(), &plan).unwrap();
+        let tm = t.elapsed().as_secs_f64();
+        let spec = chip_problem(&chip, 0.0, 40, 18.35e9, &g);
+        let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
+        let study = study_straight(&g.mesh, &inner, &SolveState::default()).unwrap();
+        let pr = &study.pairs[0];
+        let mut rows: Vec<usize> = (0..pr.rows.len()).filter(|&i| pr.rows[i].gain_pe.max(pr.rows[i].gain_mb) > 1e-2).collect();
+        rows.sort_by(|&a, &b| pr.rows[a].freq.re.partial_cmp(&pr.rows[b].freq.re).unwrap());
+        eprintln!("{name}: {} cells, meshed in {tm:.2} s, neff {:.8}", g.mesh.n_cells(), study.neff[0].re);
+        for i in rows {
+            let r = &pr.rows[i];
+            eprintln!("   f {:.6e}  Q {:.4e}  total gain {:.6e}", r.freq.re, r.q_eig, r.gain_total);
+        }
+    }
+}

@@ -13,13 +13,15 @@
 
 use crate::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;
+pub use crate::meshing_pml::{structured_pml, PmlMode, PmlReport};
 use crate::meshers::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
-use crate::meshers::adapt::field::BackgroundMetric2;
+use crate::meshers::adapt::field::{BackgroundMetric2, MetricField};
 use crate::meshers::adapt::geom::Geometry2;
 use crate::meshers::adapt::metric::{isotropic, Sym};
 use crate::meshers::adapt::topo::{Sig, Work2};
 use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
-use geom::eval::Evaluated;
+use geom::diff::{diff, ChangeKind};
+use geom::eval::{Evaluated, Evaluator, Tier};
 use geom::labels::LabelMap;
 use geom::model::FeatureList;
 use geom::select::EntityKind;
@@ -55,23 +57,25 @@ pub enum Mesher {
 pub struct MeshPlan {
     pub opts: GeomMeshOpts,
     pub mesher: Mesher,
+    /// how the absorbing layers of the model are meshed
+    pub pml: PmlMode,
 }
 
 impl MeshPlan {
     /// The simple mesher at element size `h`.
     pub fn simple(h: f64) -> Self {
-        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Simple }
+        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Simple, pml: PmlMode::Inline }
     }
 
     /// The adaptive mesher: start at element size `h`, adapt to `scale * h` (and to the curvature of the edges at that scale).
     pub fn adaptive(h: f64, scale: f64) -> Self {
-        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Adaptive(Adaptive { scale, ..Adaptive::default() }) }
+        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Adaptive(Adaptive { scale, ..Adaptive::default() }), pml: PmlMode::Inline }
     }
 }
 
 impl From<GeomMeshOpts> for MeshPlan {
     fn from(opts: GeomMeshOpts) -> Self {
-        MeshPlan { opts, mesher: Mesher::Simple }
+        MeshPlan { opts, mesher: Mesher::Simple, pml: PmlMode::Inline }
     }
 }
 
@@ -88,13 +92,17 @@ pub fn mesh_evaluated(ev: Evaluated, plan: &MeshPlan) -> Result<MeshedGeom, Stri
 /// Like `mesh_evaluated`, with the report of the adaptation when there was one.
 pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
     let start = mesh_geom_2d(ev, &plan.opts)?;
-    match plan.mesher {
-        Mesher::Simple => Ok((start, None)),
+    let (g, report) = match plan.mesher {
+        Mesher::Simple => (start, None),
         Mesher::Adaptive(a) => {
             let metrics = a_priori_metrics(&start, &plan.opts, &a)?;
             let (g, r) = adapt_to_metrics(start, &metrics, &a)?;
-            Ok((g, Some(r)))
+            (g, Some(r))
         }
+    };
+    match plan.pml {
+        PmlMode::Inline => Ok((g, report)),
+        PmlMode::Structured => Ok((structured_pml(g)?.0, report)),
     }
 }
 
@@ -204,13 +212,23 @@ pub fn adapt_to_metrics(g: MeshedGeom, metrics: &[Sym<2>], a: &Adaptive) -> Resu
     }
     let old = simplex_to_adapt::<2>(&g.mesh)?;
     let field = BackgroundMetric2::new_graded(&old, metrics, a.grade);
+    adapt_to_field(g, &field, a)
+}
+
+/// Adapts a meshed model to a metric field defined anywhere in the plane, for example the final metric of an earlier, slightly different
+/// model (`BackgroundMetric2` on that model's mesh). Same guarantees as `adapt_to_metrics`.
+pub fn adapt_to_field(g: MeshedGeom, field: &dyn MetricField<2>, a: &Adaptive) -> Result<(MeshedGeom, AdaptReport), String> {
+    if g.mesh.dim != 2 {
+        return Err("adaptation works on 2D meshes".into());
+    }
+    let old = simplex_to_adapt::<2>(&g.mesh)?;
     let mut opts = AdaptOptions { max_cells: a.max_cells, ..AdaptOptions::default() };
     opts.topo.fixed_vertices = geometry_vertices(&g);
     opts.topo.frozen_labels = periodic_labels(&g);
     let result = {
         let ev = &g.eval;
         let labels = &g.labels;
-        adapt2_with(&old, &field, &opts, |w| GeomOracle2::from_work(ev, labels, w))?
+        adapt2_with(&old, field, &opts, |w| GeomOracle2::from_work(ev, labels, w))?
     };
     let mesh = simplex_from_adapt(&result.mesh);
     Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval }, result.report))
@@ -310,5 +328,94 @@ impl Geometry2 for GeomOracle2<'_> {
             }
         }
         best.1
+    }
+}
+
+// ------------------------------------------------------------------ caching
+
+/// How a cached request was answered.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Reuse {
+    /// the same model and plan as an earlier request: nothing was recomputed
+    Hit,
+    /// meshed afresh; `change` says how the model differs from the one meshed just before (`None` for the first request), which is what
+    /// a mesh morph could use to skip the remeshing
+    Meshed { change: Option<ChangeKind> },
+}
+
+/// Counters of a `MeshCache`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CacheStats {
+    pub requests: usize,
+    pub hits: usize,
+    pub eval_seconds: f64,
+    pub mesh_seconds: f64,
+}
+
+/// Meshes a series of related models (a parameter sweep, a refinement study, the same model for several physics) without repeating work.
+///
+/// * One geom `Evaluator` lives as long as the cache, so the primitives and pair intersections of features that did not change are reused
+///   between evaluations.
+/// * The 2D meshed model of every recent request is kept under the model and plan that made it; asking again, or extruding the same section
+///   through different layers (`mesh_extruded`), costs a copy of the arrays.
+///
+/// The cache is keyed by content (the serialised feature list and the plan), never by identity, so equal models made separately hit.
+pub struct MeshCache {
+    evaluator: Evaluator,
+    entries: Vec<(String, MeshedGeom)>,
+    capacity: usize,
+    last_eval: Option<std::sync::Arc<Evaluated>>,
+    pub stats: CacheStats,
+}
+
+impl Default for MeshCache {
+    fn default() -> Self {
+        MeshCache::new(8)
+    }
+}
+
+impl MeshCache {
+    /// A cache that keeps the `capacity` most recent distinct requests.
+    pub fn new(capacity: usize) -> Self {
+        MeshCache { evaluator: Evaluator::new(), entries: vec![], capacity: capacity.max(1), last_eval: None, stats: CacheStats::default() }
+    }
+
+    fn key(list: &FeatureList, plan: &MeshPlan) -> Result<String, String> {
+        let l = serde_json::to_string(list).map_err(|e| e.to_string())?;
+        Ok(format!("{l}\u{1}{plan:?}"))
+    }
+
+    /// The meshed model for `list` and `plan`, from the cache when it is there.
+    pub fn mesh(&mut self, list: &FeatureList, plan: &MeshPlan) -> Result<(MeshedGeom, Reuse), String> {
+        self.stats.requests += 1;
+        let key = Self::key(list, plan)?;
+        if let Some(i) = self.entries.iter().position(|e| e.0 == key) {
+            // most recently used last
+            let e = self.entries.remove(i);
+            let g = e.1.clone();
+            self.entries.push(e);
+            self.stats.hits += 1;
+            return Ok((g, Reuse::Hit));
+        }
+        let t = std::time::Instant::now();
+        let ev = self.evaluator.eval(list, Tier::Complex).map_err(|e| e.to_string())?;
+        self.stats.eval_seconds += t.elapsed().as_secs_f64();
+        let change = self.last_eval.as_ref().map(|prev| diff(prev, &ev).kind);
+        let t = std::time::Instant::now();
+        let g = mesh_evaluated(ev, plan)?;
+        self.stats.mesh_seconds += t.elapsed().as_secs_f64();
+        self.last_eval = Some(g.eval.clone());
+        self.entries.push((key, g.clone()));
+        if self.entries.len() > self.capacity {
+            self.entries.remove(0);
+        }
+        Ok((g, Reuse::Meshed { change }))
+    }
+
+    /// The section of `list` swept along y through `layers`. The section is the cached part: changing only the layers re-extrudes it.
+    pub fn mesh_extruded(&mut self, list: &FeatureList, plan: &MeshPlan, layers: &[crate::mesher::Layer]) -> Result<(MeshedGeom, Reuse), String> {
+        let (mut g, reuse) = self.mesh(list, plan)?;
+        g.mesh = crate::mesher::extrude_y(&g.mesh, layers, 0.0)?;
+        Ok((g, reuse))
     }
 }

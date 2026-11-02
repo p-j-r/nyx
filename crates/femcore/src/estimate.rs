@@ -17,7 +17,8 @@ use crate::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;
 use crate::meshers::adapt::metric::{complexity_for_elements, intersect, lp_metrics, map_eig, symmetrize, LpOptions, Sym};
 use crate::meshers::interop::simplex_to_adapt;
-use crate::meshing::{adapt_to_metrics, geometry_floor, Adaptive};
+use crate::meshers::adapt::field::BackgroundMetric2;
+use crate::meshing::{adapt_to_field, adapt_to_metrics, geometry_floor, Adaptive};
 use crate::problem::SolveResult;
 use geom::model::FeatureList;
 use std::collections::HashMap;
@@ -206,11 +207,24 @@ pub struct LoopSettings {
     pub rel_tol: f64,
     /// Target cell count of cycle `k` is `growth^k` times that of the start mesh.
     pub growth: f64,
+    /// The final metric of an earlier run on a similar model (a neighbouring point of a sweep). The start mesh is adapted to it at once, so
+    /// the loop begins near the resolution the last point needed instead of climbing to it, and usually needs one or two solves.
+    pub warm: Option<WarmStart>,
+}
+
+/// The mesh and metric an adaptive run ended with.
+#[derive(Clone, Debug)]
+pub struct WarmStart {
+    pub mesh: SimplexMesh,
+    pub metrics: Vec<Sym<2>>,
+    /// cells obtained per cell requested by the last adaptation (adapting to a graded metric over-delivers); the next run divides its
+    /// requests by it
+    pub calibration: f64,
 }
 
 impl LoopSettings {
     pub fn new(h: f64) -> Self {
-        LoopSettings { opts: GeomMeshOpts::new(h), estimator: Estimator::default(), adapt: Adaptive::default(), max_cycles: 5, rel_tol: 1e-5, growth: 2.0 }
+        LoopSettings { opts: GeomMeshOpts::new(h), estimator: Estimator::default(), adapt: Adaptive::default(), max_cycles: 5, rel_tol: 1e-5, growth: 2.0, warm: None }
     }
 }
 
@@ -232,6 +246,8 @@ pub struct LoopResult {
     pub cycles: Vec<Cycle>,
     /// true when the change of the quantity fell below the tolerance
     pub converged: bool,
+    /// what a neighbouring run can start from (`LoopSettings::warm`)
+    pub warm: WarmStart,
 }
 
 /// Solve on the start mesh, then adapt to the solution and solve again until the quantity of interest settles. `solve` meshes nothing: it
@@ -243,35 +259,46 @@ pub fn solve_adaptively(
 ) -> Result<LoopResult, String> {
     let t = Instant::now();
     let mut geom = mesh_geom_2d(evaluate(list)?, &s.opts)?;
+    let mut warm_used = false;
+    if let Some(w) = &s.warm {
+        let field = BackgroundMetric2::new_graded(&simplex_to_adapt::<2>(&w.mesh)?, &w.metrics, s.adapt.grade);
+        geom = adapt_to_field(geom, &field, &s.adapt)?.0;
+        warm_used = true;
+    }
     let mut mesh_seconds = t.elapsed().as_secs_f64();
     let cells0 = geom.mesh.n_cells() as f64;
     let mut cycles: Vec<Cycle> = vec![];
-    let mut converged = false;
     let mut k = 0;
+    let mut calib = s.warm.as_ref().map_or(1.0, |w| w.calibration);
     loop {
         let t = Instant::now();
         let (result, q) = solve(&geom)?;
         let change = cycles.last().map(|c: &Cycle| (q - c.quantity).abs() / q.abs().max(1e-300));
         cycles.push(Cycle { cells: geom.mesh.n_cells(), quantity: q, change, mesh_seconds, solve_seconds: t.elapsed().as_secs_f64() });
-        if change.is_some_and(|c| c < s.rel_tol) {
-            converged = true;
-            return Ok(LoopResult { geom, result, cycles, converged });
-        }
-        if k >= s.max_cycles {
-            return Ok(LoopResult { geom, result, cycles, converged });
+        let done = change.is_some_and(|c| c < s.rel_tol);
+        let last = done || k >= s.max_cycles;
+        // cells wanted next; the over-delivery measured at the last adaptation is divided out
+        let wanted = if last { geom.mesh.n_cells() as f64 } else if warm_used { geom.mesh.n_cells() as f64 * s.growth.min(1.5) } else { cells0 * s.growth.powi(k as i32 + 1) };
+        let requested = wanted / calib;
+        let metrics = estimator_metrics(&geom, &result, &s.estimator, &s.opts, requested)?;
+        if last {
+            let warm = WarmStart { mesh: geom.mesh.clone(), metrics, calibration: calib };
+            return Ok(LoopResult { geom, result, cycles, converged: done, warm });
         }
         k += 1;
         let t = Instant::now();
-        let metrics = estimator_metrics(&geom, &result, &s.estimator, &s.opts, cells0 * s.growth.powi(k as i32))?;
         let (next, report) = adapt_to_metrics(geom, &metrics, &s.adapt)?;
         mesh_seconds = t.elapsed().as_secs_f64();
         geom = next;
+        calib = geom.mesh.n_cells() as f64 / requested;
         if report.capped {
             // at the cap: solve once more on this mesh and stop
             let (result, q) = solve(&geom)?;
             let change = cycles.last().map(|c| (q - c.quantity).abs() / q.abs().max(1e-300));
             cycles.push(Cycle { cells: geom.mesh.n_cells(), quantity: q, change, mesh_seconds, solve_seconds: 0.0 });
-            return Ok(LoopResult { geom, result, cycles, converged });
+            let metrics = estimator_metrics(&geom, &result, &s.estimator, &s.opts, geom.mesh.n_cells() as f64)?;
+            let warm = WarmStart { mesh: geom.mesh.clone(), metrics, calibration: calib };
+            return Ok(LoopResult { geom, result, cycles, converged: false, warm });
         }
     }
 }

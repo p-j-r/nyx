@@ -41,10 +41,12 @@ impl GeomMeshOpts {
 }
 
 /// A meshed model: the mesh, the compiled names, and the evaluation they came from.
+#[derive(Clone)]
 pub struct MeshedGeom {
     pub mesh: SimplexMesh,
     pub labels: LabelMap,
-    pub eval: Evaluated,
+    /// shared, so that a cached mesh can be handed out many times without copying the evaluation
+    pub eval: std::sync::Arc<Evaluated>,
 }
 
 impl MeshedGeom {
@@ -215,7 +217,7 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
         &domain_at,
     )?;
     drop(fills);
-    Ok(MeshedGeom { mesh, labels, eval: ev })
+    Ok(MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) })
 }
 
 /// Labels of whatever a selector text picks in an evaluated model: boundary labels for edges, domain labels for regions.
