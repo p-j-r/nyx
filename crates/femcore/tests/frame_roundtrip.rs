@@ -1,9 +1,8 @@
 //! What a wafer-frame problem on a 2D cross-section says, solved through `solve::solve`, against physics that has a direction: every
 //! physics and every result field it makes is named in the wafer axes (an unnamed field is a failure; `solve` also asserts it in debug
-//! builds), the fields that carry a direction point the right way, and the model-frame component that points out of the plane is wafer y.
+//! builds), the fields that carry a direction point the right way; the component that points out of the plane is wafer y.
 //! The mesh of `common::rect` has the columns (x, z); its boundaries are 1 x = 0, 2 z = 0 (bottom), 3 z = H (top), 4 x = L.
 mod common;
-use femcore::frame_adapter::{rename_wafer_fields, wafer_field_name, Kernel};
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 
@@ -106,18 +105,4 @@ fn the_lowest_mode_of_a_pec_guide_has_its_field_along_the_short_side_z() {
     let r = solve(&mesh, &s);
     assert_eq!(names(&r), sorted(&["Ex", "Ey", "Ez", "|E|", "|Ey|", "|Exz|"]));
     assert!(peak(&r, 0, "Ez") > 20.0 * peak(&r, 0, "Ex"), "Ez {} Ex {}", peak(&r, 0, "Ez"), peak(&r, 0, "Ex"));
-}
-
-#[test]
-fn a_field_the_table_cannot_place_is_reported_not_guessed() {
-    let mut r = SolveResult::default();
-    r.solutions.push(Solution {
-        fields: vec![Field { name: "uy".into(), unit: String::new(), values: vec![1.0] }, Field { name: "strange".into(), unit: String::new(), values: vec![1.0] }],
-        ..Default::default()
-    });
-    let unmapped = rename_wafer_fields(&mut r, Kernel::Section);
-    assert_eq!(unmapped, ["strange"]);
-    assert_eq!(r.solutions[0].fields[0].name, "uz");
-    assert_eq!(r.solutions[0].fields[1].name, "strange");
-    assert!(wafer_field_name("strange", Kernel::Section).is_none());
 }

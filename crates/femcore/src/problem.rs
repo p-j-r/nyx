@@ -8,9 +8,8 @@
 //! pairs, Brillouin settings, results file). Everything derives serde, so it is saved as JSON or, through `xmlio`, as XML.
 //!
 //! A problem is written in the axes of the wafer: x lateral, y the propagation direction, z the surface normal (right-handed; a 2D
-//! cross-section is the x-z plane, with y into the page). A wave along `+y` has a positive out-of-plane wave number `k`. The 2D kernels still work in an older model frame internally (a 2D mesh is the x-y plane, z out of it): `frame_adapter::to_model_frame`
-//! translates a wafer-frame problem and `frame_adapter::rename_wafer_fields` gives the result fields their wafer names again, so no
-//! caller ever sees the model axes (that module is the only place the two vocabularies meet).
+//! cross-section is the x-z plane, with y into the page). A wave along `+y` has a positive out-of-plane wave number `k`. Every kernel reads the problem in these axes and
+//! names its result fields in them (`section` is the one place with axis numbers).
 //!
 //! A solve returns a `SolveResult`: one or more `Solution`s with named fields (one value per dof, P2: vertices then edge
 //! midpoints) and optional displacement, scalar results, a text log (the stage log of `progress`), the time and the
@@ -392,7 +391,7 @@ pub struct ProblemSpec {
 }
 
 /// Photoelastic constants of one domain (dimensionless, Voigt notation of the crystal frame) and the
-/// orientation of the crystal in the model frame (x lateral, y normal, z propagation).
+/// orientation of the crystal in the wafer frame (x lateral, y propagation, z surface normal).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PhotoKind {
     Isotropic { p11: f64, p12: f64 },
@@ -403,7 +402,7 @@ pub enum PhotoKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PhotoSpec {
     pub kind: PhotoKind,
-    /// Bunge angles of the crystal axes in the model frame, degrees
+    /// Bunge angles of the crystal axes in the wafer frame, degrees
     #[serde(default)]
     pub euler_deg: [f64; 3],
     /// take the orientation from the crystal data of the same domain in the elastic problem

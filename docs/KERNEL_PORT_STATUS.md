@@ -11,7 +11,7 @@ Plan: `nyx_frames/KERNEL_PORT_PLAN.md` in the project files. Oracle: `crates/fem
 | 4 | `solid_kz` (`solve_solid_kz`: a cross-section with `out_of_plane`) | done, 4 golden cases (tilted sapphire, component constraints, PML along x and z) match to 1e-8 / 1e-7; the model-frame `solve_solid_kz_full` stays until phase 5 for Brillouin |
 | 5 | `brillouin` (straight waveguide: optical modes, photoelastic overlap, moving boundary, gains, viscosity) | done, 3 golden cases match to 1e-6 (silicon wire, cubic and tilted crystal, backward and forward); the ring (`ring_radius`) still goes through the adapter until phase 6 |
 | 6 | axisymmetric family (`solid_axisym` through `solve_solid_axisym`, `emw_axisym`, `ring_brillouin`, the ring in `brillouin::solve_ring`) | done, 2 ring Brillouin golden cases match to 1e-6 (the Q of a lossless ring mode is round-off and is not compared); the ring frame tests pass; `m > 0` is propagation along +y (signed test) |
-| 7 | delete the adapter | open |
+| 7 | delete the adapter (`frame_adapter` removed: `to_model_frame`, `rename_wafer_fields`, `WAFER_TO_MODEL`, `Kernel`, the model-frame tests; `check_wafer_input` and `axes_of_3d_problem` moved into `section`) | done |
 
 The solid kernels work in the Voigt order of the axes (x, z, y), `section::plane_stiffness` (so their in-plane block is (xx, zz, xz) and plane stress condenses yy); boundary components, loads, expansion tensors, PML directions and field names go through `section` too.
 

@@ -23,54 +23,6 @@ fn a_permittivity_tensor_in_the_wafer_frame_acts_on_the_vertical_axis_of_the_x_z
 }
 
 #[test]
-fn the_stiffness_of_a_tilted_crystal_in_the_model_frame_is_the_wafer_tensor_turned_by_the_frame_change() {
-    // sapphire with its c axis tilted by 57.6 degrees from the normal z towards y; the crystal axes in the wafer frame are
-    // a = x, c x a, c; the model axes are (x, z, -y). The 6x6 matrix is compared with a direct fourth-rank transform.
-    let b = 57.6f64.to_radians();
-    let r_lab: M3 = [[1.0, 0.0, 0.0], [0.0, b.cos(), b.sin()], [0.0, -b.sin(), b.cos()]];
-    let eul = euler_from_rotation(&r_lab);
-    assert!({
-        let r = rotation(eul);
-        (0..3).all(|i| (0..3).all(|j| (r[i][j] - r_lab[i][j]).abs() < 1e-12))
-    });
-    let st = Stiffness::Trigonal { c11: 497.35e9, c12: 163.97e9, c13: 112.20e9, c14: -23.58e9, c33: 499.11e9, c44: 147.39e9 };
-    let c_lab = stiffness_global(&st, eul); // solver Voigt order xx yy zz xy yz xz, wafer axes
-    let s: M3 = femcore::frame_adapter::WAFER_TO_MODEL;
-    // rank 4 from the 6x6
-    let vp = [(0, 0), (1, 1), (2, 2), (0, 1), (1, 2), (0, 2)];
-    let mut t = [[[[0.0; 3]; 3]; 3]; 3];
-    for (i, &(a, bb)) in vp.iter().enumerate() {
-        for (j, &(c, d)) in vp.iter().enumerate() {
-            for (p, q) in [(a, bb), (bb, a)] {
-                for (u, v) in [(c, d), (d, c)] {
-                    t[p][q][u][v] = c_lab[i][j];
-                }
-            }
-        }
-    }
-    let at = |i: usize, j: usize, k: usize, l: usize| -> f64 {
-        let mut acc = 0.0;
-        for a in 0..3 {
-            for bb in 0..3 {
-                for c in 0..3 {
-                    for d in 0..3 {
-                        acc += s[i][a] * s[j][bb] * s[k][c] * s[l][d] * t[a][bb][c][d];
-                    }
-                }
-            }
-        }
-        acc
-    };
-    let c_model = stiffness_global(&st, femcore::frame_adapter::euler_to_model_frame(eul));
-    for (i, &(a, bb)) in vp.iter().enumerate() {
-        for (j, &(c, d)) in vp.iter().enumerate() {
-            let want = at(a, bb, c, d);
-            assert!((c_model[i][j] - want).abs() < 1e-6 * 500e9, "{i}{j}: {} against {want}", c_model[i][j]);
-        }
-    }
-}
-
-#[test]
 fn a_loaded_cubic_plate_in_the_x_z_plane_feels_a_turn_of_the_crystal_about_y_but_not_about_z_in_the_same_way() {
     // wafer description: fixed at x = 0 (x and z components), a load along -z on the right end; the crystal is turned by 20 degrees about y
     // (a rotation in the plane of the section) or by 20 degrees about the normal z (a rotation that mixes the in-plane axis x with the
@@ -126,16 +78,8 @@ fn the_chip_crystals_are_oriented_in_the_wafer_frame() {
 }
 
 #[test]
-fn layers_of_a_2d_cross_section_are_written_along_x_and_z_and_a_positive_k_runs_along_plus_y() {
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.materials.pml.insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Minus, strength: 3.0, order: 2.0, re: 1.0 });
-    s.out_of_plane = Some(5.0);
-    let m = femcore::frame_adapter::to_model_frame(&s, 2);
-    // the solvers' second axis is z, and their out-of-plane axis is -y
-    let p = &m.materials.pml[&2];
-    assert_eq!((p.x, p.y, p.z), (PmlDir::Plus, PmlDir::Minus, PmlDir::Off));
-    assert_eq!(m.out_of_plane, Some(-5.0));
-    // a y layer does not exist on a 2D cross-section
+fn a_layer_along_y_does_not_exist_on_a_2d_cross_section() {
+    // layers of a 2D cross-section are written along x and z; there is no y axis in the plane
     let mesh = common::rect(1.0, 0.5, 4, 2);
     let mut bad = ProblemSpec::new(Physics::Solid);
     bad.study = Study::Eigenfrequency { n_modes: 2, f_search: 0.0 };
@@ -144,14 +88,10 @@ fn layers_of_a_2d_cross_section_are_written_along_x_and_z_and_a_positive_k_runs_
     assert!(e.contains("absorbs along y") && e.contains("use z"), "{e}");
     // the Brillouin optical layers follow the same rule
     let mut b = ProblemSpec::new(Physics::Brillouin);
-    b.brillouin.as_mut().unwrap().optical_pml.insert(3, Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Plus, ..Default::default() });
-    let m = femcore::frame_adapter::to_model_frame(&b, 2);
-    let p = &m.brillouin.as_ref().unwrap().optical_pml[&3];
-    assert_eq!((p.y, p.z), (PmlDir::Plus, PmlDir::Off));
-    // a 3D problem is untouched
-    let m3 = femcore::frame_adapter::to_model_frame(&s, 3);
-    assert_eq!(m3.out_of_plane, Some(5.0));
-    assert_eq!(m3.materials.pml[&2].z, PmlDir::Minus);
+    b.study = Study::Eigenfrequency { n_modes: 2, f_search: 1e9 };
+    b.brillouin.as_mut().unwrap().optical_pml.insert(1, Pml { y: PmlDir::Plus, ..Default::default() });
+    let e = femcore::solve::solve(&mesh, &b, &mut SolveState::default()).err().unwrap();
+    assert!(e.contains("absorbs along y") && e.contains("use z"), "{e}");
 }
 
 #[test]

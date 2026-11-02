@@ -1,8 +1,8 @@
 //! The one entry point for all physics: `solve(mesh, spec, state)`.
 //!
-//! It checks the element order and the numbers of the problem (`validate`), translates a wafer-frame problem into the
-//! solvers' model frame, dispatches to the module of the chosen physics (`scalar`, `solid`, `emw`/`emw3d`,
-//! `brillouin`), renames the result fields back, refuses a result that contains NaN or infinity, and appends the plain-
+//! It checks the element order and the numbers of the problem (`validate`), dispatches to the module of the chosen physics
+//! (`scalar`, `solid`, `emw`/`emw3d`, `brillouin`), which read the wafer-frame problem as it is and name their fields in wafer axes
+//! (`section`), refuses a result that contains NaN or infinity, and appends the plain-
 //! language stage log of the run to `SolveResult::log`. `solve_with` does the same for a `Progress` that a window can
 //! watch and cancel; a cancelled solve returns `Err("cancelled")`.
 

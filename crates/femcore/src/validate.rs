@@ -15,7 +15,7 @@ pub fn check_inputs(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String
     if let Some(i) = mesh.points.iter().position(|v| !v.is_finite()) {
         return Err(format!("the mesh has a non-finite coordinate (point {}, axis {}): NaN or infinity in the geometry", i / mesh.dim.max(1), i % mesh.dim.max(1)));
     }
-    crate::frame_adapter::check_wafer_input(mesh, spec)?;
+    crate::section::check_wafer_input(mesh, spec)?;
     let m = &spec.materials;
     for (name, v) in &m.default {
         if !v.is_finite() {

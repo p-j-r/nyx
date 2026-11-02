@@ -14,7 +14,7 @@ the phase between Ex and Ey, so they cannot give s2 and s3 for hybrid or leaky m
 * Per mode: integrated Stokes vector, point `(s1, s2, s3)` on the unit sphere, degree of polarization `P`, ellipticity and orientation angles, the share of the
   energy in Ex (`TE`) and in the longitudinal component (`Ez`), and a class (quasi-TE, quasi-TM, linear +-45, elliptical, circular, hybrid).
 * Axes: x lateral (quasi-TE), y the surface normal (quasi-TM), z the propagation axis. Wafer-frame projects keep this convention for the analysis (it
-  is the model frame of the 2D solvers). For 3D problems the propagation axis is the axis a Floquet pair is periodic along (else y in the wafer frame, z
+  is the local frame of the mode solvers, `section::local_tensor`). For 3D problems the propagation axis is the axis a Floquet pair is periodic along (else y in the wafer frame, z
   otherwise); for rings (E_r, E_z, E_theta) are (lateral, normal, propagation). The sense of rotation is `s3 > 0` counter-clockwise for a wave
   `exp(-i k z)`; left-handed axis triples (rings, wafer-frame 3D) are handled by flipping the sign convention.
 * **Degenerate modes** (effective indices within 5e-4, or frequencies within 1e-6 relative) form a group: the eigensolver returns an arbitrary mixture of

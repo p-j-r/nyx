@@ -537,7 +537,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     let nb = ned.nb();
     let mut solutions = vec![];
     let mut scalars = vec![];
-    let (axes, left_handed) = crate::frame_adapter::axes_of_3d_problem(spec, mesh);
+    let (axes, left_handed) = crate::section::axes_of_3d_problem(spec, mesh);
     let mut pol_modes: Vec<crate::analysis::ModeInput> = vec![];
     for (j, (f, i)) in freqs.iter().enumerate() {
         let x = red.expand(&vectors[*i]);

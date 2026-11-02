@@ -25,7 +25,7 @@
 //! the transverse components enter the Stokes parameters; the longitudinal part is reported as a fraction.
 //!
 //! Axes: x is the lateral (in-plane) direction, y the normal direction and z the propagation direction, as in the
-//! model frame of the solvers. "Quasi-TE" means x-dominated and "quasi-TM" y-dominated. For a ring (r, z) mesh pass
+//! local frame of the mode solvers (`section::local_tensor`). "Quasi-TE" means x-dominated and "quasi-TM" y-dominated. For a ring (r, z) mesh pass
 //! E_r as `ex` and E_z as `ey` and E_theta as `ez`, and decide how that maps to TE and TM.
 
 use std::fmt::Write;

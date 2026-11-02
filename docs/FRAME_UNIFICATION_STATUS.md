@@ -5,9 +5,8 @@ Written when the work landed on `main` (local only, nothing pushed to a remote).
 were accepted as recommended.
 
 **There is one public frame, the wafer frame: x lateral, y the direction of propagation, z the surface normal (right-handed).** A 2D
-cross-section is the x-z plane with y into the page. The 2D kernels still compute in their old model axes (mesh x-y, z out of the
-plane); `femcore::frame_adapter` is the only place the two vocabularies meet, so the kernel port (not started, see
-`KERNEL_PORT_PLAN.md`) can delete it.
+cross-section is the x-z plane with y into the page. The 2D kernels read these axes as they are
+(kernel port, `docs/KERNEL_PORT_STATUS.md`; the adapter that used to translate is gone, `femcore::section` holds the axis numbers).
 
 ## What landed (commits on `main`, in order)
 
@@ -70,8 +69,7 @@ Step 4 test arithmetic (the commit message of step 4 words it loosely): 614 - 8 
   with a signed test (`tests/ring_frame.rs`, `emw_axisym::power_along_theta`).
 * Historical design documents (`GEOMETRY_ARCHITECTURE.md`, `GEOM_HANDOFF.md`, `SWEEP_CACHING_PROPOSAL.md`) still describe the deleted front-ends;
   they are records, not updated.
-* `frame_adapter` is `#[doc(hidden)] pub` (not `pub(crate)`) because tests and examples drive kernels directly.
-* Kernel port to native wafer axes (`KERNEL_PORT_PLAN.md`): not started, out of scope.
+* Kernel port to native wafer axes (`KERNEL_PORT_PLAN.md`): done, `docs/KERNEL_PORT_STATUS.md`.
 
 ## For the geometry-integration thread
 

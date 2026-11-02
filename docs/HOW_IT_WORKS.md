@@ -43,10 +43,9 @@ loaded, held at a potential, ...); and the **study** (static solve, eigenfrequen
 transient run over time). A project file (`.nyx.xml`) is exactly this plus the geometry.
 
 There is one public coordinate convention, the *wafer frame*: a waveguide cross-section is the x-z plane, y is the
-direction the light travels, z is the surface normal. The 2D solver kernels still compute in an older *model frame*
-(a 2D mesh is the x-y plane, the third axis is out of it); `frame_adapter::to_model_frame` translates the problem and
-`frame_adapter::rename_wafer_fields` gives the result fields their wafer names (`uz`, `szz`, ...) afterwards. That
-module is the only place the two meet.
+direction the light travels, z is the surface normal. The 2D solver kernels read the problem in these axes and name their
+result fields in them (`uz`, `szz`, ...); `femcore::section` is the one place with axis numbers (a 2D mesh is the x-z plane,
+the out-of-plane axis is y, and everything propagates along +y).
 
 ## 3. The mesh (`mesh.rs`, `mesher.rs`, `mesher3d.rs`, `refine3d.rs`, `cellmesh.rs`)
 
@@ -78,7 +77,7 @@ with weights; exact for polynomials up to degree 2 or 4, `fem::quad_rule`). For 
 (`solid.rs`) it is `∫ Bᵀ D B dV`: `B` turns the unknowns into strains (how much the material is stretched
 and sheared), `D` is the material's stiffness table (6×6, in the order xx, yy, zz, xy, yz, xz, with
 engineering shear strains), so the integral is the elastic energy stored per unit of unknowns. For
-crystals `D` is rotated into the model axes by the orientation angles (`material.rs`, Z-X-Z Euler angles).
+crystals `D` is rotated into the wafer axes by the orientation angles (`material.rs`, Z-X-Z Euler angles).
 The mass matrix is `∫ ρ Nᵀ N dV`. Other physics have their own versions (`scalar.rs`: diffusion matrices
 for electric potential and temperature; `emw*.rs`: curl-curl matrices with edge elements, see §8).
 

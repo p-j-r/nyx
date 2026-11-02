@@ -36,8 +36,6 @@ pub mod emw_pml;
 pub mod expr;
 pub mod fem;
 pub mod fields;
-#[doc(hidden)]
-pub mod frame_adapter;
 pub mod geomdrive;
 #[cfg(feature = "hdf5-metno")]
 pub mod h5io;
