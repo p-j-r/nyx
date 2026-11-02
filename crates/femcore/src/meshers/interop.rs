@@ -108,7 +108,9 @@ pub fn pml_domains<const D: usize>(pml: &PmlMesh<D>, strength: f64, order: f64, 
     for r in &pml.regions {
         let axis = |a: usize| if a < D { dir(r.code[a]) } else { PmlDir::Off };
         for &(_, label) in &r.labels {
-            out.insert(label, Pml { x: axis(0), y: axis(1), z: axis(2), strength, order, re });
+            // a 2D mesh is the x-z cross-section: its second axis is z
+            let (y, z) = if D == 2 { (PmlDir::Off, axis(1)) } else { (axis(1), axis(2)) };
+            out.insert(label, Pml { x: axis(0), y, z, strength, order, re });
         }
     }
     out
@@ -185,8 +187,8 @@ mod tests {
         let doms = pml_domains(&pml, 3.0, 2.0, 1.0);
         // 4 faces + 4 corners, one material
         assert_eq!(doms.len(), 8);
-        let right = doms.values().filter(|p| p.x == PmlDir::Plus && p.y == PmlDir::Off).count();
-        let corner = doms.values().filter(|p| p.x != PmlDir::Off && p.y != PmlDir::Off).count();
+        let right = doms.values().filter(|p| p.x == PmlDir::Plus && p.z == PmlDir::Off).count();
+        let corner = doms.values().filter(|p| p.x != PmlDir::Off && p.z != PmlDir::Off).count();
         assert_eq!((right, corner), (1, 4));
         // every domain number used by the cells is either physical (1) or a PML domain
         for l in mesh.domain_labels() {

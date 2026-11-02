@@ -300,9 +300,9 @@ pub fn anchor_loss() -> Project {
         ("pml_bottom_right", PmlDir::Plus, PmlDir::Minus),
     ];
     for s in &mut p.specs {
-        for (name, x, y) in pieces {
+        for (name, x, z) in pieces {
             for d in mg.domains(name) {
-                s.materials.pml.insert(d, Pml { x, y, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 });
+                s.materials.pml.insert(d, Pml { x, y: PmlDir::Off, z, strength: 3.0, order: 2.0, re: 1.0 });
             }
         }
     }

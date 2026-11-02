@@ -69,8 +69,8 @@ pub struct Materials {
 /// * `Wafer`: the wafer lies in the x-y plane, z is the surface normal and y is the direction of propagation of a
 ///   waveguide. A 2D cross-section is the x-z plane (mesh coordinates `(x, z)`) with y out of the plane; crystal
 ///   orientations (Euler angles, photoelastic tensors, permittivity), boundary-condition components and the names
-///   of the result fields refer to the right-handed axes x, y, z. A wave that travels towards the viewer
-///   (out of the page) travels along `-y` and has a positive out-of-plane wave number.
+///   of the result fields refer to the right-handed axes x, y, z. A wave that travels along `+y` (into the page, away from the
+///   viewer) has a positive out-of-plane wave number `k` (the adapter hands the solvers `-k` of their z = -y axis).
 /// * `Model`: a 2D mesh is the x-y plane with z out of the plane (the usual convention for 2D models); 3D meshes are the same in both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
@@ -101,6 +101,11 @@ pub fn euler_to_model_frame(euler_deg: [f64; 3]) -> [f64; 3] {
     material::euler_from_rotation(&mul3(&WAFER_TO_MODEL, &material::rotation(euler_deg)))
 }
 
+/// A layer of a 2D cross-section written along the wafer axes x and z, along the mesh axes x and y of the solvers.
+fn pml_to_model_frame(p: &Pml) -> Pml {
+    Pml { y: p.z, z: PmlDir::Off, ..p.clone() }
+}
+
 /// Which side of a domain a perfectly matched layer absorbs towards, per axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PmlDir {
@@ -117,8 +122,8 @@ pub enum PmlDir {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pml {
     pub x: PmlDir,
+    /// 3D only: y is out of the plane of a 2D cross-section (x-z), where only `x` and `z` exist
     pub y: PmlDir,
-    /// 3D only
     #[serde(default = "pml_off")]
     pub z: PmlDir,
     pub strength: f64,
@@ -415,7 +420,7 @@ pub struct ProblemSpec {
     pub solver: LinearSolver,
     #[serde(default)]
     pub output: OutputSpec,
-    /// solid mechanics on a 2D cross-section: out-of-plane wave number kz (rad/m); the three
+    /// solid mechanics on a 2D cross-section: out-of-plane wave number k (rad/m), positive for a wave along +y; the three
     /// displacement components live on the cross-section (eigenfrequencies only)
     #[serde(default)]
     pub out_of_plane: Option<f64>,
@@ -546,6 +551,12 @@ impl ProblemSpec {
             return s;
         }
         s.materials.frame = Frame::Model;
+        // a positive wave number is a wave along +y of the wafer, which is -z of the model
+        s.out_of_plane = s.out_of_plane.map(|k| -k);
+        // the layers of the cross-section are written along x and z; the mesh's second axis is z
+        for p in s.materials.pml.values_mut() {
+            *p = pml_to_model_frame(p);
+        }
         for a in s.materials.aniso.values_mut() {
             a.euler_deg = euler_to_model_frame(a.euler_deg);
         }
@@ -560,6 +571,9 @@ impl ProblemSpec {
             }
         }
         if let Some(b) = s.brillouin.as_mut() {
+            for p in b.optical_pml.values_mut() {
+                *p = pml_to_model_frame(p);
+            }
             for p in b.photoelastic.values_mut() {
                 p.euler_deg = euler_to_model_frame(p.euler_deg);
             }

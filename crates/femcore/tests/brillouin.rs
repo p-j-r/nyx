@@ -471,7 +471,7 @@ fn ring_with_pml(radius_um: f64, w_um: f64, h_um: f64) -> femcore::mesh::Simplex
 }
 
 fn ring_pml_map(strength: f64) -> BTreeMap<i32, Pml> {
-    let p = |x, y| Pml { x, y, z: PmlDir::Off, strength, order: 2.0, re: 1.0 };
+    let p = |x, z| Pml { x, y: PmlDir::Off, z, strength, order: 2.0, re: 1.0 };
     [(3, p(PmlDir::Plus, PmlDir::Off)), (4, p(PmlDir::Off, PmlDir::Plus)), (5, p(PmlDir::Off, PmlDir::Minus)), (6, p(PmlDir::Plus, PmlDir::Plus)), (7, p(PmlDir::Plus, PmlDir::Minus))].into_iter().collect()
 }
 

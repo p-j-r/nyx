@@ -134,3 +134,49 @@ fn the_chip_crystals_are_oriented_in_the_wafer_frame() {
         }
     }
 }
+
+#[test]
+fn layers_of_a_2d_cross_section_are_written_along_x_and_z_and_a_positive_k_runs_along_plus_y() {
+    let mut s = ProblemSpec::new(Physics::Solid);
+    s.materials.pml.insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Minus, strength: 3.0, order: 2.0, re: 1.0 });
+    s.out_of_plane = Some(5.0);
+    let m = s.to_model_frame(2);
+    // the solvers' second axis is z, and their out-of-plane axis is -y
+    let p = &m.materials.pml[&2];
+    assert_eq!((p.x, p.y, p.z), (PmlDir::Plus, PmlDir::Minus, PmlDir::Off));
+    assert_eq!(m.out_of_plane, Some(-5.0));
+    // a y layer does not exist on a 2D cross-section
+    let mesh = SimplexMesh::rectangle(1.0, 0.5, 4, 2);
+    let mut bad = ProblemSpec::new(Physics::Solid);
+    bad.study = Study::Eigenfrequency { n_modes: 2, f_search: 0.0 };
+    bad.materials.pml.insert(1, Pml { y: PmlDir::Plus, ..Default::default() });
+    let e = femcore::solve::solve(&mesh, &bad, &mut SolveState::default()).err().unwrap();
+    assert!(e.contains("absorbs along y") && e.contains("use z"), "{e}");
+    // the Brillouin optical layers follow the same rule
+    let mut b = ProblemSpec::new(Physics::Brillouin);
+    b.brillouin.as_mut().unwrap().optical_pml.insert(3, Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Plus, ..Default::default() });
+    let m = b.to_model_frame(2);
+    let p = &m.brillouin.as_ref().unwrap().optical_pml[&3];
+    assert_eq!((p.y, p.z), (PmlDir::Plus, PmlDir::Off));
+    // a 3D problem is untouched
+    let m3 = s.to_model_frame(3);
+    assert_eq!(m3.out_of_plane, Some(5.0));
+    assert_eq!(m3.materials.pml[&2].z, PmlDir::Minus);
+}
+
+#[test]
+fn the_absorbing_pieces_of_a_geom_model_come_out_in_wafer_names() {
+    use femcore::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+    use geom::model::Model;
+    let mut m = Model::new_2d();
+    let air = m.rect("air", (-2.0, -1.0), (2.0, 1.0));
+    let win = m.rect("window", (-1.5, -0.5), (1.5, 0.8));
+    m.overlay(&[("air", air)]);
+    m.pml("pml", win, &[], 0.5, 4.0, 2.0);
+    let g = mesh_geom_2d(evaluate(&m.list).unwrap(), &GeomMeshOpts::new(0.25)).unwrap();
+    let pml = g.pml_materials(3.0);
+    let corner = pml[&g.domain("air.pml_xmin_zmin").unwrap()].clone();
+    assert_eq!((corner.x, corner.y, corner.z), (PmlDir::Minus, PmlDir::Off, PmlDir::Minus));
+    let top = pml[&g.domain("air.pml_zmax").unwrap()].clone();
+    assert_eq!((top.x, top.y, top.z), (PmlDir::Off, PmlDir::Off, PmlDir::Plus));
+}

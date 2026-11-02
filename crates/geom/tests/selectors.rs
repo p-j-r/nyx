@@ -100,7 +100,6 @@ fn resolves_the_documented_examples() {
 #[test]
 fn suggest_returns_only_exact_selectors() {
     let ev = soi();
-    let cx = ev.complex();
     for e in 0..ev.edges().len() as u32 {
         let picked = EntitySet::new(EntityKind::Edges, vec![e]);
         let s = ev.suggest(&picked);

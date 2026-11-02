@@ -46,8 +46,8 @@ pub fn set_materials(spec: &mut ProblemSpec, psi_deg: f64, domains: &[i32], sapp
     }
 }
 
-pub fn pml(x: PmlDir, y: PmlDir) -> Pml {
-    Pml { x, y, z: PmlDir::Off, strength: envf("PML_STRENGTH", 3.0), order: 2.0, re: 1.0 }
+pub fn pml(x: PmlDir, z: PmlDir) -> Pml {
+    Pml { x, y: PmlDir::Off, z, strength: envf("PML_STRENGTH", 3.0), order: 2.0, re: 1.0 }
 }
 
 /// Labels of the boundary facets on the outside of the mesh (used by one cell) whose two end points satisfy `on`.
@@ -163,7 +163,7 @@ pub struct Solved {
     pub seconds: f64,
 }
 
-/// Eigenfrequencies near `f_search` at the wave number `q` along y (the out-of-plane wave number of the model frame).
+/// Eigenfrequencies near `f_search` at the wave number `q` along +y (the out-of-plane wave number of the wafer frame; the solver gets -q of its z = -y).
 pub fn solve_q(mesh: &SimplexMesh, spec: &ProblemSpec, q: f64, n_modes: usize, f_search: f64) -> Result<Solved, String> {
     let mut s = spec.clone();
     s.study = Study::Eigenfrequency { n_modes, f_search };

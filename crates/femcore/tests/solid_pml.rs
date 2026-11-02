@@ -110,7 +110,7 @@ fn beam_on_a_pml_substrate_loses_energy_but_keeps_its_frequency() {
     outer.dedup();
     let mut s = bar_spec(Plane::Strain, 4);
     s.bcs = vec![Bc { on: None, labels: outer, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
-    let st = |x, y| Pml { x, y, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 };
+    let st = |x, z| Pml { x, y: PmlDir::Off, z, strength: 3.0, order: 2.0, re: 1.0 };
     s.materials.pml.insert(3, st(PmlDir::Minus, PmlDir::Off));
     s.materials.pml.insert(4, st(PmlDir::Plus, PmlDir::Off));
     s.materials.pml.insert(5, st(PmlDir::Off, PmlDir::Minus));

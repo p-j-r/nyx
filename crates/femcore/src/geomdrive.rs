@@ -104,9 +104,9 @@ impl MeshedGeom {
             .iter()
             .map(|p| {
                 let d = self.labels.domains[p.region as usize].id;
-                // a 2D mesh is the x-z plane: its second axis is z
+                // a 2D mesh is the x-z plane: the layers are written along x and z (y is out of the plane)
                 let (x, y, z) = if self.mesh.dim == 2 {
-                    (dir(p.sides[0]), dir(p.sides[2]), PmlDir::Off)
+                    (dir(p.sides[0]), PmlDir::Off, dir(p.sides[2]))
                 } else {
                     (dir(p.sides[0]), dir(p.sides[1]), dir(p.sides[2]))
                 };

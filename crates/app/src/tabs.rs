@@ -373,10 +373,10 @@ fn brillouin_editor(ui: &mut Ui, spec: &mut ProblemSpec, domains: &[i32], bufs: 
                 });
             }
             let mut pml = b.optical_pml.get(&d).cloned().unwrap_or_default();
-            let active = pml.x != PmlDir::Off || pml.y != PmlDir::Off;
+            let active = pml.x != PmlDir::Off || pml.z != PmlDir::Off;
             let mut edited = false;
             egui::CollapsingHeader::new(if active { "Optical PML (active)" } else { "Optical PML" }).id_salt(format!("brill_pml_{d}")).default_open(active).show(ui, |ui| {
-                for (axis, dir) in [("x", &mut pml.x), ("z", &mut pml.y)] {
+                for (axis, dir) in [("x", &mut pml.x), ("z", &mut pml.z)] {
                     ui.horizontal(|ui| {
                         ui.label(format!("absorb along {axis}"));
                         for (v, name) in [(PmlDir::Off, "off"), (PmlDir::Plus, "towards +"), (PmlDir::Minus, "towards −")] {
@@ -395,7 +395,7 @@ fn brillouin_editor(ui: &mut Ui, spec: &mut ProblemSpec, domains: &[i32], bufs: 
                 });
             });
             if edited {
-                if pml.x == PmlDir::Off && pml.y == PmlDir::Off {
+                if pml.x == PmlDir::Off && pml.z == PmlDir::Off {
                     b.optical_pml.remove(&d);
                 } else {
                     b.optical_pml.insert(d, pml);
@@ -653,9 +653,8 @@ impl App {
                     let active = pml.x != PmlDir::Off || pml.y != PmlDir::Off || pml.z != PmlDir::Off;
                     let mut edited = false;
                     egui::CollapsingHeader::new(if active { "Perfectly matched layer (active)" } else { "Perfectly matched layer" }).id_salt(format!("pml_{d}")).default_open(active).show(ui, |ui| {
-                        let nax = if mesh_dim == 3 { 3 } else { 2 };
-                        let second = if mesh_dim == 2 && mats.frame == Frame::Wafer { "z" } else { "y" };
-                        for (axis, dir) in [("x", &mut pml.x), (second, &mut pml.y), ("z", &mut pml.z)].into_iter().take(nax) {
+                        let axes = if mesh_dim == 3 { vec![("x", &mut pml.x), ("y", &mut pml.y), ("z", &mut pml.z)] } else { vec![("x", &mut pml.x), ("z", &mut pml.z)] };
+                        for (axis, dir) in axes {
                             ui.horizontal(|ui| {
                                 ui.label(format!("absorb along {axis}"));
                                 for (v, name) in [(PmlDir::Off, "off"), (PmlDir::Plus, "towards +"), (PmlDir::Minus, "towards −")] {
@@ -1093,7 +1092,7 @@ impl App {
                         let wafer = spec.materials.frame == Frame::Wafer;
                         if let Some(kz) = &mut spec.out_of_plane {
                             ui.horizontal(|ui| {
-                                ui.label(if wafer { "k (rad/m), propagation along the page normal: positive towards the viewer (-y)" } else { "kz (rad/m)" });
+                                ui.label(if wafer { "k (rad/m), propagation along the page normal: positive along +y (into the page)" } else { "kz (rad/m)" });
                                 num(ui, kz);
                             });
                             ui.weak("Three displacement components on the cross-section, u(x, y) exp(-i kz z); anisotropic crystals use their full stiffness. For backward Brillouin scattering kz = 2 n_eff 2π/λ; for forward scattering kz = n_eff 2π f_acoustic / c.");

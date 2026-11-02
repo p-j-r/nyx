@@ -15,6 +15,12 @@ pub fn check_inputs(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String
     if let Some(i) = mesh.points.iter().position(|v| !v.is_finite()) {
         return Err(format!("the mesh has a non-finite coordinate (point {}, axis {}): NaN or infinity in the geometry", i / mesh.dim.max(1), i % mesh.dim.max(1)));
     }
+    if is_wafer_2d(mesh, spec) {
+        let bad = spec.materials.pml.iter().map(|(d, p)| ("domain", *d, p)).chain(spec.brillouin.iter().flat_map(|b| b.optical_pml.iter().map(|(d, p)| ("optical domain", *d, p)))).find(|(_, _, p)| p.y != PmlDir::Off);
+        if let Some((what, d, _)) = bad {
+            return Err(format!("the perfectly matched layer of {what} {d} absorbs along y, which is out of the plane of a 2D cross-section (x-z): use z for the direction of the surface normal"));
+        }
+    }
     let m = &spec.materials;
     for (name, v) in &m.default {
         if !v.is_finite() {
@@ -120,4 +126,8 @@ mod tests {
         assert!(non_finite_token("Info { x: 1.0 }").is_none());
         assert!(non_finite_token("v: -inf").is_some());
     }
+}
+
+fn is_wafer_2d(mesh: &SimplexMesh, spec: &ProblemSpec) -> bool {
+    mesh.dim == 2 && spec.materials.frame == Frame::Wafer
 }

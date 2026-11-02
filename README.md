@@ -171,7 +171,7 @@ wire into two states tilted by 45 degrees), and **symmetric and asymmetric Bragg
 
 Projects are described in the axes of the wafer (there is no other frame): x and y span the
 wafer, **z is the surface normal and y is the direction of propagation** of a waveguide, so a 2D cross-section is the **x-z plane**
-(mesh coordinates `(x, z)`, `y` out of the page; the frame is right-handed, so a wave travelling towards the viewer travels along `-y`). Crystal
+(mesh coordinates `(x, z)`, `y` out of the page; the frame is right-handed, so a wave travelling into the page travels along `+y`, and the out-of-plane wave number `k` of an elastic study is positive for it). Crystal
 orientations (Euler Z-X-Z angles of the crystal axes in x, y, z), photoelastic tensors, permittivity, constraint and load components and
 the names of the result fields (`ux, uy, uz`, `szz`, `Ez`, ...) all refer to x, y, z; the solvers work internally in the axes (x, z, -y) of the 2D
 mesh and `ProblemSpec::to_model_frame` and `solve::rename_wafer_fields` translate (tested against a direct fourth-rank transform, against a plate solved

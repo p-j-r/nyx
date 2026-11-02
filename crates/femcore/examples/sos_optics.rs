@@ -78,7 +78,7 @@ fn main() {
         spec.materials.set(d, "eps_r", eps(n));
         spec.materials.set(d, "mu_r", 1.0);
     }
-    let pml = |x, y| Pml { x, y, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 };
+    let pml = |x, z| Pml { x, y: PmlDir::Off, z, strength: 3.0, order: 2.0, re: 1.0 };
     spec.materials.pml.insert(4, pml(PmlDir::Minus, PmlDir::Off));
     spec.materials.pml.insert(5, pml(PmlDir::Plus, PmlDir::Off));
     spec.materials.pml.insert(6, pml(PmlDir::Off, PmlDir::Minus));

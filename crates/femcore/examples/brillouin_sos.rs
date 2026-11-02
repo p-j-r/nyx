@@ -136,7 +136,7 @@ fn main() {
     labels.dedup();
     mech.bcs = vec![Bc { on: None, labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     let st = envf("PML_STRENGTH", 3.0);
-    let pml = |xd, yd| Pml { x: xd, y: yd, z: PmlDir::Off, strength: st, order: 2.0, re: 1.0 };
+    let pml = |xd, zd| Pml { x: xd, y: PmlDir::Off, z: zd, strength: st, order: 2.0, re: 1.0 };
     let mech_pml: BTreeMap<i32, Pml> = [
         (11, pml(PmlDir::Minus, PmlDir::Off)),
         (12, pml(PmlDir::Plus, PmlDir::Off)),
