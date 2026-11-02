@@ -1,10 +1,10 @@
 //! Floquet eigenmodes against an exact band edge. A stack of two dielectrics seen by a plane wave at normal incidence is the textbook
-//! Bragg mirror: with the cell periodic in x and y (phase 0) and in z (phase `pi`, the band edge of the stack) the eigenmodes of a 3D cell
+//! Bragg mirror: with the cell periodic in x and z (phase 0) and in y, the stack axis (phase `pi`, the band edge of the stack) the eigenmodes of a 3D cell
 //! are the plane waves of the stack, and the Bloch relation
 //! `cos(K L) = cos p1 cos p2 - (n1/n2 + n2/n1)/2 sin p1 sin p2`, `p_i = n_i k0 d_i`, gives the frequencies at which `K L = pi`. The edges
 //! of the first gap are what the Bragg grating use case measures, here on a structure whose answer is known. Modes come in pairs
 //! (two polarizations).
-use femcore::mesh::SimplexMesh;
+mod common;
 use femcore::problem::*;
 
 const C0: f64 = 299_792_458.0;
@@ -52,8 +52,9 @@ fn the_floquet_cell_reproduces_the_band_edges_of_a_dielectric_stack() {
     assert!(f_hi > 1.1 * f_lo, "there is a gap: {f_lo} {f_hi}");
     let mut errs = vec![];
     for nz in [20, 40] {
-        let mut mesh = SimplexMesh::block(a, a, l, 2, 2, nz);
-        mesh.relabel(&[(vec![0.0, 0.0, 0.0, a, a, d[0]], 1), (vec![0.0, 0.0, d[0], a, a, l], 2)], &[]).unwrap();
+        // the stack runs along y (the propagation axis of the wafer frame): two layers of the x-z section swept along y
+        let n0 = (nz as f64 * d[0] / l).round() as usize;
+        let mesh = common::stack_y(a, &[(d[0], n0), (d[1], nz - n0)], a / 2.0);
         let mut s = ProblemSpec::new(Physics::Emw);
         s.order = 2;
         for (dom, nn) in [(1, n[0]), (2, n[1])] {
@@ -62,8 +63,8 @@ fn the_floquet_cell_reproduces_the_band_edges_of_a_dielectric_stack() {
         }
         s.periodic = vec![
             Periodic { source: vec![1], dest: vec![6], phase: 0.0 },
-            Periodic { source: vec![2], dest: vec![5], phase: 0.0 },
-            Periodic { source: vec![3], dest: vec![4], phase: std::f64::consts::PI },
+            Periodic { source: vec![3], dest: vec![4], phase: 0.0 },
+            Periodic { source: vec![2], dest: vec![5], phase: std::f64::consts::PI },
         ];
         s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.97 * f_lo };
         let r = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();

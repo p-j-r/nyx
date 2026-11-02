@@ -1,5 +1,6 @@
 //! A running solve can be cancelled from another thread within a bounded time, a cancelled solve leaves no result,
 //! and every solve returns a plain-language stage log.
+mod common;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 use femcore::progress::{Progress, CANCELLED};
@@ -19,7 +20,7 @@ fn beam_spec(mesh: &SimplexMesh, order: usize) -> ProblemSpec {
 
 #[test]
 fn a_solve_returns_a_readable_stage_log() {
-    let m = SimplexMesh::block(1.0, 0.2, 0.2, 10, 3, 3);
+    let m = common::block(1.0, 0.2, 0.2, 10, 3, 3);
     let spec = beam_spec(&m, 2);
     let p = Progress::new();
     let r = solve_with(&m, &spec, &mut SolveState::default(), &p).unwrap();
@@ -32,7 +33,7 @@ fn a_solve_returns_a_readable_stage_log() {
 
 #[test]
 fn a_cancel_requested_before_the_start_stops_at_once() {
-    let m = SimplexMesh::block(1.0, 0.2, 0.2, 10, 3, 3);
+    let m = common::block(1.0, 0.2, 0.2, 10, 3, 3);
     let p = Progress::new();
     p.cancel();
     let e = solve_with(&m, &beam_spec(&m, 2), &mut SolveState::default(), &p).unwrap_err();
@@ -42,7 +43,7 @@ fn a_cancel_requested_before_the_start_stops_at_once() {
 #[test]
 fn a_long_eigenfrequency_solve_is_cancelled_within_a_bounded_time() {
     // multigrid-preconditioned LOBPCG on ~230,000 unknowns: many iterations, each checked for the cancel flag
-    let m = SimplexMesh::block(6.0, 1.2, 1.2, 60, 12, 12);
+    let m = common::block(6.0, 1.2, 1.2, 60, 12, 12);
     let mut spec = beam_spec(&m, 2);
     spec.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     spec.solver = LinearSolver::Iterative;

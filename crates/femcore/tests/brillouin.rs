@@ -3,10 +3,10 @@
 //!
 //! Seven tests that take 30-60 s each (rings, whispering-gallery modes, group velocity from the fields) are #[ignore]d so that
 //! cargo test stays fast; run them with cargo test --release -p femcore --test brillouin -- --ignored (about 70 s).
+mod common;
 use femcore::brillouin::*;
 use femcore::csparse::c;
 use femcore::material::*;
-use femcore::mesher::*;
 use femcore::problem::*;
 use femcore::solid_kz::KzModes;
 use std::collections::{BTreeMap, BTreeSet};
@@ -42,9 +42,8 @@ fn an_isotropic_photoelastic_tensor_is_unchanged_by_rotation() {
 
 fn wire_mesh() -> femcore::mesh::SimplexMesh {
     let um = 1e-6;
-    let rect = |x0: f64, y0: f64, x1: f64, y1: f64, d: i32, h: Option<f64>| Part { shape: Shape::Rect { x0: x0 * um, y0: y0 * um, x1: x1 * um, y1: y1 * um }, domain: d, h: h.map(|v| v * um) };
-    let parts = vec![rect(-1.2, -1.0, 1.2, 1.0, 1, None), rect(-0.225, -0.11, 0.225, 0.11, 2, Some(0.04))];
-    mesh_2d(&Spec2d { parts, h: 0.3 * um, min_angle_deg: 25.0 }).unwrap()
+    let rect = |x0: f64, z0: f64, x1: f64, z1: f64, d: i32, h: Option<f64>| common::part(x0 * um, z0 * um, x1 * um, z1 * um, d, h.map(|v| v * um));
+    common::parts_mesh(&[rect(-1.2, -1.0, 1.2, 1.0, 1, None), rect(-0.225, -0.11, 0.225, 0.11, 2, Some(0.04))], 0.3 * um)
 }
 
 fn optics(mesh: &femcore::mesh::SimplexMesh, lambda: f64) -> ProblemSpec {
@@ -115,7 +114,7 @@ fn modes_are_tracked_by_overlap_whatever_their_phase_and_order() {
 #[test]
 fn viscous_loss_proportional_to_stiffness_gives_the_exact_quality_factor() {
     // eta = tau C damps every mode with 1/Q = omega tau
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.6, 12, 8);
+    let mesh = common::rect(1.0, 0.6, 12, 8);
     let mut sp = ProblemSpec::new(Physics::Solid);
     sp.order = 2;
     sp.materials.default.insert("E".into(), 70e9);
@@ -137,8 +136,7 @@ fn viscous_loss_proportional_to_stiffness_gives_the_exact_quality_factor() {
 fn ring_problem(order: usize) -> (femcore::mesh::SimplexMesh, ProblemSpec) {
     // a ring of mean radius R = 1 m with a 0.02 m x 0.02 m cross-section (x = r, y = z)
     let (rr, a) = (1.0, 0.02);
-    let parts = vec![Part { shape: Shape::Rect { x0: rr - a / 2.0, y0: -a / 2.0, x1: rr + a / 2.0, y1: a / 2.0 }, domain: 1, h: Some(a / 4.0) }];
-    let mesh = mesh_2d(&Spec2d { parts, h: a / 4.0, min_angle_deg: 25.0 }).unwrap();
+    let mesh = common::parts_mesh(&[common::part(rr - a / 2.0, -a / 2.0, rr + a / 2.0, a / 2.0, 1, Some(a / 3.0))], a / 3.0);
     let mut sp = ProblemSpec::new(Physics::Solid);
     sp.order = order;
     sp.materials.default.insert("E".into(), 70e9);
@@ -249,7 +247,7 @@ fn the_phase_matched_overlap_is_mirror_symmetric_and_the_strain_as_is_form_is_no
 fn modes_of_a_symmetric_plate_are_classified_by_parity_and_followed_across_wave_numbers() {
     // a clamped square plate: its modes are even or odd under x -> -x; the parity is +-1 up to the mesh's
     // asymmetry, and tracking by overlap follows each mode from kz to the next kz
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 1.0, 16, 16);
+    let mesh = common::rect(1.0, 1.0, 16, 16);
     let mut sp = ProblemSpec::new(Physics::Solid);
     sp.order = 2;
     sp.materials.default.insert("E".into(), 70e9);
@@ -288,7 +286,7 @@ fn a_coaxial_cavity_has_the_transmission_line_resonances() {
     // r in [0.1, 0.2] m, z in [0, 0.3] m, perfect conductor everywhere, m = 0: the TEM standing waves
     // E_r ~ sin(l pi z / L) / r resonate at f = l c / (2 L)
     let (a, b, len) = (0.1, 0.2, 0.3);
-    let mesh = mesh_2d(&Spec2d { parts: vec![Part { shape: Shape::Rect { x0: a, y0: 0.0, x1: b, y1: len }, domain: 1, h: Some(0.015) }], h: 0.015, min_angle_deg: 25.0 }).unwrap();
+    let mesh = common::parts_mesh(&[common::part(a, 0.0, b, len, 1, Some(0.015))], 0.015);
     let mat = femcore::emw_axisym::AxiMaterial::from_indices(&mesh, &BTreeMap::new());
     let c0 = 299_792_458.0f64;
     let modes = femcore::emw_axisym::solve_axisym_modes(&mesh, &mat, 0.0, 0.9e9, 3, 2).unwrap();
@@ -314,11 +312,10 @@ fn a_whispering_gallery_mode_of_a_large_ring_has_the_straight_waveguide_index() 
     let n_straight = straight_set.modes[0].neff.re;
     // the same cross-section moved to r = R (the wire is centred, the box is 2.4 um x 2 um)
     let (sx, sy) = (radius, 0.0);
-    let parts = vec![
-        Part { shape: Shape::Rect { x0: sx - 1.2 * um, y0: sy - 1.0 * um, x1: sx + 1.2 * um, y1: sy + 1.0 * um }, domain: 1, h: None },
-        Part { shape: Shape::Rect { x0: sx - 0.225 * um, y0: sy - 0.11 * um, x1: sx + 0.225 * um, y1: sy + 0.11 * um }, domain: 2, h: Some(0.04 * um) },
-    ];
-    let ring = mesh_2d(&Spec2d { parts, h: 0.3 * um, min_angle_deg: 25.0 }).unwrap();
+    let ring = common::parts_mesh(
+        &[common::part(sx - 1.2 * um, sy - 1.0 * um, sx + 1.2 * um, sy + 1.0 * um, 1, None), common::part(sx - 0.225 * um, sy - 0.11 * um, sx + 0.225 * um, sy + 0.11 * um, 2, Some(0.04 * um))],
+        0.3 * um,
+    );
     let mut idx = BTreeMap::new();
     idx.insert(1, 1.444);
     idx.insert(2, 3.476);
@@ -456,9 +453,9 @@ fn ring_with_pml(radius_um: f64, w_um: f64, h_um: f64) -> femcore::mesh::Simplex
     // silicon wire in silica, absorbing layers on the outer side and above and below (domains 3 to 9)
     let um = 1e-6;
     let r = radius_um;
-    let rect = |x0: f64, y0: f64, x1: f64, y1: f64, d: i32, h: Option<f64>| Part { shape: Shape::Rect { x0: x0 * um, y0: y0 * um, x1: x1 * um, y1: y1 * um }, domain: d, h: h.map(|v| v * um) };
+    let rect = |x0: f64, z0: f64, x1: f64, z1: f64, d: i32, h: Option<f64>| common::part(x0 * um, z0 * um, x1 * um, z1 * um, d, h.map(|v| v * um));
     let (xl, xm, xr) = (r - 1.6, r + 1.4, r + 3.0);
-    let parts = vec![
+    let parts = [
         rect(xl, -1.2, xr, 1.2, 1, None),
         rect(xm, -0.8, xr, 0.8, 3, Some(0.15)),
         rect(xl, 0.8, xm, 1.2, 4, Some(0.15)),
@@ -467,7 +464,7 @@ fn ring_with_pml(radius_um: f64, w_um: f64, h_um: f64) -> femcore::mesh::Simplex
         rect(xm, -1.2, xr, -0.8, 7, Some(0.15)),
         rect(r - w_um / 2.0, -h_um / 2.0, r + w_um / 2.0, h_um / 2.0, 2, Some(0.05)),
     ];
-    mesh_2d(&Spec2d { parts, h: 0.25 * um, min_angle_deg: 25.0 }).unwrap()
+    common::parts_mesh(&parts, 0.25 * um)
 }
 
 fn ring_pml_map(strength: f64) -> BTreeMap<i32, Pml> {

@@ -37,7 +37,7 @@ fn plane_modulus(plane: Plane, e: f64, nu: f64) -> f64 {
 fn cantilever_tip_deflection_matches_beam_theory() {
     // cantilever 1 x 0.1, E 200e9, nu 0.3, edge load -1e5 N/m^2 on boundary 4 (F = 1e4 N per metre of depth):
     // Euler-Bernoulli F L^3 / (3 E' I) plus the shear deflection F L / (kappa G A), kappa = 5/6
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.1, 40, 4);
+    let mesh = common::rect(1.0, 0.1, 40, 4);
     for (plane, name) in planes() {
         let mut spec = cantilever(plane, Study::Static);
         spec.bcs.push(Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) });
@@ -59,7 +59,7 @@ fn cantilever_tip_deflection_matches_beam_theory() {
 #[test]
 fn cantilever_eigenfrequencies_match_beam_theory() {
     // Euler-Bernoulli: f_n = (beta_n L)^2 / (2 pi L^2) sqrt(E' I / (rho A)), beta_n L = 1.8751, 4.6941
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.1, 40, 4);
+    let mesh = common::rect(1.0, 0.1, 40, 4);
     for (plane, name) in planes() {
         let r = solve_solid(&mesh, &cantilever(plane, Study::Eigenfrequency { n_modes: 6, f_search: 0.0 }), &SolveState::default()).unwrap();
         let mine: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
@@ -79,7 +79,7 @@ fn cantilever_eigenfrequencies_match_beam_theory() {
 fn stress_at_triangle_centroids_is_uniaxial() {
     // roller supports (ux = 0 on the left, uy = 0 at the bottom) and 1 MPa on the right: sigma_xx = 1 MPa in every
     // triangle, plane strain adds sigma_zz = nu sigma_xx
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 10, 2);
+    let mesh = common::rect(1.0, 0.2, 10, 2);
     let nu = 0.3;
     for (plane, name) in planes() {
         let mut spec = ProblemSpec::new(Physics::Solid);
@@ -115,7 +115,7 @@ fn stress_at_triangle_centroids_is_uniaxial() {
 fn thermal_expansion_of_a_free_bar() {
     // bar 1 x 0.1, E 70e9, nu 0.33, alpha 23e-6, uniform 393.15 K, reference 293.15 K, roller supports only (free to
     // expand): u = a (x, y) with a = alpha dT (plane stress) or (1 + nu) alpha dT (plane strain, sigma_zz = -E alpha dT)
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.1, 10, 2);
+    let mesh = common::rect(1.0, 0.1, 10, 2);
     let (e, nu, alpha, dt) = (70e9, 0.33, 23e-6, 100.0);
     for (plane, name) in planes() {
         let mut spec = cantilever(plane, Study::Static);
@@ -144,7 +144,7 @@ fn thermal_expansion_of_a_free_bar() {
 
 #[test]
 fn heat_result_drives_thermal_expansion() {
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.1, 10, 2);
+    let mesh = common::rect(1.0, 0.1, 10, 2);
     let mut heat = ProblemSpec::new(Physics::Heat);
     heat.materials.default.insert("k".into(), 1.0);
     heat.bcs = vec![Bc { on: None, labels: vec![1, 4], kind: BcKind::Temperature(393.15) }];
@@ -167,7 +167,7 @@ fn heat_result_drives_thermal_expansion() {
 #[test]
 fn block_3d_matches_beam_theory() {
     // block 1 x 0.1 x 0.1, fixed at x = 0 (boundary 1), load (0, 0, -1e5) N/m^2 on x = 1 (boundary 6): F = 1e3 N
-    let mesh = femcore::mesh::SimplexMesh::block(1.0, 0.1, 0.1, 12, 2, 2);
+    let mesh = common::block(1.0, 0.1, 0.1, 12, 2, 2);
     let mut spec = cantilever(Plane::Strain, Study::Static);
     spec.bcs.push(Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) });
     let r = solve_solid(&mesh, &spec, &SolveState::default()).unwrap();
@@ -190,7 +190,7 @@ fn block_3d_matches_beam_theory() {
 fn roller_constraint_gives_uniaxial_strain_field() {
     // ux = 0 on the left face only, uy = 0 on the bottom only, nu = 0, load 1 MPa on the right:
     // uniaxial stress, ux = sigma x / E exactly (the P2 field is exactly linear)
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 10, 2);
+    let mesh = common::rect(1.0, 0.2, 10, 2);
     let mut spec = ProblemSpec::new(Physics::Solid);
     spec.plane = Plane::Stress;
     spec.materials.default.insert("E".into(), 1e9);
@@ -212,8 +212,7 @@ fn roller_constraint_gives_uniaxial_strain_field() {
 #[test]
 fn prescribed_displacement_and_two_materials() {
     // two layers in series with a prescribed end displacement: stress equal in both layers
-    let mut mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 10, 2);
-    mesh.relabel(&[(vec![0.5, 0.0, 1.0, 0.2], 2)], &[]).unwrap();
+    let mesh = common::rect_split_x(1.0, 0.2, 0.5, 0.1);
     let mut spec = ProblemSpec::new(Physics::Solid);
     spec.plane = Plane::Stress;
     spec.materials.set(1, "E", 100e9);

@@ -23,11 +23,10 @@
 //! agree on shared faces without any shared state.
 //!
 //! Boundary numbers: bodies in order, each numbering its faces. Box: 1 x=min, 2 x=max, 3 y=min,
-//! 4 y=max, 5 z=min, 6 z=max (the numbering of `SimplexMesh::block`). Cylinder: 1 side, 2 base,
-//! 3 top. Sphere: 1. Extrusion: the edges of the outline (as in the 2D mesher), then bottom, top.
+//! 4 y=max, 5 z=min, 6 z=max. Cylinder: 1 side, 2 base,
+//! 3 top. Sphere: 1.
 
 use crate::mesh::SimplexMesh;
-use crate::mesher::{dist_point_segment, Shape};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -37,54 +36,10 @@ pub enum Solid {
     Sphere { c: [f64; 3], r: f64 },
     /// circular cylinder along axis 0, 1 or 2 from the disc centred at `base` to `base + len` along the axis
     Cylinder { base: [f64; 3], axis: usize, r: f64, len: f64 },
-    /// a 2D outline in the x-y plane extruded from z0 to z1
-    Extrusion { profile: Shape, z0: f64, z1: f64 },
 }
 
 fn len3(a: [f64; 3]) -> f64 {
     (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
-}
-
-/// Signed distance of a 2D outline (negative inside) and the number of its edges.
-fn sdf2(shape: &Shape, p: [f64; 2]) -> f64 {
-    match shape {
-        Shape::Rect { x0, y0, x1, y1 } => {
-            let (cx, cy) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
-            let (hx, hy) = (0.5 * (x1 - x0).abs(), 0.5 * (y1 - y0).abs());
-            let (qx, qy) = ((p[0] - cx).abs() - hx, (p[1] - cy).abs() - hy);
-            (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0)
-        }
-        Shape::Circle { cx, cy, r } => ((p[0] - cx).powi(2) + (p[1] - cy).powi(2)).sqrt() - r,
-        Shape::Polygon(v) => {
-            let n = v.len();
-            let d = (0..n).map(|i| dist_point_segment(p, v[i], v[(i + 1) % n])).fold(f64::INFINITY, f64::min);
-            if shape.contains(p) { -d } else { d }
-        }
-    }
-}
-
-fn outline_edges(shape: &Shape) -> i32 {
-    match shape {
-        Shape::Rect { .. } => 4,
-        Shape::Circle { .. } => 1,
-        Shape::Polygon(v) => v.len() as i32,
-    }
-}
-
-/// Which edge (1-based) of the outline is nearest to `p`, with the 2D numbering of the mesher.
-fn outline_edge_at(shape: &Shape, p: [f64; 2]) -> i32 {
-    match shape {
-        Shape::Rect { x0, y0, x1, y1 } => {
-            let (xa, xb, ya, yb) = (x0.min(*x1), x0.max(*x1), y0.min(*y1), y0.max(*y1));
-            let d = [(p[0] - xa).abs(), (p[1] - ya).abs(), (p[1] - yb).abs(), (p[0] - xb).abs()];
-            (0..4).min_by(|&a, &b| d[a].partial_cmp(&d[b]).unwrap()).unwrap() as i32 + 1
-        }
-        Shape::Circle { .. } => 1,
-        Shape::Polygon(v) => {
-            let n = v.len();
-            (0..n).min_by(|&a, &b| dist_point_segment(p, v[a], v[(a + 1) % n]).partial_cmp(&dist_point_segment(p, v[b], v[(b + 1) % n])).unwrap()).unwrap_or(0) as i32 + 1
-        }
-    }
 }
 
 impl Solid {
@@ -93,7 +48,6 @@ impl Solid {
             Solid::Box { .. } => "Box",
             Solid::Sphere { .. } => "Sphere",
             Solid::Cylinder { .. } => "Cylinder",
-            Solid::Extrusion { .. } => "Extrusion",
         }
     }
 
@@ -114,11 +68,6 @@ impl Solid {
                 let axial = (p[*axis] - base[*axis] - 0.5 * len).abs() - 0.5 * len.abs();
                 radial.max(0.0).hypot(axial.max(0.0)) + radial.max(axial).min(0.0)
             }
-            Solid::Extrusion { profile, z0, z1 } => {
-                let d = sdf2(profile, [p[0], p[1]]);
-                let dz = (p[2] - 0.5 * (z0 + z1)).abs() - 0.5 * (z1 - z0).abs();
-                d.max(0.0).hypot(dz.max(0.0)) + d.max(dz).min(0.0)
-            }
         }
     }
 
@@ -127,7 +76,6 @@ impl Solid {
             Solid::Box { .. } => 6,
             Solid::Sphere { .. } => 1,
             Solid::Cylinder { .. } => 3,
-            Solid::Extrusion { profile, .. } => outline_edges(profile) + 2,
         }
     }
 
@@ -153,12 +101,6 @@ impl Solid {
                 let (d0, d1) = ((p[*axis] - base[*axis]).abs(), (p[*axis] - base[*axis] - len).abs());
                 if radial <= d0 && radial <= d1 { 1 } else if d0 <= d1 { 2 } else { 3 }
             }
-            Solid::Extrusion { profile, z0, z1 } => {
-                let ne = outline_edges(profile);
-                let dside = sdf2(profile, [p[0], p[1]]).abs();
-                let (d0, d1) = ((p[2] - z0).abs(), (p[2] - z1).abs());
-                if dside <= d0 && dside <= d1 { outline_edge_at(profile, [p[0], p[1]]) } else if d0 <= d1 { ne + 1 } else { ne + 2 }
-            }
         }
     }
 
@@ -178,27 +120,6 @@ impl Solid {
                     }
                 }
                 (lo, hi)
-            }
-            Solid::Extrusion { profile, z0, z1 } => {
-                let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-                let mut add = |p: [f64; 2]| {
-                    for k in 0..2 {
-                        lo[k] = lo[k].min(p[k]);
-                        hi[k] = hi[k].max(p[k]);
-                    }
-                };
-                match profile {
-                    Shape::Rect { x0, y0, x1, y1 } => {
-                        add([*x0, *y0]);
-                        add([*x1, *y1]);
-                    }
-                    Shape::Circle { cx, cy, r } => {
-                        add([cx - r, cy - r]);
-                        add([cx + r, cy + r]);
-                    }
-                    Shape::Polygon(v) => v.iter().for_each(|p| add(*p)),
-                }
-                ([lo[0], lo[1], z0.min(*z1)], [hi[0], hi[1], z0.max(*z1)])
             }
         }
     }
@@ -584,33 +505,6 @@ impl Solid {
                     plane([-n[0], -n[1], -n[2]], -(n[*axis] * b0)),
                     plane(n, n[*axis] * b1),
                 ]
-            }
-            Solid::Extrusion { profile, z0, z1 } => {
-                let mut v = vec![plane([0.0, 0.0, -1.0], -z0.min(*z1)), plane([0.0, 0.0, 1.0], z0.max(*z1))];
-                match profile {
-                    Shape::Rect { x0, y0, x1, y1 } => {
-                        let (xa, xb, ya, yb) = (x0.min(*x1), x0.max(*x1), y0.min(*y1), y0.max(*y1));
-                        v.push(plane([-1.0, 0.0, 0.0], -xa));
-                        v.push(plane([1.0, 0.0, 0.0], xb));
-                        v.push(plane([0.0, -1.0, 0.0], -ya));
-                        v.push(plane([0.0, 1.0, 0.0], yb));
-                    }
-                    Shape::Circle { cx, cy, r } => v.push(Surf::Cyl { c: [*cx, *cy, 0.0], axis: 2, r: *r }),
-                    Shape::Polygon(pts) => {
-                        let n = pts.len();
-                        let area: f64 = (0..n).map(|i| pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1]).sum::<f64>();
-                        let sign = if area >= 0.0 { 1.0 } else { -1.0 };
-                        for i in 0..n {
-                            let (a, b) = (pts[i], pts[(i + 1) % n]);
-                            let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
-                            let l = (ex * ex + ey * ey).sqrt().max(1e-300);
-                            // outward normal of a counter-clockwise polygon is (ey, -ex)
-                            let nn = [sign * ey / l, -sign * ex / l, 0.0];
-                            v.push(plane(nn, nn[0] * a[0] + nn[1] * a[1]));
-                        }
-                    }
-                }
-                v
             }
         }
     }

@@ -1,8 +1,8 @@
 //! Perfectly matched layers and complex materials in the mode solver.
+mod common;
 use femcore::csparse::c;
 use femcore::emw::{self, C0};
 use femcore::emw_pml::*;
-use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 
 fn k0(f: f64) -> f64 {
@@ -22,7 +22,7 @@ fn closest(r: &SolveResult, re: f64) -> (f64, f64) {
 #[test]
 fn complex_solver_without_pml_reproduces_the_real_solver() {
     let (a, b, f) = (22.86e-3, 10.16e-3, 20e9);
-    let mesh = SimplexMesh::rectangle(a, b, 20, 10);
+    let mesh = common::rect(a, b, 20, 10);
     let nc = mesh.n_cells();
     let eps = vec![EpsC { xx: c(1.0, 0.0), xy: c(0.0, 0.0), yy: c(1.0, 0.0), zz: c(1.0, 0.0), xz: c(0.0, 0.0), yz: c(0.0, 0.0) }; nc];
     let mu = vec![MuC { x: c(1.0, 0.0), y: c(1.0, 0.0), z: c(1.0, 0.0) }; nc];
@@ -37,8 +37,7 @@ fn complex_solver_without_pml_reproduces_the_real_solver() {
 fn real_stretch_equals_a_wider_guide() {
     // stretching a guide of width a by s = 1.5 in x acts like a guide of width 1.5 a
     let (a, b, f) = (15e-3, 10e-3, 15e9);
-    let mut mesh = SimplexMesh::rectangle(a, b, 24, 12);
-    mesh.relabel(&[(vec![0.0, 0.0, a, b], 2)], &[]).unwrap();
+    let mesh = common::parts_mesh(&[common::part(0.0, 0.0, a, b, 2, None)], (a / 24.0).min(b / 12.0));
     let mut s = spec(f, 0.9, 4);
     s.materials.pml.insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re: 1.5 });
     s.materials.set(1, "eps_r", 1.0);
@@ -53,8 +52,7 @@ fn real_stretch_equals_a_wider_guide() {
 fn complex_constant_stretch_gives_the_analytic_complex_index() {
     // s = 1 - 0.3 j along x: beta^2 = k0^2 - (pi / (a s))^2
     let (a, b, f) = (15e-3, 10e-3, 15e9);
-    let mut mesh = SimplexMesh::rectangle(a, b, 24, 12);
-    mesh.relabel(&[(vec![0.0, 0.0, a, b], 2)], &[]).unwrap();
+    let mesh = common::parts_mesh(&[common::part(0.0, 0.0, a, b, 2, None)], (a / 24.0).min(b / 12.0));
     let mut s = spec(f, 0.9, 4);
     s.materials.pml.insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.3, order: 0.0, re: 1.0 });
     let r = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
@@ -72,8 +70,10 @@ fn complex_constant_stretch_gives_the_analytic_complex_index() {
 fn pml_terminated_slab_keeps_the_guided_mode_and_absorbs_the_rest() {
     // a dielectric core (eps 4) in an air-filled PEC box 40 x 10 mm; PML layers on both x ends
     let (lx, ly, f) = (40e-3, 10e-3, 12e9);
-    let mut mesh = SimplexMesh::rectangle(lx, ly, 80, 8);
-    mesh.relabel(&[(vec![15e-3, 0.0, 25e-3, ly], 2), (vec![0.0, 0.0, 8e-3, ly], 3), (vec![32e-3, 0.0, lx, ly], 4)], &[]).unwrap();
+    let mesh = common::parts_mesh(
+        &[common::part(0.0, 0.0, lx, ly, 1, None), common::part(15e-3, 0.0, 25e-3, ly, 2, None), common::part(0.0, 0.0, 8e-3, ly, 3, None), common::part(32e-3, 0.0, lx, ly, 4, None)],
+        (lx / 80.0).min(ly / 8.0),
+    );
     let mut pml = spec(f, 1.9, 6);
     pml.materials.default.insert("eps_r".into(), 1.0);
     pml.materials.set(2, "eps_r", 4.0);
@@ -96,7 +96,7 @@ fn pml_terminated_slab_keeps_the_guided_mode_and_absorbs_the_rest() {
 
 #[test]
 fn pml_with_off_axes_changes_nothing() {
-    let mesh = SimplexMesh::rectangle(22.86e-3, 10.16e-3, 16, 8);
+    let mesh = common::rect(22.86e-3, 10.16e-3, 16, 8);
     let mut s = spec(20e9, 0.9, 3);
     s.materials.pml.insert(1, Pml::default()); // both axes Off
     let a = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();

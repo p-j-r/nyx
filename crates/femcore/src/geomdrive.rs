@@ -222,3 +222,71 @@ pub fn select_labels(ev: &Evaluated, labels: &LabelMap, selector: &str) -> Resul
         }
     }
 }
+
+/// A rectangle `[0, lx] x [0, lz]` of the x-z plane as one domain, meshed with element size `h`, with the boundary labels of its four sides
+/// (`xmin`, `xmax`, `zmin` = bottom, `zmax` = top): the quick problem for tests, benchmarks and studies that need no named geometry.
+pub struct Plate {
+    pub mesh: SimplexMesh,
+    pub domain: i32,
+    pub xmin: Vec<i32>,
+    pub xmax: Vec<i32>,
+    pub zmin: Vec<i32>,
+    pub zmax: Vec<i32>,
+}
+
+pub fn plate(lx: f64, lz: f64, h: f64) -> Result<Plate, String> {
+    let mut m = geom::model::Model::new_2d();
+    let r = m.rect("plate", (0.0, 0.0), (lx, lz));
+    m.overlay(&[("plate", r)]);
+    let g = mesh_geom_2d(evaluate(&m.list)?, &GeomMeshOpts::new(h))?;
+    let side = |sel: &str| g.select(sel);
+    let (xmin, xmax, zmin, zmax) = (side("plane(x = 0)")?, side(&format!("plane(x = {lx:e})"))?, side("plane(z = 0)")?, side(&format!("plane(z = {lz:e})"))?);
+    let domain = g.domain("plate").ok_or("the plate has no domain")?;
+    Ok(Plate { mesh: g.mesh, domain, xmin, xmax, zmin, zmax })
+}
+
+/// A box `[0, lx] x [0, ly] x [0, lz]`: the plate swept along y through `ny` layers (`extrude_y`). The vertices of the section are put in coordinate order first (`sort_nodes`), so that opposite side walls can be paired by a Floquet condition. The side walls keep the labels of the
+/// plate's sides; the ends are `ymin` (y = 0) and `ymax`.
+pub struct Block {
+    pub mesh: SimplexMesh,
+    pub domain: i32,
+    pub xmin: Vec<i32>,
+    pub xmax: Vec<i32>,
+    pub zmin: Vec<i32>,
+    pub zmax: Vec<i32>,
+    pub ymin: Vec<i32>,
+    pub ymax: Vec<i32>,
+}
+
+pub fn block(lx: f64, ly: f64, lz: f64, h: f64, ny: usize) -> Result<Block, String> {
+    let p = plate(lx, lz, h)?;
+    let nb = p.mesh.facet_labels.iter().copied().max().unwrap_or(0);
+    let mesh = crate::mesher::extrude_y(&sort_nodes(&p.mesh), &[crate::mesher::Layer { thickness: ly, n: ny, domain_offset: 0 }], 0.0)?;
+    Ok(Block { mesh, domain: p.domain, xmin: p.xmin, xmax: p.xmax, zmin: p.zmin, zmax: p.zmax, ymin: vec![nb + 1], ymax: vec![nb + 2] })
+}
+
+/// The mesh with its vertices renumbered in the order of their coordinates (x first, then the second axis, equal to a tolerance of
+/// `1e-9` of the extent). Cells and facets are unchanged. Opposite sides of a section then list their vertices in the same order, so a
+/// sweep along y (`extrude_y`, whose tetrahedra follow the vertex numbers) cuts opposite side walls the same way and the two can be paired
+/// by a Floquet condition.
+pub fn sort_nodes(m: &SimplexMesh) -> SimplexMesh {
+    let n = m.n_points();
+    let d = m.dim;
+    let (mut lo, mut hi) = (vec![f64::MAX; d], vec![f64::MIN; d]);
+    for p in m.points.chunks(d) {
+        for k in 0..d {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    let q = |i: usize, k: usize| ((m.points[i * d + k] - lo[k]) / ((hi[k] - lo[k]).max(1e-300) * 1e-9)).round() as i64;
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by_key(|&i| (0..d).map(|k| q(i, k)).collect::<Vec<_>>());
+    let mut new_of = vec![0u32; n];
+    for (new, &old) in order.iter().enumerate() {
+        new_of[old] = new as u32;
+    }
+    let points: Vec<f64> = order.iter().flat_map(|&i| m.points[i * d..(i + 1) * d].iter().copied()).collect();
+    let map = |v: &[u32]| v.iter().map(|&i| new_of[i as usize]).collect::<Vec<u32>>();
+    SimplexMesh::new(d, points, map(&m.cells), m.cell_labels.clone(), map(&m.facets), m.facet_labels.clone())
+}

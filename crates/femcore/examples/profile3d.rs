@@ -1,11 +1,11 @@
 //! Stage timings of a 3D solid static solve: NYX_PROFILE=1 cargo run --release -p femcore --example profile3d -- NX NY NZ [p1|p2]
-use femcore::mesh::SimplexMesh;
+mod benchmesh;
 use femcore::problem::*;
 
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let n: Vec<usize> = a.iter().take(3).map(|x| x.parse().unwrap()).collect();
-    let mesh = SimplexMesh::block(n[0] as f64, n[1] as f64, n[2] as f64, n[0], n[1], n[2]);
+    let mesh = benchmesh::block(n[0] as f64, n[1] as f64, n[2] as f64, n[0], n[1], n[2]);
     let mut s = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         s.materials.default.insert(k.into(), v);

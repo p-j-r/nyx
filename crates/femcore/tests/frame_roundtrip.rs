@@ -1,7 +1,8 @@
 //! What a wafer-frame problem on a 2D cross-section says, solved through `solve::solve`, against physics that has a direction: every
 //! physics and every result field it makes is named in the wafer axes (an unnamed field is a failure; `solve` also asserts it in debug
 //! builds), the fields that carry a direction point the right way, and the model-frame component that points out of the plane is wafer y.
-//! The mesh of `SimplexMesh::rectangle` has the columns (x, z); its boundaries are 1 x = 0, 2 z = 0 (bottom), 3 z = H (top), 4 x = L.
+//! The mesh of `common::rect` has the columns (x, z); its boundaries are 1 x = 0, 2 z = 0 (bottom), 3 z = H (top), 4 x = L.
+mod common;
 use femcore::frame_adapter::{rename_wafer_fields, wafer_field_name, Kernel};
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
@@ -33,7 +34,7 @@ fn solve(mesh: &SimplexMesh, spec: &ProblemSpec) -> SolveResult {
 
 #[test]
 fn electrostatics_points_from_the_high_plate_along_z() {
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 8, 4);
+    let mesh = common::rect(1.0, 0.5, 8, 4);
     let mut s = ProblemSpec::new(Physics::Electrostatics);
     s.materials.default.insert("eps_r".into(), 1.0);
     s.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
@@ -45,7 +46,7 @@ fn electrostatics_points_from_the_high_plate_along_z() {
 
 #[test]
 fn heat_flows_from_the_hot_plate_along_z() {
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 8, 4);
+    let mesh = common::rect(1.0, 0.5, 8, 4);
     let mut s = ProblemSpec::new(Physics::Heat);
     s.materials.default.insert("k".into(), 2.0);
     s.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Temperature(400.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Temperature(300.0) }];
@@ -57,7 +58,7 @@ fn heat_flows_from_the_hot_plate_along_z() {
 
 #[test]
 fn a_plate_pressed_from_above_moves_down_in_z_and_is_stressed_in_z_and_y() {
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 8, 4);
+    let mesh = common::rect(1.0, 0.5, 8, 4);
     let mut s = ProblemSpec::new(Physics::Solid);
     s.materials.default.insert("E".into(), 70e9);
     s.materials.default.insert("nu".into(), 0.3);
@@ -79,7 +80,7 @@ fn a_plate_pressed_from_above_moves_down_in_z_and_is_stressed_in_z_and_y() {
 fn the_shear_mode_of_a_clamped_plate_at_zero_wave_number_moves_along_y() {
     // at k = 0 the out-of-plane displacement decouples; clamped on all sides: f = (1/2) sqrt(mu/rho) sqrt(1/a^2 + 1/b^2)
     let (a, b) = (0.02, 0.01);
-    let mesh = SimplexMesh::rectangle(a, b, 24, 12);
+    let mesh = common::rect(a, b, 24, 12);
     let mut s = ProblemSpec::new(Physics::Solid);
     s.materials.default.insert("E".into(), 70e9);
     s.materials.default.insert("nu".into(), 0.3);
@@ -98,7 +99,7 @@ fn the_shear_mode_of_a_clamped_plate_at_zero_wave_number_moves_along_y() {
 #[test]
 fn the_lowest_mode_of_a_pec_guide_has_its_field_along_the_short_side_z() {
     // 30 x 15 mm, air, 12 GHz: TE10 has E along the short side, which in the wafer frame is z
-    let mesh = SimplexMesh::rectangle(0.03, 0.015, 24, 12);
+    let mesh = common::rect(0.03, 0.015, 24, 12);
     let mut s = ProblemSpec::new(Physics::Emw);
     s.materials.default.insert("eps_r".into(), 1.0);
     s.study = Study::Modes { freq: 12e9, n_target: 0.9, evanescent: false, n_modes: 1 };

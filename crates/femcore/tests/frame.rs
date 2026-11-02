@@ -2,13 +2,12 @@
 mod common;
 use common::*;
 use femcore::material::*;
-use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 
 #[test]
 fn a_permittivity_tensor_in_the_wafer_frame_acts_on_the_vertical_axis_of_the_x_z_plane() {
     // plates on the bottom (z = 0) and top (z = H) of an x-z section of length L: C = eps0 eps_zz L / H per metre
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 8, 4);
+    let mesh = common::rect(1.0, 0.5, 8, 4);
     let mut spec = ProblemSpec::new(Physics::Electrostatics);
     spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 5.0 }), ..Default::default() });
     spec.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
@@ -74,7 +73,7 @@ fn the_stiffness_of_a_tilted_crystal_in_the_model_frame_is_the_wafer_tensor_turn
 #[test]
 fn a_loaded_cubic_plate_in_the_x_z_plane_deflects_like_the_same_plate_in_the_model_frame() {
     // wafer description: fixed at x = 0 (x and z components), a load along -z on the right end; the crystal is turned by 20 degrees about y
-    let mesh = SimplexMesh::rectangle(1.0, 0.2, 10, 2);
+    let mesh = common::rect(1.0, 0.2, 10, 2);
     let rot_y = |t: f64| -> M3 {
         let (s, c) = t.to_radians().sin_cos();
         [[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]]
@@ -141,7 +140,7 @@ fn layers_of_a_2d_cross_section_are_written_along_x_and_z_and_a_positive_k_runs_
     assert_eq!((p.x, p.y, p.z), (PmlDir::Plus, PmlDir::Minus, PmlDir::Off));
     assert_eq!(m.out_of_plane, Some(-5.0));
     // a y layer does not exist on a 2D cross-section
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 4, 2);
+    let mesh = common::rect(1.0, 0.5, 4, 2);
     let mut bad = ProblemSpec::new(Physics::Solid);
     bad.study = Study::Eigenfrequency { n_modes: 2, f_search: 0.0 };
     bad.materials.pml.insert(1, Pml { y: PmlDir::Plus, ..Default::default() });
@@ -176,23 +175,3 @@ fn the_absorbing_pieces_of_a_geom_model_come_out_in_wafer_names() {
     assert_eq!((top.x, top.y, top.z), (PmlDir::Off, PmlDir::Off, PmlDir::Plus));
 }
 
-#[test]
-fn a_problem_saved_in_the_legacy_model_axes_is_refused_and_the_wafer_key_is_not_written() {
-    let mut s = ProblemSpec::new(Physics::Electrostatics);
-    s.materials.default.insert("eps_r".into(), 1.0);
-    s.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
-    let json = serde_json::to_value(&s).unwrap();
-    assert!(json["materials"].get("frame").is_none(), "there is no frame to save any more");
-    // files of the brief window with an Axes toggle say what they are
-    let mut old = json.clone();
-    old["materials"]["frame"] = serde_json::json!("Model");
-    let legacy: ProblemSpec = serde_json::from_value(old).unwrap();
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 4, 2);
-    let e = femcore::solve::solve(&mesh, &legacy, &mut SolveState::default()).err().unwrap();
-    assert!(e.contains("legacy model axes"), "{e}");
-    // and the old default, "Wafer", is simply what every problem is
-    let mut wafer = json;
-    wafer["materials"]["frame"] = serde_json::json!("Wafer");
-    let ok: ProblemSpec = serde_json::from_value(wafer).unwrap();
-    assert!(femcore::solve::solve(&mesh, &ok, &mut SolveState::default()).is_ok());
-}

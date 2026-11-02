@@ -2,9 +2,9 @@
 //! multigrid-preconditioned CG iteration. Used to compare thread strategies.
 //!
 //!   cargo run --release -p femcore --example pool_bench            (NYX_THREADS=N limits the pool)
+mod benchmesh;
 use femcore::amg::{pcg, Amg, AmgOptions};
 use femcore::fem::assemble_laplace;
-use femcore::mesh::SimplexMesh;
 use femcore::sparse::{Csr, Csr32};
 use std::time::Instant;
 
@@ -27,7 +27,7 @@ fn bench<F: FnMut()>(mut f: F, reps: usize) -> (f64, f64) {
 fn main() {
     println!("== Csr32::matvec_into on P1 Laplace matrices of a block (median / min microseconds) ==");
     for n in [14usize, 24, 32, 44, 60, 80, 110] {
-        let m = SimplexMesh::block(1.0, 1.0, 1.0, n, n, n);
+        let m = benchmesh::block(1.0, 1.0, 1.0, n, n, n);
         let a: Csr = assemble_laplace(&m, 1, &vec![1.0; m.n_cells()]);
         let a32 = Csr32::from_csr(&a);
         let x: Vec<f64> = (0..a.ncols).map(|i| ((i * 7919) % 101) as f64 / 101.0).collect();
@@ -36,7 +36,7 @@ fn main() {
         println!("{:>9} rows {:>10} nnz: {med:9.1} / {min:9.1}", a32.nrows, a32.nnz());
     }
     for (label, order, n) in [("P1 Laplace n=52", 1usize, 52usize), ("P2 Laplace n=22", 2, 22)] {
-        let m = SimplexMesh::block(1.0, 1.0, 1.0, n, n, n);
+        let m = benchmesh::block(1.0, 1.0, 1.0, n, n, n);
         let a: Csr = assemble_laplace(&m, order, &vec![1.0; m.n_cells()]);
         println!("\n== {label}: {} rows, {} nnz ==", a.nrows, a.nnz());
         let t = Instant::now();

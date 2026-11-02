@@ -551,42 +551,45 @@ mod tests {
 
     #[test]
     fn picking_finds_boundaries_in_2d_and_3d() {
-        let m = femcore::mesh::SimplexMesh::rectangle(2.0, 1.0, 4, 2);
-        let view = ViewMesh::from_simplex(&m);
+        let p = femcore::geomdrive::plate(2.0, 1.0, 0.5).unwrap();
+        let view = ViewMesh::from_simplex(&p.mesh);
         let mut cam = Camera::default();
         cam.fit(view.bbox, Vec2::new(800.0, 600.0), false, 0.0);
         let c = Pos2::new(400.0, 300.0);
         let mut sc = Scene::default();
         let data = |v: &ViewMesh| SceneData { pos: v.points.clone(), colors: Colors::PerTri(vec![Color32::GRAY; v.tris.len()]) };
         sc.update(1, || data(&view), &view.tris, &cam, c);
-        // a point on the left edge (x = 0, y = 0.5) is boundary 1, the bottom edge midpoint boundary 2
+        // a point on the left edge (x = 0, second axis 0.5) is the boundary of x = 0, the bottom edge midpoint the boundary of z = 0
         let left = cam.project([0.0, 0.5, 0.0], c).0;
-        assert_eq!(pick_boundary(&sc, &view, left + Vec2::new(3.0, 0.0)), Some(1));
+        assert_eq!(pick_boundary(&sc, &view, left + Vec2::new(3.0, 0.0)), Some(p.xmin[0]));
         let bottom = cam.project([1.0, 0.0, 0.0], c).0;
-        assert_eq!(pick_boundary(&sc, &view, bottom + Vec2::new(0.0, -3.0)), Some(2));
+        assert_eq!(pick_boundary(&sc, &view, bottom + Vec2::new(0.0, -3.0)), Some(p.zmin[0]));
         let far = cam.project([1.0, 0.5, 0.0], c).0;
         assert_eq!(pick_boundary(&sc, &view, far), None);
 
-        let b = femcore::mesh::SimplexMesh::block(1.0, 1.0, 1.0, 2, 2, 2);
-        let v3 = ViewMesh::from_simplex(&b);
+        let b = femcore::geomdrive::block(1.0, 1.0, 1.0, 0.5, 2).unwrap();
+        let v3 = ViewMesh::from_simplex(&b.mesh);
         let mut cam = Camera::default();
         cam.fit(v3.bbox, Vec2::new(800.0, 600.0), true, 0.0);
-        // looking from above (pitch 90 deg) the nearest facet at the centre is the top face (4)
+        // looking from above (pitch 90 deg) the nearest facet at the centre is the top face (z = lz)
         cam.pitch = std::f32::consts::FRAC_PI_2;
         cam.yaw = 0.0;
         let mut sc = Scene::default();
         sc.update(2, || data(&v3), &v3.tris, &cam, c);
         let top = cam.project([0.5, 0.5, 1.0], c).0;
-        assert_eq!(pick_boundary(&sc, &v3, top), Some(4));
+        assert_eq!(pick_boundary(&sc, &v3, top), Some(b.zmax[0]));
     }
 
     #[test]
     fn label_anchors_sit_on_the_boundaries() {
-        let m = femcore::mesh::SimplexMesh::rectangle(2.0, 1.0, 4, 2);
-        let view = ViewMesh::from_simplex(&m);
+        let p = femcore::geomdrive::plate(2.0, 1.0, 0.5).unwrap();
+        let view = ViewMesh::from_simplex(&p.mesh);
         let a = label_anchors(&view);
-        assert_eq!(a.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
-        // boundary 1 is x = 0, boundary 4 is x = lx
-        assert!(a[0].1[0].abs() < 1e-6 && (a[3].1[0] - 2.0).abs() < 1e-6);
+        let mut labels: Vec<i32> = a.iter().map(|x| x.0).collect();
+        labels.sort();
+        assert_eq!(labels, p.mesh.boundary_labels());
+        // the boundary of x = 0 is anchored at x = 0, the boundary of x = lx at x = lx
+        let at = |l: i32| a.iter().find(|x| x.0 == l).unwrap().1;
+        assert!(at(p.xmin[0])[0].abs() < 1e-6 && (at(p.xmax[0])[0] - 2.0).abs() < 1e-6);
     }
 }

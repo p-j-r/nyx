@@ -1,6 +1,6 @@
 //! Waveguide mode analysis against closed forms.
+mod common;
 use femcore::emw::*;
-use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 
 fn emw_spec(eps: f64, freq: f64, target: f64, evanescent: bool, n: usize) -> ProblemSpec {
@@ -26,7 +26,7 @@ fn neff_squared(eps: f64, freq: f64, m: usize, n: usize) -> f64 {
 #[test]
 fn filled_wr90_propagating_modes_match_the_closed_form() {
     // WR-90 section 22.86 x 10.16 mm filled with eps_r 2.1, 12 GHz: TE10, TE20, TE01 and the degenerate TE11/TM11
-    let m = SimplexMesh::rectangle(WR90.0, WR90.1, 24, 12);
+    let m = common::rect(WR90.0, WR90.1, 24, 12);
     for (mm, nn) in [(1, 0), (2, 0), (0, 1), (1, 1)] {
         let exact = neff_squared(2.1, 12e9, mm, nn).sqrt();
         let r = solve_emw(&m, &emw_spec(2.1, 12e9, exact * 1.001, false, 3)).unwrap();
@@ -38,7 +38,7 @@ fn filled_wr90_propagating_modes_match_the_closed_form() {
 #[test]
 fn filled_wr90_evanescent_modes_match_the_closed_form() {
     // below cutoff neff is imaginary, neff = -i sqrt(kc^2 / k0^2 - eps_r)
-    let m = SimplexMesh::rectangle(WR90.0, WR90.1, 24, 12);
+    let m = common::rect(WR90.0, WR90.1, 24, 12);
     let exact = neff_squared(2.1, 12e9, 3, 0).abs().sqrt();
     let r = solve_emw(&m, &emw_spec(2.1, 12e9, exact, true, 4)).unwrap();
     let best = r.solutions.iter().map(|s| (s.neff.unwrap().1.abs() - exact).abs()).fold(f64::MAX, f64::min);
@@ -50,7 +50,7 @@ fn ez_field_of_the_tm11_mode_is_sin_sin() {
     // Ez of the TM11 mode is sin(pi x / a) sin(pi y / b); the eigenvector's scale is arbitrary. TE11 has no Ez, so
     // any vector of the degenerate pair is either the TM11 field or zero
     let (a, b) = WR90;
-    let m = SimplexMesh::rectangle(a, b, 24, 12);
+    let m = common::rect(a, b, 24, 12);
     let eps = vec![2.1; m.n_cells()];
     let mur = vec![1.0; m.n_cells()];
     let exact = neff_squared(2.1, 12e9, 1, 1).sqrt();
@@ -70,7 +70,7 @@ fn ez_field_of_the_tm11_mode_is_sin_sin() {
 fn empty_wr90_closed_form() {
     // empty WR-90 at 20 GHz: neff = sqrt(1 - (kc/k0)^2), kc^2 = (m pi/a)^2 + (n pi/b)^2
     let (a, b) = (22.86e-3, 10.16e-3);
-    let m = SimplexMesh::rectangle(a, b, 24, 12);
+    let m = common::rect(a, b, 24, 12);
     let r = solve_emw(&m, &emw_spec(1.0, 20e9, 0.95, false, 4)).unwrap();
     let k0 = 2.0 * std::f64::consts::PI * 20e9 / C0;
     let mut exact: Vec<f64> = vec![];
@@ -93,8 +93,7 @@ fn slab_loaded_guide_matches_transcendental_root() {
     // WR-90-like guide half... eps_r 4 in a layer of width d next to the wall, the rest air: the
     // lowest-order LSE mode with Ey = 0 satisfies k1 cot(k1 d) + k2 cot(k2 (a - d)) = 0
     let (a, b, d, f) = (22.86e-3, 10.16e-3, 11.43e-3, 8e9);
-    let mut m = SimplexMesh::rectangle(a, b, 36, 8);
-    m.relabel(&[(vec![0.0, 0.0, d, b], 2)], &[]).unwrap();
+    let m = common::parts_mesh(&[common::part(0.0, 0.0, a, b, 1, None), common::part(0.0, 0.0, d, b, 2, None)], (a / 36.0).min(b / 8.0));
     let mut s = ProblemSpec::new(Physics::Emw);
     s.materials.set(1, "eps_r", 1.0);
     s.materials.set(2, "eps_r", 4.0);
@@ -139,7 +138,7 @@ fn slab_loaded_guide_matches_transcendental_root() {
 #[test]
 fn order_one_converges_toward_order_two() {
     let (a, b) = (22.86e-3, 10.16e-3);
-    let m = SimplexMesh::rectangle(a, b, 24, 12);
+    let m = common::rect(a, b, 24, 12);
     let k0 = 2.0 * std::f64::consts::PI * 20e9 / C0;
     let exact = (1.0 - (std::f64::consts::PI / a / k0).powi(2)).sqrt();
     let mut e = vec![];
@@ -154,7 +153,7 @@ fn order_one_converges_toward_order_two() {
 
 #[test]
 fn mode_fields_are_normalised_and_finite() {
-    let m = SimplexMesh::rectangle(WR90.0, WR90.1, 12, 6);
+    let m = common::rect(WR90.0, WR90.1, 12, 6);
     let r = solve_emw(&m, &emw_spec(2.1, 12e9, 0.54, false, 3)).unwrap();
     for s in &r.solutions {
         let e = s.field("|E|").unwrap();

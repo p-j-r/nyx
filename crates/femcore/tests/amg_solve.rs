@@ -1,12 +1,11 @@
 //! The multigrid-preconditioned CG path must give the same answers as the direct solver.
 mod common;
 use common::maxdiff;
-use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 
 #[test]
 fn iterative_elasticity_matches_the_direct_solution() {
-    let mesh = SimplexMesh::block(1.0, 0.2, 0.2, 20, 4, 4);
+    let mesh = common::block(1.0, 0.2, 0.2, 20, 4, 4);
     let mut s = ProblemSpec::new(Physics::Solid);
     s.materials.default.insert("E".into(), 200e9);
     s.materials.default.insert("nu".into(), 0.3);
@@ -30,7 +29,7 @@ fn iterative_elasticity_matches_the_direct_solution() {
 #[test]
 fn iterative_thermal_expansion_and_prescribed_displacement() {
     // 2D plate with a prescribed displacement and a mixed constraint (roller)
-    let mesh = SimplexMesh::rectangle(1.0, 0.2, 60, 12);
+    let mesh = common::rect(1.0, 0.2, 60, 12);
     let mut s = ProblemSpec::new(Physics::Solid);
     s.plane = Plane::Stress;
     s.materials.default.insert("E".into(), 1e9);
@@ -52,7 +51,7 @@ fn iterative_thermal_expansion_and_prescribed_displacement() {
 
 #[test]
 fn iterative_poisson_matches() {
-    let mesh = SimplexMesh::block(1.0, 1.0, 1.0, 12, 12, 12);
+    let mesh = common::block(1.0, 1.0, 1.0, 12, 12, 12);
     let mut s = ProblemSpec::new(Physics::Electrostatics);
     s.materials.default.insert("eps_r".into(), 4.0);
     s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Ground }];
@@ -66,7 +65,7 @@ fn iterative_poisson_matches() {
 
 #[test]
 fn heat_stationary_iterative() {
-    let mesh = SimplexMesh::block(1.0, 0.5, 0.5, 14, 7, 7);
+    let mesh = common::block(1.0, 0.5, 0.5, 14, 7, 7);
     let mut s = ProblemSpec::new(Physics::Heat);
     s.materials.default.insert("k".into(), 3.0);
     s.materials.default.insert("Q".into(), 100.0);
@@ -81,7 +80,7 @@ fn heat_stationary_iterative() {
 #[test]
 fn heat_transient_iterative_matches_direct() {
     // large enough to leave the dense eigendecomposition branch and use the BDF2 time stepping
-    let mesh = SimplexMesh::block(1.0, 0.5, 0.5, 12, 6, 6);
+    let mesh = common::block(1.0, 0.5, 0.5, 12, 6, 6);
     let mut s = ProblemSpec::new(Physics::Heat);
     for (k, v) in [("k", 3.0), ("rho", 1000.0), ("Cp", 500.0)] {
         s.materials.default.insert(k.into(), v);
@@ -102,7 +101,7 @@ fn heat_transient_iterative_matches_direct() {
 
 #[test]
 fn eigenfrequencies_by_lobpcg_match_the_factorisation() {
-    let mesh = SimplexMesh::block(1.0, 0.2, 0.2, 14, 3, 3);
+    let mesh = common::block(1.0, 0.2, 0.2, 14, 3, 3);
     let mut s = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         s.materials.default.insert(k.into(), v);

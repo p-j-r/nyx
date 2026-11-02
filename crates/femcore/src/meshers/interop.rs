@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn a_nyx_mesh_survives_the_round_trip_and_the_adaptation() {
-        let nyx = NyxMesh::rectangle(2.0, 1.0, 10, 5);
+        let nyx = crate::geomdrive::plate(2.0, 1.0, 0.2).unwrap().mesh;
         let a = simplex_to_adapt::<2>(&nyx).unwrap();
         a.check().unwrap();
         assert!((a.total_measure().abs() - 2.0).abs() < 1e-12);
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn a_2d_pml_mesh_splits_into_a_valid_nyx_mesh_with_matching_pml_domains() {
-        let nyx = NyxMesh::rectangle(1.0, 1.0, 8, 8);
+        let nyx = crate::geomdrive::plate(1.0, 1.0, 0.125).unwrap().mesh;
         let phys = simplex_to_adapt::<2>(&nyx).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 3) };
         let pml = build_pml(&phys, &spec).unwrap();
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn a_3d_pml_mesh_splits_into_tetrahedra_of_the_right_volume() {
-        let nyx = NyxMesh::block(1.0, 1.0, 1.0, 3, 3, 3);
+        let nyx = crate::geomdrive::block(1.0, 1.0, 1.0, 0.34, 3).unwrap().mesh;
         let phys = simplex_to_adapt::<3>(&nyx).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<3>::uniform(0.5, 1) };
         let pml = build_pml(&phys, &spec).unwrap();

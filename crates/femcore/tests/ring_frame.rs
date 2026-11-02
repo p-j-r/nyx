@@ -20,8 +20,8 @@
 //!    table of the adapter says so (the straight-section table says -y).
 //! 5. The crystal data of a ring are averaged about the ring axis, which makes the sign convention of the third axis irrelevant for
 //!    orientations: the (x, z, -y) treatment of Euler angles is right for rings, too.
+mod common;
 use femcore::material::*;
-use femcore::mesher::*;
 use femcore::problem::*;
 
 type R3 = [[f64; 3]; 3];
@@ -55,8 +55,7 @@ fn turn_about_z(deg: f64) -> R3 {
 /// A ring of mean radius 1 m with a 0.02 m x 0.02 m cross-section (mesh x = r, y = z).
 fn ring_mesh() -> femcore::mesh::SimplexMesh {
     let (rr, a) = (1.0, 0.02);
-    let parts = vec![Part { shape: Shape::Rect { x0: rr - a / 2.0, y0: -a / 2.0, x1: rr + a / 2.0, y1: a / 2.0 }, domain: 1, h: Some(a / 3.0) }];
-    mesh_2d(&Spec2d { parts, h: a / 3.0, min_angle_deg: 25.0 }).unwrap()
+    common::parts_mesh(&[common::part(rr - a / 2.0, -a / 2.0, rr + a / 2.0, a / 2.0, 1, Some(a / 3.0))], a / 3.0)
 }
 
 /// Sapphire ring with its crystal axes given by the rotation `r`, in the frame `frame`.

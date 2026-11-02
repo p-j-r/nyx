@@ -1,4 +1,5 @@
 //! Timings on larger generated models: cargo run --release -p femcore --example bench
+mod benchmesh;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 use femcore::solve::solve;
@@ -17,7 +18,7 @@ fn run(name: &str, mesh: &SimplexMesh, spec: &ProblemSpec) {
 }
 
 fn main() {
-    let m2 = SimplexMesh::rectangle(1.0, 0.5, 300, 150);
+    let m2 = benchmesh::rect(1.0, 0.5, 300, 150);
     println!("2D mesh: {} cells", m2.n_cells());
     let mut es = ProblemSpec::new(Physics::Electrostatics);
     es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
@@ -31,7 +32,7 @@ fn main() {
     so.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     run("solid 6 eigenfrequencies 2D", &m2, &so);
 
-    let m3 = SimplexMesh::block(1.0, 0.1, 0.1, 40, 8, 8);
+    let m3 = benchmesh::block(1.0, 0.1, 0.1, 40, 8, 8);
     println!("3D mesh: {} cells", m3.n_cells());
     let mut s3 = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
@@ -43,7 +44,7 @@ fn main() {
     run("solid 6 eigenfrequencies 3D", &m3, &s3);
 
     for (nx, ny, nz) in [(40usize, 8usize, 8usize)] {
-        let big = SimplexMesh::block(1.0, 0.1, 0.1, nx, ny, nz);
+        let big = benchmesh::block(1.0, 0.1, 0.1, nx, ny, nz);
         let mut sb = s3.clone();
         sb.study = Study::Static;
         for (name, solver) in [("direct", LinearSolver::Direct), ("AMG-CG", LinearSolver::Iterative)] {
@@ -54,7 +55,7 @@ fn main() {
             run(&format!("solid static 3D {nx}x{ny}x{nz} {name}"), &big, &sb);
         }
     }
-    let mw = SimplexMesh::rectangle(22.86e-3, 10.16e-3, 80, 36);
+    let mw = benchmesh::rect(22.86e-3, 10.16e-3, 80, 36);
     let mut em = ProblemSpec::new(Physics::Emw);
     em.study = Study::Modes { freq: 20e9, n_target: 0.9, evanescent: false, n_modes: 6 };
     run("EM modes 2D (Nedelec 2)", &mw, &em);

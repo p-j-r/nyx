@@ -15,9 +15,6 @@ pub fn check_inputs(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String
     if let Some(i) = mesh.points.iter().position(|v| !v.is_finite()) {
         return Err(format!("the mesh has a non-finite coordinate (point {}, axis {}): NaN or infinity in the geometry", i / mesh.dim.max(1), i % mesh.dim.max(1)));
     }
-    if spec.materials.legacy_frame == LegacyFrame::Model {
-        return Err("this problem was saved with the legacy model axes (a 2D mesh as the x-y plane, z out of the plane), which are no longer supported: rebuild it in the wafer axes (x lateral, y propagation, z surface normal; a 2D cross-section is x-z)".into());
-    }
     crate::frame_adapter::check_wafer_input(mesh, spec)?;
     let m = &spec.materials;
     for (name, v) in &m.default {

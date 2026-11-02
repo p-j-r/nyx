@@ -2,7 +2,6 @@
 mod common;
 use common::*;
 use femcore::material::*;
-use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 use femcore::solid::solve_solid;
 
@@ -20,7 +19,7 @@ fn solid_spec(plane: Plane, study: Study) -> ProblemSpec {
 
 #[test]
 fn cubic_with_isotropic_constants_reproduces_the_isotropic_solution() {
-    let mesh = SimplexMesh::block(1.0, 0.2, 0.2, 6, 2, 2);
+    let mesh = common::block(1.0, 0.2, 0.2, 6, 2, 2);
     let (e, nu) = (70e9, 0.33);
     let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
     let mu = e / (2.0 * (1.0 + nu));
@@ -48,7 +47,7 @@ fn cubic_plate_stiffness_depends_on_orientation_like_the_compliance_formula() {
     let (c11, c12, c44) = (165.7e9, 63.9e9, 79.6e9);
     let den = (c11 - c12) * (c11 + 2.0 * c12);
     let (s11, s12, s44) = ((c11 + c12) / den, -c12 / den, 1.0 / c44);
-    let mesh = SimplexMesh::rectangle(1.0, 0.2, 10, 2);
+    let mesh = common::rect(1.0, 0.2, 10, 2);
     let sigma = 1e6;
     for theta in [0.0f64, 45.0] {
         let mut spec = solid_spec(Plane::Stress, Study::Static);
@@ -74,7 +73,7 @@ fn cubic_plate_stiffness_depends_on_orientation_like_the_compliance_formula() {
 
 #[test]
 fn sapphire_modes_follow_the_crystal_symmetry() {
-    let mesh = SimplexMesh::block(1.0, 0.3, 0.3, 8, 3, 3);
+    let mesh = common::block(1.0, 0.3, 0.3, 8, 3, 3);
     let (st, ..) = sapphire();
     let freqs = |euler: [f64; 3]| {
         let mut spec = solid_spec(Plane::Strain, Study::Eigenfrequency { n_modes: 5, f_search: 0.0 });
@@ -89,13 +88,14 @@ fn sapphire_modes_follow_the_crystal_symmetry() {
     for (a, b) in f0.iter().zip(&f120) {
         assert!((a / b - 1.0).abs() < 1e-9, "{f0:?} vs {f120:?}");
     }
-    let f90 = freqs([0.0, 90.0, 0.0]); // c axis turned into the xy plane
+    // the c axis turned along the bar (x): the Young.s modulus along the bar changes, so the bending frequencies change
+    let f90 = freqs([90.0, 90.0, 0.0]);
     assert!(f0.iter().zip(&f90).any(|(a, b)| (a / b - 1.0).abs() > 1e-3), "{f0:?} vs {f90:?}");
 }
 
 #[test]
 fn anisotropic_thermal_expansion_of_a_free_plate_gives_no_stress() {
-    let mesh = SimplexMesh::rectangle(1.0, 0.2, 10, 3);
+    let mesh = common::rect(1.0, 0.2, 10, 3);
     let (ax, ay) = (8e-6, 2e-6);
     let dt = 100.0;
     for plane in [Plane::Stress, Plane::Strain] {
@@ -130,7 +130,7 @@ fn anisotropic_thermal_expansion_of_a_free_plate_gives_no_stress() {
 #[test]
 fn isotropic_plane_strain_free_expansion_is_stress_free() {
     // the physical check of the thermal stress recovery: uniform heating of an unconstrained plate
-    let mesh = SimplexMesh::rectangle(1.0, 0.2, 10, 3);
+    let mesh = common::rect(1.0, 0.2, 10, 3);
     let mut spec = solid_spec(Plane::Strain, Study::Static);
     for (k, v) in [("E", 70e9), ("nu", 0.33), ("alpha", 23e-6)] {
         spec.materials.default.insert(k.into(), v);
@@ -150,7 +150,7 @@ fn isotropic_plane_strain_free_expansion_is_stress_free() {
 #[test]
 fn anisotropic_conductivity_is_exact_for_linear_temperature() {
     // any constant tensor: T = T0 + g.x is an exact solution with matching Dirichlet data
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 6, 4);
+    let mesh = common::rect(1.0, 0.5, 6, 4);
     let k = Tensor::Symmetric { xx: 5.0, yy: 1.0, zz: 1.0, xy: 1.5, yz: 0.0, xz: 0.0 };
     let mut spec = ProblemSpec::new(Physics::Heat);
     spec.materials.aniso.insert(1, Anisotropy { conductivity: Some(k.clone()), euler_deg: [0.0; 3], ..Default::default() });
@@ -185,7 +185,7 @@ fn anisotropic_conductivity_is_exact_for_linear_temperature() {
 #[test]
 fn anisotropic_permittivity_sets_the_capacitance() {
     // plates at x = 0 and x = L, insulated sides: C = eps0 eps_xx H / L per metre
-    let mesh = SimplexMesh::rectangle(1.0, 0.5, 8, 4);
+    let mesh = common::rect(1.0, 0.5, 8, 4);
     let mut spec = ProblemSpec::new(Physics::Electrostatics);
     spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 3.0 }), ..Default::default() });
     spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
@@ -204,7 +204,7 @@ fn anisotropic_waveguide_te_modes_use_the_right_permittivity_component() {
     // n^2 = eps_y - (pi/(a k0))^2, TE01 (E along x) has n^2 = eps_x - (pi/(b k0))^2
     let (a, b, f) = (22.86e-3, 10.16e-3, 12e9);
     let (ex, ey, ez) = (5.0, 3.0, 2.0);
-    let mesh = SimplexMesh::rectangle(a, b, 24, 12);
+    let mesh = common::rect(a, b, 24, 12);
     let k0 = 2.0 * std::f64::consts::PI * f / femcore::emw::C0;
     let n10 = (ey - (std::f64::consts::PI / a / k0).powi(2)).sqrt();
     let n01 = (ex - (std::f64::consts::PI / b / k0).powi(2)).sqrt();
@@ -227,7 +227,7 @@ fn anisotropic_waveguide_te_modes_use_the_right_permittivity_component() {
 
 #[test]
 fn nonpositive_definite_stiffness_is_rejected() {
-    let mesh = SimplexMesh::rectangle(1.0, 0.2, 4, 2);
+    let mesh = common::rect(1.0, 0.2, 4, 2);
     let mut spec = solid_spec(Plane::Strain, Study::Static);
     spec.materials.aniso.insert(1, Anisotropy { stiffness: Some(Stiffness::Cubic { c11: 10e9, c12: 60e9, c44: 5e9 }), ..Default::default() });
     spec.bcs = vec![Bc { on: None, labels: vec![1], kind: fixed([true; 3]) }];

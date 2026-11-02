@@ -1,6 +1,6 @@
 //! The shared thread pool must not make results depend on scheduling: the same problem solved twice in one process
 //! gives bit-identical numbers (work is split into fixed pieces and combined in a fixed order).
-use femcore::mesh::SimplexMesh;
+mod common;
 use femcore::problem::*;
 use femcore::solve::solve;
 
@@ -29,7 +29,7 @@ fn bits(r: &SolveResult) -> Vec<u64> {
 
 #[test]
 fn multigrid_cg_gives_identical_results_every_time() {
-    let m = SimplexMesh::block(1.0, 0.5, 0.5, 24, 12, 12);
+    let m = common::block(1.0, 0.5, 0.5, 24, 12, 12);
     let s = spec(1, Study::Static);
     let a = solve(&m, &s, &mut SolveState::default()).unwrap();
     let b = solve(&m, &s, &mut SolveState::default()).unwrap();
@@ -39,7 +39,7 @@ fn multigrid_cg_gives_identical_results_every_time() {
 
 #[test]
 fn lobpcg_gives_identical_results_every_time() {
-    let m = SimplexMesh::block(2.0, 0.5, 0.5, 40, 10, 10);
+    let m = common::block(2.0, 0.5, 0.5, 40, 10, 10);
     let s = spec(1, Study::Eigenfrequency { n_modes: 4, f_search: 0.0 });
     let a = solve(&m, &s, &mut SolveState::default()).unwrap();
     let b = solve(&m, &s, &mut SolveState::default()).unwrap();

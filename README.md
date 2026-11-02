@@ -175,8 +175,7 @@ wafer, **z is the surface normal and y is the direction of propagation** of a wa
 orientations (Euler Z-X-Z angles of the crystal axes in x, y, z), photoelastic tensors, permittivity, constraint and load components and
 the names of the result fields (`ux, uy, uz`, `szz`, `Ez`, ...) all refer to x, y, z; the solvers work internally in the axes (x, z, -y) of the 2D
 mesh and `frame_adapter::to_model_frame` and `frame_adapter::rename_wafer_fields` translate (the only module that knows both vocabularies; rings get their own table) (tested against a direct fourth-rank transform, against a plate solved
-in both descriptions and against a capacitor in the x-z plane). There is no other public frame: the legacy model axes (mesh = x-y, z out of
-plane) were removed, and a project saved with them is refused with a clear message. 3D problems are unaffected.
+in both descriptions and against a capacitor in the x-z plane). There is no other public frame (a `frame` key in an old project file is ignored). 3D problems are unaffected.
 The four ring chips are built by `femcore::chips` (silicon axes `[p, q, z]`, sapphire axes `[a, c x a, c]`, c tilted 57.6 degrees from z towards the
 propagation direction at azimuth psi = 0; the wafer-frame stiffness equals a direct fourth-rank rotation of the crystal tensor in
 every entry, test `shear_components_of_a_rotated_stiffness_are_in_the_solver_order`).

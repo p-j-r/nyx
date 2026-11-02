@@ -1,5 +1,6 @@
 //! NaN or infinite input must be refused with a message that names the culprit, and a solve whose
 //! result contains non-finite numbers must not be returned as a success.
+mod common;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
 use femcore::solve::solve;
@@ -17,13 +18,13 @@ fn solid_spec(mesh: &SimplexMesh) -> ProblemSpec {
 
 #[test]
 fn a_valid_problem_still_solves() {
-    let m = SimplexMesh::rectangle(1.0, 0.2, 10, 3);
+    let m = common::rect(1.0, 0.2, 10, 3);
     assert!(solve(&m, &solid_spec(&m), &mut SolveState::default()).is_ok());
 }
 
 #[test]
 fn nan_and_infinite_materials_are_refused_by_name() {
-    let m = SimplexMesh::rectangle(1.0, 0.2, 10, 3);
+    let m = common::rect(1.0, 0.2, 10, 3);
     for (key, bad) in [("E", f64::NAN), ("nu", f64::INFINITY), ("rho", f64::NEG_INFINITY)] {
         let mut s = solid_spec(&m);
         s.materials.default.insert(key.into(), bad);
@@ -38,14 +39,15 @@ fn nan_and_infinite_materials_are_refused_by_name() {
 
 #[test]
 fn nan_geometry_is_refused() {
-    let m = SimplexMesh::rectangle(f64::NAN, 0.2, 10, 3);
+    let mut m = common::rect(1.0, 0.2, 10, 3);
+    m.points[3] = f64::NAN;
     let e = solve(&m, &solid_spec(&m), &mut SolveState::default()).unwrap_err();
     assert!(e.contains("non-finite coordinate"), "{e}");
 }
 
 #[test]
 fn nan_boundary_values_and_study_parameters_are_refused() {
-    let m = SimplexMesh::rectangle(1.0, 0.2, 10, 3);
+    let m = common::rect(1.0, 0.2, 10, 3);
     let mut s = solid_spec(&m);
     s.bcs[1].kind = BcKind::Load([0.0, f64::NAN, 0.0]);
     let e = solve(&m, &s, &mut SolveState::default()).unwrap_err();
@@ -61,7 +63,7 @@ fn nan_boundary_values_and_study_parameters_are_refused() {
 
 #[test]
 fn electrostatics_and_heat_refuse_nan_materials_too() {
-    let m = SimplexMesh::rectangle(1.0, 1.0, 6, 6);
+    let m = common::rect(1.0, 1.0, 6, 6);
     let mut es = ProblemSpec::new(Physics::Electrostatics);
     es.materials.default.insert("eps_r".into(), f64::NAN);
     es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];

@@ -3,7 +3,7 @@
 //!
 //!   cargo run --release -p femcore --example eig_beam -- LX LY LZ NXxNYxNZ auto|direct|iter [order]
 //!   cargo run --release -p femcore --example eig_beam -- 1 0.1 0.1 40x8x8 auto      (the slender 70,000-unknown beam of bench.rs)
-use femcore::mesh::SimplexMesh;
+mod benchmesh;
 use femcore::problem::*;
 use std::time::Instant;
 
@@ -17,7 +17,7 @@ fn main() {
         _ => LinearSolver::Auto,
     };
     let order: usize = a.get(5).and_then(|s| s.parse().ok()).unwrap_or(2);
-    let m = SimplexMesh::block(lx, ly, lz, n[0], n[1], n[2]);
+    let m = benchmesh::block(lx, ly, lz, n[0], n[1], n[2]);
     let mut s = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         s.materials.default.insert(k.into(), v);

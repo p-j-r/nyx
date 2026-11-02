@@ -1,5 +1,5 @@
 //! Perfectly matched layers in solid mechanics eigenfrequencies.
-use femcore::mesh::SimplexMesh;
+mod common;
 use femcore::problem::*;
 use femcore::solid::solve_solid;
 
@@ -20,7 +20,7 @@ fn freqs(r: &SolveResult) -> Vec<f64> {
 
 #[test]
 fn pml_with_unit_stretch_reproduces_the_real_solver() {
-    let mesh = SimplexMesh::rectangle(1.0, 0.1, 30, 3);
+    let mesh = common::rect(1.0, 0.1, 30, 3);
     let real = solve_solid(&mesh, &bar_spec(Plane::Stress, 4), &SolveState::default()).unwrap();
     let mut s = bar_spec(Plane::Stress, 4);
     s.materials.pml.insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re: 1.0 });
@@ -33,8 +33,11 @@ fn pml_with_unit_stretch_reproduces_the_real_solver() {
 
 #[test]
 fn real_stretch_equals_a_longer_bar() {
-    let short = SimplexMesh::rectangle(1.0, 0.1, 30, 3);
-    let long = SimplexMesh::rectangle(1.5, 0.1, 30, 3);
+    let short = common::rect(1.0, 0.1, 30, 3);
+    // the same mesh stretched in x, so that the two discretizations are the same one
+    let mut long = short.clone();
+    long.points.chunks_mut(2).for_each(|p| p[0] *= 1.5);
+    let long = femcore::mesh::SimplexMesh::new(2, long.points, long.cells, long.cell_labels, long.facets, long.facet_labels);
     let reference = solve_solid(&long, &bar_spec(Plane::Strain, 4), &SolveState::default()).unwrap();
     let mut s = bar_spec(Plane::Strain, 4);
     s.materials.pml.insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re: 1.5 });
@@ -49,7 +52,7 @@ fn complex_stretch_gives_the_analytic_complex_axial_frequencies() {
     // 1D axial modes of a bar clamped at x = 0: f_n = (2n - 1) c / (4 s L), c = sqrt(E / rho); with
     // s = 1 - 0.1 j the frequency is complex and Q = Re f / (2 |Im f|) = 5
     let (e, rho, l) = (200e9f64, 7850.0f64, 1.0f64);
-    let mesh = SimplexMesh::rectangle(l, 0.1, 80, 2);
+    let mesh = common::rect(l, 0.1, 80, 2);
     let mut s = bar_spec(Plane::Stress, 3);
     s.materials.default.insert("nu".into(), 0.0);
     // roller along y: uy = 0 on the long sides, so only axial motion exists
@@ -71,7 +74,7 @@ fn complex_stretch_gives_the_analytic_complex_axial_frequencies() {
 
 #[test]
 fn a_pml_without_eigenfrequency_study_is_refused() {
-    let mesh = SimplexMesh::rectangle(1.0, 0.1, 10, 2);
+    let mesh = common::rect(1.0, 0.1, 10, 2);
     let mut s = bar_spec(Plane::Stress, 2);
     s.study = Study::Static;
     s.materials.pml.insert(1, Pml { x: PmlDir::Plus, ..Default::default() });
@@ -80,12 +83,10 @@ fn a_pml_without_eigenfrequency_study_is_refused() {
 
 #[test]
 fn beam_on_a_pml_substrate_loses_energy_but_keeps_its_frequency() {
-    use femcore::mesher::*;
-    let rect = |x0, y0, x1, y1, d| Part { shape: Shape::Rect { x0, y0, x1, y1 }, domain: d, h: None };
+    let rect = |x0, z0, x1, z1, d| common::part(x0, z0, x1, z1, d, None);
     // substrate 1 x 0.5 (domain 2) with PML strips on the left/right/bottom (3, 4, 5 and the corners 6, 7),
     // a vertical beam 0.02 x 0.3 (domain 1) on top
-    let spec2 = Spec2d {
-        parts: vec![
+    let parts = [
             rect(0.0, 0.0, 1.0, 0.5, 2),
             rect(0.0, 0.15, 0.2, 0.5, 3),
             rect(0.8, 0.15, 1.0, 0.5, 4),
@@ -93,11 +94,8 @@ fn beam_on_a_pml_substrate_loses_energy_but_keeps_its_frequency() {
             rect(0.0, 0.0, 0.2, 0.15, 6),
             rect(0.8, 0.0, 1.0, 0.15, 7),
             rect(0.49, 0.5, 0.51, 0.8, 1),
-        ],
-        h: 0.03,
-        min_angle_deg: 25.0,
-    };
-    let mesh = mesh_2d(&spec2).unwrap();
+    ];
+    let mesh = common::parts_mesh(&parts, 0.03);
     // fix every boundary facet below the substrate surface (the outer edge of the layers)
     let mut outer: Vec<i32> = (0..mesh.n_facets())
         .filter(|&f| {
@@ -119,9 +117,16 @@ fn beam_on_a_pml_substrate_loses_energy_but_keeps_its_frequency() {
     s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
     let r = solve_solid(&mesh, &s, &SolveState::default()).unwrap();
     // the beam alone, clamped at its foot
-    let beam = mesh_2d(&Spec2d { parts: vec![rect(0.49, 0.5, 0.51, 0.8, 1)], h: 0.01, min_angle_deg: 25.0 }).unwrap();
+    let beam = common::parts_mesh(&[rect(0.49, 0.5, 0.51, 0.8, 1)], 0.01);
+    // the foot is the boundary at the bottom of the beam
+    let foot: Vec<i32> = {
+        let mut l: Vec<i32> = (0..beam.n_facets()).filter(|&f| beam.point(beam.facet(f)[0] as usize)[1] < 0.5 + 1e-9 && beam.point(beam.facet(f)[1] as usize)[1] < 0.5 + 1e-9).map(|f| beam.facet_labels[f]).collect();
+        l.sort();
+        l.dedup();
+        l
+    };
     let mut b = bar_spec(Plane::Strain, 1);
-    b.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    b.bcs = vec![Bc { on: None, labels: foot, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     let fb = solve_solid(&beam, &b, &SolveState::default()).unwrap().solutions[0].value.unwrap();
     let f = freqs(&r);
     let near = f.iter().cloned().min_by(|a, c| (a - fb).abs().partial_cmp(&(c - fb).abs()).unwrap()).unwrap();
@@ -138,8 +143,7 @@ fn low_reflecting_boundary_gives_the_analytic_damped_bar_modes() {
     // so Re f_n = n c / (2 L) and Q_n = n pi / ln((zeta + 1)/(zeta - 1))
     let (e, rho, l) = (200e9f64, 7850.0f64, 1.0f64);
     let layer = 0.01;
-    let mut mesh = SimplexMesh::rectangle(l, 0.05, 200, 2);
-    mesh.relabel(&[(vec![l - layer, 0.0, l, 0.05], 2)], &[]).unwrap();
+    let mesh = common::rect_split_x(l, 0.05, l - layer, layer / 4.0);
     let mut s = ProblemSpec::new(Physics::Solid);
     s.plane = Plane::Strain;
     for (k, v) in [("E", e), ("nu", 0.0), ("rho", rho)] {

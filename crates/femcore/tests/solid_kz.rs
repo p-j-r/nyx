@@ -1,5 +1,5 @@
 //! Elastic modes of a cross-section with an out-of-plane wave number.
-use femcore::mesh::SimplexMesh;
+mod common;
 use femcore::problem::*;
 
 fn spec(kz: f64, f_search: f64, n: usize) -> ProblemSpec {
@@ -16,7 +16,7 @@ fn spec(kz: f64, f_search: f64, n: usize) -> ProblemSpec {
 fn clamped_plate_shear_modes_at_zero_wave_number() {
     // kz = 0 decouples u_z: clamped on all sides, f = (1/2) sqrt(mu/rho) sqrt(1/a^2 + 1/b^2)
     let (a, b) = (0.02, 0.01);
-    let mesh = SimplexMesh::rectangle(a, b, 24, 12);
+    let mesh = common::rect(a, b, 24, 12);
     let mut s = spec(0.0, 0.0, 4);
     s.bcs = vec![Bc { on: None, labels: vec![1, 2, 3, 4], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     let r = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
@@ -31,7 +31,7 @@ fn free_rod_extensional_and_flexural_branches() {
     // a free square rod at small kz a: extensional wave omega = sqrt(E/rho) kz (Young's rod), bending
     // omega = sqrt(E I / (rho A)) kz^2 with I/A = a^2 / 12 (Euler-Bernoulli)
     let a = 0.01;
-    let mesh = SimplexMesh::rectangle(a, a, 16, 16);
+    let mesh = common::rect(a, a, 16, 16);
     let kz = 20.0; // kz a = 0.2: corrections are of order a few percent for bending
     let c_ext = (70e9f64 / 2700.0).sqrt();
     let f_ext = c_ext * kz / (2.0 * std::f64::consts::PI);
@@ -53,7 +53,7 @@ fn pml_in_the_cross_section_gives_the_analytic_complex_frequency() {
     // axial modes of a bar clamped at x = 0 with a complex stretch s = 1 - 0.1 j: f_n = (2n-1) c / (4 s L),
     // Q = 5; with kz = 0 the u_z (shear) modes appear as well, so pick the pair that matches
     let (e, rho, l) = (200e9f64, 7850.0f64, 1.0f64);
-    let mesh = SimplexMesh::rectangle(l, 0.1, 80, 2);
+    let mesh = common::rect(l, 0.1, 80, 2);
     let mut s = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", e), ("nu", 0.0), ("rho", rho)] {
         s.materials.default.insert(k.into(), v);
@@ -76,13 +76,13 @@ fn pml_in_the_cross_section_gives_the_analytic_complex_frequency() {
 
 #[test]
 fn a_floquet_periodic_3d_cell_reproduces_the_cross_section_solver() {
-    // a free square rod: a 3D cell of length l, periodic in z with phase kz l, against the 2D solver at kz
-    use femcore::mesher::{extrude, Layer};
+    // a free square rod: a 3D cell of length l along y, periodic in y with phase k l, against the 2D solver at kz
+    use femcore::mesher::{extrude_y, Layer};
     let a = 0.01;
-    let m2 = SimplexMesh::rectangle(a, a, 6, 6);
+    let m2 = common::rect(a, a, 6, 6);
     let l = 0.01;
     let kz = 20.0;
-    let mesh3 = extrude(&m2, &[Layer { thickness: l, n: 2, domain_offset: 0 }], 0.0).unwrap();
+    let mesh3 = extrude_y(&m2, &[Layer { thickness: l, n: 2, domain_offset: 0 }], 0.0).unwrap();
     let c_ext = (70e9f64 / 2700.0).sqrt();
     let f_ext = c_ext * kz / (2.0 * std::f64::consts::PI);
     let mut s3 = spec(kz, f_ext, 6);

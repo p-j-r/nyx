@@ -13,7 +13,7 @@ fn es_spec(eps: f64) -> ProblemSpec {
 #[test]
 fn es2d_parallel_plates_have_a_linear_potential() {
     // 1 x 0.5 rectangle, V = 1 on boundary 1 (x = 0), ground on 4 (x = 1), eps_r 4.2: V = 1 - x, which P2 reproduces exactly
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.5, 6, 3);
+    let mesh = common::rect(1.0, 0.5, 6, 3);
     let r = femcore::scalar::solve_electrostatics(&mesh, &es_spec(4.2)).unwrap();
     let v = &r.solutions[0].field("V").unwrap().values;
     let x = mesh.dof_coordinates(2);
@@ -27,7 +27,7 @@ fn es2d_parallel_plates_have_a_linear_potential() {
 #[test]
 fn es3d_parallel_plates_have_a_linear_potential() {
     // V = 1 on the face x = 0 (boundary 1), ground on x = lx (boundary 4 of the block is z = lz, so use 6)
-    let mesh = femcore::mesh::SimplexMesh::block(1.0, 0.4, 0.3, 4, 2, 2);
+    let mesh = common::block(1.0, 0.4, 0.3, 4, 2, 2);
     let mut s = es_spec(4.2);
     s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Ground }];
     let r = femcore::scalar::solve_electrostatics(&mesh, &s).unwrap();
@@ -39,8 +39,7 @@ fn es3d_parallel_plates_have_a_linear_potential() {
 
 #[test]
 fn es_series_capacitor_with_two_dielectrics() {
-    let mut mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 1.0, 8, 8);
-    mesh.relabel(&[(vec![0.5, 0.0, 1.0, 1.0], 2)], &[]).unwrap();
+    let mesh = common::rect_split_x(1.0, 1.0, 0.5, 0.125);
     let mut s = es_spec(1.0);
     s.materials.set(1, "eps_r", 2.0);
     s.materials.set(2, "eps_r", 8.0);
@@ -59,7 +58,7 @@ fn heat_spec(k: f64) -> ProblemSpec {
 fn heat_convection_gives_the_1d_profile() {
     // 1 x 0.2 plate, T = 100 at x = 0, convection (h, text) at x = 1, the long sides insulated:
     // T = T0 - (T0 - text) h x / (k + h L), linear, so P2 reproduces it exactly
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 8, 2);
+    let mesh = common::rect(1.0, 0.2, 8, 2);
     let (k, h, text, t0) = (2.0, 5.0, 20.0, 100.0);
     let mut s = heat_spec(k);
     s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(t0) }, Bc { on: None, labels: vec![4], kind: BcKind::Convection { h, text } }];
@@ -73,7 +72,7 @@ fn heat_convection_gives_the_1d_profile() {
 #[test]
 fn heat_source_gives_the_parabolic_profile() {
     // -k T'' = Q, T = 0 at x = 0, insulated at x = L: T = Q (L x - x^2 / 2) / k, quadratic, so P2 is exact
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 8, 2);
+    let mesh = common::rect(1.0, 0.2, 8, 2);
     let (k, q) = (2.0, 3.0);
     let mut s = heat_spec(k);
     s.materials.default.insert("Q".into(), q);
@@ -89,7 +88,7 @@ fn heat_source_gives_the_parabolic_profile() {
 fn transient_heat_follows_the_decaying_sine() {
     // 1 x 0.2, k 2, rho cp 1, T0 = sin(pi x), T = 0 on boundaries 1 and 4, 21 output times 0..0.2:
     // T = sin(pi x) exp(-k pi^2 t); the dense semi-discrete solution is exact in time, so only the mesh remains
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 20, 2);
+    let mesh = common::rect(1.0, 0.2, 20, 2);
     let mut s = heat_spec(2.0);
     s.materials.default.insert("rho".into(), 1.0);
     s.materials.default.insert("Cp".into(), 1.0);
@@ -111,7 +110,7 @@ fn transient_heat_follows_the_decaying_sine() {
 #[test]
 fn transient_bdf2_agrees_with_decay() {
     // big enough to leave the dense path: analytic decay of the first mode
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 0.2, 60, 14);
+    let mesh = common::rect(1.0, 0.2, 60, 14);
     let mut s = heat_spec(2.0);
     s.materials.default.insert("rho".into(), 1.0);
     s.materials.default.insert("Cp".into(), 1.0);
@@ -128,7 +127,7 @@ fn transient_bdf2_agrees_with_decay() {
 
 #[test]
 fn transient_convection_cools_to_ambient() {
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 1.0, 6, 6);
+    let mesh = common::rect(1.0, 1.0, 6, 6);
     let mut s = heat_spec(100.0);
     s.materials.default.insert("rho".into(), 1000.0);
     s.materials.default.insert("Cp".into(), 500.0);
@@ -145,7 +144,7 @@ fn transient_convection_cools_to_ambient() {
 
 #[test]
 fn errors_are_reported() {
-    let mesh = femcore::mesh::SimplexMesh::rectangle(1.0, 1.0, 4, 4);
+    let mesh = common::rect(1.0, 1.0, 4, 4);
     assert!(femcore::scalar::solve_electrostatics(&mesh, &ProblemSpec::new(Physics::Electrostatics)).is_err());
     let mut s = es_spec(1.0);
     s.bcs[0].labels = vec![9];

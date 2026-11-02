@@ -2,7 +2,7 @@
 //! largest value seen in every stage that the solver reports (see `femcore::progress`).
 //!
 //!   cargo run --release -p femcore --example mem_profile -- NX NY NZ [p1|p2] [static|eigen] [auto|direct|iter]
-use femcore::mesh::SimplexMesh;
+mod benchmesh;
 use femcore::problem::*;
 use femcore::progress::Progress;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -57,7 +57,7 @@ fn main() {
         Some("iter") => LinearSolver::Iterative,
         _ => LinearSolver::Auto,
     };
-    let mesh = SimplexMesh::block(n[0] as f64, n[1] as f64, n[2] as f64, n[0], n[1], n[2]);
+    let mesh = benchmesh::block(n[0] as f64, n[1] as f64, n[2] as f64, n[0], n[1], n[2]);
     println!("mesh: {} cells, {:.2} GB in use after meshing", mesh.n_cells(), gb(CURRENT.load(Ordering::Relaxed)));
     let mut s = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {

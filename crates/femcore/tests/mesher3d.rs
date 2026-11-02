@@ -3,7 +3,6 @@
 //! solutions on the meshes.
 mod common;
 use femcore::mesh::SimplexMesh;
-use femcore::mesher::Shape;
 use femcore::mesher3d::*;
 use femcore::problem::*;
 use std::collections::HashMap;
@@ -173,17 +172,6 @@ fn two_bodies_get_their_domain_numbers() {
     let (v1, v2) = (domain_volume(&m, 1), domain_volume(&m, 2));
     assert!((v1 + v2 - 0.5).abs() < 1e-12);
     assert!((v2 - 0.25).abs() < 0.05 * 0.25, "interface within an element size: {v2}");
-}
-
-#[test]
-fn an_extruded_outline() {
-    let tri = Shape::Polygon(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
-    let s = spec(vec![(Solid::Extrusion { profile: tri, z0: 0.0, z1: 0.3 }, 1)], 0.05);
-    let (m, _) = mesh_3d(&s).unwrap();
-    check_conforming(&m);
-    assert!((domain_volume(&m, 1) - 0.15).abs() / 0.15 < 0.03, "{}", domain_volume(&m, 1));
-    // outline edges 1..3, bottom 4, top 5
-    assert_eq!(m.boundary_labels(), vec![1, 2, 3, 4, 5]);
 }
 
 #[test]

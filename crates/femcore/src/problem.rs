@@ -49,10 +49,6 @@ impl Physics {
 /// source), `E`, `nu`, `alpha`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Materials {
-    /// Read from files only: projects saved while the Geometry tab still had an Axes toggle may say `"frame": "Model"`. They are refused
-    /// when solved (`validate`); there is no legacy frame any more.
-    #[serde(default, rename = "frame", skip_serializing)]
-    pub(crate) legacy_frame: LegacyFrame,
     pub domains: BTreeMap<i32, BTreeMap<String, f64>>,
     pub default: BTreeMap<String, f64>,
     /// Anisotropic data per domain (crystal stiffness, tensor conductivity, permittivity and
@@ -62,14 +58,6 @@ pub struct Materials {
     /// Perfectly matched layers per domain (waveguide mode analysis).
     #[serde(default)]
     pub pml: BTreeMap<i32, Pml>,
-}
-
-/// The `frame` key of old project files: `Wafer` is what every problem is, `Model` (a 2D mesh as the x-y plane, z out of it) is refused.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
-pub(crate) enum LegacyFrame {
-    #[default]
-    Wafer,
-    Model,
 }
 
 /// Which side of a domain a perfectly matched layer absorbs towards, per axis.

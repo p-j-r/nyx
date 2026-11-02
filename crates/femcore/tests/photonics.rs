@@ -1,7 +1,7 @@
 //! Nanophotonic scale: a 450 nm x 230 nm silicon strip (n = 3.45) on sapphire (n = 1.746) under air at 1550 nm with PML on
 //! all sides. The guided mode must lie between the cladding and core indices, be lossless, and be converged under mesh
 //! refinement (the finest meshes of the convergence study give neff = 2.3175).
-use femcore::mesher::*;
+mod common;
 use femcore::problem::*;
 
 fn sos_mesh(h_coarse: f64, h_zone: f64, h_fine: f64) -> femcore::mesh::SimplexMesh {
@@ -10,9 +10,9 @@ fn sos_mesh(h_coarse: f64, h_zone: f64, h_fine: f64) -> femcore::mesh::SimplexMe
     let (w_si, h_si) = (450e-9, 230e-9);
     let (x0, x1, y0, y1) = (-w_sapph / 2.0, w_sapph / 2.0, -h_sapph / 2.0, h_sapph / 2.0 + h_air);
     let ys = h_sapph / 2.0;
-    let rect = |xa: f64, ya: f64, xb: f64, yb: f64, d: i32, h: Option<f64>| Part { shape: Shape::Rect { x0: xa, y0: ya, x1: xb, y1: yb }, domain: d, h };
+    let rect = common::part;
     let zone = 1.5 * um;
-    let parts = vec![
+    let parts = [
         rect(x0 - w_pml, y0 - w_pml, x1 + w_pml, y1 + w_pml, 3, None),
         rect(x0, y0, x1, ys, 1, None),
         rect(-zone, ys - zone, zone, ys, 1, Some(h_zone)),
@@ -27,7 +27,7 @@ fn sos_mesh(h_coarse: f64, h_zone: f64, h_fine: f64) -> femcore::mesh::SimplexMe
         rect(x0 - w_pml, y1, x0, y1 + w_pml, 10, None),
         rect(x1, y1, x1 + w_pml, y1 + w_pml, 11, None),
     ];
-    mesh_2d(&Spec2d { parts, h: h_coarse, min_angle_deg: 25.0 }).unwrap()
+    common::parts_mesh(&parts, h_coarse)
 }
 
 fn optical_spec() -> ProblemSpec {
@@ -51,7 +51,7 @@ fn optical_spec() -> ProblemSpec {
 }
 
 #[test]
-fn shape_mesh_of_overlapping_rectangles_has_no_degenerate_cells() {
+fn a_mesh_of_overlapping_rectangles_has_no_degenerate_cells() {
     // the layers touch the substrate and the strip at coincident edges; rounding must not leave slivers
     let mesh = sos_mesh(0.5e-6, 0.12e-6, 40e-9);
     for c in 0..mesh.n_cells() {
