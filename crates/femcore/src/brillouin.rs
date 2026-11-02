@@ -1174,12 +1174,6 @@ pub fn photo_from_spec(p: &PhotoSpec, stiffness_euler: Option<[f64; 3]>) -> Phot
     photo_with_rotation(p, &r)
 }
 
-/// Transitional (the ring until phase 6 of the kernel port): as `photo_from_spec` for an orientation in the model axes of the ring.
-pub fn photo_from_spec_model(p: &PhotoSpec, stiffness_euler: Option<[f64; 3]>) -> PhotoElastic {
-    let r = crate::material::rotation(if p.follow_stiffness { stiffness_euler.unwrap_or(p.euler_deg) } else { p.euler_deg });
-    photo_with_rotation(p, &r)
-}
-
 fn photo_with_rotation(p: &PhotoSpec, r: &M3) -> PhotoElastic {
     let r = *r;
     match &p.kind {
@@ -1261,7 +1255,7 @@ fn solve_ring(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, r_ref:
     mech.physics = Physics::Solid;
     mech.brillouin = None;
     mech.out_of_plane = None;
-    let photoelastic: BTreeMap<i32, PhotoElastic> = b.photoelastic.iter().map(|(d, p)| (*d, photo_from_spec_model(p, spec.materials.aniso.get(d).map(|a| a.euler_deg)).average_about_axis(1, 16))).collect();
+    let photoelastic: BTreeMap<i32, PhotoElastic> = b.photoelastic.iter().map(|(d, p)| (*d, photo_from_spec(p, spec.materials.aniso.get(d).map(|a| a.euler_deg)).average_about_axis(1, 16))).collect();
     let moving: BTreeSet<i32> = b.moving.iter().copied().collect();
     let pml_domains: BTreeSet<i32> = spec.materials.pml.keys().copied().collect();
     let opts = GainOptions { q_cap: b.q_cap, length: 2.0 * std::f64::consts::PI * r_ref, strain: if b.conjugate_strain { StrainConvention::Conjugate } else { StrainConvention::AsIs }, body_domains: moving.clone(), pml_domains, ..Default::default() };

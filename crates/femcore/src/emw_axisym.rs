@@ -1,5 +1,5 @@
 //! Electromagnetic eigenmodes of a body of revolution (ring resonators, disks, coaxial cavities) with
-//! azimuthal dependence `exp(-i m theta)` on the (r, z) half plane (mesh x = r, y = z): the frequency is
+//! azimuthal dependence `exp(-i m theta)` on the (r, z) half plane (mesh x = r, mesh z = z; theta is wafer y, so `m > 0` runs along +y): the frequency is
 //! sought at a fixed azimuthal order `m`, so `m / (k0 R)` is the effective index of a ring of radius `R`.
 //!
 //! Unknowns: `(E_r, E_z)` in the same degree-2 Nedelec space as the waveguide mode solver and `E_theta`
@@ -39,7 +39,7 @@ impl AxiMaterial {
         AxiMaterial { mu: vec![[c(1.0, 0.0); 3]; eps.len()], eps }
     }
 
-    /// Absorbing layers by complex coordinate stretching of `r` and `z` (`Pml::x` is the r direction, `Pml::y` the z direction).
+    /// Absorbing layers by complex coordinate stretching of `r` and `z` (`Pml::x` is the r direction, `Pml::z` the z direction).
     /// With the stretches `s_r = dr~/dr`, `s_z` and `s_theta = r~/r`, the layer is the material
     /// `eps_i -> eps_i s_1 s_2 s_3 / s_i^2` (and the same for `mu`) in the physical coordinates, `r~` being the integral of
     /// `s_r` from the interface of the layer.
@@ -47,7 +47,7 @@ impl AxiMaterial {
         let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
         for ci in 0..mesh.n_cells() {
             let l = mesh.cell_labels[ci];
-            if pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off) {
+            if pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off) {
                 let e = boxes.entry(l).or_insert(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]));
                 for &v in mesh.cell(ci) {
                     let pt = mesh.point(v as usize);
@@ -67,7 +67,7 @@ impl AxiMaterial {
                     cen[k] += mesh.point(v as usize)[k] / 3.0;
                 }
             }
-            let (sr, sz) = crate::emw_pml::stretch(p, [p.x, p.y], cen, *lo, *hi);
+            let (sr, sz) = crate::emw_pml::stretch(p, [p.x, p.z], cen, *lo, *hi);
             // r~ at the centre of the cell
             let r = cen[0];
             let len = (hi[0] - lo[0]).max(1e-300);
@@ -316,4 +316,21 @@ pub fn mode_samples(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: 
         }
     }
     out
+}
+
+/// The power `P = 2 Int Re(conj(E_z) H_r - conj(E_r) H_z) dA` of mode `j` along `+theta` (W for the amplitudes of the mode), with the
+/// fields of the time convention `e^{j omega t}` (`H = j curl E / (omega mu)`). With the azimuthal dependence `exp(-i m theta)` it is positive
+/// for `m > 0` and negative for `m < 0`: the wave runs along `+theta`, wafer `+y`.
+pub fn power_along_theta(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: usize) -> f64 {
+    let ctx = AxiCtx::new(mesh, modes.order);
+    let (pts, wts) = fine_rule();
+    let omega = 2.0 * std::f64::consts::PI * modes.freqs[j];
+    let mut p = 0.0;
+    for ci in 0..mesh.n_cells() {
+        for (l, w) in pts.iter().zip(&wts) {
+            let f = ctx.fields(&modes.vectors[j], modes.m, omega, mat, ci, l);
+            p += 2.0 * (f.e[1].conj() * f.h[0] - f.e[0].conj() * f.h[1]).re * w * ctx.geo.vol[ci];
+        }
+    }
+    p
 }

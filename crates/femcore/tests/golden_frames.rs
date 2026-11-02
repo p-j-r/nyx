@@ -106,7 +106,15 @@ fn golden(name: &str, r: &SolveResult, tol: f64) {
             // a Stokes parameter that is zero prints with either sign
             for x in sc.values_mut() {
                 if let Some(t) = x.as_str() {
-                    *x = Value::String(t.replace("-0.000", "+0.000"));
+                    let mut t = t.replace("-0.000", "+0.000");
+                    // the Q of a lossless ring mode is 1e15 and more: the round-off of an imaginary part that is zero
+                    if name.starts_with("brillouin_ring") {
+                        if let Some(i) = t.find("| Q ") {
+                            let end = t[i + 4..].find(' ').map_or(t.len(), |e| i + 4 + e);
+                            t.replace_range(i + 4..end, "-");
+                        }
+                    }
+                    *x = Value::String(t);
                 }
             }
         }
@@ -516,4 +524,36 @@ fn golden_brillouin_wire_in_a_tilted_crystal() {
 #[test]
 fn golden_brillouin_forward_scattering_in_a_tilted_crystal() {
     golden_brillouin("brillouin_wire_forward", wire_brillouin(&wire_mesh(), [30.0, 40.0, 10.0], false, 2));
+}
+
+// ---------------------------------------------------------------------- Brillouin scattering of a ring
+
+/// The cross-section of `wire_mesh` on a ring of radius 20 mm (mesh x = r, mesh z = z).
+fn ring_wire_mesh(radius: f64) -> femcore::mesh::SimplexMesh {
+    let mesh = wire_mesh();
+    let mut pts = mesh.points.clone();
+    for i in 0..mesh.n_points() {
+        pts[2 * i] += radius;
+    }
+    femcore::mesh::SimplexMesh::new(2, pts, mesh.cells.clone(), mesh.cell_labels.clone(), mesh.facets.clone(), mesh.facet_labels.clone())
+}
+
+fn golden_ring(name: &str, euler: [f64; 3]) {
+    let radius = 20e-3;
+    let mesh = ring_wire_mesh(radius);
+    let mut spec = wire_brillouin(&mesh, euler, true, 1);
+    spec.brillouin.as_mut().unwrap().viscosity.clear();
+    spec.brillouin.as_mut().unwrap().ring_radius = Some(radius);
+    golden(name, &solve(&mesh, &spec), 1e-6);
+}
+
+#[test]
+fn golden_ring_brillouin_cubic_crystal() {
+    golden_ring("brillouin_ring_cubic", [0.0; 3]);
+}
+
+#[test]
+fn golden_ring_brillouin_tilted_crystal() {
+    // a crystal ring is averaged over rotations about the ring axis, so its orientation matters only through the angle to the normal
+    golden_ring("brillouin_ring_tilted", [30.0, 40.0, 10.0]);
 }

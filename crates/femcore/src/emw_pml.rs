@@ -449,11 +449,6 @@ pub fn cell_stretches(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, 
     cell_stretches_by(mesh, pml, |p, d| crate::section::mesh_pml_dirs(p, d))
 }
 
-/// Transitional (`solid_kz` until phase 4): the layers of a 2D mesh given along the model axes x, y.
-pub(crate) fn cell_stretches_model_frame(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C; 3]> {
-    cell_stretches_by(mesh, pml, |p, _| [p.x, p.y, p.z])
-}
-
 fn cell_stretches_by(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>, dirs: impl Fn(&Pml, usize) -> [PmlDir; 3]) -> Vec<[C; 3]> {
     let d = mesh.dim;
     let mut boxes: std::collections::BTreeMap<i32, ([f64; 3], [f64; 3])> = Default::default();

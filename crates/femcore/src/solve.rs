@@ -38,31 +38,13 @@ fn solve_checked(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState)
     }
     progress::check()?;
     crate::validate::check_inputs(mesh, spec)?;
-    // kernels that already read the problem in wafer axes (`section`) need no model-frame translation
-    let wafer_native = match spec.physics {
-        Physics::Electrostatics | Physics::Heat | Physics::Emw => true,
-        Physics::Solid => true,
-        // a ring (`ring_radius`) is the axisymmetric family, ported in phase 6
-        Physics::Brillouin => spec.brillouin.as_ref().is_some_and(|b| b.ring_radius.is_none()),
-    };
-    let result = if mesh.dim == 2 && !wafer_native {
-        // solve in the axes of the 2D model and name the results in the wafer axes
-        let inner = crate::frame_adapter::to_model_frame(spec, 2);
-        let mut result = solve_model_frame(mesh, &inner, state)?;
-        let unmapped = crate::frame_adapter::rename_wafer_fields(&mut result, crate::frame_adapter::Kernel::of(spec));
-        if !unmapped.is_empty() {
-            result.log.push(format!("warning: no wafer name for the result fields {unmapped:?}; they keep the names of the solver"));
-        }
-        debug_assert!(unmapped.is_empty(), "result fields without a wafer name: {unmapped:?}");
-        result
-    } else {
-        solve_model_frame(mesh, spec, state)?
-    };
+    // every kernel reads the problem in wafer axes and names its fields in wafer axes (`section`)
+    let result = dispatch(mesh, spec, state)?;
     crate::validate::check_result(&result)?;
     Ok(result)
 }
 
-fn solve_model_frame(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState) -> Result<SolveResult, String> {
+fn dispatch(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState) -> Result<SolveResult, String> {
     match spec.physics {
         Physics::Electrostatics => crate::scalar::solve_electrostatics(mesh, spec),
         Physics::Heat => crate::scalar::solve_heat(mesh, spec, state),

@@ -66,8 +66,8 @@ Step 4 test arithmetic (the commit message of step 4 words it loosely): 614 - 8 
 ## Open items
 
 * **Optical mode direction.** Superseded by the kernel port (`docs/KERNEL_PORT_STATUS.md`): the 2D optical mode solvers now propagate along +y;
-  the Brillouin kernels still use the old -y direction until their phase. (Before the port the kernels solved `exp(-i beta z_model)`, a wave along -y.) The same goes for the ring: `m > 0` is **not**
-  documented as +y, because the kernel's time convention is unverified.
+  and so do the Brillouin kernels. (Before the port the kernels solved `exp(-i beta z_model)`, a wave along -y.) The ring: `m > 0` is a wave along +y, verified
+  with a signed test (`tests/ring_frame.rs`, `emw_axisym::power_along_theta`).
 * Historical design documents (`GEOMETRY_ARCHITECTURE.md`, `GEOM_HANDOFF.md`, `SWEEP_CACHING_PROPOSAL.md`) still describe the deleted front-ends;
   they are records, not updated.
 * `frame_adapter` is `#[doc(hidden)] pub` (not `pub(crate)`) because tests and examples drive kernels directly.

@@ -170,7 +170,6 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         CrossSection::Kz(k) => k,
         CrossSection::Axisymmetric(m) => m,
     };
-    let wafer = matches!(kind, CrossSection::Kz(_));
     let t0 = Instant::now();
     if mesh.dim != 2 {
         return Err("an out-of-plane wave number applies to a 2D cross-section".into());
@@ -181,10 +180,8 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
     let mut c6 = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?;
-    if wafer {
-        // the blocks of the displacement are (x, z, y): the stiffness in the Voigt order of those axes
-        c6 = c6.iter().map(|c| crate::section::plane_stiffness(c, 2)).collect();
-    }
+    // the blocks of the displacement are (x, z, y) (for a ring: r, z, theta): the stiffness in the Voigt order of those axes
+    c6 = c6.iter().map(|c| crate::section::plane_stiffness(c, 2)).collect();
     if let CrossSection::Axisymmetric(_) = kind {
         // a crystal's axes stay fixed while the local frame turns around the ring: the stiffness of the axisymmetric
         // model is the average over rotations about the ring axis (the y direction of the (r, z) plane); exact for isotropic materials
@@ -200,8 +197,8 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         if let BcKind::Fixed { fixed, .. } = &bc.kind {
             let bd = boundary_dofs(mesh, &bc.labels, order);
             for k in 0..3 {
-                // block k is wafer axis `PLANE_AXES[k]` for a wafer-frame problem
-                if fixed[if wafer { PLANE_AXES[k] } else { k }] {
+                // block k is wafer axis `PLANE_AXES[k]`
+                if fixed[PLANE_AXES[k]] {
                     for &dof in &bd {
                         fixed_set.insert(dof + k * n1);
                     }
@@ -210,12 +207,7 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    // (the axisymmetric kind still reads its layers in the model axes until phase 6)
-    let stretch = match (spec.materials.has_pml(), wafer) {
-        (false, _) => None,
-        (true, true) => Some(crate::emw_pml::cell_stretches(mesh, &spec.materials.pml)),
-        (true, false) => Some(crate::emw_pml::cell_stretches_model_frame(mesh, &spec.materials.pml)),
-    };
+    let stretch = if spec.materials.has_pml() { Some(crate::emw_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
     let k = match kind {
         CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
         CrossSection::Axisymmetric(m) => crate::solid_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
@@ -301,8 +293,8 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         let (ux, uy, uz) = (comp(0), comp(1), comp(2));
         let mag: Vec<f64> = (0..n1).map(|a| (ux[a].norm_sqr() + uy[a].norm_sqr() + uz[a].norm_sqr()).sqrt()).collect();
         let re = |v: &[C]| -> Vec<f64> { v.iter().map(|z| z.re).collect() };
-        // the names of the three blocks: wafer (x, z, y) for a wafer-frame problem, the model's (x, y, z) otherwise
-        let names = if wafer { ["ux", "uz", "uy"] } else { ["ux", "uy", "uz"] };
+        // the names of the three blocks: wafer (x, z, y); for a ring (r, z, theta) = (x, z, y)
+        let names = ["ux", "uz", "uy"];
         let fields = vec![
             Field { name: "|u|".into(), unit: "a.u.".into(), values: mag },
             Field { name: names[0].into(), unit: "a.u.".into(), values: re(&ux) },

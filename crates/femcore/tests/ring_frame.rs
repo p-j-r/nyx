@@ -1,25 +1,24 @@
-//! The ring (axisymmetric) path in the wafer frame.
+//! The ring (axisymmetric) kernels in the wafer frame.
 //!
-//! A ring resonator is solved on the (r, z) half-plane: mesh x = r, mesh y = z, and the azimuthal direction theta is the third
+//! A ring resonator is solved on the (r, z) half-plane: mesh x = r, mesh z = z, and the azimuthal direction theta is the third
 //! displacement/field component. In the wafer frame the ring's local axes are (x, y, z) = (r, theta, z): x outward, y along the ring,
-//! z the surface normal. `solve` turns a 2D wafer-frame problem into the solvers' model frame (`frame_adapter::to_model_frame`) and
-//! renames the result fields (`frame_adapter::rename_wafer_fields`); the adapter has a ring variant (`Kernel::Ring`) for the sign of the third
-//! component. These tests pin down what the ring path needs from it: invariances, a naming check, and the sign of u_theta.
+//! z the surface normal (right-handed), so the kernels read a wafer-frame problem as it is, with the components (u_r, u_z, u_theta) =
+//! (ux, uz, uy). These tests pin down what the ring needs:
 //!
 //! 1. A crystal ring is averaged over rotations about the ring axis, which must be the wafer normal z. So the elastic modes cannot
 //!    depend on the azimuth of the crystal: a c axis turned about z by any angle (sapphire is trigonal, so only a lab rotation about z is a symmetry, not
 //!    "tilting towards x instead of y", which also turns the crystal about its own c axis) gives the same
 //!    frequencies, while a different tilt angle does not (the test can fail).
-//! 2. The same crystal described in the legacy model axes (2D mesh = x-y plane, the ring axis is y) gives the same frequencies as its
-//!    wafer description.
+//! 2. The frequencies of a tilted crystal ring equal the numbers frozen from the kernels when the model axes (r, z, theta) were still a
+//!    public frame.
 //! 3. A torsional mode (m = 0, only u_theta) is called `uy` in the wafer frame, never `ux` or `uz`.
-//!
-//! 4. The sign of u_theta: an eigenvector has an arbitrary sign, so a mode cannot show it, but a rigid translation can. Along a fixed
-//!    Cartesian X it is u_r = cos(theta), u_theta = -sin(theta), whose exp(-i theta) part is (1, -i): the stiffness of the m = 1 kernel must
-//!    annihilate (u_r, u_z, u_theta) = (1, 0, -i) and not (1, 0, +i). So the kernel's third component is +theta, wafer +y, and the ring
-//!    table of the adapter says so (the straight-section table says -y).
-//! 5. The crystal data of a ring are averaged about the ring axis, which makes the sign convention of the third axis irrelevant for
-//!    orientations: the (x, z, -y) treatment of Euler angles is right for rings, too.
+//! 4. The direction of increasing theta: an eigenvector has an arbitrary sign, so a mode cannot show it, but a rigid translation can. Along a
+//!    fixed Cartesian X it is u_r = cos(theta), u_theta = -sin(theta), whose exp(-i theta) part is (1, -i): the stiffness of the m = 1 kernel
+//!    must annihilate (u_r, u_z, u_theta) = (1, 0, -i) and not (1, 0, +i). So the azimuthal dependence is exp(-i m theta) with theta along wafer +y.
+//! 5. The optical ring modes: with the time convention e^{j omega t} of the rest of the library, exp(-i m theta) with m > 0 carries power
+//!    along +theta, i.e. +y (and m < 0 along -y).
+//! 6. The crystal data of a ring are averaged about the ring axis, which makes the sign convention of the third axis irrelevant for
+//!    orientations.
 mod common;
 use femcore::material::*;
 use femcore::problem::*;
@@ -69,14 +68,9 @@ fn sapphire_ring(r: &R3, m: f64) -> ProblemSpec {
     sp
 }
 
-/// Lowest elastic frequencies of the ring at azimuthal order `m`, the way `solve` hands a wafer-frame problem to the ring kernels.
+/// Lowest elastic frequencies of the ring at azimuthal order `m` of a wafer-frame problem.
 fn ring_frequencies(spec: &ProblemSpec, m: f64) -> Vec<f64> {
-    kernel_frequencies(&femcore::frame_adapter::to_model_frame(spec, 2), m)
-}
-
-/// The same for a problem already written in the axes of the kernel (x = r, y = z, third axis theta).
-fn kernel_frequencies(inner: &ProblemSpec, m: f64) -> Vec<f64> {
-    let (_, modes) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), inner, m).unwrap();
+    let (_, modes) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), spec, m).unwrap();
     let mut f: Vec<f64> = modes.freqs.iter().map(|z| z.re).collect();
     f.sort_by(|a, b| a.total_cmp(b));
     f
@@ -107,32 +101,21 @@ fn the_elastic_modes_of_a_crystal_ring_do_not_depend_on_the_azimuth_of_its_c_axi
 }
 
 #[test]
-fn a_ring_described_in_the_wafer_frame_and_in_the_model_axes_has_the_same_modes() {
+fn a_ring_in_the_wafer_frame_has_the_frozen_frequencies_of_the_model_axes() {
     let m = 2.0;
     let b = 57.6;
     // wafer axes: c axis tilted from the normal z towards x (the radial direction)
     let wafer = ring_frequencies(&sapphire_ring(&tilt_about_y(b), m), m);
-    // model axes of the (r, z) half-plane: x = r, y = z (the ring axis), the c axis (sin b, cos b, 0) is tilted from y towards x
-    let to_model_y: R3 = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]; // sends the crystal c axis to model y
-    let (s, c) = b.to_radians().sin_cos();
-    let about_model_z: R3 = [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]]; // turns model y towards model x
-    let r_model = mul(&about_model_z, &to_model_y);
-    let c_axis = [r_model[0][2], r_model[1][2], r_model[2][2]];
-    assert!((c_axis[0] - s).abs() < 1e-12 && (c_axis[1] - c).abs() < 1e-12 && c_axis[2].abs() < 1e-12, "{c_axis:?}");
-    // the model-axes description goes to the kernel as it is (no wafer frame any more)
-    let model = kernel_frequencies(&sapphire_ring(&r_model, m), m);
-    assert_same(&model, &wafer, "model-axes description");
-    // and its frequencies are frozen: they were computed when the model axes were still a public frame (NYX_WRITE_GOLDEN=1 rewrites the file)
+    // frozen when the same ring was described in the model axes of the (r, z) half-plane (NYX_WRITE_GOLDEN=1 rewrites the file)
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden_frames/ring_model_axes.json");
     if std::env::var("NYX_WRITE_GOLDEN").is_ok() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let text = format!("{{\"description\": \"sapphire ring, c axis 57.6 deg from z towards r, model axes (r, z, theta), azimuthal order 2: lowest elastic frequencies (Hz)\", \"m\": 2, \"frequencies\": {:?}}}
-", model);
+        let text = format!("{{\"description\": \"sapphire ring, c axis 57.6 deg from z towards r, model axes (r, z, theta), azimuthal order 2: lowest elastic frequencies (Hz)\", \"m\": 2, \"frequencies\": {:?}}}\n", wafer);
         std::fs::write(&path, text).unwrap();
     }
     let golden: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("tests/golden_frames/ring_model_axes.json")).unwrap();
     let frozen: Vec<f64> = golden["frequencies"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
-    assert_same(&model, &frozen, "frozen model-axes frequencies");
+    assert_same(&wafer, &frozen, "frozen frequencies");
 }
 
 #[test]
@@ -144,29 +127,22 @@ fn a_torsional_ring_mode_is_the_wafer_y_component() {
     sp.materials.default.insert("nu".into(), 0.33);
     sp.materials.default.insert("rho".into(), 2700.0);
     sp.study = Study::Eigenfrequency { n_modes: 8, f_search: 500.0 };
-    let (mut res, _) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), &femcore::frame_adapter::to_model_frame(&sp, 2), 0.0).unwrap();
+    let (res, _) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), &sp, 0.0).unwrap();
     let energy = |s: &femcore::problem::Solution, name: &str| s.field(name).map_or(0.0, |f| f.values.iter().map(|v| v * v).sum::<f64>());
-    // before the renaming the kernel's components are (u_r, u_z, u_theta) = (ux, uy, uz)
+    // the components (u_r, u_z, u_theta) are named ux, uz, uy
     let torsional: Vec<usize> = (0..res.solutions.len())
         .filter(|&i| {
             let s = &res.solutions[i];
-            let (r, z, t) = (energy(s, "ux"), energy(s, "uy"), energy(s, "uz"));
-            t > 0.0 && t > 100.0 * (r + z)
+            let (x, y, z) = (energy(s, "ux"), energy(s, "uy"), energy(s, "uz"));
+            y > 0.0 && y > 100.0 * (x + z)
         })
         .collect();
     assert!(!torsional.is_empty(), "no torsional mode among the {} modes found", res.solutions.len());
-    femcore::frame_adapter::rename_wafer_fields(&mut res, femcore::frame_adapter::Kernel::Ring);
-    for &i in &torsional {
-        let s = &res.solutions[i];
-        let (x, y, z) = (energy(s, "ux"), energy(s, "uy"), energy(s, "uz"));
-        assert!(y > 100.0 * (x + z), "torsion should be the wafer y component: ux {x:.3e}, uy {y:.3e}, uz {z:.3e}");
-    }
 }
 
 #[test]
-fn the_third_component_of_the_ring_kernel_is_plus_theta_which_is_wafer_plus_y() {
+fn the_ring_kernel_has_exp_minus_i_m_theta_with_theta_along_wafer_plus_y() {
     use femcore::csparse::c;
-    use femcore::frame_adapter::{wafer_field_name, Kernel};
     let mesh = ring_mesh();
     let c6 = vec![isotropic_stiffness(70e9, 0.33); mesh.n_cells()];
     let k = femcore::solid_axisym::assemble_stiffness_axisym(&mesh, &c6, 2, 1.0, None).unwrap();
@@ -185,9 +161,6 @@ fn the_third_component_of_the_ring_kernel_is_plus_theta_which_is_wafer_plus_y() 
     let wrong = size(k.matvec(&uniform(1.0)));
     assert!(wrong > 1e3, "the check cannot fail: |K u(+i)| = {wrong}");
     assert!(translation < 1e-6 * wrong, "a rigid translation along X costs {translation} against {wrong}");
-    // so the adapter names it +y for a ring, -y for a straight section
-    assert_eq!(wafer_field_name("uz", Kernel::Ring), Some(("uy".to_string(), 1.0)));
-    assert_eq!(wafer_field_name("uz", Kernel::Section), Some(("uy".to_string(), -1.0)));
 }
 
 /// Fourth-rank transform of a Voigt matrix (xx yy zz xy yz xz) by the 3x3 matrix `s` (a rotation or a reflection).
@@ -237,4 +210,24 @@ fn averaging_about_the_ring_axis_makes_the_sign_of_the_third_axis_irrelevant() {
     // ... after it, the same ring
     let (ar, a_s) = (femcore::solid_axisym::average_about_axis(&cr, 1, 16), femcore::solid_axisym::average_about_axis(&cs, 1, 16));
     assert!(diff(&ar, &a_s) < 1e-6 * 500e9, "{}", diff(&ar, &a_s));
+}
+
+#[test]
+fn a_whispering_gallery_mode_with_positive_azimuthal_order_carries_power_along_plus_y() {
+    // the silicon wire in silica on a ring of 20 mm radius: exp(-i m theta) with the time convention e^{j omega t} is a wave along +theta
+    let um = 1e-6;
+    let radius = 20e-3;
+    let rect = |x0: f64, z0: f64, x1: f64, z1: f64, d: i32, h: Option<f64>| common::part(radius + x0 * um, z0 * um, radius + x1 * um, z1 * um, d, h.map(|v| v * um));
+    let mesh = common::parts_mesh(&[rect(-1.2, -1.0, 1.2, 1.0, 1, None), rect(-0.225, -0.11, 0.225, 0.11, 2, Some(0.04))], 0.3 * um);
+    let mut idx = std::collections::BTreeMap::new();
+    idx.insert(1, 1.444);
+    idx.insert(2, 3.476);
+    let mat = femcore::emw_axisym::AxiMaterial::from_indices(&mesh, &idx);
+    let f0 = 299_792_458.0 / 1.55e-6;
+    let m = (2.35 * 2.0 * std::f64::consts::PI * f0 / 299_792_458.0 * radius).round();
+    let (plus, minus) = (femcore::emw_axisym::solve_axisym_modes(&mesh, &mat, m, f0, 1, 2).unwrap(), femcore::emw_axisym::solve_axisym_modes(&mesh, &mat, -m, f0, 1, 2).unwrap());
+    let (pp, pm) = (femcore::emw_axisym::power_along_theta(&mesh, &mat, &plus, 0), femcore::emw_axisym::power_along_theta(&mesh, &mat, &minus, 0));
+    // the same ring both ways: the frequencies agree, the powers are opposite
+    assert!((plus.freqs[0] - minus.freqs[0]).abs() < 1e-6 * plus.freqs[0], "{} against {}", plus.freqs[0], minus.freqs[0]);
+    assert!(pp > 0.0 && pm < 0.0 && (pp + pm).abs() < 1e-3 * pp.abs(), "P(m) = {pp:e}, P(-m) = {pm:e}");
 }
