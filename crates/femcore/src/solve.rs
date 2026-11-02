@@ -40,55 +40,19 @@ fn solve_checked(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState)
     crate::validate::check_inputs(mesh, spec)?;
     let result = if spec.materials.frame == Frame::Wafer && mesh.dim == 2 {
         // solve in the axes of the 2D model and name the results in the wafer axes
-        let inner = spec.to_model_frame(2);
+        let inner = crate::frame_adapter::to_model_frame(spec, 2);
         let mut result = solve_model_frame(mesh, &inner, state)?;
-        rename_wafer_fields(&mut result);
+        let unmapped = crate::frame_adapter::rename_wafer_fields(&mut result, crate::frame_adapter::Kernel::of(spec));
+        if !unmapped.is_empty() {
+            result.log.push(format!("warning: no wafer name for the result fields {unmapped:?}; they keep the names of the solver"));
+        }
+        debug_assert!(unmapped.is_empty(), "result fields without a wafer name: {unmapped:?}");
         result
     } else {
         solve_model_frame(mesh, spec, state)?
     };
     crate::validate::check_result(&result)?;
     Ok(result)
-}
-
-/// Result fields of a 2D model (x, z, out of plane = -y) under the names of the wafer axes (x, y, z).
-pub fn rename_wafer_fields(r: &mut SolveResult) {
-    // (internal name, wafer name, sign)
-    const MAP: [(&str, &str, f64); 22] = [
-        ("uy", "uz", 1.0),
-        ("uz", "uy", -1.0),
-        ("|uz|", "|uy|", 1.0),
-        ("syy", "szz", 1.0),
-        ("szz", "syy", 1.0),
-        ("sxy", "sxz", 1.0),
-        ("Ey", "Ez", 1.0),
-        ("qy", "qz", 1.0),
-        ("Etx", "Ex", 1.0),
-        ("Ety", "Ez", 1.0),
-        ("Ez", "Ey", -1.0),
-        ("|Ez|", "|Ey|", 1.0),
-        ("Re Etx", "Re Ex", 1.0),
-        ("Re Ety", "Re Ez", 1.0),
-        ("Re Ez", "Re Ey", -1.0),
-        ("|Et|", "|Exz|", 1.0),
-        ("Re ux", "Re ux", 1.0),
-        ("Re uy", "Re uz", 1.0),
-        ("Re uz", "Re uy", -1.0),
-        ("|ux|", "|ux|", 1.0),
-        ("|uy|", "|uz|", 1.0),
-        ("ux", "ux", 1.0),
-    ];
-    for sol in &mut r.solutions {
-        let originals: Vec<(String, Vec<f64>)> = sol.fields.iter().map(|f| (f.name.clone(), f.values.clone())).collect();
-        for (f, (orig, vals)) in sol.fields.iter_mut().zip(&originals) {
-            if let Some((_, to, sg)) = MAP.iter().find(|(from, _, _)| from == orig) {
-                f.name = (*to).to_string();
-                if *sg < 0.0 {
-                    f.values = vals.iter().map(|v| -v).collect();
-                }
-            }
-        }
-    }
 }
 
 fn solve_model_frame(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState) -> Result<SolveResult, String> {

@@ -42,11 +42,11 @@ tables of a crystal with its orientation angles); the **boundary conditions** (w
 loaded, held at a potential, ...); and the **study** (static solve, eigenfrequencies, waveguide modes, a
 transient run over time). A project file (`.nyx.xml`) is exactly this plus the geometry.
 
-Two coordinate conventions exist and the program converts between them for you. The *model frame* is
-the library's own (a 2D model is the x-y plane). The *wafer frame* is the waveguide frame: a waveguide cross-section is the
-x-z plane, y is the direction the light travels, z is the surface normal. The solvers always compute in the
-model frame; `ProblemSpec::to_model_frame` translates the problem and `solve::rename_wafer_fields`
-gives the result fields their wafer names (`uz`, `szz`, ...) afterwards.
+There is one public coordinate convention, the *wafer frame*: a waveguide cross-section is the x-z plane, y is the
+direction the light travels, z is the surface normal. The 2D solver kernels still compute in an older *model frame*
+(a 2D mesh is the x-y plane, the third axis is out of it); `frame_adapter::to_model_frame` translates the problem and
+`frame_adapter::rename_wafer_fields` gives the result fields their wafer names (`uz`, `szz`, ...) afterwards. That
+module is the only place the two meet.
 
 ## 3. The mesh (`mesh.rs`, `mesher.rs`, `mesher3d.rs`, `refine3d.rs`, `cellmesh.rs`)
 

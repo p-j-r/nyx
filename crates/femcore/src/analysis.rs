@@ -372,43 +372,6 @@ pub fn analyze_optical(mesh: &SimplexMesh, set: &OpticalSet, opts: &AnalysisOpti
     analyze_modes(&modes, opts)
 }
 
-/// The three axes of a 3D problem that play the roles of the cross-section: `(lateral, normal, propagation)` as indices of x, y, z,
-/// and whether that triple is left-handed (then the sense of rotation of the field must be read the other way round).
-///
-/// The propagation axis is the axis a Floquet pair of the problem is periodic along (the first one found); without periodic
-/// conditions it is `y` in the wafer frame and `z` otherwise. The surface normal is `z` in the wafer frame and `y` otherwise.
-pub fn axes_of_3d_problem(spec: &crate::problem::ProblemSpec, mesh: &SimplexMesh) -> ([usize; 3], bool) {
-    let wafer = spec.materials.frame == crate::problem::Frame::Wafer;
-    let mut long = if wafer { 1 } else { 2 };
-    // a Floquet pair maps the facets of `source` onto those of `dest`: the periodic axis is the one the two groups differ in
-    if let Some(p) = spec.periodic.first() {
-        let centre = |labels: &[i32]| -> [f64; 3] {
-            let (mut c, mut n) = ([0.0f64; 3], 0.0f64);
-            for f in 0..mesh.n_facets() {
-                if labels.contains(&mesh.facet_labels[f]) {
-                    for &v in mesh.facet(f) {
-                        for k in 0..3 {
-                            c[k] += mesh.point(v as usize)[k];
-                        }
-                        n += 1.0;
-                    }
-                }
-            }
-            c.map(|x| x / n.max(1.0))
-        };
-        let (a, b) = (centre(&p.source), centre(&p.dest));
-        let d = [(a[0] - b[0]).abs(), (a[1] - b[1]).abs(), (a[2] - b[2]).abs()];
-        if d.iter().cloned().fold(0.0, f64::max) > 0.0 {
-            long = (0..3).max_by(|&i, &j| d[i].total_cmp(&d[j])).unwrap_or(long);
-        }
-    }
-    let normal = if wafer && long != 2 { 2 } else if long != 1 { 1 } else { 2 };
-    let lateral = (0..3).find(|&k| k != long && k != normal).unwrap_or(0);
-    // (lateral, normal, long) is right-handed when it is an even permutation of (x, y, z)
-    let even = matches!((lateral, normal, long), (0, 1, 2) | (1, 2, 0) | (2, 0, 1));
-    ([lateral, normal, long], !even)
-}
-
 impl Analysis {
     /// Adds the result to a solver's output: one summary entry per mode in the scalars, the table in the log and the
     /// whole analysis for the analysis tab and the exports.

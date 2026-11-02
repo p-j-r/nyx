@@ -174,7 +174,7 @@ wafer, **z is the surface normal and y is the direction of propagation** of a wa
 (mesh coordinates `(x, z)`, `y` out of the page; the frame is right-handed, so a wave travelling into the page travels along `+y`, and the out-of-plane wave number `k` of an elastic study is positive for it). Crystal
 orientations (Euler Z-X-Z angles of the crystal axes in x, y, z), photoelastic tensors, permittivity, constraint and load components and
 the names of the result fields (`ux, uy, uz`, `szz`, `Ez`, ...) all refer to x, y, z; the solvers work internally in the axes (x, z, -y) of the 2D
-mesh and `ProblemSpec::to_model_frame` and `solve::rename_wafer_fields` translate (tested against a direct fourth-rank transform, against a plate solved
+mesh and `frame_adapter::to_model_frame` and `frame_adapter::rename_wafer_fields` translate (the only module that knows both vocabularies; rings get their own table) (tested against a direct fourth-rank transform, against a plate solved
 in both descriptions and against a capacitor in the x-z plane). `Frame::Model` (mesh = x-y, z out of
 plane) stays the default of the library. 3D problems are unaffected.
 The four ring chips are built by `femcore::chips` (silicon axes `[p, q, z]`, sapphire axes `[a, c x a, c]`, c tilted 57.6 degrees from z towards the

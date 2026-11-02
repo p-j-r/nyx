@@ -41,7 +41,7 @@ fn the_stiffness_of_a_tilted_crystal_in_the_model_frame_is_the_wafer_tensor_turn
     });
     let st = Stiffness::Trigonal { c11: 497.35e9, c12: 163.97e9, c13: 112.20e9, c14: -23.58e9, c33: 499.11e9, c44: 147.39e9 };
     let c_lab = stiffness_global(&st, eul); // solver Voigt order xx yy zz xy yz xz, wafer axes
-    let s: M3 = WAFER_TO_MODEL;
+    let s: M3 = femcore::frame_adapter::WAFER_TO_MODEL;
     // rank 4 from the 6x6
     let vp = [(0, 0), (1, 1), (2, 2), (0, 1), (1, 2), (0, 2)];
     let mut t = [[[[0.0; 3]; 3]; 3]; 3];
@@ -67,7 +67,7 @@ fn the_stiffness_of_a_tilted_crystal_in_the_model_frame_is_the_wafer_tensor_turn
         }
         acc
     };
-    let c_model = stiffness_global(&st, euler_to_model_frame(eul));
+    let c_model = stiffness_global(&st, femcore::frame_adapter::euler_to_model_frame(eul));
     for (i, &(a, bb)) in vp.iter().enumerate() {
         for (j, &(c, d)) in vp.iter().enumerate() {
             let want = at(a, bb, c, d);
@@ -95,7 +95,7 @@ fn a_loaded_cubic_plate_in_the_x_z_plane_deflects_like_the_same_plate_in_the_mod
     let rw = femcore::solve::solve(&mesh, &w, &mut SolveState::default()).unwrap();
     // the model-frame description: the same rotation expressed in (x, z)
     let mut m = spec;
-    m.materials.aniso.get_mut(&1).unwrap().euler_deg = euler_to_model_frame(eul);
+    m.materials.aniso.get_mut(&1).unwrap().euler_deg = femcore::frame_adapter::euler_to_model_frame(eul);
     m.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, false], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e6, 0.0]) }];
     let rm = femcore::solid::solve_solid(&mesh, &m, &SolveState::default()).unwrap();
     let (uz_w, uy_m) = (&rw.solutions[0].field("uz").unwrap().values, &rm.solutions[0].field("uy").unwrap().values);
@@ -140,7 +140,7 @@ fn layers_of_a_2d_cross_section_are_written_along_x_and_z_and_a_positive_k_runs_
     let mut s = ProblemSpec::new(Physics::Solid);
     s.materials.pml.insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Minus, strength: 3.0, order: 2.0, re: 1.0 });
     s.out_of_plane = Some(5.0);
-    let m = s.to_model_frame(2);
+    let m = femcore::frame_adapter::to_model_frame(&s, 2);
     // the solvers' second axis is z, and their out-of-plane axis is -y
     let p = &m.materials.pml[&2];
     assert_eq!((p.x, p.y, p.z), (PmlDir::Plus, PmlDir::Minus, PmlDir::Off));
@@ -155,11 +155,11 @@ fn layers_of_a_2d_cross_section_are_written_along_x_and_z_and_a_positive_k_runs_
     // the Brillouin optical layers follow the same rule
     let mut b = ProblemSpec::new(Physics::Brillouin);
     b.brillouin.as_mut().unwrap().optical_pml.insert(3, Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Plus, ..Default::default() });
-    let m = b.to_model_frame(2);
+    let m = femcore::frame_adapter::to_model_frame(&b, 2);
     let p = &m.brillouin.as_ref().unwrap().optical_pml[&3];
     assert_eq!((p.y, p.z), (PmlDir::Plus, PmlDir::Off));
     // a 3D problem is untouched
-    let m3 = s.to_model_frame(3);
+    let m3 = femcore::frame_adapter::to_model_frame(&s, 3);
     assert_eq!(m3.out_of_plane, Some(5.0));
     assert_eq!(m3.materials.pml[&2].z, PmlDir::Minus);
 }

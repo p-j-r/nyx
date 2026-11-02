@@ -168,7 +168,7 @@ pub fn solve_q(mesh: &SimplexMesh, spec: &ProblemSpec, q: f64, n_modes: usize, f
     let mut s = spec.clone();
     s.study = Study::Eigenfrequency { n_modes, f_search };
     s.out_of_plane = Some(q);
-    let inner = s.to_model_frame(2);
+    let inner = femcore::frame_adapter::to_model_frame(&s, 2);
     let t = Instant::now();
     let (r, modes) = solve_solid_kz_full(mesh, &inner, q)?;
     Ok(Solved { modes, dofs: r.dofs, seconds: t.elapsed().as_secs_f64() })

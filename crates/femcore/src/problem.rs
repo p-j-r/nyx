@@ -9,9 +9,9 @@
 //!
 //! `Frame` says in which axes a problem is written. The wafer frame is the default and the one the geometry is built in (a 2D
 //! cross-section is the x-z plane, y is the propagation direction, z the surface normal); the model frame (a 2D mesh is the x-y plane,
-//! z out of it) is kept for old project files. The 2D kernels work in the model frame internally: `ProblemSpec::to_model_frame`
-//! translates a wafer-frame problem and `solve::rename_wafer_fields` gives the result fields their wafer names again, so no caller
-//! ever sees the model axes.
+//! z out of it) is kept for old project files. The 2D kernels work in the model frame internally: `frame_adapter::to_model_frame`
+//! translates a wafer-frame problem and `frame_adapter::rename_wafer_fields` gives the result fields their wafer names again, so no
+//! caller ever sees the model axes (that module is the only place the two vocabularies meet).
 //!
 //! A solve returns a `SolveResult`: one or more `Solution`s with named fields (one value per dof, P2: vertices then edge
 //! midpoints) and optional displacement, scalar results, a text log (the stage log of `progress`), the time and the
@@ -79,31 +79,6 @@ pub enum Frame {
     /// the default: geometry, materials, conditions and results are in the axes of the wafer, with nothing to convert
     #[default]
     Wafer,
-}
-
-/// The rotation from the wafer axes (x, y, z) to the axes of a 2D model (mesh x, mesh y = z, out of plane = -y).
-pub const WAFER_TO_MODEL: M3 = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]];
-
-fn mul3(a: &M3, b: &M3) -> M3 {
-    let mut r = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            for k in 0..3 {
-                r[i][j] += a[i][k] * b[k][j];
-            }
-        }
-    }
-    r
-}
-
-/// Euler angles of a crystal whose orientation is `euler_deg` in the wafer frame, expressed in the 2D model frame.
-pub fn euler_to_model_frame(euler_deg: [f64; 3]) -> [f64; 3] {
-    material::euler_from_rotation(&mul3(&WAFER_TO_MODEL, &material::rotation(euler_deg)))
-}
-
-/// A layer of a 2D cross-section written along the wafer axes x and z, along the mesh axes x and y of the solvers.
-fn pml_to_model_frame(p: &Pml) -> Pml {
-    Pml { y: p.z, z: PmlDir::Off, ..p.clone() }
 }
 
 /// Which side of a domain a perfectly matched layer absorbs towards, per axis.
@@ -542,48 +517,6 @@ impl Default for BrillouinSpec {
 }
 
 impl ProblemSpec {
-    /// The problem in the axes the solvers use. For `Frame::Wafer` on a 2D mesh the crystal orientations and the
-    /// components of constraints and loads are turned into the model frame (x, z, -y); everything else is unchanged.
-    pub fn to_model_frame(&self, mesh_dim: usize) -> ProblemSpec {
-        let mut s = self.clone();
-        if self.materials.frame != Frame::Wafer || mesh_dim != 2 {
-            s.materials.frame = Frame::Model;
-            return s;
-        }
-        s.materials.frame = Frame::Model;
-        // a positive wave number is a wave along +y of the wafer, which is -z of the model
-        s.out_of_plane = s.out_of_plane.map(|k| -k);
-        // the layers of the cross-section are written along x and z; the mesh's second axis is z
-        for p in s.materials.pml.values_mut() {
-            *p = pml_to_model_frame(p);
-        }
-        for a in s.materials.aniso.values_mut() {
-            a.euler_deg = euler_to_model_frame(a.euler_deg);
-        }
-        for bc in &mut s.bcs {
-            match &mut bc.kind {
-                BcKind::Fixed { fixed, values } => {
-                    *fixed = [fixed[0], fixed[2], fixed[1]];
-                    *values = [values[0], values[2], -values[1]];
-                }
-                BcKind::Load(f) => *f = [f[0], f[2], -f[1]],
-                _ => {}
-            }
-        }
-        if let Some(b) = s.brillouin.as_mut() {
-            for p in b.optical_pml.values_mut() {
-                *p = pml_to_model_frame(p);
-            }
-            for p in b.photoelastic.values_mut() {
-                p.euler_deg = euler_to_model_frame(p.euler_deg);
-            }
-            for a in b.viscosity.values_mut() {
-                a.euler_deg = euler_to_model_frame(a.euler_deg);
-            }
-        }
-        s
-    }
-
     pub fn new(physics: Physics) -> Self {
         let study = match physics {
             Physics::Electrostatics => Study::Stationary,

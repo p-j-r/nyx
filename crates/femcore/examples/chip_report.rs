@@ -34,7 +34,7 @@ fn main() {
                     continue;
                 }
             };
-            let inner = spec.to_model_frame(2);
+            let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
             let study = match study_straight(&mesh, &inner, &SolveState::default()) {
                 Ok(s) => s,
                 Err(e) => {

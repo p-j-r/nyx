@@ -2,9 +2,9 @@
 //!
 //! A ring resonator is solved on the (r, z) half-plane: mesh x = r, mesh y = z, and the azimuthal direction theta is the third
 //! displacement/field component. In the wafer frame the ring's local axes are (x, y, z) = (r, theta, z): x outward, y along the ring,
-//! z the surface normal. `solve` turns a 2D wafer-frame problem into the solvers' model frame (`ProblemSpec::to_model_frame`) and
-//! renames the result fields (`rename_wafer_fields`); both were written for the straight-waveguide kernels. These tests pin down what
-//! the ring path needs from them, without any reference value: only invariances and a naming check.
+//! z the surface normal. `solve` turns a 2D wafer-frame problem into the solvers' model frame (`frame_adapter::to_model_frame`) and
+//! renames the result fields (`frame_adapter::rename_wafer_fields`); the adapter has a ring variant (`Kernel::Ring`) for the sign of the third
+//! component. These tests pin down what the ring path needs from it: invariances, a naming check, and the sign of u_theta.
 //!
 //! 1. A crystal ring is averaged over rotations about the ring axis, which must be the wafer normal z. So the elastic modes cannot
 //!    depend on the azimuth of the crystal: a c axis turned about z by any angle (sapphire is trigonal, so only a lab rotation about z is a symmetry, not
@@ -14,9 +14,12 @@
 //!    wafer description.
 //! 3. A torsional mode (m = 0, only u_theta) is called `uy` in the wafer frame, never `ux` or `uz`.
 //!
-//! Not covered (open, needs a decision): the sign of the u_theta component. The kernel's third component is +theta (azimuth, exp(-i m theta)),
-//! while `rename_wafer_fields` maps it to `-uy` (the model frame's out-of-plane axis is -y). With y = +theta (right-handed wafer axes) that
-//! sign is wrong for rings; eigenvector signs are arbitrary, so an eigenmode cannot show it.
+//! 4. The sign of u_theta: an eigenvector has an arbitrary sign, so a mode cannot show it, but a rigid translation can. Along a fixed
+//!    Cartesian X it is u_r = cos(theta), u_theta = -sin(theta), whose exp(-i theta) part is (1, -i): the stiffness of the m = 1 kernel must
+//!    annihilate (u_r, u_z, u_theta) = (1, 0, -i) and not (1, 0, +i). So the kernel's third component is +theta, wafer +y, and the ring
+//!    table of the adapter says so (the straight-section table says -y).
+//! 5. The crystal data of a ring are averaged about the ring axis, which makes the sign convention of the third axis irrelevant for
+//!    orientations: the (x, z, -y) treatment of Euler angles is right for rings, too.
 use femcore::material::*;
 use femcore::mesher::*;
 use femcore::problem::*;
@@ -70,7 +73,7 @@ fn sapphire_ring(r: &R3, frame: Frame, m: f64) -> ProblemSpec {
 
 /// Lowest elastic frequencies of the ring at azimuthal order `m`, the way `solve` hands a wafer-frame problem to the ring kernels.
 fn ring_frequencies(spec: &ProblemSpec, m: f64) -> Vec<f64> {
-    let inner = spec.to_model_frame(2);
+    let inner = femcore::frame_adapter::to_model_frame(&spec, 2);
     let (_, modes) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), &inner, m).unwrap();
     let mut f: Vec<f64> = modes.freqs.iter().map(|z| z.re).collect();
     f.sort_by(|a, b| a.total_cmp(b));
@@ -127,7 +130,7 @@ fn a_torsional_ring_mode_is_the_wafer_y_component() {
     sp.materials.default.insert("nu".into(), 0.33);
     sp.materials.default.insert("rho".into(), 2700.0);
     sp.study = Study::Eigenfrequency { n_modes: 8, f_search: 500.0 };
-    let (mut res, _) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), &sp.to_model_frame(2), 0.0).unwrap();
+    let (mut res, _) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), &femcore::frame_adapter::to_model_frame(&sp, 2), 0.0).unwrap();
     let energy = |s: &femcore::problem::Solution, name: &str| s.field(name).map_or(0.0, |f| f.values.iter().map(|v| v * v).sum::<f64>());
     // before the renaming the kernel's components are (u_r, u_z, u_theta) = (ux, uy, uz)
     let torsional: Vec<usize> = (0..res.solutions.len())
@@ -138,10 +141,86 @@ fn a_torsional_ring_mode_is_the_wafer_y_component() {
         })
         .collect();
     assert!(!torsional.is_empty(), "no torsional mode among the {} modes found", res.solutions.len());
-    femcore::solve::rename_wafer_fields(&mut res);
+    femcore::frame_adapter::rename_wafer_fields(&mut res, femcore::frame_adapter::Kernel::Ring);
     for &i in &torsional {
         let s = &res.solutions[i];
         let (x, y, z) = (energy(s, "ux"), energy(s, "uy"), energy(s, "uz"));
         assert!(y > 100.0 * (x + z), "torsion should be the wafer y component: ux {x:.3e}, uy {y:.3e}, uz {z:.3e}");
     }
+}
+
+#[test]
+fn the_third_component_of_the_ring_kernel_is_plus_theta_which_is_wafer_plus_y() {
+    use femcore::csparse::c;
+    use femcore::frame_adapter::{wafer_field_name, Kernel};
+    let mesh = ring_mesh();
+    let c6 = vec![isotropic_stiffness(70e9, 0.33); mesh.n_cells()];
+    let k = femcore::solid_axisym::assemble_stiffness_axisym(&mesh, &c6, 2, 1.0, None).unwrap();
+    let n1 = mesh.n_dofs(2);
+    // components (u_r, u_z, u_theta) as blocks of n1 dofs; uniform fields
+    let uniform = |s: f64| {
+        let mut u = vec![c(0.0, 0.0); 3 * n1];
+        for i in 0..n1 {
+            u[i] = c(1.0, 0.0);
+            u[2 * n1 + i] = c(0.0, s);
+        }
+        u
+    };
+    let size = |v: Vec<femcore::csparse::C>| v.iter().map(|z| z.norm()).fold(0.0, f64::max);
+    let translation = size(k.matvec(&uniform(-1.0)));
+    let wrong = size(k.matvec(&uniform(1.0)));
+    assert!(wrong > 1e3, "the check cannot fail: |K u(+i)| = {wrong}");
+    assert!(translation < 1e-6 * wrong, "a rigid translation along X costs {translation} against {wrong}");
+    // so the adapter names it +y for a ring, -y for a straight section
+    assert_eq!(wafer_field_name("uz", Kernel::Ring), Some(("uy".to_string(), 1.0)));
+    assert_eq!(wafer_field_name("uz", Kernel::Section), Some(("uy".to_string(), -1.0)));
+}
+
+/// Fourth-rank transform of a Voigt matrix (xx yy zz xy yz xz) by the 3x3 matrix `s` (a rotation or a reflection).
+fn transform_c6(c6: &M6, s: &R3) -> M6 {
+    let vp = [(0, 0), (1, 1), (2, 2), (0, 1), (1, 2), (0, 2)];
+    let mut t = [[[[0.0; 3]; 3]; 3]; 3];
+    for (i, &(a, b)) in vp.iter().enumerate() {
+        for (j, &(cc, d)) in vp.iter().enumerate() {
+            for (p, q) in [(a, b), (b, a)] {
+                for (u, v) in [(cc, d), (d, cc)] {
+                    t[p][q][u][v] = c6[i][j];
+                }
+            }
+        }
+    }
+    let mut out = [[0.0; 6]; 6];
+    for (i, &(a, b)) in vp.iter().enumerate() {
+        for (j, &(cc, d)) in vp.iter().enumerate() {
+            let mut acc = 0.0;
+            for p in 0..3 {
+                for q in 0..3 {
+                    for u in 0..3 {
+                        for v in 0..3 {
+                            acc += s[a][p] * s[b][q] * s[cc][u] * s[d][v] * t[p][q][u][v];
+                        }
+                    }
+                }
+            }
+            out[i][j] = acc;
+        }
+    }
+    out
+}
+
+#[test]
+fn averaging_about_the_ring_axis_makes_the_sign_of_the_third_axis_irrelevant() {
+    // sapphire with its c axis tilted from z towards the ring direction y, in the wafer frame
+    let (stiffness, _, _, _, _) = sapphire();
+    let wafer = stiffness_global(&stiffness, euler_from_rotation(&tilt_about_x(57.6)));
+    // kernel axes (r, z, theta) = wafer (x, z, +y) for a ring, (x, z, -y) for a straight section: reflections / rotations as 3x3 maps
+    let ring: R3 = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]];
+    let section: R3 = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]];
+    let (cr, cs) = (transform_c6(&wafer, &ring), transform_c6(&wafer, &section));
+    let diff = |a: &M6, b: &M6| (0..6).flat_map(|i| (0..6).map(move |j| (a[i][j] - b[i][j]).abs())).fold(0.0, f64::max);
+    // before the averaging the two conventions are different crystals (the check can fail) ...
+    assert!(diff(&cr, &cs) > 1e9, "{}", diff(&cr, &cs));
+    // ... after it, the same ring
+    let (ar, a_s) = (femcore::solid_axisym::average_about_axis(&cr, 1, 16), femcore::solid_axisym::average_about_axis(&cs, 1, 16));
+    assert!(diff(&ar, &a_s) < 1e-6 * 500e9, "{}", diff(&ar, &a_s));
 }
