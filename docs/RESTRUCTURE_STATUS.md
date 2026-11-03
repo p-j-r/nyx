@@ -152,3 +152,19 @@ Gates of the plan not yet answered: **G2** (tolerance and reference platform; ne
 
 * 2026-11-03: architecture model, 23 ADRs, 28 rough spots, contract tests (bookmark `arch-model-adrs`), restructure plan written.
 * 2026-11-04: foundation session: `nyx2` created, phases 0 and 1, workspace layout, `nyx-physics` and the skeletons, ADRs 24 to 27, parallel list.
+
+## Materials session (phase 6), written by the materials session, 2026-11-04
+
+State: **started, stopped early (usage limit)**. Bookmark `restructure-6-materials`, workspace `nyx2-materials`.
+
+Done (not compiled or tested yet; `cargo check -p femcore` is the first thing to run):
+* `crates/femcore/src/material.rs` moved unchanged to `material/mod.rs` (same module path, no API change).
+* `toml` dependency (feature `preserve_order`) added to `femcore`.
+
+Design decided (nothing written yet), for whoever continues:
+* New files under `material/`: `units.rs` (quantities as `"496.8 GPa"`, `{value,unit}` or bare number with a declared `unit`), `elastic.rs` (class + constants, upper-triangle or full 6x6 matrix, compliance; class table by layout of entries; checks: symmetry, positive definite via Mandel eigenvalues, class consistency, derived entries checked, unknown keys with "did you mean"), `tensor.rs` (one, three, six entries, 3x3, or `{perp,par}`), `optics.rs` (constant, Sellmeier, Cauchy, tabulated n,k with PCHIP or linear, no silent extrapolation, `range` required for formula models, declared `wavelength_unit`, `dn_dT` with reference temperature, per axis: isotropic / ordinary+extraordinary / x,y,z; time convention n - jk), `spec.rs` (`MaterialSpec`, TOML read and write, `Library::load_dir`), `schema.rs` (versioned JSON Schema, `format = 1`).
+* Add `Stiffness::General(M6)` to the legacy enum so a general matrix reaches the old `Anisotropy`; keep `sapphire()`/`silicon()` until the library location is answered, with a test that they agree with `materials/*.toml`.
+* Library `materials/*.toml` at the repository root (silicon from the Li 1993 table, silica Malitson, sapphire Malitson o and e, air). Verified coefficients from refractiveindex.info: silica B = 0.6961663, 0.4079426, 0.8974794 with resonance wavelengths 0.0684043, 0.1162414, 9.896161 um (range 0.21 to 6.7 um); sapphire o: B = 1.4313493, 0.65054713, 5.3414021, lambda0 = 0.0726631, 0.1193242, 18.028251 (0.2 to 5 um); sapphire e: B = 1.5039759, 0.55069141, 6.5927379, lambda0 = 0.0740288, 0.1216529, 20.072248; silicon at 293 K n(1.55 um) = 3.4757.
+* Tests to write: `tests/material_contract.rs` (own file, not `contracts.rs`, to avoid conflicts), exemplars `material_schema.v1.json` and a kitchen-sink `.toml` using every key; ADRs 28 and 29 (check the other workspaces for number clashes), `docs/MATERIALS.md`, `CODE_TO_ADR.md` rows for `material/**` and `materials/**`, `VERSIONS.md` lines.
+
+Open questions sent to paul: library location, refractiveindex.info import, which dispersion models first (defaults used above).
