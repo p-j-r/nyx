@@ -466,6 +466,8 @@ fn model_editor(ui: &mut Ui, ed: &mut crate::geomui::State, g: &mut GeometrySpec
         num(ui, &mut g.h);
         ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", g.list.dim));
     });
+    ui.checkbox(&mut g.physics_sizing, "size the mesh from the physics")
+        .on_hover_text("Elements are made fine enough for the wavelength of the study in each material (points per wavelength by element order). Applies to EM waves, solid-mechanics eigenfrequencies and Brillouin studies; the sizes of the model still apply.");
     extrude_editor(ui, &mut g.extrude);
     ui.add_space(4.0);
     crate::geomui::show(ui, ed, &mut g.list);
