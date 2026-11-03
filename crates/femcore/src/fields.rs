@@ -160,3 +160,58 @@ impl Display {
         self.dofs.iter().map(|&d| values[d] as f32).collect()
     }
 }
+
+// ------------------------------------------------------------------ per-cell nodal fields (the "fields" stage)
+
+/// One quantity at the local dofs of every cell, not averaged over the cells that share a node:
+/// `re[c * nloc + a]` (and `im` when the quantity is complex, else empty). Names are wafer names (`Ex`, `uz`, `Sxz`, ...).
+#[derive(Clone, Debug, Default)]
+pub struct CellField {
+    pub name: String,
+    pub unit: String,
+    pub re: Vec<f64>,
+    pub im: Vec<f64>,
+}
+
+/// The un-averaged per-cell fields of one solution. This is what an error estimator needs (the jump of a flux
+/// between neighbouring cells is exactly what averaging destroys); `Solution::fields` are the node-averaged plot fields.
+#[derive(Clone, Debug, Default)]
+pub struct CellFields {
+    pub order: usize,
+    /// local dofs per cell (vertices, then edge midpoints for P2)
+    pub nloc: usize,
+    pub fields: Vec<CellField>,
+}
+
+impl CellFields {
+    pub fn new(mesh: &SimplexMesh, order: usize) -> Self {
+        CellFields { order, nloc: mesh.nloc(order), fields: vec![] }
+    }
+
+    pub fn get(&self, name: &str) -> Option<&CellField> {
+        self.fields.iter().find(|f| f.name == name)
+    }
+
+    pub fn push_real(&mut self, name: impl Into<String>, unit: impl Into<String>, re: Vec<f64>) {
+        self.fields.push(CellField { name: name.into(), unit: unit.into(), re, im: vec![] });
+    }
+
+    pub fn push_complex(&mut self, name: impl Into<String>, unit: impl Into<String>, re: Vec<f64>, im: Vec<f64>) {
+        self.fields.push(CellField { name: name.into(), unit: unit.into(), re, im });
+    }
+
+    /// The `ncomp` interleaved per-cell values `g[(c*nloc + a)*ncomp + j]` as one real field per component, named
+    /// `{prefix}{names[j]}`.
+    pub fn push_components(&mut self, prefix: &str, names: &[&str], unit: &str, g: &[f64]) {
+        let m = names.len();
+        for (j, n) in names.iter().enumerate() {
+            let re = g.chunks(m).map(|p| p[j]).collect();
+            self.push_real(format!("{prefix}{n}"), unit, re);
+        }
+    }
+
+    /// The node average of a real component (the plot field it must reproduce).
+    pub fn node_average(&self, mesh: &SimplexMesh, name: &str) -> Option<Vec<f64>> {
+        self.get(name).map(|f| node_average(mesh, &f.re, 1, self.order))
+    }
+}

@@ -37,3 +37,25 @@ Every physics module carries a three-letter code, chosen by Paul:
 | `sbs` | stimulated Brillouin scattering | `sbs`, `sbs_ring` (were `brillouin`, `ring_brillouin`) |
 
 `solvers::scalar` (the solver library's scalar trait) is unrelated and keeps its name.
+
+## Kernel stages: assemble, solve, fields (2026-11-03)
+
+Every kernel is three functions; `solve_*` is their composition, and the golden files are unchanged, so the split changed no number.
+
+1. **assemble**: matrices on the free dofs, constraints, loads, the material data later stages need.
+2. **solve**: the raw result (complex eigenpairs, a solution vector, the states of a transient run). The backend is chosen here (`spec.solver`, or the eigensolver the stage calls), so a `femcore::solvers` adapter replaces one function per kernel.
+3. **fields**: the plot fields (node-averaged, as before) and `Solution::cell_fields`: the same components per cell and local node, not averaged, with wafer names and complex values where the quantity is complex (`fields::CellFields`, indexed `cell * nloc + a`). The node average of a cell field is the plot field of the same name (checked on every golden case).
+
+| Kernel | assemble | solve | fields |
+|---|---|---|---|
+| dfs electrostatics | `assemble_electrostatics` | `solve_potential` | `electrostatics_fields` (`V`, `Ex`, `Ez`) |
+| dfs heat | `assemble_heat` | `solve_heat_states` | `heat_fields` (`T`, `qx`, `qz`) |
+| ems 2D real | `assemble_modes` | `solve_mode_pairs` | `mode_fields_cells` (`Ex`, `Ez`, `Ey`) |
+| ems 2D complex / PML / tilted | `assemble_modes_complex` | `solve_mode_pairs_complex` | `mode_fields_complex_cells` (complex `Ex`, `Ez`, `Ey`) |
+| sms kz and axisymmetric | `assemble_cross_section` | `solve_cross_section_modes` | `cross_section_fields` (complex `ux`, `uz`, `uy`) |
+| ems axisymmetric | `assemble_axisym` | `solve_axisym_pairs` | `mode_samples` (unchanged) |
+| sms plain static / eigen | inline in `solve_solid` (`setup`, `assemble_solid`, loads) | static: `solve_spd`; eigen: `solve_real_modes` (AMG + LOBPCG kept) | `fields_of` (`ux`, `uz`, stresses, `von Mises`) |
+| sms PML, Floquet, low-reflecting | inline | inline | `complex_mode_fields` (complex `ux`, `uz`) |
+| ems 3D | inline in `solve_emw_eigen` | inline | cell `Ex`, `Ey`, `Ez` (complex) |
+
+The last two rows have the fields stage and the cell fields, but their assemble and solve are still one function each (they share large local state with the Floquet reduction, the low-reflecting damping and the polarization analysis); they are the next to cut.

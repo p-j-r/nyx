@@ -526,6 +526,9 @@ pub struct Solution {
     /// time (s), frequency (Hz) or neff (re, im) of this solution
     pub value: Option<f64>,
     pub neff: Option<(f64, f64)>,
+    /// the same derived quantities as `fields` before averaging over the cells at a node (wafer names), when the
+    /// kernel's fields stage provides them
+    pub cell_fields: Option<crate::fields::CellFields>,
 }
 
 impl Solution {

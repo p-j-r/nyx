@@ -25,7 +25,7 @@
 use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
 use crate::ems::{cell_data, edge_basis, tri_g, C0};
 use crate::fem::*;
-use crate::fields::{local_bary, node_average};
+use crate::fields::{local_bary, node_average, CellFields};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
 use crate::section::local_component;
@@ -136,6 +136,24 @@ pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) 
 
 /// Modes with complex effective index nearest `n_target` (complex).
 pub fn solve_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[MuC], n_target: C, k: usize, order: usize) -> Result<ModesC, String> {
+    let asm = assemble_modes_complex(mesh, freq, eps, mu, order)?;
+    solve_mode_pairs_complex(&asm, n_target, k)
+}
+
+/// Stage 1 of the complex mode solver: `A x = lambda B x` (`lambda = -beta^2`) on the free dofs, plus the part of `A`
+/// that is linear in `beta` when the permittivity couples the transverse and the longitudinal field (tilted crystal).
+pub struct ModeAssemblyC {
+    pub a: CCsr,
+    pub b: CCsr,
+    /// `A1` of `(A + j beta A1) x = -beta^2 B x`, present only for a tilted crystal
+    pub a1: Option<CCsr>,
+    pub free: Vec<usize>,
+    pub n_tot: usize,
+    pub net: usize,
+    pub k0: f64,
+}
+
+pub fn assemble_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[MuC], order: usize) -> Result<ModeAssemblyC, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -255,16 +273,27 @@ pub fn solve_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[Mu
     }
     let af = a_full.submatrix(&free, &free);
     let bf = b_full.submatrix(&free, &free);
-    let sigma = -(n_target * n_target) * (k0 * k0);
-    let mut pairs = eigs_complex(&af, &bf, sigma, k, 1e-10, 400)?;
-    if has_coupling {
+    let a1 = if has_coupling {
         let mut a1 = a1_coo.to_csr();
         for r in 0..a1.nrows {
             for p in a1.indptr[r]..a1.indptr[r + 1] {
                 a1.data[p] *= scale[r] * scale[a1.indices[p]];
             }
         }
-        let a1f = a1.submatrix(&free, &free);
+        Some(a1.submatrix(&free, &free))
+    } else {
+        None
+    };
+    Ok(ModeAssemblyC { a: af, b: bf, a1, free, n_tot, net, k0 })
+}
+
+/// Stage 2: the `k` eigenpairs nearest the complex effective index `n_target`, as effective indices, edge coefficients
+/// and `phi = Ez / (j beta)`, sorted by closeness to it. Pairs the Krylov process could not converge are dropped.
+pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> Result<ModesC, String> {
+    let (af, bf, free, n_tot, net, k0) = (&asm.a, &asm.b, &asm.free, asm.n_tot, asm.net, asm.k0);
+    let sigma = -(n_target * n_target) * (k0 * k0);
+    let mut pairs = eigs_complex(af, bf, sigma, k, 1e-10, 400)?;
+    if let Some(a1f) = &asm.a1 {
         // refine every mode by the fixed-point iteration on b in the linear term
         for i in 0..pairs.values.len() {
             let pick = |z: C| -> C {
@@ -281,7 +310,7 @@ pub fn solve_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[Mu
             let mut hist: Vec<C> = vec![];
             for it in 0..10 {
                 crate::progress::check()?;
-                let cmat = af.add_scaled(&a1f, c(0.0, 1.0) * beta);
+                let cmat = af.add_scaled(a1f, c(0.0, 1.0) * beta);
                 let one = eigs_complex(&cmat, &bf, -(beta * beta), 1, 1e-11, 400)?;
                 let nb = pick((-one.values[0]).sqrt());
                 let change = (nb - beta).norm() / beta.norm();
@@ -347,6 +376,12 @@ pub fn solve_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[Mu
 /// Nodal magnitude fields of a complex mode, scaled to max |E| = 1, under wafer names: `|E|, |Exz|, |Ey|, Re Ex,
 /// Re Ez, Re Ey` (real parts after rotating the phase so that the largest component is real).
 pub fn mode_fields_complex(mesh: &SimplexMesh, modes: &ModesC, j: usize, freq: f64, order: usize) -> Vec<Field> {
+    mode_fields_complex_cells(mesh, modes, j, freq, order).0
+}
+
+/// Stage 3: `mode_fields_complex` and, next to them, the complex components `Ex`, `Ez`, `Ey` at the local dofs of every
+/// cell, in the phase of the plot fields and with their scale (the node average of the real parts is `Re E..`).
+pub fn mode_fields_complex_cells(mesh: &SimplexMesh, modes: &ModesC, j: usize, freq: f64, order: usize) -> (Vec<Field>, CellFields) {
     let k0 = 2.0 * std::f64::consts::PI * freq / C0;
     let (nc, nloc) = (mesh.n_cells(), mesh.nloc(order));
     let geo = geometry(mesh);
@@ -393,14 +428,20 @@ pub fn mode_fields_complex(mesh: &SimplexMesh, modes: &ModesC, j: usize, freq: f
     let f = |name: &str, v: Vec<f64>| Field { name: name.into(), unit: "a.u.".into(), values: v.iter().map(|x| x * s).collect() };
     let (lat, nor, prop) = (local_component(0), local_component(1), local_component(2));
     let signed = |c: &[C], sign: f64| -> Vec<f64> { avg(&re(c)).iter().map(|x| x * sign).collect() };
-    vec![
+    let mut cells = CellFields::new(mesh, order);
+    for (comp, v, sign) in [(lat, &ex, lat.1), (nor, &ey, nor.1), (prop, &ez, prop.1)] {
+        let rotated: Vec<C> = v.iter().map(|z| *z * rot * s * sign).collect();
+        cells.push_complex(format!("E{}", comp.0), "a.u.", rotated.iter().map(|z| z.re).collect(), rotated.iter().map(|z| z.im).collect());
+    }
+    let fields = vec![
         f("|E|", tot.clone()),
         f("|Exz|", etn),
         f(&format!("|E{}|", prop.0), ezn),
         f(&format!("Re E{}", lat.0), signed(&ex, lat.1)),
         f(&format!("Re E{}", nor.0), signed(&ey, nor.1)),
         f(&format!("Re E{}", prop.0), signed(&ez, prop.1)),
-    ]
+    ];
+    (fields, cells)
 }
 
 pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
@@ -419,7 +460,8 @@ pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Solve
     for j in 0..modes.neff.len() {
         let z = modes.neff[j];
         let txt = format!("{:.6} {:+.3e}i", z.re, z.im);
-        solutions.push(Solution { label: format!("mode {}: neff = {txt}", j + 1), fields: mode_fields_complex(mesh, &modes, j, freq, spec.order), neff: Some((z.re, z.im)), ..Default::default() });
+        let (fields, cell_fields) = mode_fields_complex_cells(mesh, &modes, j, freq, spec.order);
+        solutions.push(Solution { label: format!("mode {}: neff = {txt}", j + 1), fields, cell_fields: Some(cell_fields), neff: Some((z.re, z.im)), ..Default::default() });
         scalars.push((format!("neff {}", j + 1), Scalar::Text(txt)));
         let q = if z.im.abs() > 0.0 && z.re > 0.0 { z.re / (2.0 * z.im.abs()) } else { f64::INFINITY };
         if q.is_finite() {

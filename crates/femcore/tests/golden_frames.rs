@@ -79,6 +79,10 @@ fn compare(path: &str, want: &Value, got: &Value, scale: f64, tol: f64, out: &mu
 fn golden(name: &str, r: &SolveResult, tol: f64) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden_frames/{name}.json"));
     let got = record(r);
+    // the kernels that have a fields stage hand out the cell fields
+    if ["emw_", "es_", "heat_", "solid_"].iter().any(|p| name.starts_with(p)) {
+        assert!(r.solutions.iter().all(|s| s.cell_fields.is_some()), "{name}: a solution without cell fields");
+    }
     // NYX_WRITE_GOLDEN=1 writes every file, NYX_WRITE_GOLDEN=<prefix> only the files whose name starts with the prefix
     if std::env::var("NYX_WRITE_GOLDEN").is_ok_and(|w| w == "1" || name.starts_with(&w)) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -157,7 +161,31 @@ fn golden(name: &str, r: &SolveResult, tol: f64) {
 }
 
 fn solve(mesh: &femcore::mesh::SimplexMesh, spec: &ProblemSpec) -> SolveResult {
-    femcore::solve::solve(mesh, spec, &mut SolveState::default()).unwrap()
+    let r = femcore::solve::solve(mesh, spec, &mut SolveState::default()).unwrap();
+    cell_fields_reproduce_the_plot_fields(mesh, &r);
+    r
+}
+
+/// The fields stage hands out the same quantities as the plot fields before the average over the cells at a node: every
+/// cell field has the name of a plot field (or its `Re ` version) and its node average is that plot field.
+fn cell_fields_reproduce_the_plot_fields(mesh: &femcore::mesh::SimplexMesh, r: &SolveResult) {
+    for sol in &r.solutions {
+        let Some(cf) = &sol.cell_fields else { continue };
+        assert_eq!(cf.nloc, mesh.nloc(r.order));
+        assert!(!cf.fields.is_empty());
+        for f in &cf.fields {
+            assert_eq!(f.re.len(), mesh.n_cells() * cf.nloc, "{}", f.name);
+            assert!(f.im.is_empty() || f.im.len() == f.re.len(), "{}", f.name);
+            let plot = sol
+                .field(&f.name)
+                .or_else(|| sol.field(&format!("Re {}", f.name)))
+                .unwrap_or_else(|| panic!("cell field {} has no plot field in {:?}", f.name, sol.fields.iter().map(|p| &p.name).collect::<Vec<_>>()));
+            let avg = femcore::fields::node_average(mesh, &f.re, 1, cf.order);
+            let scale = plot.values.iter().fold(0.0f64, |m, x| m.max(x.abs())).max(1e-300);
+            let worst = avg.iter().zip(&plot.values).fold(0.0f64, |m, (a, b)| m.max((a - b).abs()));
+            assert!(worst <= 1e-9 * scale, "node average of cell field {} differs from the plot field by {worst:e} (scale {scale:e})", f.name);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------- scalar kernels

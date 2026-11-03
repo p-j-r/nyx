@@ -23,7 +23,7 @@
 
 use crate::eigen::{eigs_general, EigOpts};
 use crate::fem::*;
-use crate::fields::{local_bary, node_average};
+use crate::fields::{local_bary, node_average, CellFields};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
 use crate::section::{local_component, local_tensor};
@@ -133,6 +133,25 @@ pub fn solve_modes(mesh: &SimplexMesh, freq: f64, eps_r: &[f64], mu_r: &[f64], n
 /// As `solve_modes` with a permittivity tensor per cell.
 #[allow(clippy::too_many_arguments)]
 pub fn solve_modes_tensor(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], n_target: f64, evanescent: bool, k: usize, order: usize) -> Result<Modes, String> {
+    let asm = assemble_modes(mesh, freq, eps_r, mu_r, order)?;
+    solve_mode_pairs(&asm, n_target, evanescent, k)
+}
+
+/// Stage 1 of the real mode solver: the generalized eigenproblem `A x = lambda B x` (`lambda = -beta^2`) of the
+/// edge-element + P2-phi formulation, with the PEC walls removed and the phi block scaled by `1/k0`.
+pub struct ModeAssembly {
+    /// free-dof system matrices
+    pub a: Csr,
+    pub b: Csr,
+    /// the free dofs of the full vector (edge functions first, then phi)
+    pub free: Vec<usize>,
+    pub n_tot: usize,
+    /// edge-function dofs (the first block of the full vector)
+    pub net: usize,
+    pub k0: f64,
+}
+
+pub fn assemble_modes(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], order: usize) -> Result<ModeAssembly, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -241,10 +260,15 @@ pub fn solve_modes_tensor(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r
             bs.data[p] *= scale[r] * scale[bs.indices[p]];
         }
     }
-    let af = a_full.submatrix(&free, &free);
-    let bf = bs.submatrix(&free, &free);
+    Ok(ModeAssembly { a: a_full.submatrix(&free, &free), b: bs.submatrix(&free, &free), free, n_tot, net, k0 })
+}
+
+/// Stage 2: the `k` eigenpairs nearest the effective index `n_target` (real, or imaginary if `evanescent`), sorted by
+/// closeness to it, as effective indices, edge coefficients and `phi = Ez / (j beta)`.
+pub fn solve_mode_pairs(asm: &ModeAssembly, n_target: f64, evanescent: bool, k: usize) -> Result<Modes, String> {
+    let (k0, net, n_tot, free) = (asm.k0, asm.net, asm.n_tot, &asm.free);
     let sigma = if evanescent { (n_target * k0).powi(2) } else { -(n_target * k0).powi(2) };
-    let pairs = eigs_general(&af, &bf, sigma, k, &EigOpts::default())?;
+    let pairs = eigs_general(&asm.a, &asm.b, sigma, k, &EigOpts::default())?;
     let mut out = vec![];
     for (i, &lam) in pairs.values.iter().enumerate() {
         let beta2 = -lam;
@@ -275,6 +299,12 @@ pub fn solve_modes_tensor(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r
 /// Nodal fields of one mode: transverse and longitudinal field at every dof (node average of
 /// the element values), scaled to max |E| = 1, under wafer names: `|E|`, `|Exz|` (in the plane), `|Ey|` and `Ey` (along the guide), `Ex`, `Ez`.
 pub fn mode_fields(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order: usize) -> Vec<Field> {
+    mode_fields_cells(mesh, modes, j, freq, order).0
+}
+
+/// Stage 3: `mode_fields` and, next to them, the components `Ex`, `Ez` (in the plane) and `Ey` (along the guide) at the
+/// local dofs of every cell, with the same scale and sign as the plot fields (whose node average they reproduce).
+pub fn mode_fields_cells(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order: usize) -> (Vec<Field>, CellFields) {
     let k0 = 2.0 * std::f64::consts::PI * freq / C0;
     let (nc, nloc) = (mesh.n_cells(), mesh.nloc(order));
     let geo = geometry(mesh);
@@ -328,14 +358,26 @@ pub fn mode_fields(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order
     let sg = if big < 0.0 { -1.0 } else { 1.0 };
     let f = |name: &str, v: Vec<f64>| Field { name: name.into(), unit: "a.u.".into(), values: v };
     let (lat, nor, prop) = (local_component(0), local_component(1), local_component(2));
-    vec![
+    let mut cells = CellFields::new(mesh, order);
+    let ez_cell: Vec<f64> = (0..nc)
+        .flat_map(|c| {
+            let mut pd = Vec::new();
+            mesh.cell_dofs(c, order, &mut pd);
+            pd.into_iter().take(nloc).map(|d| ez_nodal_signed[d] * s * prop.1).collect::<Vec<_>>()
+        })
+        .collect();
+    cells.push_real(format!("E{}", lat.0), "a.u.", etx.iter().map(|x| x * s * sg * lat.1).collect());
+    cells.push_real(format!("E{}", nor.0), "a.u.", ety.iter().map(|x| x * s * sg * nor.1).collect());
+    cells.push_real(format!("E{}", prop.0), "a.u.", ez_cell);
+    let fields = vec![
         f("|E|", sc(&tot)),
         f("|Exz|", sc(&etn)),
         f(&format!("|E{}|", prop.0), sc(&ezn)),
         f(&format!("E{}", prop.0), ez_nodal_signed.iter().map(|x| x * s * prop.1).collect()),
         f(&format!("E{}", lat.0), etxn.iter().map(|x| x * s * sg * lat.1).collect()),
         f(&format!("E{}", nor.0), etyn.iter().map(|x| x * s * sg * nor.1).collect()),
-    ]
+    ];
+    (fields, cells)
 }
 
 pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
@@ -369,9 +411,11 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
     for j in 0..modes.neff.len() {
         let (re, im) = modes.neff[j];
         let txt = if im.abs() > 1e-9 * re.abs().max(1.0) { format!("{re:.6} {im:+.4}i") } else { format!("{re:.6}") };
+        let (fields, cell_fields) = mode_fields_cells(mesh, &modes, j, freq, spec.order);
         solutions.push(Solution {
             label: format!("mode {}: neff = {txt}", j + 1),
-            fields: mode_fields(mesh, &modes, j, freq, spec.order),
+            fields,
+            cell_fields: Some(cell_fields),
             neff: Some((re, im)),
             ..Default::default()
         });

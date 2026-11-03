@@ -194,21 +194,9 @@ pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, 
         for (a, &dof) in free.iter().enumerate() {
             u[dof] = vecs[i][a];
         }
-        let big = u.iter().cloned().fold(c(0.0, 0.0), |mx, z| if z.norm() > mx.norm() { z } else { mx });
-        let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
-        let scale = 1.0 / big.norm().max(1e-300);
-        let mag: Vec<f64> = (0..n1).map(|a| (0..d).map(|kk| u[kk * n1 + a].norm_sqr()).sum::<f64>().sqrt() * scale).collect();
-        let mut fields = vec![Field { name: "|u|".into(), unit: "a.u.".into(), values: mag }];
-        let mut disp = vec![0.0; n1 * d];
-        for (comp, ax) in crate::section::component_names(d).iter().enumerate() {
-            let v: Vec<f64> = (0..n1).map(|a| (u[comp * n1 + a] * rot * scale).re).collect();
-            for a in 0..n1 {
-                disp[a * d + comp] = v[a];
-            }
-            fields.push(Field { name: format!("Re u{ax}"), unit: "a.u.".into(), values: v });
-        }
+        let (fields, disp, cells) = crate::sms::complex_mode_fields(mesh, spec.order, &u);
         let q = if f.im.abs() > 0.0 { f.re / (2.0 * f.im.abs()) } else { f64::INFINITY };
-        solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q), fields, disp: Some(disp), value: Some(f.re), ..Default::default() });
+        solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(f.re), ..Default::default() });
         scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
         if q.is_finite() {
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));

@@ -16,7 +16,7 @@ use crate::eigen::EigOpts;
 use crate::ems::C0;
 use crate::ems_pml::cell_stretches;
 use crate::fem::*;
-use crate::fields::{local_bary, node_average};
+use crate::fields::{local_bary, node_average, CellFields};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
 use crate::sparse::Csr;
@@ -584,13 +584,19 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
             Field { name: "Re Ey".into(), unit: "a.u.".into(), values: avg(e.iter().map(|v| (v[1] * rot).re).collect()) },
             Field { name: "Re Ez".into(), unit: "a.u.".into(), values: avg(e.iter().map(|v| (v[2] * rot).re).collect()) },
         ];
+        // the same components per cell, not averaged, in the phase and scale of the plot fields
+        let mut cells = CellFields::new(mesh, 2);
+        for (k, name) in ["Ex", "Ey", "Ez"].iter().enumerate() {
+            let z: Vec<C> = e.iter().map(|v| v[k] * rot * s).collect();
+            cells.push_complex(*name, "a.u.", z.iter().map(|x| x.re).collect(), z.iter().map(|x| x.im).collect());
+        }
         if f.im.abs() > 1e-12 * f.re.abs().max(1.0) {
             let q = f.re / (2.0 * f.im.abs());
-            solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q), fields, value: Some(f.re), ..Default::default() });
+            solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q), fields, cell_fields: Some(cells), value: Some(f.re), ..Default::default() });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
         } else {
-            solutions.push(Solution { label: format!("mode {}: {:.6} GHz", j + 1, f.re / 1e9), fields, value: Some(f.re), ..Default::default() });
+            solutions.push(Solution { label: format!("mode {}: {:.6} GHz", j + 1, f.re / 1e9), fields, cell_fields: Some(cells), value: Some(f.re), ..Default::default() });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(f.re)));
         }
     }

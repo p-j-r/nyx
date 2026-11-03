@@ -6,7 +6,7 @@
 
 use crate::expr::eval_at;
 use crate::fem::*;
-use crate::fields::{gradients_at_nodes, node_average};
+use crate::fields::{gradients_at_nodes, node_average, CellFields};
 use crate::linalg::{gen_eigh, SparseSolver};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
@@ -34,8 +34,8 @@ pub(crate) fn check_labels(mesh: &SimplexMesh, bcs: &[Bc]) -> Result<(), String>
     }
 }
 
-/// Nodal field and gradient components of a scalar field: `[value, g_x, g_y, (g_z)]` per dof.
-pub(crate) fn nodal_gradient(mesh: &SimplexMesh, u: &[f64], order: usize, scale: &[f64]) -> Vec<f64> {
+/// `scale[c] * grad u` at the local dofs of every cell, not averaged: `g[(c*nloc + a)*dim + k]`.
+pub(crate) fn cell_gradient(mesh: &SimplexMesh, u: &[f64], order: usize, scale: &[f64]) -> Vec<f64> {
     let d = mesh.dim;
     let nloc = mesh.nloc(order);
     let mut g = gradients_at_nodes(mesh, u, 1, order);
@@ -46,11 +46,11 @@ pub(crate) fn nodal_gradient(mesh: &SimplexMesh, u: &[f64], order: usize, scale:
             }
         }
     }
-    node_average(mesh, &g, d, order)
+    g
 }
 
-/// Nodal flux `sign * K grad(u)` averaged over the cells around each dof, `dim` values per dof.
-pub(crate) fn nodal_tensor_gradient(mesh: &SimplexMesh, u: &[f64], order: usize, k: &[M3], sign: f64) -> Vec<f64> {
+/// `sign * K grad(u)` at the local dofs of every cell, not averaged, `dim` values per local dof.
+pub(crate) fn cell_tensor_gradient(mesh: &SimplexMesh, u: &[f64], order: usize, k: &[M3], sign: f64) -> Vec<f64> {
     let d = mesh.dim;
     let nloc = mesh.nloc(order);
     let mut g = gradients_at_nodes(mesh, u, 1, order);
@@ -63,7 +63,19 @@ pub(crate) fn nodal_tensor_gradient(mesh: &SimplexMesh, u: &[f64], order: usize,
             }
         }
     }
-    node_average(mesh, &g, d, order)
+    g
+}
+
+/// The values of a dof field at the local dofs of every cell: `out[c*nloc + a]`.
+pub(crate) fn cell_values_at_nodes(mesh: &SimplexMesh, u: &[f64], order: usize) -> Vec<f64> {
+    let nloc = mesh.nloc(order);
+    let mut out = Vec::with_capacity(mesh.n_cells() * nloc);
+    let mut dofs = Vec::new();
+    for c in 0..mesh.n_cells() {
+        mesh.cell_dofs(c, order, &mut dofs);
+        out.extend(dofs.iter().take(nloc).map(|&d| u[d]));
+    }
+    out
 }
 
 fn components(g: &[f64], d: usize) -> Vec<Vec<f64>> {
@@ -80,8 +92,17 @@ fn minmax(v: &[f64]) -> (f64, f64) {
 
 // ------------------------------------------------------------------ electrostatics
 
-pub fn solve_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
-    let t0 = Instant::now();
+/// Stage 1 of electrostatics: the stiffness matrix, the load and the Dirichlet dofs.
+pub struct ElectroAssembly {
+    pub k: Csr,
+    pub f: Vec<f64>,
+    pub fixed: Vec<usize>,
+    pub vals: Vec<f64>,
+    /// fixed potential per boundary label
+    pub volt: BTreeMap<i32, f64>,
+}
+
+pub fn assemble_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<ElectroAssembly, String> {
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
     let eps = spec.materials.cell_values(mesh, "eps_r", Some(1.0))?;
@@ -119,53 +140,78 @@ pub fn solve_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<So
         return Err("electrostatics needs at least one potential or ground boundary".into());
     }
     let (fixed, vals) = dirichlet_constraints(mesh, &volt, order);
-    let (v, solver_note) = solve_spd(mesh, order, 1, spec.solver, &k, &f, &fixed, &vals)?;
-    let e: Vec<f64> = nodal_gradient(mesh, &v, order, &vec![-1.0; mesh.n_cells()]);
+    Ok(ElectroAssembly { k, f, fixed, vals, volt })
+}
+
+/// Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one
+/// `spec.solver` names.
+pub fn solve_potential(mesh: &SimplexMesh, spec: &ProblemSpec, asm: &ElectroAssembly) -> Result<(Vec<f64>, Option<String>), String> {
+    solve_spd(mesh, spec.order, 1, spec.solver, &asm.k, &asm.f, &asm.fixed, &asm.vals)
+}
+
+/// Stage 3: the plot fields `V`, `|E|`, `E{x,z}` and the same without averaging over the cells at a node.
+pub fn electrostatics_fields(mesh: &SimplexMesh, order: usize, v: &[f64]) -> (Vec<Field>, CellFields) {
+    let scale = vec![-1.0; mesh.n_cells()];
+    let ecell = cell_gradient(mesh, v, order, &scale);
+    let e = node_average(mesh, &ecell, mesh.dim, order);
     let ec = components(&e, mesh.dim);
-    let en = norm_of(&ec);
-    let kv = k.matvec(&v);
+    let mut fields = vec![Field { name: "V".into(), unit: "V".into(), values: v.to_vec() }, Field { name: "|E|".into(), unit: "V/m".into(), values: norm_of(&ec) }];
+    for (name, c) in crate::section::component_names(mesh.dim).iter().zip(ec) {
+        fields.push(Field { name: format!("E{name}"), unit: "V/m".into(), values: c });
+    }
+    let mut cf = CellFields::new(mesh, order);
+    cf.push_real("V", "V", cell_values_at_nodes(mesh, v, order));
+    cf.push_components("E", crate::section::component_names(mesh.dim), "V/m", &ecell);
+    (fields, cf)
+}
+
+pub fn solve_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let order = spec.order;
+    let asm = assemble_electrostatics(mesh, spec)?;
+    let (v, solver_note) = solve_potential(mesh, spec, &asm)?;
+    let (fields, cell_fields) = electrostatics_fields(mesh, order, &v);
+    let en = &fields[1].values;
+    let kv = asm.k.matvec(&v);
     let w = 0.5 * v.iter().zip(&kv).map(|(a, b)| a * b).sum::<f64>();
     let (vmin, vmax) = minmax(&v);
     let mut scalars = vec![
         ("stored energy W_e (J; per metre in 2D)".to_string(), Scalar::Num(w)),
-        ("max |E| (V/m)".into(), Scalar::Num(minmax(&en).1)),
+        ("max |E| (V/m)".into(), Scalar::Num(minmax(en).1)),
         ("V min (V)".into(), Scalar::Num(vmin)),
         ("V max (V)".into(), Scalar::Num(vmax)),
     ];
-    let mut dv: Vec<f64> = volt.values().map(|x| (x * 1e12).round() / 1e12).collect();
+    let mut dv: Vec<f64> = asm.volt.values().map(|x| (x * 1e12).round() / 1e12).collect();
     dv.sort_by(|a, b| a.partial_cmp(b).unwrap());
     dv.dedup();
     if dv.len() == 2 {
         scalars.push(("capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(), Scalar::Num(2.0 * w / (dv[1] - dv[0]).powi(2))));
     }
-    let mut fields = vec![Field { name: "V".into(), unit: "V".into(), values: v }, Field { name: "|E|".into(), unit: "V/m".into(), values: en }];
-    for (name, c) in crate::section::component_names(mesh.dim).iter().zip(ec) {
-        fields.push(Field { name: format!("E{name}"), unit: "V/m".into(), values: c });
-    }
     Ok(SolveResult {
         order,
         dim: mesh.dim,
-        solutions: vec![Solution { label: "stationary".into(), fields, ..Default::default() }],
+        solutions: vec![Solution { label: "stationary".into(), fields, cell_fields: Some(cell_fields), ..Default::default() }],
         scalars,
         log: solver_note.into_iter().collect(),
         seconds: t0.elapsed().as_secs_f64(),
-        dofs: n,
+        dofs: asm.k.nrows,
         ..Default::default()
     })
 }
 
 // ------------------------------------------------------------------ heat transfer
 
-struct HeatSystem {
-    k: Csr,
-    f: Vec<f64>,
-    ktensor: Vec<M3>,
-    fixed: Vec<usize>,
-    vals: Vec<f64>,
-    has_convection: bool,
+/// Stage 1 of heat transfer: conductivity matrix, load, Dirichlet dofs and the conductivity tensors (for the flux).
+pub struct HeatSystem {
+    pub k: Csr,
+    pub f: Vec<f64>,
+    pub ktensor: Vec<M3>,
+    pub fixed: Vec<usize>,
+    pub vals: Vec<f64>,
+    pub has_convection: bool,
 }
 
-fn heat_system(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<HeatSystem, String> {
+pub fn assemble_heat(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<HeatSystem, String> {
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
     let ktensor = plane_tensors(mesh, spec.materials.cell_tensor(mesh, TensorKind::Conductivity, None)?);
@@ -206,39 +252,39 @@ fn heat_system(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<HeatSystem, Str
     Ok(HeatSystem { k, f, ktensor, fixed, vals, has_convection })
 }
 
-fn heat_fields(mesh: &SimplexMesh, t: &[f64], ktensor: &[M3], order: usize) -> Vec<Field> {
-    let q = nodal_tensor_gradient(mesh, t, order, ktensor, -1.0);
+/// Stage 3 of heat transfer: `T`, `|q|`, `q{x,z}` and the same per cell without averaging.
+pub fn heat_fields(mesh: &SimplexMesh, t: &[f64], ktensor: &[M3], order: usize) -> (Vec<Field>, CellFields) {
+    let qcell = cell_tensor_gradient(mesh, t, order, ktensor, -1.0);
+    let q = node_average(mesh, &qcell, mesh.dim, order);
     let qc = components(&q, mesh.dim);
     let mut fields = vec![Field { name: "T".into(), unit: "K".into(), values: t.to_vec() }, Field { name: "|q|".into(), unit: "W/m^2".into(), values: norm_of(&qc) }];
     for (name, c) in crate::section::component_names(mesh.dim).iter().zip(qc) {
         fields.push(Field { name: format!("q{name}"), unit: "W/m^2".into(), values: c });
     }
-    fields
+    let mut cf = CellFields::new(mesh, order);
+    cf.push_real("T", "K", cell_values_at_nodes(mesh, t, order));
+    cf.push_components("q", crate::section::component_names(mesh.dim), "W/m^2", &qcell);
+    (fields, cf)
 }
 
-pub fn solve_heat(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState) -> Result<SolveResult, String> {
-    let t0 = Instant::now();
+/// Stage 2 of heat transfer: the temperature at every dof, for the stationary study (one state) or at each output
+/// time of the transient one.
+pub struct HeatStates {
+    /// output times, empty for the stationary study
+    pub times: Vec<f64>,
+    pub temps: Vec<Vec<f64>>,
+    pub log: Vec<String>,
+}
+
+pub fn solve_heat_states(mesh: &SimplexMesh, spec: &ProblemSpec, sys: &HeatSystem) -> Result<HeatStates, String> {
     let order = spec.order;
-    let sys = heat_system(mesh, spec)?;
     let n = sys.k.nrows;
     let mut log = vec![];
-    let _ = sys.has_convection;
     match &spec.study {
         Study::Stationary => {
             let (t, note) = solve_spd(mesh, order, 1, spec.solver, &sys.k, &sys.f, &sys.fixed, &sys.vals)?;
             log.extend(note);
-            let (lo, hi) = minmax(&t);
-            state.heat_t = Some(t.clone());
-            Ok(SolveResult {
-                order,
-                dim: mesh.dim,
-                solutions: vec![Solution { label: "stationary".into(), fields: heat_fields(mesh, &t, &sys.ktensor, order), ..Default::default() }],
-                scalars: vec![("T min (K)".into(), Scalar::Num(lo)), ("T max (K)".into(), Scalar::Num(hi))],
-                log,
-                seconds: t0.elapsed().as_secs_f64(),
-                dofs: n,
-                ..Default::default()
-            })
+            Ok(HeatStates { times: vec![], temps: vec![t], log })
         }
         Study::Transient { t_end, n_out, t0: t0_expr } => {
             if *t_end <= 0.0 || *n_out < 1 {
@@ -357,31 +403,39 @@ pub fn solve_heat(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState
                 }
                 log.push(format!("BDF2, {} steps ({} free dofs; too large for the exact dense method)", sub * n_out, free.len()));
             }
-            state.heat_t = out.last().cloned();
-            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-            let mut solutions = vec![];
-            for (j, row) in out.iter().enumerate() {
-                let (a, b) = minmax(row);
-                lo = lo.min(a);
-                hi = hi.max(b);
-                solutions.push(Solution {
-                    label: format!("t = {:.6} s", times[j]).replace(".000000", ""),
-                    fields: heat_fields(mesh, row, &sys.ktensor, order),
-                    value: Some(times[j]),
-                    ..Default::default()
-                });
-            }
-            Ok(SolveResult {
-                order,
-                dim: mesh.dim,
-                solutions,
-                scalars: vec![("T min (K)".into(), Scalar::Num(lo)), ("T max (K)".into(), Scalar::Num(hi))],
-                log,
-                seconds: t0.elapsed().as_secs_f64(),
-                dofs: n,
-                ..Default::default()
-            })
+            Ok(HeatStates { times, temps: out, log })
         }
         _ => Err("heat transfer supports Stationary and Transient studies".into()),
     }
+}
+
+pub fn solve_heat(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let order = spec.order;
+    let sys = assemble_heat(mesh, spec)?;
+    let st = solve_heat_states(mesh, spec, &sys)?;
+    state.heat_t = st.temps.last().cloned();
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut solutions = vec![];
+    for (j, row) in st.temps.iter().enumerate() {
+        let (a, b) = minmax(row);
+        lo = lo.min(a);
+        hi = hi.max(b);
+        let (fields, cell_fields) = heat_fields(mesh, row, &sys.ktensor, order);
+        let (label, value) = match st.times.get(j) {
+            Some(&t) => (format!("t = {:.6} s", t).replace(".000000", ""), Some(t)),
+            None => ("stationary".to_string(), None),
+        };
+        solutions.push(Solution { label, fields, cell_fields: Some(cell_fields), value, ..Default::default() });
+    }
+    Ok(SolveResult {
+        order,
+        dim: mesh.dim,
+        solutions,
+        scalars: vec![("T min (K)".into(), Scalar::Num(lo)), ("T max (K)".into(), Scalar::Num(hi))],
+        log: st.log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: sys.k.nrows,
+        ..Default::default()
+    })
 }

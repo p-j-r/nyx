@@ -166,11 +166,41 @@ pub fn solve_solid_axisym(mesh: &SimplexMesh, spec: &ProblemSpec, m: f64) -> Res
 }
 
 pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSection) -> Result<(SolveResult, KzModes), String> {
+    let t0 = Instant::now();
+    let asm = assemble_cross_section(mesh, spec, kind)?;
+    let solved = solve_cross_section_modes(&asm)?;
+    let result = cross_section_fields(mesh, &asm, &solved)?;
+    let result = SolveResult { seconds: t0.elapsed().as_secs_f64(), ..result };
+    Ok((result, solved.modes))
+}
+
+/// Stage 1 of the cross-section solid kernels: stiffness, mass and (low-reflecting) damping on the free dofs, the
+/// constraints, and the material data the coupling integrals need.
+pub struct CrossAssembly {
+    pub kind: CrossSection,
+    pub order: usize,
+    /// all dofs (three displacement blocks of `n1`)
+    pub n: usize,
+    pub n1: usize,
+    pub kf: CCsr,
+    pub mf: CCsr,
+    /// damping on the free dofs when a boundary is low-reflecting
+    pub cf: Option<Csr>,
+    pub free: Vec<usize>,
+    pub fixed: Vec<usize>,
+    pub c6: Vec<M6>,
+    pub rho: Vec<f64>,
+    pub n_modes: usize,
+    pub f_search: f64,
+    /// a PML or a low-reflecting boundary makes the frequencies complex
+    pub has_loss: bool,
+}
+
+pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSection) -> Result<CrossAssembly, String> {
     let kz = match kind {
         CrossSection::Kz(k) => k,
         CrossSection::Axisymmetric(m) => m,
     };
-    let t0 = Instant::now();
     if mesh.dim != 2 {
         return Err("an out-of-plane wave number applies to a 2D cross-section".into());
     }
@@ -239,13 +269,37 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
     }
     let kf = k.submatrix(&free, &free);
     let mf = mc.submatrix(&free, &free);
+    let lrb_labels: Vec<i32> = spec.bcs.iter().filter(|b| matches!(b.kind, BcKind::LowReflecting)).flat_map(|b| b.labels.iter().copied()).collect();
+    if !lrb_labels.is_empty() && f_search <= 0.0 {
+        return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());
+    }
+    let cf = if lrb_labels.is_empty() { None } else { Some(crate::sms_lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free)) };
+    let has_loss = stretch.is_some() || !lrb_labels.is_empty();
+    Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss })
+}
+
+/// Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them.
+pub struct CrossSolve {
+    pub modes: KzModes,
+    /// Krylov dimension of the eigensolver
+    pub dim: usize,
+}
+
+/// Stage 2: the complex eigenpairs (`K - w^2 M` or the quadratic problem with the low-reflecting damping) nearest the
+/// search frequency, as complex frequencies in Hz with their displacement over all dofs, sorted by real part.
+pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, String> {
+    let kz = match asm.kind {
+        CrossSection::Kz(k) => k,
+        CrossSection::Axisymmetric(m) => m,
+    };
+    let (n_modes, f_search, free, n) = (asm.n_modes, asm.f_search, &asm.free, asm.n);
+    let (kf, mf) = (&asm.kf, &asm.mf);
     // the shift: the requested frequency, or just below the spectrum for the lowest modes
     let sigma = if f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
-    let lrb_labels: Vec<i32> = spec.bcs.iter().filter(|b| matches!(b.kind, BcKind::LowReflecting)).flat_map(|b| b.labels.iter().copied()).collect();
     // (frequencies, displacement vectors over the free dofs, converged, Krylov dimension)
     type Found = (Vec<(C, usize)>, Vec<Vec<C>>, bool, usize);
-    let (mut modes, vectors, converged, kdim): Found = if lrb_labels.is_empty() {
-        let pairs = crate::csparse::eigs_complex(&kf, &mf, c(sigma, 0.0), n_modes, 1e-9, 400)?;
+    let (mut modes, vectors, converged, kdim): Found = if asm.cf.is_none() {
+        let pairs = crate::csparse::eigs_complex(kf, mf, c(sigma, 0.0), n_modes, 1e-9, 400)?;
         let modes = pairs
             .values
             .iter()
@@ -261,30 +315,35 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
             .collect();
         (modes, pairs.vectors.clone(), pairs.converged, pairs.dim)
     } else {
-        if f_search <= 0.0 {
-            return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());
-        }
-        let cfull = crate::sms_lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3);
-        let cf = cfull.submatrix(&free, &free);
-        let (omegas, vecs, conv, dim) = crate::sms_lrb::quadratic_modes(&kf, &mf, &cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
+        let cf = asm.cf.as_ref().unwrap();
+        let (omegas, vecs, conv, dim) = crate::sms_lrb::quadratic_modes(kf, mf, cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
         let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
         (modes, vecs, conv, dim)
     };
-    let pairs = crate::csparse::CEigPairs { values: vec![], vectors, residuals: vec![], dim: kdim, converged };
-    let has_loss = stretch.is_some() || !lrb_labels.is_empty();
     modes.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
-    let mut solutions = vec![];
-    let mut scalars = vec![];
     let mut out_freqs: Vec<C> = vec![];
     let mut out_vectors: Vec<Vec<C>> = vec![];
-    for (j, &(fz, i)) in modes.iter().enumerate() {
-        let freq = fz.re;
+    for &(fz, i) in modes.iter() {
         let mut u = vec![C::new(0.0, 0.0); n];
         for (a, &dof) in free.iter().enumerate() {
-            u[dof] = pairs.vectors[i][a];
+            u[dof] = vectors[i][a];
         }
         out_freqs.push(fz);
-        out_vectors.push(u.clone());
+        out_vectors.push(u);
+    }
+    Ok(CrossSolve { modes: KzModes { kz, freqs: out_freqs, vectors: out_vectors, c6: asm.c6.clone(), rho: asm.rho.clone(), converged }, dim: kdim })
+}
+
+/// Stage 3: the plot fields `|u|`, `ux`, `uz`, `uy`, `|uy|` of every mode (largest component real, unit maximum), the
+/// displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
+pub fn cross_section_fields(mesh: &SimplexMesh, asm: &CrossAssembly, solved: &CrossSolve) -> Result<SolveResult, String> {
+    let (n1, order, has_loss) = (asm.n1, asm.order, asm.has_loss);
+    let modes = &solved.modes;
+    let mut solutions = vec![];
+    let mut scalars = vec![];
+    for (j, &fz) in modes.freqs.iter().enumerate() {
+        let freq = fz.re;
+        let u = &modes.vectors[j];
         // rotate the phase so the largest component is real, scale to unit maximum modulus
         let big = u.iter().cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
         let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
@@ -302,6 +361,21 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
             Field { name: names[2].into(), unit: "a.u.".into(), values: re(&uz) },
             Field { name: format!("|{}|", names[2]), unit: "a.u.".into(), values: uz.iter().map(|z| z.norm()).collect() },
         ];
+        let nloc = mesh.nloc(order);
+        let mut cells = crate::fields::CellFields::new(mesh, order);
+        for (k, name) in names.iter().enumerate() {
+            let (mut re_c, mut im_c) = (Vec::with_capacity(mesh.n_cells() * nloc), Vec::with_capacity(mesh.n_cells() * nloc));
+            let mut dofs = Vec::new();
+            for cell in 0..mesh.n_cells() {
+                mesh.cell_dofs(cell, order, &mut dofs);
+                for &d in dofs.iter().take(nloc) {
+                    let z = u[k * n1 + d] * rot * scale;
+                    re_c.push(z.re);
+                    im_c.push(z.im);
+                }
+            }
+            cells.push_complex(*name, "a.u.", re_c, im_c);
+        }
         let mut disp = vec![0.0; n1 * 2];
         for a in 0..n1 {
             disp[a * 2] = ux[a].re;
@@ -309,25 +383,25 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         }
         if has_loss && fz.im.abs() > 0.0 {
             let q = fz.re / (2.0 * fz.im.abs());
-            solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, fz.re, fz.im, q), fields, disp: Some(disp), value: Some(freq), ..Default::default() });
+            solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, fz.re, fz.im, q), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(freq), ..Default::default() });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", fz.re, fz.im))));
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
         } else {
-            solutions.push(Solution { label: format!("mode {}: {:.6} Hz", j + 1, freq), fields, disp: Some(disp), value: Some(freq), ..Default::default() });
+            solutions.push(Solution { label: format!("mode {}: {:.6} Hz", j + 1, freq), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(freq), ..Default::default() });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
         }
     }
     if solutions.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
     }
-    let what = match kind {
+    let kz = modes.kz;
+    let what = match asm.kind {
         CrossSection::Kz(_) => format!("wave number k = {kz:.6e} rad/m along y"),
         CrossSection::Axisymmetric(_) => format!("axisymmetric, azimuthal order m = {kz}"),
     };
-    let mut log = vec![format!("{what}; complex Hermitian eigenproblem, Krylov dimension {}{}", pairs.dim, if pairs.converged { "" } else { " (not every pair converged; those are omitted)" })];
-    if fixed.is_empty() {
+    let mut log = vec![format!("{what}; complex Hermitian eigenproblem, Krylov dimension {}{}", solved.dim, if modes.converged { "" } else { " (not every pair converged; those are omitted)" })];
+    if asm.fixed.is_empty() {
         log.push("no fixed boundary: the lowest modes may be rigid-body-like".into());
     }
-    let result = SolveResult { order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() };
-    Ok((result, KzModes { kz, freqs: out_freqs, vectors: out_vectors, c6, rho, converged: pairs.converged }))
+    Ok(SolveResult { order, dim: 2, solutions, scalars, log, dofs: asm.n, ..Default::default() })
 }

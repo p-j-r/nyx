@@ -182,6 +182,22 @@ impl<'a> AxiCtx<'a> {
 
 /// Modes with frequency nearest `f_target` at azimuthal order `m` (`nev` of them).
 pub fn solve_axisym_modes(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, f_target: f64, nev: usize, order: usize) -> Result<AxiModes, String> {
+    let asm = assemble_axisym(mesh, mat, m, order)?;
+    solve_axisym_pairs(&asm, f_target, nev)
+}
+
+/// Stage 1: the curl-curl matrix `A` and the permittivity mass `B` of `A x = (omega/c)^2 B x` on the free dofs (edge
+/// functions for E_r, E_z, then nodal E_theta), with perfectly conducting exterior walls.
+pub struct AxiAssembly {
+    pub m: f64,
+    pub order: usize,
+    pub a: CCsr,
+    pub b: CCsr,
+    pub free: Vec<usize>,
+    pub n_tot: usize,
+}
+
+pub fn assemble_axisym(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, order: usize) -> Result<AxiAssembly, String> {
     if mesh.dim != 2 {
         return Err("an axisymmetric problem needs a 2D mesh in (r, z)".into());
     }
@@ -269,10 +285,15 @@ pub fn solve_axisym_modes(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, f_targe
         fixed.extend(be.iter().map(|&e| net + nv + e));
     }
     let free = free_dofs(n_tot, &fixed);
-    let af = a_full.submatrix(&free, &free);
-    let bf = b_full.submatrix(&free, &free);
+    Ok(AxiAssembly { m, order, a: a_full.submatrix(&free, &free), b: b_full.submatrix(&free, &free), free, n_tot })
+}
+
+/// Stage 2: the `nev` eigenpairs nearest `f_target` (Hz), as complex frequencies and field vectors over all dofs,
+/// sorted by closeness to it; unconverged pairs are dropped.
+pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Result<AxiModes, String> {
+    let (m, order, free, n_tot) = (asm.m, asm.order, &asm.free, asm.n_tot);
     let k0 = 2.0 * std::f64::consts::PI * f_target / C0;
-    let pairs = eigs_complex(&af, &bf, c(k0 * k0, 0.0), nev, 1e-9, 800)?;
+    let pairs = eigs_complex(&asm.a, &asm.b, c(k0 * k0, 0.0), nev, 1e-9, 800)?;
     let mut modes: Vec<(C, Vec<C>)> = vec![];
     for (i, lam) in pairs.values.iter().enumerate() {
         if lam.re <= 0.0 || pairs.residuals.get(i).is_some_and(|r| *r > 1e-6) {

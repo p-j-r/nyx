@@ -16,7 +16,8 @@
 
 use crate::eigen::{eigs_sym, EigOpts};
 use crate::fem::*;
-use crate::fields::{gradients_at_nodes, node_average};
+use crate::csparse::{c, C};
+use crate::fields::{gradients_at_nodes, node_average, CellFields};
 use crate::material::{M3, M6};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
@@ -288,12 +289,15 @@ struct Thermal {
     tref: f64,
 }
 
-fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Plane, thermal: Option<&Thermal>, with_stress: bool) -> (Vec<Field>, Vec<f64>) {
+/// Stage 3 of the real solid kernels: plot fields (`|u|`, `von Mises`, `u{x,y,z}`, stresses under wafer names), the
+/// displacement per dof, and the same components per cell without averaging.
+fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Plane, thermal: Option<&Thermal>, with_stress: bool) -> (Vec<Field>, Vec<f64>, CellFields) {
     let d = st.d;
     let n1 = st.n1;
     let nloc = mesh.nloc(order);
     let nc = mesh.n_cells();
     let mut fields = vec![];
+    let mut cells = CellFields::new(mesh, order);
     let unorm: Vec<f64> = (0..n1).map(|i| (0..d).map(|k| u[k * n1 + i] * u[k * n1 + i]).sum::<f64>().sqrt()).collect();
     fields.push(Field { name: "|u|".into(), unit: "m".into(), values: unorm });
     if with_stress {
@@ -314,17 +318,21 @@ fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Pla
         lap(&mut tl, "  stress at nodes");
         let vm: Vec<f64> = s.iter().map(von_mises).collect();
         fields.push(Field { name: "von Mises".into(), unit: "Pa".into(), values: node_average(mesh, &vm, 1, order) });
+        cells.push_real("von Mises", "Pa", vm);
         for (k, ax) in crate::section::component_names(d).iter().enumerate() {
             fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
+            cells.push_real(format!("u{ax}"), "m", crate::dfs::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
         }
         let comps: &[usize] = if d == 2 { &[0, 1, 3, 2] } else { &[0, 1, 2, 3, 4, 5] };
         for &idx in comps {
             let v: Vec<f64> = s.iter().map(|x| x[idx]).collect();
             fields.push(Field { name: crate::section::stress_name(d, idx).into(), unit: "Pa".into(), values: node_average(mesh, &v, 1, order) });
+            cells.push_real(crate::section::stress_name(d, idx), "Pa", v);
         }
     } else {
         for (k, ax) in crate::section::component_names(d).iter().enumerate() {
             fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
+            cells.push_real(format!("u{ax}"), "m", crate::dfs::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
         }
     }
     let mut disp = vec![0.0; n1 * d];
@@ -333,7 +341,92 @@ fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Pla
             disp[i * d + k] = u[k * n1 + i];
         }
     }
-    (fields, disp)
+    (fields, disp, cells)
+}
+
+/// Stage 3 of the complex-frequency solid kernels (PML, Floquet, low-reflecting): the mode shape `u` over all dofs
+/// (component blocks) with its largest component made real and of unit modulus, as the plot fields `|u|`, `Re u{x,y,z}`,
+/// the displacement of the real parts, and the complex components per cell.
+pub(crate) fn complex_mode_fields(mesh: &SimplexMesh, order: usize, u: &[C]) -> (Vec<Field>, Vec<f64>, CellFields) {
+    let (d, n1) = (mesh.dim, mesh.n_dofs(order));
+    let big = u.iter().cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+    let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+    let scale = 1.0 / big.norm().max(1e-300);
+    let mag: Vec<f64> = (0..n1).map(|a| (0..d).map(|k| u[k * n1 + a].norm_sqr()).sum::<f64>().sqrt() * scale).collect();
+    let mut fields = vec![Field { name: "|u|".into(), unit: "a.u.".into(), values: mag }];
+    let mut disp = vec![0.0; n1 * d];
+    let mut cells = CellFields::new(mesh, order);
+    let nloc = mesh.nloc(order);
+    for (comp, ax) in crate::section::component_names(d).iter().enumerate() {
+        let v: Vec<f64> = (0..n1).map(|a| (u[comp * n1 + a] * rot * scale).re).collect();
+        for a in 0..n1 {
+            disp[a * d + comp] = v[a];
+        }
+        fields.push(Field { name: format!("Re u{ax}"), unit: "a.u.".into(), values: v });
+        let (mut re_c, mut im_c) = (Vec::with_capacity(mesh.n_cells() * nloc), Vec::with_capacity(mesh.n_cells() * nloc));
+        let mut dofs = Vec::new();
+        for cell in 0..mesh.n_cells() {
+            mesh.cell_dofs(cell, order, &mut dofs);
+            for &dof in dofs.iter().take(nloc) {
+                let z = u[comp * n1 + dof] * rot * scale;
+                re_c.push(z.re);
+                im_c.push(z.im);
+            }
+        }
+        cells.push_complex(format!("u{ax}"), "a.u.", re_c, im_c);
+    }
+    (fields, disp, cells)
+}
+
+/// Stage 2 of the real solid eigenfrequency kernel: the `nm` eigenpairs of `K u = w^2 M u` on the free dofs nearest the
+/// search frequency (shift-invert Lanczos; for the lowest modes of a large problem LOBPCG with a multigrid
+/// preconditioner, with a factorisation as the fallback), and a note on which route was taken.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn solve_real_modes(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, k: &Csr, m: &Csr, free: &[usize], nm: usize, f_search: f64) -> Result<(crate::eigen::EigPairs, Option<String>), String> {
+    let (d, order) = (st.d, spec.order);
+    let kff = k.submatrix(&free, &free);
+    let mff = m.submatrix(&free, &free);
+    let mut eig_note: Option<String> = None;
+    let sigma = if f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
+    // for the lowest modes (shift below the spectrum) K - sigma M is positive definite and large
+    // 3D problems are solved with multigrid-preconditioned CG instead of a sparse factorisation
+    let big = if mesh.dim == 3 { free.len() > crate::fem::LOBPCG_MIN_FREE } else { free.len() > crate::fem::AMG_THRESHOLD };
+    let want_amg = match spec.solver {
+        LinearSolver::Direct => false,
+        LinearSolver::Iterative => sigma <= 0.0,
+        LinearSolver::Auto => sigma <= 0.0 && big,
+    };
+    let pairs = if want_amg {
+        // no factorisation: block preconditioned CG (LOBPCG) with one multigrid cycle as preconditioner
+        let shifted_full = k.add_scaled(&m, -sigma);
+        let sys = crate::fem::AmgSystem::new(mesh, order, d, &shifted_full, &st.fixed)?;
+        let factor = sys.convergence_factor();
+        // multigrid that converges slowly (very thin or stretched parts) loses to a factorisation
+        // unless the factorisation would not fit
+        let use_amg = spec.solver == LinearSolver::Iterative || factor <= crate::fem::LOBPCG_MAX_FACTOR || free.len() > crate::fem::FACTORISE_MAX_FREE;
+        if use_amg {
+            // in Auto mode a stalled iteration gives up early and the factorisation takes over
+            let guard = spec.solver != LinearSolver::Iterative;
+            let res = crate::lobpcg::lobpcg_guarded(&kff, &mff, nm, nm.clamp(4, 8), &|r: &[f64]| sys.precondition_free(r), 1e-8, 400, guard);
+            match res {
+                Ok(r) if r.converged || spec.solver == LinearSolver::Iterative => {
+                    eig_note = Some(format!("LOBPCG with AMG preconditioner: {} levels {:?}, convergence factor {:.2}, setup {:.1} s{}", sys.n_levels(), sys.sizes(), factor, sys.setup_seconds, if r.converged { "" } else { " (not fully converged)" }));
+                    r
+                }
+                Err(e) if e.starts_with(crate::lobpcg::STALLED) => {
+                    eig_note = Some(format!("{e}; used a sparse factorisation instead"));
+                    eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
+                }
+                _ => eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?,
+            }
+        } else {
+            eig_note = Some(format!("multigrid converges slowly here (factor {factor:.2}), used a sparse factorisation"));
+            eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
+        }
+    } else {
+        eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
+    };
+    Ok((pairs, eig_note))
 }
 
 /// Records the time since `t` under the label `what` in the stage log (and on stderr when NYX_PROFILE is set),
@@ -396,14 +489,14 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
             lap(&mut tl, "loads");
             let (u, note) = solve_spd(mesh, order, d, spec.solver, &k, &f, &st.fixed, &st.vals)?;
             lap(&mut tl, "linear solve");
-            let (fields, disp) = fields_of(mesh, &u, order, &st, spec.plane, thermal.as_ref(), true);
+            let (fields, disp, cells) = fields_of(mesh, &u, order, &st, spec.plane, thermal.as_ref(), true);
             lap(&mut tl, "fields (gradients, stress, averaging)");
             let umax = fields[0].values.iter().cloned().fold(0.0, f64::max);
             let vmax = fields.iter().find(|f| f.name == "von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);
             Ok(SolveResult {
                 order,
                 dim: d,
-                solutions: vec![Solution { label: "static".into(), fields, disp: Some(disp), ..Default::default() }],
+                solutions: vec![Solution { label: "static".into(), fields, cell_fields: Some(cells), disp: Some(disp), ..Default::default() }],
                 scalars: vec![("max |u| (m)".into(), Scalar::Num(umax)), ("max von Mises (Pa)".into(), Scalar::Num(vmax))],
                 log: note.into_iter().collect(),
                 seconds: t0.elapsed().as_secs_f64(),
@@ -434,48 +527,7 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
             if nm < 1 || nm + 1 >= free.len() {
                 return Err("number of modes must be between 1 and the number of free dofs".into());
             }
-            let kff = k.submatrix(&free, &free);
-            let mff = m.submatrix(&free, &free);
-            let mut eig_note: Option<String> = None;
-            let sigma = if *f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
-            // for the lowest modes (shift below the spectrum) K - sigma M is positive definite and large
-            // 3D problems are solved with multigrid-preconditioned CG instead of a sparse factorisation
-            let big = if mesh.dim == 3 { free.len() > crate::fem::LOBPCG_MIN_FREE } else { free.len() > crate::fem::AMG_THRESHOLD };
-            let want_amg = match spec.solver {
-                LinearSolver::Direct => false,
-                LinearSolver::Iterative => sigma <= 0.0,
-                LinearSolver::Auto => sigma <= 0.0 && big,
-            };
-            let pairs = if want_amg {
-                // no factorisation: block preconditioned CG (LOBPCG) with one multigrid cycle as preconditioner
-                let shifted_full = k.add_scaled(&m, -sigma);
-                let sys = crate::fem::AmgSystem::new(mesh, order, d, &shifted_full, &st.fixed)?;
-                let factor = sys.convergence_factor();
-                // multigrid that converges slowly (very thin or stretched parts) loses to a factorisation
-                // unless the factorisation would not fit
-                let use_amg = spec.solver == LinearSolver::Iterative || factor <= crate::fem::LOBPCG_MAX_FACTOR || free.len() > crate::fem::FACTORISE_MAX_FREE;
-                if use_amg {
-                    // in Auto mode a stalled iteration gives up early and the factorisation takes over
-                    let guard = spec.solver != LinearSolver::Iterative;
-                    let res = crate::lobpcg::lobpcg_guarded(&kff, &mff, nm, nm.clamp(4, 8), &|r: &[f64]| sys.precondition_free(r), 1e-8, 400, guard);
-                    match res {
-                        Ok(r) if r.converged || spec.solver == LinearSolver::Iterative => {
-                            eig_note = Some(format!("LOBPCG with AMG preconditioner: {} levels {:?}, convergence factor {:.2}, setup {:.1} s{}", sys.n_levels(), sys.sizes(), factor, sys.setup_seconds, if r.converged { "" } else { " (not fully converged)" }));
-                            r
-                        }
-                        Err(e) if e.starts_with(crate::lobpcg::STALLED) => {
-                            eig_note = Some(format!("{e}; used a sparse factorisation instead"));
-                            eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
-                        }
-                        _ => eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?,
-                    }
-                } else {
-                    eig_note = Some(format!("multigrid converges slowly here (factor {factor:.2}), used a sparse factorisation"));
-                    eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
-                }
-            } else {
-                eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
-            };
+            let (pairs, eig_note) = solve_real_modes(mesh, spec, &st, &k, &m, &free, nm, *f_search)?;
             let mut order_idx: Vec<usize> = (0..pairs.values.len()).collect();
             order_idx.sort_by(|&a, &b| pairs.values[a].partial_cmp(&pairs.values[b]).unwrap());
             let mut solutions = vec![];
@@ -490,8 +542,8 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
                 if mx > 0.0 {
                     u.iter_mut().for_each(|x| *x /= mx);
                 }
-                let (fields, disp) = fields_of(mesh, &u, order, &st, spec.plane, None, false);
-                solutions.push(Solution { label: format!("mode {}: {:.6} Hz", j + 1, freq), fields, disp: Some(disp), value: Some(freq), ..Default::default() });
+                let (fields, disp, cells) = fields_of(mesh, &u, order, &st, spec.plane, None, false);
+                solutions.push(Solution { label: format!("mode {}: {:.6} Hz", j + 1, freq), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(freq), ..Default::default() });
                 scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
             }
             let mut log = vec![format!("Krylov dimension {}{}", pairs.dim, if pairs.converged { "" } else { " (not fully converged)" })];
