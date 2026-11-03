@@ -16,8 +16,9 @@ The rule is ADR 19. Each contract is an exemplar file here plus a test that gene
 | `solve_result` v2 | serde shape of a result | same, `solve_result_v2_*` | same |
 | `physics_descriptors`, `physics_api` | descriptor types; trait surface, registry rules, error codes | same | same |
 | `physics_dfs`, `physics_sms`, `physics_ems` | the descriptors each physics declares (studies, conditions, properties, fields, couplings, generated JSON Schema) | `crates/nyx-{dfs,sms,ems}/tests/contracts.rs` | `cargo test --release -p nyx-dfs -p nyx-sms -p nyx-ems --test contracts` |
+| `connect_hosts`, `connect_report` | the config entry written into each AI host's file; the JSON and JSON Schema of `nyx-connect --json` | `crates/nyx-connect/tests/contracts.rs` | `cargo test --release -p nyx-connect --test contracts` |
 | `layering` (tests only) | which workspace crate may depend on which | `crates/nyx-engine/tests/layering.rs` | `cargo test --release -p nyx-engine --test layering` |
 
 Rewriting an exemplar: `NYX_WRITE_CONTRACT=1 cargo test ... --test contracts <test name>`. Do it only with a `VERSIONS.md` entry. None of these tests depends on frozen floating-point values, so they pass on a machine where the golden files fail (R22).
 
-Files: `problem_spec.v1.json` (old `ProblemSpec`, until phase 4), `problem_spec.v2.json`, `solve_result.v2.json`, `physics_descriptors.v1.json`, `physics_{dfs,sms,ems}.v1.json`, `store_workflow.v1.json`, `store_run.v1.json`, `mcp_tools.v1.json`; versions in `VERSIONS.md`. Exemplars are compared as values, never as text: the order of the keys of a JSON object is not part of a contract (ADR 26).
+Files: `problem_spec.v1.json` (old `ProblemSpec`, until phase 4), `problem_spec.v2.json`, `solve_result.v2.json`, `physics_descriptors.v1.json`, `physics_{dfs,sms,ems}.v1.json`, `store_workflow.v1.json`, `store_run.v1.json`, `mcp_tools.v1.json`, `connect_hosts.v1.json`, `connect_report.v1.json`, `connect_report.v1.schema.json`; versions in `VERSIONS.md`. Exemplars are compared as values, never as text: the order of the keys of a JSON object is not part of a contract (ADR 26).

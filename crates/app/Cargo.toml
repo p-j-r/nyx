@@ -7,6 +7,7 @@ rust-version.workspace = true
 [dependencies]
 femcore = { path = "../femcore" }
 geom = { path = "../geom" }
+nyx-connect = { path = "../nyx-connect" }
 nyx-store = { path = "../nyx-store" }
 rayon = "1"
 eframe = "0.37"

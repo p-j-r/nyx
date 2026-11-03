@@ -146,14 +146,13 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | features `hdf5-metno`, `phdf5`, `portable-kernels` |
 | `crates/nyx-store/*` | 14 | |
-| `crates/app/src/connect.rs` | 15 | duplicate of crates/nyx-connect (R07) |
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |
 | `crates/app/src/*` | 23 | |
 | `crates/app/*` | 23 | |
 | `crates/nyx-mcp/tests/contracts.rs` | 19, 15 | |
 | `crates/nyx-mcp/*` | 15 | moved from `ai/` into the root workspace (ADR 26) |
 | `crates/nyx-session/*` | 15 | dissolved in phase 7 |
-| `crates/nyx-connect/*` | 15 | |
+| `crates/nyx-connect/*` | 15, 28, 19 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27 | shared target directory |
 | `crates/nyx-physics/*` | 25, 19 | the Physics trait, envelope, descriptors, registry |

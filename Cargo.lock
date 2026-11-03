@@ -2807,6 +2807,7 @@ dependencies = [
  "femcore",
  "geom",
  "image",
+ "nyx-connect",
  "nyx-store",
  "rayon",
  "rfd",

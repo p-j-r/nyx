@@ -3,12 +3,11 @@
 //!
 //! Command line: `nyx [FILE]` opens the window (and a project or HDF5 results file), `--size WxH` sets the window size,
 //! `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.xml` solves
-//! without a window (see `batch`). Modules: `app` (state and layout), `connect` (registering the AI server with Claude), `tabs` (the inspector), `viewport` and `scene` (drawing),
+//! without a window (see `batch`). Modules: `app` (state and layout), the Connect menu (in `app`, backed by the `nyx-connect` crate), `tabs` (the inspector), `viewport` and `scene` (drawing),
 //! `worker` (background jobs), `state` (the saved project), `examples`, `colormap`, `theme`.
 mod app;
 mod batch;
 mod colormap;
-mod connect;
 mod dashboard;
 mod examples;
 mod geomui;
