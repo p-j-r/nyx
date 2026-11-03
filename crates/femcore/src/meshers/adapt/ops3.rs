@@ -8,8 +8,11 @@
 //! a surface face or a crease edge, a split puts the new vertex on the surface or crease it lies on (through the `Geometry3` oracle) and
 //! a smoothing step slides a surface or crease vertex over its patch or curve.
 //!
-//! **Limits.** Flips are 3-2 and 2-3 of interior edges and faces; flips of surface edges, and edge removal with more tets around the
-//! edge, are not implemented. A surface collapse refuses to turn a surface face by more than about 25 degrees, so a curved surface
+//! Edge removal replaces an interior edge with 4 to 7 tets around it by the best triangulation of its ring (`edge_removal_pass`), and a
+//! surface flip changes the diagonal of two coplanar boundary faces (`surface_flip_pass`).
+//!
+//! **Limits.** Edge removal stops at 7 tets around the edge; a surface flip needs a flat boundary patch (not an interface) with two
+//! tets on the edge, so curved surfaces and interfaces keep their triangulation. A surface collapse refuses to turn a surface face by more than about 25 degrees, so a curved surface
 //! coarsens only where it is nearly flat at the scale of the edge. Serial.
 
 use super::field::MetricField;
@@ -39,6 +42,8 @@ pub struct AdaptOptions3 {
     pub max_cells: Option<usize>,
     /// Stop when an iteration's splits plus collapses are below this fraction of the tetrahedra.
     pub converge_frac: f64,
+    /// Also try edge removal and surface flips after the 3-2 / 2-3 flips.
+    pub edge_removal: bool,
 }
 
 impl Default for AdaptOptions3 {
@@ -54,6 +59,7 @@ impl Default for AdaptOptions3 {
             sample_iters: 2,
             max_cells: None,
             converge_frac: 0.005,
+            edge_removal: true,
         }
     }
 }
@@ -669,4 +675,189 @@ pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometr
         }
     }
     moved
+}
+
+/// The vertices around the interior edge `e` in cyclic order (each tetrahedron on the edge contributes the pair of its other vertices);
+/// `None` when the edge is on the boundary of the mesh.
+fn ring_of(w: &Work3, snap: &Snap3, e: &Edge) -> Option<Vec<u32>> {
+    let ts = &snap.edge_tets[e];
+    let mut pairs: Vec<[u32; 2]> = vec![];
+    for &t in ts {
+        let o: Vec<u32> = w.tets[t as usize].iter().copied().filter(|&x| x != e[0] && x != e[1]).collect();
+        pairs.push([o[0], o[1]]);
+    }
+    // walk the cycle
+    let mut ring = vec![pairs[0][0], pairs[0][1]];
+    let mut used = vec![false; pairs.len()];
+    used[0] = true;
+    for _ in 1..pairs.len() {
+        let last = *ring.last().unwrap();
+        let (i, next) = pairs.iter().enumerate().find_map(|(i, p)| {
+            if used[i] {
+                None
+            } else if p[0] == last {
+                Some((i, p[1]))
+            } else if p[1] == last {
+                Some((i, p[0]))
+            } else {
+                None
+            }
+        })?;
+        used[i] = true;
+        ring.push(next);
+    }
+    // closed: the walk ends where it began
+    if ring.pop()? != ring[0] || ring.len() != pairs.len() {
+        return None;
+    }
+    Some(ring)
+}
+
+/// Edge removal: an interior edge with `n` (4 to 7) tetrahedra around it is replaced by the `2(n - 2)` tetrahedra of the best
+/// triangulation of its ring, if that raises the worst quality. (The 3-2 flip of `flip_pass` is the case `n = 3`.) Returns the number.
+pub fn edge_removal_pass(w: &mut Work3) -> usize {
+    let snap = snapshot(w);
+    let mut lock = vec![false; w.tets.len()];
+    let mut n_done = 0;
+    for e in all_edges(&snap) {
+        let ts = &snap.edge_tets[&e];
+        let n = ts.len();
+        if !(4..=7).contains(&n) || locked(&lock, ts) || w.curve_of.contains_key(&e) {
+            continue;
+        }
+        let label = w.tlabel[ts[0] as usize];
+        if ts.iter().any(|&t| w.tlabel[t as usize] != label) {
+            continue;
+        }
+        if ts.iter().any(|&t| tet_faces(&w.tets[t as usize]).iter().any(|(f, _)| f.contains(&e[0]) && f.contains(&e[1]) && w.patch_of.contains_key(f))) {
+            continue;
+        }
+        let Some(ring) = ring_of(w, &snap, &e) else { continue };
+        let old_min = ts.iter().map(|&t| tet_q(w, &w.tets[t as usize])).fold(f64::INFINITY, f64::min);
+        // quality of the two tetrahedra over a ring triangle (i, j, k): the ends of the edge must lie on opposite sides
+        let tri_q = |i: usize, j: usize, k: usize| -> f64 {
+            let (ci, cj, ck) = (ring[i], ring[j], ring[k]);
+            let va = tet_volume(&w.pts, &[ci, cj, ck, e[0]]);
+            let vb = tet_volume(&w.pts, &[ci, cj, ck, e[1]]);
+            if !(va * vb < 0.0) {
+                return f64::NEG_INFINITY;
+            }
+            let ta = orient(w, [ci, cj, ck, e[0]]);
+            let tb = orient(w, [ci, cj, ck, e[1]]);
+            tet_q(w, &ta).min(tet_q(w, &tb))
+        };
+        // best triangulation of the polygon by dynamic programming over its intervals: best[i][j] = (worst quality, split vertex)
+        let mut best = vec![vec![(f64::INFINITY, 0usize); n]; n];
+        for len in 2..n {
+            for i in 0..n - len {
+                let j = i + len;
+                let mut b = (f64::NEG_INFINITY, 0usize);
+                for k in i + 1..j {
+                    let q = tri_q(i, k, j).min(best[i][k].0).min(best[k][j].0);
+                    if q > b.0 {
+                        b = (q, k);
+                    }
+                }
+                best[i][j] = b;
+            }
+        }
+        let (q_new, _) = best[0][n - 1];
+        if !(q_new > old_min) {
+            continue;
+        }
+        let mut tris: Vec<(usize, usize, usize)> = vec![];
+        let mut stack = vec![(0usize, n - 1)];
+        while let Some((i, j)) = stack.pop() {
+            if j - i < 2 {
+                continue;
+            }
+            let k = best[i][j].1;
+            tris.push((i, k, j));
+            stack.push((i, k));
+            stack.push((k, j));
+        }
+        for &t in ts.iter() {
+            w.talive[t as usize] = false;
+            lock[t as usize] = true;
+        }
+        for (i, k, j) in tris {
+            for apex in [e[0], e[1]] {
+                let t = orient(w, [ring[i], ring[k], ring[j], apex]);
+                w.tets.push(t);
+                w.tlabel.push(label);
+                w.talive.push(true);
+                lock.push(true);
+            }
+        }
+        n_done += 1;
+    }
+    n_done
+}
+
+/// Flip of a boundary edge between two coplanar faces of a boundary patch with exactly two tetrahedra on it: the diagonal of the
+/// quadrilateral changes, the surface (flat there) does not. Returns the number of flips.
+pub fn surface_flip_pass(w: &mut Work3) -> usize {
+    use super::topo::Sig;
+    let snap = snapshot(w);
+    let mut lock = vec![false; w.tets.len()];
+    let mut n_done = 0;
+    for e in all_edges(&snap) {
+        let ts = &snap.edge_tets[&e];
+        if ts.len() != 2 || locked(&lock, ts) || w.curve_of.contains_key(&e) {
+            continue;
+        }
+        let sf = surface_faces_on(w, &snap, &e);
+        if sf.len() != 2 || sf[0].1 != sf[1].1 {
+            continue;
+        }
+        let p = sf[0].1;
+        if !matches!(w.patches[p as usize].sig, Sig::Bnd(_)) || w.patches[p as usize].frozen {
+            continue;
+        }
+        if w.tlabel[ts[0] as usize] != w.tlabel[ts[1] as usize] {
+            continue;
+        }
+        let (c, d) = (*sf[0].0.iter().find(|&&x| x != e[0] && x != e[1]).unwrap(), *sf[1].0.iter().find(|&&x| x != e[0] && x != e[1]).unwrap());
+        // the two faces must be coplanar: the four points of the quadrilateral a, c, b, d lie in one plane
+        let (pa, pb, pc, pd) = (w.pts[e[0] as usize], w.pts[e[1] as usize], w.pts[c as usize], w.pts[d as usize]);
+        let (u, v, x) = (sub3(pb, pa), sub3(pc, pa), sub3(pd, pa));
+        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let scale = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() * (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+        if (n[0] * x[0] + n[1] * x[1] + n[2] * x[2]).abs() > 1e-9 * scale {
+            continue;
+        }
+        // the third vertex x of the two tetrahedra (the one they share besides the edge)
+        let others = |t: u32| -> Vec<u32> { w.tets[t as usize].iter().copied().filter(|&y| y != e[0] && y != e[1]).collect() };
+        let (o0, o1) = (others(ts[0]), others(ts[1]));
+        let Some(&xv) = o0.iter().find(|y| o1.contains(y)) else { continue };
+        // old tets: (a,b,c,x) and (a,b,x,d) in some order; new: (c,d,x,a) and (c,d,x,b)
+        let new = [orient(w, [c, d, xv, e[0]]), orient(w, [c, d, xv, e[1]])];
+        let (va, vb) = (tet_volume(&w.pts, &[c, d, xv, e[0]]), tet_volume(&w.pts, &[c, d, xv, e[1]]));
+        if !(va * vb < 0.0) {
+            continue;
+        }
+        let old_min = ts.iter().map(|&t| tet_q(w, &w.tets[t as usize])).fold(f64::INFINITY, f64::min);
+        let new_min = new.iter().map(|t| tet_q(w, t)).fold(f64::INFINITY, f64::min);
+        if new_min <= old_min {
+            continue;
+        }
+        for &t in ts {
+            w.talive[t as usize] = false;
+            lock[t as usize] = true;
+        }
+        let label = w.tlabel[ts[0] as usize];
+        for t in new {
+            w.tets.push(t);
+            w.tlabel.push(label);
+            w.talive.push(true);
+            lock.push(true);
+        }
+        for (f, _) in &sf {
+            w.patch_of.remove(f);
+        }
+        w.patch_of.insert(fkey(c, d, e[0]), p);
+        w.patch_of.insert(fkey(c, d, e[1]), p);
+        n_done += 1;
+    }
+    n_done
 }

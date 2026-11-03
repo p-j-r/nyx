@@ -5,7 +5,7 @@ use super::drive::{AdaptReport, IterStats};
 use super::field::MetricField;
 use super::geom3::{FacetGeometry, Geometry3};
 use super::metric::Sym;
-use super::ops3::{all_edges_of, collapse_pass, elen, flip_pass, smooth_pass, split_pass, tet_q, unresolved_frozen, AdaptOptions3};
+use super::ops3::{all_edges_of, collapse_pass, edge_removal_pass, elen, flip_pass, smooth_pass, split_pass, surface_flip_pass, tet_q, unresolved_frozen, AdaptOptions3};
 use super::topo3::{TopoOptions3, Work3};
 use crate::meshers::mesh::SimplexMesh;
 
@@ -95,8 +95,14 @@ pub fn adapt3_with<G: Geometry3>(
             }
         }
         for _ in 0..10 {
-            let n = report.phases.time("flip", || flip_pass(&mut w));
+            let mut n = report.phases.time("flip", || flip_pass(&mut w));
             verify(&w, "flip", iter)?;
+            if opt.edge_removal {
+                n += report.phases.time("edge removal", || edge_removal_pass(&mut w));
+                verify(&w, "edge removal", iter)?;
+                n += report.phases.time("surface flip", || surface_flip_pass(&mut w));
+                verify(&w, "surface flip", iter)?;
+            }
             nf += n;
             if n == 0 {
                 break;

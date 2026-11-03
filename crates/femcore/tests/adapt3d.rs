@@ -170,3 +170,25 @@ fn a_fine_box_coarsens_on_its_surface_too() {
     assert!(a.n_cells() * 20 < start, "{} tets left of {start}", a.n_cells());
     assert!(surface < 150, "{surface} surface vertices of 6 * 81 + ... before");
 }
+
+#[test]
+fn edge_removal_and_surface_flips_never_worsen_the_worst_tetrahedron() {
+    let field = |x: &[f64; 3]| {
+        let h = 0.07 + 0.25 * (x[0] * x[0] + x[1]).min(1.0);
+        from_sizes(&[h; 3], &[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    };
+    let m = unit_box(3);
+    let run = |edge_removal: bool| {
+        let opt = AdaptOptions3 { edge_removal, ..AdaptOptions3::default() };
+        let out = adapt3(&m, &field, &TopoOptions3::default(), &opt).unwrap();
+        assert!((volume(&out.mesh, None) - 1.0).abs() < 1e-12);
+        assert!((facet_area(&out.mesh) - 6.0).abs() < 1e-12);
+        let flips: usize = out.report.iters.iter().map(|s| s.flips).sum();
+        let last = out.report.iters.last().unwrap();
+        (out.mesh.n_cells(), last.q_min, last.q_mean, last.in_band, flips)
+    };
+    let (off, on) = (run(false), run(true));
+    eprintln!("without: {} tets qmin {:.3} qmean {:.3} in band {:.3} flips {}\nwith:    {} tets qmin {:.3} qmean {:.3} in band {:.3} flips {}", off.0, off.1, off.2, off.3, off.4, on.0, on.1, on.2, on.3, on.4);
+    assert!(on.2 >= off.2 - 1e-3, "mean quality {} against {}", on.2, off.2);
+    assert!(on.1 > 0.02);
+}
