@@ -262,3 +262,46 @@ fn layers_on_all_six_sides_with_a_unit_stretch_equal_the_bigger_cavity() {
     eprintln!("{} tets ({} hexes, {} prisms cut): worst of 4 modes {worst:.2e}", pb.mesh.n_cells(), pb.split.hexes, pb.split.prisms);
     assert!(worst < 6e-3, "{got:?} vs {exact:?}");
 }
+
+/// Lowest three complex frequencies (Hz, as (Re f, Im f)) of the guide a x b closed by a PEC wall at z = 0 and by PML layers beyond
+/// z = d, on a block with `n` cells along x and `layers` PML layers (the other directions scale with it).
+fn pml_end_modes(n: usize, layers: usize, strength: f64, t: f64) -> Vec<(f64, f64)> {
+    use femcore::meshers::adapt::pml::PmlSpec;
+    use femcore::pml3::{add_pml_3d, apply_materials};
+    let (a, b, d) = (0.04, 0.03, 0.02);
+    let phys = common::block(a, b, d, n, n * 3 / 4, n * 3 / 4);
+    let mut spec = ProblemSpec::new(Physics::Emw);
+    spec.order = 2;
+    spec.materials.default.insert("eps_r".into(), 1.0);
+    let f101 = 0.5 * C0 * ((1.0 / a).powi(2) + (1.0 / (2.0 * d)).powi(2)).sqrt();
+    spec.study = Study::Eigenfrequency { n_modes: 3, f_search: f101 };
+    let mut pspec = PmlSpec::<3>::uniform(0.0, 0);
+    pspec.thickness[2][1] = t;
+    pspec.layers[2][1] = layers;
+    pspec.outer_label = Some(4);
+    let pb = add_pml_3d(&phys, &pspec, strength, 2.0, 1.0).unwrap();
+    apply_materials(&pb, &mut spec.materials);
+    let r = femcore::solve::solve(&pb.mesh, &spec, &mut SolveState::default()).unwrap();
+    (1..=r.solutions.len())
+        .map(|j| {
+            let f = r.solutions[j - 1].value.unwrap();
+            match r.scalar(&format!("Q{j}")) {
+                Some(q) => (f, f / (2.0 * q)),
+                None => (f, 0.0),
+            }
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "study: mesh convergence of the damped modes of a PML-terminated guide; run with --ignored --nocapture"]
+fn pml_end_converges_with_the_mesh() {
+    // the same continuous problem (PML thickness 2 cm, strength 3) on three meshes: the complex frequencies must converge
+    let levels = [(4, 3), (6, 4), (8, 6), (12, 9)];
+    let all: Vec<Vec<(f64, f64)>> = levels.iter().map(|&(n, l)| pml_end_modes(n, l, 3.0, 0.02)).collect();
+    let fin = all.last().unwrap();
+    for (lv, m) in levels.iter().zip(&all) {
+        let err: Vec<String> = m.iter().zip(fin).map(|(x, r)| format!("{:.1e}", ((x.0 - r.0).powi(2) + (x.1 - r.1).powi(2)).sqrt() / r.0)).collect();
+        eprintln!("n {} layers {}: {:?} error vs finest {err:?}", lv.0, lv.1, m.iter().map(|x| format!("{:.5e}{:+.3e}i", x.0, x.1)).collect::<Vec<_>>());
+    }
+}
