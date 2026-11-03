@@ -1,0 +1,1 @@
+{"id":"r0001_abcd","t":"2026-11-03T00:00:00Z","sec":0.25,"status":"ok","spec":"b3:0000","femcore":"0.1.0","version":2,"params":{"w":5e-7},"metrics":{"neff_re":2.44},"tags":["baseline"],"star":true,"note":"first","artifacts":[{"kind":"fields","path":"r0001_abcd/fields.h5","bytes":1024}]}

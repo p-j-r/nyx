@@ -1,0 +1,45 @@
+{
+  "nyx": 1,
+  "kind": "workflow",
+  "id": "wf-example",
+  "title": "Exemplar",
+  "status": "active",
+  "pinned": false,
+  "origin": "gui",
+  "created": "2026-11-03T00:00:00Z",
+  "touched": "2026-11-03T00:00:00Z",
+  "tags": [
+    "soi"
+  ],
+  "share": "recipe",
+  "version": 1,
+  "scripts_approved": false,
+  "experiments": [
+    {
+      "id": "e1",
+      "title": "TE modes",
+      "spec_hash": "b3:0000",
+      "card": {
+        "physics": "",
+        "study": "",
+        "dim": 0,
+        "geometry": {
+          "family": "",
+          "summary": "",
+          "dims": []
+        },
+        "materials": [],
+        "keywords": [],
+        "summary": ""
+      },
+      "runs": {
+        "count": 0,
+        "ok": 0,
+        "failed": 0,
+        "params": {},
+        "metrics": {},
+        "starred": []
+      }
+    }
+  ]
+}

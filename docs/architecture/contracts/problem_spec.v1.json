@@ -1,0 +1,242 @@
+[
+  {
+    "physics": "Electrostatics",
+    "order": 2,
+    "materials": {
+      "domains": {
+        "1": {
+          "eps_r": 2.0
+        },
+        "2": {
+          "eps_r": 8.0
+        }
+      },
+      "default": {},
+      "aniso": {},
+      "pml": {}
+    },
+    "bcs": [
+      {
+        "labels": [
+          1
+        ],
+        "kind": {
+          "Potential": 1.0
+        }
+      },
+      {
+        "labels": [
+          4
+        ],
+        "kind": "Ground"
+      }
+    ],
+    "study": "Stationary",
+    "plane": "Strain",
+    "thickness": 1.0,
+    "thermal": null,
+    "solver": "Auto",
+    "output": {
+      "mode": "None",
+      "path": ""
+    },
+    "out_of_plane": null,
+    "inactive": [],
+    "periodic": [],
+    "brillouin": null
+  },
+  {
+    "physics": "Heat",
+    "order": 2,
+    "materials": {
+      "domains": {},
+      "default": {
+        "k": 3.0
+      },
+      "aniso": {},
+      "pml": {}
+    },
+    "bcs": [
+      {
+        "labels": [
+          1
+        ],
+        "kind": {
+          "Temperature": 300.0
+        }
+      }
+    ],
+    "study": {
+      "Transient": {
+        "t_end": 1.0,
+        "n_out": 5,
+        "t0": "293.15 + 50*exp(-((x-0.5)^2)/0.01)"
+      }
+    },
+    "plane": "Strain",
+    "thickness": 1.0,
+    "thermal": null,
+    "solver": "Auto",
+    "output": {
+      "mode": "None",
+      "path": ""
+    },
+    "out_of_plane": null,
+    "inactive": [],
+    "periodic": [],
+    "brillouin": null
+  },
+  {
+    "physics": "Solid",
+    "order": 2,
+    "materials": {
+      "domains": {
+        "1": {
+          "E": 169000000000.0,
+          "nu": 0.28,
+          "rho": 2329.0
+        }
+      },
+      "default": {},
+      "aniso": {},
+      "pml": {
+        "2": {
+          "x": "Plus",
+          "y": "Off",
+          "z": "Minus",
+          "strength": 3.0,
+          "order": 2.0,
+          "re": 1.0
+        }
+      }
+    },
+    "bcs": [
+      {
+        "labels": [
+          2
+        ],
+        "kind": "LowReflecting"
+      }
+    ],
+    "study": {
+      "Eigenfrequency": {
+        "n_modes": 6,
+        "f_search": 5000000000.0
+      }
+    },
+    "plane": "Strain",
+    "thickness": 1.0,
+    "thermal": null,
+    "solver": "Auto",
+    "output": {
+      "mode": "None",
+      "path": ""
+    },
+    "out_of_plane": 1000000.0,
+    "inactive": [
+      3
+    ],
+    "periodic": [
+      {
+        "source": [
+          1
+        ],
+        "dest": [
+          4
+        ],
+        "phase": 0.5
+      }
+    ],
+    "brillouin": null
+  },
+  {
+    "physics": "Emw",
+    "order": 2,
+    "materials": {
+      "domains": {
+        "1": {
+          "eps_r": 12.08
+        },
+        "2": {
+          "eps_r": 2.085
+        }
+      },
+      "default": {},
+      "aniso": {},
+      "pml": {}
+    },
+    "bcs": [],
+    "study": {
+      "Modes": {
+        "freq": 193400000000000.0,
+        "n_target": 2.4,
+        "evanescent": false,
+        "n_modes": 4
+      }
+    },
+    "plane": "Strain",
+    "thickness": 1.0,
+    "thermal": null,
+    "solver": "Auto",
+    "output": {
+      "mode": "None",
+      "path": ""
+    },
+    "out_of_plane": null,
+    "inactive": [],
+    "periodic": [],
+    "brillouin": null
+  },
+  {
+    "physics": "Brillouin",
+    "order": 2,
+    "materials": {
+      "domains": {},
+      "default": {},
+      "aniso": {},
+      "pml": {}
+    },
+    "bcs": [],
+    "study": {
+      "Eigenfrequency": {
+        "n_modes": 12,
+        "f_search": 10000000000.0
+      }
+    },
+    "plane": "Strain",
+    "thickness": 1.0,
+    "thermal": null,
+    "solver": "Auto",
+    "output": {
+      "mode": "None",
+      "path": ""
+    },
+    "out_of_plane": null,
+    "inactive": [],
+    "periodic": [],
+    "brillouin": {
+      "wavelength": 1.55e-6,
+      "n_target": 2.5,
+      "n_optical_modes": 2,
+      "backward": true,
+      "pump_modes": [
+        1
+      ],
+      "stokes_modes": [
+        1
+      ],
+      "refractive_index": {},
+      "dn_dt": {},
+      "t_ref": 293.15,
+      "optical_pml": {},
+      "photoelastic": {},
+      "moving": [],
+      "viscosity": {},
+      "q_cap": 1000.0,
+      "length": 0.02,
+      "conjugate_strain": true,
+      "ring_radius": null,
+      "mirror_axis": null
+    }
+  }
+]
