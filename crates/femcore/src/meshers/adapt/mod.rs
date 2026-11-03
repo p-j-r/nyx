@@ -3,6 +3,7 @@
 pub mod drive;
 pub mod drive3;
 pub mod field;
+pub mod field3;
 pub mod geom;
 pub mod geom3;
 pub mod metric;

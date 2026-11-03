@@ -33,11 +33,14 @@ pub struct PhysicsSizing {
     pub points_per_wavelength: Option<f64>,
     /// Factor on the size inside perfectly matched layers (1 keeps it).
     pub pml_relax: f64,
+    /// Eigenfrequency studies look for `n_modes` modes at and above the search frequency; the mesh must resolve the highest of them. The
+    /// search frequency is multiplied by this to stand for it.
+    pub eigen_headroom: f64,
 }
 
 impl Default for PhysicsSizing {
     fn default() -> Self {
-        PhysicsSizing { points_per_wavelength: None, pml_relax: 1.5 }
+        PhysicsSizing { points_per_wavelength: None, pml_relax: 1.5, eigen_headroom: 1.5 }
     }
 }
 
@@ -50,16 +53,23 @@ impl PhysicsSizing {
 
 /// Shortest wavelength (m) of the study in every domain of the mesh, by domain label. Domains that carry no wave of this study are absent.
 pub fn wavelengths(spec: &ProblemSpec, mesh: &SimplexMesh) -> Result<BTreeMap<i32, f64>, String> {
+    wavelengths_with(spec, mesh, 1.0)
+}
+
+/// Like [`wavelengths`], with the search frequency of an eigenfrequency study multiplied by `headroom`.
+pub fn wavelengths_with(spec: &ProblemSpec, mesh: &SimplexMesh, headroom: f64) -> Result<BTreeMap<i32, f64>, String> {
     let first = first_cell_of_each_domain(mesh);
     match spec.physics {
         Physics::Emw => {
-            let Study::Modes { freq, .. } = spec.study else {
-                return Err("the wavelength of an electromagnetic study needs a Modes study".into());
+            let freq = match spec.study {
+                Study::Modes { freq, .. } => freq,
+                Study::Eigenfrequency { f_search, .. } if f_search > 0.0 => f_search * headroom,
+                _ => return Err("the wavelength of an electromagnetic study needs a Modes study or an eigenfrequency study with a search frequency".into()),
             };
             optical_wavelengths(spec, mesh, &first, C0 / freq, None)
         }
         Physics::Solid => {
-            let f = elastic_frequency(spec)?.ok_or("the wavelength of a solid-mechanics study needs an eigenfrequency study with a search frequency")?;
+            let f = elastic_frequency(spec)?.ok_or("the wavelength of a solid-mechanics study needs an eigenfrequency study with a search frequency")? * headroom;
             elastic_wavelengths(spec, mesh, &first, f)
         }
         Physics::Brillouin => {
@@ -67,7 +77,7 @@ pub fn wavelengths(spec: &ProblemSpec, mesh: &SimplexMesh) -> Result<BTreeMap<i3
             let lam0 = b.wavelength;
             let opt = optical_wavelengths(spec, mesh, &first, lam0, Some(&b.refractive_index))?;
             let f = match elastic_frequency(spec)? {
-                Some(f) => f,
+                Some(f) => f * headroom,
                 None => {
                     // backward scattering: f = 2 n v_L / lambda0, with the fastest index and the fastest wave of the mesh
                     let n = opt.values().map(|l| lam0 / l).fold(1.0, f64::max);
@@ -181,7 +191,7 @@ pub fn cell_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) ->
     if !(sz.pml_relax >= 1.0 && sz.ppw(spec.order) > 0.0) {
         return Err("points per wavelength must be positive and pml_relax at least 1".into());
     }
-    let lam = wavelengths(spec, mesh)?;
+    let lam = wavelengths_with(spec, mesh, sz.eigen_headroom)?;
     let ppw = sz.ppw(spec.order);
     let pml = |d: i32| spec.materials.pml.contains_key(&d) || spec.brillouin.as_ref().is_some_and(|b| b.optical_pml.contains_key(&d));
     Ok(mesh
@@ -213,6 +223,34 @@ pub fn metrics(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing, ceili
         return Err("physics metrics are for 2D meshes".into());
     }
     Ok(vertex_sizes(spec, mesh, sz)?.into_iter().map(|h| isotropic::<2>(h.min(ceiling).max(1e-300))).collect())
+}
+
+/// Isotropic metric of the physics size at every vertex of a mesh of any dimension (`D` = 2 or 3). Vertices without a wave get `ceiling`.
+pub fn metrics_d<const D: usize>(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing, ceiling: f64) -> Result<Vec<Sym<D>>, String> {
+    if mesh.dim != D {
+        return Err(format!("a {}D mesh, but metrics for {D}D were asked", mesh.dim));
+    }
+    Ok(vertex_sizes(spec, mesh, sz)?.into_iter().map(|h| isotropic::<D>(h.min(ceiling).max(1e-300))).collect())
+}
+
+/// Adapts a tetrahedral mesh to the physics of `spec`: the sizes of `vertex_sizes` (capped at `ceiling`), graded with slope `grade`,
+/// carried to the new vertices by a background field. Domain labels and boundary-facet labels pass through; corners, creases and
+/// material interfaces are kept as `meshers::adapt::topo3` classifies them. Returns the mesh and the report.
+pub fn adapt_tets(
+    mesh: &SimplexMesh,
+    spec: &ProblemSpec,
+    sz: &PhysicsSizing,
+    ceiling: f64,
+    grade: f64,
+    opt: &crate::meshers::adapt::ops3::AdaptOptions3,
+) -> Result<(SimplexMesh, crate::meshers::adapt::drive::AdaptReport), String> {
+    use crate::meshers::adapt::{drive3::adapt3, field3::BackgroundMetric3, topo3::TopoOptions3};
+    use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
+    let metrics = metrics_d::<3>(spec, mesh, sz, ceiling)?;
+    let old = simplex_to_adapt::<3>(mesh)?;
+    let field = BackgroundMetric3::new_graded(&old, &metrics, grade);
+    let out = adapt3(&old, &field, &TopoOptions3::default(), opt)?;
+    Ok((simplex_from_adapt(&out.mesh), out.report))
 }
 
 #[cfg(test)]

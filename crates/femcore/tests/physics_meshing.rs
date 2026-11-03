@@ -158,3 +158,52 @@ fn e_field_components_as_one_vector_need_fewer_cells_than_intersected_components
     assert!(cells[1].0 < cells[0].0, "one vector metric should not ask for more cells than three intersected ones: {cells:?}");
     assert!(cells[1].1 < (n0 - reference).abs() || (n0 - reference).abs() < 1e-6, "adapting to the E components must not worsen the index: {cells:?}");
 }
+
+// ---- 3D: a PEC cavity meshed from its physics ----------------------------------------------------------------------------------------
+
+mod common;
+use femcore::meshers::adapt::ops3::AdaptOptions3;
+use femcore::physics_size::adapt_tets;
+
+fn cavity_modes(a: f64, b: f64, d: f64, fmax: f64) -> Vec<f64> {
+    let mut out = vec![];
+    for m in 0..5 {
+        for n in 0..5 {
+            for p in 0..5 {
+                let nonzero = (m > 0) as usize + (n > 0) as usize + (p > 0) as usize;
+                if nonzero < 2 {
+                    continue;
+                }
+                let f = 0.5 * C0 * ((m as f64 / a).powi(2) + (n as f64 / b).powi(2) + (p as f64 / d).powi(2)).sqrt();
+                if f <= fmax {
+                    out.push(f);
+                    if nonzero == 3 {
+                        out.push(f);
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    out
+}
+
+#[test]
+fn a_cavity_meshed_from_its_physics_reproduces_the_first_modes() {
+    let (a, b, d) = (0.04, 0.03, 0.02);
+    let exact = cavity_modes(a, b, d, 20e9);
+    for order in [1usize, 2] {
+        let start = common::block(a, b, d, 2, 2, 2);
+        let mut spec = ProblemSpec::new(Physics::Emw);
+        spec.order = order;
+        spec.materials.default.insert("eps_r".into(), 1.0);
+        spec.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * exact[0] };
+        let (mesh, report) = adapt_tets(&start, &spec, &PhysicsSizing::default(), a, 0.4, &AdaptOptions3::default()).unwrap();
+        let r = femcore::solve::solve(&mesh, &spec, &mut SolveState::default()).unwrap();
+        let got: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
+        let worst = got.iter().zip(&exact).map(|(g, e)| (g / e - 1.0).abs()).fold(0.0, f64::max);
+        eprintln!("order {order}: {} -> {} tets, worst of 4 modes {worst:.2e}, adaptation iterations {}", start.n_cells(), mesh.n_cells(), report.iters.len());
+        assert!(worst < 5e-3, "order {order}: modes {got:?} vs {exact:?}");
+        assert!(got[0] > 0.95 * exact[0], "a spurious mode below the first: {got:?}");
+    }
+}
