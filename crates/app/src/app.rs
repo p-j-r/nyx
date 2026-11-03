@@ -193,7 +193,7 @@ impl App {
         self.proj.geometry = self.geom_edit.clone();
         self.proj.source = Source::Generated;
         let job = self.begin_job("Building mesh".into(), false);
-        worker::spawn_build(self.proj.geometry.clone(), job);
+        worker::spawn_build(self.proj.geometry.clone(), Some(self.proj.active_spec().clone()), job);
     }
 
     pub fn open_path(&mut self, path: PathBuf) {

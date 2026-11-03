@@ -66,7 +66,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             println!("{s}");
         }
     };
-    let mesh = std::sync::Arc::new(proj.geometry.build()?);
+    let mesh = std::sync::Arc::new(proj.geometry.build_for(&spec)?);
     say(format!("{}: {} cells, {} points, {} process(es)", phys.name(), mesh.n_cells(), mesh.n_points(), size));
     let mut state = SolveState::default();
     let result = femcore::solve::solve(&mesh, &spec, &mut state)?;

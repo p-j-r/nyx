@@ -25,6 +25,11 @@ pub struct GeometrySpec {
     /// finer mesh whose boundary and interface vertices lie on the exact curves. `None` is the simple mesher.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapt_scale: Option<f64>,
+    /// Size the mesh from the physics of the problem it is built for (`femcore::physics_size`: points per wavelength by element order,
+    /// shorter in high-index or slow-wave domains), on top of the sizes the model asks for. Needs a problem with a wavelength (EM waves,
+    /// solid-mechanics eigenfrequencies, Brillouin); other physics mesh as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub physics_sizing: bool,
 }
 
 impl TryFrom<serde_json::Value> for GeometrySpec {
@@ -41,6 +46,8 @@ impl TryFrom<serde_json::Value> for GeometrySpec {
             extrude: Option<Vec<femcore::mesher::Layer>>,
             #[serde(default)]
             adapt_scale: Option<f64>,
+            #[serde(default)]
+            physics_sizing: bool,
         }
         let inner = match v.get("geometry") {
             Some(g) => match g.get("Model") {
@@ -55,19 +62,19 @@ impl TryFrom<serde_json::Value> for GeometrySpec {
             None => v,
         };
         let f: Fields = serde_json::from_value(inner).map_err(|e| e.to_string())?;
-        Ok(GeometrySpec { list: f.list, h: f.h, extrude: f.extrude, adapt_scale: f.adapt_scale })
+        Ok(GeometrySpec { list: f.list, h: f.h, extrude: f.extrude, adapt_scale: f.adapt_scale, physics_sizing: f.physics_sizing })
     }
 }
 
 impl GeometrySpec {
     /// A model of the x-z cross-section (a 2D feature list) meshed with element size `h`.
     pub fn model(list: geom::model::FeatureList, h: f64) -> Self {
-        GeometrySpec { list, h, extrude: None, adapt_scale: None }
+        GeometrySpec { list, h, extrude: None, adapt_scale: None, physics_sizing: false }
     }
 
     /// A 2D model swept along y through `layers` (see `femcore::mesher::extrude_y`).
     pub fn model_extruded(list: geom::model::FeatureList, h: f64, layers: Vec<femcore::mesher::Layer>) -> Self {
-        GeometrySpec { list, h, extrude: Some(layers), adapt_scale: None }
+        GeometrySpec { list, h, extrude: Some(layers), adapt_scale: None, physics_sizing: false }
     }
 
     /// A rectangle `lx` wide (x) and `lz` high (z), one region `plate`, with element size `h`; swept `len` along y into a block when `len` is given.
@@ -76,11 +83,17 @@ impl GeometrySpec {
         let r = m.rect("plate", (0.0, 0.0), (lx, lz));
         m.overlay(&[("plate", r)]);
         let layers = len.map(|l| vec![femcore::mesher::Layer { thickness: l, n: ((l / h).round() as usize).clamp(1, 200), domain_offset: 0 }]);
-        GeometrySpec { list: m.list, h, extrude: layers, adapt_scale: None }
+        GeometrySpec { list: m.list, h, extrude: layers, adapt_scale: None, physics_sizing: false }
     }
 
     /// Evaluates and meshes the model: the mesh with the names of its regions and boundaries.
     pub fn build_named(&self) -> Result<femcore::geomdrive::MeshedGeom, String> {
+        self.build_named_for(None)
+    }
+
+    /// Like `build_named`, for the problem it will be solved with: when `physics_sizing` is set and the problem has a wavelength, the
+    /// mesh is also sized by it (`femcore::meshing::mesh_for_problem`). A problem without a wavelength (statics, heat) meshes as before.
+    pub fn build_named_for(&self, problem: Option<&ProblemSpec>) -> Result<femcore::geomdrive::MeshedGeom, String> {
         if self.list.dim != 2 {
             return Err("a 3D model cannot be meshed yet: model the x-z cross-section in 2D and sweep it along y with layers".into());
         }
@@ -91,7 +104,19 @@ impl GeometrySpec {
             Some(scale) => femcore::meshing::MeshPlan::adaptive(self.h, scale),
             None => femcore::meshing::MeshPlan::simple(self.h),
         };
-        let mut g = femcore::meshing::mesh_model(&self.list, &plan)?;
+        let sized = match problem {
+            Some(p) if self.physics_sizing && matches!(p.physics, Physics::Emw | Physics::Solid | Physics::Brillouin) => {
+                let adaptive = femcore::meshing::MeshPlan::adaptive(self.h, self.adapt_scale.unwrap_or(1.0));
+                let plan = femcore::meshing::MeshPlan { pml: plan.pml, ..adaptive };
+                let sz = femcore::physics_size::PhysicsSizing::default();
+                Some(femcore::meshing::mesh_for_problem(&self.list, &plan, p, &sz)?.0)
+            }
+            _ => None,
+        };
+        let mut g = match sized {
+            Some(g) => g,
+            None => femcore::meshing::mesh_model(&self.list, &plan)?,
+        };
         if let Some(layers) = &self.extrude {
             g.mesh = femcore::mesher::extrude_y(&g.mesh, layers, 0.0)?;
         }
@@ -100,6 +125,11 @@ impl GeometrySpec {
 
     pub fn build(&self) -> Result<femcore::mesh::SimplexMesh, String> {
         Ok(self.build_named()?.mesh)
+    }
+
+    /// The mesh for a problem (see `build_named_for`).
+    pub fn build_for(&self, problem: &ProblemSpec) -> Result<femcore::mesh::SimplexMesh, String> {
+        Ok(self.build_named_for(Some(problem))?.mesh)
     }
 
     /// The names of the model for the mesh built from it: what a rule can select. `ymin` and `ymax` name the two ends of a swept model.
@@ -360,6 +390,31 @@ fn bbox_of(d: &Display) -> ([f32; 3], [f32; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn physics_sizing_refines_a_wave_problem_and_leaves_others_alone() {
+        // a 40 mm x 10 mm plate meshed at h = 8 mm: 12 GHz in eps_r 4 has a wavelength of 12.5 mm, far finer than 8 mm asks
+        let mut g = GeometrySpec::plate(0.04, 0.01, 0.008, None);
+        let coarse = g.build().unwrap().n_cells();
+        let mut emw = ProblemSpec::new(Physics::Emw);
+        emw.order = 1;
+        emw.materials.default.insert("eps_r".into(), 4.0);
+        emw.study = Study::Modes { freq: 12e9, n_target: 1.5, evanescent: false, n_modes: 1 };
+        // off: the problem makes no difference
+        assert_eq!(g.build_for(&emw).unwrap().n_cells(), coarse);
+        g.physics_sizing = true;
+        let sized = g.build_for(&emw).unwrap().n_cells();
+        assert!(sized > 4 * coarse, "{sized} cells against {coarse}");
+        // statics have no wavelength: unchanged
+        let es = ProblemSpec::new(Physics::Electrostatics);
+        assert_eq!(g.build_for(&es).unwrap().n_cells(), coarse);
+        // the flag round-trips and an old file without it reads as off
+        let back: GeometrySpec = serde_json::from_value(serde_json::to_value(&g).unwrap()).unwrap();
+        assert!(back.physics_sizing);
+        let mut v = serde_json::to_value(GeometrySpec::plate(1.0, 1.0, 0.2, None)).unwrap();
+        v.as_object_mut().unwrap().remove("physics_sizing");
+        assert!(!serde_json::from_value::<GeometrySpec>(v).unwrap().physics_sizing);
+    }
 
     #[test]
     fn every_example_survives_a_json_round_trip_and_builds() {

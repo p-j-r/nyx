@@ -51,9 +51,9 @@ fn send(job: &Job, m: Msg) {
     job.ctx.request_repaint();
 }
 
-pub fn spawn_build(spec: GeometrySpec, job: Job) {
+pub fn spawn_build(spec: GeometrySpec, problem: Option<ProblemSpec>, job: Job) {
     std::thread::spawn(move || {
-        let r = spec.build().map(|m| {
+        let r = spec.build_named_for(problem.as_ref()).map(|g| g.mesh).map(|m| {
             let view = Arc::new(ViewMesh::from_simplex(&m));
             Built { mesh: Arc::new(m), view }
         });
