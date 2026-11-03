@@ -8,6 +8,15 @@
 //! 6 x=lx. Meshes given as lists of cells may contain quadrilaterals, hexahedra and prisms; `from_cells_split` cuts
 //! them into simplices without new vertices (`SplitMode::Minimal`).
 
+pub mod cellmesh;
+pub mod cells;
+pub mod fixtures;
+pub mod interop;
+pub mod io;
+pub mod native;
+pub mod quality;
+pub mod view;
+
 use crate::cellmesh::CellMesh;
 use std::collections::BTreeSet;
 

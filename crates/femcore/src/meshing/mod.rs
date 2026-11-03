@@ -11,6 +11,16 @@
 //! `adapt_to_metrics` is the hook for an error estimator: give it a metric per vertex of an existing meshed model (from a recovered
 //! Hessian, say) and it adapts the same way. Nothing else of the interface changes.
 
+pub mod geomdrive;
+pub mod mesher;
+pub mod mesher3d;
+pub mod physics_size;
+pub mod pml;
+pub mod pml3;
+pub mod pml_box;
+pub mod refine3d;
+pub mod validate;
+
 use crate::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;
 pub use crate::meshing_pml::{structured_pml, PmlMode, PmlReport};
@@ -18,7 +28,7 @@ use crate::meshers::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
 use crate::meshers::adapt::field::{BackgroundMetric2, MetricField};
 use crate::meshers::adapt::geom::Geometry2;
 use crate::meshers::adapt::metric::{intersect, isotropic, Sym};
-use crate::physics_size::{self, PhysicsSizing};
+use physics_size::PhysicsSizing;
 use crate::problem::ProblemSpec;
 use crate::meshers::adapt::topo::{Sig, Work2};
 use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};

@@ -22,7 +22,7 @@
 //! indexed form is the one that matches the formulas, and rewriting 49 such loops as iterator chains would not change
 //! the machine code. `too_many_arguments` is allowed on the few assembly/solver entry points that take a full problem
 //! description (each marked where it applies).
-#![allow(clippy::needless_range_loop)]
+#![allow(clippy::needless_range_loop, clippy::neg_cmp_op_on_partial_ord)]
 pub mod amg;
 pub mod analysis;
 pub mod optical;
@@ -32,32 +32,22 @@ pub mod ems;
 pub mod ems3d;
 pub mod ems_axisym;
 pub mod ems_pml;
-pub mod estimate;
-pub mod estimate3;
 pub mod expr;
 pub mod fem;
 pub mod fields;
-pub mod geomdrive;
 #[cfg(feature = "hdf5-metno")]
 pub mod h5io;
 pub mod linalg;
 pub mod material;
 pub mod lobpcg;
+pub mod adapt;
 pub mod mesh;
-pub mod meshers;
-pub mod mesher;
-pub mod mesher3d;
 pub mod meshing;
-pub mod meshing_pml;
-pub mod physics_size;
-pub mod pml3;
-pub mod cellmesh;
 pub mod par;
 pub mod periodic;
 pub mod polarization;
 pub mod problem;
 pub mod progress;
-pub mod refine3d;
 pub mod dfs;
 pub mod section;
 pub mod sms;
@@ -71,5 +61,19 @@ pub mod solvers;
 pub mod validate;
 pub mod sparse;
 pub mod usecases;
-pub mod view;
 pub mod xmlio;
+
+// TEMPORARY compatibility paths (phase 2, step 1: the pure file move). Everything below moved; the old paths keep
+// compiling so that no other file changes in the move commit. Step 2 rewrites the callers and deletes this block.
+pub use adapt::{estimate, estimate3};
+pub use mesh::{cellmesh, view};
+pub use meshing::{geomdrive, mesher, mesher3d, physics_size, pml3, refine3d};
+pub use meshing::pml as meshing_pml;
+pub mod meshers {
+    pub use crate::adapt;
+    pub use crate::adapt::{par, timer};
+    pub use crate::mesh::cells as cellmesh;
+    pub use crate::mesh::native as mesh;
+    pub use crate::mesh::{fixtures, interop, io, quality};
+    pub use crate::meshing::validate;
+}
