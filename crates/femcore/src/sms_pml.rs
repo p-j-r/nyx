@@ -10,11 +10,11 @@
 //! quality factor `Q = Re f / (2 |Im f|)`.
 
 use crate::csparse::{c, eigs_complex, CCoo, C};
-use crate::emw_pml::cell_stretches;
+use crate::ems_pml::cell_stretches;
 use crate::fem::*;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::solid::{d_matrix, dof_layout, setup};
+use crate::sms::{d_matrix, dof_layout, setup};
 use std::time::Instant;
 
 /// Complex strain-displacement matrix from complex shape gradients `g[a*d + k]`.

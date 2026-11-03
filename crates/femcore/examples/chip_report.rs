@@ -4,7 +4,7 @@
 //! of every strong elastic mode, next to the as-is photoelastic form (strain without complex conjugate).
 //!
 //!   cargo run --release -p femcore --example chip_report -- [out.md] [chips, e.g. 300TE,500TM] [psi list, e.g. 0,45]
-use femcore::brillouin::*;
+use femcore::sbs::*;
 use femcore::chips::*;
 use femcore::problem::*;
 use std::fmt::Write as _;

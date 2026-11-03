@@ -13,13 +13,13 @@ fn a_permittivity_tensor_in_the_wafer_frame_acts_on_the_vertical_axis_of_the_x_z
     spec.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
     let r = femcore::solve::solve(&mesh, &spec.clone(), &mut SolveState::default()).unwrap();
     let c = r.scalar("capacitance").unwrap();
-    assert!((c / (femcore::scalar::EPS0 * 5.0 * 1.0 / 0.5) - 1.0).abs() < 1e-9, "{c}");
+    assert!((c / (femcore::dfs::EPS0 * 5.0 * 1.0 / 0.5) - 1.0).abs() < 1e-9, "{c}");
     // the field of a uniform vertical field is called Ez
     assert!(r.solutions[0].field("Ez").is_some() && r.solutions[0].field("Ey").is_none());
     // plates on the sides see eps_xx
     spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
     let r = femcore::solve::solve(&mesh, &spec, &mut SolveState::default()).unwrap();
-    assert!((r.scalar("capacitance").unwrap() / (femcore::scalar::EPS0 * 7.0 * 0.5 / 1.0) - 1.0).abs() < 1e-9);
+    assert!((r.scalar("capacitance").unwrap() / (femcore::dfs::EPS0 * 7.0 * 0.5 / 1.0) - 1.0).abs() < 1e-9);
 }
 
 #[test]

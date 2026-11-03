@@ -9,10 +9,10 @@
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
 //! * linear algebra: `sparse`, `csparse` (sparse matrices, real and complex), `linalg` (sparse factorisations, dense
 //!   eigenproblems), `amg` (multigrid and CG), `eigen` (shift-and-invert Krylov), `lobpcg` (multigrid eigensolver)
-//! * physics: `scalar` (electrostatics, heat), `solid` and its variants `solid_kz` (out-of-plane wave number), `solid_pml`,
-//!   `solid_lrb` (absorbing boundaries), `solid_floquet` and `periodic` (periodic cells), `solid_axisym` (bodies of
-//!   revolution); `emw` (2D waveguide modes), `emw_pml` (complex modes, tilted crystals), `emw_axisym`, `emw3d` (3D cavities)
-//! * Brillouin scattering: `brillouin` (overlap integrals and gain), `ring_brillouin` (rings), `chips` (the four ring chips)
+//! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (out-of-plane wave number), `sms_pml`,
+//!   `sms_lrb` (absorbing boundaries), `sms_floquet` and `periodic` (periodic cells), `sms_axisym` (bodies of
+//!   revolution); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
+//! * Brillouin scattering: `sbs` (overlap integrals and gain), `sbs_ring` (rings), `chips` (the four ring chips)
 //! * ported libraries: `solvers` (Krylov, eigen, preconditioner, time-stepping and optimisation library for real and complex
 //!   systems) and `meshers` (metric mesh adaptation, structured PML meshes, `.fmsh` files), see docs/ports
 //! * files: `xmlio` (project XML), `h5io` (HDF5/XDMF results, feature `hdf5`)
@@ -25,14 +25,14 @@
 #![allow(clippy::needless_range_loop)]
 pub mod amg;
 pub mod analysis;
-pub mod brillouin;
+pub mod sbs;
 pub mod chips;
 pub mod csparse;
 pub mod eigen;
-pub mod emw;
-pub mod emw3d;
-pub mod emw_axisym;
-pub mod emw_pml;
+pub mod ems;
+pub mod ems3d;
+pub mod ems_axisym;
+pub mod ems_pml;
 pub mod expr;
 pub mod fem;
 pub mod fields;
@@ -53,15 +53,15 @@ pub mod polarization;
 pub mod problem;
 pub mod progress;
 pub mod refine3d;
-pub mod ring_brillouin;
-pub mod scalar;
+pub mod sbs_ring;
+pub mod dfs;
 pub mod section;
-pub mod solid;
-pub mod solid_axisym;
-pub mod solid_floquet;
-pub mod solid_kz;
-pub mod solid_lrb;
-pub mod solid_pml;
+pub mod sms;
+pub mod sms_axisym;
+pub mod sms_floquet;
+pub mod sms_kz;
+pub mod sms_lrb;
+pub mod sms_pml;
 pub mod solve;
 pub mod solvers;
 pub mod validate;

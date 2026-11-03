@@ -4,7 +4,7 @@
 //!   WIDTH=0.8 cargo run --release -p femcore --example rib_sweep -- <out_dir>
 //! Environment: WIDTH (um), LAMBDA (nm, 1550), OPT_MODES (12), N_ELASTIC (40), F_LIST (GHz, comma list), WORKER/NWORK (this process
 //! takes the Stokes modes k with (k-1) % NWORK == WORKER), MESH_SCALE, OPTICS_ONLY.
-use femcore::brillouin::*;
+use femcore::sbs::*;
 use femcore::chips::*;
 use femcore::csparse::C;
 use femcore::material::Anisotropy;
@@ -202,7 +202,7 @@ fn main() {
         mech.physics = Physics::Solid;
         mech.brillouin = None;
         mech.study = Study::Eigenfrequency { n_modes: 12, f_search: fg * 1e9 };
-        let (_r, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
+        let (_r, modes) = femcore::sms_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
         let j = (0..modes.freqs.len()).min_by(|&a, &b| (modes.freqs[a].re - fg * 1e9).abs().partial_cmp(&(modes.freqs[b].re - fg * 1e9).abs()).unwrap()).unwrap();
         let u = &modes.vectors[j];
         let mut big = (0.0, C::new(1.0, 0.0));

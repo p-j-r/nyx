@@ -3,7 +3,7 @@
 //! Wafer frame: x lateral, y propagation, z surface normal (the cross-section is x-z, meshed as x-y).
 //!   cargo run --release -p femcore --example wg800 -- optics [out_dir]
 //!   cargo run --release -p femcore --example wg800 -- acoustics [out_dir] [pump_mode_number] [f_search_GHz,...]
-use femcore::brillouin::*;
+use femcore::sbs::*;
 use femcore::chips::*;
 use femcore::csparse::C;
 use femcore::material::Anisotropy;
@@ -222,7 +222,7 @@ fn main() {
             mech.physics = Physics::Solid;
             mech.brillouin = None;
             mech.study = Study::Eigenfrequency { n_modes: 10, f_search: fg * 1e9 };
-            let (_r, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
+            let (_r, modes) = femcore::sms_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
             let j = (0..modes.freqs.len()).min_by(|&a, &b| (modes.freqs[a].re - fg * 1e9).abs().partial_cmp(&(modes.freqs[b].re - fg * 1e9).abs()).unwrap()).unwrap();
             let u = &modes.vectors[j];
             println!("  target {fg} GHz -> mode at {:.4} GHz", modes.freqs[j].re * 1e-9);
@@ -284,7 +284,7 @@ fn main() {
                 mech.brillouin = None;
                 mech.study = Study::Eigenfrequency { n_modes: envf("N_ELASTIC", 40.0) as usize, f_search: fs * 1e9 };
                 let t = std::time::Instant::now();
-                let (_r, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
+                let (_r, modes) = femcore::sms_kz::solve_solid_kz_full(&mesh, &mech, q).unwrap();
                 let opts = GainOptions { body_domains: moving.clone(), pml_domains: pml_domains.clone(), strain: StrainConvention::Conjugate, q_cap: 1000.0, ..Default::default() };
                 let rows = gains(&mesh, &cp, &modes, &opts);
                 let mut order: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].frac_body > 0.15).collect();

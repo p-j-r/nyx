@@ -17,9 +17,9 @@
 //! adequate for well-confined whispering-gallery modes in a large enough domain. The mesh must not
 //! touch the axis `r = 0`.
 
-use crate::brillouin::fine_rule;
+use crate::sbs::fine_rule;
 use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
-use crate::emw::{cell_data, edge_basis, tri_g, CellData, C0};
+use crate::ems::{cell_data, edge_basis, tri_g, CellData, C0};
 use crate::fem::*;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
@@ -67,7 +67,7 @@ impl AxiMaterial {
                     cen[k] += mesh.point(v as usize)[k] / 3.0;
                 }
             }
-            let (sr, sz) = crate::emw_pml::stretch(p, [p.x, p.z], cen, *lo, *hi);
+            let (sr, sz) = crate::ems_pml::stretch(p, [p.x, p.z], cen, *lo, *hi);
             // r~ at the centre of the cell
             let r = cen[0];
             let len = (hi[0] - lo[0]).max(1e-300);
@@ -169,13 +169,13 @@ impl<'a> AxiCtx<'a> {
         let cr = -(ez * im) / r - dty;
         let ct = -cth;
         let cz = dtx + et / r + er * im / r;
-        let q = c(0.0, 1.0) / (omega * crate::brillouin::MU0);
+        let q = c(0.0, 1.0) / (omega * crate::sbs::MU0);
         let mu = mat.mu[ci];
         // H in the order (r, z, theta)
         let h = [cr * q / mu[0], cz * q / mu[1], ct * q / mu[2]];
         let e = [er, ez, et];
         let eps = mat.eps[ci];
-        let d = [e[0] * eps[0] * crate::brillouin::EPS0, e[1] * eps[1] * crate::brillouin::EPS0, e[2] * eps[2] * crate::brillouin::EPS0];
+        let d = [e[0] * eps[0] * crate::sbs::EPS0, e[1] * eps[1] * crate::sbs::EPS0, e[2] * eps[2] * crate::sbs::EPS0];
         Fields3 { e, d, h }
     }
 }
@@ -302,7 +302,7 @@ fn _unused(_: &Physics) {}
 /// is left-handed, so the analysis of a ring reads the sense of rotation with `TimeConvention::MinusI`.
 pub fn mode_samples(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: usize, in_pml: &[bool]) -> Vec<crate::polarization::Sample> {
     let ctx = AxiCtx::new(mesh, modes.order);
-    let (pts, wts) = crate::brillouin::fine_rule();
+    let (pts, wts) = crate::sbs::fine_rule();
     let omega = 2.0 * std::f64::consts::PI * modes.freqs[j];
     let mut out = Vec::with_capacity(mesh.n_cells() * pts.len());
     for ci in 0..mesh.n_cells() {

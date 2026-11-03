@@ -3,7 +3,7 @@
 //! eigenmode solver on a periodic cell of the same PEC guide (a different formulation sharing only the tensor). Both are written in the
 //! wafer axes: the guide runs along y, the crystal axis is tilted in the y-z plane against the propagation direction, the 2D problem goes
 //! through `solve::solve` (so the frame adapter turns the crystal into the kernel's axes) and the 3D cell is periodic along y.
-//! The last test drives the 2D kernel directly in its own axes (`emw::solve_emw`).
+//! The last test drives the 2D kernel directly in its own axes (`ems::solve_emw`).
 mod common;
 use femcore::material::*;
 use femcore::problem::*;
@@ -58,9 +58,9 @@ fn the_coupled_solver_reduces_to_the_uncoupled_one_without_tilt() {
     s.order = 2;
     s.materials.aniso.insert(1, crystal(0.0));
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-    let real = femcore::emw::solve_emw(&mesh, &s).unwrap();
-    let (eps, mu) = femcore::emw_pml::cell_materials(&mesh, &s.materials).unwrap();
-    let cm = femcore::emw_pml::solve_modes_complex(&mesh, 12e9, &eps, &mu, femcore::csparse::c(1.6, 0.0), 3, 2).unwrap();
+    let real = femcore::ems::solve_emw(&mesh, &s).unwrap();
+    let (eps, mu) = femcore::ems_pml::cell_materials(&mesh, &s.materials).unwrap();
+    let cm = femcore::ems_pml::solve_modes_complex(&mesh, 12e9, &eps, &mu, femcore::csparse::c(1.6, 0.0), 3, 2).unwrap();
     for (r, z) in real.solutions.iter().zip(&cm.neff) {
         assert!((r.neff.unwrap().0 - z.re).abs() < 1e-8 && z.im.abs() < 1e-8, "{} against {}", r.neff.unwrap().0, z.re);
     }
@@ -75,8 +75,8 @@ fn modes_along_plus_y_and_minus_y_have_the_same_effective_indices_and_different_
     s.order = 2;
     s.materials.aniso.insert(1, crystal(40.0));
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-    let fwd = femcore::brillouin::solve_optical_wafer(&mesh, &s, 1.0).unwrap();
-    let bwd = femcore::brillouin::solve_optical_wafer(&mesh, &s, -1.0).unwrap();
+    let fwd = femcore::sbs::solve_optical_wafer(&mesh, &s, 1.0).unwrap();
+    let bwd = femcore::sbs::solve_optical_wafer(&mesh, &s, -1.0).unwrap();
     assert!(fwd.left_handed && !bwd.left_handed);
     for (a, b) in fwd.modes.iter().zip(&bwd.modes) {
         assert!((a.neff.re - b.neff.re).abs() < 1e-7, "{} against {}", a.neff.re, b.neff.re);

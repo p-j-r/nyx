@@ -8,7 +8,7 @@ use crate::fields::node_average;
 use crate::mesh::SimplexMesh;
 use crate::periodic::{congruence, match_vertices, nodal_relations, Reduction};
 use crate::problem::*;
-use crate::solid::Setup;
+use crate::sms::Setup;
 use crate::sparse::Csr;
 use std::time::Instant;
 

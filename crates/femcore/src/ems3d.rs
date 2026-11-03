@@ -13,8 +13,8 @@
 
 use crate::csparse::{c, CCoo, CCsr, C};
 use crate::eigen::EigOpts;
-use crate::emw::C0;
-use crate::emw_pml::cell_stretches;
+use crate::ems::C0;
+use crate::ems_pml::cell_stretches;
 use crate::fem::*;
 use crate::fields::{local_bary, node_average};
 use crate::mesh::SimplexMesh;
@@ -400,7 +400,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     let ned = Ned3::new(mesh, order, vkey);
     let n = ned.n_dofs();
     let (k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
-    crate::solid::lap(&mut tl, "emw3d: numbering and assembly");
+    crate::sms::lap(&mut tl, "emw3d: numbering and assembly");
     // perfect electric conductor on the exterior boundary, except the periodic boundaries
     let exterior = mesh.exterior_facets();
     let periodic_labels: Vec<i32> = spec.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
@@ -463,7 +463,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
         CCsr { nrows: nred, ncols: nred_nodes.n_reduced(), indptr, indices, data }
     };
     let g_h = crate::periodic::ccsr_adjoint(&g_red);
-    crate::solid::lap(&mut tl, "emw3d: reduction and gradient matrix");
+    crate::sms::lap(&mut tl, "emw3d: reduction and gradient matrix");
     // shift: the requested frequency; without one, the frequency of a wave that fits the cavity
     let (lo, hi) = mesh.bbox();
     let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
@@ -474,7 +474,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     let (vectors, dim, converged): (Vec<Vec<C>>, usize, bool);
     if is_real(&kc) && is_real(&mc) && is_real(&g_red) {
         let (kr, mr, gr) = (to_real(&kc), to_real(&mc), to_real(&g_red));
-        crate::solid::lap(&mut tl, "emw3d: matrices");
+        crate::sms::lap(&mut tl, "emw3d: matrices");
         let gt = gr.transpose();
         let s_mat = crate::amg::spmm(&gt, &crate::amg::spmm(&mr, &gr));
         let s_solver = crate::linalg::SparseSolver::new(&s_mat, true)?;
@@ -487,10 +487,10 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
                 *a -= b;
             }
         };
-        crate::solid::lap(&mut tl, "emw3d: projection factorisation");
+        crate::sms::lap(&mut tl, "emw3d: projection factorisation");
         let shifted = kr.add_scaled(&mr, -sigma);
         let solver = crate::linalg::SparseSolver::new(&shifted, false)?;
-        crate::solid::lap(&mut tl, "emw3d: shift-invert factorisation");
+        crate::sms::lap(&mut tl, "emw3d: shift-invert factorisation");
         let pairs = crate::eigen::eigs_sym_projected(&kr, &mr, sigma, n_modes, &EigOpts::default(), &|b: &[f64]| Ok(solver.solve(b)), Some(&project))?;
         for (i, l) in pairs.values.iter().enumerate() {
             freqs.push((c(l.max(0.0).sqrt() * (C0 / (2.0 * std::f64::consts::PI)), 0.0), i));
@@ -511,7 +511,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
                 *a -= *b;
             }
         };
-        crate::solid::lap(&mut tl, "emw3d: projection factorisation");
+        crate::sms::lap(&mut tl, "emw3d: projection factorisation");
         let pairs = crate::csparse::eigs_complex_projected(&kc, &mc, c(sigma, 0.0), n_modes, 1e-9, 500, Some(&project))?;
         for (i, l) in pairs.values.iter().enumerate() {
             if pairs.residuals.get(i).is_some_and(|r| *r > 1e-6) {
@@ -527,7 +527,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
         dim = pairs.dim;
         converged = pairs.converged;
     }
-    crate::solid::lap(&mut tl, "emw3d: eigenvalue iteration");
+    crate::sms::lap(&mut tl, "emw3d: eigenvalue iteration");
     freqs.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
     // fields at the quadratic nodes
     let geo = geometry(mesh);

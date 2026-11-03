@@ -1,7 +1,7 @@
 //! Perfectly matched layers in solid mechanics eigenfrequencies.
 mod common;
 use femcore::problem::*;
-use femcore::solid::solve_solid;
+use femcore::sms::solve_solid;
 
 fn bar_spec(plane: Plane, nm: usize) -> ProblemSpec {
     let mut s = ProblemSpec::new(Physics::Solid);

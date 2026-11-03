@@ -1,7 +1,7 @@
 //! Elastic modes of a body of revolution (a ring, a disk, a wheel) on its half-plane cross-section:
 //! the displacement is `u(r, z) exp(-i m theta)` with azimuthal order `m`, and the mesh has `x = r`,
 //! `y = z`. The three components are stored as (u_r, u_z, u_theta) so the assembly is that of
-//! `solid_kz` with the out-of-plane strain terms replaced by their cylindrical forms,
+//! `sms_kz` with the out-of-plane strain terms replaced by their cylindrical forms,
 //!
 //! ```text
 //!   e_rr = du_r/dr   e_zz = du_z/dz   e_tt = (u_r - i m u_t) / r

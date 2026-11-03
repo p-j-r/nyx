@@ -1,6 +1,6 @@
 //! Waveguide mode analysis against closed forms.
 mod common;
-use femcore::emw::*;
+use femcore::ems::*;
 use femcore::problem::*;
 
 fn emw_spec(eps: f64, freq: f64, target: f64, evanescent: bool, n: usize) -> ProblemSpec {

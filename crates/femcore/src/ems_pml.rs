@@ -1,7 +1,7 @@
 //! Complex-valued mode analysis of a 2D cross-section: lossy or absorbing media and perfectly
 //! matched layers (PML) by complex coordinate stretching.
 //!
-//! The formulation is that of `emw`, with complex tensors: permittivity `eps = [[xx, xy], [xy, yy]]`,
+//! The formulation is that of `ems`, with complex tensors: permittivity `eps = [[xx, xy], [xy, yy]]`,
 //! `zz` and the couplings `xz`, `yz` to the propagation axis (a crystal with its axes tilted against the
 //! guide, such as sapphire), permeability `diag(mu_x, mu_y, mu_z)`. The curl-curl
 //! equation becomes (with `mu_t^-1` rotated by 90 degrees to `diag(1/mu_y, 1/mu_x)` in the terms
@@ -23,7 +23,7 @@
 //! `COUPLED_BETA_TOL` (relative) between two steps.
 
 use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
-use crate::emw::{cell_data, edge_basis, tri_g, C0};
+use crate::ems::{cell_data, edge_basis, tri_g, C0};
 use crate::fem::*;
 use crate::fields::{local_bary, node_average};
 use crate::mesh::SimplexMesh;
@@ -432,7 +432,7 @@ pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Solve
     }
     let mut result = SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order), ..Default::default() };
     if !modes.neff.is_empty() {
-        if let Ok(set) = crate::brillouin::optical_set_complex(mesh, spec, &modes, freq) {
+        if let Ok(set) = crate::sbs::optical_set_complex(mesh, spec, &modes, freq) {
             crate::analysis::analyze_optical(mesh, &set, &Default::default()).attach(&mut result);
         }
     }

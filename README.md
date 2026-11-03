@@ -85,7 +85,7 @@ modes at that `q`, and combine the fields in the photoelastic and moving-boundar
 
 * **Optics:** the existing mode solvers (Nedelec degree 2 + P2; complex materials and PML go through the complex
   solver). Fields E, D and H are evaluated at quadrature points of the native mesh, not on a grid.
-* **Elastic modes:** `solid_kz` (three components, `exp(-i q z)`, rotated crystals, PML for leakage into the
+* **Elastic modes:** `sms_kz` (three components, `exp(-i q z)`, rotated crystals, PML for leakage into the
   substrate, low-reflecting boundaries). The complex frequency gives the radiation Q; a viscosity tensor adds
   `1/Q` by first-order perturbation (`viscous_inverse_q`, exact for `eta = tau C`: `1/Q = omega tau`).
 * **Gain:** photoelastic overlap over the domains with a photoelastic tensor (isotropic, cubic or trigonal, with
@@ -119,10 +119,10 @@ form gives the same gains for a process and for its mirror image (pump counter-p
 the Study tab selects `StrainConvention::AsIs`.
 
 **Rings.** `brillouin.ring_radius` (Study tab: "ring resonator") switches the study to the axisymmetric models: the mesh is the (r, z) half
-plane (x = r, y = z); the optical modes are whispering-gallery modes of `emw_axisym` (Nedelec degree 2 for (E_r, E_z), P2 for E_theta,
+plane (x = r, y = z); the optical modes are whispering-gallery modes of `ems_axisym` (Nedelec degree 2 for (E_r, E_z), P2 for E_theta,
 azimuthal order `m = round(n_target k0 R)`, `exp(-i m theta)`, perfectly conducting walls and optional absorbing layers by complex stretching of r and z with the metric factor `s_theta = r~/r`), the elastic modes come from
 `solid_kz::solve_solid_axisym` (`u(r, z) exp(-i M theta)`, cylindrical strains, weight `r`, PML in the substrate) with `M = m_p + m_s`
-(backward) or `m_p - m_s` (forward), and `ring_brillouin` evaluates the same overlaps with cylindrical fields and strains and the
+(backward) or `m_p - m_s` (forward), and `sbs_ring` evaluates the same overlaps with cylindrical fields and strains and the
 weight `r / R`, so power, group velocity, gain and `g0` (length `2 pi R`) are per unit length of the ring at the reference radius `R`.
 The absorbing layers leave a confined mode alone (frequency to 2e-6, loss below 1e-7) and give a leaky whispering-gallery mode (3 um ring, m = 21, Q = 39.9) a loss that agrees to 0.25 % for layers of strength 3 and 6. Crystals (stiffness and photoelastic tensors) are averaged over rotations about the ring axis, the approximation used for ringsplan; a crystal ring is therefore not exactly the fixed-orientation straight guide. Checked: a coaxial cavity's resonances
 (499.654 and 999.308 MHz against 499.585 and 999.170), a whispering-gallery mode of a 2 mm ring against the straight guide

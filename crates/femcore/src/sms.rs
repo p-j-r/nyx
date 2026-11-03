@@ -20,7 +20,7 @@ use crate::fields::{gradients_at_nodes, node_average};
 use crate::material::{M3, M6};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::scalar::check_labels;
+use crate::dfs::check_labels;
 use crate::sparse::Csr;
 use rayon::prelude::*;
 use std::time::Instant;
@@ -348,11 +348,11 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
     let mut tl = Instant::now();
     let order = spec.order;
     if let (Some(kz), 2) = (spec.out_of_plane, mesh.dim) {
-        return crate::solid_kz::solve_solid_kz(mesh, spec, kz);
+        return crate::sms_kz::solve_solid_kz(mesh, spec, kz);
     }
     if spec.materials.has_pml() {
         return match spec.study {
-            Study::Eigenfrequency { .. } => crate::solid_pml::solve_solid_pml(mesh, spec),
+            Study::Eigenfrequency { .. } => crate::sms_pml::solve_solid_pml(mesh, spec),
             _ => Err("perfectly matched layers are used with the Eigenfrequency study (they give complex frequencies and Q)".into()),
         };
     }
@@ -423,11 +423,11 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
             let blocks: Vec<&Csr> = (0..d).map(|_| &m1).collect();
             let m = Csr::block_diag(&blocks);
             if !spec.periodic.is_empty() {
-                return crate::solid_floquet::solve_floquet(mesh, spec, &st, &k, &m, *n_modes, *f_search, t0);
+                return crate::sms_floquet::solve_floquet(mesh, spec, &st, &k, &m, *n_modes, *f_search, t0);
             }
             let lrb_labels: Vec<i32> = spec.bcs.iter().filter(|b| matches!(b.kind, BcKind::LowReflecting)).flat_map(|b| b.labels.iter().copied()).collect();
             if !lrb_labels.is_empty() {
-                return crate::solid_lrb::solve_lrb(mesh, spec, &st, &k, &m, &rho, &lrb_labels, *n_modes, *f_search, t0);
+                return crate::sms_lrb::solve_lrb(mesh, spec, &st, &k, &m, &rho, &lrb_labels, *n_modes, *f_search, t0);
             }
             let free = free_dofs(n, &st.fixed);
             let nm = *n_modes;

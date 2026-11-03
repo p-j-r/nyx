@@ -70,7 +70,7 @@ fn sapphire_ring(r: &R3, m: f64) -> ProblemSpec {
 
 /// Lowest elastic frequencies of the ring at azimuthal order `m` of a wafer-frame problem.
 fn ring_frequencies(spec: &ProblemSpec, m: f64) -> Vec<f64> {
-    let (_, modes) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), spec, m).unwrap();
+    let (_, modes) = femcore::sms_kz::solve_solid_axisym(&ring_mesh(), spec, m).unwrap();
     let mut f: Vec<f64> = modes.freqs.iter().map(|z| z.re).collect();
     f.sort_by(|a, b| a.total_cmp(b));
     f
@@ -127,7 +127,7 @@ fn a_torsional_ring_mode_is_the_wafer_y_component() {
     sp.materials.default.insert("nu".into(), 0.33);
     sp.materials.default.insert("rho".into(), 2700.0);
     sp.study = Study::Eigenfrequency { n_modes: 8, f_search: 500.0 };
-    let (res, _) = femcore::solid_kz::solve_solid_axisym(&ring_mesh(), &sp, 0.0).unwrap();
+    let (res, _) = femcore::sms_kz::solve_solid_axisym(&ring_mesh(), &sp, 0.0).unwrap();
     let energy = |s: &femcore::problem::Solution, name: &str| s.field(name).map_or(0.0, |f| f.values.iter().map(|v| v * v).sum::<f64>());
     // the components (u_r, u_z, u_theta) are named ux, uz, uy
     let torsional: Vec<usize> = (0..res.solutions.len())
@@ -145,7 +145,7 @@ fn the_ring_kernel_has_exp_minus_i_m_theta_with_theta_along_wafer_plus_y() {
     use femcore::csparse::c;
     let mesh = ring_mesh();
     let c6 = vec![isotropic_stiffness(70e9, 0.33); mesh.n_cells()];
-    let k = femcore::solid_axisym::assemble_stiffness_axisym(&mesh, &c6, 2, 1.0, None).unwrap();
+    let k = femcore::sms_axisym::assemble_stiffness_axisym(&mesh, &c6, 2, 1.0, None).unwrap();
     let n1 = mesh.n_dofs(2);
     // components (u_r, u_z, u_theta) as blocks of n1 dofs; uniform fields
     let uniform = |s: f64| {
@@ -208,7 +208,7 @@ fn averaging_about_the_ring_axis_makes_the_sign_of_the_third_axis_irrelevant() {
     // before the averaging the two conventions are different crystals (the check can fail) ...
     assert!(diff(&cr, &cs) > 1e9, "{}", diff(&cr, &cs));
     // ... after it, the same ring
-    let (ar, a_s) = (femcore::solid_axisym::average_about_axis(&cr, 1, 16), femcore::solid_axisym::average_about_axis(&cs, 1, 16));
+    let (ar, a_s) = (femcore::sms_axisym::average_about_axis(&cr, 1, 16), femcore::sms_axisym::average_about_axis(&cs, 1, 16));
     assert!(diff(&ar, &a_s) < 1e-6 * 500e9, "{}", diff(&ar, &a_s));
 }
 
@@ -222,11 +222,11 @@ fn a_whispering_gallery_mode_with_positive_azimuthal_order_carries_power_along_p
     let mut idx = std::collections::BTreeMap::new();
     idx.insert(1, 1.444);
     idx.insert(2, 3.476);
-    let mat = femcore::emw_axisym::AxiMaterial::from_indices(&mesh, &idx);
+    let mat = femcore::ems_axisym::AxiMaterial::from_indices(&mesh, &idx);
     let f0 = 299_792_458.0 / 1.55e-6;
     let m = (2.35 * 2.0 * std::f64::consts::PI * f0 / 299_792_458.0 * radius).round();
-    let (plus, minus) = (femcore::emw_axisym::solve_axisym_modes(&mesh, &mat, m, f0, 1, 2).unwrap(), femcore::emw_axisym::solve_axisym_modes(&mesh, &mat, -m, f0, 1, 2).unwrap());
-    let (pp, pm) = (femcore::emw_axisym::power_along_theta(&mesh, &mat, &plus, 0), femcore::emw_axisym::power_along_theta(&mesh, &mat, &minus, 0));
+    let (plus, minus) = (femcore::ems_axisym::solve_axisym_modes(&mesh, &mat, m, f0, 1, 2).unwrap(), femcore::ems_axisym::solve_axisym_modes(&mesh, &mat, -m, f0, 1, 2).unwrap());
+    let (pp, pm) = (femcore::ems_axisym::power_along_theta(&mesh, &mat, &plus, 0), femcore::ems_axisym::power_along_theta(&mesh, &mat, &minus, 0));
     // the same ring both ways: the frequencies agree, the powers are opposite
     assert!((plus.freqs[0] - minus.freqs[0]).abs() < 1e-6 * plus.freqs[0], "{} against {}", plus.freqs[0], minus.freqs[0]);
     assert!(pp > 0.0 && pm < 0.0 && (pp + pm).abs() < 1e-3 * pp.abs(), "P(m) = {pp:e}, P(-m) = {pm:e}");

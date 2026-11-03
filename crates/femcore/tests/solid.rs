@@ -2,7 +2,7 @@
 mod common;
 use common::*;
 use femcore::problem::*;
-use femcore::solid::solve_solid;
+use femcore::sms::solve_solid;
 
 fn steel() -> Materials {
     let mut m = Materials::default();
@@ -99,7 +99,7 @@ fn stress_at_triangle_centroids_is_uniaxial() {
         u[n1..].copy_from_slice(&s.field("uz").unwrap().values);
         let nc = mesh.n_cells();
         let c6 = vec![femcore::material::isotropic_stiffness(1e9, nu); nc];
-        let cs = femcore::solid::centroid_stress(&mesh, &u, &c6, plane, 2);
+        let cs = femcore::sms::centroid_stress(&mesh, &u, &c6, plane, 2);
         // our row: [sxx, sxz, szx, szz, syy (out of the plane), vm]
         let szz = if plane == Plane::Strain { nu * 1e6 } else { 0.0 };
         let vm = (0.5 * ((1e6f64 - 0.0).powi(2) + (0.0 - szz).powi(2) + (szz - 1e6).powi(2))).sqrt();
@@ -149,7 +149,7 @@ fn heat_result_drives_thermal_expansion() {
     heat.materials.default.insert("k".into(), 1.0);
     heat.bcs = vec![Bc { on: None, labels: vec![1, 4], kind: BcKind::Temperature(393.15) }];
     let mut state = SolveState::default();
-    femcore::scalar::solve_heat(&mesh, &heat, &mut state).unwrap();
+    femcore::dfs::solve_heat(&mesh, &heat, &mut state).unwrap();
     let mk = |source| {
         let mut spec = cantilever(Plane::Strain, Study::Static);
         for (k, v) in [("E", 70e9), ("nu", 0.33), ("alpha", 23e-6)] {

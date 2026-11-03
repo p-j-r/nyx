@@ -17,7 +17,7 @@ use crate::fem::*;
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::scalar::check_labels;
+use crate::dfs::check_labels;
 use crate::sparse::Csr;
 use std::time::Instant;
 
@@ -186,7 +186,7 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         // a crystal's axes stay fixed while the local frame turns around the ring: the stiffness of the axisymmetric
         // model is the average over rotations about the ring axis (the y direction of the (r, z) plane); exact for isotropic materials
         for m in c6.iter_mut() {
-            *m = crate::solid_axisym::average_about_axis(m, 1, 16);
+            *m = crate::sms_axisym::average_about_axis(m, 1, 16);
         }
     }
     let n1 = mesh.n_dofs(order);
@@ -207,10 +207,10 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let stretch = if spec.materials.has_pml() { Some(crate::emw_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
+    let stretch = if spec.materials.has_pml() { Some(crate::ems_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
     let k = match kind {
         CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
-        CrossSection::Axisymmetric(m) => crate::solid_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
+        CrossSection::Axisymmetric(m) => crate::sms_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
     };
     let mut rho = spec.materials.cell_values(mesh, "rho", None)?;
     for (c, r) in rho.iter_mut().enumerate() {
@@ -220,7 +220,7 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
     }
     // mass: weighted by the determinant of the stretch in the layers (complex there)
     let mc = match &stretch {
-        _ if matches!(kind, CrossSection::Axisymmetric(_)) => crate::solid_axisym::assemble_mass_axisym(mesh, &rho, order, stretch.as_deref()),
+        _ if matches!(kind, CrossSection::Axisymmetric(_)) => crate::sms_axisym::assemble_mass_axisym(mesh, &rho, order, stretch.as_deref()),
         None => to_complex(&Csr::block_diag(&[&assemble_mass(mesh, order, &rho), &assemble_mass(mesh, order, &rho), &assemble_mass(mesh, order, &rho)])),
         Some(st) => {
             let w: Vec<C> = (0..mesh.n_cells()).map(|i| st[i][0] * st[i][1]).collect();
@@ -264,9 +264,9 @@ pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSe
         if f_search <= 0.0 {
             return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());
         }
-        let cfull = crate::solid_lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3);
+        let cfull = crate::sms_lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3);
         let cf = cfull.submatrix(&free, &free);
-        let (omegas, vecs, conv, dim) = crate::solid_lrb::quadratic_modes(&kf, &mf, &cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
+        let (omegas, vecs, conv, dim) = crate::sms_lrb::quadratic_modes(&kf, &mf, &cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
         let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
         (modes, vecs, conv, dim)
     };

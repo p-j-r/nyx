@@ -340,7 +340,7 @@ pub fn mode_fields(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order
 
 pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
     if spec.materials.has_pml() {
-        return crate::emw_pml::solve_emw_complex(mesh, spec);
+        return crate::ems_pml::solve_emw_complex(mesh, spec);
     }
     let t0 = Instant::now();
     let Study::Modes { freq, n_target, evanescent, n_modes } = spec.study.clone() else {
@@ -358,7 +358,7 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
         if t[0][2].abs() > 1e-9 * scale || t[1][2].abs() > 1e-9 * scale {
             // a crystal whose axes are tilted against the propagation axis: the complex solver handles the
             // coupling of the longitudinal and the transverse field exactly
-            return crate::emw_pml::solve_emw_complex(mesh, spec);
+            return crate::ems_pml::solve_emw_complex(mesh, spec);
         }
     }
     let eps: Vec<EpsCell> = tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
@@ -386,7 +386,7 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
     }
     let mut result = SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order), ..Default::default() };
     if !modes.neff.is_empty() {
-        if let Ok(set) = crate::brillouin::optical_set_real(mesh, spec, &modes, freq) {
+        if let Ok(set) = crate::sbs::optical_set_real(mesh, spec, &modes, freq) {
             crate::analysis::analyze_optical(mesh, &set, &Default::default()).attach(&mut result);
         }
     }

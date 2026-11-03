@@ -4,7 +4,7 @@ mod common;
 use femcore::mesh::{SimplexMesh, SplitMode};
 use femcore::cellmesh::{ElementType, CellMesh};
 use femcore::problem::*;
-use femcore::solid::solve_solid;
+use femcore::sms::solve_solid;
 use std::collections::HashMap;
 
 fn grid_points(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Vec<f64> {

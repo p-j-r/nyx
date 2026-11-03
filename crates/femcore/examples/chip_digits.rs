@@ -4,7 +4,7 @@
 //!
 //!   cargo run --release -p femcore --example chip_digits -- 300TE 0 > before.txt
 //!   (chip name from `chips::CHIPS`, crystal azimuth psi in degrees)
-use femcore::brillouin::*;
+use femcore::sbs::*;
 use femcore::chips::*;
 use femcore::problem::*;
 

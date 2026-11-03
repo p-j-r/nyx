@@ -1,23 +1,23 @@
 //! Brillouin gain of a ring resonator from its axisymmetric cross-section: whispering-gallery pump and
-//! Stokes modes (`emw_axisym`, azimuthal orders `m_p`, `m_s`) and the elastic modes of the ring with the
+//! Stokes modes (`ems_axisym`, azimuthal orders `m_p`, `m_s`) and the elastic modes of the ring with the
 //! phase-matched azimuthal order `M = m_p + m_s` (backward: the Stokes mode runs the other way round) or
-//! `M = m_p - m_s` (forward), from `solid_kz::solve_solid_axisym`.
+//! `M = m_p - m_s` (forward), from `sms_kz::solve_solid_axisym`.
 //!
-//! The overlap integrals are those of `brillouin` with cylindrical fields and strains; every integral over the
+//! The overlap integrals are those of `sbs` with cylindrical fields and strains; every integral over the
 //! cross-section carries the weight `r / r_ref` so that the quantities are per unit length of the ring at the
 //! reference radius `r_ref` (mean radius of the mode), the optical power `P = 2 Int Re(conj(E_z) H_r - conj(E_r) H_z) dA`
 //! is the power crossing the cross-section, and `vg = P / W` is a speed at `r_ref`. The gain, `g0` and the quality
-//! factor then follow the conventions of `brillouin` with the length `2 pi r_ref`. A crystal's photoelastic
+//! factor then follow the conventions of `sbs` with the length `2 pi r_ref`. A crystal's photoelastic
 //! tensor and stiffness vary with the angle around the ring; use tensors with the symmetry of the ring or
-//! averaged about the axis (`PhotoElastic::average_about_axis`, `solid_axisym::average_about_axis`).
+//! averaged about the axis (`PhotoElastic::average_about_axis`, `sms_axisym::average_about_axis`).
 
-use crate::brillouin::*;
+use crate::sbs::*;
 use crate::csparse::{c, C};
-use crate::emw::C0;
-use crate::emw_axisym::*;
+use crate::ems::C0;
+use crate::ems_axisym::*;
 use crate::fem::*;
 use crate::mesh::SimplexMesh;
-use crate::solid_kz::KzModes;
+use crate::sms_kz::KzModes;
 use std::collections::{BTreeMap, BTreeSet};
 
 impl PhotoElastic {
@@ -307,7 +307,7 @@ pub fn ring_coupling(inp: &RingInput) -> Result<RingCoupling, String> {
     })
 }
 
-/// Gains of every elastic mode of `mech` (from `solid_kz::solve_solid_axisym` at order `cp.elastic_order()`).
+/// Gains of every elastic mode of `mech` (from `sms_kz::solve_solid_axisym` at order `cp.elastic_order()`).
 pub fn ring_gains(mesh: &SimplexMesh, cp: &RingCoupling, mech: &KzModes, opts: &GainOptions) -> Vec<GainRow> {
     let order = cp.order;
     let n1 = mesh.n_dofs(order);

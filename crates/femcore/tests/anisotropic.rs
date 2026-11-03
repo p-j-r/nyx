@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use femcore::material::*;
 use femcore::problem::*;
-use femcore::solid::solve_solid;
+use femcore::sms::solve_solid;
 
 fn fixed(f: [bool; 3]) -> BcKind {
     BcKind::Fixed { fixed: f, values: [0.0; 3] }
@@ -159,7 +159,7 @@ fn anisotropic_conductivity_is_exact_for_linear_temperature() {
     // (Dirichlet only supports constants, so use a 1D gradient in x and insulated sides: not exact
     // for a tensor with kxz != 0) -> instead check the flux of the 1D x-solution directly
     spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Temperature(320.0) }];
-    let r = femcore::scalar::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
+    let r = femcore::dfs::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
     let t = &r.solutions[0].field("T").unwrap().values;
     let (tmin, tmax) = (t.iter().cloned().fold(f64::MAX, f64::min), t.iter().cloned().fold(f64::MIN, f64::max));
     assert!((tmin - 300.0).abs() < 1e-9 && (tmax - 320.0).abs() < 1e-9);
@@ -167,7 +167,7 @@ fn anisotropic_conductivity_is_exact_for_linear_temperature() {
     // while for a diagonal tensor the solution is exactly linear and qx = -kxx dT/dx
     let mut diag = spec.clone();
     diag.materials.aniso.insert(1, Anisotropy { conductivity: Some(Tensor::Diagonal { x: 5.0, y: 1.0, z: 1.0 }), euler_deg: [0.0; 3], ..Default::default() });
-    let r = femcore::scalar::solve_heat(&mesh, &diag, &mut SolveState::default()).unwrap();
+    let r = femcore::dfs::solve_heat(&mesh, &diag, &mut SolveState::default()).unwrap();
     let s = &r.solutions[0];
     let x = mesh.dof_coordinates(2);
     let exact_t: Vec<f64> = (0..x.len() / 2).map(|i| 300.0 + 20.0 * x[2 * i]).collect();
@@ -178,7 +178,7 @@ fn anisotropic_conductivity_is_exact_for_linear_temperature() {
     // rotating the diagonal tensor by 90 degrees about z swaps kxx and kyy: the x-flux drops to -1*20
     let mut rot = diag.clone();
     rot.materials.aniso.get_mut(&1).unwrap().euler_deg = [90.0, 0.0, 0.0];
-    let r = femcore::scalar::solve_heat(&mesh, &rot, &mut SolveState::default()).unwrap();
+    let r = femcore::dfs::solve_heat(&mesh, &rot, &mut SolveState::default()).unwrap();
     assert!(r.solutions[0].field("qx").unwrap().values.iter().all(|q| (q + 20.0).abs() < 1e-8));
 }
 
@@ -189,13 +189,13 @@ fn anisotropic_permittivity_sets_the_capacitance() {
     let mut spec = ProblemSpec::new(Physics::Electrostatics);
     spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 3.0 }), ..Default::default() });
     spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
-    let r = femcore::scalar::solve_electrostatics(&mesh, &spec).unwrap();
+    let r = femcore::dfs::solve_electrostatics(&mesh, &spec).unwrap();
     let c = r.scalar("capacitance").unwrap();
-    assert!((c / (femcore::scalar::EPS0 * 7.0 * 0.5) - 1.0).abs() < 1e-9, "{c}");
+    assert!((c / (femcore::dfs::EPS0 * 7.0 * 0.5) - 1.0).abs() < 1e-9, "{c}");
     // rotated by 90 degrees the roles of x and y swap
     spec.materials.aniso.get_mut(&1).unwrap().euler_deg = [90.0, 0.0, 0.0];
-    let r = femcore::scalar::solve_electrostatics(&mesh, &spec).unwrap();
-    assert!((r.scalar("capacitance").unwrap() / (femcore::scalar::EPS0 * 3.0 * 0.5) - 1.0).abs() < 1e-9);
+    let r = femcore::dfs::solve_electrostatics(&mesh, &spec).unwrap();
+    assert!((r.scalar("capacitance").unwrap() / (femcore::dfs::EPS0 * 3.0 * 0.5) - 1.0).abs() < 1e-9);
 }
 
 #[test]
@@ -205,13 +205,13 @@ fn anisotropic_waveguide_te_modes_use_the_right_permittivity_component() {
     let (a, b, f) = (22.86e-3, 10.16e-3, 12e9);
     let (ex, ey, ez) = (5.0, 2.0, 3.0);
     let mesh = common::rect(a, b, 24, 12);
-    let k0 = 2.0 * std::f64::consts::PI * f / femcore::emw::C0;
+    let k0 = 2.0 * std::f64::consts::PI * f / femcore::ems::C0;
     let n10 = (ez - (std::f64::consts::PI / a / k0).powi(2)).sqrt();
     let n01 = (ex - (std::f64::consts::PI / b / k0).powi(2)).sqrt();
     let mut spec = ProblemSpec::new(Physics::Emw);
     spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: ex, y: ey, z: ez }), ..Default::default() });
     spec.study = Study::Modes { freq: f, n_target: 1.6, evanescent: false, n_modes: 6 };
-    let r = femcore::emw::solve_emw(&mesh, &spec).unwrap();
+    let r = femcore::ems::solve_emw(&mesh, &spec).unwrap();
     let got: Vec<f64> = r.solutions.iter().map(|s| s.neff.unwrap().0).collect();
     for want in [n10, n01] {
         let best = got.iter().map(|g| (g - want).abs()).fold(f64::MAX, f64::min);
@@ -221,7 +221,7 @@ fn anisotropic_waveguide_te_modes_use_the_right_permittivity_component() {
     // periodic cell in `aniso_optics.rs`); here only that it runs and stays close to the untilted modes
     let mut tilted = spec.clone();
     tilted.materials.aniso.get_mut(&1).unwrap().euler_deg = [0.0, 30.0, 0.0];
-    let r = femcore::emw::solve_emw(&mesh, &tilted).unwrap();
+    let r = femcore::ems::solve_emw(&mesh, &tilted).unwrap();
     assert!(!r.solutions.is_empty() && r.solutions[0].neff.unwrap().0 > 1.0);
 }
 

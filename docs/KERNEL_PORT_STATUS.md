@@ -5,12 +5,12 @@ Plan: `nyx_frames/KERNEL_PORT_PLAN.md` in the project files. Oracle: `crates/fem
 | Phase | Kernels | State |
 |---|---|---|
 | 0 | `section` module, golden files | done |
-| 1 | `scalar` (electrostatics, heat) | done, adapter bypassed, golden files match to 1e-9 |
-| 1 pilot / 3 | `emw`, `emw_pml` (real, tilted-crystal and PML paths), `Physics::Emw` on a cross-section | done, golden files match to 1e-8 / 1e-7 |
-| 2 | `solid`, `solid_pml`, `solid_floquet`, `solid_lrb` on a cross-section without `out_of_plane` | done, 7 golden cases match to 1e-8 / 1e-7 (the low-reflecting kernel has no golden: its test fails on this machine before and after) |
-| 4 | `solid_kz` (`solve_solid_kz`: a cross-section with `out_of_plane`) | done, 4 golden cases (tilted sapphire, component constraints, PML along x and z) match to 1e-8 / 1e-7; the model-frame `solve_solid_kz_full` stays until phase 5 for Brillouin |
-| 5 | `brillouin` (straight waveguide: optical modes, photoelastic overlap, moving boundary, gains, viscosity) | done, 3 golden cases match to 1e-6 (silicon wire, cubic and tilted crystal, backward and forward); the ring (`ring_radius`) still goes through the adapter until phase 6 |
-| 6 | axisymmetric family (`solid_axisym` through `solve_solid_axisym`, `emw_axisym`, `ring_brillouin`, the ring in `brillouin::solve_ring`) | done, 2 ring Brillouin golden cases match to 1e-6 (the Q of a lossless ring mode is round-off and is not compared); the ring frame tests pass; `m > 0` is propagation along +y (signed test) |
+| 1 | `dfs` (electrostatics, heat) | done, adapter bypassed, golden files match to 1e-9 |
+| 1 pilot / 3 | `ems`, `ems_pml` (real, tilted-crystal and PML paths), `Physics::Emw` on a cross-section | done, golden files match to 1e-8 / 1e-7 |
+| 2 | `sms`, `sms_pml`, `sms_floquet`, `sms_lrb` on a cross-section without `out_of_plane` | done, 7 golden cases match to 1e-8 / 1e-7 (the low-reflecting kernel has no golden: its test fails on this machine before and after) |
+| 4 | `sms_kz` (`solve_solid_kz`: a cross-section with `out_of_plane`) | done, 4 golden cases (tilted sapphire, component constraints, PML along x and z) match to 1e-8 / 1e-7; the model-frame `solve_solid_kz_full` stays until phase 5 for Brillouin |
+| 5 | `sbs` (straight waveguide: optical modes, photoelastic overlap, moving boundary, gains, viscosity) | done, 3 golden cases match to 1e-6 (silicon wire, cubic and tilted crystal, backward and forward); the ring (`ring_radius`) still goes through the adapter until phase 6 |
+| 6 | axisymmetric family (`sms_axisym` through `solve_solid_axisym`, `ems_axisym`, `sbs_ring`, the ring in `brillouin::solve_ring`) | done, 2 ring Brillouin golden cases match to 1e-6 (the Q of a lossless ring mode is round-off and is not compared); the ring frame tests pass; `m > 0` is propagation along +y (signed test) |
 | 7 | delete the adapter (`frame_adapter` removed: `to_model_frame`, `rename_wafer_fields`, `WAFER_TO_MODEL`, `Kernel`, the model-frame tests; `check_wafer_input` and `axes_of_3d_problem` moved into `section`) | done |
 
 The solid kernels work in the Voigt order of the axes (x, z, y), `section::plane_stiffness` (so their in-plane block is (xx, zz, xz) and plane stress condenses yy); boundary components, loads, expansion tensors, PML directions and field names go through `section` too.
@@ -24,3 +24,16 @@ The ring kernels run in the ring's local wafer frame (r, theta, z) = (x, y, z), 
 The kz kernel carries the wave `exp(-j k y)` with displacement blocks (x, z, y); the equations did not change (a reflected third axis with a reflected wave number is the same eigenproblem), only the stiffness order, the constraint components and the names. The golden comparison accepts an eigenvector with all its signed fields negated: when two entries of a mode tie in modulus its overall sign is round-off.
 
 Known: `solid_pml::low_reflecting_boundary_gives_the_analytic_damped_bar_modes` fails on this machine's cloud container before and after the port (Re f1 = 4e-7, a rigid-body mode); not caused by the port.
+
+## Physics codes (2026-11-03)
+
+Every physics module carries a three-letter code, chosen by Paul:
+
+| Code | Physics | Modules |
+|---|---|---|
+| `dfs` | scalar diffusion (electrostatics, heat) | `dfs` (was `scalar`) |
+| `sms` | solid mechanics | `sms`, `sms_pml`, `sms_floquet`, `sms_lrb`, `sms_kz`, `sms_axisym` (were `solid*`) |
+| `ems` | EM waves | `ems`, `ems_pml`, `ems3d`, `ems_axisym` (were `emw*`) |
+| `sbs` | stimulated Brillouin scattering | `sbs`, `sbs_ring` (were `brillouin`, `ring_brillouin`) |
+
+`solvers::scalar` (the solver library's scalar trait) is unrelated and keeps its name.

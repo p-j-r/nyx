@@ -16,9 +16,9 @@ fn poisson_on_a_meshed_disk_matches_the_exact_solution() {
     m.overlay(&[("disk", d)]);
     let g = mesh_geom_2d(evaluate(&m.list).unwrap(), &GeomMeshOpts::new(0.05)).unwrap();
     let mut s = ProblemSpec::new(Physics::Electrostatics);
-    s.materials.default.insert("rho_v".into(), femcore::scalar::EPS0);
+    s.materials.default.insert("rho_v".into(), femcore::dfs::EPS0);
     s.bcs = vec![Bc { on: None, labels: g.select("outer").unwrap(), kind: BcKind::Ground }];
-    let res = femcore::scalar::solve_electrostatics(&g.mesh, &s).unwrap();
+    let res = femcore::dfs::solve_electrostatics(&g.mesh, &s).unwrap();
     let vmax = res.scalar("V max").unwrap();
     assert!((vmax / (r * r / 4.0) - 1.0).abs() < 5e-3, "{vmax} vs {}", r * r / 4.0);
 }
@@ -90,7 +90,7 @@ fn a_section_swept_along_y_is_conforming_and_solves_exactly() {
     // potential 1 on x = 0, ground on x = 1: V = 1 - x exactly
     let mut s = ProblemSpec::new(Physics::Electrostatics);
     s.bcs = vec![Bc { on: None, labels: p.xmin.clone(), kind: BcKind::Potential(1.0) }, Bc { on: None, labels: p.xmax.clone(), kind: BcKind::Ground }];
-    let r = femcore::scalar::solve_electrostatics(&m3, &s).unwrap();
+    let r = femcore::dfs::solve_electrostatics(&m3, &s).unwrap();
     let v = &r.solutions[0].field("V").unwrap().values;
     let x = m3.dof_coordinates(2);
     let err = (0..v.len()).map(|i| (v[i] - (1.0 - x[3 * i])).abs()).fold(0.0, f64::max);

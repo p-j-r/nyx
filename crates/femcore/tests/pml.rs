@@ -1,8 +1,8 @@
 //! Perfectly matched layers and complex materials in the mode solver.
 mod common;
 use femcore::csparse::c;
-use femcore::emw::{self, C0};
-use femcore::emw_pml::*;
+use femcore::ems::{self, C0};
+use femcore::ems_pml::*;
 use femcore::problem::*;
 
 fn k0(f: f64) -> f64 {
@@ -27,7 +27,7 @@ fn complex_solver_without_pml_reproduces_the_real_solver() {
     let eps = vec![EpsC { xx: c(1.0, 0.0), xy: c(0.0, 0.0), yy: c(1.0, 0.0), zz: c(1.0, 0.0), xz: c(0.0, 0.0), yz: c(0.0, 0.0) }; nc];
     let mu = vec![MuC { x: c(1.0, 0.0), y: c(1.0, 0.0), z: c(1.0, 0.0) }; nc];
     let cm = solve_modes_complex(&mesh, f, &eps, &mu, c(0.9, 0.0), 4, 2).unwrap();
-    let rm = emw::solve_modes(&mesh, f, &vec![1.0; nc], &vec![1.0; nc], 0.9, false, 4, 2).unwrap();
+    let rm = ems::solve_modes(&mesh, f, &vec![1.0; nc], &vec![1.0; nc], 0.9, false, 4, 2).unwrap();
     for j in 0..4 {
         assert!((cm.neff[j].re - rm.neff[j].0).abs() < 1e-9 && cm.neff[j].im.abs() < 1e-9, "mode {j}: {:?} vs {:?}", cm.neff[j], rm.neff[j]);
     }

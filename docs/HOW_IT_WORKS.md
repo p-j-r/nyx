@@ -74,17 +74,17 @@ Cells are straight-sided, so the gradients of the `l_i` are constant over a cell
 
 An **element matrix** is an integral over the cell, evaluated by **quadrature** (a few well-chosen points
 with weights; exact for polynomials up to degree 2 or 4, `fem::quad_rule`). For elasticity
-(`solid.rs`) it is `∫ Bᵀ D B dV`: `B` turns the unknowns into strains (how much the material is stretched
+(`sms.rs`) it is `∫ Bᵀ D B dV`: `B` turns the unknowns into strains (how much the material is stretched
 and sheared), `D` is the material's stiffness table (6×6, in the order xx, yy, zz, xy, yz, xz, with
 engineering shear strains), so the integral is the elastic energy stored per unit of unknowns. For
 crystals `D` is rotated into the wafer axes by the orientation angles (`material.rs`, Z-X-Z Euler angles).
-The mass matrix is `∫ ρ Nᵀ N dV`. Other physics have their own versions (`scalar.rs`: diffusion matrices
-for electric potential and temperature; `emw*.rs`: curl-curl matrices with edge elements, see §8).
+The mass matrix is `∫ ρ Nᵀ N dV`. Other physics have their own versions (`dfs.rs`: diffusion matrices
+for electric potential and temperature; `ems*.rs`: curl-curl matrices with edge elements, see §8).
 
-Variants of the elasticity element matrix: out-of-plane wave number (`solid_kz.rs`: all three displacement
+Variants of the elasticity element matrix: out-of-plane wave number (`sms_kz.rs`: all three displacement
 components live on a 2D cross-section with a travelling-wave factor `exp(−i kz z)`), bodies of revolution
-(`solid_axisym.rs`), complex coordinate stretching for absorbing layers (`solid_pml.rs`), and boundary
-damping that absorbs outgoing waves (`solid_lrb.rs`).
+(`sms_axisym.rs`), complex coordinate stretching for absorbing layers (`sms_pml.rs`), and boundary
+damping that absorbs outgoing waves (`sms_lrb.rs`).
 
 ## 5. Assembly and boundary conditions (`fem::assemble_parallel`, `sparse.rs`, `periodic.rs`)
 
@@ -140,26 +140,26 @@ Free vibrations, cavity resonances and waveguide modes are eigenproblems: find t
   80,000 unknowns in 3D, 400,000 in 2D (below that the factorisation is as fast), probes whether multigrid is a good preconditioner,
   and **gives up early** when the residual stops improving (a slender part can defeat multigrid): the stage
   log then says "LOBPCG stalled ...; used a sparse factorisation instead".
-* **Complex problems with absorbing layers or tilted crystals** (`csparse.rs`, `emw_pml.rs`). The matrices are
+* **Complex problems with absorbing layers or tilted crystals** (`csparse.rs`, `ems_pml.rs`). The matrices are
   complex symmetric. When a crystal's axes are tilted against the propagation direction, the unknown
-  propagation constant β appears in the matrix itself; `emw_pml.rs` solves this by repeating the eigensolve
+  propagation constant β appears in the matrix itself; `ems_pml.rs` solves this by repeating the eigensolve
   with the latest β until β stops changing (relative change below `COUPLED_BETA_TOL` = 1e-8, which sits just above
   the eigensolver's own noise of ~1e-9; a stricter test used to run all 10 repeats of 13 s each for nothing).
-  Low-reflecting boundaries make the eigenproblem quadratic in ω; `solid_lrb.rs` rewrites it as a linear problem of
+  Low-reflecting boundaries make the eigenproblem quadratic in ω; `sms_lrb.rs` rewrites it as a linear problem of
   twice the size.
 
-## 8. Electromagnetic waves (`emw.rs`, `emw_pml.rs`, `emw_axisym.rs`, `emw3d.rs`)
+## 8. Electromagnetic waves (`ems.rs`, `ems_pml.rs`, `ems_axisym.rs`, `ems3d.rs`)
 
 For light in a waveguide cross-section the unknown is the electric field, which has a component along
 the guide and two across it. The program uses the standard **mixed formulation**: the transverse field is
 expanded in Nédélec *edge* elements (unknowns on edges, tangential component continuous across cells — the
 right continuity for E, which avoids false "spurious" modes) and the longitudinal field in ordinary
 Lagrange elements. The eigenvalue is `−β²`; the effective index is `n_eff = β / k0`. Perfect conductor walls, complex
-materials and PML are handled; `emw_axisym.rs` treats rings (azimuthal order `m`) and `emw3d.rs` closed 3D cavities
+materials and PML are handled; `ems_axisym.rs` treats rings (azimuthal order `m`) and `ems3d.rs` closed 3D cavities
 (`curl(1/μ curl E) = (2πf/c)² ε E`; the set of gradient fields, which has eigenvalue zero and is not physical, is
 projected out).
 
-## 9. Brillouin scattering (`brillouin.rs`, `ring_brillouin.rs`, `chips.rs`)
+## 9. Brillouin scattering (`sbs.rs`, `sbs_ring.rs`, `chips.rs`)
 
 Stimulated Brillouin scattering couples two light waves (pump and Stokes) and a sound wave. The chain for a
 waveguide cross-section:
@@ -167,7 +167,7 @@ waveguide cross-section:
 1. Solve the **optical modes** of the cross-section (§8) at the chosen wavelength: effective indices, fields E, D, H.
 2. For a chosen pump/Stokes pair, the sound wave must carry the momentum difference: its out-of-plane wave number is
    `q = β_pump + β_Stokes` (backward scattering) or `β_pump − β_Stokes` (forward).
-3. Solve the **elastic modes** at that `q` (`solid_kz.rs`; frequencies are complex with PML in the substrate, the
+3. Solve the **elastic modes** at that `q` (`sms_kz.rs`; frequencies are complex with PML in the substrate, the
    imaginary part gives the radiation loss Q).
 4. Combine optical and elastic fields in two overlap integrals: the **photoelastic** one (the strain of the
    sound wave changes the permittivity, which scatters light; `p:S` with the material's photoelastic tensor) and
@@ -177,7 +177,7 @@ waveguide cross-section:
 5. The **gain** per mode follows from the overlaps, the mode's Q and group velocities. The report lists, per
    elastic mode: frequency, Q, share of the energy in the body and in the PML, MB, PE and total gain, and g0.
 
-`chips.rs` builds the four ring-chip cross-sections (silicon rib on sapphire) and `ring_brillouin.rs`
+`chips.rs` builds the four ring-chip cross-sections (silicon rib on sapphire) and `sbs_ring.rs`
 does the same for whole rings (axisymmetric). Example 15 of the Examples menu is the 300TE chip.
 
 ## 10. From the solution to the picture (`fields.rs`, `app/src/viewport.rs`, `scene.rs`)
@@ -280,14 +280,14 @@ or "LOBPCG stalled" mean a fallback to the direct method happened.
 | `linalg.rs` | sparse Cholesky/LU, dense eigensolvers |
 | `amg.rs` | smoothed-aggregation multigrid and preconditioned conjugate gradients |
 | `eigen.rs`, `lobpcg.rs` | shift-and-invert Krylov eigensolvers; multigrid LOBPCG with stall guard |
-| `scalar.rs` | electrostatics and heat transfer (stationary, transient: exact for small systems, BDF2 for large) |
-| `solid.rs` | linear elasticity: static, eigenfrequencies, stresses, thermal expansion |
-| `solid_kz.rs`, `solid_axisym.rs` | elastic modes with out-of-plane wave number; bodies of revolution |
-| `solid_pml.rs`, `solid_lrb.rs` | anchor loss through PML; low-reflecting boundaries (quadratic eigenproblem) |
-| `solid_floquet.rs`, `periodic.rs` | periodic cells (phononic crystals), Floquet constraints |
-| `emw.rs`, `emw_pml.rs` | 2D waveguide modes; complex modes, PML, tilted crystals |
-| `emw_axisym.rs`, `emw3d.rs` | ring resonator modes; 3D cavities |
-| `brillouin.rs`, `ring_brillouin.rs`, `chips.rs` | Brillouin overlaps and gain; rings; the four chips |
+| `dfs.rs` | electrostatics and heat transfer (stationary, transient: exact for small systems, BDF2 for large) |
+| `sms.rs` | linear elasticity: static, eigenfrequencies, stresses, thermal expansion |
+| `sms_kz.rs`, `sms_axisym.rs` | elastic modes with out-of-plane wave number; bodies of revolution |
+| `sms_pml.rs`, `sms_lrb.rs` | anchor loss through PML; low-reflecting boundaries (quadratic eigenproblem) |
+| `sms_floquet.rs`, `periodic.rs` | periodic cells (phononic crystals), Floquet constraints |
+| `ems.rs`, `ems_pml.rs` | 2D waveguide modes; complex modes, PML, tilted crystals |
+| `ems_axisym.rs`, `ems3d.rs` | ring resonator modes; 3D cavities |
+| `sbs.rs`, `sbs_ring.rs`, `chips.rs` | Brillouin overlaps and gain; rings; the four chips |
 | `xmlio.rs`, `h5io.rs` | project XML; HDF5/XDMF results |
 
 Window crate (crates/app/src): `main.rs` (command line), `app.rs` (state, jobs, layout), `tabs.rs` (inspector),

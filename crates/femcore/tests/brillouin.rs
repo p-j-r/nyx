@@ -4,11 +4,11 @@
 //! Seven tests that take 30-60 s each (rings, whispering-gallery modes, group velocity from the fields) are #[ignore]d so that
 //! cargo test stays fast; run them with cargo test --release -p femcore --test brillouin -- --ignored (about 70 s).
 mod common;
-use femcore::brillouin::*;
+use femcore::sbs::*;
 use femcore::csparse::c;
 use femcore::material::*;
 use femcore::problem::*;
-use femcore::solid_kz::KzModes;
+use femcore::sms_kz::KzModes;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
@@ -122,7 +122,7 @@ fn viscous_loss_proportional_to_stiffness_gives_the_exact_quality_factor() {
     sp.materials.default.insert("rho".into(), 2700.0);
     sp.bcs = vec![Bc { on: None, labels: vec![1, 2, 3, 4], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     sp.study = Study::Eigenfrequency { n_modes: 4, f_search: 3000.0 };
-    let (_, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &sp, 5.0).unwrap();
+    let (_, modes) = femcore::sms_kz::solve_solid_kz_full(&mesh, &sp, 5.0).unwrap();
     let tau = 2e-9;
     let eta: Vec<M6> = modes.c6.iter().map(|m| m.map(|r| r.map(|x| x * tau))).collect();
     let inv_q = viscous_inverse_q(&mesh, 2, &modes, &eta);
@@ -150,7 +150,7 @@ fn ring_problem(order: usize) -> (femcore::mesh::SimplexMesh, ProblemSpec) {
 fn a_thin_ring_breathes_at_the_hoop_frequency() {
     // m = 0: all the ring moves radially, f = sqrt(E / rho) / (2 pi R) for a thin ring
     let (mesh, sp) = ring_problem(2);
-    let (_, modes) = femcore::solid_kz::solve_solid_axisym(&mesh, &sp, 0.0).unwrap();
+    let (_, modes) = femcore::sms_kz::solve_solid_axisym(&mesh, &sp, 0.0).unwrap();
     let c = (70e9f64 / 2700.0).sqrt();
     let expect = c / (2.0 * std::f64::consts::PI);
     let best = modes.freqs.iter().map(|f| f.re).min_by(|a, b| (a - expect).abs().partial_cmp(&(b - expect).abs()).unwrap()).unwrap();
@@ -169,7 +169,7 @@ fn a_thin_ring_bends_in_its_plane_with_the_classical_frequencies() {
         let expect = w2.sqrt() / (2.0 * std::f64::consts::PI);
         let mut sp2 = sp.clone();
         sp2.study = Study::Eigenfrequency { n_modes: 10, f_search: expect };
-        let (_, modes) = femcore::solid_kz::solve_solid_axisym(&mesh, &sp2, m).unwrap();
+        let (_, modes) = femcore::sms_kz::solve_solid_axisym(&mesh, &sp2, m).unwrap();
         let best = modes.freqs.iter().map(|f| f.re).min_by(|a, b| (a - expect).abs().partial_cmp(&(b - expect).abs()).unwrap()).unwrap();
         println!("m = {m}: {best:.3} Hz, ring theory {expect:.3} Hz");
         assert!((best - expect).abs() < 0.03 * expect, "m = {m}: {best} against {expect}");
@@ -216,8 +216,8 @@ fn the_phase_matched_overlap_is_mirror_symmetric_and_the_strain_as_is_form_is_no
     let (cp, cm) = (mk(false), mk(true));
     assert!((cp.q() + cm.q()).abs() < 1e-9 * cp.q().abs());
     let sp = wire_elastic(&mesh, 16e9, 14);
-    let (_, modes_p) = femcore::solid_kz::solve_solid_kz_full(&mesh, &sp, cp.q()).unwrap();
-    let (_, modes_m) = femcore::solid_kz::solve_solid_kz_full(&mesh, &sp, cm.q()).unwrap();
+    let (_, modes_p) = femcore::sms_kz::solve_solid_kz_full(&mesh, &sp, cp.q()).unwrap();
+    let (_, modes_m) = femcore::sms_kz::solve_solid_kz_full(&mesh, &sp, cm.q()).unwrap();
     assert_eq!(modes_p.freqs.len(), modes_m.freqs.len());
     let opts = |strain| GainOptions { strain, body_domains: [2].into_iter().collect(), ..Default::default() };
     let mut worst_conj = 0.0f64;
@@ -258,7 +258,7 @@ fn modes_of_a_symmetric_plate_are_classified_by_parity_and_followed_across_wave_
     labels.dedup();
     sp.bcs = vec![Bc { on: None, labels, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
     sp.study = Study::Eigenfrequency { n_modes: 6, f_search: 2000.0 };
-    let (_, modes) = femcore::solid_kz::solve_solid_kz_full(&mesh, &sp, 3.0).unwrap();
+    let (_, modes) = femcore::sms_kz::solve_solid_kz_full(&mesh, &sp, 3.0).unwrap();
     let map = mirror_map(&mesh, 2, 0);
     let Some(map) = map else {
         println!("the mesh is not mirror symmetric in its vertices; parity check skipped");
@@ -287,9 +287,9 @@ fn a_coaxial_cavity_has_the_transmission_line_resonances() {
     // E_r ~ sin(l pi z / L) / r resonate at f = l c / (2 L)
     let (a, b, len) = (0.1, 0.2, 0.3);
     let mesh = common::parts_mesh(&[common::part(a, 0.0, b, len, 1, Some(0.015))], 0.015);
-    let mat = femcore::emw_axisym::AxiMaterial::from_indices(&mesh, &BTreeMap::new());
+    let mat = femcore::ems_axisym::AxiMaterial::from_indices(&mesh, &BTreeMap::new());
     let c0 = 299_792_458.0f64;
-    let modes = femcore::emw_axisym::solve_axisym_modes(&mesh, &mat, 0.0, 0.9e9, 3, 2).unwrap();
+    let modes = femcore::ems_axisym::solve_axisym_modes(&mesh, &mat, 0.0, 0.9e9, 3, 2).unwrap();
     println!("frequencies {:?}", modes.freqs.iter().map(|f| f / 1e6).collect::<Vec<_>>());
     for l in [1.0f64, 2.0] {
         let expect = l * c0 / (2.0 * len);
@@ -319,11 +319,11 @@ fn a_whispering_gallery_mode_of_a_large_ring_has_the_straight_waveguide_index() 
     let mut idx = BTreeMap::new();
     idx.insert(1, 1.444);
     idx.insert(2, 3.476);
-    let mat = femcore::emw_axisym::AxiMaterial::from_indices(&ring, &idx);
+    let mat = femcore::ems_axisym::AxiMaterial::from_indices(&ring, &idx);
     let f0 = 299_792_458.0 / 1.55e-6;
     let k0 = 2.0 * std::f64::consts::PI * f0 / 299_792_458.0;
     let m = (n_straight * k0 * radius).round();
-    let modes = femcore::emw_axisym::solve_axisym_modes(&ring, &mat, m, f0, 2, 2).unwrap();
+    let modes = femcore::ems_axisym::solve_axisym_modes(&ring, &mat, m, f0, 2, 2).unwrap();
     let f = modes.freqs[0];
     let n_ring = m / (2.0 * std::f64::consts::PI * f / 299_792_458.0 * radius);
     println!("m = {m}, f = {:.4} THz (target {:.4}), neff ring {n_ring:.5}, straight {n_straight:.5}", f * 1e-12, f0 * 1e-12);
@@ -335,7 +335,7 @@ fn a_whispering_gallery_mode_of_a_large_ring_has_the_straight_waveguide_index() 
 fn a_large_ring_has_the_gains_of_the_straight_waveguide() {
     // the silicon wire in silica on a ring of radius 20 mm: the axisymmetric gain (azimuthal orders m_p + m_s for the
     // phonon) equals the straight-waveguide gain at q = M / R, to the curvature corrections
-    use femcore::ring_brillouin::*;
+    use femcore::sbs_ring::*;
     let um = 1e-6;
     let radius = std::env::var("RING_R_UM").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(20000.0) * um;
     let mesh = wire_mesh();
@@ -354,11 +354,11 @@ fn a_large_ring_has_the_gains_of_the_straight_waveguide() {
         pts[2 * i] += radius;
     }
     let ring = femcore::mesh::SimplexMesh::new(2, pts, mesh.cells.clone(), mesh.cell_labels.clone(), mesh.facets.clone(), mesh.facet_labels.clone());
-    let mat = femcore::emw_axisym::AxiMaterial::from_indices(&ring, &n_idx);
+    let mat = femcore::ems_axisym::AxiMaterial::from_indices(&ring, &n_idx);
     let f0 = 299_792_458.0 / 1.55e-6;
     let k0 = 2.0 * std::f64::consts::PI * f0 / 299_792_458.0;
     let m = (set.modes[0].neff.re * k0 * radius).round();
-    let opt = femcore::emw_axisym::solve_axisym_modes(&ring, &mat, m, f0, 1, 2).unwrap();
+    let opt = femcore::ems_axisym::solve_axisym_modes(&ring, &mat, m, f0, 1, 2).unwrap();
     let rc = ring_coupling(&RingInput { mesh: &ring, material: &mat, pump: (&opt, 0), stokes: (&opt, 0), backward: true, photoelastic: &pe, moving: &moving, r_ref: radius }).unwrap();
     println!("group index: ring {:.4}, straight {:.4}; P ring {:.3e} straight {:.3e}", rc.group_index().0, flat.group_index().0, rc.p_pump, flat.p_pump);
     assert!(rc.p_pump > 0.0, "power along +theta for m > 0");
@@ -373,8 +373,8 @@ fn a_large_ring_has_the_gains_of_the_straight_waveguide() {
     };
     let sp_flat = iso(wire_elastic(&mesh, 16e9, 12));
     let sp_ring = iso(wire_elastic(&ring, 16e9, 12));
-    let (_, mf) = femcore::solid_kz::solve_solid_kz_full(&mesh, &sp_flat, q).unwrap();
-    let (_, mr) = femcore::solid_kz::solve_solid_axisym(&ring, &sp_ring, rc.elastic_order()).unwrap();
+    let (_, mf) = femcore::sms_kz::solve_solid_kz_full(&mesh, &sp_flat, q).unwrap();
+    let (_, mr) = femcore::sms_kz::solve_solid_axisym(&ring, &sp_ring, rc.elastic_order()).unwrap();
     let opts = GainOptions { body_domains: [2].into_iter().collect(), length: 1.0, ..Default::default() };
     let rf = gains(&mesh, &flat, &mf, &opts);
     let rr = ring_gains(&ring, &rc, &mr, &opts);
@@ -475,7 +475,7 @@ fn ring_pml_map(strength: f64) -> BTreeMap<i32, Pml> {
 #[test]
 #[ignore = "slow (30-60 s): run with `cargo test --release -- --ignored`"]
 fn absorbing_layers_of_a_ring_leave_a_confined_mode_alone_and_give_a_leaky_one_a_loss_that_does_not_depend_on_them() {
-    use femcore::emw_axisym::*;
+    use femcore::ems_axisym::*;
     let n_idx: BTreeMap<i32, f64> = (1..=7).map(|d| (d, if d == 2 { 3.476 } else { 1.444 })).collect();
     let f0 = 299_792_458.0 / 1.55e-6;
     let k0 = 2.0 * std::f64::consts::PI / 1.55e-6;

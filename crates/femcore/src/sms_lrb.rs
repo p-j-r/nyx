@@ -160,9 +160,9 @@ pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize)
 }
 
 /// Eigenfrequencies with low-reflecting boundaries for the real stiffness and mass matrices of
-/// `solid.rs` (2D plane problems and 3D).
+/// `sms.rs` (2D plane problems and 3D).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::solid::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant) -> Result<crate::problem::SolveResult, String> {
+pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant) -> Result<crate::problem::SolveResult, String> {
     use crate::problem::*;
     if f_search <= 0.0 {
         return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());

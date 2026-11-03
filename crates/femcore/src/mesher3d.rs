@@ -687,7 +687,7 @@ pub fn mesh_3d(spec: &Spec3d) -> Result<(SimplexMesh, Report3d), String> {
     let tol = 1e-9 * hmin;
     let alpha = spec.alpha;
     let mut tl = std::time::Instant::now();
-    let mut lap = |what: &str| crate::solid::lap(&mut tl, what);
+    let mut lap = |what: &str| crate::sms::lap(&mut tl, what);
 
     // 1. classify the lattice vertices for every cutting surface: -1 inside, +1 outside, 0 on it
     let mut cls: Vec<Vec<i8>> = Vec::with_capacity(ns);

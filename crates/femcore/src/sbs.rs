@@ -1,6 +1,6 @@
 //! Stimulated Brillouin scattering of a 2D waveguide cross-section: the optical modes (pump and
-//! Stokes, from `emw`/`emw_pml`) and the elastic modes with the phase-matched out-of-plane wave
-//! number (from `solid_kz`) are combined in the two coupling integrals of the standard theory
+//! Stokes, from `ems`/`emw_pml`) and the elastic modes with the phase-matched out-of-plane wave
+//! number (from `sms_kz`) are combined in the two coupling integrals of the standard theory
 //! (Wolff et al., Sturmberg et al.):
 //!
 //! * the photoelastic overlap `f_PE = -eps0 eps_r^2 * Int conj(E_s) p:S E_p dA`, over the domains
@@ -20,13 +20,13 @@
 //! coupling is evaluated once for an optical pair and then applied to every elastic mode.
 
 use crate::csparse::{c, C};
-use crate::emw::{cell_data, edge_basis, tri_g, CellData, EpsCell, Modes, C0};
-use crate::emw_pml::{cell_materials, cell_materials_signed, solve_modes_complex, EpsC, ModesC, MuC};
+use crate::ems::{cell_data, edge_basis, tri_g, CellData, EpsCell, Modes, C0};
+use crate::ems_pml::{cell_materials, cell_materials_signed, solve_modes_complex, EpsC, ModesC, MuC};
 use crate::fem::*;
 use crate::material::M3;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::solid_kz::KzModes;
+use crate::sms_kz::KzModes;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const EPS0: f64 = 8.854_187_812_8e-12;
@@ -173,7 +173,7 @@ pub fn solve_optical_wafer(mesh: &SimplexMesh, spec: &ProblemSpec, prop_sign: f6
         let tens: Vec<_> = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(|t| crate::section::local_tensor_signed(t, prop_sign)).collect();
         let e: Vec<EpsCell> = tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
         let mur = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-        let m = crate::emw::solve_modes_tensor(mesh, freq, &e, &mur, n_target, evanescent, n_modes, spec.order)?;
+        let m = crate::ems::solve_modes_tensor(mesh, freq, &e, &mur, n_target, evanescent, n_modes, spec.order)?;
         (from_real(&m), m.converged)
     };
     Ok(OpticalSet { freq, order: spec.order, eps, mu, modes, converged, in_pml, left_handed: crate::section::is_left_handed(prop_sign) })
@@ -318,13 +318,13 @@ pub fn mode_samples(mesh: &SimplexMesh, set: &OpticalSet, j: usize) -> Vec<crate
     out
 }
 
-/// The optical modes found by `emw::solve_modes_tensor` for `spec` as an `OpticalSet`, to evaluate their fields.
+/// The optical modes found by `ems::solve_modes_tensor` for `spec` as an `OpticalSet`, to evaluate their fields.
 pub(crate) fn optical_set_real(mesh: &SimplexMesh, spec: &ProblemSpec, m: &Modes, freq: f64) -> Result<OpticalSet, String> {
     let (eps, mu) = cell_materials(mesh, &spec.materials)?;
     Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_real(m), converged: m.converged, in_pml: vec![false; mesh.n_cells()], left_handed: crate::section::is_left_handed(crate::section::PROP_SIGN) })
 }
 
-/// The modes of `emw_pml::solve_modes_complex` for `spec` as an `OpticalSet`.
+/// The modes of `ems_pml::solve_modes_complex` for `spec` as an `OpticalSet`.
 pub(crate) fn optical_set_complex(mesh: &SimplexMesh, spec: &ProblemSpec, m: &ModesC, freq: f64) -> Result<OpticalSet, String> {
     let (eps, mu) = cell_materials(mesh, &spec.materials)?;
     let in_pml = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off)).collect();
@@ -955,7 +955,7 @@ pub fn cell_viscosity(mesh: &SimplexMesh, viscosity: &BTreeMap<i32, crate::mater
 /// so `(K + j Omega K_eta - Omega^2 M) u = 0` and `Im(Omega) = u^H K_eta u / (2 u^H M u)`, that is
 /// `1/Q = 2 Im(Omega) / Omega = u^H K_eta u / (Omega u^H M u)`. For `eta = tau C` this is exactly `Omega tau`.
 pub fn viscous_inverse_q(mesh: &SimplexMesh, order: usize, mech: &KzModes, eta: &[crate::material::M6]) -> Vec<f64> {
-    let k = crate::solid_kz::assemble_stiffness_kz(mesh, eta, order, mech.kz, None);
+    let k = crate::sms_kz::assemble_stiffness_kz(mesh, eta, order, mech.kz, None);
     let n1 = mesh.n_dofs(order);
     let nloc = mesh.nloc(order);
     let q = quad_rule(2, 4);
@@ -1051,7 +1051,7 @@ pub type ModeTracks = Vec<Vec<Option<usize>>>;
 pub fn elastic_dispersion(mesh: &SimplexMesh, mech: &ProblemSpec, qs: &[f64], threshold: f64) -> Result<(Vec<KzModes>, ModeTracks), String> {
     let mut all: Vec<KzModes> = vec![];
     for &q in qs {
-        all.push(crate::solid_kz::solve_solid_kz_full(mesh, mech, q)?.1);
+        all.push(crate::sms_kz::solve_solid_kz_full(mesh, mech, q)?.1);
     }
     if all.is_empty() {
         return Ok((all, vec![]));
@@ -1143,7 +1143,7 @@ impl BrillouinStudy<'_> {
                 let q = cp.q();
                 let at = match solved.iter().position(|(k, _, _)| (k - q).abs() <= 1e-9 * q.abs()) {
                     Some(i) => i,
-                    None => match crate::solid_kz::solve_solid_kz_full(self.mesh, &self.mech, q) {
+                    None => match crate::sms_kz::solve_solid_kz_full(self.mesh, &self.mech, q) {
                         Ok((r, m)) => {
                             solved.push((q, r, m));
                             solved.len() - 1
@@ -1221,8 +1221,8 @@ fn report_rows(tag: &str, rows: &[GainRow], res: &SolveResult, scalars: &mut Vec
 
 /// Brillouin study of a ring resonator (`brillouin.ring_radius`): the mesh is the (r, z) half plane.
 fn solve_ring(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, r_ref: f64) -> Result<SolveResult, String> {
-    use crate::emw_axisym::*;
-    use crate::ring_brillouin::*;
+    use crate::ems_axisym::*;
+    use crate::sbs_ring::*;
     let t0 = std::time::Instant::now();
     let b = spec.brillouin.as_ref().ok_or("this problem has no Brillouin settings")?;
     let mut log = vec![format!("ring resonator, reference radius {:.4e} m; the crystal data are averaged over rotations about the ring axis", r_ref)];
@@ -1274,7 +1274,7 @@ fn solve_ring(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, r_ref:
             let at = match solved.iter().position(|(k, _, _)| (k - m_el).abs() < 1e-9) {
                 Some(i) => i,
                 None => {
-                    let (r, m) = crate::solid_kz::solve_solid_axisym(mesh, &mech, m_el)?;
+                    let (r, m) = crate::sms_kz::solve_solid_axisym(mesh, &mech, m_el)?;
                     solved.push((m_el, r, m));
                     solved.len() - 1
                 }
@@ -1304,7 +1304,7 @@ fn solve_ring(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, r_ref:
         .map(|j| crate::analysis::ModeInput {
             label: format!("mode {}", j + 1),
             neff: (m_pump * C0 / (2.0 * std::f64::consts::PI * modes.freqs[j] * r_ref), 0.0),
-            samples: crate::emw_axisym::mode_samples(mesh, &mat, &modes, j, &in_pml),
+            samples: crate::ems_axisym::mode_samples(mesh, &mat, &modes, j, &in_pml),
         })
         .collect();
     let mut opts = crate::analysis::AnalysisOptions::default();
@@ -1459,7 +1459,7 @@ pub fn study_straight(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState
             let at = match solved.iter().position(|(k, _, _)| (k - q).abs() <= 1e-9 * q.abs()) {
                 Some(i) => i,
                 None => {
-                    let (r, m) = crate::solid_kz::solve_solid_kz_full(mesh, &mech, q)?;
+                    let (r, m) = crate::sms_kz::solve_solid_kz_full(mesh, &mech, q)?;
                     solved.push((q, r, m));
                     solved.len() - 1
                 }
