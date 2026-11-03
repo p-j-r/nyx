@@ -111,8 +111,8 @@ fn an_anisotropic_metric_gives_elongated_tetrahedra() {
     let (band, q) = (in_band(a, &met), qmin(a, &met));
     eprintln!("anisotropic: {} tets, in band {band:.3}, qmin {q:.3}", a.n_cells());
     // far fewer than the isotropic 0.1 mesh would need (about 1e4 · 6 tets), more than the start
-    assert!(a.n_cells() > m.n_cells() && a.n_cells() < 8000, "{} tets", a.n_cells());
-    assert!(band > 0.7, "in band {band}");
+    assert!(a.n_cells() > m.n_cells() && a.n_cells() < 700, "{} tets", a.n_cells());
+    assert!(band > 0.9, "in band {band}");
 }
 
 #[test]
@@ -142,4 +142,31 @@ fn a_graded_metric_is_followed_with_good_tetrahedra() {
     eprintln!("graded: {} tets, in band {frac:.3}, qmin {q:.3}, iters {}, converged {}", a.n_cells(), out.report.iters.len(), out.report.converged);
     assert!(frac > 0.85, "in band {frac}");
     assert!(q > 0.02, "worst tetrahedron {q}");
+}
+
+#[test]
+fn a_fine_box_coarsens_on_its_surface_too() {
+    let mut m = unit_box(8);
+    for c in 0..m.n_cells() {
+        let z: f64 = m.cell(c).iter().map(|&v| m.points[v as usize][2]).sum::<f64>() / 4.0;
+        if z > 0.5 {
+            m.cell_label[c] = 2;
+        }
+    }
+    let start = m.n_cells();
+    let out = adapt3(&m, &UniformSize(0.5), &TopoOptions3::default(), &AdaptOptions3::default()).unwrap();
+    let a = &out.mesh;
+    a.check().unwrap();
+    // flat faces and creases lose nothing by coarsening: the geometry is exact
+    assert!((volume(a, Some(1)) - 0.5).abs() < 1e-12 && (volume(a, Some(2)) - 0.5).abs() < 1e-12);
+    assert!((facet_area(a) - 6.0).abs() < 1e-12, "boundary area {}", facet_area(a));
+    for c in 0..8 {
+        let p = [(c & 1) as f64, ((c >> 1) & 1) as f64, ((c >> 2) & 1) as f64];
+        assert!(a.points.iter().any(|q| *q == p), "corner {p:?} lost");
+    }
+    let met = from_sizes(&[0.5; 3], &[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    let surface = a.points.iter().filter(|p| p.iter().any(|&x| x == 0.0 || x == 1.0)).count();
+    eprintln!("coarsened {start} -> {} tets, {surface} vertices on the surface, in band {:.3}, qmin {:.3}", a.n_cells(), in_band(a, &met), qmin(a, &met));
+    assert!(a.n_cells() * 20 < start, "{} tets left of {start}", a.n_cells());
+    assert!(surface < 150, "{surface} surface vertices of 6 * 81 + ... before");
 }

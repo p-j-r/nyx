@@ -8,9 +8,9 @@
 //! a surface face or a crease edge, a split puts the new vertex on the surface or crease it lies on (through the `Geometry3` oracle) and
 //! a smoothing step slides a surface or crease vertex over its patch or curve.
 //!
-//! **Limits.** Collapse removes interior vertices only, so a surface or crease that is finer than the metric asks is not coarsened
-//! (refinement towards a metric is complete; coarsening of the surface is not). Flips are 3-2 and 2-3; edge removal with more tets
-//! around the edge, and face-edge flips on the surface, are not implemented. Serial.
+//! **Limits.** Flips are 3-2 and 2-3 of interior edges and faces; flips of surface edges, and edge removal with more tets around the
+//! edge, are not implemented. A surface collapse refuses to turn a surface face by more than about 25 degrees, so a curved surface
+//! coarsens only where it is nearly flat at the scale of the edge. Serial.
 
 use super::field::MetricField;
 use super::geom3::Geometry3;
@@ -247,12 +247,89 @@ fn neighbours(w: &Work3, snap: &Snap3, v: u32) -> Vec<u32> {
     n
 }
 
-/// Can interior vertex `a` be merged into `b`? Returns the worst new quality if so.
-fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -> Option<f64> {
-    if w.vclass[a as usize] != VClass3::Interior {
-        return None;
+/// Vertices joined to `v` by an edge of a surface face.
+fn surface_nbrs(w: &Work3, snap: &Snap3, v: u32) -> Vec<u32> {
+    let mut n: Vec<u32> = vec![];
+    for &t in &snap.vert_tets[v as usize] {
+        for (f, _) in tet_faces(&w.tets[t as usize]) {
+            if f.contains(&v) && w.patch_of.contains_key(&f) {
+                n.extend(f.iter().copied().filter(|&x| x != v));
+            }
+        }
     }
+    n.sort_unstable();
+    n.dedup();
+    n
+}
+
+/// The surface faces on the edge `e`, as `(face, patch)`.
+fn surface_faces_on(w: &Work3, snap: &Snap3, e: &Edge) -> Vec<([u32; 3], u32)> {
+    let mut out: Vec<([u32; 3], u32)> = vec![];
+    for &t in &snap.edge_tets[e] {
+        for (f, _) in tet_faces(&w.tets[t as usize]) {
+            if f.contains(&e[0]) && f.contains(&e[1]) {
+                if let Some(&p) = w.patch_of.get(&f) {
+                    if !out.iter().any(|x| x.0 == f) {
+                        out.push((f, p));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/// Unit normal of the face `f` of tetrahedron `t` pointing out of `t`.
+fn outward_normal(pts: &[[f64; 3]], t: &[u32; 4], f: &[u32; 3]) -> [f64; 3] {
+    let opp = *t.iter().find(|x| !f.contains(x)).unwrap();
+    let (a, b, c) = (pts[f[0] as usize], pts[f[1] as usize], pts[f[2] as usize]);
+    let (u, v) = (sub3(b, a), sub3(c, a));
+    let mut n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-300);
+    let d = sub3(pts[opp as usize], a);
+    if n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0.0 {
+        n = [-n[0], -n[1], -n[2]];
+    }
+    [n[0] / l, n[1] / l, n[2] / l]
+}
+
+/// Can vertex `a` be merged into `b`? An interior vertex moves onto anything; a surface vertex only along an edge of its own patch;
+/// a crease vertex only along its own curve; a corner never. Returns the worst new quality if so.
+fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -> Option<f64> {
     let e = ekey(a, b);
+    match w.vclass[a as usize] {
+        VClass3::Corner => return None,
+        VClass3::Surface(p) => {
+            if w.patches[p as usize].frozen || !surface_faces_on(w, snap, &e).iter().any(|x| x.1 == p) {
+                return None;
+            }
+        }
+        VClass3::Crease(c) => {
+            if w.curves[c as usize].frozen || w.curve_of.get(&e) != Some(&c) {
+                return None;
+            }
+            match w.vclass[b as usize] {
+                VClass3::Crease(cb) if cb == c => {}
+                VClass3::Corner => {}
+                _ => return None,
+            }
+        }
+        VClass3::Interior => {}
+    }
+    if w.vclass[a as usize] != VClass3::Interior {
+        // the same link condition on the surface: the common surface neighbours are the apexes of the surface faces on the edge
+        let (sa, sb) = (surface_nbrs(w, snap, a), surface_nbrs(w, snap, b));
+        let common: Vec<u32> = sa.iter().copied().filter(|x| sb.binary_search(x).is_ok()).collect();
+        let mut opp: Vec<u32> = surface_faces_on(w, snap, &e).iter().map(|(f, _)| *f.iter().find(|&&x| x != a && x != b).unwrap()).collect();
+        opp.sort_unstable();
+        if common != opp {
+            return None;
+        }
+    }
     // link condition: the common neighbours of a and b are exactly the vertices opposite the edge in its tetrahedra
     let mut link: Vec<u32> = vec![];
     for &t in &snap.edge_tets[&e] {
@@ -297,6 +374,18 @@ fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -
         if !(tet_volume(&w.pts, &nt) > 0.0) {
             return None;
         }
+        if w.vclass[a as usize] != VClass3::Interior {
+            // a surface face that moves with a must not turn by more than about 25 degrees (flat patches do not turn at all)
+            for (f, _) in tet_faces(&tt) {
+                if f.contains(&a) && !f.contains(&b) && w.patch_of.contains_key(&f) {
+                    let g: Vec<u32> = f.iter().map(|&x| if x == a { b } else { x }).collect();
+                    let (n0, n1) = (outward_normal(&w.pts, &tt, &f), outward_normal(&w.pts, &nt, &fkey(g[0], g[1], g[2])));
+                    if n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] < 0.9 {
+                        return None;
+                    }
+                }
+            }
+        }
         let q = tet_q(w, &nt);
         if q < opt.collapse_qmin.min(tet_q(w, &tt)) {
             return None;
@@ -311,13 +400,13 @@ fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -
     Some(worst)
 }
 
-/// Collapse every interior edge shorter than `opt.lmin` that can be collapsed (the interior end moves onto the other). Returns the number.
+/// Collapse every edge shorter than `opt.lmin` that can be collapsed (one end moves onto the other, along its patch or curve when it is on one). Returns the number.
 pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize {
     let snap = snapshot(w);
     let mut cand: Vec<(f64, Edge)> = vec![];
     for e in all_edges(&snap) {
         let l = elen(w, e[0], e[1]);
-        if l < opt.lmin && (w.vclass[e[0] as usize] == VClass3::Interior || w.vclass[e[1] as usize] == VClass3::Interior) {
+        if l < opt.lmin {
             cand.push((l, e));
         }
     }
@@ -337,6 +426,34 @@ pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize {
             }
         }
         let Some((_, a, b)) = best else { continue };
+        // surface bookkeeping: faces on the edge vanish, the other surface faces and crease edges at a move to b
+        if w.vclass[a as usize] != VClass3::Interior {
+            let mut moved: Vec<[u32; 3]> = vec![];
+            for &t in &snap.vert_tets[a as usize] {
+                for (f, _) in tet_faces(&w.tets[t as usize]) {
+                    if f.contains(&a) && w.patch_of.contains_key(&f) && !moved.contains(&f) {
+                        moved.push(f);
+                    }
+                }
+            }
+            for f in moved {
+                let p = w.patch_of.remove(&f).unwrap();
+                if !f.contains(&b) {
+                    let g: Vec<u32> = f.iter().map(|&x| if x == a { b } else { x }).collect();
+                    w.patch_of.insert(fkey(g[0], g[1], g[2]), p);
+                }
+            }
+            if let VClass3::Crease(_) = w.vclass[a as usize] {
+                let ces: Vec<(Edge, u32)> = w.curve_of.iter().filter(|(k, _)| k.contains(&a)).map(|(k, &c)| (*k, c)).collect();
+                for (k, c) in ces {
+                    w.curve_of.remove(&k);
+                    if !k.contains(&b) {
+                        let o = if k[0] == a { k[1] } else { k[0] };
+                        w.curve_of.insert(ekey(b, o), c);
+                    }
+                }
+            }
+        }
         for &t in &snap.vert_tets[a as usize] {
             let tt = w.tets[t as usize];
             if tt.contains(&b) {
