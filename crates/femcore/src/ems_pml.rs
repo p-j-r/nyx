@@ -474,7 +474,7 @@ pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Solve
     }
     let mut result = SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order), ..Default::default() };
     if !modes.neff.is_empty() {
-        if let Ok(set) = crate::sbs::optical_set_complex(mesh, spec, &modes, freq) {
+        if let Ok(set) = crate::optical::optical_set_complex(mesh, spec, &modes, freq) {
             crate::analysis::analyze_optical(mesh, &set, &Default::default()).attach(&mut result);
         }
     }

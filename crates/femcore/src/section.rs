@@ -135,7 +135,6 @@ pub fn check_wafer_input(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), S
             .pml
             .iter()
             .map(|(d, p)| ("domain", *d, p))
-            .chain(spec.brillouin.iter().flat_map(|b| b.optical_pml.iter().map(|(d, p)| ("optical domain", *d, p))))
             .find(|(_, _, p)| p.y != PmlDir::Off);
         if let Some((what, d, _)) = bad {
             return Err(format!("the perfectly matched layer of {what} {d} absorbs along y, which is out of the plane of a 2D cross-section (x-z): use z for the direction of the surface normal"));

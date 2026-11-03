@@ -69,7 +69,7 @@ fn props_for(p: Physics) -> &'static [(&'static str, &'static str, &'static str)
     match p {
         Physics::Electrostatics => &[("eps_r", "relative permittivity ε_r", ""), ("rho_v", "space charge density ρ_v", "C/m³")],
         Physics::Heat => &[("k", "thermal conductivity k", "W/(m·K)"), ("rho", "density ρ", "kg/m³"), ("Cp", "heat capacity C_p", "J/(kg·K)"), ("Q", "heat source Q", "W/m³")],
-        Physics::Solid | Physics::Brillouin => &[("E", "Young's modulus E", "Pa"), ("nu", "Poisson's ratio ν", ""), ("rho", "density ρ", "kg/m³"), ("alpha", "thermal expansion α", "1/K")],
+        Physics::Solid => &[("E", "Young's modulus E", "Pa"), ("nu", "Poisson's ratio ν", ""), ("rho", "density ρ", "kg/m³"), ("alpha", "thermal expansion α", "1/K")],
         Physics::Emw => &[("eps_r", "relative permittivity ε_r", ""), ("mu_r", "relative permeability μ_r", "")],
     }
 }
@@ -169,7 +169,7 @@ fn tensor_combo(ui: &mut Ui, id: &str, label: &str, unit: &str, t: &mut Option<T
 /// Editor of the anisotropic data of one domain for the active physics. Returns true on change.
 fn aniso_editor(ui: &mut Ui, phys: Physics, d: i32, an: &mut Anisotropy, props: &Materials) -> bool {
     let mut changed = false;
-    if phys == Physics::Solid || phys == Physics::Brillouin {
+    if phys == Physics::Solid {
         ui.horizontal(|ui| {
             ui.label("stiffness");
             let cur = an.stiffness.as_ref().map(|x| x.name()).unwrap_or("Isotropic (E, ν)");
@@ -211,9 +211,9 @@ fn aniso_editor(ui: &mut Ui, phys: Physics, d: i32, an: &mut Anisotropy, props: 
         let k0 = props.get(d, "k").unwrap_or(1.0);
         changed |= tensor_combo(ui, &format!("cond_{d}"), "conductivity", "W/(m·K)", &mut an.conductivity, k0);
     }
-    if phys == Physics::Electrostatics || phys == Physics::Emw || phys == Physics::Brillouin {
+    if phys == Physics::Electrostatics || phys == Physics::Emw {
         let e0 = props.get(d, "eps_r").unwrap_or(1.0);
-        changed |= tensor_combo(ui, &format!("perm_{d}"), if phys == Physics::Brillouin { "optical permittivity (replaces the refractive index)" } else { "permittivity" }, "", &mut an.permittivity, e0);
+        changed |= tensor_combo(ui, &format!("perm_{d}"), "permittivity", "", &mut an.permittivity, e0);
     }
     let any = an.stiffness.is_some() || an.conductivity.is_some() || an.permittivity.is_some() || an.expansion.is_some();
     if any {
@@ -225,203 +225,6 @@ fn aniso_editor(ui: &mut Ui, phys: Physics, d: i32, an: &mut Anisotropy, props: 
         });
     }
     changed
-}
-
-/// Photoelastic presets (constants of the crystal frame; orientation follows the elastic crystal data).
-type PhotoPreset = (&'static str, fn() -> PhotoKind);
-const PHOTO_PRESETS: &[PhotoPreset] = &[
-    ("Silicon (-0.094, 0.017, -0.051)", || PhotoKind::Cubic { p11: -0.094, p12: 0.017, p44: -0.051 }),
-    ("Sapphire (-0.23, 0.03, 0.02, 0, -0.2, -0.1)", || PhotoKind::Trigonal { p11: -0.23, p12: 0.03, p13: 0.02, p14: 0.0, p33: -0.2, p44: -0.1 }),
-    ("Silica (0.121, 0.270)", || PhotoKind::Isotropic { p11: 0.121, p12: 0.270 }),
-    ("Silicon nitride (0.2, 0.2) isotropic", || PhotoKind::Isotropic { p11: 0.2, p12: 0.2 }),
-];
-
-fn photo_kind_name(k: &PhotoKind) -> &'static str {
-    match k {
-        PhotoKind::Isotropic { .. } => "isotropic",
-        PhotoKind::Cubic { .. } => "cubic",
-        PhotoKind::Trigonal { .. } => "trigonal",
-    }
-}
-
-fn photo_constants(k: &mut PhotoKind) -> Vec<(&'static str, &mut f64)> {
-    match k {
-        PhotoKind::Isotropic { p11, p12 } => vec![("p11", p11), ("p12", p12)],
-        PhotoKind::Cubic { p11, p12, p44 } => vec![("p11", p11), ("p12", p12), ("p44", p44)],
-        PhotoKind::Trigonal { p11, p12, p13, p14, p33, p44 } => vec![("p11", p11), ("p12", p12), ("p13", p13), ("p14", p14), ("p33", p33), ("p44", p44)],
-    }
-}
-
-/// The optical side of a Brillouin study: wavelength, modes, backward or forward scattering, and per
-/// domain the refractive index, the photoelastic data, the moving boundary and the optical PML.
-fn brillouin_editor(ui: &mut Ui, spec: &mut ProblemSpec, domains: &[i32], bufs: &mut std::collections::HashMap<(Physics, usize), String>) {
-    let Some(b) = spec.brillouin.as_mut() else {
-        spec.brillouin = Some(BrillouinSpec::default());
-        return;
-    };
-    ui.label(RichText::new("Optical modes").strong());
-    egui::Grid::new("brill_opt").num_columns(2).show(ui, |ui| {
-        let mut nm = b.wavelength * 1e9;
-        ui.label("pump wavelength (nm)");
-        if num(ui, &mut nm).changed() {
-            b.wavelength = nm * 1e-9;
-        }
-        ui.end_row();
-        ui.label("search near effective index");
-        num(ui, &mut b.n_target);
-        ui.end_row();
-        ui.label("number of optical modes");
-        ui.add(DragValue::new(&mut b.n_optical_modes).range(1..=20));
-        ui.end_row();
-    });
-    ui.horizontal(|ui| {
-        ui.label("scattering");
-        ui.selectable_value(&mut b.backward, true, "backward (q = β_pump + β_Stokes)");
-        ui.selectable_value(&mut b.backward, false, "forward (q = β_pump − β_Stokes)");
-    });
-    let mut ring = b.ring_radius.is_some();
-    ui.horizontal(|ui| {
-        if ui.checkbox(&mut ring, "ring resonator (axisymmetric)").changed() {
-            b.ring_radius = if ring { Some(100e-6) } else { None };
-        }
-        if let Some(r) = b.ring_radius.as_mut() {
-            let mut um = *r * 1e6;
-            ui.label("reference radius (µm)");
-            if num(ui, &mut um).changed() {
-                *r = um * 1e-6;
-            }
-        }
-    });
-    if b.ring_radius.is_some() {
-        ui.weak("The mesh is the (r, z) half plane: x = r, y = z, away from the axis. Optical modes are whispering-gallery modes of azimuthal order m = round(n_target k0 R) (perfectly conducting walls; optical PML layers absorb the radiation, their stretch is applied to r and z), the elastic modes have order m_pump + m_Stokes (backward) or the difference (forward). Crystals are averaged over rotations about the ring axis. Viscosity is not used for rings.");
-    }
-    let list_field = |ui: &mut Ui, bufs: &mut std::collections::HashMap<(Physics, usize), String>, key: usize, value: &mut Vec<usize>, label: &str| {
-        let as_i32: Vec<i32> = value.iter().map(|&x| x as i32).collect();
-        let shown = labels_text(&as_i32);
-        let entry = bufs.entry((Physics::Brillouin, key)).or_insert_with(|| shown.clone());
-        let id = ui.make_persistent_id(("brill_list", key));
-        let focused = ui.memory(|m| m.has_focus(id));
-        if parse_labels(entry).as_ref() != Some(&as_i32) && !focused {
-            *entry = shown;
-        }
-        ui.horizontal(|ui| {
-            ui.label(label);
-            let r = ui.add(egui::TextEdit::singleline(entry).id(id).desired_width(110.0).hint_text("empty = all"));
-            if r.changed() {
-                if let Some(l) = parse_labels(entry) {
-                    *value = l.into_iter().filter(|x| *x >= 1).map(|x| x as usize).collect();
-                }
-            }
-        });
-    };
-    list_field(ui, bufs, 9200, &mut b.pump_modes, "pump modes (numbers from 1)");
-    list_field(ui, bufs, 9201, &mut b.stokes_modes, "Stokes modes (numbers from 1)");
-    ui.weak("Every pump/Stokes pair gets its own elastic problem at the phase-matched wave number q. Intra-mode scattering is pump = Stokes. The elastic side (materials, crystal data, PML, fixed boundaries, domains without solid, number of modes, search frequency) is set in the Materials, Boundary and this Study tab like a Solid mechanics study.");
-    ui.add_space(4.0);
-    ui.label(RichText::new("Domains").strong());
-    ui.weak("n: refractive index (air 1). Photoelastic: the domains that couple light and strain. Moving boundary: the domains whose outline moves (the body). Optical PML: absorbing layers for the light.");
-    for &d in domains {
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("domain {d}")).strong());
-                let mut n = b.refractive_index.get(&d).copied().unwrap_or(1.0);
-                ui.label("n");
-                if num(ui, &mut n).changed() {
-                    b.refractive_index.insert(d, n);
-                }
-                let mut moving = b.moving.contains(&d);
-                if ui.checkbox(&mut moving, "moving boundary").changed() {
-                    if moving {
-                        b.moving.push(d);
-                        b.moving.sort();
-                    } else {
-                        b.moving.retain(|x| *x != d);
-                    }
-                }
-            });
-            let cur = b.photoelastic.get(&d).map(|p| photo_kind_name(&p.kind)).unwrap_or("none");
-            ui.horizontal(|ui| {
-                ui.label("photoelastic");
-                egui::ComboBox::from_id_salt(format!("pe_{d}")).selected_text(cur).show_ui(ui, |ui| {
-                    if ui.selectable_label(!b.photoelastic.contains_key(&d), "none").clicked() {
-                        b.photoelastic.remove(&d);
-                    }
-                    for (name, make) in PHOTO_PRESETS {
-                        if ui.selectable_label(false, *name).clicked() {
-                            let follow = b.photoelastic.get(&d).is_none_or(|p| p.follow_stiffness);
-                            let euler = b.photoelastic.get(&d).map_or([0.0; 3], |p| p.euler_deg);
-                            b.photoelastic.insert(d, PhotoSpec { kind: make(), euler_deg: euler, follow_stiffness: follow });
-                        }
-                    }
-                });
-            });
-            if let Some(p) = b.photoelastic.get_mut(&d) {
-                ui.horizontal_wrapped(|ui| {
-                    for (n, v) in photo_constants(&mut p.kind) {
-                        ui.label(n);
-                        num(ui, v);
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut p.follow_stiffness, "orientation of the elastic crystal data");
-                    if !p.follow_stiffness {
-                        ui.label("Euler Z-X-Z (°)");
-                        for a in p.euler_deg.iter_mut() {
-                            ui.add(DragValue::new(a).speed(1.0).range(-360.0..=360.0));
-                        }
-                    }
-                });
-            }
-            let mut pml = b.optical_pml.get(&d).cloned().unwrap_or_default();
-            let active = pml.x != PmlDir::Off || pml.z != PmlDir::Off;
-            let mut edited = false;
-            egui::CollapsingHeader::new(if active { "Optical PML (active)" } else { "Optical PML" }).id_salt(format!("brill_pml_{d}")).default_open(active).show(ui, |ui| {
-                for (axis, dir) in [("x", &mut pml.x), ("z", &mut pml.z)] {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("absorb along {axis}"));
-                        for (v, name) in [(PmlDir::Off, "off"), (PmlDir::Plus, "towards +"), (PmlDir::Minus, "towards −")] {
-                            if ui.selectable_label(*dir == v, name).clicked() && *dir != v {
-                                *dir = v;
-                                edited = true;
-                            }
-                        }
-                    });
-                }
-                ui.horizontal(|ui| {
-                    ui.label("strength σ");
-                    edited |= num(ui, &mut pml.strength).changed();
-                    ui.label("order p");
-                    edited |= num(ui, &mut pml.order).changed();
-                });
-            });
-            if edited {
-                if pml.x == PmlDir::Off && pml.z == PmlDir::Off {
-                    b.optical_pml.remove(&d);
-                } else {
-                    b.optical_pml.insert(d, pml);
-                }
-            }
-        });
-    }
-    ui.add_space(4.0);
-    ui.label(RichText::new("Gain").strong());
-    egui::Grid::new("brill_gain").num_columns(2).show(ui, |ui| {
-        ui.label("mechanical Q cap");
-        num(ui, &mut b.q_cap);
-        ui.end_row();
-        ui.label("waveguide length for g₀ (m)");
-        num(ui, &mut b.length);
-        ui.end_row();
-    });
-    ui.horizontal(|ui| {
-        ui.label("mode parity under the mirror");
-        for (v, name) in [(None, "off"), (Some(0usize), "x → −x"), (Some(1usize), "z → −z")] {
-            ui.selectable_value(&mut b.mirror_axis, v, name);
-        }
-    });
-    ui.weak("For cross-sections whose mesh vertices are symmetric about the middle (structured or mirrored meshes): +1 even, −1 odd, in between for mixed (degenerate) modes.");
-    ui.checkbox(&mut b.conjugate_strain, "phase-matched photoelastic overlap (conjugate strain)");
-    ui.weak("Off uses the strain as it is (the same expression for a phonon of the opposite wave-number sign); the two differ when the strain components have different phases. Gain = 2 ω_p (Q/k_eff) |f|², power P = 2∫Re(E*×H)·z, Q = min(Q_eig, cap).");
 }
 
 /// Layers along y (the propagation axis) of a swept cross-section.
@@ -650,7 +453,7 @@ impl App {
                     }
                 });
                 let mats = self.proj.active_spec().materials.clone();
-                if phys == Physics::Emw || phys == Physics::Solid || phys == Physics::Brillouin {
+                if phys == Physics::Emw || phys == Physics::Solid {
                     let mut pml = mats.pml.get(&d).cloned().unwrap_or_default();
                     let active = pml.x != PmlDir::Off || pml.y != PmlDir::Off || pml.z != PmlDir::Off;
                     let mut edited = false;
@@ -818,7 +621,6 @@ impl App {
             Physics::Heat => "Boundaries without a condition are thermally insulated.",
             Physics::Solid => "Boundaries without a condition are free.",
             Physics::Emw => "All outer boundaries are perfect electric conductors (except periodic ones).",
-            Physics::Brillouin => "Elastic boundary conditions. Boundaries without a condition are free; fix the outer edges of the substrate and its PML. The optical problem has perfectly conducting walls.",
         };
         ui.weak(note);
         let mut remove = None;
@@ -958,7 +760,7 @@ impl App {
             });
         }
         // domains that do not take part, and Floquet-periodic boundary pairs
-        if phys == Physics::Solid || phys == Physics::Emw || phys == Physics::Brillouin {
+        if phys == Physics::Solid || phys == Physics::Emw {
             ui.add_space(6.0);
             ui.separator();
             let text_field = |ui: &mut Ui, bufs: &mut std::collections::HashMap<(Physics, usize), String>, key: (Physics, usize), value: &mut Vec<i32>, id: &str| {
@@ -975,7 +777,7 @@ impl App {
                     }
                 }
             };
-            if phys == Physics::Solid || phys == Physics::Brillouin {
+            if phys == Physics::Solid {
                 ui.horizontal(|ui| {
                     ui.label("Domains without solid (e.g. air)");
                     text_field(ui, &mut self.label_buffers, (phys, 9000), &mut spec.inactive, "inactive");
@@ -1096,32 +898,10 @@ impl App {
                                 ui.label("k (rad/m), propagation along the page normal: positive along +y (into the page)");
                                 num(ui, kz);
                             });
-                            ui.weak("Three displacement components on the cross-section, u(x, z) exp(-i k y); anisotropic crystals use their full stiffness. For backward Brillouin scattering k = 2 n_eff 2π/λ; for forward scattering k = n_eff 2π f_acoustic / c.");
+                            ui.weak("Three displacement components on the cross-section, u(x, z) exp(-i k y); anisotropic crystals use their full stiffness.");
                         }
                     }
                 }
-            }
-            Physics::Brillouin => {
-                if !matches!(spec.study, Study::Eigenfrequency { .. }) {
-                    spec.study = Study::Eigenfrequency { n_modes: 30, f_search: 10e9 };
-                }
-                if let Study::Eigenfrequency { n_modes, f_search } = &mut spec.study {
-                    ui.label(RichText::new("Elastic modes").strong());
-                    egui::Grid::new("brill_eig").num_columns(2).show(ui, |ui| {
-                        ui.label("modes per pump/Stokes pair");
-                        ui.add(DragValue::new(n_modes).range(1..=200));
-                        ui.end_row();
-                        ui.label("search around (Hz)");
-                        num(ui, f_search);
-                        ui.end_row();
-                    });
-                    ui.weak("About 11 GHz for forward-like and 15 to 25 GHz for backward scattering in silicon; the search is a shift-and-invert around this frequency, so several tens of modes are needed to see the guided ones among the substrate modes.");
-                }
-                if self.doc.mesh.as_ref().is_some_and(|m| m.dim == 3) {
-                    ui.colored_label(Color32::from_rgb(235, 110, 100), "The Brillouin study works on a 2D cross-section.");
-                }
-                let domains = self.domain_labels();
-                brillouin_editor(ui, &mut spec, &domains, &mut self.label_buffers);
             }
             Physics::Emw if self.doc.mesh.as_ref().is_some_and(|m| m.dim == 3) => {
                 if !matches!(spec.study, Study::Eigenfrequency { .. }) {
@@ -1365,10 +1145,10 @@ impl App {
             let rv = &mut self.results[cur];
             let selectable = rv.physics == Some(Physics::Emw);
             let Some(a) = rv.result.analysis.as_ref() else {
-                ui.weak("This result has no polarization analysis. Mode studies of the electromagnetic waves physics and the Brillouin study (optical modes) have one.");
+                ui.weak("This result has no polarization analysis. Mode studies of the electromagnetic waves physics have one.");
                 return;
             };
-            ui.label(RichText::new(if rv.physics == Some(Physics::Brillouin) { "Polarization of the optical modes (pump and Stokes)" } else { "Polarization of the modes" }).strong());
+            ui.label(RichText::new("Polarization of the modes").strong());
             ui.weak("Stokes parameters from the complex field of each mode, summed over the cross-section. s1 > 0 is x (lateral, quasi-TE), s1 < 0 is z (normal, quasi-TM), s2 the diagonals, s3 the sense of rotation (+ counter-clockwise). P is the degree of polarization: below 1 where the polarization changes across the mode.");
             // the picture
             let side = ui.available_width().clamp(220.0, 360.0);
@@ -1511,8 +1291,8 @@ impl App {
         let fname = rv.result.solutions[rv.sol.min(nsol - 1)].fields.get(rv.field).map(|f| f.name.clone()).unwrap_or_default();
         let xs: Vec<f64> = rv.result.solutions.iter().enumerate().map(|(i, s)| s.value.unwrap_or(i as f64 + 1.0)).collect();
         let is_modes = rv.result.solutions[0].neff.is_some();
-        // eigenfrequencies: solids, Brillouin, and the 3D electromagnetic eigenmodes (frequency, no effective index)
-        let is_eigen_plot = (rv.physics == Some(Physics::Solid) || rv.physics == Some(Physics::Brillouin) || (rv.physics == Some(Physics::Emw) && rv.result.solutions[0].neff.is_none())) && rv.result.solutions[0].value.is_some();
+        // eigenfrequencies: solids and the 3D electromagnetic eigenmodes (frequency, no effective index)
+        let is_eigen_plot = (rv.physics == Some(Physics::Solid) || (rv.physics == Some(Physics::Emw) && rv.result.solutions[0].neff.is_none())) && rv.result.solutions[0].value.is_some();
         let xlabel = if is_eigen_plot || is_modes { "mode number" } else if rv.result.solutions[0].value.is_some() { "time (s)" } else { "solution" };
         let mut max_pts = vec![];
         let mut min_pts = vec![];

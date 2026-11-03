@@ -74,7 +74,7 @@ fn selector(s: &str) -> Selector {
     Selector::parse(s).expect("a valid selector")
 }
 
-pub const NAMES: [&str; 19] = [
+pub const NAMES: [&str; 18] = [
     "Parallel-plate capacitor with two dielectrics (electrostatics, 2D)",
     "Cantilever beam (solid mechanics, static + eigenfrequencies, 2D)",
     "Heated plate with convective cooling (heat transfer, 2D, transient)",
@@ -89,7 +89,6 @@ pub const NAMES: [&str; 19] = [
     "Plate with a drilled hole in 3D, the section swept along y (solid mechanics, stress concentration)",
     "Silicon strip on sapphire at 1550 nm: optical modes (EM waves) and acoustic modes with out-of-plane wave number (solid mechanics)",
     "Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)",
-    "Brillouin gain of a silicon rib on sapphire (300TE ring chip, backward, 1550 nm): optical mode, phonons, photoelastic and moving-boundary gain",
     "Silicon wire on 300 nm SOI at 1550 nm: TE0 and TM0 modes with Stokes parameters and Poincare sphere (EM waves, 2D cross-section)",
     "300 nm SOI wire with a sloped left wall: hybrid modes tilted on the Poincare sphere (EM waves, 2D cross-section)",
     "Symmetric Bragg grating in a 300 nm SOI wire: band-edge modes of a 3D Floquet cell (teeth on both sides)",
@@ -99,7 +98,6 @@ pub const NAMES: [&str; 19] = [
 /// An empty project to build a simulation from: the chosen physics active, default materials, no boundary conditions and a unit
 /// plate (one region `plate`, x-z) or, in 3D, the unit cube made by sweeping it along y. Wafer axes.
 pub fn blank(physics: Physics, three_d: bool) -> Project {
-    let three_d = three_d && physics != Physics::Brillouin;
     let g = if three_d { GeometrySpec::plate(1.0, 1.0, 0.125, Some(1.0)) } else { GeometrySpec::plate(1.0, 1.0, 0.05, None) };
     let mut p = base(g, physics);
     if three_d && physics == Physics::Emw {
@@ -124,10 +122,9 @@ pub fn by_index(i: usize) -> Project {
         11 => drilled_plate(),
         12 => sos_strip(),
         13 => box_cavity(),
-        14 => brillouin_rib(),
-        15 => soi_wire(),
-        16 => soi_hybrid_wire(),
-        17 => bragg_symmetric(),
+        14 => soi_wire(),
+        15 => soi_hybrid_wire(),
+        16 => bragg_symmetric(),
         _ => bragg_asymmetric(),
     }
 }
@@ -327,7 +324,7 @@ pub fn drilled_plate() -> Project {
 /// The cross-section of a silicon strip (450 nm x 230 nm) on a sapphire substrate under air, at 1550 nm:
 /// optical modes with PML on all sides (regions `air`, `sapphire`, `silicon` and the absorbing pieces `<region>.pml_xmin`, ...) and
 /// acoustic modes of the solid (silicon and sapphire, rotated crystal, PML in the sapphire) at a small
-/// out-of-plane wave number (forward Brillouin scattering).
+/// out-of-plane wave number.
 pub fn sos_strip() -> Project {
     use femcore::material::*;
     let um = 1e-6;
@@ -370,7 +367,7 @@ pub fn sos_strip() -> Project {
             so.materials.set(*d, "nu", 0.25);
             so.materials.set(*d, "rho", 3980.0);
         }
-        let saph = Anisotropy { stiffness: Some(Stiffness::Trigonal { c11: 497.73e9, c12: 162.8e9, c13: 116.0e9, c14: -21.9e9, c33: 500.9e9, c44: 146.8e9 }), euler_deg: femcore::material::euler_from_rotation(&femcore::chips::crystal_rotations(0.0).1), ..Default::default() };
+        let saph = Anisotropy { stiffness: Some(Stiffness::Trigonal { c11: 497.73e9, c12: 162.8e9, c13: 116.0e9, c14: -21.9e9, c33: 500.9e9, c44: 146.8e9 }), euler_deg: femcore::material::euler_from_rotation(&r_plane_sapphire()), ..Default::default() };
         for &d in &sapphire {
             so.materials.aniso.insert(d, saph.clone());
         }
@@ -399,19 +396,10 @@ pub fn box_cavity() -> Project {
     p
 }
 
-/// Backward Brillouin scattering in the rib waveguide of the 300TE ring chip (0.5 um wide, 0.3 um high rib on a
-/// 0.13 um slab, silicon on r-plane sapphire, 1550 nm), in the wafer frame (x lateral, y propagation, z normal; the
-/// cross-section is the x-z plane): the optical TE0 mode, the phonons at q = 2 beta and the photoelastic and
-/// moving-boundary gain, with the full anisotropic stiffness, photoelastic and permittivity tensors of the crystals.
-/// The geometry is a `geom` model (`femcore::chips::chip_geometry`: regions air, sapphire, slab, rib and their absorbing layers).
-pub fn brillouin_rib() -> Project {
-    let chip = femcore::chips::CHIPS[0];
-    let g = femcore::chips::chip_mesh(&chip, 1.0).expect("the chip mesh");
-    let spec = femcore::chips::chip_problem(&chip, 0.0, 24, 18.35e9, &g);
-    let geometry = GeometrySpec::model(femcore::chips::chip_geometry(&chip, 1.0).list, 0.12e-6);
-    let mut p = base(geometry, Physics::Brillouin);
-    *p.spec_mut(Physics::Brillouin) = spec;
-    p
+/// Orientation (columns = crystal axes in the wafer frame) of r-plane sapphire with the c axis in the y-z plane, 57.6 degrees from the surface normal.
+fn r_plane_sapphire() -> [[f64; 3]; 3] {
+    let b = 57.6f64.to_radians();
+    [[1.0, 0.0, 0.0], [0.0, b.cos(), -b.sin()], [0.0, b.sin(), b.cos()]]
 }
 
 /// A project for the optical modes of a `SoiWire`: its model and its mode study, in the wafer frame.

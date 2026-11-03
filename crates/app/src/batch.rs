@@ -1,7 +1,7 @@
 //! Headless runs without a window, for workstations and clusters:
 //!
 //! ```text
-//! nyx --batch model.nyx.xml [--physics es|heat|solid|emw|brillouin] [--output serial|parallel FILE.h5]
+//! nyx --batch model.nyx.xml [--physics es|heat|solid|emw] [--output serial|parallel FILE.h5]
 //! mpiexec -n 16 nyx --batch model.nyx.xml --output parallel results.h5     (build with --features phdf5)
 //! ```
 //!
@@ -27,8 +27,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     Some("heat") => Physics::Heat,
                     Some("solid") => Physics::Solid,
                     Some("emw") => Physics::Emw,
-                    Some("brillouin") => Physics::Brillouin,
-                    other => return Err(format!("--physics needs es, heat, solid, emw or brillouin, got {other:?}")),
+                    other => return Err(format!("--physics needs es, heat, solid or emw, got {other:?}")),
                 });
             }
             "--output" => {
@@ -46,7 +45,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
-    let path = path.ok_or("usage: nyx --batch PROJECT.nyx.xml [--physics es|heat|solid|emw|brillouin] [--output serial|parallel FILE.h5]")?;
+    let path = path.ok_or("usage: nyx --batch PROJECT.nyx.xml [--physics es|heat|solid|emw] [--output serial|parallel FILE.h5]")?;
     let proj = Project::load(std::path::Path::new(&path))?;
     let phys = physics.unwrap_or(proj.active);
     let mut spec = proj.spec(phys).clone();

@@ -8,7 +8,7 @@ solvers are checked against closed forms and self-consistency tests (see "What i
 nyx/
   crates/femcore   the solver library (meshes, sparse + eigen solvers, physics)
   crates/app       the egui application (binary `nyx`)
-  docs/            HOW_IT_WORKS.md, the Brillouin chip report and docs/ports (provenance of the ported libraries)
+  docs/            HOW_IT_WORKS.md, docs/architecture (ADRs, contracts, restructure plan) and docs/ports (provenance of the ported libraries)
 ```
 
 ## Build and run
@@ -17,7 +17,7 @@ nyx/
 cargo run --release -p nyx                 # start the application
 cargo run --release -p nyx -- project.nyx.xml   # ... and open a project or HDF5 results file
 cargo test --release --workspace              # about 500 tests (about 200 of them for the ported solvers) against closed forms and self-consistency checks, ~2.5 min
-cargo test --release --workspace -- --ignored # 10 slow tests: 7 Brillouin (30-60 s each), 2 of the solver library, the Bragg grating comparison (~1.5 min)
+cargo test --release --workspace -- --ignored # the slow tests (the solver library, the Bragg grating comparison ~1.5 min)
 cargo clippy --release --workspace --all-targets -- -D warnings   # clean
 ```
 
@@ -39,8 +39,8 @@ line of the solver log means; every source file of `femcore` starts with a short
   runs, printed by `--batch`). `NYX_PROFILE=1` echoes it to the console while it runs; `NYX_FRAME_LOG=1` prints
   the time of every window frame.
 * NaN or infinite input (a material, a coordinate, a load) is refused with a message that names it.
-* Measured on a 20-thread machine: the README Brillouin example (example 15, 23,240 cells, 141,000 unknowns) takes
-  about 43 s (it took 207 s before the tilted-crystal loop stopped repeating a 13 s factorisation ten times); a
+* Measured on a 20-thread machine: the Brillouin example of the earlier README (23,240 cells, 141,000 unknowns) took
+  about 43 s (it is gone, see `sbs-last`); a
   3.1-million-unknown 3D solid solves in about 40 s in 13 GB; a million-triangle result rotates at ~45 ms per frame.
 
 ## Meshes with hexahedra and prisms
@@ -52,7 +52,7 @@ every face, so neighbours always agree). The older star split (a vertex at every
 (a quarter of the cells for hexahedra), and the AMG-CG solve needs several times fewer iterations on it.
 Meshes of mixed cells are described by `femcore::cellmesh::CellMesh`; `SimplexMesh::from_cells_split` converts them.
 
-## Nanophotonics and Brillouin cross-sections
+## Nanophotonics cross-sections
 
 The example "Silicon strip on sapphire at 1550 nm" is a 450 nm x 230 nm silicon strip on sapphire
 (n = 3.45 / 1.746 / 1, PML on all sides).
@@ -76,73 +76,11 @@ drifting geometry in saved projects; it now round-trips exactly. The complex mod
 (parallel orthogonalisation, exact residuals without assembling vectors) and omits the clustered radiation
 modes inside absorbing layers that would not converge, instead of running to its limit for them.
 
-## Brillouin scattering of a waveguide cross-section
+## Brillouin scattering (removed)
 
-Physics > Brillouin scattering (cross-section), `femcore::brillouin`, example 15 in the Examples menu. The recipe
-is the usual one (as in NumBAT): solve the optical modes of the cross-section, pick the
-phase-matched elastic wave number (`q = beta_p + beta_s` backward, `beta_p - beta_s` forward), solve the elastic
-modes at that `q`, and combine the fields in the photoelastic and moving-boundary overlap integrals.
-
-* **Optics:** the existing mode solvers (Nedelec degree 2 + P2; complex materials and PML go through the complex
-  solver). Fields E, D and H are evaluated at quadrature points of the native mesh, not on a grid.
-* **Elastic modes:** `sms_kz` (three components, `exp(-i q z)`, rotated crystals, PML for leakage into the
-  substrate, low-reflecting boundaries). The complex frequency gives the radiation Q; a viscosity tensor adds
-  `1/Q` by first-order perturbation (`viscous_inverse_q`, exact for `eta = tau C`: `1/Q = omega tau`).
-* **Gain:** photoelastic overlap over the domains with a photoelastic tensor (isotropic, cubic or trigonal, with
-  the crystal orientation of the elastic data), moving-boundary overlap on the edges between the body and its
-  surroundings (normal displacement times `(eps_a - eps_b) E_par E_par - (1/eps_a - 1/eps_b) D_perp D_perp`), power
-  normalisation, `gain = 2 omega_p (Q/k_eff)|f|^2`, `g0` from the group velocities. Output: a row per elastic mode (frequency, Q, share of the elastic energy in the body
-  and in the PML, MB, PE and total gain, g0), the mode shapes sorted by gain, and for temperature fields from a
-  heat study the dn/dT shift of the refractive indices.
-* **Workflow:** every pump/Stokes pair of the chosen optical modes gets its own elastic problem; `track_modes`
-  follows modes between two q by the overlap of their shapes (insensitive to phase and order).
-
-Also checked: the group velocity from E x H and the energy against the dispersion `d omega / d beta` of a
-silicon wire (0.007 %, n_g = 4.1458 against 4.1455), the Euler-angle inverse, isotropic photoelastic tensors
-under rotation, and mode tracking. The four ring chips of `femcore::chips` (silicon rib on a slab on r-plane
-sapphire, anisotropic stiffness, photoelastic and permittivity tensors of both crystals, PML below and beside,
-backward scattering of the design mode at 1550 nm) have a report in `docs/chip_report.md`; regenerate it with
-`cargo run --release -p femcore --example chip_report` (about 1 min per chip and azimuth).
-
-**Which strain enters the photoelastic overlap.** The expression `conj(E_s) dEps[S] E_p` with the strain as it is
-(`StrainConvention::AsIs`) and the one with the strain conjugated (`StrainConvention::Conjugate`, the default;
-the boundary term uses `conj(u.n)` in both) are different. With pump `exp(-j beta_p z)`, a backward Stokes wave
-`exp(+j beta_s z)` and a phonon `u exp(-j q z)`, the Stokes wave is driven by `conj(dEps[u]) E_p`, so the
-z-independent (phase-matched) overlap uses the conjugate strain; the as-is form is the same expression for a
-phonon of the opposite wave-number sign. Observations: (1) for the 18.35 GHz mode of the 300TE chip the two
-forms give photoelastic gains of 544 (as is) and 39 (conjugate) per W per m; (2) with the conjugate form the
-photoelastic and boundary overlaps of every strong mode are exactly in phase, with the as-is form their relative
-phase follows the arbitrary phase of the eigenvector (132 and 1 degrees for two modes here); (3) for a
-mirror-symmetric silicon wire in silica (test `the_phase_matched_overlap_is_mirror_symmetric...`) the conjugate
-form gives the same gains for a process and for its mirror image (pump counter-propagating, phonon at -q) to
-3e-9, the as-is form differs by 90 %. The module therefore uses the conjugate form by default; the checkbox in
-the Study tab selects `StrainConvention::AsIs`.
-
-**Rings.** `brillouin.ring_radius` (Study tab: "ring resonator") switches the study to the axisymmetric models: the mesh is the (r, z) half
-plane (x = r, y = z); the optical modes are whispering-gallery modes of `ems_axisym` (Nedelec degree 2 for (E_r, E_z), P2 for E_theta,
-azimuthal order `m = round(n_target k0 R)`, `exp(-i m theta)`, perfectly conducting walls and optional absorbing layers by complex stretching of r and z with the metric factor `s_theta = r~/r`), the elastic modes come from
-`solid_kz::solve_solid_axisym` (`u(r, z) exp(-i M theta)`, cylindrical strains, weight `r`, PML in the substrate) with `M = m_p + m_s`
-(backward) or `m_p - m_s` (forward), and `sbs_ring` evaluates the same overlaps with cylindrical fields and strains and the
-weight `r / R`, so power, group velocity, gain and `g0` (length `2 pi R`) are per unit length of the ring at the reference radius `R`.
-The absorbing layers leave a confined mode alone (frequency to 2e-6, loss below 1e-7) and give a leaky whispering-gallery mode (3 um ring, m = 21, Q = 39.9) a loss that agrees to 0.25 % for layers of strength 3 and 6. Crystals (stiffness and photoelastic tensors) are averaged over rotations about the ring axis, the approximation used for ringsplan; a crystal ring is therefore not exactly the fixed-orientation straight guide. Checked: a coaxial cavity's resonances
-(499.654 and 999.308 MHz against 499.585 and 999.170), a whispering-gallery mode of a 2 mm ring against the straight guide
-(neff 2.35316 against 2.35315), thin-ring breathing and in-plane flexure (0.004 to 0.08 %), and the large-ring limit of the gains: for a silicon wire in
-silica with isotropic elastic and photoelastic data on a ring of 20 mm radius every strong elastic mode has the frequency and the
-photoelastic and boundary gains of the straight guide to about 1 % (the difference falls as 1/R: 6, 0.6 and 0.06 percent for the
-strongest mode at R = 2, 20 and 200 mm in an earlier check; curvature corrections of relative size w/R are amplified by cancellations
-in weak modes), and the whole `Physics::Brillouin` study of the ring and of the straight guide agree to 0.14 %.
-
-**Axisymmetric elastic modes** (rings, disks): `solid_kz::solve_solid_axisym` solves `u(r, z) exp(-i m theta)` with the cylindrical strains
-and the weight `r` (components u_r, u_z, u_theta); the crystal stiffness is averaged about the axis. Checked against thin-ring theory:
-the breathing mode `f = sqrt(E/rho)/(2 pi R)` to 0.004 % and the in-plane flexural modes `m = 2, 3, 4` to 0.00, 0.04 and 0.08 %.
-
-**Sweeps, symmetry and speed.** `elastic_dispersion` solves a list of wave numbers and follows every mode from one to the next by the
-overlap of the shapes; `GainOptions::mirror_axis` (Study tab) reports the parity of each mode under `x -> -x` or `y -> -y` for meshes with
-symmetric vertices, so symmetric and antisymmetric families do not get swapped; pump/Stokes pairs with the same `q` share one elastic
-solve. Both eigensolvers now orthogonalise, form the projected matrix and run the triangular solves on all cores: for the 300TE model
-(23 000 cells, 141 000 elastic dofs, 24 modes) the optical solve went from 165 s to 14 s (asking for 2 optical modes instead of 6 matters most:
-the clustered substrate modes make the sixth slow) and the elastic solve from 68 s to 34 s (the factorisation, 12 s, is serial).
-**Curved edges:** the mesh boundary vertices lie on the true outline, so a circular boundary becomes a polygon whose perimeter is short by `theta^2 / 24` and whose area is short by `theta^2 / 6` for an element of arc angle `theta` (0.04 % and 0.17 % for an element of one tenth of the radius, 0.17 % and 0.7 % for one fifth): second order in the element size, below the other errors of a moving-boundary integral at the sizes used here. Isoparametric elements (midside nodes moved onto the curve with a curved geometry map) are not implemented; they would only matter for strongly curved boundaries on coarse meshes.
+The Brillouin study (optical and phase-matched elastic modes, photoelastic and moving-boundary gain, rings) and the four ring chips were
+removed in the restructure (`docs/architecture/adr/0024-brillouin-and-chips-removed.md`). The last state that has them is the tag `sbs-last`.
+The kz solid kernel and the axisymmetric kernels that it was built on stay as ordinary studies.
 
 ## Ported solver and mesher libraries
 
@@ -156,7 +94,7 @@ Provenance, licences, what the authors measured and the plan for swapping the so
 
 ## Polarization analysis and the photonic use cases
 
-Every optical mode solver (2D real and complex, 3D eigenmodes and Floquet cells, the Brillouin study of straight guides and rings) now returns the **Stokes
+Every optical mode solver (2D real and complex, 3D eigenmodes and Floquet cells) returns the **Stokes
 parameters and the Poincare-sphere point of each mode**, computed from the complex field the solver found: degree of polarization, ellipticity and
 orientation, TE and longitudinal shares, a class (quasi-TE, quasi-TM, linear, elliptical, circular, hybrid), and for degenerate modes the group Stokes vector and the
 resolved pair (the eigensolver returns an arbitrary mixture of degenerate modes). The application shows it in the **Analysis** tab (sphere, mode list, table, CSV and SVG
@@ -174,7 +112,7 @@ wafer, **z is the surface normal and y is the direction of propagation** of a wa
 (mesh coordinates `(x, z)`, `y` out of the page; the frame is right-handed, so a wave travelling into the page travels along `+y`, and the out-of-plane wave number `k` of an elastic study is positive for it). Crystal
 orientations (Euler Z-X-Z angles of the crystal axes in x, y, z), photoelastic tensors, permittivity, constraint and load components and
 the names of the result fields (`ux, uy, uz`, `szz`, `Ez`, ...) all refer to x, y, z; the kernels read these axes as they are (`femcore::section` is the one place with axis numbers; golden files in `crates/femcore/tests/golden_frames` froze the results of the earlier kernels, see `docs/KERNEL_PORT_STATUS.md`). There is no other public frame (a `frame` key in an old project file is ignored). 3D problems are unaffected.
-The four ring chips are built by `femcore::chips` (silicon axes `[p, q, z]`, sapphire axes `[a, c x a, c]`, c tilted 57.6 degrees from z towards the
+Crystal orientations are written in these axes (the ring chips that once showed it are gone with ADR 24; silicon axes `[p, q, z]`, sapphire axes `[a, c x a, c]`, c tilted 57.6 degrees from z towards the
 propagation direction at azimuth psi = 0; the wafer-frame stiffness equals a direct fourth-rank rotation of the crystal tensor in
 every entry, test `shear_components_of_a_rotated_stiffness_are_in_the_solver_order`).
 

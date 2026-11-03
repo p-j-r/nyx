@@ -9,14 +9,14 @@
  * Written 2026-11-03 against main a047506. View: `structurizr-lite` on this folder, or
  * `structurizr-cli export -workspace workspace.dsl -format mermaid|plantuml`.
  */
-workspace "nyx" "Desktop finite-element application for photonics, phononics and stimulated Brillouin scattering, in pure Rust." {
+workspace "nyx" "Desktop finite-element application for photonics and phononics, in pure Rust." {
 
     !identifiers hierarchical
     !adrs adr
 
     model {
 
-        researcher = person "Researcher" "Designs waveguides, rings and phononic cells; runs mode, Brillouin and eigenfrequency studies; compares runs." "Person"
+        researcher = person "Researcher" "Designs waveguides, rings and phononic cells; runs mode and eigenfrequency studies; compares runs." "Person"
         aiHost = softwareSystem "AI host" "Claude Code or Claude Desktop (any MCP host). Drives nyx through typed tools." "External"
         viewer = softwareSystem "Results viewer" "ParaView or any XDMF/HDF5 reader. Optional; only with the hdf5 feature." "External"
         wsFolder = softwareSystem "Workspace folder" "Documents/nyx on disk: workflows, runs, .nyx archives, project files." "External,Store"
@@ -104,13 +104,12 @@ workspace "nyx" "Desktop finite-element application for photonics, phononics and
                 dfs = component "dfs: diffusion" "Electrostatics and heat transfer on P1/P2 simplices." "dfs.rs" "Kernel"
                 sms = component "sms: solid mechanics" "Static, eigenfrequency, kz, PML, low-reflecting, Floquet, axisymmetric." "sms*.rs, periodic.rs" "Kernel"
                 ems = component "ems: EM waves" "2D modes (real, complex/PML/tilted crystal), axisymmetric, 3D cavities." "ems*.rs" "Kernel"
-                sbs = component "sbs: Brillouin" "Optical modes, photoelastic overlap, phase-matched elastic modes, gain; ring variant." "sbs.rs, sbs_ring.rs" "Kernel"
                 analysis = component "Analysis" "Polarization (Stokes, Poincare) and mode classification, in the solvers local axes." "analysis.rs, polarization.rs" {
                     properties {
                         "adr" "0021"
                     }
                 }
-                useCases = component "Use cases and chips" "Ready-made SOI, Bragg and ring-chip problems. Application content living in the solver library." "usecases/, chips.rs" "rough" {
+                useCases = component "Use cases" "Ready-made SOI and Bragg problems. Application content living in the solver library." "usecases/" "rough" {
                     properties {
                         "adr" "0022"
                     }
@@ -223,14 +222,10 @@ workspace "nyx" "Desktop finite-element application for photonics, phononics and
         nyx.femcore.solveEntry -> nyx.femcore.dfs "Dispatch (Electrostatics, Heat)"
         nyx.femcore.solveEntry -> nyx.femcore.sms "Dispatch (Solid)"
         nyx.femcore.solveEntry -> nyx.femcore.ems "Dispatch (Emw 2D / 3D)"
-        nyx.femcore.solveEntry -> nyx.femcore.sbs "Dispatch (Brillouin)"
         nyx.femcore.solveEntry -> nyx.femcore.meshTypes "Takes SimplexMesh"
         nyx.femcore.dfs -> nyx.femcore.section "Wafer names and tensors"
         nyx.femcore.sms -> nyx.femcore.section "Wafer names, Voigt order"
         nyx.femcore.ems -> nyx.femcore.section "Wafer names, propagation sign"
-        nyx.femcore.sbs -> nyx.femcore.section "Wafer names"
-        nyx.femcore.sbs -> nyx.femcore.ems "Optical modes"
-        nyx.femcore.sbs -> nyx.femcore.sms "Phase-matched elastic modes (kz)"
         nyx.femcore.dfs -> nyx.femcore.linalg "Assembles and factorises" "" "rough"
         nyx.femcore.sms -> nyx.femcore.linalg "Assembles, eigensolves" "" "rough"
         nyx.femcore.ems -> nyx.femcore.linalg "Assembles, eigensolves" "" "rough"

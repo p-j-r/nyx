@@ -75,8 +75,8 @@ fn modes_along_plus_y_and_minus_y_have_the_same_effective_indices_and_different_
     s.order = 2;
     s.materials.aniso.insert(1, crystal(40.0));
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-    let fwd = femcore::sbs::solve_optical_wafer(&mesh, &s, 1.0).unwrap();
-    let bwd = femcore::sbs::solve_optical_wafer(&mesh, &s, -1.0).unwrap();
+    let fwd = femcore::optical::solve_optical_wafer(&mesh, &s, 1.0).unwrap();
+    let bwd = femcore::optical::solve_optical_wafer(&mesh, &s, -1.0).unwrap();
     assert!(fwd.left_handed && !bwd.left_handed);
     for (a, b) in fwd.modes.iter().zip(&bwd.modes) {
         assert!((a.neff.re - b.neff.re).abs() < 1e-7, "{} against {}", a.neff.re, b.neff.re);

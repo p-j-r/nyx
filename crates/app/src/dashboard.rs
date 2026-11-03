@@ -15,7 +15,6 @@ pub fn physics_label(p: &str) -> &'static str {
         "Heat" => "Heat transfer",
         "Solid" => "Solid mechanics",
         "Emw" => "EM waves",
-        "Brillouin" => "Brillouin",
         _ => "Other",
     }
 }

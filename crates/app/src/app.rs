@@ -689,13 +689,10 @@ impl App {
                     }
                 });
                 ui.end_row();
-                if d.physics == Physics::Brillouin {
-                    d.three_d = false;
-                }
                 ui.label("Space");
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut d.three_d, false, "2D (cross-section)");
-                    ui.add_enabled_ui(d.physics != Physics::Brillouin, |ui| ui.selectable_value(&mut d.three_d, true, "3D (the section swept along y)"));
+                    ui.selectable_value(&mut d.three_d, true, "3D (the section swept along y)");
                 });
                 ui.end_row();
             });
@@ -978,7 +975,7 @@ mod tests {
                     assert_eq!(p.active, physics);
                     assert!(p.specs.iter().all(|s| s.bcs.is_empty()), "no boundary conditions in a new project");
                     let mesh = p.geometry.build().unwrap_or_else(|e| panic!("{physics:?} 3d={three_d}: {e}"));
-                    assert_eq!(mesh.dim, if three_d && physics != Physics::Brillouin { 3 } else { 2 });
+                    assert_eq!(mesh.dim, if three_d { 3 } else { 2 });
                 }
             }
         }

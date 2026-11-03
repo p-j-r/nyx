@@ -7,8 +7,6 @@
 //! * `Emw` mode analysis at `freq`: `lambda = c0 / (f n)` with `n^2 = mu_r * (largest eigenvalue of the permittivity tensor)`.
 //! * `Solid` eigenfrequency study with `f_search > 0`: `lambda = c_min / f_search`, `c_min` the slowest plane wave of the (possibly
 //!   anisotropic, rotated) stiffness, found from the Christoffel matrix over a sampled sphere of directions.
-//! * `Brillouin`: the shorter of the optical wavelength `lambda0 / n` per domain and the elastic wavelength at the search frequency of
-//!   the study (without one, at the backward-scattering frequency `2 n v_L / lambda0`).
 //!
 //! Domains listed in `inactive` do not carry elastic waves and are left out of the elastic size. Domains with a perfectly matched layer
 //! may be coarser by `pml_relax`: the wave is damped there and the layer is not where the answer is read.
@@ -66,32 +64,11 @@ pub fn wavelengths_with(spec: &ProblemSpec, mesh: &SimplexMesh, headroom: f64) -
                 Study::Eigenfrequency { f_search, .. } if f_search > 0.0 => f_search * headroom,
                 _ => return Err("the wavelength of an electromagnetic study needs a Modes study or an eigenfrequency study with a search frequency".into()),
             };
-            optical_wavelengths(spec, mesh, &first, C0 / freq, None)
+            optical_wavelengths(spec, mesh, &first, C0 / freq)
         }
         Physics::Solid => {
             let f = elastic_frequency(spec)?.ok_or("the wavelength of a solid-mechanics study needs an eigenfrequency study with a search frequency")? * headroom;
             elastic_wavelengths(spec, mesh, &first, f)
-        }
-        Physics::Brillouin => {
-            let b = spec.brillouin.as_ref().ok_or("a Brillouin study needs its optical data")?;
-            let lam0 = b.wavelength;
-            let opt = optical_wavelengths(spec, mesh, &first, lam0, Some(&b.refractive_index))?;
-            let f = match elastic_frequency(spec)? {
-                Some(f) => f * headroom,
-                None => {
-                    // backward scattering: f = 2 n v_L / lambda0, with the fastest index and the fastest wave of the mesh
-                    let n = opt.values().map(|l| lam0 / l).fold(1.0, f64::max);
-                    let v = elastic_speeds(spec, mesh, &first)?.values().map(|s| s.1).fold(0.0, f64::max);
-                    2.0 * n * v / lam0
-                }
-            };
-            let ela = elastic_wavelengths(spec, mesh, &first, f)?;
-            let mut out = opt;
-            for (d, l) in ela {
-                let e = out.entry(d).or_insert(l);
-                *e = e.min(l);
-            }
-            Ok(out)
         }
         p => Err(format!("{} has no wavelength to resolve", p.name())),
     }
@@ -112,15 +89,9 @@ fn elastic_frequency(spec: &ProblemSpec) -> Result<Option<f64>, String> {
     }
 }
 
-/// Vacuum wavelength `lam0` shortened by the largest refractive index of each domain. `index` overrides the permittivity (Brillouin).
-fn optical_wavelengths(spec: &ProblemSpec, mesh: &SimplexMesh, first: &BTreeMap<i32, usize>, lam0: f64, index: Option<&BTreeMap<i32, f64>>) -> Result<BTreeMap<i32, f64>, String> {
+/// Vacuum wavelength `lam0` shortened by the largest refractive index of each domain.
+fn optical_wavelengths(spec: &ProblemSpec, mesh: &SimplexMesh, first: &BTreeMap<i32, usize>, lam0: f64) -> Result<BTreeMap<i32, f64>, String> {
     let mut out = BTreeMap::new();
-    if let Some(ix) = index {
-        for &d in first.keys() {
-            out.insert(d, lam0 / ix.get(&d).copied().unwrap_or(1.0).max(1e-6));
-        }
-        return Ok(out);
-    }
     let eps = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
     let mu = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     for (&d, &c) in first {
@@ -193,7 +164,7 @@ pub fn cell_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) ->
     }
     let lam = wavelengths_with(spec, mesh, sz.eigen_headroom)?;
     let ppw = sz.ppw(spec.order);
-    let pml = |d: i32| spec.materials.pml.contains_key(&d) || spec.brillouin.as_ref().is_some_and(|b| b.optical_pml.contains_key(&d));
+    let pml = |d: i32| spec.materials.pml.contains_key(&d);
     Ok(mesh
         .cell_labels
         .iter()

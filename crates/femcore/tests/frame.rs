@@ -1,6 +1,5 @@
 //! The wafer frame: x-y plane of the wafer, z the surface normal, a 2D cross-section is the x-z plane.
 mod common;
-use common::*;
 use femcore::material::*;
 use femcore::problem::*;
 
@@ -53,31 +52,6 @@ fn a_loaded_cubic_plate_in_the_x_z_plane_feels_a_turn_of_the_crystal_about_y_but
 }
 
 #[test]
-fn the_chip_crystals_are_oriented_in_the_wafer_frame() {
-    use femcore::chips::*;
-    let b = 57.6f64.to_radians();
-    // psi = 0: the sapphire c axis lies in the y-z plane (y = propagation, up to sign), 57.6 degrees from the surface normal z
-    let (r_si, r_sap) = crystal_rotations(0.0);
-    let c_axis = [r_sap[0][2], r_sap[1][2], r_sap[2][2]];
-    assert!(c_axis[0].abs() < 1e-12 && (c_axis[1].abs() - b.sin()).abs() < 1e-12 && (c_axis[2] - b.cos()).abs() < 1e-12, "{c_axis:?}");
-    let a_axis = [r_sap[0][0], r_sap[1][0], r_sap[2][0]];
-    assert!((a_axis[0] - 1.0).abs() < 1e-12, "{a_axis:?}");
-    // silicon [100] along the propagation direction y, [010] along x, [001] along z
-    assert!((r_si[1][0].abs() - 1.0).abs() < 1e-12 && (r_si[0][1] - 1.0).abs() < 1e-12 && (r_si[2][2] - 1.0).abs() < 1e-12);
-    // psi = 90: the projection of the c axis lies along x
-    let (_, r90) = crystal_rotations(90.0);
-    assert!((r90[0][2] - b.sin()).abs() < 1e-12 && r90[1][2].abs() < 1e-12);
-    // every rotation is proper
-    for psi in [0.0, 30.0, 45.0, 90.0] {
-        let (s, p) = crystal_rotations(psi);
-        for r in [s, p] {
-            let det = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1]) - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0]) + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
-            assert!((det - 1.0).abs() < 1e-12);
-        }
-    }
-}
-
-#[test]
 fn a_layer_along_y_does_not_exist_on_a_2d_cross_section() {
     // layers of a 2D cross-section are written along x and z; there is no y axis in the plane
     let mesh = common::rect(1.0, 0.5, 4, 2);
@@ -85,12 +59,6 @@ fn a_layer_along_y_does_not_exist_on_a_2d_cross_section() {
     bad.study = Study::Eigenfrequency { n_modes: 2, f_search: 0.0 };
     bad.materials.pml.insert(1, Pml { y: PmlDir::Plus, ..Default::default() });
     let e = femcore::solve::solve(&mesh, &bad, &mut SolveState::default()).err().unwrap();
-    assert!(e.contains("absorbs along y") && e.contains("use z"), "{e}");
-    // the Brillouin optical layers follow the same rule
-    let mut b = ProblemSpec::new(Physics::Brillouin);
-    b.study = Study::Eigenfrequency { n_modes: 2, f_search: 1e9 };
-    b.brillouin.as_mut().unwrap().optical_pml.insert(1, Pml { y: PmlDir::Plus, ..Default::default() });
-    let e = femcore::solve::solve(&mesh, &b, &mut SolveState::default()).err().unwrap();
     assert!(e.contains("absorbs along y") && e.contains("use z"), "{e}");
 }
 

@@ -6,6 +6,8 @@ Date: 2026-11-03
 
 Accepted (Paul's choice; commit `d2e0f74`).
 
+Superseded in part by ADR 24: the code `sbs` and its modules are gone.
+
 ## Context
 
 Module names mixed physics and implementation history (`scalar`, `solid`, `emw`, `brillouin`, `ring_brillouin`) and the same words meant different things in different crates (`solvers::scalar` is the solver library's scalar trait).

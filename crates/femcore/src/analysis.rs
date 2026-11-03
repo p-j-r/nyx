@@ -20,7 +20,7 @@
 //! larger group gets its group Stokes vector only.
 
 use crate::polarization::*;
-use crate::sbs::{mode_samples, OpticalSet};
+use crate::optical::{mode_samples, OpticalSet};
 use crate::mesh::SimplexMesh;
 use crate::problem::{Scalar, Solution, SolveResult};
 use std::fmt::Write;

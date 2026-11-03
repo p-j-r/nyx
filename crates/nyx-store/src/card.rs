@@ -166,7 +166,6 @@ fn physics_words(name: &str) -> &'static str {
         "Heat" => "heat thermal temperature conduction",
         "Solid" => "solid mechanics structure stress vibration eigenfrequency elastic",
         "Emw" => "em waves electromagnetic optical waveguide modes neff photonics",
-        "Brillouin" => "brillouin scattering phonon gain optomechanics",
         _ => "",
     }
 }
@@ -177,7 +176,6 @@ fn physics_label(name: &str) -> &'static str {
         "Heat" => "heat transfer",
         "Solid" => "solid mechanics",
         "Emw" => "EM waves",
-        "Brillouin" => "Brillouin",
         _ => "unknown physics",
     }
 }
@@ -203,14 +201,11 @@ pub fn from_value(proj: &Value) -> Card {
     let active = proj.get("active").and_then(|a| a.as_str()).unwrap_or("Emw").to_string();
     let spec = proj.get("specs").and_then(|s| s.as_array()).and_then(|a| a.iter().find(|s| s.get("physics").and_then(|p| p.as_str()) == Some(&active)));
     let (geo, dimn) = geometry(proj);
-    let (study, mut wavelength) = spec.and_then(|s| s.get("study")).map(study_label).unwrap_or(("unknown".into(), None));
-    if let Some(w) = spec.and_then(|s| get(s, &["brillouin", "wavelength"])).and_then(num) {
-        wavelength = Some(w);
-    }
+    let (study, wavelength) = spec.and_then(|s| s.get("study")).map(study_label).unwrap_or(("unknown".into(), None));
     // materials: refractive index per domain for the optical physics, name when it matches a known material
     let mut materials = vec![];
     let mut keywords: Vec<String> = physics_words(&active).split_whitespace().map(String::from).collect();
-    if matches!(active.as_str(), "Emw" | "Brillouin") {
+    if active == "Emw" {
         if let Some(domains) = spec.and_then(|s| get(s, &["materials", "domains"])).and_then(|d| d.as_object()) {
             for (d, props) in domains {
                 let Some(eps) = props.get("eps_r").and_then(num).filter(|e| *e > 0.0) else { continue };

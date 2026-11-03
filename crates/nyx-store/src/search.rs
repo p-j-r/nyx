@@ -27,7 +27,7 @@ const SYNONYMS: &[(&str, &[&str])] = &[
     ("waveguide", &["rib", "strip", "wire", "guide"]),
     ("rib", &["waveguide"]),
     ("neff", &["effective index", "modes"]),
-    ("phonon", &["brillouin", "solid mechanics", "elastic"]),
+    ("phonon", &["solid mechanics", "elastic"]),
     ("thermal", &["heat", "temperature"]),
     ("optical", &["em waves", "electromagnetic"]),
 ];

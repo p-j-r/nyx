@@ -1,6 +1,6 @@
 //! Scripted runs for testing and screenshots: `nyx --script "example 1; compute; shot out.png; quit"`.
 //!
-//! Commands (separated by `;`): `example N`, `new es|heat|solid|emw|brillouin [3d]`, `open PATH`, `physics es|heat|solid|emw|brillouin`,
+//! Commands (separated by `;`): `example N`, `new es|heat|solid|emw [3d]`, `open PATH`, `physics es|heat|solid|emw`,
 //! `tab geometry|materials|physics|study|results|analysis`, `compute`, `field NAME`,
 //! `sol N`, `cancel_after SECONDS` (cancels the running solve then), `rotate DYAW DPITCH`, `pan DX DY`, `zoom F`, `view mesh|result`, `pick N`, `study eigen|static|transient|stationary`,
 //! `output serial|parallel FILE`, `save FILE.xml|json`, `shot FILE`, `wait`, `quit`.
@@ -45,7 +45,6 @@ impl App {
                     "es" => Physics::Electrostatics,
                     "heat" => Physics::Heat,
                     "solid" => Physics::Solid,
-                    "brillouin" => Physics::Brillouin,
                     _ => Physics::Emw,
                 };
                 let three_d = words.contains(&"3d");
@@ -57,7 +56,6 @@ impl App {
                     "es" => Physics::Electrostatics,
                     "heat" => Physics::Heat,
                     "solid" => Physics::Solid,
-                    "brillouin" => Physics::Brillouin,
                     _ => Physics::Emw,
                 }
             }

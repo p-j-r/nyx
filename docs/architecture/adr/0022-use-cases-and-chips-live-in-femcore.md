@@ -6,6 +6,8 @@ Date: 2026-10-31
 
 Accepted by practice (`e60ad11`, `4107cfa`; the chips predate them, `6de7458`). Re-expressed on geom by `08dd007` and `ffa1bf6`.
 
+Superseded in part by ADR 24: the four ring chips (`chips.rs`) are deleted; `usecases/` stays until phase 7.
+
 ## Context
 
 The physics modules need realistic, reproducible inputs to be tested and demonstrated: a 300 nm SOI wire at 1550 nm, symmetric and asymmetric Bragg gratings, and the silicon-on-sapphire rib waveguides of four ring chips (300TE, 300TM, 500TE, 500TM) as Brillouin problems with crystal orientations, absorbing layers and photoelastic data.

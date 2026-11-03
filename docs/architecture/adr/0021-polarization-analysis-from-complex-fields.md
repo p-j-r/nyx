@@ -6,6 +6,8 @@ Date: 2026-10-31
 
 Accepted (commit `4107cfa`, "Analysis tab, ring and 3D polarization"; `e60ad11` for the first version). `docs/photonic_use_cases.md` is the description.
 
+Superseded in part by ADR 24: the Brillouin study no longer produces an analysis; the optical mode set moved to `femcore::optical`.
+
 ## Context
 
 Users of waveguide mode solvers want to know whether a mode is quasi-TE, quasi-TM, hybrid or circular. The plotted fields are real and lose the phase between components, so they cannot give the Stokes parameters of hybrid or leaky modes. Degenerate modes (the square 300 nm wire in oxide has an exactly degenerate TE/TM pair) come out of the eigensolver as arbitrary mixtures, so their individual polarizations mean nothing.

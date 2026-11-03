@@ -78,7 +78,6 @@ flowchart TB
     DFS[dfs]:::kernel
     SMS[sms]:::kernel
     EMS[ems]:::kernel
-    SBS[sbs]:::kernel
   end
   OLD["original linear algebra<br/>sparse, amg, eigen, lobpcg (R02)"]:::rough
   PORT["solvers (ported library)<br/>examples only, no caller"]:::rough
@@ -89,15 +88,13 @@ flowchart TB
   MG["meshing<br/>MeshPlan, sizing, loop"]:::mesh
   MP["meshers (ported)<br/>adaptation, PML, .fmsh"]:::mesh
   M3["mesher3d, refine3d<br/>tests only (R05)"]:::dead
-  UC["use cases, chips<br/>app content (R15)"]:::misc
+  UC["use cases<br/>app content (R15)"]:::misc
   AN["analysis, polarization<br/>own axis names (R28)"]:::misc
   FI["files: xmlio, h5io"]:::misc
 
   SOLVE --> PROB
-  SOLVE --> DFS & SMS & EMS & SBS
-  DFS & SMS & EMS & SBS --> SEC
-  SBS --> EMS
-  SBS --> SMS
+  SOLVE --> DFS & SMS & EMS
+  DFS & SMS & EMS --> SEC
   DFS & SMS & EMS --> OLD
   PORT -.->|intended replacement| OLD
   SOLVE --> SM

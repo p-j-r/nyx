@@ -255,7 +255,16 @@ fn shear_components_of_a_rotated_stiffness_are_in_the_solver_order() {
         }
     }
     for psi in [0.0, 30.0, 45.0, 90.0] {
-        let (_, r) = femcore::chips::crystal_rotations(psi);
+        // a proper rotation about the surface normal followed by a tilt of 57.6 degrees (any rotation tests the tensor transformation)
+        let (cp, sp, ct, st_) = ((psi as f64).to_radians().cos(), (psi as f64).to_radians().sin(), 57.6f64.to_radians().cos(), 57.6f64.to_radians().sin());
+        let rz = [[cp, -sp, 0.0], [sp, cp, 0.0], [0.0, 0.0, 1.0]];
+        let rx = [[1.0, 0.0, 0.0], [0.0, ct, -st_], [0.0, st_, ct]];
+        let mut r = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                r[i][j] = (0..3).map(|k| rz[i][k] * rx[k][j]).sum();
+            }
+        }
         let m = stiffness_global(&st, euler_from_rotation(&r));
         for (i, &(a, b)) in vp.iter().enumerate() {
             for (j, &(c, d)) in vp.iter().enumerate() {

@@ -27,7 +27,7 @@ pub struct GeometrySpec {
     pub adapt_scale: Option<f64>,
     /// Size the mesh from the physics of the problem it is built for (`femcore::physics_size`: points per wavelength by element order,
     /// shorter in high-index or slow-wave domains), on top of the sizes the model asks for. Needs a problem with a wavelength (EM waves,
-    /// solid-mechanics eigenfrequencies, Brillouin); other physics mesh as before.
+    /// solid-mechanics eigenfrequencies); other physics mesh as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub physics_sizing: bool,
 }
@@ -105,7 +105,7 @@ impl GeometrySpec {
             None => femcore::meshing::MeshPlan::simple(self.h),
         };
         let sized = match problem {
-            Some(p) if self.physics_sizing && matches!(p.physics, Physics::Emw | Physics::Solid | Physics::Brillouin) => {
+            Some(p) if self.physics_sizing && matches!(p.physics, Physics::Emw | Physics::Solid) => {
                 let adaptive = femcore::meshing::MeshPlan::adaptive(self.h, self.adapt_scale.unwrap_or(1.0));
                 let plan = femcore::meshing::MeshPlan { pml: plan.pml, ..adaptive };
                 let sz = femcore::physics_size::PhysicsSizing::default();

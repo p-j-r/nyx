@@ -1108,7 +1108,6 @@ fn short_physics(p: Physics) -> &'static str {
         Physics::Heat => "Heat",
         Physics::Solid => "Solid",
         Physics::Emw => "EM waves",
-        Physics::Brillouin => "Brillouin",
     }
 }
 

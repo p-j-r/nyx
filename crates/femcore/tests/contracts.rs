@@ -64,11 +64,7 @@ fn exemplar_specs() -> Vec<ProblemSpec> {
     emw.materials.set(1, "eps_r", 12.08);
     emw.materials.set(2, "eps_r", 2.085);
 
-    let mut sbs = ProblemSpec::new(Physics::Brillouin);
-    sbs.brillouin = Some(BrillouinSpec::default());
-    sbs.study = Study::Eigenfrequency { n_modes: 12, f_search: 1.0e10 };
-
-    vec![es, heat, solid, emw, sbs]
+    vec![es, heat, solid, emw]
 }
 
 #[test]
@@ -103,11 +99,9 @@ fn problem_spec_json_shape_that_other_crates_read_without_types() {
     assert_eq!(emw["physics"], json!("Emw"));
     assert_eq!(emw["study"], json!({ "Modes": { "freq": 1.934e14, "n_target": 2.4, "evanescent": false, "n_modes": 4 } }));
     assert!(emw["materials"]["domains"]["1"]["eps_r"].is_number(), "materials.domains.<label>.<property>");
-    let sbs = serde_json::to_value(&specs[4]).unwrap();
-    assert!(sbs["brillouin"]["wavelength"].is_number());
     // keys of the top level, in the order of the declaration (the exemplar pins the rest)
     let keys: Vec<&str> = emw.as_object().unwrap().keys().map(|s| s.as_str()).collect();
-    for k in ["physics", "order", "materials", "bcs", "study", "plane", "thickness", "thermal", "solver", "output", "out_of_plane", "inactive", "periodic", "brillouin"] {
+    for k in ["physics", "order", "materials", "bcs", "study", "plane", "thickness", "thermal", "solver", "output", "out_of_plane", "inactive", "periodic"] {
         assert!(keys.contains(&k), "ProblemSpec lost the key {k}");
     }
 }
@@ -126,10 +120,10 @@ fn problem_spec_reading_is_lenient_in_both_directions() {
 }
 
 #[test]
-fn physics_enum_has_five_members_in_this_order() {
+fn physics_enum_has_four_members_in_this_order() {
     // the order is the order of the tabs and of `Physics::ALL`; names are the serde tags in saved files
     let names: Vec<Value> = Physics::ALL.iter().map(|p| serde_json::to_value(p).unwrap()).collect();
-    assert_eq!(names, vec![json!("Electrostatics"), json!("Heat"), json!("Solid"), json!("Emw"), json!("Brillouin")]);
+    assert_eq!(names, vec![json!("Electrostatics"), json!("Heat"), json!("Solid"), json!("Emw")]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------- solve_result
@@ -398,7 +392,7 @@ fn kernel_stage_api_is_public() {
     let _ = (femcore::sms_floquet::assemble_floquet, femcore::sms_floquet::solve_floquet_modes, femcore::sms_floquet::floquet_fields);
     // the one-call solvers and the dispatching entry points
     let _ = (femcore::solve::solve, femcore::solve::solve_with);
-    let _ = (femcore::dfs::solve_electrostatics, femcore::dfs::solve_heat, femcore::sms::solve_solid, femcore::ems::solve_emw, femcore::ems3d::solve_emw_eigen, femcore::sbs::solve_brillouin);
+    let _ = (femcore::dfs::solve_electrostatics, femcore::dfs::solve_heat, femcore::sms::solve_solid, femcore::ems::solve_emw, femcore::ems3d::solve_emw_eigen);
 }
 
 #[test]
@@ -406,7 +400,6 @@ fn physics_dispatch_covers_every_physics_and_the_emw_split_by_mesh_dimension() {
     // ROUGH_SPOTS R10: `Physics::Emw` means waveguide modes on a 2D mesh and cavity eigenfrequencies on a 3D mesh. A 3D mesh given a
     // `Modes` study is the caller's mistake; the contract is only that the dispatch does not panic and that 2D `Emw` is the mode solver.
     let names: Vec<&str> = Physics::ALL.iter().map(|p| p.name()).collect();
-    assert_eq!(names.len(), 5);
+    assert_eq!(names.len(), 4);
     assert!(Physics::Emw.name().contains("mode analysis"));
-    assert!(Physics::Brillouin.name().contains("cross-section"));
 }

@@ -14,9 +14,9 @@ use nyx_store::ShareLevel;
 
 /// Start-from cards: (title, text, example index in `examples::NAMES`, or `None` when no template exists yet)
 const TEMPLATES: [(&str, &str, Option<usize>); 8] = [
-    ("Optical waveguide", "Strip or rib cross-section, modes and n_eff", Some(15)),
-    ("Brillouin gain chip", "Silicon rib on sapphire, pump and Stokes pairs", Some(14)),
-    ("Bragg grating", "Periodic cell, 3D, band-edge modes", Some(17)),
+    ("Optical waveguide", "Strip or rib cross-section, modes and n_eff", Some(14)),
+    ("Strip on sapphire", "Optical and acoustic modes of a silicon strip", Some(12)),
+    ("Bragg grating", "Periodic cell, 3D, band-edge modes", Some(16)),
     ("Ring resonator", "Whispering-gallery modes, axisymmetric", None),
     ("Vibrating structure", "Solid mechanics, eigenfrequencies", Some(1)),
     ("Heat transfer", "Stationary or transient temperature", Some(2)),
@@ -89,12 +89,9 @@ impl App {
                         ui.selectable_value(&mut self.shell.new.physics, p, p.name());
                     }
                 });
-                if self.shell.new.physics == Physics::Brillouin {
-                    self.shell.new.three_d = false;
-                }
                 ui.label("Dimension");
                 ui.selectable_value(&mut self.shell.new.three_d, false, "2D section");
-                ui.add_enabled_ui(self.shell.new.physics != Physics::Brillouin, |ui| ui.selectable_value(&mut self.shell.new.three_d, true, "3D"));
+                ui.selectable_value(&mut self.shell.new.three_d, true, "3D");
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if kit::primary(ui, "Create workflow").clicked() {

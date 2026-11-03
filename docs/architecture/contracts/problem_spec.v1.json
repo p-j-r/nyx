@@ -42,8 +42,7 @@
     },
     "out_of_plane": null,
     "inactive": [],
-    "periodic": [],
-    "brillouin": null
+    "periodic": []
   },
   {
     "physics": "Heat",
@@ -83,8 +82,7 @@
     },
     "out_of_plane": null,
     "inactive": [],
-    "periodic": [],
-    "brillouin": null
+    "periodic": []
   },
   {
     "physics": "Solid",
@@ -146,8 +144,7 @@
         ],
         "phase": 0.5
       }
-    ],
-    "brillouin": null
+    ]
   },
   {
     "physics": "Emw",
@@ -184,59 +181,6 @@
     },
     "out_of_plane": null,
     "inactive": [],
-    "periodic": [],
-    "brillouin": null
-  },
-  {
-    "physics": "Brillouin",
-    "order": 2,
-    "materials": {
-      "domains": {},
-      "default": {},
-      "aniso": {},
-      "pml": {}
-    },
-    "bcs": [],
-    "study": {
-      "Eigenfrequency": {
-        "n_modes": 12,
-        "f_search": 10000000000.0
-      }
-    },
-    "plane": "Strain",
-    "thickness": 1.0,
-    "thermal": null,
-    "solver": "Auto",
-    "output": {
-      "mode": "None",
-      "path": ""
-    },
-    "out_of_plane": null,
-    "inactive": [],
-    "periodic": [],
-    "brillouin": {
-      "wavelength": 1.55e-6,
-      "n_target": 2.5,
-      "n_optical_modes": 2,
-      "backward": true,
-      "pump_modes": [
-        1
-      ],
-      "stokes_modes": [
-        1
-      ],
-      "refractive_index": {},
-      "dn_dt": {},
-      "t_ref": 293.15,
-      "optical_pml": {},
-      "photoelastic": {},
-      "moving": [],
-      "viscosity": {},
-      "q_cap": 1000.0,
-      "length": 0.02,
-      "conjugate_strain": true,
-      "ring_radius": null,
-      "mirror_axis": null
-    }
+    "periodic": []
   }
 ]

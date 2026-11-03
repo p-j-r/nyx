@@ -12,7 +12,7 @@
 //! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (out-of-plane wave number), `sms_pml`,
 //!   `sms_lrb` (absorbing boundaries), `sms_floquet` and `periodic` (periodic cells), `sms_axisym` (bodies of
 //!   revolution); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
-//! * Brillouin scattering: `sbs` (overlap integrals and gain), `sbs_ring` (rings), `chips` (the four ring chips)
+//! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)
 //! * ported libraries: `solvers` (Krylov, eigen, preconditioner, time-stepping and optimisation library for real and complex
 //!   systems) and `meshers` (metric mesh adaptation, structured PML meshes, `.fmsh` files), see docs/ports
 //! * files: `xmlio` (project XML), `h5io` (HDF5/XDMF results, feature `hdf5`)
@@ -25,8 +25,7 @@
 #![allow(clippy::needless_range_loop)]
 pub mod amg;
 pub mod analysis;
-pub mod sbs;
-pub mod chips;
+pub mod optical;
 pub mod csparse;
 pub mod eigen;
 pub mod ems;
@@ -59,7 +58,6 @@ pub mod polarization;
 pub mod problem;
 pub mod progress;
 pub mod refine3d;
-pub mod sbs_ring;
 pub mod dfs;
 pub mod section;
 pub mod sms;

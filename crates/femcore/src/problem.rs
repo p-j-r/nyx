@@ -1,11 +1,11 @@
 //! The description of a problem and of its result: what the window edits and saves, what the solvers take in and give back.
 //!
-//! A `ProblemSpec` names one physics (electrostatics, heat transfer, solid mechanics, EM waves, Brillouin scattering),
+//! A `ProblemSpec` names one physics (electrostatics, heat transfer, solid mechanics, EM waves),
 //! the element order (1 or 2), the material data per domain (`Materials`: scalar properties, anisotropic tensors with a
 //! crystal orientation, perfectly matched layers), the boundary conditions (`Bc`: boundary numbers and a `BcKind`),
 //! the study (`Study`: stationary/static, transient, eigenfrequencies, waveguide modes) and the options (linear solver,
 //! plane stress/strain and thickness in 2D, thermal expansion, out-of-plane wave number, inactive domains, Floquet-periodic
-//! pairs, Brillouin settings, results file). Everything derives serde, so it is saved as JSON or, through `xmlio`, as XML.
+//! pairs, results file). Everything derives serde, so it is saved as JSON or, through `xmlio`, as XML.
 //!
 //! A problem is written in the axes of the wafer: x lateral, y the propagation direction, z the surface normal (right-handed; a 2D
 //! cross-section is the x-z plane, with y into the page). A wave along `+y` has a positive out-of-plane wave number `k`. Every kernel reads the problem in these axes and
@@ -26,19 +26,16 @@ pub enum Physics {
     Heat,
     Solid,
     Emw,
-    /// stimulated Brillouin scattering of a 2D cross-section: optical modes, phase-matched elastic modes, gain
-    Brillouin,
 }
 
 impl Physics {
-    pub const ALL: [Physics; 5] = [Physics::Electrostatics, Physics::Heat, Physics::Solid, Physics::Emw, Physics::Brillouin];
+    pub const ALL: [Physics; 4] = [Physics::Electrostatics, Physics::Heat, Physics::Solid, Physics::Emw];
     pub fn name(self) -> &'static str {
         match self {
             Physics::Electrostatics => "Electrostatics",
             Physics::Heat => "Heat transfer",
             Physics::Solid => "Solid mechanics",
             Physics::Emw => "EM waves (mode analysis)",
-            Physics::Brillouin => "Brillouin scattering (cross-section)",
         }
     }
 }
@@ -245,14 +242,13 @@ impl BcKind {
             Physics::Heat => vec![BcKind::Temperature(293.15), BcKind::Flux(0.0), BcKind::Convection { h: 10.0, text: 293.15 }],
             Physics::Solid => vec![BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }, BcKind::Load([0.0; 3]), BcKind::LowReflecting],
             Physics::Emw => vec![],
-            Physics::Brillouin => vec![BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }, BcKind::LowReflecting],
         }
     }
     pub fn belongs_to(&self, p: Physics) -> bool {
         match self {
             BcKind::Potential(_) | BcKind::Ground | BcKind::SurfaceCharge(_) => p == Physics::Electrostatics,
             BcKind::Temperature(_) | BcKind::Flux(_) | BcKind::Convection { .. } => p == Physics::Heat,
-            BcKind::Fixed { .. } | BcKind::Load(_) | BcKind::LowReflecting => p == Physics::Solid || p == Physics::Brillouin,
+            BcKind::Fixed { .. } | BcKind::Load(_) | BcKind::LowReflecting => p == Physics::Solid,
         }
     }
 }
@@ -384,114 +380,6 @@ pub struct ProblemSpec {
     /// Floquet-periodic boundary pairs (eigenfrequency studies of solid mechanics and 3D EM waves)
     #[serde(default)]
     pub periodic: Vec<Periodic>,
-    /// optical side of a Brillouin study; the solid-mechanics data above (materials, boundary conditions,
-    /// PML, inactive domains, eigenfrequency study) describe the elastic side
-    #[serde(default)]
-    pub brillouin: Option<BrillouinSpec>,
-}
-
-/// Photoelastic constants of one domain (dimensionless, Voigt notation of the crystal frame) and the
-/// orientation of the crystal in the wafer frame (x lateral, y propagation, z surface normal).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum PhotoKind {
-    Isotropic { p11: f64, p12: f64 },
-    Cubic { p11: f64, p12: f64, p44: f64 },
-    Trigonal { p11: f64, p12: f64, p13: f64, p14: f64, p33: f64, p44: f64 },
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PhotoSpec {
-    pub kind: PhotoKind,
-    /// Bunge angles of the crystal axes in the wafer frame, degrees
-    #[serde(default)]
-    pub euler_deg: [f64; 3],
-    /// take the orientation from the crystal data of the same domain in the elastic problem
-    #[serde(default = "photo_follow_default")]
-    pub follow_stiffness: bool,
-}
-
-fn photo_follow_default() -> bool {
-    true
-}
-
-/// The optical side and the options of a Brillouin study.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BrillouinSpec {
-    /// vacuum wavelength of the pump (m)
-    pub wavelength: f64,
-    /// effective index near which the optical modes are searched
-    pub n_target: f64,
-    pub n_optical_modes: usize,
-    /// backward (phonon wave number beta_p + beta_s) or forward (beta_p - beta_s) scattering
-    pub backward: bool,
-    /// 1-based optical mode numbers (empty: all)
-    #[serde(default)]
-    pub pump_modes: Vec<usize>,
-    #[serde(default)]
-    pub stokes_modes: Vec<usize>,
-    /// refractive index per domain (domains not listed: 1)
-    #[serde(default)]
-    pub refractive_index: BTreeMap<i32, f64>,
-    /// dn/dT per domain (1/K), used with a temperature field from a heat study
-    #[serde(default)]
-    pub dn_dt: BTreeMap<i32, f64>,
-    /// reference temperature for `dn_dt` (K)
-    #[serde(default = "default_t_ref")]
-    pub t_ref: f64,
-    /// perfectly matched layers of the optical problem
-    #[serde(default)]
-    pub optical_pml: BTreeMap<i32, Pml>,
-    #[serde(default)]
-    pub photoelastic: BTreeMap<i32, PhotoSpec>,
-    /// domains whose outline moves with the elastic mode (moving-boundary term)
-    #[serde(default)]
-    pub moving: Vec<i32>,
-    /// viscosity per domain (Pa s), as stiffness-like constants; adds a loss `1/Q` to every mode
-    #[serde(default)]
-    pub viscosity: BTreeMap<i32, Anisotropy>,
-    /// mechanical Q used in the gain is at most this (1000 is a common choice)
-    pub q_cap: f64,
-    /// waveguide length for the single-photon coupling rate (m)
-    pub length: f64,
-    /// phase-matched (conjugate) strain in the photoelastic overlap; false uses the strain as it is
-    pub conjugate_strain: bool,
-    /// ring resonator instead of a straight waveguide: the mesh is the (r, z) half plane (x = r, y = z), the optical modes are
-    /// whispering-gallery modes of the axisymmetric solver and the elastic modes have the azimuthal order `m_p + m_s`; the value
-    /// is the reference radius (m) for the per-length quantities (the mean radius of the mode)
-    #[serde(default)]
-    pub ring_radius: Option<f64>,
-    /// report the parity of the elastic modes under the mirror x -> -x (0) or z -> -z (1) of a mesh (mesh axes of the cross-section: x and the surface normal z) whose vertices are symmetric
-    #[serde(default)]
-    pub mirror_axis: Option<usize>,
-}
-
-fn default_t_ref() -> f64 {
-    293.15
-}
-
-impl Default for BrillouinSpec {
-    fn default() -> Self {
-        BrillouinSpec {
-            wavelength: 1.55e-6,
-            n_target: 2.5,
-            n_optical_modes: 2,
-            backward: true,
-            pump_modes: vec![1],
-            stokes_modes: vec![1],
-            refractive_index: BTreeMap::new(),
-            dn_dt: BTreeMap::new(),
-            t_ref: default_t_ref(),
-            optical_pml: BTreeMap::new(),
-            photoelastic: BTreeMap::new(),
-            moving: vec![],
-            viscosity: BTreeMap::new(),
-            q_cap: 1000.0,
-            length: 0.02,
-            conjugate_strain: true,
-            mirror_axis: None,
-            ring_radius: None,
-        }
-    }
 }
 
 impl ProblemSpec {
@@ -501,9 +389,8 @@ impl ProblemSpec {
             Physics::Heat => Study::Stationary,
             Physics::Solid => Study::Static,
             Physics::Emw => Study::Modes { freq: 10e9, n_target: 1.0, evanescent: false, n_modes: 4 },
-            Physics::Brillouin => Study::Eigenfrequency { n_modes: 30, f_search: 10e9 },
         };
-        ProblemSpec { physics, order: 2, materials: Materials::default(), bcs: vec![], study, plane: Plane::Strain, thickness: 1.0, thermal: None, solver: LinearSolver::Auto, output: OutputSpec::default(), out_of_plane: None, inactive: vec![], periodic: vec![], brillouin: if physics == Physics::Brillouin { Some(BrillouinSpec::default()) } else { None } }
+        ProblemSpec { physics, order: 2, materials: Materials::default(), bcs: vec![], study, plane: Plane::Strain, thickness: 1.0, thermal: None, solver: LinearSolver::Auto, output: OutputSpec::default(), out_of_plane: None, inactive: vec![], periodic: vec![] }
     }
 }
 

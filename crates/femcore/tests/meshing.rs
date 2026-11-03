@@ -510,31 +510,6 @@ fn a_model_without_layers_is_left_alone_and_a_round_window_is_refused() {
     assert!(e.is_some(), "a round window must be refused");
 }
 
-/// The Brillouin chip with inline and with structured absorbing layers: cells, effective index, and the Q and gain of the strongest elastic modes.
-#[test]
-#[ignore = "study (about a minute): cargo test -p femcore --test meshing --release chip_pml -- --ignored --nocapture"]
-fn chip_pml_structured_study() {
-    use femcore::sbs::study_straight;
-    use femcore::chips::{chip_by_name, chip_geometry, chip_problem};
-    let chip = chip_by_name("300TE").unwrap();
-    let list = chip_geometry(&chip, 1.0).list;
-    for (name, plan) in [("inline", MeshPlan::simple(0.12e-6)), ("structured", structured(MeshPlan::simple(0.12e-6)))] {
-        let t = std::time::Instant::now();
-        let g = femcore::meshing::mesh_evaluated(evaluate(&list).unwrap(), &plan).unwrap();
-        let tm = t.elapsed().as_secs_f64();
-        let spec = chip_problem(&chip, 0.0, 40, 18.35e9, &g);
-        let study = study_straight(&g.mesh, &spec, &SolveState::default()).unwrap();
-        let pr = &study.pairs[0];
-        let mut rows: Vec<usize> = (0..pr.rows.len()).filter(|&i| pr.rows[i].gain_pe.max(pr.rows[i].gain_mb) > 1e-2).collect();
-        rows.sort_by(|&a, &b| pr.rows[a].freq.re.partial_cmp(&pr.rows[b].freq.re).unwrap());
-        eprintln!("{name}: {} cells, meshed in {tm:.2} s, neff {:.8}", g.mesh.n_cells(), study.neff[0].re);
-        for i in rows {
-            let r = &pr.rows[i];
-            eprintln!("   f {:.6e}  Q {:.4e}  total gain {:.6e}", r.freq.re, r.q_eig, r.gain_total);
-        }
-    }
-}
-
 /// 3D by sweeping the 2D section: the adapted (and the structured-layer) section extruded along y fills the right volume with positive tets.
 #[test]
 fn an_adapted_section_extruded_to_3d_has_the_volume_and_the_labels() {
