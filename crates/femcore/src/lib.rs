@@ -34,6 +34,7 @@ pub mod ems3d;
 pub mod ems_axisym;
 pub mod ems_pml;
 pub mod estimate;
+pub mod estimate3;
 pub mod expr;
 pub mod fem;
 pub mod fields;

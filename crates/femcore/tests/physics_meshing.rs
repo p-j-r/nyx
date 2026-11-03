@@ -305,3 +305,68 @@ fn pml_end_converges_with_the_mesh() {
         eprintln!("n {} layers {}: {:?} error vs finest {err:?}", lv.0, lv.1, m.iter().map(|x| format!("{:.5e}{:+.3e}i", x.0, x.1)).collect::<Vec<_>>());
     }
 }
+
+#[test]
+fn the_3d_loop_beats_uniform_meshes_for_a_cavity_mode_at_order_two() {
+    // measured in `the_3d_loop_against_uniform_blocks`: at order 2 the loop reaches 2.6e-6 on 494 tets where uniform blocks give 1.8e-4 on 696.
+    // At order 1 it does NOT beat uniform blocks: the Hessian of the vertex-averaged piecewise-constant field is too noisy to steer
+    use femcore::estimate::Estimator;
+    use femcore::estimate3::{solve_adaptively3, LoopSettings3};
+    let (a, b, d) = (0.04, 0.03, 0.02);
+    let exact = cavity_modes(a, b, d, 20e9)[0];
+    let mut spec = ProblemSpec::new(Physics::Emw);
+    spec.order = 2;
+    spec.materials.default.insert("eps_r".into(), 1.0);
+    spec.study = Study::Eigenfrequency { n_modes: 1, f_search: 0.9 * exact };
+    let start = common::block(a, b, d, 2, 2, 2);
+    let mut st = LoopSettings3::new(a / 2.0);
+    st.estimator = Estimator { fields: vec!["Re Ex".into(), "Re Ey".into(), "Re Ez".into()], combine: true, ..Estimator::default() };
+    st.max_cycles = 3;
+    st.rel_tol = 1e-5;
+    let mut solve = |m: &femcore::mesh::SimplexMesh| {
+        let r = femcore::solve::solve(m, &spec, &mut SolveState::default())?;
+        let f = r.solutions[0].value.ok_or("no frequency")?;
+        Ok((r, f))
+    };
+    let out = solve_adaptively3(&start, &st, None, &mut solve).unwrap();
+    for c in &out.cycles {
+        eprintln!("  cells {:6}  f {:.6e}  error {:.2e}", c.cells, c.quantity, (c.quantity / exact - 1.0).abs());
+    }
+    let (first, last) = (out.cycles.first().unwrap(), out.cycles.last().unwrap());
+    assert!(out.cycles.len() >= 2);
+    assert!(last.cells <= 900, "{} tets", last.cells);
+    assert!((last.quantity / exact - 1.0).abs() < 1e-4, "uniform blocks of 696 tets give 1.8e-4");
+    assert!((last.quantity / exact - 1.0).abs() < 0.1 * (first.quantity / exact - 1.0).abs());
+}
+
+#[test]
+#[ignore = "study: adaptive loop against uniform blocks of similar size"]
+fn the_3d_loop_against_uniform_blocks() {
+    use femcore::estimate::Estimator;
+    use femcore::estimate3::{solve_adaptively3, LoopSettings3};
+    let (a, b, d) = (0.04, 0.03, 0.02);
+    let exact = cavity_modes(a, b, d, 20e9)[0];
+    for order in [1usize, 2] {
+        let mut spec = ProblemSpec::new(Physics::Emw);
+        spec.order = order;
+        spec.materials.default.insert("eps_r".into(), 1.0);
+        spec.study = Study::Eigenfrequency { n_modes: 1, f_search: 0.9 * exact };
+        let f = |m: &femcore::mesh::SimplexMesh| femcore::solve::solve(m, &spec, &mut SolveState::default()).unwrap().solutions[0].value.unwrap();
+        for (nx, ny, nz) in [(2, 2, 2), (3, 2, 2), (4, 3, 2), (5, 4, 3), (7, 5, 4)] {
+            let m = common::block(a, b, d, nx, ny, nz);
+            eprintln!("order {order} uniform {:5} tets error {:.2e}", m.n_cells(), (f(&m) / exact - 1.0).abs());
+        }
+        let mut st = LoopSettings3::new(a / 2.0);
+        st.estimator = Estimator { fields: vec!["Re Ex".into(), "Re Ey".into(), "Re Ez".into()], combine: true, ..Estimator::default() };
+        st.max_cycles = 4;
+        let mut solve = |m: &femcore::mesh::SimplexMesh| {
+            let r = femcore::solve::solve(m, &spec, &mut SolveState::default())?;
+            let q = r.solutions[0].value.ok_or("no frequency")?;
+            Ok((r, q))
+        };
+        let out = solve_adaptively3(&common::block(a, b, d, 2, 2, 2), &st, None, &mut solve).unwrap();
+        for c in &out.cycles {
+            eprintln!("order {order} loop    {:5} tets error {:.2e}", c.cells, (c.quantity / exact - 1.0).abs());
+        }
+    }
+}
