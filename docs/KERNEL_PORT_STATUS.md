@@ -54,8 +54,11 @@ Every kernel is three functions; `solve_*` is their composition, and the golden 
 | ems 2D complex / PML / tilted | `assemble_modes_complex` | `solve_mode_pairs_complex` | `mode_fields_complex_cells` (complex `Ex`, `Ez`, `Ey`) |
 | sms kz and axisymmetric | `assemble_cross_section` | `solve_cross_section_modes` | `cross_section_fields` (complex `ux`, `uz`, `uy`) |
 | ems axisymmetric | `assemble_axisym` | `solve_axisym_pairs` | `mode_samples` (unchanged) |
-| sms plain static / eigen | inline in `solve_solid` (`setup`, `assemble_solid`, loads) | static: `solve_spd`; eigen: `solve_real_modes` (AMG + LOBPCG kept) | `fields_of` (`ux`, `uz`, stresses, `von Mises`) |
-| sms PML, Floquet, low-reflecting | inline | inline | `complex_mode_fields` (complex `ux`, `uz`) |
-| ems 3D | inline in `solve_emw_eigen` | inline | cell `Ex`, `Ey`, `Ez` (complex) |
+| sms plain static | `assemble_static` (`setup`, `assemble_solid`, loads) | `solve_static` | `fields_of` (`ux`, `uz`, stresses, `von Mises`) |
+| sms plain eigen | `setup`, `assemble_solid`, mass | `solve_real_modes` (AMG + LOBPCG kept) | `fields_of` |
+| sms PML | `assemble_solid_pml` | `solve_pml_modes` | `pml_fields` (complex `ux`, `uz`) |
+| sms Floquet | `assemble_floquet` | `solve_floquet_modes` | `floquet_fields` |
+| sms low-reflecting | `assemble_lrb` | `solve_lrb_modes` | `lrb_fields` |
+| ems 3D | `assemble_emw_eigen` | `solve_emw_modes` | `emw_eigen_fields` (complex `Ex`, `Ey`, `Ez`) |
 
-The last two rows have the fields stage and the cell fields, but their assemble and solve are still one function each (they share large local state with the Floquet reduction, the low-reflecting damping and the polarization analysis); they are the next to cut.
+Every kernel has the three stages. A `femcore::solvers` backend replaces one solve function per kernel.

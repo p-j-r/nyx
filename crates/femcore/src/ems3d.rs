@@ -357,6 +357,39 @@ fn ned_relations(mesh: &SimplexMesh, ned: &Ned3, m: &crate::periodic::Match, pha
 /// Eigenfrequencies of the cavity.
 pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
     let t0 = Instant::now();
+    let asm = assemble_emw_eigen(mesh, spec)?;
+    let solved = solve_emw_modes(&asm)?;
+    let r = emw_eigen_fields(mesh, spec, &asm, &solved)?;
+    Ok(SolveResult { seconds: t0.elapsed().as_secs_f64(), ..r })
+}
+
+/// Stage 1 of the 3D EM eigenfrequency kernel: Nedelec numbering, `K` and `M` (PML stretch, anisotropy) reduced by the PEC
+/// walls and the periodic pairs, and the gradient matrix that spans the null space of the curl-curl operator.
+pub(crate) struct EmwAssembly {
+    pub(crate) order: usize,
+    pub(crate) n: usize,
+    pub(crate) nred: usize,
+    pub(crate) ned: Ned3,
+    pub(crate) red: crate::periodic::Reduction,
+    pub(crate) kc: CCsr,
+    pub(crate) mc: CCsr,
+    pub(crate) g_red: CCsr,
+    pub(crate) g_h: CCsr,
+    pub(crate) f0: f64,
+    pub(crate) sigma: f64,
+    pub(crate) n_modes: usize,
+    pub(crate) f_search: f64,
+}
+
+/// Stage 2 output: complex frequencies (Hz) with the index of their reduced vector, sorted by real part.
+pub(crate) struct EmwSolve {
+    pub(crate) freqs: Vec<(C, usize)>,
+    pub(crate) vectors: Vec<Vec<C>>,
+    pub(crate) dim: usize,
+    pub(crate) converged: bool,
+}
+
+pub(crate) fn assemble_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<EmwAssembly, String> {
     if mesh.dim != 3 {
         return Err("the Eigenfrequency study of EM waves needs a 3D mesh".into());
     }
@@ -469,11 +502,19 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
     let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
     let sigma = (2.0 * std::f64::consts::PI * f0 / C0).powi(2);
+    Ok(EmwAssembly { order, n, nred, ned, red, kc, mc, g_red, g_h, f0, sigma, n_modes, f_search })
+}
+
+/// Stage 2: the eigenpairs `K x = k0^2 M x` nearest the shift with the gradients projected out (real symmetric route with
+/// shift-invert, or the complex route for absorbing layers and Floquet phases).
+pub(crate) fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
+    let (kc, mc, g_red, g_h, sigma, n_modes) = (&asm.kc, &asm.mc, &asm.g_red, &asm.g_h, asm.sigma, asm.n_modes);
+    let mut tl = Instant::now();
     // eigenvalue lambda = k0^2: K x = lambda M x
     let mut freqs: Vec<(C, usize)> = vec![];
     let (vectors, dim, converged): (Vec<Vec<C>>, usize, bool);
-    if is_real(&kc) && is_real(&mc) && is_real(&g_red) {
-        let (kr, mr, gr) = (to_real(&kc), to_real(&mc), to_real(&g_red));
+    if is_real(kc) && is_real(mc) && is_real(g_red) {
+        let (kr, mr, gr) = (to_real(kc), to_real(mc), to_real(g_red));
         crate::sms::lap(&mut tl, "emw3d: matrices");
         let gt = gr.transpose();
         let s_mat = crate::amg::spmm(&gt, &crate::amg::spmm(&mr, &gr));
@@ -500,7 +541,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
         converged = pairs.converged;
     } else {
         // complex: absorbing layers or Floquet phases. Projection x - G S^-1 G^H M x with S = G^H M G
-        let s_c = crate::periodic::ccsr_mul(&g_h, &crate::periodic::ccsr_mul(&mc, &g_red));
+        let s_c = crate::periodic::ccsr_mul(g_h, &crate::periodic::ccsr_mul(mc, g_red));
         let s_solver = crate::csparse::CSolver::new(&s_c)?;
         let project = |x: &mut Vec<C>| {
             let t = mc.matvec(x);
@@ -529,6 +570,15 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     }
     crate::sms::lap(&mut tl, "emw3d: eigenvalue iteration");
     freqs.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
+    Ok(EmwSolve { freqs, vectors, dim, converged })
+}
+
+/// Stage 3: plot fields and per-cell complex E of every mode at the quadratic nodes, the frequencies and Q, and the
+/// polarization analysis.
+pub(crate) fn emw_eigen_fields(mesh: &SimplexMesh, spec: &ProblemSpec, asm: &EmwAssembly, solved: &EmwSolve) -> Result<SolveResult, String> {
+    let (order, n, nred, f0, f_search) = (asm.order, asm.n, asm.nred, asm.f0, asm.f_search);
+    let (ned, red) = (&asm.ned, &asm.red);
+    let (freqs, vectors, dim, converged) = (&solved.freqs, &solved.vectors, solved.dim, solved.converged);
     // fields at the quadratic nodes
     let geo = geometry(mesh);
     let lamn = local_bary(3, 2);
@@ -610,7 +660,7 @@ pub fn solve_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     if f_search <= 0.0 {
         log.push("no search frequency given: modes nearest the fundamental of a box of this size".into());
     }
-    let mut result = SolveResult { order: 2, dim: 3, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() };
+    let mut result = SolveResult { order: 2, dim: 3, solutions, scalars, log, dofs: n, ..Default::default() };
     // Stokes parameters of the modes with respect to the (lateral, normal, propagation) axes of the problem
     let fmax = pol_modes.iter().map(|m| m.neff.0.abs()).fold(0.0, f64::max);
     let mut opts = crate::analysis::AnalysisOptions { value_label: "f (THz)".into(), degeneracy_tol: 1e-6 * fmax, ..Default::default() };

@@ -248,15 +248,15 @@ pub fn von_mises(s: &[f64; 6]) -> f64 {
     (0.5 * ((sx - sy).powi(2) + (sy - sz).powi(2) + (sz - sx).powi(2)) + 3.0 * (sxy * sxy + syz * syz + sxz * sxz)).sqrt()
 }
 
-pub(crate) struct Setup {
-    pub(crate) d: usize,
-    pub(crate) n1: usize,
-    pub(crate) c6: Vec<M6>,
-    pub(crate) fixed: Vec<usize>,
-    pub(crate) vals: Vec<f64>,
+pub struct Setup {
+    pub d: usize,
+    pub n1: usize,
+    pub c6: Vec<M6>,
+    pub fixed: Vec<usize>,
+    pub vals: Vec<f64>,
 }
 
-pub(crate) fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, String> {
+pub fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, String> {
     let d = mesh.dim;
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
@@ -283,10 +283,10 @@ pub(crate) fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, Str
     Ok(Setup { d, n1, c6, fixed, vals })
 }
 
-struct Thermal {
-    alpha: Vec<M3>,
-    t: Vec<f64>,
-    tref: f64,
+pub(crate) struct Thermal {
+    pub(crate) alpha: Vec<M3>,
+    pub(crate) t: Vec<f64>,
+    pub(crate) tref: f64,
 }
 
 /// Stage 3 of the real solid kernels: plot fields (`|u|`, `von Mises`, `u{x,y,z}`, stresses under wafer names), the
@@ -429,6 +429,53 @@ pub(crate) fn solve_real_modes(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setu
     Ok((pairs, eig_note))
 }
 
+/// Stage 1 of the static solid kernel: the load vector (boundary tractions in wafer axes, thermal expansion) next to the
+/// stiffness matrix. A static problem needs a fixed boundary.
+pub(crate) struct StaticAssembly {
+    pub(crate) k: Csr,
+    pub(crate) f: Vec<f64>,
+    pub(crate) thermal: Option<Thermal>,
+}
+
+pub(crate) fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, st: &Setup, k: Csr) -> Result<StaticAssembly, String> {
+    if st.fixed.is_empty() {
+        return Err("a static solid problem needs a fixed boundary (otherwise it floats freely)".into());
+    }
+    let (d, n1, order, thk) = (st.d, st.n1, spec.order, spec.thickness);
+    let n = d * n1;
+    let mut f = vec![0.0; n];
+    for bc in &spec.bcs {
+        if let BcKind::Load(t) = &bc.kind {
+            for (comp, &w) in crate::section::wafer_axes(d).iter().enumerate() {
+                if t[w] != 0.0 {
+                    let tc = t[w] * if d == 2 { thk } else { 1.0 };
+                    add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f, d, comp);
+                }
+            }
+        }
+    }
+    let mut thermal: Option<Thermal> = None;
+    if let Some(th) = &spec.thermal {
+        let alpha: Vec<M3> = spec.materials.cell_tensor(mesh, TensorKind::Expansion, Some(0.0))?.iter().map(|a| crate::section::plane_tensor(a, d)).collect();
+        let t = match &th.source {
+            ThermalSource::Uniform(tv) => vec![*tv; n1],
+            ThermalSource::FromHeat => match &state.heat_t {
+                Some(t) if t.len() == n1 => t.clone(),
+                _ => return Err("no heat-transfer result on this mesh and element order; solve Heat transfer first".into()),
+            },
+        };
+        let fth = thermal_load(mesh, &st.c6, &alpha, &t, th.t_ref, order, spec.plane, thk);
+        f.iter_mut().zip(&fth).for_each(|(a, b)| *a += b);
+        thermal = Some(Thermal { alpha, t, tref: th.t_ref });
+    }
+    Ok(StaticAssembly { k, f, thermal })
+}
+
+/// Stage 2: the displacement (component blocks) by the linear solver `spec.solver` names, and its note.
+pub(crate) fn solve_static(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, asm: &StaticAssembly) -> Result<(Vec<f64>, Option<String>), String> {
+    solve_spd(mesh, spec.order, st.d, spec.solver, &asm.k, &asm.f, &st.fixed, &st.vals)
+}
+
 /// Records the time since `t` under the label `what` in the stage log (and on stderr when NYX_PROFILE is set),
 /// then restarts `t`. See `progress::lap` for how labels are treated.
 pub(crate) fn lap(t: &mut Instant, what: &str) {
@@ -458,38 +505,11 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
     lap(&mut tl, "stiffness assembly");
     match &spec.study {
         Study::Static => {
-            if st.fixed.is_empty() {
-                return Err("a static solid problem needs a fixed boundary (otherwise it floats freely)".into());
-            }
-            let mut f = vec![0.0; n];
-            for bc in &spec.bcs {
-                if let BcKind::Load(t) = &bc.kind {
-                    for (comp, &w) in crate::section::wafer_axes(d).iter().enumerate() {
-                        if t[w] != 0.0 {
-                            let tc = t[w] * if d == 2 { thk } else { 1.0 };
-                            add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f, d, comp);
-                        }
-                    }
-                }
-            }
-            let mut thermal: Option<Thermal> = None;
-            if let Some(th) = &spec.thermal {
-                let alpha: Vec<M3> = spec.materials.cell_tensor(mesh, TensorKind::Expansion, Some(0.0))?.iter().map(|a| crate::section::plane_tensor(a, d)).collect();
-                let t = match &th.source {
-                    ThermalSource::Uniform(tv) => vec![*tv; n1],
-                    ThermalSource::FromHeat => match &state.heat_t {
-                        Some(t) if t.len() == n1 => t.clone(),
-                        _ => return Err("no heat-transfer result on this mesh and element order; solve Heat transfer first".into()),
-                    },
-                };
-                let fth = thermal_load(mesh, &st.c6, &alpha, &t, th.t_ref, order, spec.plane, thk);
-                f.iter_mut().zip(&fth).for_each(|(a, b)| *a += b);
-                thermal = Some(Thermal { alpha, t, tref: th.t_ref });
-            }
+            let asm = assemble_static(mesh, spec, state, &st, k)?;
             lap(&mut tl, "loads");
-            let (u, note) = solve_spd(mesh, order, d, spec.solver, &k, &f, &st.fixed, &st.vals)?;
+            let (u, note) = solve_static(mesh, spec, &st, &asm)?;
             lap(&mut tl, "linear solve");
-            let (fields, disp, cells) = fields_of(mesh, &u, order, &st, spec.plane, thermal.as_ref(), true);
+            let (fields, disp, cells) = fields_of(mesh, &u, order, &st, spec.plane, asm.thermal.as_ref(), true);
             lap(&mut tl, "fields (gradients, stress, averaging)");
             let umax = fields[0].values.iter().cloned().fold(0.0, f64::max);
             let vmax = fields.iter().find(|f| f.name == "von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);

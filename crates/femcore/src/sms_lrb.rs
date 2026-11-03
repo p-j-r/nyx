@@ -163,7 +163,36 @@ pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize)
 /// `sms.rs` (2D plane problems and 3D).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant) -> Result<crate::problem::SolveResult, String> {
-    use crate::problem::*;
+    let asm = assemble_lrb(mesh, spec, st, k, m, rho_cells, labels, n_modes, f_search)?;
+    let solved = solve_lrb_modes(&asm)?;
+    let r = lrb_fields(mesh, &asm, &solved)?;
+    Ok(crate::problem::SolveResult { seconds: t0.elapsed().as_secs_f64(), ..r })
+}
+
+/// Stage 1 of the solid kernel with low-reflecting boundaries: stiffness, mass and the boundary damping on the free dofs
+/// (the eigenproblem is quadratic in the frequency).
+pub(crate) struct LrbAssembly {
+    pub order: usize,
+    pub d: usize,
+    pub n: usize,
+    pub kf: CCsr,
+    pub mf: CCsr,
+    pub cf: Csr,
+    pub free: Vec<usize>,
+    pub n_modes: usize,
+    pub f_search: f64,
+}
+
+/// Stage 2 output: complex angular frequencies and the free-dof vectors of the converged modes.
+pub struct LrbSolve {
+    pub omegas: Vec<C>,
+    pub vectors: Vec<Vec<C>>,
+    pub converged: bool,
+    pub dim: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn assemble_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64) -> Result<LrbAssembly, String> {
     if f_search <= 0.0 {
         return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());
     }
@@ -180,10 +209,24 @@ pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, 
     let mf = to_complex(&m.submatrix(&free, &free));
     let cfull = damping_matrix(mesh, &st.c6, rho_cells, labels, spec.order, d);
     let cf = cfull.submatrix(&free, &free);
-    let (omegas, vecs, converged, dim) = quadratic_modes(&kf, &mf, &cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
+    Ok(LrbAssembly { order: spec.order, d, n, kf, mf, cf, free, n_modes, f_search })
+}
+
+/// Stage 2: the quadratic eigenpairs nearest the search frequency.
+pub(crate) fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String> {
+    let (omegas, vectors, converged, dim) = quadratic_modes(&asm.kf, &asm.mf, &asm.cf, 2.0 * std::f64::consts::PI * asm.f_search, asm.n_modes)?;
     if omegas.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
     }
+    Ok(LrbSolve { omegas, vectors, converged, dim })
+}
+
+/// Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q.
+pub(crate) fn lrb_fields(mesh: &SimplexMesh, asm: &LrbAssembly, solved: &LrbSolve) -> Result<crate::problem::SolveResult, String> {
+    use crate::problem::*;
+    let (n, d) = (asm.n, asm.d);
+    let (omegas, vecs, free) = (&solved.omegas, &solved.vectors, &asm.free);
+    let (converged, dim) = (solved.converged, solved.dim);
     let mut order_idx: Vec<usize> = (0..omegas.len()).collect();
     order_idx.sort_by(|&a, &b| omegas[a].re.partial_cmp(&omegas[b].re).unwrap());
     let mut solutions = vec![];
@@ -194,7 +237,7 @@ pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, 
         for (a, &dof) in free.iter().enumerate() {
             u[dof] = vecs[i][a];
         }
-        let (fields, disp, cells) = crate::sms::complex_mode_fields(mesh, spec.order, &u);
+        let (fields, disp, cells) = crate::sms::complex_mode_fields(mesh, asm.order, &u);
         let q = if f.im.abs() > 0.0 { f.re / (2.0 * f.im.abs()) } else { f64::INFINITY };
         solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(f.re), ..Default::default() });
         scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
@@ -203,5 +246,5 @@ pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, 
         }
     }
     let log = vec![format!("low-reflecting boundaries: quadratic eigenproblem solved as a pencil of size {}, Krylov dimension {dim}{}", 2 * free.len(), if converged { "" } else { " (not every pair converged; those are omitted)" })];
-    Ok(SolveResult { order: spec.order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() })
+    Ok(SolveResult { order: asm.order, dim: d, solutions, scalars, log, dofs: n, ..Default::default() })
 }

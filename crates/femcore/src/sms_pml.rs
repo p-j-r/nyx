@@ -9,7 +9,7 @@
 //! with complex symmetric K and M. The frequency is `f = omega / (2 pi)` (complex) and the
 //! quality factor `Q = Re f / (2 |Im f|)`.
 
-use crate::csparse::{c, eigs_complex, CCoo, C};
+use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
 use crate::ems_pml::cell_stretches;
 use crate::fem::*;
 use crate::mesh::SimplexMesh;
@@ -39,6 +39,35 @@ fn b_matrix_c(g: &[C], nloc: usize, d: usize, b: &mut [C]) {
 
 pub fn solve_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
     let t0 = Instant::now();
+    let asm = assemble_solid_pml(mesh, spec)?;
+    let solved = solve_pml_modes(&asm)?;
+    let r = pml_fields(mesh, &asm, &solved)?;
+    Ok(SolveResult { seconds: t0.elapsed().as_secs_f64(), ..r })
+}
+
+/// Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the
+/// stretch determinant) on the free dofs.
+pub struct PmlAssembly {
+    pub order: usize,
+    pub d: usize,
+    pub n: usize,
+    pub kff: CCsr,
+    pub mff: CCsr,
+    pub free: Vec<usize>,
+    pub n_modes: usize,
+    pub f_search: f64,
+    pub has_fixed: bool,
+}
+
+/// Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors.
+pub struct PmlSolve {
+    pub freqs: Vec<(usize, C)>,
+    pub vectors: Vec<Vec<C>>,
+    pub dim: usize,
+    pub converged: bool,
+}
+
+pub fn assemble_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<PmlAssembly, String> {
     let order = spec.order;
     let st = setup(mesh, spec)?;
     let (d, n1) = (st.d, st.n1);
@@ -123,8 +152,13 @@ pub fn solve_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
     }
     let kff = kfull.submatrix(&free, &free);
     let mff = mfull.submatrix(&free, &free);
-    let sigma = if f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
-    let pairs = eigs_complex(&kff, &mff, c(sigma, 0.0), n_modes, 1e-9, 600)?;
+    Ok(PmlAssembly { order, d, n, kff, mff, free, n_modes, f_search, has_fixed: !st.fixed.is_empty() })
+}
+
+/// Stage 2: the complex eigenpairs nearest the search frequency.
+pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String> {
+    let sigma = if asm.f_search > 0.0 { (2.0 * std::f64::consts::PI * asm.f_search).powi(2) } else { -1.0 };
+    let pairs = eigs_complex(&asm.kff, &asm.mff, c(sigma, 0.0), asm.n_modes, 1e-9, 600)?;
     // frequencies, sorted by real part
     let mut freqs: Vec<(usize, C)> = pairs.values.iter().enumerate().map(|(i, l)| {
         let mut f = l.sqrt() / (2.0 * std::f64::consts::PI);
@@ -134,14 +168,18 @@ pub fn solve_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
         (i, f)
     }).collect();
     freqs.sort_by(|a, b| a.1.re.partial_cmp(&b.1.re).unwrap());
-    let nloc_p = mesh.nloc(order);
-    let _ = nloc_p;
+    Ok(PmlSolve { freqs, vectors: pairs.vectors.clone(), dim: pairs.dim, converged: pairs.converged })
+}
+
+/// Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q.
+pub fn pml_fields(mesh: &SimplexMesh, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String> {
+    let (order, d, n) = (asm.order, asm.d, asm.n);
     let mut solutions = vec![];
     let mut scalars = vec![];
-    for (j, (i, f)) in freqs.iter().enumerate() {
+    for (j, (i, f)) in solved.freqs.iter().enumerate() {
         let mut u = vec![c(0.0, 0.0); n];
-        for (a, &dof) in free.iter().enumerate() {
-            u[dof] = pairs.vectors[*i][a];
+        for (a, &dof) in asm.free.iter().enumerate() {
+            u[dof] = solved.vectors[*i][a];
         }
         let (fields, disp, cells) = crate::sms::complex_mode_fields(mesh, order, &u);
         let q = if f.im.abs() > 0.0 { f.re / (2.0 * f.im.abs()) } else { f64::INFINITY };
@@ -151,9 +189,9 @@ pub fn solve_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveRe
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
         }
     }
-    let mut log = vec![format!("complex eigenproblem with PML, Krylov dimension {}{}", pairs.dim, if pairs.converged { "" } else { " (not fully converged)" })];
-    if st.fixed.is_empty() {
+    let mut log = vec![format!("complex eigenproblem with PML, Krylov dimension {}{}", solved.dim, if solved.converged { "" } else { " (not fully converged)" })];
+    if !asm.has_fixed {
         log.push("no fixed boundary: the lowest modes are rigid-body motions".into());
     }
-    Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() })
+    Ok(SolveResult { order, dim: d, solutions, scalars, log, dofs: n, ..Default::default() })
 }
