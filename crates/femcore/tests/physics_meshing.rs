@@ -207,3 +207,58 @@ fn a_cavity_meshed_from_its_physics_reproduces_the_first_modes() {
         assert!(got[0] > 0.95 * exact[0], "a spurious mode below the first: {got:?}");
     }
 }
+
+#[test]
+fn a_real_stretch_layer_on_an_adapted_cavity_equals_the_longer_cavity() {
+    use femcore::meshers::adapt::pml::PmlSpec;
+    use femcore::pml3::{add_pml_3d, apply_materials};
+    // PML with the real stretch 2 over a layer of d/2 on the +z end equals a cavity of length d + 2 * d / 2 = 2d. The physical block is
+    // first adapted to the physics; its box faces, edges and corners stay exact, so the layers can be swept from it
+    let (a, b, d) = (0.04, 0.03, 0.02);
+    let exact = cavity_modes(a, b, 2.0 * d, 20e9);
+    let start = common::block(a, b, d, 2, 2, 2);
+    let mut spec = ProblemSpec::new(Physics::Emw);
+    spec.order = 2;
+    spec.materials.default.insert("eps_r".into(), 1.0);
+    spec.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * exact[0] };
+    let (phys, _) = adapt_tets(&start, &spec, &PhysicsSizing::default(), a, 0.4, &AdaptOptions3::default()).unwrap();
+    let mut pspec = PmlSpec::<3>::uniform(0.0, 0);
+    pspec.thickness[2][1] = 0.5 * d;
+    pspec.layers[2][1] = 3;
+    pspec.outer_label = Some(4);
+    let pb = add_pml_3d(&phys, &pspec, 0.0, 0.0, 2.0).unwrap();
+    assert!(pb.cells.ty("prism").is_some() && pb.split.prisms > 0, "the face layer is prisms");
+    apply_materials(&pb, &mut spec.materials);
+    // PML cells of the face region carry a z stretch only
+    assert!(pb.pml.values().all(|p| p.z != femcore::problem::PmlDir::Off && p.x == femcore::problem::PmlDir::Off));
+    let r = femcore::solve::solve(&pb.mesh, &spec, &mut SolveState::default()).unwrap();
+    let got: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
+    let worst = got.iter().zip(&exact).map(|(g, e)| (g / e - 1.0).abs()).fold(0.0, f64::max);
+    eprintln!("adapted block {} tets + layers = {} tets ({} prisms cut), worst of 4 modes {worst:.2e}", phys.n_cells(), pb.mesh.n_cells(), pb.split.prisms);
+    assert!(worst < 5e-3, "{got:?} vs {exact:?}");
+}
+
+#[test]
+fn layers_on_all_six_sides_with_a_unit_stretch_equal_the_bigger_cavity() {
+    use femcore::meshers::adapt::pml::PmlSpec;
+    use femcore::pml3::{add_pml_3d, apply_materials};
+    // re = 1 and no loss: the layers are plain vacuum. Faces are prisms, edges and corners hexahedra; all 26 layer domains are in play
+    let (a, b, d, t) = (0.04, 0.03, 0.02, 0.01);
+    let exact = cavity_modes(a + 2.0 * t, b + 2.0 * t, d + 2.0 * t, 20e9);
+    let phys = common::block(a, b, d, 4, 3, 2);
+    let mut spec = ProblemSpec::new(Physics::Emw);
+    spec.order = 2;
+    spec.materials.default.insert("eps_r".into(), 1.0);
+    spec.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * exact[0] };
+    let mut pspec = PmlSpec::<3>::uniform(t, 2);
+    pspec.outer_label = Some(1);
+    let pb = add_pml_3d(&phys, &pspec, 0.0, 0.0, 1.0).unwrap();
+    assert_eq!(pb.pml.len(), 26);
+    assert!(pb.split.hexes > 0 && pb.split.prisms > 0);
+    apply_materials(&pb, &mut spec.materials);
+    let r = femcore::solve::solve(&pb.mesh, &spec, &mut SolveState::default()).unwrap();
+    let got: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
+    let worst = got.iter().zip(&exact).map(|(g, e)| (g / e - 1.0).abs()).fold(0.0, f64::max);
+    eprintln!("{} tets ({} hexes, {} prisms cut): worst of 4 modes {worst:.2e}", pb.mesh.n_cells(), pb.split.hexes, pb.split.prisms);
+    assert!(worst < 6e-3, "{got:?} vs {exact:?}");
+}
