@@ -63,6 +63,10 @@ impl SplitReport {
     }
 }
 
+/// The mesh type the physics crates take (`nyx_physics::Mesh`). Today it is the simplex mesh; restructure phase 2 makes it the one native
+/// per-cell-type mesh (ADR 5). Code outside femcore names the mesh through this alias so that change is one line.
+pub type Mesh = SimplexMesh;
+
 #[derive(Clone, Debug)]
 pub struct SimplexMesh {
     pub dim: usize,

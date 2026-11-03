@@ -26,7 +26,7 @@ Elements carry three properties: `code` (where it lives), `adr` (which decisions
 cargo test --release -p femcore --test contracts
 cargo test --release -p geom --test contracts
 cargo test --release -p nyx-store --test contracts
-cd ai && cargo test --release -p nyx-mcp --test contracts
+cargo test --release -p nyx-mcp --test contracts
 bash docs/architecture/check_code_to_adr.sh
 ```
 

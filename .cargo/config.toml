@@ -1,0 +1,5 @@
+# One shared build directory for every jj workspace of this repository (nyx2, nyx2-mesh, ...): the registry dependencies (egui, wgpu, faer) are
+# compiled once. The path is relative to the folder that holds `.cargo`, so it is the sibling folder `nyx2-target` for every workspace.
+# Cargo serialises builds that use the same directory; set CARGO_TARGET_DIR to something else to opt out.
+[build]
+target-dir = "../nyx2-target"

@@ -1,6 +1,20 @@
 [workspace]
 resolver = "2"
-members = ["crates/geom", "crates/femcore", "crates/app", "crates/nyx-store"]
+members = [
+    "crates/geom",
+    "crates/femcore",
+    "crates/nyx-physics",
+    "crates/nyx-dfs",
+    "crates/nyx-sms",
+    "crates/nyx-ems",
+    "crates/nyx-analysis",
+    "crates/nyx-store",
+    "crates/nyx-engine",
+    "crates/nyx-session",
+    "crates/nyx-mcp",
+    "crates/nyx-connect",
+    "crates/app",
+]
 
 [workspace.package]
 version = "0.1.0"

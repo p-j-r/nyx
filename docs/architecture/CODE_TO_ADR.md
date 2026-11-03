@@ -87,8 +87,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/sms*.rs` | 1, 9, 12 | |
 | `crates/femcore/src/periodic.rs` | 12, 9 | Floquet pairs; belongs to no single physics |
 | `crates/femcore/src/ems*.rs` | 1, 9, 12 | |
-| `crates/femcore/src/sbs*.rs` | 1, 9, 12 | |
-| `crates/femcore/src/chips.rs` | 22, 2 | |
+| `crates/femcore/src/optical.rs` | 21, 9 | optical mode sets and field sampling (split out of `sbs.rs` in phase 1) |
 | `crates/femcore/src/usecases/*` | 22, 2 | |
 | `crates/femcore/src/analysis.rs` | 21 | |
 | `crates/femcore/src/polarization.rs` | 21 | |
@@ -139,7 +138,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/emw2d.rs` | 1, 12 | old prefix (R13) |
 | `crates/femcore/tests/emw3d.rs` | 1, 12 | old prefix (R13) |
 | `crates/femcore/tests/pml.rs` | 7 | |
-| `crates/femcore/tests/*` | 9, 12 | physics tests: scalar, solid, solid_kz, solid_pml, brillouin, anisotropic, aniso_optics, amg_solve, common |
+| `crates/femcore/tests/*` | 9, 12 | physics tests: scalar, solid, solid_kz, solid_pml, anisotropic, aniso_optics, amg_solve, common |
 | `crates/femcore/examples/fs_*.rs` | 8 | ported CLI tools |
 | `crates/femcore/examples/mesh_*.rs` | 7, 16 | mesher studies |
 | `crates/femcore/examples/chip_*.rs` | 22 | |
@@ -147,15 +146,23 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | features `hdf5-metno`, `phdf5`, `portable-kernels` |
 | `crates/nyx-store/*` | 14 | |
-| `crates/app/src/connect.rs` | 15 | duplicate of ai/nyx-connect (R07) |
+| `crates/app/src/connect.rs` | 15 | duplicate of crates/nyx-connect (R07) |
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |
 | `crates/app/src/*` | 23 | |
 | `crates/app/*` | 23 | |
-| `ai/nyx-mcp/tests/contracts.rs` | 19, 15 | |
-| `ai/nyx-mcp/*` | 15 | |
-| `ai/nyx-session/*` | 15 | |
-| `ai/nyx-connect/*` | 15 | |
-| `ai/*` | 15 | |
+| `crates/nyx-mcp/tests/contracts.rs` | 19, 15 | |
+| `crates/nyx-mcp/*` | 15 | moved from `ai/` into the root workspace (ADR 26) |
+| `crates/nyx-session/*` | 15 | dissolved in phase 7 |
+| `crates/nyx-connect/*` | 15 | |
+| `tools/*` | 20 | baseline and helper scripts |
+| `.cargo/*` | 26, 27 | shared target directory |
+| `crates/nyx-physics/*` | 25, 19 | the Physics trait, envelope, descriptors, registry |
+| `crates/nyx-dfs/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
+| `crates/nyx-sms/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
+| `crates/nyx-ems/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
+| `crates/nyx-analysis/*` | 25, 21 | skeleton: the Analysis trait; content moves in phase 5 |
+| `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
+| `crates/nyx-engine/*` | 25, 23, 26 | skeleton: registry from cargo features; Project and commands in phase 7 |
 <!-- map:end -->
 
 ## Gaps this index shows

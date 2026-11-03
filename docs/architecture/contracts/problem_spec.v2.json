@@ -1,0 +1,89 @@
+[
+  {
+    "bcs": [
+      {
+        "kind": "convection",
+        "on": "outer",
+        "params": {
+          "h": 10.0,
+          "t_ext": 293.15
+        }
+      }
+    ],
+    "materials": {},
+    "order": 1,
+    "physics": "dfs",
+    "study": {
+      "kind": "heat_transient",
+      "params": {
+        "n_out": 10,
+        "t0": "293.15 + 50*exp(-((x-0.5)^2)/0.01)",
+        "t_end": 2.0
+      }
+    }
+  },
+  {
+    "bcs": [
+      {
+        "kind": "fixed",
+        "on": "outer & plane(x = 0)",
+        "params": {
+          "ux": 0.0,
+          "uy": 0.0,
+          "uz": 0.0
+        }
+      }
+    ],
+    "materials": {
+      "beam": {
+        "E": 169000000000.0,
+        "nu": 0.22,
+        "rho": 2329.0
+      }
+    },
+    "order": 2,
+    "params": {
+      "inactive": [
+        "air"
+      ],
+      "plane": "strain"
+    },
+    "physics": "sms",
+    "study": {
+      "kind": "eigenfrequency",
+      "params": {
+        "f_search": 1000000000.0,
+        "n_modes": 6
+      }
+    }
+  },
+  {
+    "bcs": [
+      {
+        "kind": "pml",
+        "on": "clad_pml",
+        "params": {
+          "strength": 3.0,
+          "x": "plus"
+        }
+      }
+    ],
+    "materials": {
+      "clad": "silica",
+      "core": {
+        "eps_r": 12.08
+      }
+    },
+    "order": 2,
+    "physics": "ems",
+    "study": {
+      "kind": "modes",
+      "params": {
+        "evanescent": false,
+        "freq": 193400000000000.0,
+        "n_modes": 4,
+        "n_target": 2.4
+      }
+    }
+  }
+]

@@ -1,0 +1,186 @@
+{
+  "bc_kinds": [
+    {
+      "applies": "boundary",
+      "doc": "",
+      "kind": "fixed",
+      "name": "Fixed",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Displacement",
+          "name": "ux",
+          "required": false,
+          "unit": "m"
+        }
+      ]
+    }
+  ],
+  "fields": [
+    {
+      "components": [
+        "x",
+        "y",
+        "z"
+      ],
+      "doc": "field",
+      "name": "E",
+      "unit": "V/m"
+    }
+  ],
+  "id": "tst",
+  "link": {
+    "field": "tst.T",
+    "role": "temperature"
+  },
+  "params": [
+    {
+      "doc": "",
+      "kind": {
+        "default": "strain",
+        "options": [
+          "strain",
+          "stress"
+        ],
+        "type": "choice"
+      },
+      "label": "Plane",
+      "name": "plane",
+      "required": false,
+      "unit": ""
+    }
+  ],
+  "properties": [
+    {
+      "default": null,
+      "kind": "scalar",
+      "label": "Young's modulus",
+      "name": "E",
+      "needed_by": [],
+      "unit": "Pa"
+    },
+    {
+      "default": 1.0,
+      "kind": "tensor",
+      "label": "Permittivity",
+      "name": "eps_r",
+      "needed_by": [
+        "modes"
+      ],
+      "unit": ""
+    }
+  ],
+  "sizing": {
+    "headroom": 1.5,
+    "order": 2,
+    "wavelengths": {
+      "core": 5e-7
+    }
+  },
+  "studies": [
+    {
+      "dims": "two",
+      "doc": "a study",
+      "kind": "modes",
+      "name": "Modes",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 1000000000.0,
+            "max": 1e+18,
+            "min": 1.0,
+            "type": "number"
+          },
+          "label": "Frequency",
+          "name": "freq",
+          "required": true,
+          "unit": "Hz"
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 4,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Evanescent",
+          "name": "evanescent",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": "a",
+            "options": [
+              "a",
+              "b"
+            ],
+            "type": "choice"
+          },
+          "label": "Kind",
+          "name": "kind",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Vector",
+          "name": "v",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": "x",
+            "type": "text"
+          },
+          "label": "Expression",
+          "name": "expr",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": [],
+            "type": "names"
+          },
+          "label": "Skipped regions",
+          "name": "skip",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    }
+  ]
+}

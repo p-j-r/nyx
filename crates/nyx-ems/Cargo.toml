@@ -1,0 +1,11 @@
+[package]
+name = "nyx-ems"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The ems physics of nyx: descriptors now, kernels moved in from femcore in restructure phase 4"
+
+[dependencies]
+nyx-physics = { path = "../nyx-physics" }
+femcore = { path = "../femcore" }
+serde_json = { version = "1", features = ["float_roundtrip"] }

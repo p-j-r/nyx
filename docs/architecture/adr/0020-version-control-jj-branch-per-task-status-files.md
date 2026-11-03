@@ -6,6 +6,8 @@ Date: 2026-11-03
 
 Accepted (`CLAUDE.md`, commit `a047506`; paul wants jj used, 2026-11-03).
 
+Refined by ADR 27: the restructure runs in the repository `nyx2`, one jj workspace per working session.
+
 ## Context
 
 nyx is built by many short working sessions, human and AI, on one machine, with `main` local and unpushed. Work was lost or tangled when sessions shared one working copy: a thread "switched the shared `nyx-jj` working copy mid-session" (`MISSING_FEATURES.md` section 6), uncommitted `geom` and `ai/` trees lived only in the main checkout for days (`CAPABILITIES_MEMO.md`, section 0.1).

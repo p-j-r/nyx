@@ -1,0 +1,826 @@
+{
+  "bc_kinds": [
+    {
+      "applies": "boundary",
+      "doc": "Constrains the listed displacement components (wafer axes) to given values.",
+      "kind": "fixed",
+      "name": "Fixed constraint",
+      "params": [
+        {
+          "doc": "constrains this component to the value; absent: free",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Displacement along x",
+          "name": "ux",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "constrains this component to the value; absent: free",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Displacement along y",
+          "name": "uy",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "constrains this component to the value; absent: free",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Displacement along z",
+          "name": "uz",
+          "required": false,
+          "unit": "m"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Traction (force per area) in wafer axes.",
+      "kind": "load",
+      "name": "Boundary load",
+      "params": [
+        {
+          "doc": "x, y, z",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Traction",
+          "name": "traction",
+          "required": false,
+          "unit": "Pa"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Absorbing traction for outgoing pressure and shear waves (eigenfrequency studies).",
+      "kind": "low_reflecting",
+      "name": "Low-reflecting boundary",
+      "params": []
+    },
+    {
+      "applies": "domain",
+      "doc": "Absorbing layer by coordinate stretching in the region.",
+      "kind": "pml",
+      "name": "Perfectly matched layer",
+      "params": [
+        {
+          "doc": "which side of the region the layer absorbs towards",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along x",
+          "name": "x",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region the layer absorbs towards",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along y (3D only)",
+          "name": "y",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region the layer absorbs towards",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along z",
+          "name": "z",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "stretch s = re - j strength t^order",
+          "kind": {
+            "default": 3.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Strength",
+          "name": "strength",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 2.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Order",
+          "name": "order",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Real part",
+          "name": "re",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase).",
+      "kind": "periodic",
+      "name": "Floquet-periodic pair",
+      "params": [
+        {
+          "doc": "a boundary selector",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Destination boundary",
+          "name": "dest",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "k . d over the period",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Phase advance",
+          "name": "phase",
+          "required": false,
+          "unit": "rad"
+        }
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "field": "sms.u",
+      "role": "displacement"
+    }
+  ],
+  "fields": {
+    "eigenfrequency": [
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "displacement of a mode (normalised)",
+        "name": "u",
+        "unit": "a.u."
+      }
+    ],
+    "static": [
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "displacement (2D: x and z)",
+        "name": "u",
+        "unit": "m"
+      },
+      {
+        "components": [],
+        "doc": "equivalent stress",
+        "name": "von Mises",
+        "unit": "Pa"
+      }
+    ]
+  },
+  "id": "sms",
+  "imports": [
+    {
+      "field": "sms.temperature",
+      "role": "temperature"
+    }
+  ],
+  "name": "Solid mechanics",
+  "params": [
+    {
+      "doc": "",
+      "kind": {
+        "default": "strain",
+        "options": [
+          "strain",
+          "stress"
+        ],
+        "type": "choice"
+      },
+      "label": "Plane assumption (2D)",
+      "name": "plane",
+      "required": false,
+      "unit": ""
+    },
+    {
+      "doc": "",
+      "kind": {
+        "default": 1.0,
+        "max": null,
+        "min": 2.2250738585072014e-308,
+        "type": "number"
+      },
+      "label": "Thickness (2D plane stress)",
+      "name": "thickness",
+      "required": false,
+      "unit": "m"
+    },
+    {
+      "doc": "`imported` takes the temperature exported by another physics (dfs)",
+      "kind": {
+        "default": "off",
+        "options": [
+          "off",
+          "uniform",
+          "imported"
+        ],
+        "type": "choice"
+      },
+      "label": "Thermal expansion",
+      "name": "thermal",
+      "required": false,
+      "unit": ""
+    },
+    {
+      "doc": "used with thermal = uniform",
+      "kind": {
+        "default": 293.15,
+        "max": null,
+        "min": null,
+        "type": "number"
+      },
+      "label": "Uniform temperature",
+      "name": "temperature",
+      "required": false,
+      "unit": "K"
+    },
+    {
+      "doc": "the stress-free temperature",
+      "kind": {
+        "default": 293.15,
+        "max": null,
+        "min": null,
+        "type": "number"
+      },
+      "label": "Reference temperature",
+      "name": "t_ref",
+      "required": false,
+      "unit": "K"
+    },
+    {
+      "doc": "regions with no stiffness or mass (for example air); the dofs only they touch are held at zero",
+      "kind": {
+        "default": [],
+        "type": "names"
+      },
+      "label": "Inactive regions",
+      "name": "inactive",
+      "required": false,
+      "unit": ""
+    }
+  ],
+  "properties": [
+    {
+      "default": null,
+      "kind": "scalar",
+      "label": "Young's modulus",
+      "name": "E",
+      "needed_by": [],
+      "unit": "Pa"
+    },
+    {
+      "default": null,
+      "kind": "scalar",
+      "label": "Poisson's ratio",
+      "name": "nu",
+      "needed_by": [],
+      "unit": ""
+    },
+    {
+      "default": null,
+      "kind": "scalar",
+      "label": "Density",
+      "name": "rho",
+      "needed_by": [
+        "eigenfrequency"
+      ],
+      "unit": "kg/m^3"
+    },
+    {
+      "default": 0.0,
+      "kind": "tensor",
+      "label": "Thermal expansion",
+      "name": "alpha",
+      "needed_by": [
+        "static"
+      ],
+      "unit": "1/K"
+    },
+    {
+      "default": null,
+      "kind": "tensor",
+      "label": "Elastic matrix (Voigt)",
+      "name": "stiffness",
+      "needed_by": [],
+      "unit": "Pa"
+    }
+  ],
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "bcs": {
+        "items": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "Constrains the listed displacement components (wafer axes) to given values.",
+              "properties": {
+                "kind": {
+                  "const": "fixed"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "ux": {
+                      "default": 0.0,
+                      "description": "Displacement along x [m]. constrains this component to the value; absent: free",
+                      "type": "number"
+                    },
+                    "uy": {
+                      "default": 0.0,
+                      "description": "Displacement along y [m]. constrains this component to the value; absent: free",
+                      "type": "number"
+                    },
+                    "uz": {
+                      "default": 0.0,
+                      "description": "Displacement along z [m]. constrains this component to the value; absent: free",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Traction (force per area) in wafer axes.",
+              "properties": {
+                "kind": {
+                  "const": "load"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "traction": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Traction [Pa]. x, y, z",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Absorbing traction for outgoing pressure and shear waves (eigenfrequency studies).",
+              "properties": {
+                "kind": {
+                  "const": "low_reflecting"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Absorbing layer by coordinate stretching in the region.",
+              "properties": {
+                "kind": {
+                  "const": "pml"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "order": {
+                      "default": 2.0,
+                      "description": "Order",
+                      "type": "number"
+                    },
+                    "re": {
+                      "default": 1.0,
+                      "description": "Real part",
+                      "type": "number"
+                    },
+                    "strength": {
+                      "default": 3.0,
+                      "description": "Strength. stretch s = re - j strength t^order",
+                      "type": "number"
+                    },
+                    "x": {
+                      "default": "off",
+                      "description": "Absorb along x. which side of the region the layer absorbs towards",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "y": {
+                      "default": "off",
+                      "description": "Absorb along y (3D only). which side of the region the layer absorbs towards",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "z": {
+                      "default": "off",
+                      "description": "Absorb along z. which side of the region the layer absorbs towards",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase).",
+              "properties": {
+                "kind": {
+                  "const": "periodic"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dest": {
+                      "default": "",
+                      "description": "Destination boundary. a boundary selector",
+                      "type": "string"
+                    },
+                    "phase": {
+                      "default": 0.0,
+                      "description": "Phase advance [rad]. k . d over the period",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "dest"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "materials": {
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "description": "a material by name",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "E": {
+                  "description": "Young's modulus [Pa]",
+                  "type": "number"
+                },
+                "alpha": {
+                  "description": "Thermal expansion [1/K]",
+                  "type": "number"
+                },
+                "nu": {
+                  "description": "Poisson's ratio []",
+                  "type": "number"
+                },
+                "rho": {
+                  "description": "Density [kg/m^3]",
+                  "type": "number"
+                },
+                "stiffness": {
+                  "description": "Elastic matrix (Voigt) [Pa]",
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "description": "material by region name",
+        "type": "object"
+      },
+      "order": {
+        "maximum": 9,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "inactive": {
+            "default": [],
+            "description": "Inactive regions. regions with no stiffness or mass (for example air); the dofs only they touch are held at zero",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "plane": {
+            "default": "strain",
+            "description": "Plane assumption (2D)",
+            "enum": [
+              "strain",
+              "stress"
+            ],
+            "type": "string"
+          },
+          "t_ref": {
+            "default": 293.15,
+            "description": "Reference temperature [K]. the stress-free temperature",
+            "type": "number"
+          },
+          "temperature": {
+            "default": 293.15,
+            "description": "Uniform temperature [K]. used with thermal = uniform",
+            "type": "number"
+          },
+          "thermal": {
+            "default": "off",
+            "description": "Thermal expansion. `imported` takes the temperature exported by another physics (dfs)",
+            "enum": [
+              "off",
+              "uniform",
+              "imported"
+            ],
+            "type": "string"
+          },
+          "thickness": {
+            "default": 1.0,
+            "description": "Thickness (2D plane stress) [m]",
+            "minimum": 2.2250738585072014e-308,
+            "type": "number"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "physics": {
+        "const": "sms"
+      },
+      "study": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Displacement and stress under fixed constraints, loads and thermal expansion.",
+            "properties": {
+              "kind": {
+                "const": "static"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Vibration modes. With `kz` on a 2D cross-section the modes travel along y with that wave number; with absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
+            "properties": {
+              "kind": {
+                "const": "eigenfrequency"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "f_search": {
+                    "default": 0.0,
+                    "description": "Search around [Hz]. 0 finds the lowest modes",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "kz": {
+                    "default": 0.0,
+                    "description": "Out-of-plane wave number [rad/m]. 2D only; positive for a wave along +y. Absent: no propagation along y",
+                    "type": "number"
+                  },
+                  "n_modes": {
+                    "default": 6,
+                    "description": "Number of modes",
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "required": [
+      "physics",
+      "order",
+      "study"
+    ],
+    "title": "nyx problem for Solid mechanics (sms)",
+    "type": "object"
+  },
+  "studies": [
+    {
+      "dims": "both",
+      "doc": "Displacement and stress under fixed constraints, loads and thermal expansion.",
+      "kind": "static",
+      "name": "Static",
+      "params": []
+    },
+    {
+      "dims": "both",
+      "doc": "Vibration modes. With `kz` on a 2D cross-section the modes travel along y with that wave number; with absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
+      "kind": "eigenfrequency",
+      "name": "Eigenfrequencies",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 6,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "0 finds the lowest modes",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Search around",
+          "name": "f_search",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "2D only; positive for a wave along +y. Absent: no propagation along y",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Out-of-plane wave number",
+          "name": "kz",
+          "required": false,
+          "unit": "rad/m"
+        }
+      ]
+    }
+  ]
+}

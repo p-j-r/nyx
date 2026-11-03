@@ -1,0 +1,662 @@
+{
+  "bc_kinds": [
+    {
+      "applies": "domain",
+      "doc": "Absorbing layer by coordinate stretching in the region (x and z on a cross-section, x, y and z in 3D). Outer walls not otherwise described are perfect electric conductors.",
+      "kind": "pml",
+      "name": "Perfectly matched layer",
+      "params": [
+        {
+          "doc": "which side of the region the layer absorbs towards",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along x",
+          "name": "x",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region the layer absorbs towards",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along y (3D only)",
+          "name": "y",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region the layer absorbs towards",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along z",
+          "name": "z",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "stretch s = re - j strength t^order",
+          "kind": {
+            "default": 3.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Strength",
+          "name": "strength",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 2.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Order",
+          "name": "order",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Real part",
+          "name": "re",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity study).",
+      "kind": "periodic",
+      "name": "Floquet-periodic pair",
+      "params": [
+        {
+          "doc": "a boundary selector",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Destination boundary",
+          "name": "dest",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "k . d over the period",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Phase advance",
+          "name": "phase",
+          "required": false,
+          "unit": "rad"
+        }
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "field": "ems.E",
+      "role": "optical_field"
+    }
+  ],
+  "fields": {
+    "axisymmetric_modes": [
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "electric field of a mode (x lateral, z normal, y along the propagation)",
+        "name": "E",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude",
+        "name": "|E|",
+        "unit": "a.u."
+      }
+    ],
+    "cavity": [
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "electric field of a mode",
+        "name": "E",
+        "unit": "a.u."
+      }
+    ],
+    "modes": [
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "electric field of a mode (x lateral, z normal, y along the propagation)",
+        "name": "E",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude",
+        "name": "|E|",
+        "unit": "a.u."
+      }
+    ]
+  },
+  "id": "ems",
+  "imports": [
+    {
+      "field": "ems.temperature",
+      "role": "temperature"
+    }
+  ],
+  "name": "Electromagnetic waves",
+  "params": [],
+  "properties": [
+    {
+      "default": 1.0,
+      "kind": "tensor",
+      "label": "Relative permittivity",
+      "name": "eps_r",
+      "needed_by": [],
+      "unit": ""
+    },
+    {
+      "default": 1.0,
+      "kind": "scalar",
+      "label": "Relative permeability",
+      "name": "mu_r",
+      "needed_by": [],
+      "unit": ""
+    }
+  ],
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "bcs": {
+        "items": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "Absorbing layer by coordinate stretching in the region (x and z on a cross-section, x, y and z in 3D). Outer walls not otherwise described are perfect electric conductors.",
+              "properties": {
+                "kind": {
+                  "const": "pml"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "order": {
+                      "default": 2.0,
+                      "description": "Order",
+                      "type": "number"
+                    },
+                    "re": {
+                      "default": 1.0,
+                      "description": "Real part",
+                      "type": "number"
+                    },
+                    "strength": {
+                      "default": 3.0,
+                      "description": "Strength. stretch s = re - j strength t^order",
+                      "type": "number"
+                    },
+                    "x": {
+                      "default": "off",
+                      "description": "Absorb along x. which side of the region the layer absorbs towards",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "y": {
+                      "default": "off",
+                      "description": "Absorb along y (3D only). which side of the region the layer absorbs towards",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "z": {
+                      "default": "off",
+                      "description": "Absorb along z. which side of the region the layer absorbs towards",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity study).",
+              "properties": {
+                "kind": {
+                  "const": "periodic"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dest": {
+                      "default": "",
+                      "description": "Destination boundary. a boundary selector",
+                      "type": "string"
+                    },
+                    "phase": {
+                      "default": 0.0,
+                      "description": "Phase advance [rad]. k . d over the period",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "dest"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "materials": {
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "description": "a material by name",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "eps_r": {
+                  "description": "Relative permittivity []",
+                  "type": "number"
+                },
+                "mu_r": {
+                  "description": "Relative permeability []",
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "description": "material by region name",
+        "type": "object"
+      },
+      "order": {
+        "maximum": 9,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "params": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "physics": {
+        "const": "ems"
+      },
+      "study": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Guided modes of a 2D cross-section at a frequency, propagating along +y as exp(-j beta y); the result is the effective index (loss is n - j k).",
+            "properties": {
+              "kind": {
+                "const": "modes"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "evanescent": {
+                    "default": false,
+                    "description": "Evanescent target. search an imaginary effective index",
+                    "type": "boolean"
+                  },
+                  "freq": {
+                    "default": 193400000000000.0,
+                    "description": "Frequency [Hz]",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "n_modes": {
+                    "default": 4,
+                    "description": "Number of modes",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_target": {
+                    "default": 1.0,
+                    "description": "Effective index near. the modes are searched around this index",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "freq"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Whispering-gallery and other modes of a body of revolution; the mesh is the (r, z) half plane with x = r.",
+            "properties": {
+              "kind": {
+                "const": "axisymmetric_modes"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "azimuthal_order": {
+                    "default": 0,
+                    "description": "Azimuthal order",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "freq": {
+                    "default": 193400000000000.0,
+                    "description": "Frequency [Hz]",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "n_modes": {
+                    "default": 4,
+                    "description": "Number of modes",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_target": {
+                    "default": 1.0,
+                    "description": "Effective index near",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "freq"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Resonant frequencies of a 3D cavity or one period of a Floquet cell.",
+            "properties": {
+              "kind": {
+                "const": "cavity"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "f_search": {
+                    "default": 10000000000.0,
+                    "description": "Search around [Hz]",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "n_modes": {
+                    "default": 6,
+                    "description": "Number of modes",
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "f_search"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "required": [
+      "physics",
+      "order",
+      "study"
+    ],
+    "title": "nyx problem for Electromagnetic waves (ems)",
+    "type": "object"
+  },
+  "studies": [
+    {
+      "dims": "two",
+      "doc": "Guided modes of a 2D cross-section at a frequency, propagating along +y as exp(-j beta y); the result is the effective index (loss is n - j k).",
+      "kind": "modes",
+      "name": "Waveguide modes",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 193400000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Frequency",
+          "name": "freq",
+          "required": true,
+          "unit": "Hz"
+        },
+        {
+          "doc": "the modes are searched around this index",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Effective index near",
+          "name": "n_target",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "search an imaginary effective index",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Evanescent target",
+          "name": "evanescent",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 4,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "two",
+      "doc": "Whispering-gallery and other modes of a body of revolution; the mesh is the (r, z) half plane with x = r.",
+      "kind": "axisymmetric_modes",
+      "name": "Axisymmetric modes",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 193400000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Frequency",
+          "name": "freq",
+          "required": true,
+          "unit": "Hz"
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 0,
+            "max": null,
+            "min": 0,
+            "type": "integer"
+          },
+          "label": "Azimuthal order",
+          "name": "azimuthal_order",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Effective index near",
+          "name": "n_target",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 4,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "three",
+      "doc": "Resonant frequencies of a 3D cavity or one period of a Floquet cell.",
+      "kind": "cavity",
+      "name": "Cavity eigenfrequencies",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 6,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 10000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Search around",
+          "name": "f_search",
+          "required": true,
+          "unit": "Hz"
+        }
+      ]
+    }
+  ]
+}

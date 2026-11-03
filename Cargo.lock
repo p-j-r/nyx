@@ -2815,6 +2815,86 @@ dependencies = [
 ]
 
 [[package]]
+name = "nyx-analysis"
+version = "0.1.0"
+dependencies = [
+ "nyx-physics",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-connect"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-dfs"
+version = "0.1.0"
+dependencies = [
+ "femcore",
+ "nyx-physics",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-ems"
+version = "0.1.0"
+dependencies = [
+ "femcore",
+ "nyx-physics",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-engine"
+version = "0.1.0"
+dependencies = [
+ "nyx-analysis",
+ "nyx-dfs",
+ "nyx-ems",
+ "nyx-physics",
+ "nyx-sms",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-mcp"
+version = "0.1.0"
+dependencies = [
+ "nyx-session",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-physics"
+version = "0.1.0"
+dependencies = [
+ "femcore",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-session"
+version = "0.1.0"
+dependencies = [
+ "femcore",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-sms"
+version = "0.1.0"
+dependencies = [
+ "femcore",
+ "nyx-physics",
+ "serde_json",
+]
+
+[[package]]
 name = "nyx-store"
 version = "0.1.0"
 dependencies = [

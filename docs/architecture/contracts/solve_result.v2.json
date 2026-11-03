@@ -1,0 +1,60 @@
+{
+  "dim": 2,
+  "dofs": 12,
+  "log": [
+    "solving ems on a 2D mesh"
+  ],
+  "order": 2,
+  "physics": "ems",
+  "scalars": [
+    [
+      "neff 1",
+      2.4
+    ],
+    [
+      "polarization 1",
+      "TE"
+    ]
+  ],
+  "seconds": 0.5,
+  "solutions": [
+    {
+      "cell_fields": [
+        {
+          "im": [],
+          "name": "Ex",
+          "nloc": 3,
+          "re": [
+            1.0,
+            2.0,
+            3.0
+          ],
+          "unit": "a.u."
+        }
+      ],
+      "eigenvalue": [
+        2.4,
+        -1e-6
+      ],
+      "fields": [
+        {
+          "components": [
+            "x",
+            "z"
+          ],
+          "name": "E",
+          "unit": "a.u.",
+          "values": [
+            0.0,
+            1.0,
+            0.5,
+            0.25
+          ]
+        }
+      ],
+      "label": "mode 1",
+      "value": 1.0
+    }
+  ],
+  "study": "modes"
+}

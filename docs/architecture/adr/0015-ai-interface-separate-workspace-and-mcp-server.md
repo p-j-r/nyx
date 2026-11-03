@@ -6,6 +6,8 @@ Date: 2026-11-01
 
 Accepted (`docs/MCP_ASSISTANT_PLAN.md` sections 18 to 20; code brought under version control in `36f6b3d`; Connect menu `839efa1`).
 
+Superseded in part by ADR 26: `ai/` is no longer a separate workspace; its crates are in `crates/` and the root workspace.
+
 ## Context
 
 An AI host should be able to build a geometry, mesh it, define a problem, solve and pick a mode, with nyx deciding *how* and the AI deciding *what*. The plan was written under the constraint that `app` and `femcore` stay untouched.

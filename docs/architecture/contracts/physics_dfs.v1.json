@@ -1,0 +1,664 @@
+{
+  "bc_kinds": [
+    {
+      "applies": "boundary",
+      "doc": "Fixed potential (electrostatics).",
+      "kind": "potential",
+      "name": "Electric potential",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Potential",
+          "name": "value",
+          "required": false,
+          "unit": "V"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Zero potential (electrostatics).",
+      "kind": "ground",
+      "name": "Ground",
+      "params": []
+    },
+    {
+      "applies": "boundary",
+      "doc": "Surface charge density (electrostatics).",
+      "kind": "surface_charge",
+      "name": "Surface charge",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Surface charge density",
+          "name": "density",
+          "required": false,
+          "unit": "C/m^2"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Fixed temperature (heat transfer).",
+      "kind": "temperature",
+      "name": "Temperature",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 293.15,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Temperature",
+          "name": "value",
+          "required": false,
+          "unit": "K"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Inward heat flux (heat transfer).",
+      "kind": "flux",
+      "name": "Heat flux",
+      "params": [
+        {
+          "doc": "positive into the body",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Heat flux",
+          "name": "value",
+          "required": false,
+          "unit": "W/m^2"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Newton cooling to an outside temperature (heat transfer).",
+      "kind": "convection",
+      "name": "Convective cooling",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 10.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Heat transfer coefficient",
+          "name": "h",
+          "required": false,
+          "unit": "W/(m^2 K)"
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 293.15,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Outside temperature",
+          "name": "t_ext",
+          "required": false,
+          "unit": "K"
+        }
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "field": "dfs.T",
+      "role": "temperature"
+    },
+    {
+      "field": "dfs.V",
+      "role": "potential"
+    },
+    {
+      "field": "dfs.E",
+      "role": "electric_field"
+    }
+  ],
+  "fields": {
+    "electrostatic": [
+      {
+        "components": [],
+        "doc": "electric potential",
+        "name": "V",
+        "unit": "V"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "electric field (2D: x and z)",
+        "name": "E",
+        "unit": "V/m"
+      }
+    ],
+    "heat_stationary": [
+      {
+        "components": [],
+        "doc": "temperature",
+        "name": "T",
+        "unit": "K"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "heat flux (2D: x and z)",
+        "name": "q",
+        "unit": "W/m^2"
+      }
+    ],
+    "heat_transient": [
+      {
+        "components": [],
+        "doc": "temperature",
+        "name": "T",
+        "unit": "K"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "heat flux (2D: x and z)",
+        "name": "q",
+        "unit": "W/m^2"
+      }
+    ]
+  },
+  "id": "dfs",
+  "imports": [],
+  "name": "Diffusion (electrostatics, heat transfer)",
+  "params": [],
+  "properties": [
+    {
+      "default": null,
+      "kind": "tensor",
+      "label": "Relative permittivity",
+      "name": "eps_r",
+      "needed_by": [
+        "electrostatic"
+      ],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Charge density",
+      "name": "rho_v",
+      "needed_by": [
+        "electrostatic"
+      ],
+      "unit": "C/m^3"
+    },
+    {
+      "default": null,
+      "kind": "tensor",
+      "label": "Thermal conductivity",
+      "name": "k",
+      "needed_by": [
+        "heat_stationary",
+        "heat_transient"
+      ],
+      "unit": "W/(m K)"
+    },
+    {
+      "default": null,
+      "kind": "scalar",
+      "label": "Density",
+      "name": "rho",
+      "needed_by": [
+        "heat_transient"
+      ],
+      "unit": "kg/m^3"
+    },
+    {
+      "default": null,
+      "kind": "scalar",
+      "label": "Specific heat",
+      "name": "Cp",
+      "needed_by": [
+        "heat_transient"
+      ],
+      "unit": "J/(kg K)"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Heat source",
+      "name": "Q",
+      "needed_by": [
+        "heat_stationary",
+        "heat_transient"
+      ],
+      "unit": "W/m^3"
+    }
+  ],
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "bcs": {
+        "items": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "Fixed potential (electrostatics).",
+              "properties": {
+                "kind": {
+                  "const": "potential"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "default": 1.0,
+                      "description": "Potential [V]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Zero potential (electrostatics).",
+              "properties": {
+                "kind": {
+                  "const": "ground"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Surface charge density (electrostatics).",
+              "properties": {
+                "kind": {
+                  "const": "surface_charge"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "density": {
+                      "default": 0.0,
+                      "description": "Surface charge density [C/m^2]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Fixed temperature (heat transfer).",
+              "properties": {
+                "kind": {
+                  "const": "temperature"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "default": 293.15,
+                      "description": "Temperature [K]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Inward heat flux (heat transfer).",
+              "properties": {
+                "kind": {
+                  "const": "flux"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "default": 0.0,
+                      "description": "Heat flux [W/m^2]. positive into the body",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Newton cooling to an outside temperature (heat transfer).",
+              "properties": {
+                "kind": {
+                  "const": "convection"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "h": {
+                      "default": 10.0,
+                      "description": "Heat transfer coefficient [W/(m^2 K)]",
+                      "type": "number"
+                    },
+                    "t_ext": {
+                      "default": 293.15,
+                      "description": "Outside temperature [K]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "materials": {
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "description": "a material by name",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "Cp": {
+                  "description": "Specific heat [J/(kg K)]",
+                  "type": "number"
+                },
+                "Q": {
+                  "description": "Heat source [W/m^3]",
+                  "type": "number"
+                },
+                "eps_r": {
+                  "description": "Relative permittivity []",
+                  "type": "number"
+                },
+                "k": {
+                  "description": "Thermal conductivity [W/(m K)]",
+                  "type": "number"
+                },
+                "rho": {
+                  "description": "Density [kg/m^3]",
+                  "type": "number"
+                },
+                "rho_v": {
+                  "description": "Charge density [C/m^3]",
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "description": "material by region name",
+        "type": "object"
+      },
+      "order": {
+        "maximum": 9,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "params": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "physics": {
+        "const": "dfs"
+      },
+      "study": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Potential and field of fixed potentials and charges: div(eps grad V) = -rho_v.",
+            "properties": {
+              "kind": {
+                "const": "electrostatic"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Temperature for fixed temperatures, fluxes, convection and sources: div(k grad T) + Q = 0.",
+            "properties": {
+              "kind": {
+                "const": "heat_stationary"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Temperature in time from an initial field: rho Cp dT/dt = div(k grad T) + Q.",
+            "properties": {
+              "kind": {
+                "const": "heat_transient"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "n_out": {
+                    "default": 10,
+                    "description": "Output times. number of stored time steps",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "t0": {
+                    "default": "293.15",
+                    "description": "Initial temperature. an expression in x, y, z (m), giving kelvin",
+                    "type": "string"
+                  },
+                  "t_end": {
+                    "default": 1.0,
+                    "description": "End time [s]",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "t_end"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "required": [
+      "physics",
+      "order",
+      "study"
+    ],
+    "title": "nyx problem for Diffusion (electrostatics, heat transfer) (dfs)",
+    "type": "object"
+  },
+  "studies": [
+    {
+      "dims": "both",
+      "doc": "Potential and field of fixed potentials and charges: div(eps grad V) = -rho_v.",
+      "kind": "electrostatic",
+      "name": "Electrostatics",
+      "params": []
+    },
+    {
+      "dims": "both",
+      "doc": "Temperature for fixed temperatures, fluxes, convection and sources: div(k grad T) + Q = 0.",
+      "kind": "heat_stationary",
+      "name": "Heat transfer, stationary",
+      "params": []
+    },
+    {
+      "dims": "both",
+      "doc": "Temperature in time from an initial field: rho Cp dT/dt = div(k grad T) + Q.",
+      "kind": "heat_transient",
+      "name": "Heat transfer, transient",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "End time",
+          "name": "t_end",
+          "required": true,
+          "unit": "s"
+        },
+        {
+          "doc": "number of stored time steps",
+          "kind": {
+            "default": 10,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Output times",
+          "name": "n_out",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "an expression in x, y, z (m), giving kelvin",
+          "kind": {
+            "default": "293.15",
+            "type": "text"
+          },
+          "label": "Initial temperature",
+          "name": "t0",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    }
+  ]
+}

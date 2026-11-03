@@ -27,3 +27,7 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 21 | [Polarization from complex fields](adr/0021-polarization-analysis-from-complex-fields.md) | `analysis` |
 | 22 | [Use cases and chips live in femcore](adr/0022-use-cases-and-chips-live-in-femcore.md) | `usecases`, `chips` |
 | 23 | [The app is a shell over one Project](adr/0023-app-is-a-thin-shell-over-one-project.md) | `app` |
+| 24 | [Brillouin and the ring chips removed](adr/0024-brillouin-and-chips-removed.md) | `sbs`, `chips` (gone) |
+| 25 | [A physics is a crate behind the `Physics` trait](adr/0025-physics-trait-registry-and-problem-envelope.md) | `nyx-physics`, `nyx-dfs/sms/ems`, `nyx-engine` |
+| 26 | [One workspace and a layering test](adr/0026-one-workspace-and-a-layering-test.md) | `Cargo.toml`, layering |
+| 27 | [`nyx2`: second repository, a jj workspace per session](adr/0027-nyx2-repository-and-jj-workspace-per-working-session.md) | process |

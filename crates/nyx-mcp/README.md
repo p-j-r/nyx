@@ -1,6 +1,6 @@
-# nyx `ai/`: MCP server for nyx
+# nyx-mcp, nyx-session, nyx-connect: the MCP server for nyx
 
-A separate Cargo workspace. It depends on `femcore` and `geom` by path and changes nothing in them or in `app`.
+Three crates of the root workspace (a separate `ai/` workspace until the restructure). Phase 7 of `docs/architecture/RESTRUCTURE_PLAN.md` turns the tools into engine commands and dissolves `nyx-session`.
 Design: `docs/MCP_ASSISTANT_PLAN.md`.
 
 | crate | what |
@@ -12,9 +12,8 @@ Design: `docs/MCP_ASSISTANT_PLAN.md`.
 ## Build
 
 ```
-cd ai
 cargo build --release -p nyx-mcp        # target\release\nyx-mcp.exe
-cargo test --release                    # unit tests + a stdio test with a real solve
+cargo test --release -p nyx-session -p nyx-mcp -p nyx-connect   # unit tests + a stdio test with a real solve
 ```
 
 ## Try it without a host
@@ -31,7 +30,7 @@ Reference check: oxide-clad 500 x 300 nm on 2 um BOX gives TE0 2.6718, TM0 2.333
 
 Easiest: `nyx-connect list`, then `nyx-connect connect claude-code` (or `all`). It keeps a `.nyx-backup-*` copy of any file it changes and refuses files with comments. `nyx-connect test` starts the server and lists its tools. By hand:
 
-Claude Code: `claude mcp add nyx -- C:\path\to\nyx\ai\target\release\nyx-mcp.exe`
+Claude Code: `claude mcp add nyx -- C:\path\to\nyx2\target\release\nyx-mcp.exe`
 
 Claude Desktop, Cursor, and others (JSON config):
 

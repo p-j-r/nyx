@@ -1,0 +1,23 @@
+[package]
+name = "nyx-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The nyx engine: the project, its commands, the job runner and the registry of compiled-in physics. Shared by the window and the MCP server"
+
+[dependencies]
+nyx-physics = { path = "../nyx-physics" }
+nyx-dfs = { path = "../nyx-dfs", optional = true }
+nyx-sms = { path = "../nyx-sms", optional = true }
+nyx-ems = { path = "../nyx-ems", optional = true }
+nyx-analysis = { path = "../nyx-analysis" }
+
+[features]
+# the physics compiled into a build (plan: physics are compiled in, run-time plug-ins are out of scope)
+default = ["dfs", "sms", "ems"]
+dfs = ["dep:nyx-dfs"]
+sms = ["dep:nyx-sms"]
+ems = ["dep:nyx-ems"]
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }

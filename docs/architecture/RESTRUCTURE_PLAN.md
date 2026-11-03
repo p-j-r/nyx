@@ -247,3 +247,14 @@ After phase 1, phases 2, 3 and 6 touch different files and can be done by separa
 * Read `docs/RESTRUCTURE_STATUS.md` before starting and update it before finishing (CLAUDE.md convention).
 * Small commits, one subject line saying what and why. When a rule here conflicts with what you find in the code, stop and write the conflict into the status file, then ask paul.
 * Do not fix a rough spot in the old structure if this plan resolves it later (R21, R25 especially).
+
+## 10. Amendments (2026-11-04, foundation session; details in `docs/RESTRUCTURE_STATUS.md`)
+
+* The work runs in the repository **`nyx2`** (full history of `nyx`, no remote), one jj workspace per session, bookmarks `restructure-<n>-<name>` (ADR 27). Replace "`jj workspace add ../nyx-<phase>`" in section 9 by `../nyx2-<name>`.
+* Phases 0 and 1 are done; the **foundation** (workspace layout, the crate skeletons `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis`, `nyx-engine`, the `Physics` trait, conventions, layering test) is done and tagged by the bookmark `restructure-foundation` (ADR 25, 26). Phase 4 therefore *fills* existing crates instead of creating them.
+* `ai/` joined the root workspace already in the foundation (section 2 said phase 7); the `nyx-connect` merge and the dissolution of `nyx-session` stay in phase 7.
+* The `Physics` trait has a tenth method, `params()`; `ProblemSpec::order` is range-checked 1 to 9 by the envelope and the physics decides its own limit.
+* Section 5 item 4 (benchmarks within 10 %) is measured as the best of three runs on an idle machine (`BENCH_ONLY=1 bash tools/baseline.sh <dir>`); single runs vary by up to 40 % on the 3D eigensolve.
+* Section 5 item 1: counts are taken for the whole root workspace; JSON key order is never compared (ADR 26).
+* Phase 2 should land a pure file-move commit first (no logic change) so the mesher feature work can branch from it (status file, "Mesher features").
+* Gate answers (paul, 2026-11-03): G1 keep `ems_axisym`/`sms_axisym` but check their implementation (phase 3 and 4 owners; `sms_kz` stays, paul asked what it is); G3 crate names as written; G4 TOML.

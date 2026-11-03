@@ -77,7 +77,10 @@ fn mcp_tool_list_matches_the_contract_snapshot() {
         return;
     }
     let want = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    assert_eq!(want.replace("\r\n", "\n").trim_end(), got.trim_end(), "the tool list changed: this is an interface change for every registered host (ADR 19)");
+    // compared as values: the order of the keys of an object is not part of the contract (`serde_json` keeps insertion order or sorts,
+    // depending on whether any crate of the build enables `preserve_order`)
+    let want_value: Value = serde_json::from_str(&want).unwrap();
+    assert_eq!(want_value, tools_snapshot(), "the tool list changed: this is an interface change for every registered host (ADR 19)");
 }
 
 #[test]

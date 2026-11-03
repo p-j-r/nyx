@@ -1,4 +1,4 @@
-//! The Connect menu: registers the `nyx-mcp` server (the AI interface in `ai/`) with Claude Code and Claude Desktop in one click.
+//! The Connect menu: registers the `nyx-mcp` server (the AI interface, crate `nyx-mcp`) with Claude Code and Claude Desktop in one click.
 //!
 //! Both clients keep their MCP servers in a JSON file under `mcpServers`; connecting adds a `nyx` entry that runs
 //! `nyx-mcp`, disconnecting removes it, and every other key of the file is left as it was. The first time a file is
@@ -63,17 +63,17 @@ fn desktop_config_dir(home: Option<PathBuf>) -> Option<PathBuf> {
     home.map(|h| if cfg!(target_os = "macos") { h.join("Library").join("Application Support").join("Claude") } else { h.join(".config").join("Claude") })
 }
 
-/// Looks for `nyx-mcp` next to the running program and in the `ai/target` folder of the source tree the program was built from.
+/// Looks for `nyx-mcp` next to the running program and in the `target` folder of the source tree the program was built from.
 pub fn find_server() -> Option<PathBuf> {
     let exe = if cfg!(windows) { "nyx-mcp.exe" } else { "nyx-mcp" };
     let mut dirs: Vec<PathBuf> = vec![];
     if let Ok(me) = std::env::current_exe() {
         for a in me.ancestors().skip(1).take(5) {
             dirs.push(a.to_path_buf());
-            dirs.push(a.join("ai").join("target").join("release"));
+            dirs.push(a.join("target").join("release"));
         }
     }
-    dirs.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("ai").join("target").join("release"));
+    dirs.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("target").join("release"));
     dirs.into_iter().map(|d| d.join(exe)).find(|p| p.is_file()).and_then(|p| p.canonicalize().ok()).map(plain_path)
 }
 
