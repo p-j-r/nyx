@@ -14,6 +14,7 @@ use crate::adapt::metric::{complexity_for_elements, intersect, isotropic, lp_met
 use crate::adapt::ops3::AdaptOptions3;
 use crate::adapt::topo3::TopoOptions3;
 use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
+use crate::adapt::PlotFields;
 use crate::problem::SolveResult;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -122,7 +123,7 @@ fn fit_hessian(patch: &[u32], centre: u32, pt: &dyn Fn(u32) -> [f64; 3], u: &[f6
 /// The metric the solution asks for at every vertex of `mesh`, for about `target_cells` tetrahedra, with sizes between `hmin_fraction * h`
 /// and `h`. Fields that are constant or linear (zero Hessian) ask for nothing. `floor` (a metric per vertex, for example from
 /// `physics_size::metrics_d`) is intersected when given.
-pub fn estimator_metrics(mesh: &SimplexMesh, result: &SolveResult, est: &Estimator, h: f64, target_cells: f64, floor: Option<&[Sym<3>]>) -> Result<Vec<Sym<3>>, String> {
+pub fn estimator_metrics<R: PlotFields>(mesh: &SimplexMesh, result: &R, est: &Estimator, h: f64, target_cells: f64, floor: Option<&[Sym<3>]>) -> Result<Vec<Sym<3>>, String> {
     let n = mesh.n_points();
     let adapt_mesh = simplex_to_adapt::<3>(mesh)?;
     let vol = adapt_mesh.vertex_volumes();
@@ -136,13 +137,13 @@ pub fn estimator_metrics(mesh: &SimplexMesh, result: &SolveResult, est: &Estimat
     };
     let mut asked: Vec<Sym<3>> = vec![isotropic::<3>(h); n];
     let mut used = 0;
-    for sol in &result.solutions {
-        let names: Vec<&str> = if est.fields.is_empty() { sol.fields.first().map(|f| f.name.as_str()).into_iter().collect() } else { est.fields.iter().map(String::as_str).collect() };
+    for sol in result.plot_fields() {
+        let names: Vec<&str> = if est.fields.is_empty() { sol.first().map(|f| f.0.as_str()).into_iter().collect() } else { est.fields.iter().map(String::as_str).collect() };
         let mut sum: Vec<Sym<3>> = vec![[[0.0; 3]; 3]; n];
         let mut any = false;
         for name in names {
-            let Some(f) = sol.field(name) else { continue };
-            let hess = recovered_hessians(mesh, &f.values)?;
+            let Some(f) = sol.iter().find(|f| f.0 == name) else { continue };
+            let hess = recovered_hessians(mesh, &f.1)?;
             let norm: f64 = hess.iter().map(|m| m[0][0].abs().max(m[1][1].abs()).max(m[2][2].abs())).fold(0.0, f64::max);
             if !(norm > 1e-300 && norm.is_finite()) {
                 continue;
@@ -215,9 +216,9 @@ pub struct Cycle3 {
     pub solve_seconds: f64,
 }
 
-pub struct LoopResult3 {
+pub struct LoopResult3<R = SolveResult> {
     pub mesh: SimplexMesh,
-    pub result: SolveResult,
+    pub result: R,
     pub cycles: Vec<Cycle3>,
     pub converged: bool,
 }
@@ -225,12 +226,12 @@ pub struct LoopResult3 {
 /// Solve on `start`, adapt to the solution, solve again, until the quantity of interest settles. `solve` gets a mesh and returns the
 /// result and the number being tracked. `floor` gives, for a mesh, a metric per vertex that adaptation must always satisfy (physics or
 /// geometry sizes); `None` for no floor.
-pub fn solve_adaptively3(
+pub fn solve_adaptively3<R: PlotFields>(
     start: &SimplexMesh,
     s: &LoopSettings3,
     floor: Option<&dyn Fn(&SimplexMesh) -> Result<Vec<Sym<3>>, String>>,
-    solve: &mut dyn FnMut(&SimplexMesh) -> Result<(SolveResult, f64), String>,
-) -> Result<LoopResult3, String> {
+    solve: &mut dyn FnMut(&SimplexMesh) -> Result<(R, f64), String>,
+) -> Result<LoopResult3<R>, String> {
     let mut mesh = start.clone();
     let cells0 = mesh.n_cells() as f64;
     let mut cycles: Vec<Cycle3> = vec![];

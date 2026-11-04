@@ -8,22 +8,6 @@ use geom::select::Selector;
 use std::collections::HashMap;
 
 #[test]
-fn poisson_on_a_meshed_disk_matches_the_exact_solution() {
-    // -div(eps0 grad V) = eps0 on a disk of radius R, V = 0 on the rim: V = (R^2 - r^2)/4
-    let r = 0.5;
-    let mut m = Model::new_2d();
-    let d = m.circle("disk", (0.0, 0.0), r);
-    m.overlay(&[("disk", d)]);
-    let g = mesh_geom_2d(evaluate(&m.list).unwrap(), &GeomMeshOpts::new(0.05)).unwrap();
-    let mut s = ProblemSpec::new(Physics::Electrostatics);
-    s.materials.default.insert("rho_v".into(), femcore::dfs::EPS0);
-    s.bcs = vec![Bc { on: None, labels: g.select("outer").unwrap(), kind: BcKind::Ground }];
-    let res = femcore::dfs::solve_electrostatics(&g.mesh, &s).unwrap();
-    let vmax = res.scalar("V max").unwrap();
-    assert!((vmax / (r * r / 4.0) - 1.0).abs() < 5e-3, "{vmax} vs {}", r * r / 4.0);
-}
-
-#[test]
 fn plate_with_a_hole_has_the_textbook_stress_concentration() {
     // 0.4 x 0.2 plate in the x-z plane, hole radius 0.04, 1 MPa gross tension along x: net-section stress 1e6 * 0.2 / 0.12 = 1.667 MPa and
     // Kt (net, d/w = 0.4) about 2.16 (Peterson), so sigma_max about 3.6 MPa
@@ -73,7 +57,7 @@ fn assert_conforming(m: &femcore::mesh::SimplexMesh) {
 }
 
 #[test]
-fn a_section_swept_along_y_is_conforming_and_solves_exactly() {
+fn a_section_swept_along_y_is_conforming() {
     let p = femcore::meshing::geomdrive::plate(1.0, 0.4, 0.1).unwrap();
     let layers = vec![Layer { thickness: 0.2, n: 2, domain_offset: 0 }, Layer { thickness: 0.1, n: 1, domain_offset: 10 }];
     let m3 = extrude_y(&p.mesh, &layers, 0.0).unwrap();
@@ -87,12 +71,4 @@ fn a_section_swept_along_y_is_conforming_and_solves_exactly() {
     let mut want = p.mesh.boundary_labels();
     want.extend([nb + 1, nb + 2]);
     assert_eq!(m3.boundary_labels(), want);
-    // potential 1 on x = 0, ground on x = 1: V = 1 - x exactly
-    let mut s = ProblemSpec::new(Physics::Electrostatics);
-    s.bcs = vec![Bc { on: None, labels: p.xmin.clone(), kind: BcKind::Potential(1.0) }, Bc { on: None, labels: p.xmax.clone(), kind: BcKind::Ground }];
-    let r = femcore::dfs::solve_electrostatics(&m3, &s).unwrap();
-    let v = &r.solutions[0].field("V").unwrap().values;
-    let x = m3.dof_coordinates(2);
-    let err = (0..v.len()).map(|i| (v[i] - (1.0 - x[3 * i])).abs()).fold(0.0, f64::max);
-    assert!(err < 1e-10, "{err}");
 }

@@ -5,10 +5,10 @@ The rule is ADR 19. Each contract is an exemplar file here plus a test that gene
 | Contract | Pins | Test | Run |
 |---|---|---|---|
 | `problem_spec` | serde shape of `ProblemSpec` (one spec per physics), XML encoding, leniency, `Physics` order | `crates/femcore/tests/contracts.rs` `problem_spec_*`, `physics_enum_*` | `cargo test --release -p femcore --test contracts` |
-| `solve_result` | structure of a `SolveResult`, order refusal, `"cancelled"` | same file, `solve_*`, `a_cancelled_solve_*` | same |
+| `solve_result` | structure of the old (window) `SolveResult`, order refusal, `"cancelled"`; since phase 4 through the bridge `nyx_engine::legacy` | `crates/nyx-engine/tests/legacy_contract.rs` | `cargo test --release -p nyx-engine --test legacy_contract` |
 | `frames` | wafer-frame constants, name tables, tensor permutations, PML axes | same file, `frames_*` | same |
 | `mesh` | label bases (1 for domains and boundaries), node order per cell type, no curved-node storage, `.fmsh` version and round trip, PML numbering; exemplar `mesh_cells.v1.json` | same file, `mesh_*` | same |
-| `kernel_stages` | public stage functions of every kernel family (R26 closed in phase 3) | same file, `kernel_stage_api_is_public`; composition in `tests/stages.rs` | same |
+| `kernel_stages` | public stage functions of every kernel family (R26 closed in phase 3); the dfs stages are in `nyx-dfs` since phase 4 (ADR 41) | `crates/femcore/tests/contracts.rs` `kernel_stage_api_is_public` (sms, ems); `crates/nyx-dfs/tests/contracts.rs` (dfs); composition in `tests/stages.rs` of each crate | same |
 | `geom_model` | geom depends on serde only; golden feature lists round-trip key for key | `crates/geom/tests/contracts.rs`; `tests/goldens.rs` | `cargo test --release -p geom --test contracts` |
 | `store` | `workflow.json`, `runs.jsonl` line, format gate, metric names, concept card | `crates/nyx-store/tests/contracts.rs` | `cargo test --release -p nyx-store --test contracts` (`-- --include-ignored` shows R25) |
 | `mcp_tools` | tool names, annotations, arguments, handshake, handle format | `crates/nyx-mcp/tests/contracts.rs` | `cargo test --release -p nyx-mcp --test contracts` |

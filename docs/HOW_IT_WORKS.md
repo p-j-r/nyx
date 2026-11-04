@@ -302,7 +302,7 @@ cargo test --release --workspace -- --ignored    # 7 slow Brillouin tests, ~70 s
 cargo clippy --release --workspace --all-targets -- -D warnings
 ```
 
-Examples (`cargo run --release -p femcore --example NAME`): `stage_log` (the logs quoted above), `bench` (timings on larger
+Examples (`cargo run --release -p femcore --example NAME`; `stage_log` and `bench` are in `nyx-engine`, since they drive every physics): `stage_log` (the logs quoted above), `bench` (timings on larger
 models), `profile3d` (stage times of a 3D static solve), `mem_profile` (peak memory by stage), `pool_bench` (matrix-vector
 product and multigrid iteration cost), `lu_scaling` (factorisation speed against threads), `eig_beam` (eigenfrequencies of a
 beam with each solver), `chip_report` / `chip_digits` (the Brillouin chips; `chip_digits` prints 12 digits for before/after

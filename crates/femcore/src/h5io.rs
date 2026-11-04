@@ -559,13 +559,33 @@ pub fn read_results(path: &Path) -> Result<(SimplexMesh, Option<String>, SolveRe
 mod tests {
     use super::*;
 
+    /// A result shaped like a heat solution (the kernel moved to nyx-dfs): a temperature at every dof and its magnitude, one scalar.
+    fn heat_like(mesh: &crate::mesh::SimplexMesh) -> SolveResult {
+        let x = mesh.dof_coordinates(2);
+        let d = mesh.dim;
+        let t: Vec<f64> = (0..x.len() / d).map(|i| 300.0 + x[d * i..d * i + d].iter().sum::<f64>()).collect();
+        let q: Vec<f64> = t.iter().map(|v| (v - 300.0).abs()).collect();
+        SolveResult {
+            order: 2,
+            dim: d,
+            solutions: vec![Solution {
+                label: "stationary".into(),
+                fields: vec![Field { name: "T".into(), unit: "K".into(), values: t }, Field { name: "|q|".into(), unit: "W/m^2".into(), values: q }],
+                ..Default::default()
+            }],
+            scalars: vec![("T min (K)".into(), Scalar::Num(300.0))],
+            dofs: x.len() / d,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn round_trip() {
         let mesh = crate::meshing::geomdrive::plate(1.0, 0.5, 0.2).unwrap().mesh;
         let mut spec = ProblemSpec::new(Physics::Heat);
         spec.materials.default.insert("k".into(), 2.0);
         spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }];
-        let r = crate::dfs::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
+        let r = heat_like(&mesh);
         let path = std::env::temp_dir().join(format!("nyx-h5-test-{}.h5", std::process::id()));
         write_results(&path, H5Mode::Serial, &mesh, Some(&spec), &r).unwrap();
         let (m2, spec2, r2) = read_results(&path).unwrap();
@@ -596,7 +616,7 @@ mod tests {
             } else {
                 spec.materials.default.insert("k".into(), 1.0);
                 spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Temperature(0.0) }];
-                crate::dfs::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap()
+                heat_like(&mesh)
             };
             let path = std::env::temp_dir().join(format!("nyx-xdmf-{name}-{}.h5", std::process::id()));
             write_results(&path, H5Mode::Serial, &mesh, Some(&spec), &r).unwrap();
@@ -674,7 +694,7 @@ mod tests {
         let mut spec = ProblemSpec::new(Physics::Heat);
         spec.materials.default.insert("k".into(), 1.0);
         spec.bcs = vec![Bc { on: None, labels: b.xmin.clone(), kind: BcKind::Temperature(1.0) }, Bc { on: None, labels: b.xmax.clone(), kind: BcKind::Temperature(0.0) }];
-        let r = crate::dfs::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
+        let r = heat_like(&mesh);
         let tmp = |n: &str| std::env::temp_dir().join(format!("nyx-part-{n}-{}.h5", std::process::id()));
         let (pa, pb) = (tmp("serial"), tmp("three"));
         write_results(&pa, H5Mode::Serial, &mesh, Some(&spec), &r).unwrap();

@@ -16,6 +16,7 @@ pub mod engine;
 pub mod geomdesc;
 pub mod geometry;
 pub mod jobs;
+pub mod legacy;
 pub mod meshing;
 pub mod project;
 pub mod solve;

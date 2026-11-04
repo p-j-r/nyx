@@ -68,7 +68,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mesh = std::sync::Arc::new(proj.geometry.build_for(&spec)?);
     say(format!("{}: {} cells, {} points, {} process(es)", phys.name(), mesh.n_cells(), mesh.n_points(), size));
     let mut state = SolveState::default();
-    let result = femcore::solve::solve(&mesh, &spec, &mut state)?;
+    let result = nyx_engine::legacy::solve(&mesh, &spec, &mut state)?;
     say(format!("solved in {:.2} s, {} dofs, {} solution(s)", result.seconds, result.dofs, result.solutions.len()));
     for (n, v) in &result.scalars {
         match v {

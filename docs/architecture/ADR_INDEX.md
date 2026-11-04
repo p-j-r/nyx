@@ -38,3 +38,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 38 | [Geometry operations are described once](adr/0038-geometry-operations-are-described-once.md) | `nyx-engine::geomdesc` |
 | 39 | [The store takes spec text and a card function](adr/0039-the-store-takes-spec-text-and-a-card-function.md) | `nyx-store`, `nyx-engine::store_link` |
 | 40 | [3D geom models meshed by the lattice mesher (`Domain3`)](adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md) | `femcore::meshing::{mesher3d, refine3d, geomdrive3}` |
+| 41 | [A physics crate owns its typed problem; the window reaches it through a legacy bridge](adr/0041-physics-crate-pattern-and-the-legacy-bridge.md) | `nyx-dfs`, `nyx-physics::decode`, `nyx-engine::legacy` |

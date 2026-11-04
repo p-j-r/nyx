@@ -145,3 +145,24 @@ fn check_value(v: &Value, d: &ParamDesc) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Every field of the result must be finite: NaN or infinity does not stop a factorisation or a Krylov iteration, it flows into every
+/// field. The message names the solution, the field and how many values are bad. Scalar results (for example Q = infinity of a lossless
+/// mode) may legitimately be infinite and are not checked.
+pub fn check_result_finite(result: &crate::result::SolveResult) -> Result<(), Error> {
+    for (k, sol) in result.solutions.iter().enumerate() {
+        for f in &sol.fields {
+            let bad = f.values.iter().filter(|v| !v.is_finite()).count();
+            if bad > 0 {
+                return Err(Error::NonFinite(format!(
+                    "the solution is not finite: field '{}' of solution {} ('{}') has {bad} NaN/infinite values out of {}; check materials, boundary conditions and the mesh",
+                    f.name,
+                    k + 1,
+                    sol.label,
+                    f.values.len()
+                )));
+            }
+        }
+    }
+    Ok(())
+}

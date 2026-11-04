@@ -1,7 +1,7 @@
 //! The one entry point for all physics: `solve(mesh, spec, state)`.
 //!
 //! It checks the element order and the numbers of the problem (`validate`), dispatches to the module of the chosen physics
-//! (`dfs`, `sms`, `ems`/`emw3d`), which read the wafer-frame problem as it is and name their fields in wafer axes
+//! (`sms`, `ems`/`emw3d`; `dfs` is in its crate), which read the wafer-frame problem as it is and name their fields in wafer axes
 //! (`section`), refuses a result that contains NaN or infinity, and appends the plain-
 //! language stage log of the run to `SolveResult::log`. `solve_with` does the same for a `Progress` that a window can
 //! watch and cancel; a cancelled solve returns `Err("cancelled")`.
@@ -46,8 +46,8 @@ fn solve_checked(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState)
 
 fn dispatch(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState) -> Result<SolveResult, String> {
     match spec.physics {
-        Physics::Electrostatics => crate::dfs::solve_electrostatics(mesh, spec),
-        Physics::Heat => crate::dfs::solve_heat(mesh, spec, state),
+        // dfs lives in its crate (restructure phase 4): the window reaches it through `nyx_engine::legacy`
+        Physics::Electrostatics | Physics::Heat => Err("electrostatics and heat transfer moved to the nyx-dfs crate; solve through nyx_engine::legacy::solve".into()),
         Physics::Solid => crate::sms::solve_solid(mesh, spec, state),
         Physics::Emw if mesh.dim == 3 => crate::ems3d::solve_emw_eigen(mesh, spec),
         Physics::Emw => crate::ems::solve_emw(mesh, spec),

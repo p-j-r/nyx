@@ -32,30 +32,6 @@ fn solve(mesh: &SimplexMesh, spec: &ProblemSpec) -> SolveResult {
 }
 
 #[test]
-fn electrostatics_points_from_the_high_plate_along_z() {
-    let mesh = common::rect(1.0, 0.5, 8, 4);
-    let mut s = ProblemSpec::new(Physics::Electrostatics);
-    s.materials.default.insert("eps_r".into(), 1.0);
-    s.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
-    let r = solve(&mesh, &s);
-    assert_eq!(names(&r), sorted(&["Ex", "Ez", "V", "|E|"]));
-    assert!((mean(&r, "Ez") - 2.0).abs() < 1e-6, "E = -grad V = +2 V/m along +z, got {}", mean(&r, "Ez"));
-    assert!(mean(&r, "Ex").abs() < 1e-9);
-}
-
-#[test]
-fn heat_flows_from_the_hot_plate_along_z() {
-    let mesh = common::rect(1.0, 0.5, 8, 4);
-    let mut s = ProblemSpec::new(Physics::Heat);
-    s.materials.default.insert("k".into(), 2.0);
-    s.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Temperature(400.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Temperature(300.0) }];
-    let r = solve(&mesh, &s);
-    assert_eq!(names(&r), sorted(&["T", "qx", "qz", "|q|"]));
-    // q = -k grad T = 2 * 100 / 0.5 along +z
-    assert!((mean(&r, "qz") - 400.0).abs() < 1e-6 * 400.0, "{}", mean(&r, "qz"));
-}
-
-#[test]
 fn a_plate_pressed_from_above_moves_down_in_z_and_is_stressed_in_z_and_y() {
     let mesh = common::rect(1.0, 0.5, 8, 4);
     let mut s = ProblemSpec::new(Physics::Solid);

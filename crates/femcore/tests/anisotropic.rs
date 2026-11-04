@@ -148,57 +148,6 @@ fn isotropic_plane_strain_free_expansion_is_stress_free() {
 }
 
 #[test]
-fn anisotropic_conductivity_is_exact_for_linear_temperature() {
-    // any constant tensor: T = T0 + g.x is an exact solution with matching Dirichlet data
-    let mesh = common::rect(1.0, 0.5, 6, 4);
-    let k = Tensor::Symmetric { xx: 5.0, yy: 1.0, zz: 1.0, xy: 0.0, yz: 0.0, xz: 1.5 };
-    let mut spec = ProblemSpec::new(Physics::Heat);
-    spec.materials.aniso.insert(1, Anisotropy { conductivity: Some(k.clone()), euler_deg: [0.0; 3], ..Default::default() });
-    spec.materials.default.insert("k".into(), 1.0);
-    // linear field T = 300 + 20 x + 10 z imposed on all four sides through two values per side
-    // (Dirichlet only supports constants, so use a 1D gradient in x and insulated sides: not exact
-    // for a tensor with kxz != 0) -> instead check the flux of the 1D x-solution directly
-    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Temperature(320.0) }];
-    let r = femcore::dfs::solve_heat(&mesh, &spec, &mut SolveState::default()).unwrap();
-    let t = &r.solutions[0].field("T").unwrap().values;
-    let (tmin, tmax) = (t.iter().cloned().fold(f64::MAX, f64::min), t.iter().cloned().fold(f64::MIN, f64::max));
-    assert!((tmin - 300.0).abs() < 1e-9 && (tmax - 320.0).abs() < 1e-9);
-    // with kxz != 0 the insulated sides bend the field, so the y flux is not zero in the interior,
-    // while for a diagonal tensor the solution is exactly linear and qx = -kxx dT/dx
-    let mut diag = spec.clone();
-    diag.materials.aniso.insert(1, Anisotropy { conductivity: Some(Tensor::Diagonal { x: 5.0, y: 1.0, z: 1.0 }), euler_deg: [0.0; 3], ..Default::default() });
-    let r = femcore::dfs::solve_heat(&mesh, &diag, &mut SolveState::default()).unwrap();
-    let s = &r.solutions[0];
-    let x = mesh.dof_coordinates(2);
-    let exact_t: Vec<f64> = (0..x.len() / 2).map(|i| 300.0 + 20.0 * x[2 * i]).collect();
-    assert!(maxdiff(&s.field("T").unwrap().values, &exact_t) < 1e-10);
-    let qx = &s.field("qx").unwrap().values;
-    assert!(qx.iter().all(|q| (q + 5.0 * 20.0).abs() < 1e-8), "qx should be -100 everywhere");
-    assert!(s.field("qz").unwrap().values.iter().all(|q| q.abs() < 1e-8));
-    // rotating the diagonal tensor by 90 degrees about z swaps kxx and kyy: the x-flux drops to -1*20
-    let mut rot = diag.clone();
-    rot.materials.aniso.get_mut(&1).unwrap().euler_deg = [90.0, 0.0, 0.0];
-    let r = femcore::dfs::solve_heat(&mesh, &rot, &mut SolveState::default()).unwrap();
-    assert!(r.solutions[0].field("qx").unwrap().values.iter().all(|q| (q + 20.0).abs() < 1e-8));
-}
-
-#[test]
-fn anisotropic_permittivity_sets_the_capacitance() {
-    // plates at x = 0 and x = L, insulated sides: C = eps0 eps_xx H / L per metre
-    let mesh = common::rect(1.0, 0.5, 8, 4);
-    let mut spec = ProblemSpec::new(Physics::Electrostatics);
-    spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 3.0 }), ..Default::default() });
-    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
-    let r = femcore::dfs::solve_electrostatics(&mesh, &spec).unwrap();
-    let c = r.scalar("capacitance").unwrap();
-    assert!((c / (femcore::dfs::EPS0 * 7.0 * 0.5) - 1.0).abs() < 1e-9, "{c}");
-    // rotated by 90 degrees the roles of x and y swap
-    spec.materials.aniso.get_mut(&1).unwrap().euler_deg = [90.0, 0.0, 0.0];
-    let r = femcore::dfs::solve_electrostatics(&mesh, &spec).unwrap();
-    assert!((r.scalar("capacitance").unwrap() / (femcore::dfs::EPS0 * 3.0 * 0.5) - 1.0).abs() < 1e-9);
-}
-
-#[test]
 fn anisotropic_waveguide_te_modes_use_the_right_permittivity_component() {
     // PEC rectangle a x b (x lateral, z the vertical axis, propagation along y) filled with diag(eps_x, eps_y, eps_z): TE10 (E along z) has
     // n^2 = eps_z - (pi/(a k0))^2, TE01 (E along x) has n^2 = eps_x - (pi/(b k0))^2; eps_y plays no role

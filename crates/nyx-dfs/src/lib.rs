@@ -1,13 +1,26 @@
 //! nyx-dfs: diffusion physics (`dfs`, ADR 12): electrostatics and heat transfer, stationary and transient.
 //!
-//! SKELETON (restructure foundation). This crate declares what `dfs` is to the rest of nyx: its studies, conditions, properties, fields
-//! and couplings. The kernels (`femcore::dfs`: assemble, solve, fields) move in here in phase 4, first of the three physics, after
-//! phases 2 and 3 have changed the mesh type and the linear algebra underneath them. Until then `solve` answers
-//! `Error::NotYetMoved`. The descriptors below are the first version, read from the current kernels; the phase 4 owner refines
-//! them and bumps `docs/architecture/contracts/physics_dfs.v1.json` with a `VERSIONS.md` entry.
+//! The crate holds the typed problem (`problem`, decoded from the envelope by `problem::decode`), the kernels in the three stages of ADR 9
+//! (`electro`: `assemble_electrostatics`, `solve_potential`, `electrostatics_fields`; `heat`: `assemble_heat`, `solve_heat_states`,
+//! `heat_fields`) and the `Physics` implementation below. Moved here from `femcore::dfs` in restructure phase 4 (ADR 41).
 
-use nyx_physics::Mesh;
+// The kernels index several arrays with one loop variable, the form that matches the formulas (as in femcore).
+#![allow(clippy::needless_range_loop)]
+
+mod common;
+pub mod electro;
+pub mod heat;
+pub mod problem;
+
+pub use electro::{
+    assemble_electrostatics, electrostatics_fields, solve_electrostatics, solve_potential, ElectroAssembly, EPS0,
+};
+pub use heat::{assemble_heat, heat_fields, solve_heat, solve_heat_states, HeatStates, HeatSystem};
+pub use problem::{decode, Bc, BcKind, Problem, Study};
+
+use femcore::progress::{self, Progress};
 use nyx_physics::*;
+use std::sync::Arc;
 
 pub struct Dfs;
 
@@ -119,7 +132,13 @@ impl Physics for Dfs {
     }
 
     fn params(&self) -> Vec<ParamDesc> {
-        vec![]
+        vec![ParamDesc::choice(
+            "solver",
+            "Linear solver",
+            &["auto", "direct", "iterative"],
+            "auto",
+            "auto: sparse direct for small systems, multigrid-preconditioned CG for large 3D ones; direct: Cholesky; iterative: AMG-CG",
+        )]
     }
 
     fn fields(&self, study: &str) -> Vec<FieldDesc> {
@@ -148,10 +167,16 @@ impl Physics for Dfs {
         vec![]
     }
 
-    fn validate(&self, spec: &ProblemSpec, _mesh: &Mesh) -> Result<(), Error> {
-        // the element orders the kernels have (phase 4 adds the checks that need the mesh)
+    fn validate(&self, spec: &ProblemSpec, mesh: &Mesh) -> Result<(), Error> {
         if !(1..=2).contains(&spec.order) {
             return Err(Error::Unsupported(format!("dfs supports element order 1 and 2, not {}", spec.order)));
+        }
+        if let Some(i) = mesh.points.iter().position(|v| !v.is_finite()) {
+            return Err(Error::NonFinite(format!(
+                "the mesh has a non-finite coordinate (point {}, axis {}): NaN or infinity in the geometry",
+                i / mesh.dim.max(1),
+                i % mesh.dim.max(1)
+            )));
         }
         Ok(())
     }
@@ -161,9 +186,43 @@ impl Physics for Dfs {
         Sizing { order: spec.order, headroom: 1.0, wavelengths: Default::default() }
     }
 
-    fn solve(&self, _mesh: &Mesh, _spec: &ProblemSpec, _ctx: &mut Ctx) -> Result<SolveResult, Error> {
-        Err(Error::NotYetMoved(
-            "dfs: the kernels still live in femcore::dfs and move into this crate in restructure phase 4".into(),
-        ))
+    fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {
+        validate_spec(self, spec)?;
+        self.validate(spec, mesh)?;
+        let problem = decode(spec, ctx)?;
+        run(mesh, &problem, &ctx.progress)
     }
+}
+
+/// Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the
+/// stage log to the result. `Physics::solve` is this after `decode`; code that already has mesh numbers calls it directly.
+pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error> {
+    let _installed = progress::install(progress);
+    let first_line = progress.log().len();
+    if !(1..=2).contains(&problem.order) {
+        return Err(Error::invalid("element order must be 1 or 2"));
+    }
+    if progress.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    if let Some(i) = mesh.points.iter().position(|v| !v.is_finite()) {
+        return Err(Error::NonFinite(format!(
+            "the mesh has a non-finite coordinate (point {}, axis {}): NaN or infinity in the geometry",
+            i / mesh.dim.max(1),
+            i % mesh.dim.max(1)
+        )));
+    }
+    problem.check_finite().map_err(Error::NonFinite)?;
+    let mut result = {
+        let _s = progress::stage(format!("solving diffusion on a {}D mesh of {} cells", mesh.dim, mesh.n_cells()));
+        let d = discretise(mesh)?;
+        match problem.study {
+            Study::Electrostatic => solve_electrostatics(&d, problem),
+            _ => solve_heat(&d, problem),
+        }
+        .map_err(Error::from_kernel)?
+    };
+    check_result_finite(&result)?;
+    result.log.extend(progress.log().into_iter().skip(first_line));
+    Ok(result)
 }

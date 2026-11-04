@@ -1,11 +1,12 @@
 //! Prints the plain-language stage log of a few small solves, to see what the simulator reports for each kind of study
 //! (the text of docs/HOW_IT_WORKS.md quotes these):
 //!
-//!   cargo run --release -p femcore --example stage_log
+//!   cargo run --release -p nyx-engine --example stage_log
+#[path = "../../femcore/examples/benchmesh/mod.rs"]
 mod benchmesh;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
-use femcore::solve::solve;
+use nyx_engine::legacy::solve;
 
 fn show(title: &str, mesh: &SimplexMesh, spec: &ProblemSpec) {
     println!("=== {title}");
@@ -28,21 +29,31 @@ fn main() {
     let rect = benchmesh::rect(1.0, 0.5, 20, 10);
     let mut es = ProblemSpec::new(Physics::Electrostatics);
     es.materials.default.insert("eps_r".into(), 4.0);
-    es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
+    es.bcs = vec![
+        Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) },
+        Bc { on: None, labels: vec![3], kind: BcKind::Ground },
+    ];
     show("electrostatics, 2D", &rect, &es);
 
     let mut so = ProblemSpec::new(Physics::Solid);
     for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
         so.materials.default.insert(k.into(), v);
     }
-    so.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) }];
+    so.bcs = vec![
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) },
+    ];
     show("solid mechanics, static, 2D", &rect, &so);
     so.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
     show("solid mechanics, 4 eigenfrequencies, 2D", &rect, &so);
 
     let beam = benchmesh::block(1.0, 0.1, 0.1, 40, 8, 8);
     so.bcs.truncate(1);
-    show("solid mechanics, 6 eigenfrequencies, 3D slender beam (multigrid LOBPCG is tried above 80,000 unknowns)", &beam, &so);
+    show(
+        "solid mechanics, 6 eigenfrequencies, 3D slender beam (multigrid LOBPCG is tried above 80,000 unknowns)",
+        &beam,
+        &so,
+    );
     let big = benchmesh::block(1.0, 1.0, 1.0, 14, 14, 14);
     so.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     so.solver = LinearSolver::Iterative;

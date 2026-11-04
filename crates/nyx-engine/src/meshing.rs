@@ -152,7 +152,11 @@ impl Mesher for FemcoreMesher {
         if let Some(layers) = &s.sweep {
             let layers: Vec<femcore::meshing::mesher::Layer> = layers
                 .iter()
-                .map(|l| femcore::meshing::mesher::Layer { thickness: l.thickness, n: l.n, domain_offset: l.domain_offset })
+                .map(|l| femcore::meshing::mesher::Layer {
+                    thickness: l.thickness,
+                    n: l.n,
+                    domain_offset: l.domain_offset,
+                })
                 .collect();
             mesh = femcore::meshing::mesher::extrude_y(&mesh, &layers, 0.0).map_err(Error::Invalid)?;
         }

@@ -4,24 +4,6 @@ use femcore::material::*;
 use femcore::problem::*;
 
 #[test]
-fn a_permittivity_tensor_in_the_wafer_frame_acts_on_the_vertical_axis_of_the_x_z_plane() {
-    // plates on the bottom (z = 0) and top (z = H) of an x-z section of length L: C = eps0 eps_zz L / H per metre
-    let mesh = common::rect(1.0, 0.5, 8, 4);
-    let mut spec = ProblemSpec::new(Physics::Electrostatics);
-    spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 5.0 }), ..Default::default() });
-    spec.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
-    let r = femcore::solve::solve(&mesh, &spec.clone(), &mut SolveState::default()).unwrap();
-    let c = r.scalar("capacitance").unwrap();
-    assert!((c / (femcore::dfs::EPS0 * 5.0 * 1.0 / 0.5) - 1.0).abs() < 1e-9, "{c}");
-    // the field of a uniform vertical field is called Ez
-    assert!(r.solutions[0].field("Ez").is_some() && r.solutions[0].field("Ey").is_none());
-    // plates on the sides see eps_xx
-    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
-    let r = femcore::solve::solve(&mesh, &spec, &mut SolveState::default()).unwrap();
-    assert!((r.scalar("capacitance").unwrap() / (femcore::dfs::EPS0 * 7.0 * 0.5 / 1.0) - 1.0).abs() < 1e-9);
-}
-
-#[test]
 fn a_loaded_cubic_plate_in_the_x_z_plane_feels_a_turn_of_the_crystal_about_y_but_not_about_z_in_the_same_way() {
     // wafer description: fixed at x = 0 (x and z components), a load along -z on the right end; the crystal is turned by 20 degrees about y
     // (a rotation in the plane of the section) or by 20 degrees about the normal z (a rotation that mixes the in-plane axis x with the

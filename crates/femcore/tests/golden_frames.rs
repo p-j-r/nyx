@@ -175,49 +175,6 @@ fn cell_fields_reproduce_the_plot_fields(mesh: &femcore::mesh::SimplexMesh, r: &
 
 // ---------------------------------------------------------------------- scalar kernels
 
-#[test]
-fn golden_electrostatics_anisotropic_plates() {
-    let mesh = common::rect(1.0, 0.5, 8, 4);
-    let mut spec = ProblemSpec::new(Physics::Electrostatics);
-    // a generic orientation, so that every entry of the tensor (xz, xy, zy) is non-zero
-    spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: 7.0, y: 3.0, z: 5.0 }), euler_deg: [30.0, 40.0, 10.0], ..Default::default() });
-    spec.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
-    golden("es_aniso_plates", &solve(&mesh, &spec), 1e-9);
-}
-
-#[test]
-fn golden_electrostatics_series_with_charge() {
-    let mesh = common::rect_split_x(1.0, 1.0, 0.5, 0.125);
-    let mut spec = ProblemSpec::new(Physics::Electrostatics);
-    spec.materials.set(1, "eps_r", 2.0);
-    spec.materials.set(2, "eps_r", 8.0);
-    spec.materials.set(2, "rho_v", 1e-9);
-    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }, Bc { on: None, labels: vec![3], kind: BcKind::SurfaceCharge(1e-10) }];
-    golden("es_series_charge", &solve(&mesh, &spec), 1e-9);
-}
-
-#[test]
-fn golden_heat_anisotropic_stationary() {
-    let mesh = common::rect(1.0, 0.4, 10, 4);
-    let mut spec = ProblemSpec::new(Physics::Heat);
-    spec.materials.aniso.insert(1, Anisotropy { conductivity: Some(Tensor::Diagonal { x: 30.0, y: 5.0, z: 2.0 }), euler_deg: [10.0, 30.0, 50.0], ..Default::default() });
-    spec.materials.default.insert("Q".into(), 1e4);
-    spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Convection { h: 20.0, text: 280.0 } }, Bc { on: None, labels: vec![3], kind: BcKind::Flux(500.0) }];
-    golden("heat_aniso_stationary", &solve(&mesh, &spec), 1e-9);
-}
-
-#[test]
-fn golden_heat_transient_dense() {
-    let mesh = common::rect(1.0, 0.2, 10, 2);
-    let mut spec = ProblemSpec::new(Physics::Heat);
-    spec.materials.default.insert("k".into(), 2.0);
-    spec.materials.default.insert("rho".into(), 1.0);
-    spec.materials.default.insert("Cp".into(), 1.0);
-    spec.bcs = vec![Bc { on: None, labels: vec![1, 4], kind: BcKind::Temperature(0.0) }];
-    spec.study = Study::Transient { t_end: 0.2, n_out: 4, t0: "sin(pi*x)".into() };
-    golden("heat_transient", &solve(&mesh, &spec), 1e-9);
-}
-
 // ---------------------------------------------------------------------- optical modes
 
 #[test]
@@ -303,27 +260,6 @@ fn golden_solid_static_plane_stress_with_thermal_expansion() {
     s.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(393.15), t_ref: 293.15 });
     clamped_left(&mut s);
     golden("solid_static_sapphire_stress_thermal", &solve(&mesh, &s), 1e-8);
-}
-
-#[test]
-fn golden_solid_static_isotropic_thermal_from_heat() {
-    let mesh = common::rect(1.0, 0.2, 10, 3);
-    let mut heat = ProblemSpec::new(Physics::Heat);
-    heat.order = 2;
-    heat.materials.default.insert("k".into(), 5.0);
-    heat.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(293.15) }, Bc { on: None, labels: vec![4], kind: BcKind::Temperature(393.15) }, Bc { on: None, labels: vec![2], kind: BcKind::Temperature(293.15) }];
-    let mut state = SolveState::default();
-    femcore::solve::solve(&mesh, &heat, &mut state).unwrap();
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.order = 2;
-    for (k, v) in [("E", 70e9), ("nu", 0.33), ("alpha", 2.3e-5)] {
-        s.materials.default.insert(k.into(), v);
-    }
-    s.materials.aniso.insert(1, Anisotropy { expansion: Some(Tensor::Diagonal { x: 2.0e-5, y: 3.0e-5, z: 2.6e-5 }), ..Default::default() });
-    s.thermal = Some(ThermalExpansion { source: ThermalSource::FromHeat, t_ref: 293.15 });
-    clamped_left(&mut s);
-    let r = femcore::solve::solve(&mesh, &s, &mut state).unwrap();
-    golden("solid_static_thermal_from_heat", &r, 1e-8);
 }
 
 #[test]

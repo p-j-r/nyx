@@ -9,3 +9,6 @@ description = "The dfs physics of nyx: descriptors now, kernels moved in from fe
 nyx-physics = { path = "../nyx-physics" }
 femcore = { path = "../femcore" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+geom = { path = "../geom" }

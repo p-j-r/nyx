@@ -19,6 +19,7 @@ use crate::adapt::metric::{complexity_for_elements, intersect, lp_metrics, map_e
 use crate::adapt::work::simplex_to_adapt;
 use crate::adapt::field::BackgroundMetric2;
 use crate::meshing::{adapt_to_field, adapt_to_metrics, geometry_floor, Adaptive};
+use crate::adapt::PlotFields;
 use crate::problem::SolveResult;
 use geom::model::FeatureList;
 use std::collections::HashMap;
@@ -168,7 +169,7 @@ fn fit_hessian(patch: &[u32], centre: u32, pt: &dyn Fn(u32) -> [f64; 2], u: &[f6
 
 /// The metric the solution asks for at every vertex of the mesh of `g`, for about `target_cells` triangles, intersected with the floor of the
 /// geometry. Fields that are constant or linear (zero Hessian) ask for nothing.
-pub fn estimator_metrics(g: &MeshedGeom, result: &SolveResult, est: &Estimator, opts: &GeomMeshOpts, target_cells: f64) -> Result<Vec<Sym<2>>, String> {
+pub fn estimator_metrics<R: PlotFields>(g: &MeshedGeom, result: &R, est: &Estimator, opts: &GeomMeshOpts, target_cells: f64) -> Result<Vec<Sym<2>>, String> {
     let mesh = &g.mesh;
     let n = mesh.n_points();
     let adapt_mesh = simplex_to_adapt::<2>(mesh)?;
@@ -185,12 +186,12 @@ pub fn estimator_metrics(g: &MeshedGeom, result: &SolveResult, est: &Estimator, 
     let mut used = 0;
     // `combine`: the sum over the components of |H| at every vertex, per solution
     let mut sum: Vec<Sym<2>> = vec![[[0.0; 2]; 2]; n];
-    for sol in &result.solutions {
+    for sol in result.plot_fields() {
         let mut any = false;
-        let names: Vec<&str> = if est.fields.is_empty() { sol.fields.first().map(|f| f.name.as_str()).into_iter().collect() } else { est.fields.iter().map(String::as_str).collect() };
+        let names: Vec<&str> = if est.fields.is_empty() { sol.first().map(|f| f.0.as_str()).into_iter().collect() } else { est.fields.iter().map(String::as_str).collect() };
         for name in names {
-            let Some(f) = sol.field(name) else { continue };
-            let hess = recovered_hessians(mesh, &f.values)?;
+            let Some(f) = sol.iter().find(|f| f.0 == name) else { continue };
+            let hess = recovered_hessians(mesh, &f.1)?;
             let norm: f64 = hess.iter().map(|h| h[0][0].abs().max(h[1][1].abs())).fold(0.0, f64::max);
             if !(norm > 1e-300 && norm.is_finite()) {
                 continue;
@@ -276,10 +277,10 @@ pub struct Cycle {
     pub solve_seconds: f64,
 }
 
-pub struct LoopResult {
+pub struct LoopResult<R = SolveResult> {
     /// the last mesh and its solution
     pub geom: MeshedGeom,
-    pub result: SolveResult,
+    pub result: R,
     pub cycles: Vec<Cycle>,
     /// true when the change of the quantity fell below the tolerance
     pub converged: bool,
@@ -289,11 +290,11 @@ pub struct LoopResult {
 
 /// Solve on the start mesh, then adapt to the solution and solve again until the quantity of interest settles. `solve` meshes nothing: it
 /// gets a meshed model and returns the result together with the number being tracked (n_eff of the first mode, a peak, an energy).
-pub fn solve_adaptively(
+pub fn solve_adaptively<R: PlotFields>(
     list: &FeatureList,
     s: &LoopSettings,
-    solve: &mut dyn FnMut(&MeshedGeom) -> Result<(SolveResult, f64), String>,
-) -> Result<LoopResult, String> {
+    solve: &mut dyn FnMut(&MeshedGeom) -> Result<(R, f64), String>,
+) -> Result<LoopResult<R>, String> {
     let t = Instant::now();
     let mut geom = mesh_geom_2d(evaluate(list)?, &s.opts)?;
     let mut warm_used = false;

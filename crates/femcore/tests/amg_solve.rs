@@ -50,56 +50,6 @@ fn iterative_thermal_expansion_and_prescribed_displacement() {
 }
 
 #[test]
-fn iterative_poisson_matches() {
-    let mesh = common::block(1.0, 1.0, 1.0, 12, 12, 12);
-    let mut s = ProblemSpec::new(Physics::Electrostatics);
-    s.materials.default.insert("eps_r".into(), 4.0);
-    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Ground }];
-    s.solver = LinearSolver::Direct;
-    let d = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
-    s.solver = LinearSolver::Iterative;
-    let it = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
-    assert!(maxdiff(&d.solutions[0].field("V").unwrap().values, &it.solutions[0].field("V").unwrap().values) < 1e-7);
-    eprintln!("{}", it.log[0]);
-}
-
-#[test]
-fn heat_stationary_iterative() {
-    let mesh = common::block(1.0, 0.5, 0.5, 14, 7, 7);
-    let mut s = ProblemSpec::new(Physics::Heat);
-    s.materials.default.insert("k".into(), 3.0);
-    s.materials.default.insert("Q".into(), 100.0);
-    s.bcs = vec![Bc { on: None, labels: vec![1, 6], kind: BcKind::Temperature(300.0) }];
-    s.solver = LinearSolver::Direct;
-    let d = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
-    s.solver = LinearSolver::Iterative;
-    let it = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
-    assert!(maxdiff(&d.solutions[0].field("T").unwrap().values, &it.solutions[0].field("T").unwrap().values) < 1e-6);
-}
-
-#[test]
-fn heat_transient_iterative_matches_direct() {
-    // large enough to leave the dense eigendecomposition branch and use the BDF2 time stepping
-    let mesh = common::block(1.0, 0.5, 0.5, 12, 6, 6);
-    let mut s = ProblemSpec::new(Physics::Heat);
-    for (k, v) in [("k", 3.0), ("rho", 1000.0), ("Cp", 500.0)] {
-        s.materials.default.insert(k.into(), v);
-    }
-    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(400.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Temperature(300.0) }];
-    s.study = Study::Transient { t_end: 2000.0, n_out: 4, t0: "300".into() };
-    s.solver = LinearSolver::Direct;
-    let d = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
-    s.solver = LinearSolver::Iterative;
-    let it = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
-    assert!(it.log.iter().any(|l| l.contains("BDF2")), "{:?}", it.log);
-    assert!(it.log.iter().any(|l| l.contains("AMG-CG")), "{:?}", it.log);
-    assert_eq!(d.solutions.len(), it.solutions.len());
-    for (a, b) in d.solutions.iter().zip(&it.solutions) {
-        assert!(maxdiff(&a.field("T").unwrap().values, &b.field("T").unwrap().values) < 1e-5, "{}", a.label);
-    }
-}
-
-#[test]
 fn eigenfrequencies_by_lobpcg_match_the_factorisation() {
     let mesh = common::block(1.0, 0.2, 0.2, 14, 3, 3);
     let mut s = ProblemSpec::new(Physics::Solid);

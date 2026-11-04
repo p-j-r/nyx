@@ -1,7 +1,7 @@
 //! Background jobs: building meshes, opening files and solving, so the window stays responsive.
 //!
 //! Each job runs on its own thread and sends its result back through a channel together with the job number (`Job`); the
-//! window picks it up in `App::poll`. A solve calls `femcore::solve::solve_with` with the job's `Progress`, so it can be watched and
+//! window picks it up in `App::poll`. A solve calls `nyx_engine::legacy::solve_with` with the job's `Progress`, so it can be watched and
 //! cancelled, then writes the results file requested in the study and the autosave of the run (project XML, stage log and, in builds
 //! with HDF5, the results) to the runs folder. Files are named `temp_untitled_YYYYMMDD_HHMMSS` with the local time.
 
@@ -148,7 +148,7 @@ fn autosave_run(auto: &AutoSave, mesh: &SimplexMesh, spec: &ProblemSpec, result:
 pub fn spawn_solve(mesh: Arc<SimplexMesh>, spec: ProblemSpec, mut state: SolveState, auto: Option<AutoSave>, job: Job) {
     std::thread::spawn(move || {
         let physics = spec.physics;
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| femcore::solve::solve_with(&mesh, &spec, &mut state, &job.progress)));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| nyx_engine::legacy::solve_with(&mesh, &spec, &mut state, &job.progress)));
         let res = match r {
             Ok(Ok(result)) => {
                 let display = Display::new(&mesh, result.order);

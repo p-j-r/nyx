@@ -17,7 +17,7 @@ One line per contract. Bump the version here in the same commit that changes the
 | problem_spec | `problem_spec.v2.json` | 2.0 | 2026-11-04 | the envelope `{ physics, order, study{kind,params}, materials, bcs[{on,kind,params}], params }` of `nyx-physics` (ADR 25). Coexists with v1 until phase 4 deletes the old `ProblemSpec` |
 | solve_result | `solve_result.v2.json` | 2.0 | 2026-11-04 | `SolveResult`, `Solution`, `Field`, `CellField`, `Scalar` of `nyx-physics` are serialisable (R27); no `analysis` member |
 | physics_descriptors | `physics_descriptors.v1.json` | 1.0 | 2026-11-04 | serde shape of the descriptor types (`StudyDesc`, `BcDesc`, `PropDesc`, `ParamDesc`, `FieldDesc`, `FieldLink`, `Sizing`) |
-| physics_dfs | `physics_dfs.v1.json` | 1.0 | 2026-11-04 | first descriptors of `dfs`, read from the current kernels; the phase 4 owner refines them (bump here) |
+| physics_dfs | `physics_dfs.v1.json` | 1.1 | 2026-11-04 | the kernels moved in (phase 4, ADR 41); 1.1: the physics option `solver` (auto, direct, iterative) replaces the old `ProblemSpec::solver` |
 | physics_sms | `physics_sms.v1.json` | 1.1 | 2026-11-04 | first descriptors of `sms`; 1.1: the `kz` study parameter removed with the out-of-plane model |
 | physics_ems | `physics_ems.v1.json` | 1.0 | 2026-11-04 | same, `ems` |
 | physics_api | (tests only) the `Physics` trait surface, registry rules, error codes | 1.0 | 2026-11-04 | `crates/nyx-physics/tests/contracts.rs`; changing a method is a bump |

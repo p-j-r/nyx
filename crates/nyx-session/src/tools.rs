@@ -406,7 +406,7 @@ struct Solved {
 
 fn run_solve(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Solved, ToolError> {
     let progress = Progress::new();
-    let r = femcore::solve::solve_with(mesh, spec, &mut SolveState::default(), &progress).map_err(|e| {
+    let r = nyx_engine::legacy::solve_with(mesh, spec, &mut SolveState::default(), &progress).map_err(|e| {
         if e == femcore::progress::CANCELLED {
             ToolError::new("cancelled", "the solve was cancelled")
         } else {

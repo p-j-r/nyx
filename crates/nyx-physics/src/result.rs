@@ -49,6 +49,11 @@ impl Solution {
     pub fn field(&self, name: &str) -> Option<&Field> {
         self.fields.iter().find(|f| f.name == name)
     }
+
+    /// The values of a field by its flat name (`V`, `|E|`, `Ex`; see `flat_fields`).
+    pub fn flat(&self, name: &str) -> Option<Vec<f64>> {
+        self.flat_fields().into_iter().find(|(n, _, _)| n == name).map(|(_, _, v)| v)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -74,5 +79,96 @@ impl SolveResult {
             Scalar::Num(x) => Some(*x),
             Scalar::Text(_) => None,
         })
+    }
+}
+
+impl Field {
+    /// A scalar field, one value per dof.
+    pub fn scalar(name: impl Into<String>, unit: impl Into<String>, values: Vec<f64>) -> Field {
+        Field { name: name.into(), unit: unit.into(), components: vec![], values }
+    }
+
+    /// A vector field from one array per component (`comps[j][dof]`), stored interleaved by dof.
+    pub fn vector(name: impl Into<String>, unit: impl Into<String>, names: &[&str], comps: &[Vec<f64>]) -> Field {
+        assert_eq!(names.len(), comps.len(), "one array per component name");
+        let n = comps.first().map_or(0, Vec::len);
+        let mut values = Vec::with_capacity(n * comps.len());
+        for i in 0..n {
+            for c in comps {
+                values.push(c[i]);
+            }
+        }
+        Field {
+            name: name.into(),
+            unit: unit.into(),
+            components: names.iter().map(|s| s.to_string()).collect(),
+            values,
+        }
+    }
+
+    /// The array of component `j` of a vector field (the whole array for a scalar).
+    pub fn component(&self, j: usize) -> Vec<f64> {
+        let m = self.components.len().max(1);
+        self.values.chunks(m).map(|p| p[j]).collect()
+    }
+}
+
+impl Solution {
+    /// The fields in the flat form the window and the golden files use: a scalar keeps its name; a vector `E` with components `x`, `z`
+    /// becomes `|E|` (the norm), `Ex`, `Ez`, in that order. This is the naming of the pre-restructure results (ADR 41).
+    pub fn flat_fields(&self) -> Vec<(String, String, Vec<f64>)> {
+        let mut out = vec![];
+        for f in &self.fields {
+            if f.components.is_empty() {
+                out.push((f.name.clone(), f.unit.clone(), f.values.clone()));
+            } else {
+                let comps: Vec<Vec<f64>> = (0..f.components.len()).map(|j| f.component(j)).collect();
+                let n = comps[0].len();
+                let norm: Vec<f64> = (0..n).map(|i| comps.iter().map(|c| c[i] * c[i]).sum::<f64>().sqrt()).collect();
+                out.push((format!("|{}|", f.name), f.unit.clone(), norm));
+                for (name, c) in f.components.iter().zip(comps) {
+                    out.push((format!("{}{}", f.name, name), f.unit.clone(), c));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// The per-cell fields of a kernel (`femcore::fields::CellFields`) as plain serialisable data.
+pub fn cell_fields_of(cf: &femcore::fields::CellFields) -> Vec<CellField> {
+    cf.fields
+        .iter()
+        .map(|f| CellField {
+            name: f.name.clone(),
+            unit: f.unit.clone(),
+            nloc: cf.nloc,
+            re: f.re.clone(),
+            im: f.im.clone(),
+        })
+        .collect()
+}
+
+/// The inverse of `cell_fields_of`, for code that still reads `CellFields` (the window until phase 7, the analysis until phase 5).
+pub fn cell_fields_back(order: usize, fields: &[CellField]) -> femcore::fields::CellFields {
+    let nloc = fields.first().map_or(0, |f| f.nloc);
+    femcore::fields::CellFields {
+        order,
+        nloc,
+        fields: fields
+            .iter()
+            .map(|f| femcore::fields::CellField {
+                name: f.name.clone(),
+                unit: f.unit.clone(),
+                re: f.re.clone(),
+                im: f.im.clone(),
+            })
+            .collect(),
+    }
+}
+
+impl femcore::adapt::PlotFields for SolveResult {
+    fn plot_fields(&self) -> Vec<Vec<(String, Vec<f64>)>> {
+        self.solutions.iter().map(|s| s.flat_fields().into_iter().map(|(n, _, v)| (n, v)).collect()).collect()
     }
 }

@@ -30,6 +30,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
 const TEMPORARY: &[(&str, &str, &str)] = &[
     ("nyx-store", "femcore", "phase 7: metrics_of and the concept card move to the engine (R21, R25)"),
     ("nyx-session", "femcore", "phase 7: nyx-session is dissolved into the engine"),
+    ("nyx-session", "nyx-engine", "phase 7: the legacy solve bridge (`nyx_engine::legacy`) goes with nyx-session"),
     ("nyx-mcp", "nyx-session", "phase 7: every tool becomes an engine command"),
     ("nyx", "femcore", "phase 7: the window calls engine commands only"),
     ("nyx", "geom", "phase 7: the window calls engine commands only"),

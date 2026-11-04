@@ -428,14 +428,35 @@ fn the_project_json_is_stable_and_round_trips() {
 }
 
 #[test]
-fn the_real_physics_of_this_build_answer_not_yet_moved_until_phase_4() {
+fn dfs_solves_the_strip_through_the_engine() {
+    // restructure phase 4: the real `dfs` of this build solves through `Physics::solve`, with regions and the boundary selector resolved by
+    // the engine's label map. A heat source in the silicon core, a fixed temperature on the outer boundary.
     let mut e = Engine::new();
     build_strip(&mut e);
-    call(&mut e, "add_physics", json!({ "physics": "dfs", "study": "electrostatic" }));
+    call(&mut e, "add_physics", json!({ "physics": "dfs", "study": "heat_stationary" }));
+    for (region, k, q) in [("air", 0.026, 0.0), ("oxide", 1.4, 0.0), ("silicon", 150.0, 1e13)] {
+        call(&mut e, "set_material", json!({ "physics": "dfs", "region": region, "material": { "k": k, "Q": q } }));
+    }
+    call(
+        &mut e,
+        "add_condition",
+        json!({ "physics": "dfs", "on": "outer", "kind": "temperature", "params": { "value": 300.0 } }),
+    );
+    call(&mut e, "mesh_build", json!({}));
+    let solved = call(&mut e, "solve_run", json!({}));
+    assert_eq!(solved["results"][0]["physics"], "dfs");
+    let field = call(&mut e, "result_field", json!({ "physics": "dfs", "field": "T" }));
+    let t: Vec<f64> = field["values"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    let (lo, hi) = t.iter().fold((f64::MAX, f64::MIN), |(a, b), &v| (a.min(v), b.max(v)));
+    assert!((lo - 300.0).abs() < 1e-6, "the boundary holds 300 K, the minimum is {lo}");
+    assert!(hi > 300.0 + 1e-3, "the heated core is warmer than the boundary: {hi}");
+    // a condition that belongs to another study of the same physics is refused with the reason
+    call(&mut e, "add_condition", json!({ "physics": "dfs", "on": "outer", "kind": "ground" }));
     let err = e.call("solve_run", &json!({})).unwrap_err();
-    assert_eq!(err.code(), "not_yet_moved", "{err}");
+    assert_eq!(err.code(), "invalid", "{err}");
+    assert!(err.to_string().contains("not a heat-transfer boundary condition"), "{err}");
     assert_eq!(e.registry().ids(), ["dfs", "ems", "sms"]);
-    // the physics are all described from their descriptors
+    // the sibling physics are still skeletons until their phase 4 threads land; every physics is described from its descriptors
     for id in e.registry().ids() {
         let d = call(&mut e, "describe_physics", json!({ "physics": id }));
         assert!(!d["studies"].as_array().unwrap().is_empty());

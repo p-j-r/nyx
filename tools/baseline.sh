@@ -21,8 +21,10 @@ if [ -z "${BENCH_ONLY:-}" ]; then
 fi
 # build the examples first so the timings below are run time only
 cargo build --release -p "$pkg" --examples > "$out/build_examples.log" 2>&1
+# `bench` drives every physics through the window bridge, so it lives in nyx-engine since restructure phase 4
+cargo build --release -p nyx-engine --examples >> "$out/build_examples.log" 2>&1
 export NYX_PROFILE=1
-step bench         cargo run --release -p "$pkg" --example bench
+step bench         cargo run --release -p nyx-engine --example bench
 step profile3d     cargo run --release -p "$pkg" --example profile3d -- 16 16 16 p2
 step mem_profile   cargo run --release -p "$pkg" --example mem_profile -- 12 12 12 p2 static auto
 step cavity_bench  cargo run --release -p "$pkg" --example cavity_bench -- 0.012 2

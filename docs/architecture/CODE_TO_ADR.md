@@ -94,7 +94,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/progress.rs` | 9, 11 | |
 | `crates/femcore/src/solve.rs` | 9, 1 | |
 | `crates/femcore/src/section.rs` | 1 | |
-| `crates/femcore/src/dfs.rs` | 9, 12 | |
+| `crates/femcore/src/props.rs` | 41, 25 | shared per-domain data (materials, PML, periodic pairs, linear solver); replaced by material files in phase 6 |
+| `crates/femcore/src/testkit.rs` | 41, 10 | mesh fixtures of the tests of every physics crate |
 | `crates/femcore/src/sms*.rs` | 1, 9, 12 | |
 | `crates/femcore/src/periodic.rs` | 12, 9 | Floquet pairs; belongs to no single physics |
 | `crates/femcore/src/ems*.rs` | 1, 9, 12 | |
@@ -150,17 +151,23 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-connect/*` | 15 | |
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27 | shared target directory |
+| `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |
+| `crates/nyx-physics/src/testkit.rs` | 41, 10 | the golden-file harness |
 | `crates/nyx-physics/*` | 25, 19 | the Physics trait, envelope, descriptors, registry |
-| `crates/nyx-dfs/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
+| `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
+| `crates/nyx-dfs/*` | 41, 25, 12, 9 | diffusion: typed problem, electrostatics and heat kernels (moved from femcore::dfs), descriptors |
 | `crates/nyx-sms/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
 | `crates/nyx-ems/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
 | `crates/nyx-analysis/*` | 25, 21 | skeleton: the Analysis trait; content moves in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
+| `crates/nyx-engine/src/legacy/*` | 41 | bridge from the old window problem to the physics crates; deleted in phase 7 |
+| `crates/nyx-engine/tests/legacy_thermal.rs` | 41, 10 | heat feeding thermal expansion through the bridge |
+| `crates/nyx-engine/examples/*` | 41, 9 | benchmarks and logs that drive every physics |
 | `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
 <!-- map:end -->
 
 ## Gaps this index shows
 
 * Files with no ADR of their own: benchmarks and studies in `examples/`. They are measurements, not decisions.
-* Modules whose ADR is retrospective and thin on rationale because the history gives only the subject line: `fem.rs`, `mesher3d.rs`, `refine3d.rs` (ADR 4, 7), `dfs.rs`, `sms*.rs`, `ems*.rs`, `sbs*.rs` as physics (ADR 9, 12 are about structure and naming, not about the choice of formulation; `docs/HOW_IT_WORKS.md` is the explanation of the formulations).
+* Modules whose ADR is retrospective and thin on rationale because the history gives only the subject line: `fem.rs`, `mesher3d.rs`, `refine3d.rs` (ADR 4, 7), `sms*.rs`, `ems*.rs`, `sbs*.rs` as physics (ADR 9, 12 are about structure and naming, not about the choice of formulation; `docs/HOW_IT_WORKS.md` is the explanation of the formulations).
 * Decisions with no ADR because they are not recorded anywhere I could read: choice of `faer`, `spade`, `eframe`; choice of P1/P2 and Nedelec 1/2 as the element families (ADR 4 only states what exists); the Brillouin gain formulation. Ask paul if they should be written down.

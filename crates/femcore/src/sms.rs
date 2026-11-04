@@ -22,7 +22,12 @@ use crate::fields::{gradients_at_nodes, node_average, CellFields};
 use crate::material::{M3, M6};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::dfs::check_labels;
+use crate::fem::check_boundary_labels;
+use crate::problem::Bc;
+
+fn check_labels(mesh: &crate::mesh::SimplexMesh, bcs: &[Bc]) -> Result<(), String> {
+    check_boundary_labels(mesh, bcs.iter().flat_map(|b| b.labels.iter().copied()))
+}
 use crate::linalg::csr::RCsr as Csr;
 use rayon::prelude::*;
 use std::time::Instant;
@@ -322,7 +327,7 @@ fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Pla
         cells.push_real("von Mises", "Pa", vm);
         for (k, ax) in crate::section::component_names(d).iter().enumerate() {
             fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
-            cells.push_real(format!("u{ax}"), "m", crate::dfs::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
+            cells.push_real(format!("u{ax}"), "m", crate::fem::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
         }
         let comps: &[usize] = if d == 2 { &[0, 1, 3, 2] } else { &[0, 1, 2, 3, 4, 5] };
         for &idx in comps {
@@ -333,7 +338,7 @@ fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Pla
     } else {
         for (k, ax) in crate::section::component_names(d).iter().enumerate() {
             fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
-            cells.push_real(format!("u{ax}"), "m", crate::dfs::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
+            cells.push_real(format!("u{ax}"), "m", crate::fem::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
         }
     }
     let mut disp = vec![0.0; n1 * d];

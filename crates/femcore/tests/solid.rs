@@ -143,28 +143,6 @@ fn thermal_expansion_of_a_free_bar() {
 }
 
 #[test]
-fn heat_result_drives_thermal_expansion() {
-    let mesh = common::rect(1.0, 0.1, 10, 2);
-    let mut heat = ProblemSpec::new(Physics::Heat);
-    heat.materials.default.insert("k".into(), 1.0);
-    heat.bcs = vec![Bc { on: None, labels: vec![1, 4], kind: BcKind::Temperature(393.15) }];
-    let mut state = SolveState::default();
-    femcore::dfs::solve_heat(&mesh, &heat, &mut state).unwrap();
-    let mk = |source| {
-        let mut spec = cantilever(Plane::Strain, Study::Static);
-        for (k, v) in [("E", 70e9), ("nu", 0.33), ("alpha", 23e-6)] {
-            spec.materials.default.insert(k.into(), v);
-        }
-        spec.thermal = Some(ThermalExpansion { source, t_ref: 293.15 });
-        spec
-    };
-    let a = solve_solid(&mesh, &mk(ThermalSource::FromHeat), &state).unwrap();
-    let b = solve_solid(&mesh, &mk(ThermalSource::Uniform(393.15)), &state).unwrap();
-    let (ua, ub) = (&a.solutions[0].field("ux").unwrap().values, &b.solutions[0].field("ux").unwrap().values);
-    assert!(maxdiff(ua, ub) < 1e-12);
-    assert!(solve_solid(&mesh, &mk(ThermalSource::FromHeat), &SolveState::default()).is_err());
-}
-#[test]
 fn block_3d_matches_beam_theory() {
     // block 1 x 0.1 x 0.1, fixed at x = 0 (boundary 1), load (0, 0, -1e5) N/m^2 on x = 1 (boundary 6): F = 1e3 N
     let mesh = common::block(1.0, 0.1, 0.1, 12, 2, 2);

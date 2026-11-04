@@ -199,7 +199,24 @@
   "id": "dfs",
   "imports": [],
   "name": "Diffusion (electrostatics, heat transfer)",
-  "params": [],
+  "params": [
+    {
+      "doc": "auto: sparse direct for small systems, multigrid-preconditioned CG for large 3D ones; direct: Cholesky; iterative: AMG-CG",
+      "kind": {
+        "default": "auto",
+        "options": [
+          "auto",
+          "direct",
+          "iterative"
+        ],
+        "type": "choice"
+      },
+      "label": "Linear solver",
+      "name": "solver",
+      "required": false,
+      "unit": ""
+    }
+  ],
   "properties": [
     {
       "default": null,
@@ -503,7 +520,18 @@
       },
       "params": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "solver": {
+            "default": "auto",
+            "description": "Linear solver. auto: sparse direct for small systems, multigrid-preconditioned CG for large 3D ones; direct: Cholesky; iterative: AMG-CG",
+            "enum": [
+              "auto",
+              "direct",
+              "iterative"
+            ],
+            "type": "string"
+          }
+        },
         "required": [],
         "type": "object"
       },

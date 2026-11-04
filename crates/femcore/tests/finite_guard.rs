@@ -62,19 +62,6 @@ fn nan_boundary_values_and_study_parameters_are_refused() {
 }
 
 #[test]
-fn electrostatics_and_heat_refuse_nan_materials_too() {
-    let m = common::rect(1.0, 1.0, 6, 6);
-    let mut es = ProblemSpec::new(Physics::Electrostatics);
-    es.materials.default.insert("eps_r".into(), f64::NAN);
-    es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![3], kind: BcKind::Ground }];
-    assert!(solve(&m, &es, &mut SolveState::default()).unwrap_err().contains("'eps_r'"));
-    let mut heat = ProblemSpec::new(Physics::Heat);
-    heat.materials.default.insert("k".into(), f64::NAN);
-    heat.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(1.0) }];
-    assert!(solve(&m, &heat, &mut SolveState::default()).unwrap_err().contains("'k'"));
-}
-
-#[test]
 fn a_non_finite_result_is_an_error() {
     let mut r = SolveResult::default();
     r.solutions.push(Solution { label: "static".into(), fields: vec![Field { name: "ux".into(), unit: "m".into(), values: vec![0.0, f64::NAN, 1.0] }], ..Default::default() });

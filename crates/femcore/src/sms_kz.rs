@@ -3,12 +3,17 @@
 //! model (`sms_axisym`: bodies of revolution, azimuthal order `m`). The out-of-plane wave-number model (`u(x, z) exp(-j k y)`) that
 //! was the other client is removed (paul, 2026-11-04). The file keeps its name until phase 4 moves it into `nyx-sms`.
 
-use crate::linalg::csr::{c, CCoo, CCsr, C};
+use crate::linalg::csr::{c, CCsr, C};
 use crate::fem::*;
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::dfs::check_labels;
+use crate::fem::check_boundary_labels;
+use crate::problem::Bc;
+
+fn check_labels(mesh: &crate::mesh::SimplexMesh, bcs: &[Bc]) -> Result<(), String> {
+    check_boundary_labels(mesh, bcs.iter().flat_map(|b| b.labels.iter().copied()))
+}
 use crate::linalg::csr::RCsr as Csr;
 use std::time::Instant;
 

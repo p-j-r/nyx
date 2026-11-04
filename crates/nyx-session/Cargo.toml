@@ -7,5 +7,6 @@ description = "nyx session layer: typed capabilities, handles, assumptions ledge
 
 [dependencies]
 femcore = { path = "../femcore" }
+nyx-engine = { path = "../nyx-engine" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
