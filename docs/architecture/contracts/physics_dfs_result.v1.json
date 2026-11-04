@@ -1,0 +1,185 @@
+{
+  "electrostatic": {
+    "physics": "dfs",
+    "scalars": [
+      "stored energy W_e (J; per metre in 2D)",
+      "max |E| (V/m)",
+      "V min (V)",
+      "V max (V)",
+      "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "V",
+          "Ex",
+          "Ez"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "V",
+            "unit": "V"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "E",
+            "unit": "V/m"
+          }
+        ],
+        "flat": [
+          "V",
+          "|E|",
+          "Ex",
+          "Ez"
+        ],
+        "has_value": false,
+        "label": "stationary"
+      }
+    ],
+    "study": "electrostatic"
+  },
+  "heat_stationary": {
+    "physics": "dfs",
+    "scalars": [
+      "T min (K)",
+      "T max (K)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "T",
+          "qx",
+          "qz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "T",
+            "unit": "K"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "q",
+            "unit": "W/m^2"
+          }
+        ],
+        "flat": [
+          "T",
+          "|q|",
+          "qx",
+          "qz"
+        ],
+        "has_value": false,
+        "label": "stationary"
+      }
+    ],
+    "study": "heat_stationary"
+  },
+  "heat_transient": {
+    "physics": "dfs",
+    "scalars": [
+      "T min (K)",
+      "T max (K)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "T",
+          "qx",
+          "qz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "T",
+            "unit": "K"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "q",
+            "unit": "W/m^2"
+          }
+        ],
+        "flat": [
+          "T",
+          "|q|",
+          "qx",
+          "qz"
+        ],
+        "has_value": true,
+        "label": "t = 0 s"
+      },
+      {
+        "cell_fields": [
+          "T",
+          "qx",
+          "qz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "T",
+            "unit": "K"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "q",
+            "unit": "W/m^2"
+          }
+        ],
+        "flat": [
+          "T",
+          "|q|",
+          "qx",
+          "qz"
+        ],
+        "has_value": true,
+        "label": "t = 0.050000 s"
+      },
+      {
+        "cell_fields": [
+          "T",
+          "qx",
+          "qz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "T",
+            "unit": "K"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "q",
+            "unit": "W/m^2"
+          }
+        ],
+        "flat": [
+          "T",
+          "|q|",
+          "qx",
+          "qz"
+        ],
+        "has_value": true,
+        "label": "t = 0.100000 s"
+      }
+    ],
+    "study": "heat_transient"
+  }
+}

@@ -15,6 +15,7 @@ The rule is ADR 19. Each contract is an exemplar file here plus a test that gene
 | `problem_spec` v2 | serde shape of the problem envelope (`nyx-physics`), one spec per physics | `crates/nyx-physics/tests/contracts.rs` `problem_spec_v2_*` | `cargo test --release -p nyx-physics --test contracts` |
 | `solve_result` v2 | serde shape of a result | same, `solve_result_v2_*` | same |
 | `physics_descriptors`, `physics_api` | descriptor types; trait surface, registry rules, error codes | same | same |
+| `physics_dfs_result` | the shape of a dfs result per study (names, units, components, per-cell fields, scalar names; no numbers) | `crates/nyx-dfs/tests/contracts.rs` `result_shape_exemplar_is_stable` | `cargo test --release -p nyx-dfs --test contracts` |
 | `physics_dfs`, `physics_sms`, `physics_ems` | the descriptors each physics declares (studies, conditions, properties, fields, couplings, generated JSON Schema) | `crates/nyx-{dfs,sms,ems}/tests/contracts.rs` | `cargo test --release -p nyx-dfs -p nyx-sms -p nyx-ems --test contracts` |
 | `engine_commands`, `geom_operations`, `engine_project` | the command catalog with schemas, the geometry operation descriptors, an example project (provisional layout) | `crates/nyx-engine/tests/{contracts,geomdesc}.rs` | `cargo test --release -p nyx-engine --test contracts --test geomdesc` |
 | `layering` (tests only) | which workspace crate may depend on which | `crates/nyx-engine/tests/layering.rs` | `cargo test --release -p nyx-engine --test layering` |

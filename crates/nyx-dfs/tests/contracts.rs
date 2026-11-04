@@ -147,3 +147,43 @@ fn kernel_stage_api_is_public() {
     let _ = (nyx_dfs::assemble_heat, nyx_dfs::solve_heat_states, nyx_dfs::heat_fields);
     let _ = (nyx_dfs::solve_electrostatics, nyx_dfs::solve_heat, nyx_dfs::run, nyx_dfs::decode);
 }
+
+/// The shape of a result, without numbers: what a front-end, the store and the analyses may rely on (names, units, components, the per-cell
+/// fields, the scalars, the number of solutions).
+fn result_shape(r: &SolveResult) -> serde_json::Value {
+    json!({
+        "physics": r.physics,
+        "study": r.study,
+        "solutions": r.solutions.iter().map(|s| json!({
+            "label": s.label,
+            "has_value": s.value.is_some(),
+            "fields": s.fields.iter().map(|f| json!({ "name": f.name, "unit": f.unit, "components": f.components })).collect::<Vec<_>>(),
+            "flat": s.flat_fields().iter().map(|f| f.0.clone()).collect::<Vec<_>>(),
+            "cell_fields": s.cell_fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+        "scalars": r.scalars.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+    })
+}
+
+#[test]
+fn result_shape_exemplar_is_stable() {
+    // one small problem per study; the exemplar `physics_dfs_result.v1.json` lists their shapes
+    use femcore::testkit::rect;
+    use nyx_dfs::{Bc, BcKind, Problem, Study};
+    let mesh = Mesh::from_solver_mesh(&rect(1.0, 0.5, 4, 2)).unwrap();
+    let run = |p: &Problem| result_shape(&nyx_dfs::run(&mesh, p, &femcore::progress::Progress::new()).unwrap());
+    let mut es = Problem::new(Study::Electrostatic, 2);
+    es.bcs = vec![Bc { labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { labels: vec![4], kind: BcKind::Ground }];
+    let mut heat = Problem::new(Study::HeatStationary, 2);
+    heat.materials.default.insert("k".into(), 1.0);
+    heat.bcs = vec![
+        Bc { labels: vec![1], kind: BcKind::Temperature(1.0) },
+        Bc { labels: vec![4], kind: BcKind::Temperature(0.0) },
+    ];
+    let mut transient = heat.clone();
+    transient.materials.default.insert("rho".into(), 1.0);
+    transient.materials.default.insert("Cp".into(), 1.0);
+    transient.study = Study::HeatTransient { t_end: 0.1, n_out: 2, t0: "0".into() };
+    let got = json!({ "electrostatic": run(&es), "heat_stationary": run(&heat), "heat_transient": run(&transient) });
+    contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_dfs_result.v1.json", &got);
+}
