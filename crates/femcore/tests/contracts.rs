@@ -480,3 +480,27 @@ fn physics_dispatch_covers_every_physics_and_the_emw_split_by_mesh_dimension() {
     assert_eq!(names.len(), 4);
     assert!(Physics::Emw.name().contains("mode analysis"));
 }
+
+// ---------------------------------------------------------------------------------------------------------------- mesh, 3D geom models (ADR 40)
+
+#[test]
+fn mesh_geom3d_numbers_cells_and_facets_with_the_model_label_map() {
+    // A 3D geom model meshes through the same entry point as a 2D one (`meshing::mesh_model`): cells carry the domain number of their region
+    // and boundary facets the boundary number of their geom face, both 1-based and equal to the model's `LabelMap`; the result is all
+    // tetrahedra (`dim` 3, four vertices per cell, three per facet), no curved-node storage (ADR 18).
+    let mut m = geom::model::Model::new_3d();
+    let host = m.box_("air", (0.0, 0.0, 0.0), (2.0, 2.0, 2.0));
+    let ball = m.sphere("ball", (1.0, 1.0, 1.0), 0.5);
+    m.overlay(&[("air", host), ("ball", ball)]);
+    let g = femcore::meshing::mesh_model(&m.list, &femcore::meshing::MeshPlan::simple(0.25)).unwrap();
+    assert_eq!(g.mesh.dim, 3);
+    assert_eq!(g.mesh.cells.len(), 4 * g.mesh.n_cells());
+    assert_eq!(g.mesh.facets.len(), 3 * g.mesh.n_facets());
+    let domains: std::collections::BTreeSet<i32> = g.mesh.cell_labels.iter().copied().collect();
+    assert_eq!(domains, g.labels.domains.iter().map(|d| d.id).collect(), "every region has cells, and no other number appears");
+    assert_eq!(domains.iter().next(), Some(&1), "domain numbers start at 1");
+    let faces: std::collections::BTreeSet<i32> = g.mesh.facet_labels.iter().copied().collect();
+    assert_eq!(faces, g.labels.boundaries.iter().map(|b| b.id).collect(), "every face of the model has facets, and no other number appears");
+    assert_eq!(faces.iter().next(), Some(&1), "boundary numbers start at 1");
+    assert_eq!(g.boundary("air|ball").len(), 1);
+}

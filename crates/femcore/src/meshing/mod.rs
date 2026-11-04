@@ -12,12 +12,15 @@
 //! Hessian, say) and it adapts the same way. Nothing else of the interface changes.
 
 pub mod geomdrive;
+pub mod geomdrive3;
 pub mod mesher;
+pub mod mesher3d;
 pub mod physics_size;
 pub mod sizing;
 pub mod pml_geom;
 pub mod pml3;
 pub mod pml_box;
+pub mod refine3d;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
@@ -103,6 +106,16 @@ pub fn mesh_evaluated(ev: Evaluated, plan: &MeshPlan) -> Result<MeshedGeom, Stri
 
 /// Like `mesh_evaluated`, with the report of the adaptation when there was one.
 pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    if ev.list.dim == 3 {
+        // tetrahedra by the lattice mesher (ADR 40); the adaptation and the structured absorbing layers are 2D
+        if !matches!(plan.mesher, Mesher::Simple) {
+            return Err("the adaptive mesher works on 2D models; a 3D model is meshed with the simple mesher".into());
+        }
+        if !matches!(plan.pml, PmlMode::Inline) {
+            return Err("structured absorbing layers are 2D only; a 3D model keeps its layers inline".into());
+        }
+        return Ok((geomdrive3::mesh_geom_3d(ev, &plan.opts)?, None));
+    }
     let start = mesh_geom_2d(ev, &plan.opts)?;
     let (g, report) = match plan.mesher {
         Mesher::Simple => (start, None),

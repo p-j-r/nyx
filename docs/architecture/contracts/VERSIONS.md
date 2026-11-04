@@ -9,7 +9,7 @@ One line per contract. Bump the version here in the same commit that changes the
 | store_run | `store_run.v1.json` | 1.0 | 2026-11-03 | first snapshot |
 | mcp_tools | `mcp_tools.v1.json` | 1.0 | 2026-11-03 | first snapshot, 9 tools |
 | geom_model | `crates/geom/golden/*.json` | 1.0 | 2026-11-03 | no exemplar of its own; the goldens are the exemplars; the file carries no format key yet |
-| mesh | (tests only) `.fmsh` version byte 2 | 1.1 | 2026-11-04 | boundary-element numbers of the nyx `CellMesh` are 1-based like the domain numbers (ADR 32 step 1); `SimplexMesh` labels unchanged, `from_cells` no longer shifts |
+| mesh | (tests only) `.fmsh` version byte 2 | 1.2 | 2026-11-04 | boundary-element numbers of the nyx `CellMesh` are 1-based like the domain numbers (ADR 32 step 1); `SimplexMesh` labels unchanged, `from_cells` no longer shifts. 1.2 (ADR 40): additive, a 3D geom model meshes through `mesh_model` with the label-map numbering (test `mesh_geom3d_numbers_cells_and_facets_with_the_model_label_map`) |
 | mesh_cells | `mesh_cells.v1.json` | 1.0 | 2026-11-04 | the one mesh model (ADR 32): node order per cell type, faces, label base 1 for domains and boundaries, `.fmsh` version 2, how the solver view is cut from it; the nyx `CellMesh` it replaces is gone |
 | frames | (tests only) `section` constants | 1.0 | 2026-11-03 | wafer frame, +y |
 | kernel_stages | (tests only) public stage functions | 1.1 | 2026-11-03 | the list of one-call solvers loses `sbs::solve_brillouin` (ADR 24); stage functions unchanged |

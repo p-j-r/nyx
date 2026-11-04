@@ -71,11 +71,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/mesh/cells.rs` | 5 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
 | `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
-| `crates/femcore/src/meshing/README.md` | 4, 7 | where mesher3d and refine3d went (R05) |
 | `crates/femcore/src/meshing/mod.rs` | 6, 7, 18 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
 | `crates/femcore/src/meshing/geomdrive.rs` | 2, 6 | |
 | `crates/femcore/src/meshing/mesher.rs` | 6, 2 | 2D triangulation core |
-| `crates/femcore/tests/common/solid3d/*` | 4, 7 | R05: stuffed solid meshes (sphere cavity), test fixture only, was `meshing/mesher3d.rs`, `refine3d.rs` |
+| `crates/femcore/src/meshing/mesher3d.rs` | 40 | lattice (isosurface stuffing) tetrahedral mesher on the trait `Domain3`; was the R05 fixture |
+| `crates/femcore/src/meshing/refine3d.rs` | 40 | Rivara longest-edge refinement of a `CellMesh<3>` |
+| `crates/femcore/src/meshing/geomdrive3.rs` | 40, 2 | adapter: a 3D geom model as `Domain3` (classify, facet_project, LabelMap), `mesh_geom_3d`, `sphere_cavity` |
 | `crates/femcore/src/meshing/pml3.rs` | 5, 7 | |
 | `crates/femcore/src/meshing/pml_geom.rs` | 5, 7 | structured PML for a meshed geom model, an adapter over `pml_box` (was `meshing_pml.rs`, then `meshing/pml.rs`) |
 | `crates/femcore/src/meshing/pml_box.rs` | 7, 5 | structured PML generator (was `meshers/adapt/pml.rs`) |

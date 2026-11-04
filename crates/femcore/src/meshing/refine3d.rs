@@ -8,7 +8,7 @@
 //! cells, and the new vertex on an edge that lies on the boundary of the solid or on an interface
 //! between domains is moved onto the true (curved) surface by the caller's projection.
 
-use femcore::mesh::SimplexMesh;
+use crate::mesh::cells::{CellMesh, CellType};
 use std::collections::HashMap;
 
 type P3 = [f64; 3];
@@ -70,20 +70,20 @@ fn volume6(p: [P3; 4]) -> f64 {
 /// `project(midpoint, a, b, kind)` returns the position of the new vertex on edge `a`-`b`; it is
 /// only asked to move the midpoint for edges on the boundary or on an interface.
 pub fn refine_to_size(
-    mesh: &SimplexMesh,
+    mesh: &CellMesh<3>,
     size: &(dyn Fn(P3) -> f64 + Sync),
     project: &(dyn Fn(P3, P3, P3, EdgeKind) -> P3 + Sync),
     ratio: f64,
     max_cells: usize,
-) -> Result<(SimplexMesh, RefineReport), String> {
-    if mesh.dim != 3 {
-        return Err("local refinement works on tetrahedral meshes".into());
+) -> Result<(CellMesh<3>, RefineReport), String> {
+    if mesh.types.iter().any(|&t| t != CellType::Tet) || (0..mesh.n_facets()).any(|f| mesh.facet(f).len() != 3) {
+        return Err("local refinement works on tetrahedral meshes with triangular boundary facets".into());
     }
-    let mut pts: Vec<P3> = (0..mesh.n_points()).map(|i| [mesh.points[3 * i], mesh.points[3 * i + 1], mesh.points[3 * i + 2]]).collect();
-    let mut cells: Vec<[u32; 4]> = (0..mesh.n_cells()).map(|c| [mesh.cells[4 * c], mesh.cells[4 * c + 1], mesh.cells[4 * c + 2], mesh.cells[4 * c + 3]]).collect();
-    let mut labels = mesh.cell_labels.clone();
-    let mut facets: Vec<[u32; 3]> = (0..mesh.n_facets()).map(|f| [mesh.facets[3 * f], mesh.facets[3 * f + 1], mesh.facets[3 * f + 2]]).collect();
-    let mut flabels = mesh.facet_labels.clone();
+    let mut pts: Vec<P3> = mesh.points.clone();
+    let mut cells: Vec<[u32; 4]> = (0..mesh.n_cells()).map(|c| [mesh.cell(c)[0], mesh.cell(c)[1], mesh.cell(c)[2], mesh.cell(c)[3]]).collect();
+    let mut labels = mesh.label.clone();
+    let mut facets: Vec<[u32; 3]> = (0..mesh.n_facets()).map(|f| [mesh.facet(f)[0], mesh.facet(f)[1], mesh.facet(f)[2]]).collect();
+    let mut flabels = mesh.facet_label.clone();
     let mut report = RefineReport { cells_before: cells.len(), ..Default::default() };
 
     for _round in 0..200 {
@@ -231,7 +231,13 @@ pub fn refine_to_size(
     }
 
     report.cells_after = cells.len();
-    let points: Vec<f64> = pts.iter().flatten().copied().collect();
-    let out = SimplexMesh::new(3, points, cells.iter().flatten().copied().collect(), labels, facets.iter().flatten().copied().collect(), flabels);
+    let mut out = CellMesh::<3>::new();
+    out.points = pts;
+    for (t, &l) in cells.iter().zip(&labels) {
+        out.push_cell(CellType::Tet, t, l);
+    }
+    for (f, &l) in facets.iter().zip(&flabels) {
+        out.push_facet(f, l);
+    }
     Ok((out, report))
 }

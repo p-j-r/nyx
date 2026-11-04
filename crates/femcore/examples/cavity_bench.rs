@@ -1,14 +1,12 @@
 //! Spherical PEC cavity timing: cargo run --release -p femcore --example cavity_bench -- h order
-#[path = "../tests/common/solid3d/mod.rs"]
-mod solid3d;
-use solid3d::mesher3d::*;
+
 use femcore::problem::*;
 fn main() {
     let a: Vec<f64> = std::env::args().skip(1).filter_map(|s| s.parse().ok()).collect();
     let (h, order) = (a.first().copied().unwrap_or(0.012), a.get(1).copied().unwrap_or(2.0) as usize);
     let r = 0.05;
-    let s3 = Spec3d { bodies: vec![Body3d { solid: Solid::Sphere { c: [0.0; 3], r }, domain: 1, h: None }], h, alpha: 0.3, snap_features: true, min_layers: 2.0 };
-    let (mesh, _) = mesh_3d(&s3).unwrap();
+
+    let mesh = femcore::meshing::geomdrive3::sphere_cavity(r, h).unwrap().mesh;
     println!("{} tetrahedra", mesh.n_cells());
     let exact = 299792458.0 * 2.7437 / (2.0 * std::f64::consts::PI * r);
     let mut s = ProblemSpec::new(Physics::Emw);

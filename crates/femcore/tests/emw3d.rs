@@ -1,7 +1,5 @@
 //! Electromagnetic eigenmodes of 3D cavities.
 mod common;
-#[path = "common/solid3d/mod.rs"]
-mod solid3d;
 use femcore::problem::*;
 
 const C0: f64 = 299_792_458.0;
@@ -76,11 +74,10 @@ fn first_order_elements_converge_more_slowly() {
 
 #[test]
 fn spherical_cavity_lowest_mode_on_a_stuffed_mesh() {
-    // TM mode of a PEC sphere: k R = 2.7437 (three-fold degenerate); the mesh follows the sphere to O(h^2)
-    use crate::solid3d::mesher3d::*;
+    // TM mode of a PEC sphere: k R = 2.7437 (three-fold degenerate); the mesh follows the sphere to O(h^2). The sphere is a geom model
+    // (a sphere in a hole box); the mesh is made by the 3D adapter (ADR 40)
     let r = 0.05;
-    let spec3 = Spec3d { bodies: vec![Body3d { solid: Solid::Sphere { c: [0.0; 3], r }, domain: 1, h: None }], h: 0.012, alpha: 0.3, snap_features: true, min_layers: 2.0 };
-    let (mesh, _) = mesh_3d(&spec3).unwrap();
+    let mesh = femcore::meshing::geomdrive3::sphere_cavity(r, 0.012).unwrap().mesh;
     let exact = C0 * 2.7437 / (2.0 * std::f64::consts::PI * r);
     let res = femcore::solve::solve(&mesh, &spec(2, exact, 4), &mut SolveState::default()).unwrap();
     let f: Vec<f64> = res.solutions.iter().map(|s| s.value.unwrap()).collect();
