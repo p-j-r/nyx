@@ -1,0 +1,131 @@
+{
+  "active": "ems",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "window",
+        "op": {
+          "Rect": {
+            "max": [
+              2e-6,
+              1.5e-6
+            ],
+            "min": [
+              -2e-6,
+              -1.5e-6
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "box",
+        "op": {
+          "Rect": {
+            "max": [
+              2e-6,
+              0.0
+            ],
+            "min": [
+              -2e-6,
+              -1.5e-6
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "core",
+        "op": {
+          "Rect": {
+            "max": [
+              "w/2",
+              "t"
+            ],
+            "min": [
+              "-w/2",
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "overlay1",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "air",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "oxide",
+                "pinned_id": null
+              },
+              {
+                "input": 3,
+                "kind": "Material",
+                "name": "silicon",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": [
+      {
+        "name": "w",
+        "value": 5e-7
+      },
+      {
+        "name": "t",
+        "value": 2.2e-7
+      }
+    ]
+  },
+  "mesh": {
+    "h": 1e-7
+  },
+  "physics": [
+    {
+      "bcs": [],
+      "materials": {
+        "silicon": {
+          "eps_r": 12.08
+        }
+      },
+      "order": 2,
+      "physics": "ems",
+      "study": {
+        "kind": "modes",
+        "params": {
+          "freq": 193400000000000.0,
+          "n_modes": 2
+        }
+      }
+    }
+  ],
+  "title": "SOI strip"
+}

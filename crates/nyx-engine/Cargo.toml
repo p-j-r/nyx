@@ -11,6 +11,11 @@ nyx-dfs = { path = "../nyx-dfs", optional = true }
 nyx-sms = { path = "../nyx-sms", optional = true }
 nyx-ems = { path = "../nyx-ems", optional = true }
 nyx-analysis = { path = "../nyx-analysis" }
+nyx-store = { path = "../nyx-store" }
+femcore = { path = "../femcore" }
+geom = { path = "../geom" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [features]
 # the physics compiled into a build (plan: physics are compiled in, run-time plug-ins are out of scope)
@@ -19,5 +24,3 @@ dfs = ["dep:nyx-dfs"]
 sms = ["dep:nyx-sms"]
 ems = ["dep:nyx-ems"]
 
-[dev-dependencies]
-serde_json = { version = "1", features = ["float_roundtrip"] }

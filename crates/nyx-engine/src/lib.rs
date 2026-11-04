@@ -1,10 +1,31 @@
 //! nyx-engine: the one place that knows how a nyx session works. The window (`app`) and the MCP server (`nyx-mcp`) are thin front-ends
 //! over it: every action of either is a command of the engine (restructure phase 7, ADR 23 and 25).
 //!
-//! SKELETON (restructure foundation). Today it holds only the registry of compiled-in physics, built from cargo features. Phase 7
-//! adds `Project` (moved from `app/state.rs`), the command set, the job runner (progress, cancel), persistence through `nyx-store`, the
-//! batch runner and the exports. The rule it enforces from now on: **nothing outside the physics crates names a physics**; code that
-//! needs one asks `registry().get(id)`.
+//! * `project`: `Project` (feature list, mesh settings, one problem per physics), saved as JSON
+//! * `geometry`: editing a feature list; the operations come from `geomdesc`
+//! * `meshing`: `MeshedModel` (mesh and names, the label resolver) and the `Mesher` seam that restructure phase 2 rewrites
+//! * `jobs`: the job runner (progress, cancel); `solve`: the coupled chain of physics; `store_link`: persistence through `nyx-store`
+//! * `engine`: `Engine`, the state around one project; `commands`: every action by name, JSON in and out, with schemas (`catalog`)
+//!
+//! Built before phase 4 (the kernels): `solve` goes through `Physics::solve`, which answers `NotYetMoved` for the skeleton physics until
+//! phase 4 fills them, and meshing goes through one seam. The rule it enforces: **nothing outside the physics crates names a physics**;
+//! code that needs one asks `registry().get(id)`.
+
+pub mod commands;
+pub mod engine;
+pub mod geomdesc;
+pub mod geometry;
+pub mod jobs;
+pub mod meshing;
+pub mod project;
+pub mod solve;
+pub mod store_link;
+
+pub use commands::{Access, CommandDesc};
+pub use engine::Engine;
+pub use jobs::{JobId, JobInfo, JobOutput, JobRunner, JobState};
+pub use meshing::{FemcoreMesher, MeshedModel, Mesher};
+pub use project::{MeshSettings, Project, SweepLayer};
 
 use nyx_physics::{Error, Registry};
 #[allow(unused_imports)]

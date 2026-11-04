@@ -1,0 +1,1850 @@
+[
+  {
+    "dims": [
+      2
+    ],
+    "doc": "A rectangle in the x-z cross-section, given by its two corners.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "lower-left corner (x, z) in metres",
+        "name": "min",
+        "required": true,
+        "type": "Exprs(2)"
+      },
+      {
+        "default": null,
+        "doc": "upper-right corner (x, z) in metres",
+        "name": "max",
+        "required": true,
+        "type": "Exprs(2)"
+      }
+    ],
+    "group": "shape",
+    "kind": "Rect",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "upper-right corner (x, z) in metres",
+          "type": "array"
+        },
+        "min": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "lower-left corner (x, z) in metres",
+          "type": "array"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "title": "Rectangle",
+    "tool": "add_rect"
+  },
+  {
+    "dims": [
+      2
+    ],
+    "doc": "A disc in the x-z cross-section.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "centre (x, z)",
+        "name": "center",
+        "required": true,
+        "type": "Exprs(2)"
+      },
+      {
+        "default": null,
+        "doc": "radius",
+        "name": "r",
+        "required": true,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "Circle",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "centre (x, z)",
+          "type": "array"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius"
+        }
+      },
+      "required": [
+        "center",
+        "r"
+      ],
+      "type": "object"
+    },
+    "title": "Circle",
+    "tool": "add_circle"
+  },
+  {
+    "dims": [
+      2
+    ],
+    "doc": "An ellipse in the x-z cross-section, rotated by an angle.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "centre (x, z)",
+        "name": "center",
+        "required": true,
+        "type": "Exprs(2)"
+      },
+      {
+        "default": null,
+        "doc": "semi-axes along the rotated x and z",
+        "name": "radii",
+        "required": true,
+        "type": "Exprs(2)"
+      },
+      {
+        "default": 0.0,
+        "doc": "rotation in degrees",
+        "name": "angle_deg",
+        "required": false,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "Ellipse",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "angle_deg": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "rotation in degrees"
+        },
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "centre (x, z)",
+          "type": "array"
+        },
+        "radii": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "semi-axes along the rotated x and z",
+          "type": "array"
+        }
+      },
+      "required": [
+        "center",
+        "radii"
+      ],
+      "type": "object"
+    },
+    "title": "Ellipse",
+    "tool": "add_ellipse"
+  },
+  {
+    "dims": [
+      2
+    ],
+    "doc": "A closed polygon in the x-z cross-section; counter-clockwise or clockwise. Edge i goes from point i to point i+1.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the corners (x, z)",
+        "name": "pts",
+        "required": true,
+        "type": "Points(2)"
+      },
+      {
+        "default": [],
+        "doc": "role names of the edges (default e0, e1, ...), used in boundary names",
+        "name": "names",
+        "required": false,
+        "type": "TextList"
+      }
+    ],
+    "group": "shape",
+    "kind": "Polygon",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "role names of the edges (default e0, e1, ...), used in boundary names",
+          "type": "array"
+        },
+        "pts": {
+          "items": {
+            "items": {
+              "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "minItems": 3,
+          "title": "the corners (x, z)",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pts"
+      ],
+      "type": "object"
+    },
+    "title": "Polygon",
+    "tool": "add_polygon"
+  },
+  {
+    "dims": [
+      2
+    ],
+    "doc": "A rectangle with quarter-circle corners.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "lower-left corner (x, z)",
+        "name": "min",
+        "required": true,
+        "type": "Exprs(2)"
+      },
+      {
+        "default": null,
+        "doc": "upper-right corner (x, z)",
+        "name": "max",
+        "required": true,
+        "type": "Exprs(2)"
+      },
+      {
+        "default": null,
+        "doc": "corner radius",
+        "name": "r",
+        "required": true,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "RoundedRect",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "upper-right corner (x, z)",
+          "type": "array"
+        },
+        "min": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "lower-left corner (x, z)",
+          "type": "array"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "corner radius"
+        }
+      },
+      "required": [
+        "min",
+        "max",
+        "r"
+      ],
+      "type": "object"
+    },
+    "title": "Rounded rectangle",
+    "tool": "add_rounded_rect"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "An axis-aligned box (3D). Face roles: xmin xmax ymin ymax zmin zmax.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "lower corner (x, y, z)",
+        "name": "min",
+        "required": true,
+        "type": "Exprs(3)"
+      },
+      {
+        "default": null,
+        "doc": "upper corner (x, y, z)",
+        "name": "max",
+        "required": true,
+        "type": "Exprs(3)"
+      }
+    ],
+    "group": "shape",
+    "kind": "Box",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "upper corner (x, y, z)",
+          "type": "array"
+        },
+        "min": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "lower corner (x, y, z)",
+          "type": "array"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "title": "Box",
+    "tool": "add_box"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "A cylinder (3D) from `base` along +z. Face roles: side bottom top.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "centre of the bottom face",
+        "name": "base",
+        "required": true,
+        "type": "Exprs(3)"
+      },
+      {
+        "default": "Z",
+        "doc": "this build: z only",
+        "name": "axis",
+        "required": false,
+        "type": "Axis"
+      },
+      {
+        "default": null,
+        "doc": "radius",
+        "name": "r",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "height",
+        "name": "h",
+        "required": true,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "Cylinder",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Z",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "this build: z only"
+        },
+        "base": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre of the bottom face",
+          "type": "array"
+        },
+        "h": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "height"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius"
+        }
+      },
+      "required": [
+        "base",
+        "r",
+        "h"
+      ],
+      "type": "object"
+    },
+    "title": "Cylinder",
+    "tool": "add_cylinder"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "A sphere (3D). One face, `surface`; it must not touch any other face.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "centre",
+        "name": "center",
+        "required": true,
+        "type": "Exprs(3)"
+      },
+      {
+        "default": null,
+        "doc": "radius",
+        "name": "r",
+        "required": true,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "Sphere",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre",
+          "type": "array"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius"
+        }
+      },
+      "required": [
+        "center",
+        "r"
+      ],
+      "type": "object"
+    },
+    "title": "Sphere",
+    "tool": "add_sphere"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "A cone frustum (3D) along the axis from `base`; either radius may be 0. Faces side, bottom, top.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "centre of the bottom face",
+        "name": "base",
+        "required": true,
+        "type": "Exprs(3)"
+      },
+      {
+        "default": "Z",
+        "doc": "the axis of the cone",
+        "name": "axis",
+        "required": false,
+        "type": "Axis"
+      },
+      {
+        "default": null,
+        "doc": "radius at the bottom",
+        "name": "r0",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "radius at the top",
+        "name": "r1",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "height",
+        "name": "h",
+        "required": true,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "Cone",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Z",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "the axis of the cone"
+        },
+        "base": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre of the bottom face",
+          "type": "array"
+        },
+        "h": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "height"
+        },
+        "r0": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius at the bottom"
+        },
+        "r1": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius at the top"
+        }
+      },
+      "required": [
+        "base",
+        "r0",
+        "r1",
+        "h"
+      ],
+      "type": "object"
+    },
+    "title": "Cone frustum",
+    "tool": "add_cone"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "A full turn of a Rect or Polygon profile about the axis through `center` (3D). The profile's (x, y) are the radius (>= 0) and the height.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the 2D profile feature",
+        "name": "profile",
+        "required": true,
+        "type": "Feature"
+      },
+      {
+        "default": "Z",
+        "doc": "the axis of revolution",
+        "name": "axis",
+        "required": false,
+        "type": "Axis"
+      },
+      {
+        "default": null,
+        "doc": "a point on the axis",
+        "name": "center",
+        "required": true,
+        "type": "Exprs(3)"
+      }
+    ],
+    "group": "build",
+    "kind": "Revolve",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Z",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "the axis of revolution"
+        },
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "a point on the axis",
+          "type": "array"
+        },
+        "profile": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the 2D profile feature"
+        }
+      },
+      "required": [
+        "profile",
+        "center"
+      ],
+      "type": "object"
+    },
+    "title": "Revolve",
+    "tool": "add_revolve"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "A torus with axis z (3D). One face, `surface`.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "centre",
+        "name": "center",
+        "required": true,
+        "type": "Exprs(3)"
+      },
+      {
+        "default": null,
+        "doc": "major radius",
+        "name": "major",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "minor radius",
+        "name": "minor",
+        "required": true,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "Torus",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre",
+          "type": "array"
+        },
+        "major": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "major radius"
+        },
+        "minor": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "minor radius"
+        }
+      },
+      "required": [
+        "center",
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    },
+    "title": "Torus",
+    "tool": "add_torus"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "Sweeps a 2D profile feature along an axis (default y, the propagation direction) into a 3D solid. Roles side:<profile role> and the caps ymin, ymax.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the 2D profile feature",
+        "name": "profile",
+        "required": true,
+        "type": "Feature"
+      },
+      {
+        "default": "Y",
+        "doc": "the axis of the sweep",
+        "name": "axis",
+        "required": false,
+        "type": "Axis"
+      },
+      {
+        "default": null,
+        "doc": "start coordinate along the axis",
+        "name": "from",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "end coordinate along the axis",
+        "name": "to",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "wall angle in degrees (positive narrows towards `to`); makes the solid polyhedral",
+        "name": "taper_deg",
+        "required": false,
+        "type": "Expr"
+      }
+    ],
+    "group": "build",
+    "kind": "Extrude",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Y",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "the axis of the sweep"
+        },
+        "from": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "start coordinate along the axis"
+        },
+        "profile": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the 2D profile feature"
+        },
+        "taper_deg": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "wall angle in degrees (positive narrows towards `to`); makes the solid polyhedral"
+        },
+        "to": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "end coordinate along the axis"
+        }
+      },
+      "required": [
+        "profile",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "title": "Extrude",
+    "tool": "add_extrude"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "Moves, rotates, mirrors or scales a feature; the steps apply in order.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the feature to transform",
+        "name": "input",
+        "required": true,
+        "type": "Feature"
+      },
+      {
+        "default": null,
+        "doc": "list of steps in the serde form of TStep",
+        "name": "steps",
+        "required": true,
+        "type": "Steps"
+      }
+    ],
+    "group": "build",
+    "kind": "Transform",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature to transform"
+        },
+        "steps": {
+          "items": {
+            "description": "{\"Translate\": [dx, dy, dz]} | {\"Rotate\": {axis, deg, about}} | {\"Mirror\": {axis, at}} | {\"Scale\": {factor, about}}",
+            "maxProperties": 1,
+            "minProperties": 1,
+            "type": "object"
+          },
+          "title": "list of steps in the serde form of TStep",
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "title": "Transform",
+    "tool": "add_transform"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "n copies of a feature, in a line or around an axis.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the feature to repeat",
+        "name": "input",
+        "required": true,
+        "type": "Feature"
+      },
+      {
+        "default": null,
+        "doc": "Linear { step } or Polar { axis, center, total_deg }",
+        "name": "kind",
+        "required": true,
+        "type": "Pattern"
+      },
+      {
+        "default": null,
+        "doc": "number of copies",
+        "name": "n",
+        "required": true,
+        "type": "Expr"
+      }
+    ],
+    "group": "build",
+    "kind": "Pattern",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature to repeat"
+        },
+        "kind": {
+          "description": "{\"Linear\": {\"step\": [dx, dy, dz]}} | {\"Polar\": {axis, center, total_deg}}",
+          "maxProperties": 1,
+          "minProperties": 1,
+          "title": "Linear { step } or Polar { axis, center, total_deg }",
+          "type": "object"
+        },
+        "n": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "number of copies"
+        }
+      },
+      "required": [
+        "input",
+        "kind",
+        "n"
+      ],
+      "type": "object"
+    },
+    "title": "Pattern",
+    "tool": "add_pattern"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "The union of features.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the features to join",
+        "name": "ids",
+        "required": true,
+        "type": "Features"
+      }
+    ],
+    "group": "build",
+    "kind": "Union",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "the features to join",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "title": "Union",
+    "tool": "add_union"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "The feature `a` with the features `b` cut away.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the feature kept",
+        "name": "a",
+        "required": true,
+        "type": "Feature"
+      },
+      {
+        "default": null,
+        "doc": "the features removed",
+        "name": "b",
+        "required": true,
+        "type": "Features"
+      }
+    ],
+    "group": "build",
+    "kind": "Difference",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature kept"
+        },
+        "b": {
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "the features removed",
+          "type": "array"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "type": "object"
+    },
+    "title": "Difference",
+    "tool": "add_difference"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "The common part of features.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the features to intersect",
+        "name": "ids",
+        "required": true,
+        "type": "Features"
+      }
+    ],
+    "group": "build",
+    "kind": "Intersect",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "the features to intersect",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "title": "Intersection",
+    "tool": "add_intersect"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "The root of the model: names the regions, in painter order (a later region wins where they overlap). A list has one overlay. Pins fix the integer label of selected boundaries.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "regions in painter order: { name, input (feature name), kind (Material | Hole | Pml | Void), pinned_id }",
+        "name": "regions",
+        "required": true,
+        "type": "Regions"
+      },
+      {
+        "default": [],
+        "doc": "label pins: { sel (selector text), id }",
+        "name": "pins",
+        "required": false,
+        "type": "Pins"
+      },
+      {
+        "default": "Feature",
+        "doc": "how boundary faces against the void are named",
+        "name": "naming",
+        "required": false,
+        "type": "Naming"
+      }
+    ],
+    "group": "naming",
+    "kind": "Overlay",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "naming": {
+          "default": "Feature",
+          "enum": [
+            "Feature",
+            "Region",
+            "Numbered"
+          ],
+          "title": "how boundary faces against the void are named"
+        },
+        "pins": {
+          "default": [],
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "sel": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sel",
+              "id"
+            ],
+            "type": "object"
+          },
+          "title": "label pins: { sel (selector text), id }",
+          "type": "array"
+        },
+        "regions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "kind": {
+                "default": "Material",
+                "enum": [
+                  "Material",
+                  "Hole",
+                  "Pml",
+                  "Void"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "pinned_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "input"
+            ],
+            "type": "object"
+          },
+          "title": "regions in painter order: { name, input (feature name), kind (Material | Hole | Pml | Void), pinned_id }",
+          "type": "array"
+        }
+      },
+      "required": [
+        "regions"
+      ],
+      "type": "object"
+    },
+    "title": "Regions (overlay)",
+    "tool": "add_overlay"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "Absorbing layers of `thickness` around a window on some sides; splits every matching region into the physical part and one piece per side combination.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the feature that bounds the physical window",
+        "name": "window",
+        "required": true,
+        "type": "Feature"
+      },
+      {
+        "default": [],
+        "doc": "sides that get a layer (empty: all)",
+        "name": "sides",
+        "required": false,
+        "type": "Sides"
+      },
+      {
+        "default": null,
+        "doc": "layer thickness",
+        "name": "thickness",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "number of element layers across it",
+        "name": "layers",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "order of the polynomial profile",
+        "name": "grading",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": [],
+        "doc": "regions to split (empty: all)",
+        "name": "regions",
+        "required": false,
+        "type": "TextList"
+      }
+    ],
+    "group": "boundary",
+    "kind": "Pml",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "grading": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "order of the polynomial profile"
+        },
+        "layers": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "number of element layers across it"
+        },
+        "regions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "regions to split (empty: all)",
+          "type": "array"
+        },
+        "sides": {
+          "default": [],
+          "items": {
+            "enum": [
+              "XMin",
+              "XMax",
+              "YMin",
+              "YMax",
+              "ZMin",
+              "ZMax"
+            ]
+          },
+          "title": "sides that get a layer (empty: all)",
+          "type": "array"
+        },
+        "thickness": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "layer thickness"
+        },
+        "window": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature that bounds the physical window"
+        }
+      },
+      "required": [
+        "window",
+        "thickness",
+        "layers",
+        "grading"
+      ],
+      "type": "object"
+    },
+    "title": "Absorbing layers",
+    "tool": "add_pml"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "Keeps one side of the plane normal . p = offset. The cut face is named <feature>.cut and tagged `symmetry`.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "plane normal",
+        "name": "normal",
+        "required": true,
+        "type": "Exprs(3)"
+      },
+      {
+        "default": null,
+        "doc": "plane offset along the normal",
+        "name": "offset",
+        "required": true,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "which side to keep",
+        "name": "keep",
+        "required": true,
+        "type": "Keep"
+      }
+    ],
+    "group": "boundary",
+    "kind": "Cut",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "keep": {
+          "enum": [
+            "Above",
+            "Below"
+          ],
+          "title": "which side to keep"
+        },
+        "normal": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "plane normal",
+          "type": "array"
+        },
+        "offset": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "plane offset along the normal"
+        }
+      },
+      "required": [
+        "normal",
+        "offset",
+        "keep"
+      ],
+      "type": "object"
+    },
+    "title": "Cut by a plane",
+    "tool": "add_cut"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "Declares two boundary sets as periodic images of each other.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "first boundary set",
+        "name": "sel_a",
+        "required": true,
+        "type": "Selector"
+      },
+      {
+        "default": null,
+        "doc": "second boundary set",
+        "name": "sel_b",
+        "required": true,
+        "type": "Selector"
+      },
+      {
+        "default": null,
+        "doc": "the translation from A to B",
+        "name": "translation",
+        "required": true,
+        "type": "Exprs(3)"
+      }
+    ],
+    "group": "boundary",
+    "kind": "Periodic",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "sel_a": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "first boundary set",
+          "type": "string"
+        },
+        "sel_b": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "second boundary set",
+          "type": "string"
+        },
+        "translation": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "the translation from A to B",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sel_a",
+        "sel_b",
+        "translation"
+      ],
+      "type": "object"
+    },
+    "title": "Periodic pair",
+    "tool": "add_periodic"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "Sets the element size near the selected boundaries or regions.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "where the size applies",
+        "name": "sel",
+        "required": true,
+        "type": "Selector"
+      },
+      {
+        "default": null,
+        "doc": "element size",
+        "name": "h",
+        "required": false,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "largest distance of a chord from its curve",
+        "name": "max_deviation",
+        "required": false,
+        "type": "Expr"
+      },
+      {
+        "default": null,
+        "doc": "fewest element layers across a thin region",
+        "name": "min_layers",
+        "required": false,
+        "type": "Expr"
+      }
+    ],
+    "group": "naming",
+    "kind": "Size",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "h": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "element size"
+        },
+        "max_deviation": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "largest distance of a chord from its curve"
+        },
+        "min_layers": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "fewest element layers across a thin region"
+        },
+        "sel": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "where the size applies",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sel"
+      ],
+      "type": "object"
+    },
+    "title": "Mesh size",
+    "tool": "add_size"
+  },
+  {
+    "dims": [
+      2,
+      3
+    ],
+    "doc": "Gives a selection a name (a boundary group) to refer to later.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "what to tag",
+        "name": "sel",
+        "required": true,
+        "type": "Selector"
+      },
+      {
+        "default": null,
+        "doc": "the tag",
+        "name": "name",
+        "required": true,
+        "type": "Text"
+      }
+    ],
+    "group": "naming",
+    "kind": "Tag",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "the tag",
+          "type": "string"
+        },
+        "sel": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "what to tag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sel",
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Tag",
+    "tool": "add_tag"
+  }
+]

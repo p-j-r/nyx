@@ -1,0 +1,2246 @@
+[
+  {
+    "access": "read",
+    "description": "Every command with its title, access and schema.",
+    "name": "list_commands",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the commands"
+  },
+  {
+    "access": "edit",
+    "description": "Starts an empty project (dropping the current one, its mesh and results).",
+    "name": "project_new",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "dim": {
+          "description": "2 (x-z cross-section, the default) or 3",
+          "type": "integer"
+        },
+        "h": {
+          "description": "global element size in metres",
+          "type": "number"
+        },
+        "title": {
+          "description": "project title",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "New project"
+  },
+  {
+    "access": "read",
+    "description": "Title, geometry size, the problem of each physics, the mesh, the results (and whether they are stale), the store binding and the jobs.",
+    "name": "project_info",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Project summary"
+  },
+  {
+    "access": "read",
+    "description": "The whole project as JSON text (the file that is saved).",
+    "name": "project_json",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Project as JSON"
+  },
+  {
+    "access": "edit",
+    "description": "Replaces the project by JSON text, after checking it.",
+    "name": "project_load",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "json": {
+          "description": "project JSON text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "json"
+      ],
+      "type": "object"
+    },
+    "title": "Load a project from JSON"
+  },
+  {
+    "access": "edit",
+    "description": "Reads a project JSON file.",
+    "name": "project_open",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "file path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "title": "Open a project file"
+  },
+  {
+    "access": "expensive",
+    "description": "Writes the project as a JSON file.",
+    "name": "project_save",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "file path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "title": "Save the project to a file"
+  },
+  {
+    "access": "read",
+    "description": "Every geometry operation with its fields, types and defaults (what the add_* commands take).",
+    "name": "list_operations",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the geometry operations"
+  },
+  {
+    "access": "read",
+    "description": "The feature list: parameters, and each feature with its kind and arguments.",
+    "name": "list_features",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the features"
+  },
+  {
+    "access": "edit",
+    "description": "Changes some fields of a feature; give only the fields to change, in the form the add command takes.",
+    "name": "update_feature",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "fields to change",
+          "type": "object"
+        },
+        "name": {
+          "description": "feature name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "title": "Change a feature"
+  },
+  {
+    "access": "edit",
+    "description": "Removes a feature that no later feature uses.",
+    "name": "remove_feature",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "feature name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Remove a feature"
+  },
+  {
+    "access": "edit",
+    "description": "",
+    "name": "rename_feature",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "feature name",
+          "type": "string"
+        },
+        "new_name": {
+          "description": "new name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "new_name"
+      ],
+      "type": "object"
+    },
+    "title": "Rename a feature"
+  },
+  {
+    "access": "edit",
+    "description": "A suppressed feature stays in the list and is skipped.",
+    "name": "suppress_feature",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "feature name",
+          "type": "string"
+        },
+        "suppressed": {
+          "description": "true (default) to suppress, false to restore",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Suppress or restore a feature"
+  },
+  {
+    "access": "edit",
+    "description": "Adds (or removes) a tag of a feature.",
+    "name": "tag_feature",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "feature name",
+          "type": "string"
+        },
+        "remove": {
+          "description": "true removes the tag",
+          "type": "boolean"
+        },
+        "tag": {
+          "description": "tag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "tag"
+      ],
+      "type": "object"
+    },
+    "title": "Tag a feature"
+  },
+  {
+    "access": "edit",
+    "description": "Sets (or creates) a named parameter that expressions in the features can use. A number, or an expression over other parameters.",
+    "name": "set_param",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "parameter name",
+          "type": "string"
+        },
+        "value": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    "title": "Set a model parameter"
+  },
+  {
+    "access": "edit",
+    "description": "",
+    "name": "remove_param",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "parameter name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Remove a model parameter"
+  },
+  {
+    "access": "read",
+    "description": "Evaluates the model and returns the region and boundary names a problem can use, and the bounding box. Instant; it reports a geometry that does not evaluate.",
+    "name": "geometry_names",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Evaluate the geometry and list its names"
+  },
+  {
+    "access": "read",
+    "description": "The physics compiled in, their studies, and which the project loads.",
+    "name": "list_physics",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the physics of this build"
+  },
+  {
+    "access": "read",
+    "description": "Studies, conditions, properties, fields and couplings of one physics, and the JSON Schema of its problem.",
+    "name": "describe_physics",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics"
+      ],
+      "type": "object"
+    },
+    "title": "Describe a physics"
+  },
+  {
+    "access": "edit",
+    "description": "Adds a problem for a physics (a project loads one to three). The study defaults to the first the physics lists.",
+    "name": "add_physics",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "order": {
+          "description": "element order, default 1",
+          "type": "integer"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "study": {
+          "description": "study kind (see describe_physics)",
+          "type": "string"
+        },
+        "study_params": {
+          "description": "study parameters",
+          "type": "object"
+        }
+      },
+      "required": [
+        "physics"
+      ],
+      "type": "object"
+    },
+    "title": "Add a physics to the project"
+  },
+  {
+    "access": "edit",
+    "description": "",
+    "name": "set_study",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "description": "study kind",
+          "type": "string"
+        },
+        "order": {
+          "description": "element order",
+          "type": "integer"
+        },
+        "params": {
+          "description": "study parameters",
+          "type": "object"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "title": "Set the study of a physics"
+  },
+  {
+    "access": "edit",
+    "description": "A material by name, or scalar properties by descriptor name (`{\"E\": 1.7e11, \"nu\": 0.28}`).",
+    "name": "set_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "material": {
+          "description": "material name or properties",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "description": "region name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics",
+        "region",
+        "material"
+      ],
+      "type": "object"
+    },
+    "title": "Assign a material to a region"
+  },
+  {
+    "access": "edit",
+    "description": "`on` is a selector over the geometry (`outer & plane(x = 0)`), a boundary name or a region name.",
+    "name": "add_condition",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "description": "condition kind (see describe_physics)",
+          "type": "string"
+        },
+        "on": {
+          "description": "selector, boundary or region",
+          "type": "string"
+        },
+        "params": {
+          "description": "condition parameters",
+          "type": "object"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics",
+        "on",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "title": "Add a boundary or domain condition"
+  },
+  {
+    "access": "edit",
+    "description": "By its position (from 0) in the physics' list, as project_info shows.",
+    "name": "remove_condition",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "description": "position from 0",
+          "type": "integer"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics",
+        "index"
+      ],
+      "type": "object"
+    },
+    "title": "Remove a condition"
+  },
+  {
+    "access": "edit",
+    "description": "",
+    "name": "set_physics_params",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "description": "physics options",
+          "type": "object"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics",
+        "params"
+      ],
+      "type": "object"
+    },
+    "title": "Set the options of a physics"
+  },
+  {
+    "access": "edit",
+    "description": "",
+    "name": "remove_physics",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics"
+      ],
+      "type": "object"
+    },
+    "title": "Remove a physics from the project"
+  },
+  {
+    "access": "edit",
+    "description": "The one solved by default.",
+    "name": "set_active",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "physics"
+      ],
+      "type": "object"
+    },
+    "title": "Set the active physics"
+  },
+  {
+    "access": "read",
+    "description": "Checks the geometry, the element size and every problem against the descriptors of its physics, without meshing.",
+    "name": "check_project",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Check the project"
+  },
+  {
+    "access": "edit",
+    "description": "Give only what changes. `adapt_scale` or `sweep` set to null return to the simple mesher / a 2D mesh.",
+    "name": "set_mesh",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "adapt_scale": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "h": {
+          "description": "global element size in metres",
+          "type": "number"
+        },
+        "physics_sizing": {
+          "description": "size from the physics (waits for restructure phase 2)",
+          "type": "boolean"
+        },
+        "sweep": {
+          "description": "layers to sweep the 2D mesh along y",
+          "items": {
+            "properties": {
+              "domain_offset": {
+                "type": "integer"
+              },
+              "n": {
+                "type": "integer"
+              },
+              "thickness": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "thickness",
+              "n"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Set the mesh settings"
+  },
+  {
+    "access": "expensive",
+    "description": "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.",
+    "name": "mesh_build",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "wait": {
+          "description": "wait for the mesh, default true",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Mesh the geometry"
+  },
+  {
+    "access": "expensive",
+    "description": "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.",
+    "name": "solve_run",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "physics": {
+          "description": "physics code(s); default the active one",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "wait": {
+          "description": "wait for the result, default true",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Solve"
+  },
+  {
+    "access": "read",
+    "description": "State, current stage, fraction done and elapsed time.",
+    "name": "job_status",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "title": "Status of a job"
+  },
+  {
+    "access": "read",
+    "description": "",
+    "name": "job_list",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the jobs"
+  },
+  {
+    "access": "expensive",
+    "description": "The solver notices at its next check; a factorisation in progress finishes first.",
+    "name": "job_cancel",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "title": "Cancel a job"
+  },
+  {
+    "access": "expensive",
+    "description": "Blocks until the job has finished and applies its outcome.",
+    "name": "job_wait",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "title": "Wait for a job"
+  },
+  {
+    "access": "read",
+    "description": "Applies every job that has finished since the last call and returns what each came to.",
+    "name": "poll_jobs",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Apply finished jobs"
+  },
+  {
+    "access": "read",
+    "description": "For each physics solved: the study, size, time, solutions with their values, fields and scalars, and whether the project changed since.",
+    "name": "result_info",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Describe the results"
+  },
+  {
+    "access": "read",
+    "description": "The values of one field of one solution (sampled evenly when there are more than `max_values`).",
+    "name": "result_field",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "description": "field name",
+          "type": "string"
+        },
+        "max_values": {
+          "description": "default 2000",
+          "type": "integer"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "solution": {
+          "description": "solution number from 0, default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "physics",
+        "field"
+      ],
+      "type": "object"
+    },
+    "title": "Read a field"
+  },
+  {
+    "access": "expensive",
+    "description": "Binds the project to a workflow folder (created in `workspace` the first time) or stores a new version of it. Later solves are recorded in the run table.",
+    "name": "store_save",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "description": "workspace folder, needed the first time",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Save into a workspace"
+  },
+  {
+    "access": "edit",
+    "description": "Opens a workflow folder and makes its experiment the project.",
+    "name": "store_open",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "experiment": {
+          "description": "experiment id, default the first",
+          "type": "string"
+        },
+        "folder": {
+          "description": "workflow folder",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folder"
+      ],
+      "type": "object"
+    },
+    "title": "Open a workflow"
+  },
+  {
+    "access": "read",
+    "description": "The runs of the bound experiment: status, time, params and metrics.",
+    "name": "store_runs",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Run table"
+  },
+  {
+    "access": "edit",
+    "description": "A rectangle in the x-z cross-section, given by its two corners. [shape; dimensions [2]]",
+    "name": "add_rect",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "upper-right corner (x, z) in metres",
+          "type": "array"
+        },
+        "min": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "lower-left corner (x, z) in metres",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "title": "Rectangle"
+  },
+  {
+    "access": "edit",
+    "description": "A disc in the x-z cross-section. [shape; dimensions [2]]",
+    "name": "add_circle",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "centre (x, z)",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius"
+        }
+      },
+      "required": [
+        "center",
+        "r"
+      ],
+      "type": "object"
+    },
+    "title": "Circle"
+  },
+  {
+    "access": "edit",
+    "description": "An ellipse in the x-z cross-section, rotated by an angle. [shape; dimensions [2]]",
+    "name": "add_ellipse",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "angle_deg": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "rotation in degrees"
+        },
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "centre (x, z)",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "radii": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "semi-axes along the rotated x and z",
+          "type": "array"
+        }
+      },
+      "required": [
+        "center",
+        "radii"
+      ],
+      "type": "object"
+    },
+    "title": "Ellipse"
+  },
+  {
+    "access": "edit",
+    "description": "A closed polygon in the x-z cross-section; counter-clockwise or clockwise. Edge i goes from point i to point i+1. [shape; dimensions [2]]",
+    "name": "add_polygon",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "role names of the edges (default e0, e1, ...), used in boundary names",
+          "type": "array"
+        },
+        "pts": {
+          "items": {
+            "items": {
+              "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "minItems": 3,
+          "title": "the corners (x, z)",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pts"
+      ],
+      "type": "object"
+    },
+    "title": "Polygon"
+  },
+  {
+    "access": "edit",
+    "description": "A rectangle with quarter-circle corners. [shape; dimensions [2]]",
+    "name": "add_rounded_rect",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "upper-right corner (x, z)",
+          "type": "array"
+        },
+        "min": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "lower-left corner (x, z)",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "corner radius"
+        }
+      },
+      "required": [
+        "min",
+        "max",
+        "r"
+      ],
+      "type": "object"
+    },
+    "title": "Rounded rectangle"
+  },
+  {
+    "access": "edit",
+    "description": "An axis-aligned box (3D). Face roles: xmin xmax ymin ymax zmin zmax. [shape; dimensions [3]]",
+    "name": "add_box",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "upper corner (x, y, z)",
+          "type": "array"
+        },
+        "min": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "lower corner (x, y, z)",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "title": "Box"
+  },
+  {
+    "access": "edit",
+    "description": "A cylinder (3D) from `base` along +z. Face roles: side bottom top. [shape; dimensions [3]]",
+    "name": "add_cylinder",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Z",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "this build: z only"
+        },
+        "base": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre of the bottom face",
+          "type": "array"
+        },
+        "h": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "height"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius"
+        }
+      },
+      "required": [
+        "base",
+        "r",
+        "h"
+      ],
+      "type": "object"
+    },
+    "title": "Cylinder"
+  },
+  {
+    "access": "edit",
+    "description": "A sphere (3D). One face, `surface`; it must not touch any other face. [shape; dimensions [3]]",
+    "name": "add_sphere",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "r": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius"
+        }
+      },
+      "required": [
+        "center",
+        "r"
+      ],
+      "type": "object"
+    },
+    "title": "Sphere"
+  },
+  {
+    "access": "edit",
+    "description": "A cone frustum (3D) along the axis from `base`; either radius may be 0. Faces side, bottom, top. [shape; dimensions [3]]",
+    "name": "add_cone",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Z",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "the axis of the cone"
+        },
+        "base": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre of the bottom face",
+          "type": "array"
+        },
+        "h": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "height"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "r0": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius at the bottom"
+        },
+        "r1": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "radius at the top"
+        }
+      },
+      "required": [
+        "base",
+        "r0",
+        "r1",
+        "h"
+      ],
+      "type": "object"
+    },
+    "title": "Cone frustum"
+  },
+  {
+    "access": "edit",
+    "description": "A full turn of a Rect or Polygon profile about the axis through `center` (3D). The profile's (x, y) are the radius (>= 0) and the height. [build; dimensions [3]]",
+    "name": "add_revolve",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Z",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "the axis of revolution"
+        },
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "a point on the axis",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "profile": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the 2D profile feature"
+        }
+      },
+      "required": [
+        "profile",
+        "center"
+      ],
+      "type": "object"
+    },
+    "title": "Revolve"
+  },
+  {
+    "access": "edit",
+    "description": "A torus with axis z (3D). One face, `surface`. [shape; dimensions [3]]",
+    "name": "add_torus",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "centre",
+          "type": "array"
+        },
+        "major": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "major radius"
+        },
+        "minor": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "minor radius"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "center",
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    },
+    "title": "Torus"
+  },
+  {
+    "access": "edit",
+    "description": "Sweeps a 2D profile feature along an axis (default y, the propagation direction) into a 3D solid. Roles side:<profile role> and the caps ymin, ymax. [build; dimensions [3]]",
+    "name": "add_extrude",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "default": "Y",
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "the axis of the sweep"
+        },
+        "from": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "start coordinate along the axis"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "profile": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the 2D profile feature"
+        },
+        "taper_deg": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "wall angle in degrees (positive narrows towards `to`); makes the solid polyhedral"
+        },
+        "to": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "end coordinate along the axis"
+        }
+      },
+      "required": [
+        "profile",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "title": "Extrude"
+  },
+  {
+    "access": "edit",
+    "description": "Moves, rotates, mirrors or scales a feature; the steps apply in order. [build; dimensions [2, 3]]",
+    "name": "add_transform",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature to transform"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "description": "{\"Translate\": [dx, dy, dz]} | {\"Rotate\": {axis, deg, about}} | {\"Mirror\": {axis, at}} | {\"Scale\": {factor, about}}",
+            "maxProperties": 1,
+            "minProperties": 1,
+            "type": "object"
+          },
+          "title": "list of steps in the serde form of TStep",
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "title": "Transform"
+  },
+  {
+    "access": "edit",
+    "description": "n copies of a feature, in a line or around an axis. [build; dimensions [2, 3]]",
+    "name": "add_pattern",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature to repeat"
+        },
+        "kind": {
+          "description": "{\"Linear\": {\"step\": [dx, dy, dz]}} | {\"Polar\": {axis, center, total_deg}}",
+          "maxProperties": 1,
+          "minProperties": 1,
+          "title": "Linear { step } or Polar { axis, center, total_deg }",
+          "type": "object"
+        },
+        "n": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "number of copies"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "kind",
+        "n"
+      ],
+      "type": "object"
+    },
+    "title": "Pattern"
+  },
+  {
+    "access": "edit",
+    "description": "The union of features. [build; dimensions [2, 3]]",
+    "name": "add_union",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "the features to join",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "title": "Union"
+  },
+  {
+    "access": "edit",
+    "description": "The feature `a` with the features `b` cut away. [build; dimensions [2, 3]]",
+    "name": "add_difference",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature kept"
+        },
+        "b": {
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "the features removed",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "type": "object"
+    },
+    "title": "Difference"
+  },
+  {
+    "access": "edit",
+    "description": "The common part of features. [build; dimensions [2, 3]]",
+    "name": "add_intersect",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "the features to intersect",
+          "type": "array"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "title": "Intersection"
+  },
+  {
+    "access": "edit",
+    "description": "The root of the model: names the regions, in painter order (a later region wins where they overlap). A list has one overlay. Pins fix the integer label of selected boundaries. [naming; dimensions [2, 3]]",
+    "name": "add_overlay",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "naming": {
+          "default": "Feature",
+          "enum": [
+            "Feature",
+            "Region",
+            "Numbered"
+          ],
+          "title": "how boundary faces against the void are named"
+        },
+        "pins": {
+          "default": [],
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "sel": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sel",
+              "id"
+            ],
+            "type": "object"
+          },
+          "title": "label pins: { sel (selector text), id }",
+          "type": "array"
+        },
+        "regions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "kind": {
+                "default": "Material",
+                "enum": [
+                  "Material",
+                  "Hole",
+                  "Pml",
+                  "Void"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "pinned_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "input"
+            ],
+            "type": "object"
+          },
+          "title": "regions in painter order: { name, input (feature name), kind (Material | Hole | Pml | Void), pinned_id }",
+          "type": "array"
+        }
+      },
+      "required": [
+        "regions"
+      ],
+      "type": "object"
+    },
+    "title": "Regions (overlay)"
+  },
+  {
+    "access": "edit",
+    "description": "Absorbing layers of `thickness` around a window on some sides; splits every matching region into the physical part and one piece per side combination. [boundary; dimensions [2, 3]]",
+    "name": "add_pml",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "grading": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "order of the polynomial profile"
+        },
+        "layers": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "number of element layers across it"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "regions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "regions to split (empty: all)",
+          "type": "array"
+        },
+        "sides": {
+          "default": [],
+          "items": {
+            "enum": [
+              "XMin",
+              "XMax",
+              "YMin",
+              "YMax",
+              "ZMin",
+              "ZMax"
+            ]
+          },
+          "title": "sides that get a layer (empty: all)",
+          "type": "array"
+        },
+        "thickness": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "layer thickness"
+        },
+        "window": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the feature that bounds the physical window"
+        }
+      },
+      "required": [
+        "window",
+        "thickness",
+        "layers",
+        "grading"
+      ],
+      "type": "object"
+    },
+    "title": "Absorbing layers"
+  },
+  {
+    "access": "edit",
+    "description": "Keeps one side of the plane normal . p = offset. The cut face is named <feature>.cut and tagged `symmetry`. [boundary; dimensions [2, 3]]",
+    "name": "add_cut",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "keep": {
+          "enum": [
+            "Above",
+            "Below"
+          ],
+          "title": "which side to keep"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "normal": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "plane normal",
+          "type": "array"
+        },
+        "offset": {
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "plane offset along the normal"
+        }
+      },
+      "required": [
+        "normal",
+        "offset",
+        "keep"
+      ],
+      "type": "object"
+    },
+    "title": "Cut by a plane"
+  },
+  {
+    "access": "edit",
+    "description": "Declares two boundary sets as periodic images of each other. [boundary; dimensions [2, 3]]",
+    "name": "add_periodic",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "sel_a": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "first boundary set",
+          "type": "string"
+        },
+        "sel_b": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "second boundary set",
+          "type": "string"
+        },
+        "translation": {
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "the translation from A to B",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sel_a",
+        "sel_b",
+        "translation"
+      ],
+      "type": "object"
+    },
+    "title": "Periodic pair"
+  },
+  {
+    "access": "edit",
+    "description": "Sets the element size near the selected boundaries or regions. [naming; dimensions [2, 3]]",
+    "name": "add_size",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "h": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "element size"
+        },
+        "max_deviation": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "largest distance of a chord from its curve"
+        },
+        "min_layers": {
+          "default": null,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "fewest element layers across a thin region"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "sel": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "where the size applies",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sel"
+      ],
+      "type": "object"
+    },
+    "title": "Mesh size"
+  },
+  {
+    "access": "edit",
+    "description": "Gives a selection a name (a boundary group) to refer to later. [naming; dimensions [2, 3]]",
+    "name": "add_tag",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "sel": {
+          "description": "selector text, e.g. `outer & plane(x = 0)`",
+          "title": "what to tag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sel",
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Tag"
+  }
+]

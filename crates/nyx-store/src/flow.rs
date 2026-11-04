@@ -29,9 +29,19 @@ pub const MERGE_SECS: i64 = 300;
 pub struct WorkflowDir {
     pub root: PathBuf,
     pub wf: Workflow,
+    /// Makes the search card of an experiment from its spec value. The default reads the old `Project` shape; the engine sets its own
+    /// (`create_with`, `open_with`), because the store does not know what a project looks like (R21, R25).
+    pub card_of: CardFn,
 }
 
+/// A function from the value of a spec to its card.
+pub type CardFn = fn(&serde_json::Value) -> Card;
+
+/// The value of a spec text: JSON when it starts with `{` (the engine's projects), the old `nyx_project` XML otherwise.
 fn parse_spec(xml: &str) -> Result<serde_json::Value, String> {
+    if xml.trim_start().starts_with('{') {
+        return serde_json::from_str(xml).map_err(|e| format!("not a nyx project: {e}"));
+    }
     let (root, v) = femcore::xmlio::xml_to_value(xml)?;
     if root != "nyx_project" {
         return Err(format!("not a nyx project: root element is <{root}>"));
@@ -73,6 +83,11 @@ impl WorkflowDir {
 
     /// Like `create` with a chosen id (a draft that has lived in a tab keeps the id it was shown under).
     pub fn create_as(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_xml: &str) -> Result<WorkflowDir, String> {
+        Self::create_with(workspace, id, title, origin, spec_xml, crate::card::from_value)
+    }
+
+    /// Like `create_as` with the function that makes cards from specs.
+    pub fn create_with(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_xml: &str, card_of: CardFn) -> Result<WorkflowDir, String> {
         let mut wf = Workflow::new(title, origin);
         if let Some(id) = id {
             wf.id = id.to_string();
@@ -80,20 +95,25 @@ impl WorkflowDir {
         let root = workspace.join(format!("{}_{}", slug(title), wf.id));
         std::fs::create_dir_all(&root).map_err(|e| io_err(&root, e))?;
         wf.experiments.clear();
-        let mut d = WorkflowDir { root, wf };
+        let mut d = WorkflowDir { root, wf, card_of };
         d.add_experiment("Experiment 1", spec_xml, None)?;
         d.write_gitignore()?;
         Ok(d)
     }
 
     pub fn open(root: &Path) -> Result<WorkflowDir, String> {
+        Self::open_with(root, crate::card::from_value)
+    }
+
+    /// Like `open` with the function that makes cards from specs.
+    pub fn open_with(root: &Path, card_of: CardFn) -> Result<WorkflowDir, String> {
         let p = root.join("workflow.json");
         let text = std::fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
         let wf: Workflow = serde_json::from_str(&text).map_err(|e| io_err(&p, format!("not a nyx workflow: {e}")))?;
         if wf.nyx > FORMAT {
             return Err(format!("{}: made with a newer nyx (format {}, this one reads {FORMAT})", p.display(), wf.nyx));
         }
-        Ok(WorkflowDir { root: root.to_path_buf(), wf })
+        Ok(WorkflowDir { root: root.to_path_buf(), wf, card_of })
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -148,7 +168,7 @@ impl WorkflowDir {
             parent: parent.map(String::from),
             links: vec![],
             spec_hash: hash.clone(),
-            card: crate::card::from_value(&value),
+            card: (self.card_of)(&value),
             runs: Digest::default(),
             model: None,
         });
@@ -234,7 +254,7 @@ impl WorkflowDir {
         write_atomic(&self.spec_path(eid), spec_xml.as_bytes()).map_err(|e| io_err(&self.spec_path(eid), e))?;
         let e = self.wf.experiment_mut(eid).unwrap();
         e.spec_hash = new_hash.clone();
-        e.card = crate::card::from_value(&new_value);
+        e.card = (self.card_of)(&new_value);
         let n = self.push_version(eid, new_hash, Some(old_hash), summary, changes, true)?;
         self.wf.version = self.history().last().map(|v| v.n).unwrap_or(n);
         self.touch()?;
@@ -271,7 +291,7 @@ impl WorkflowDir {
             write_atomic(&self.spec_path(&eid), xml.as_bytes()).map_err(|e| io_err(&self.spec_path(&eid), e))?;
             let e = self.wf.experiment_mut(&eid).unwrap();
             e.spec_hash = v.spec_hash.clone();
-            e.card = crate::card::from_value(&new);
+            e.card = (self.card_of)(&new);
             self.push_version(&eid, v.spec_hash.clone(), Some(cur), format!("Restored v{n}"), changes, false)?;
             self.touch()?;
         }
@@ -440,6 +460,29 @@ pub(crate) mod tests {
         assert!(!stale.digest_is_stale());
         assert!(d.root.join(".gitignore").exists());
         assert_eq!(d.sparkline(&e1), [2.44]);
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    fn json_card(v: &serde_json::Value) -> Card {
+        Card { summary: format!("engine card: {}", v["title"].as_str().unwrap_or("")), ..Default::default() }
+    }
+
+    #[test]
+    fn json_specs_and_a_card_function_of_the_caller_work_without_the_old_project_shape() {
+        let ws = tmp("json");
+        let spec = |t: &str| serde_json::json!({ "title": t, "out": r"C:\Users\me\r.h5" }).to_string();
+        let mut d = WorkflowDir::create_with(&ws, None, "json", "ai", &spec("a"), json_card).unwrap();
+        let e = d.wf.experiments[0].id.clone();
+        assert_eq!(d.wf.experiments[0].card.summary, "engine card: a");
+        assert_eq!(d.commit_spec(&e, &spec("b")).unwrap(), Some(2));
+        assert_eq!(d.wf.experiments[0].card.summary, "engine card: b");
+        assert!(d.history()[1].changes.iter().any(|c| c.path.ends_with("title")), "{:?}", d.history()[1].changes);
+        let reopened = WorkflowDir::open_with(&d.root, json_card).unwrap();
+        assert_eq!(reopened.wf, d.wf);
+        let (out, n) = crate::archive::strip_paths_xml(&spec("b")).unwrap();
+        assert_eq!(n, 1);
+        assert!(out.contains("r.h5") && !out.contains("Users"));
+        assert!(d.commit_spec(&e, "{not json").is_err());
         let _ = std::fs::remove_dir_all(&ws);
     }
 

@@ -139,7 +139,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/{soi_modes,bragg_gratings,rib_sweep,rib_shapes,wg800}.rs` | 22 | |
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | features `hdf5-metno`, `phdf5`, `portable-kernels` |
-| `crates/nyx-store/*` | 14 | |
+| `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
 | `crates/app/src/connect.rs` | 15 | duplicate of crates/nyx-connect (R07) |
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |
 | `crates/app/src/*` | 23 | |
@@ -156,7 +156,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
 | `crates/nyx-analysis/*` | 25, 21 | skeleton: the Analysis trait; content moves in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
-| `crates/nyx-engine/*` | 25, 23, 26 | skeleton: registry from cargo features; Project and commands in phase 7 |
+| `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
 <!-- map:end -->
 
 ## Gaps this index shows

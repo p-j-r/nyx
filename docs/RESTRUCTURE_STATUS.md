@@ -25,6 +25,8 @@ Last updated: 2026-11-04, by the foundation session.
 
 Bookmarks stack: `main` (= `arch-model-adrs` tip f74c12ea) <- `restructure-0-baselines` <- `restructure-1-delete-sbs-chips` <- `restructure-foundation`.
 
+Bookmarks that exist after the machine restart (2026-11-04, none is merged into another yet; whoever integrates decides the order): `restructure-1b-remove-sms-kz` and `restructure-1c-gate-answers` (children of the foundation; 1c holds every answered gate and should be the base of new sessions), `restructure-2-mesh`, `restructure-2b-mesh3d-adapter`, `restructure-3-linalg`, `restructure-3x-g2-experiment`, `restructure-4e-engine-core` (engine core early, approved), `restructure-6-materials`, `restructure-7a-connect`. Not created yet: `restructure-9a-structurizr`. Each session records its own state in its own section below.
+
 ## How to start a working session
 
 ```
@@ -62,7 +64,7 @@ Each row is one working session in its own jj workspace of `nyx2`, started from 
 
 Waits for the above: phase 4 (needs 2 and 3), then 5 (needs 4), 7 (needs 4, 5, 6), 8, 9. **Phase 4 can fan out after its first step**: one session lands `dfs` (and any change to `nyx-physics` it needs), then `sms` and `ems` are separate files and can be moved by two sessions at once.
 
-Not in the plan, needs paul's go: **engine core early.** `Project`, the command set and the job runner of `nyx-engine` do not depend on the kernels (solve is stubbed by `NotYetMoved`). Starting them before phase 4 would overlap with phase 2 only in `app/src/state.rs` and the meshing calls. The plan puts phase 7 after 4; say if you want it earlier.
+**Engine core early: approved (2026-11-04), thread started from `restructure-1c-gate-answers`.** `Project`, the command set and the job runner of `nyx-engine` do not depend on the kernels (solve is stubbed by `NotYetMoved`). Starting them before phase 4 would overlap with phase 2 only in `app/src/state.rs` and the meshing calls. The plan puts phase 7 after 4; say if you want it earlier.
 
 ## Baselines
 
@@ -142,12 +144,37 @@ That file lives uncommitted in the old checkout (`nyx/docs/ports/meshers/FEATURE
 ## Gate answers from paul (2026-11-03 evening, in the thread)
 
 * **G1**: keep the axisymmetric kernels (`ems_axisym`, `sms_axisym`) **with a note that their implementation must be checked**, paul is not sure of it. Action for the phase 3 and 4 owners: before moving them, review them against closed forms (the earlier checks quoted in the pre-restructure README: whispering-gallery modes, breathing and flexural modes of a ring) and say in this file what was verified. About `sms_kz`, paul does not know why it exists after the axis changes: it is the solid-mechanics kernel for a 2D cross-section with an out-of-plane wave number k (three displacement components, `u(x, z) exp(-j k y)`, wafer axes since the kernel port), i.e. the phonon waveguide dispersion, not Brillouin-specific. **Update 2026-11-04: paul said to remove it** (the axis is along y now, so the code is obsolete): done on bookmark `restructure-1b-remove-sms-kz` (ADR 24 amendment). What went: `ProblemSpec::out_of_plane`, `solve_solid_kz*`, `assemble_stiffness_kz`, the 4 `solid_kz_*` goldens, `tests/solid_kz.rs` (its Floquet-vs-cross-section test too), the app checkbox, the example's `out_of_plane`. What stays: the shared cross-section machinery in `sms_kz.rs`, because `sms_axisym` is built on it; phase 4 renames and moves it into `nyx-sms`.
+* **G2** (2026-11-04): loose tolerances everywhere, no reference platform (option B); recorded by the g2 session.
+* **G5** (2026-11-04): the MCP may manipulate **every tool geom offers** (the whole feature-list editing surface), not a minimal set. The plan's "first set (strip, rib, ring)" is only a build order and the acceptance test: those three must be rebuildable through MCP; the tool set is generated from geom's feature descriptors so nothing is left out. Phase 7 owner: derive the tools from geom, do not hand-pick.
+* **G6** (2026-11-04): the JSON layout of the project file is **not fixed**; it is derived from the `ProblemSpec` envelope, `Project` and `FeatureList` in phase 8 (the plan's default stands). No layout decision is needed before then.
+* **Structurizr** (2026-11-04): paul allows downloading the Structurizr CLI (session `dsl`, bookmark `restructure-9a-structurizr`, optional and low priority).
 * **G3**: "sure": crate names as in the plan (`nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis`, `nyx-engine`).
 * **G4**: "sure": TOML for materials.
 
+## Engine core early (session `nyx2-engine`, bookmark `restructure-4e-engine-core`, 2026-11-04)
+
+Started from `restructure-1c-gate-answers`. ADRs 37, 38, 39. **State: done for the part that does not depend on phases 2 to 4; the rest waits (below).**
+
+**Dependency check (asked by paul: "start the engine core if it has no dependencies").** From the plan and the code: `Project`, the commands, the job runner and the store wiring do not depend on the kernels or on the linear algebra (phase 3). The old `app::Project` could not simply move: it is built on the old `femcore::problem::ProblemSpec` (replaced by the envelope in phase 4) and calls `femcore::{meshing, mesher, geomdrive, physics_size}` (phase 2 replaces and moves those). The engine therefore uses the new envelope and `geom` directly, and has exactly two couplings: **the mesher** (one function, `FemcoreMesher::mesh` in `meshing.rs`; phase 2 rewrites it) and **`Physics::solve`** (answers `NotYetMoved` for the skeleton physics until phase 4). No file owned by the phase 2, 3 or 6 sessions was touched.
+
+**Built.** `Project` (feature list, mesh settings, one envelope per physics, active), JSON with sorted keys; `Engine` with caches keyed by content (stale results are reported, nothing is invalidated by hand); 64 commands (`Engine::catalog()` / `Engine::call(name, json)`), each with a JSON Schema: project, geometry edits, physics/study/material/condition edits, mesh, solve, jobs, results, store; a job runner (thread per job, `Progress`, cancel, `info`, `try_take`, `wait`, panic becomes a failed job); the coupled solve chain (order from `Registry::solve_order`, imports filled from exports); store wiring (create or open a workflow folder, commit versions, every solve, failed or cancelled run is a row of the run table with metrics, log and result files); the geometry descriptors (G5): one `add_*` command per geom operation (23), generated from `nyx_engine::geomdesc`, with a test that the descriptors equal the serde fields and that the strip, rib and ring can be built, evaluated and meshed through commands alone. `nyx-store`: specs may be JSON, and the caller supplies the card function (ADR 39); additive, the app is unchanged.
+
+**Tests.** `cargo test --release -p nyx-engine`: contracts 2, engine 10 (strip, rib and ring through commands, stand-in physics for solve/chain/cancel/store/reopen, refusals leave the project unchanged), geomdesc 7, layering 2, registry 4. Whole workspace (`cargo test --release --workspace --no-fail-fast`): 775 pass, 9 ignored, 2 fail, the two expected golden failures (R22); the base `restructure-1c-gate-answers` has 755 pass, so the 20 new tests are the difference. clippy `-D warnings` and rustfmt clean for `nyx-engine`. `nyx-store`: one new test. New contract exemplars: `engine_commands.v1.json`, `geom_operations.v1.json`, `engine_project.v1.json` (provisional, version 0.1; see `VERSIONS.md`).
+
+**What waits (and on what).**
+* Solving with the real physics: phase 4 (`NotYetMoved` is reported and recorded as a failed run). Nothing in the engine changes then.
+* `physics_sizing` of the mesh: phase 2 (neutral `Sizing`); the engine answers `Unsupported`. 3D models (feature list `dim` 3) do not mesh yet (also the case in the old app); a 2D model can be swept along y with `sweep` layers.
+* Rewiring `app` and `nyx-mcp` to `Engine::call` and dissolving `nyx-session`: phase 7 proper. The MCP server can become a loop over `catalog()` and `call()`; it has to add the handshake, the `nyx.project_hash` header and the assumptions ledger of the old session if wanted.
+* File names in the store (`experiment.nyx.xml` holds JSON for an engine project), removal of the XML branch and of `femcore` from `nyx-store`: phase 7/8. The final project JSON layout and its `format` key: phase 8 (G6).
+* Not done: `set_material` takes a material name or scalar properties (the TOML files and dispersion models are phase 6, `femcore::material`); the engine does not read material files yet. Analyses (`nyx-analysis`) are not wired: phase 5. The batch runner and HDF5 export of the plan's engine list are not built (HDF5 stays an optional export; batch is `Engine::call` in a loop).
+
+**For the other sessions.** Phase 2 owner: change `FemcoreMesher::mesh` only; names and labels come from `geom::labels::LabelMap`, which already numbers domains from 1. Phase 4 owners: your physics are exercised by `solve` through `Ctx` (resolver, progress, imported fields by role); `describe_physics` and the schema of each command come from your descriptors, so refining a descriptor changes `engine_commands.v1.json` (rewrite it with a `VERSIONS.md` line). Phase 7 owner: start from `Engine`; do not write a second project type.
+
+**Findings.** `geom` depends on serde only and a test pins that (ADR 3), so the descriptors live in the engine, not in `geom`. A running test executable in another session locked the shared target directory once (LNK1104); the coordinator suggested a private `CARGO_TARGET_DIR`, which was not needed here.
+
 ## Open questions for paul
 
-Gates of the plan not yet answered: **G2** (tolerance and reference platform; needed before phase 3 ends), **G5**, **G6**. New: the session list above (engine core early? Docker for Structurizr?), and whether to free `nyx-jj/target`.
+Nothing is open for paul from the foundation any more: the plan's gates G1 to G6 are answered, and the coordinator reports the rest settled on 2026-11-04: mesh defaults accepted (`mesher3d`/`refine3d` kept as a fixture with a README, numbering from 1, `Sizing` in `femcore::meshing`), materials settled in its own thread (further models added, sources verified, unverified values flagged), mesher decision D1 = skip Mmg, D2 answered (the geom 3D finding went to paul), and **engine core early = yes** (a thread "Build engine core early" started from `restructure-1c-gate-answers`).
 
 ## Log
 
