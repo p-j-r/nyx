@@ -32,3 +32,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 26 | [One workspace and a layering test](adr/0026-one-workspace-and-a-layering-test.md) | `Cargo.toml`, layering |
 | 27 | [`nyx2`: second repository, a jj workspace per session](adr/0027-nyx2-repository-and-jj-workspace-per-working-session.md) | process |
 | 31 | [femcore holds meshes, meshing and adaptation in three module trees](adr/0031-mesh-meshing-adapt-module-layout.md) | `femcore::{mesh, meshing, adapt}` |
+| 32 | [One native mesh; `SimplexMesh` as the solver view](adr/0032-one-native-mesh-simplexmesh-as-a-view.md) | `femcore::mesh` (proposed) |
