@@ -257,4 +257,4 @@ After phase 1, phases 2, 3 and 6 touch different files and can be done by separa
 * Section 5 item 4 (benchmarks within 10 %) is measured as the best of three runs on an idle machine (`BENCH_ONLY=1 bash tools/baseline.sh <dir>`); single runs vary by up to 40 % on the 3D eigensolve.
 * Section 5 item 1: counts are taken for the whole root workspace; JSON key order is never compared (ADR 26).
 * Phase 2 should land a pure file-move commit first (no logic change) so the mesher feature work can branch from it (status file, "Mesher features").
-* Gate answers (paul, 2026-11-03): G1 keep `ems_axisym`/`sms_axisym` but check their implementation (phase 3 and 4 owners; `sms_kz` stays, paul asked what it is); G3 crate names as written; G4 TOML.
+* Gate answers (paul, 2026-11-03): G1 keep `ems_axisym`/`sms_axisym` but check their implementation (phase 3 and 4 owners); `sms_kz` out-of-plane model removed by paul's instruction on 2026-11-04 (bookmark `restructure-1b-remove-sms-kz`); G3 crate names as written; G4 TOML.

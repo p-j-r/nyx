@@ -721,7 +721,7 @@
           },
           {
             "additionalProperties": false,
-            "description": "Vibration modes. With `kz` on a 2D cross-section the modes travel along y with that wave number; with absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
+            "description": "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
             "properties": {
               "kind": {
                 "const": "eigenfrequency"
@@ -733,11 +733,6 @@
                     "default": 0.0,
                     "description": "Search around [Hz]. 0 finds the lowest modes",
                     "minimum": 0.0,
-                    "type": "number"
-                  },
-                  "kz": {
-                    "default": 0.0,
-                    "description": "Out-of-plane wave number [rad/m]. 2D only; positive for a wave along +y. Absent: no propagation along y",
                     "type": "number"
                   },
                   "n_modes": {
@@ -777,7 +772,7 @@
     },
     {
       "dims": "both",
-      "doc": "Vibration modes. With `kz` on a 2D cross-section the modes travel along y with that wave number; with absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
+      "doc": "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
       "kind": "eigenfrequency",
       "name": "Eigenfrequencies",
       "params": [
@@ -806,19 +801,6 @@
           "name": "f_search",
           "required": false,
           "unit": "Hz"
-        },
-        {
-          "doc": "2D only; positive for a wave along +y. Absent: no propagation along y",
-          "kind": {
-            "default": 0.0,
-            "max": null,
-            "min": null,
-            "type": "number"
-          },
-          "label": "Out-of-plane wave number",
-          "name": "kz",
-          "required": false,
-          "unit": "rad/m"
         }
       ]
     }

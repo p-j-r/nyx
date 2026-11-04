@@ -1,18 +1,9 @@
-//! Elastic modes of a 2D cross-section with an out-of-plane wave number (solid mechanics
-//! with an out-of-plane wave number on a 2D component): all three displacement components
-//! `u(x, y) exp(-i kz z)` live on the cross-section and the strains contain `-i kz` terms,
-//!
-//! ```text
-//!   e_xx = du_x/dx   e_yy = du_y/dy   e_zz = -i kz u_z
-//!   g_xy = du_x/dy + du_y/dx   g_yz = du_z/dy - i kz u_y   g_xz = du_z/dx - i kz u_x
-//! ```
-//!
-//! The stiffness matrix is complex Hermitian, the mass matrix real. With `kz` equal to the phase
-//! constant of a travelling wave this gives the dispersion of acoustic modes of waveguides, as
-//! needed for Brillouin scattering. Materials use the full 6x6 stiffness (anisotropic and
-//! rotated crystals included); no plane assumption is made.
+//! The shared kernel of the elastic cross-section models: stiffness and mass on a 2D mesh with three displacement components, the
+//! constraints, absorbing layers and low-reflecting boundaries, the complex eigensolve and the fields. Today it serves the axisymmetric
+//! model (`sms_axisym`: bodies of revolution, azimuthal order `m`). The out-of-plane wave-number model (`u(x, z) exp(-j k y)`) that
+//! was the other client is removed (paul, 2026-11-04). The file keeps its name until phase 4 moves it into `nyx-sms`.
 
-use crate::csparse::{c, CCoo, CCsr, C};
+use crate::csparse::{c, CCsr, C};
 use crate::fem::*;
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
@@ -42,91 +33,10 @@ fn to_complex(a: &Csr) -> CCsr {
     CCsr { nrows: a.nrows, ncols: a.ncols, indptr: a.indptr.clone(), indices: a.indices.clone(), data: a.data.iter().map(|&v| c(v, 0.0)).collect() }
 }
 
-/// Stiffness matrix over `3 * n_dofs(order)` unknowns (component blocks): complex Hermitian
-/// without absorbing layers. With perfectly matched layers (`stretch`: the complex coordinate
-/// stretches of every cell) the in-plane derivatives are divided by the stretch, the cell weight
-/// is the determinant of the stretch, and the test strain uses the transpose of the strain operator
-/// with the conjugate wave-number terms, so the matrix is complex symmetric in the layers.
-// The B-matrix tables below are written `row * nd + component * nloc + a` for every entry, including the ones with a
-// zero factor, so that all lines read alike.
-#[allow(clippy::erasing_op)]
-pub fn assemble_stiffness_kz(mesh: &SimplexMesh, c6: &[M6], order: usize, kz: f64, stretch: Option<&[[C; 3]]>) -> CCsr {
-    let re = RefElement::new(2, order, 2 * order);
-    let geo = geometry(mesh);
-    let nloc = re.nloc;
-    let nd = 3 * nloc;
-    let n1 = mesh.n_dofs(order);
-    let n = 3 * n1;
-    let beta = c(0.0, -kz);
-    let mut coo = CCoo::new(n, n);
-    let (mut scratch, mut full) = (Vec::new(), Vec::new());
-    let mut grad = vec![0.0; nloc * 2];
-    // B = B0 + beta B1, six strain rows over the 3 * nloc local dofs (comp * nloc + a)
-    let mut b0 = vec![c(0.0, 0.0); 6 * nd];
-    let mut b1 = vec![0.0; 6 * nd];
-    let mut db = vec![c(0.0, 0.0); 6 * nd];
-    let mut ke = vec![c(0.0, 0.0); nd * nd];
-    for ci in 0..mesh.n_cells() {
-        ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
-        let dm = &c6[ci];
-        let (sx, sy) = stretch.map_or((c(1.0, 0.0), c(1.0, 0.0)), |s| (s[ci][0], s[ci][1]));
-        let det = sx * sy;
-        for q in 0..re.w.len() {
-            shape_gradients(&re, &geo, ci, q, &mut grad);
-            b0.iter_mut().for_each(|x| *x = c(0.0, 0.0));
-            b1.iter_mut().for_each(|x| *x = 0.0);
-            for a in 0..nloc {
-                let (gx, gy, nv) = (c(grad[a * 2], 0.0) / sx, c(grad[a * 2 + 1], 0.0) / sy, re.n[q][a]);
-                // rows: 0 xx, 1 yy, 2 zz, 3 xy, 4 yz, 5 xz
-                b0[0 * nd + 0 * nloc + a] = gx;
-                b0[nd + nloc + a] = gy;
-                b1[2 * nd + 2 * nloc + a] = nv;
-                b0[3 * nd + 0 * nloc + a] = gy;
-                b0[3 * nd + nloc + a] = gx;
-                b0[4 * nd + 2 * nloc + a] = gy;
-                b1[4 * nd + nloc + a] = nv;
-                b0[5 * nd + 2 * nloc + a] = gx;
-                b1[5 * nd + 0 * nloc + a] = nv;
-            }
-            // D B
-            for s in 0..6 {
-                for j in 0..nd {
-                    let mut acc = c(0.0, 0.0);
-                    for t in 0..6 {
-                        acc += (b0[t * nd + j] + beta * b1[t * nd + j]) * dm[s][t];
-                    }
-                    db[s * nd + j] = acc;
-                }
-            }
-            // K += w B^H (D B)
-            for i in 0..nd {
-                for j in 0..nd {
-                    let mut acc = c(0.0, 0.0);
-                    for s in 0..6 {
-                        let bh = b0[s * nd + i] + beta.conj() * b1[s * nd + i];
-                        acc += bh * db[s * nd + j];
-                    }
-                    ke[i * nd + j] += acc * re.w[q];
-                }
-            }
-        }
-        let vol = c(geo.vol[ci], 0.0) * det;
-        ke.iter_mut().for_each(|x| *x *= vol);
-        mesh.cell_dofs(ci, order, &mut scratch);
-        full.clear();
-        for k in 0..3 {
-            full.extend(scratch.iter().map(|&d| d + k * n1));
-        }
-        coo.push_block(&full, &full, &ke);
-    }
-    coo.to_csr()
-}
-
-/// The wafer axis (0 = x, 1 = y, 2 = z) of each displacement block of `CrossSection::Kz`: x, z, y.
+/// The wafer axis (0 = x, 1 = y, 2 = z) of each displacement block: x, z, y (for a ring r, z, theta).
 const PLANE_AXES: [usize; 3] = [0, 2, 1];
 
-/// The complex eigenvectors behind a `solve_solid_kz` result (for coupling integrals such as the
-/// Brillouin gain): displacement over all `3 * n_dofs(order)` dofs (component blocks), the complex
+/// The complex eigenvectors behind a cross-section solid result: displacement over all `3 * n_dofs(order)` dofs (component blocks), the complex
 /// frequencies in Hz, in the order of the solutions.
 pub struct KzModes {
     pub kz: f64,
@@ -137,25 +47,10 @@ pub struct KzModes {
     pub converged: bool,
 }
 
-/// Eigenfrequencies of a cross-section in wafer axes (mesh x, z; out of the plane y) for a wave `exp(-j k y)` along `+y` with wave number
-/// `k` (rad/m). The constraints, crystal orientations and layers of `spec` are in wafer axes, the fields come back under wafer names.
-pub fn solve_solid_kz(mesh: &SimplexMesh, spec: &ProblemSpec, k: f64) -> Result<SolveResult, String> {
-    solve_solid_kz_full(mesh, spec, k).map(|r| r.0)
-}
-
-/// Like `solve_solid_kz`, and also returns the complex mode shapes (displacement blocks in the order x, z, y, and the stiffness in the
-/// Voigt order of those axes).
-pub fn solve_solid_kz_full(mesh: &SimplexMesh, spec: &ProblemSpec, k: f64) -> Result<(SolveResult, KzModes), String> {
-    solve_cross_section(mesh, spec, CrossSection::Kz(k))
-}
-
-/// What the third displacement component and the third dimension are: the out-of-plane direction
-/// with wave number `kz`, or the azimuth of an axisymmetric body with azimuthal order `m`
+/// What the third displacement component and the third dimension are: the azimuth of an axisymmetric body with azimuthal order `m`
 /// (mesh coordinates x = r, y = z).
 #[derive(Clone, Copy, Debug)]
 pub enum CrossSection {
-    /// A cross-section in wafer axes: the displacement components are (x, z, y) and the wave is `exp(-j k y)`.
-    Kz(f64),
     Axisymmetric(f64),
 }
 
@@ -197,22 +92,18 @@ pub struct CrossAssembly {
 }
 
 pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSection) -> Result<CrossAssembly, String> {
-    let kz = match kind {
-        CrossSection::Kz(k) => k,
-        CrossSection::Axisymmetric(m) => m,
-    };
     if mesh.dim != 2 {
-        return Err("an out-of-plane wave number applies to a 2D cross-section".into());
+        return Err("a cross-section model needs a 2D mesh".into());
     }
     let Study::Eigenfrequency { n_modes, f_search } = spec.study.clone() else {
-        return Err("with an out-of-plane wave number the solid mechanics study must be Eigenfrequency".into());
+        return Err("the cross-section solid models need an Eigenfrequency study".into());
     };
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
     let mut c6 = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?;
     // the blocks of the displacement are (x, z, y) (for a ring: r, z, theta): the stiffness in the Voigt order of those axes
     c6 = c6.iter().map(|c| crate::section::plane_stiffness(c, 2)).collect();
-    if let CrossSection::Axisymmetric(_) = kind {
+    {
         // a crystal's axes stay fixed while the local frame turns around the ring: the stiffness of the axisymmetric
         // model is the average over rotations about the ring axis (the y direction of the (r, z) plane); exact for isotropic materials
         for m in c6.iter_mut() {
@@ -239,7 +130,6 @@ pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: Cros
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
     let stretch = if spec.materials.has_pml() { Some(crate::ems_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
     let k = match kind {
-        CrossSection::Kz(_) => assemble_stiffness_kz(mesh, &c6, order, kz, stretch.as_deref()),
         CrossSection::Axisymmetric(m) => crate::sms_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
     };
     let mut rho = spec.materials.cell_values(mesh, "rho", None)?;
@@ -288,10 +178,7 @@ pub struct CrossSolve {
 /// Stage 2: the complex eigenpairs (`K - w^2 M` or the quadratic problem with the low-reflecting damping) nearest the
 /// search frequency, as complex frequencies in Hz with their displacement over all dofs, sorted by real part.
 pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, String> {
-    let kz = match asm.kind {
-        CrossSection::Kz(k) => k,
-        CrossSection::Axisymmetric(m) => m,
-    };
+    let CrossSection::Axisymmetric(kz) = asm.kind;
     let (n_modes, f_search, free, n) = (asm.n_modes, asm.f_search, &asm.free, asm.n);
     let (kf, mf) = (&asm.kf, &asm.mf);
     // the shift: the requested frequency, or just below the spectrum for the lowest modes
@@ -396,7 +283,6 @@ pub fn cross_section_fields(mesh: &SimplexMesh, asm: &CrossAssembly, solved: &Cr
     }
     let kz = modes.kz;
     let what = match asm.kind {
-        CrossSection::Kz(_) => format!("wave number k = {kz:.6e} rad/m along y"),
         CrossSection::Axisymmetric(_) => format!("axisymmetric, azimuthal order m = {kz}"),
     };
     let mut log = vec![format!("{what}; complex Hermitian eigenproblem, Krylov dimension {}{}", solved.dim, if modes.converged { "" } else { " (not every pair converged; those are omitted)" })];

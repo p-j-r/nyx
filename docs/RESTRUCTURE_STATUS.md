@@ -11,6 +11,7 @@ Last updated: 2026-11-04, by the foundation session.
 |---|---|---|---|---|
 | 0 | Baselines | **done** | `restructure-0-baselines` | tags `pre-restructure`, `sbs-last`; numbers below; `tools/baseline.sh` |
 | 1 | Delete sbs, chips | **done** | `restructure-1-delete-sbs-chips` | G1 answered (keep axisymmetric, check them; `sms_kz` kept); ADR 24 |
+| 1b | Remove `sms_kz` (out-of-plane model), on paul's instruction | **done** | `restructure-1b-remove-sms-kz` (on top of `restructure-foundation`) | 755 pass, 9 ignored, 2 expected golden failures; merge it before phase 3 touches `sms_kz.rs` |
 | F | Foundation (workspace layout, crate skeletons, `Physics` trait, conventions) | **done** | `restructure-foundation` (tip) | ADR 25, 26, 27; start every parallel workspace from this bookmark |
 | 2 | femcore: one mesh model, all meshing | ready | `restructure-2-mesh` | see "Parallel work" |
 | 3 | femcore: one linear algebra | ready (gate G2 before it ends) | `restructure-3-linalg` | |
@@ -140,7 +141,7 @@ That file lives uncommitted in the old checkout (`nyx/docs/ports/meshers/FEATURE
 
 ## Gate answers from paul (2026-11-03 evening, in the thread)
 
-* **G1**: keep the axisymmetric kernels (`ems_axisym`, `sms_axisym`) **with a note that their implementation must be checked**, paul is not sure of it. Action for the phase 3 and 4 owners: before moving them, review them against closed forms (the earlier checks quoted in the pre-restructure README: whispering-gallery modes, breathing and flexural modes of a ring) and say in this file what was verified. About `sms_kz`, paul does not know why it exists after the axis changes: it is the solid-mechanics kernel for a 2D cross-section with an out-of-plane wave number k (three displacement components, `u(x, z) exp(-j k y)`, wafer axes since the kernel port), i.e. the phonon waveguide dispersion, not Brillouin-specific. It stays (nothing was deleted); paul may still ask for its removal.
+* **G1**: keep the axisymmetric kernels (`ems_axisym`, `sms_axisym`) **with a note that their implementation must be checked**, paul is not sure of it. Action for the phase 3 and 4 owners: before moving them, review them against closed forms (the earlier checks quoted in the pre-restructure README: whispering-gallery modes, breathing and flexural modes of a ring) and say in this file what was verified. About `sms_kz`, paul does not know why it exists after the axis changes: it is the solid-mechanics kernel for a 2D cross-section with an out-of-plane wave number k (three displacement components, `u(x, z) exp(-j k y)`, wafer axes since the kernel port), i.e. the phonon waveguide dispersion, not Brillouin-specific. **Update 2026-11-04: paul said to remove it** (the axis is along y now, so the code is obsolete): done on bookmark `restructure-1b-remove-sms-kz` (ADR 24 amendment). What went: `ProblemSpec::out_of_plane`, `solve_solid_kz*`, `assemble_stiffness_kz`, the 4 `solid_kz_*` goldens, `tests/solid_kz.rs` (its Floquet-vs-cross-section test too), the app checkbox, the example's `out_of_plane`. What stays: the shared cross-section machinery in `sms_kz.rs`, because `sms_axisym` is built on it; phase 4 renames and moves it into `nyx-sms`.
 * **G3**: "sure": crate names as in the plan (`nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis`, `nyx-engine`).
 * **G4**: "sure": TOML for materials.
 

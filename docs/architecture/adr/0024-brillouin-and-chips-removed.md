@@ -6,6 +6,8 @@ Date: 2026-11-03
 
 Accepted by paul on 2026-11-03 (restructure plan, goal 8). Supersedes in part ADR 12 (the code `sbs`), ADR 21 (the Brillouin use of the analysis) and ADR 22 (the four ring chips). The code is kept in the tag `sbs-last` of the `nyx2` repository.
 
+Amendment 2026-11-04: on paul's instruction the out-of-plane wave-number solid model (`ProblemSpec::out_of_plane`, `sms_kz::solve_solid_kz*`, its 4 goldens, `tests/solid_kz.rs`, the app checkbox) is removed as well. The cross-section solid machinery in `sms_kz.rs` stays because the axisymmetric model (`sms_axisym`, kept by G1) is built on it; it is renamed and moved in phase 4. The Floquet-vs-cross-section agreement test went with `solid_kz.rs`; `solid_eigen_floquet` remains as a golden.
+
 ## Context
 
 nyx started as a Brillouin application. The restructure narrows it to a general finite-element application with a few physics per project. Brillouin scattering needed the optical modes, the elastic modes with a phase-matched out-of-plane wave number, photoelastic and moving-boundary overlaps and gain; it spread over `sbs.rs`, `sbs_ring.rs`, `chips.rs`, a `Physics::Brillouin` variant, a `BrillouinSpec` inside `ProblemSpec`, an application tab, five golden files and about 5000 lines of tests and studies. Five of the seven failing golden tests were Brillouin goldens.

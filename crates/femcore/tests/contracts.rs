@@ -50,7 +50,6 @@ fn exemplar_specs() -> Vec<ProblemSpec> {
 
     let mut solid = ProblemSpec::new(Physics::Solid);
     solid.study = Study::Eigenfrequency { n_modes: 6, f_search: 5e9 };
-    solid.out_of_plane = Some(1.0e6);
     solid.inactive = vec![3];
     solid.materials.set(1, "E", 169e9);
     solid.materials.set(1, "nu", 0.28);
@@ -101,7 +100,7 @@ fn problem_spec_json_shape_that_other_crates_read_without_types() {
     assert!(emw["materials"]["domains"]["1"]["eps_r"].is_number(), "materials.domains.<label>.<property>");
     // keys of the top level, in the order of the declaration (the exemplar pins the rest)
     let keys: Vec<&str> = emw.as_object().unwrap().keys().map(|s| s.as_str()).collect();
-    for k in ["physics", "order", "materials", "bcs", "study", "plane", "thickness", "thermal", "solver", "output", "out_of_plane", "inactive", "periodic"] {
+    for k in ["physics", "order", "materials", "bcs", "study", "plane", "thickness", "thermal", "solver", "output", "inactive", "periodic"] {
         assert!(keys.contains(&k), "ProblemSpec lost the key {k}");
     }
 }

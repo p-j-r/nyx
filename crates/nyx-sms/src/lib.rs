@@ -1,5 +1,5 @@
 //! nyx-sms: solid mechanics (`sms`, ADR 12): static and eigenfrequency studies of isotropic and anisotropic solids, in 2D (plane strain or
-//! stress, with an optional out-of-plane wave number) and 3D, with absorbing layers and Floquet-periodic pairs.
+//! stress) and 3D, with absorbing layers and Floquet-periodic pairs.
 //!
 //! SKELETON (restructure foundation). It declares what `sms` is to the rest of nyx; the kernels (`femcore::sms`, `sms_kz`, `sms_pml`,
 //! `sms_lrb`, `sms_floquet`, `sms_axisym`, `periodic`) move in here in phase 4, after phases 2 and 3. Until then `solve` answers
@@ -42,12 +42,11 @@ impl Physics for Sms {
             StudyDesc {
                 kind: "eigenfrequency".into(),
                 name: "Eigenfrequencies".into(),
-                doc: "Vibration modes. With `kz` on a 2D cross-section the modes travel along y with that wave number; with absorbing layers or low-reflecting boundaries the frequencies are complex (Q).".into(),
+                doc: "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (Q).".into(),
                 dims: Dims::Both,
                 params: vec![
                     ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
                     ParamDesc::number("f_search", "Search around", "Hz", 0.0, "0 finds the lowest modes").range(Some(0.0), None),
-                    ParamDesc::number("kz", "Out-of-plane wave number", "rad/m", 0.0, "2D only; positive for a wave along +y. Absent: no propagation along y"),
                 ],
             },
         ]

@@ -91,7 +91,13 @@ fn optical_mode_stages_compose_to_the_one_call_solver() {
 #[test]
 fn elastic_cross_section_stages_compose_to_the_one_call_solver() {
     use femcore::sms_kz::*;
-    let mesh = common::rect(1.0e-3, 0.2e-3, 8, 3);
+    // a ring of radius 5 mm with a 1 mm x 0.2 mm section: the mesh is the (r, z) half plane
+    let flat = common::rect(1.0e-3, 0.2e-3, 8, 3);
+    let mut pts = flat.points.clone();
+    for i in 0..flat.n_points() {
+        pts[2 * i] += 5.0e-3;
+    }
+    let mesh = femcore::mesh::SimplexMesh::new(2, pts, flat.cells.clone(), flat.cell_labels.clone(), flat.facets.clone(), flat.facet_labels.clone());
     let mut s = ProblemSpec::new(Physics::Solid);
     s.order = 2;
     let st = Stiffness::Trigonal { c11: 497.35e9, c12: 163.97e9, c13: 112.20e9, c14: -23.58e9, c33: 499.11e9, c44: 147.39e9 };
@@ -99,14 +105,14 @@ fn elastic_cross_section_stages_compose_to_the_one_call_solver() {
     s.materials.default.insert("rho".into(), 3980.0);
     s.bcs.push(Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } });
     s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
-    let (whole, wm) = solve_cross_section(&mesh, &s, CrossSection::Kz(3.0e3)).unwrap();
-    let asm = assemble_cross_section(&mesh, &s, CrossSection::Kz(3.0e3)).unwrap();
+    let (whole, wm) = solve_cross_section(&mesh, &s, CrossSection::Axisymmetric(2.0)).unwrap();
+    let asm = assemble_cross_section(&mesh, &s, CrossSection::Axisymmetric(2.0)).unwrap();
     assert_eq!(asm.kf.nrows, asm.free.len());
     let solved = solve_cross_section_modes(&asm).unwrap();
     assert_eq!(solved.modes.freqs, wm.freqs);
     let r = cross_section_fields(&mesh, &asm, &solved).unwrap();
     assert_eq!(r.solutions.len(), whole.solutions.len());
-    // the three displacement components come per cell, complex, under wafer names (x, z in the plane; y along the wave)
+    // the three displacement components come per cell, complex, under wafer names (x, z in the plane; y along the ring)
     let cf = r.solutions[0].cell_fields.as_ref().unwrap();
     let names: Vec<&str> = cf.fields.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["ux", "uz", "uy"]);

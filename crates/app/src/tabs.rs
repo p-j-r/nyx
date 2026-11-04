@@ -888,19 +888,6 @@ impl App {
                         ui.end_row();
                     });
                     ui.weak("Boundary loads are ignored; only fixed constraints matter. Without a fixed boundary the first modes are rigid-body motions at 0 Hz.");
-                    if self.doc.mesh.as_ref().is_some_and(|m| m.dim == 2) {
-                        let mut on = spec.out_of_plane.is_some();
-                        if ui.checkbox(&mut on, "Out-of-plane wave number (waveguide cross-section)").changed() {
-                            spec.out_of_plane = if on { Some(0.0) } else { None };
-                        }
-                        if let Some(kz) = &mut spec.out_of_plane {
-                            ui.horizontal(|ui| {
-                                ui.label("k (rad/m), propagation along the page normal: positive along +y (into the page)");
-                                num(ui, kz);
-                            });
-                            ui.weak("Three displacement components on the cross-section, u(x, z) exp(-i k y); anisotropic crystals use their full stiffness.");
-                        }
-                    }
                 }
             }
             Physics::Emw if self.doc.mesh.as_ref().is_some_and(|m| m.dim == 3) => {

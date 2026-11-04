@@ -87,7 +87,7 @@ pub const NAMES: [&str; 18] = [
     "Plate with a hole (solid mechanics, stress concentration)",
     "Beam on a PML substrate: anchor loss (solid eigenfrequencies, complex frequency and Q)",
     "Plate with a drilled hole in 3D, the section swept along y (solid mechanics, stress concentration)",
-    "Silicon strip on sapphire at 1550 nm: optical modes (EM waves) and acoustic modes with out-of-plane wave number (solid mechanics)",
+    "Silicon strip on sapphire at 1550 nm: optical modes (EM waves) and acoustic modes in plane strain (solid mechanics)",
     "Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)",
     "Silicon wire on 300 nm SOI at 1550 nm: TE0 and TM0 modes with Stokes parameters and Poincare sphere (EM waves, 2D cross-section)",
     "300 nm SOI wire with a sloped left wall: hybrid modes tilted on the Poincare sphere (EM waves, 2D cross-section)",
@@ -323,8 +323,8 @@ pub fn drilled_plate() -> Project {
 
 /// The cross-section of a silicon strip (450 nm x 230 nm) on a sapphire substrate under air, at 1550 nm:
 /// optical modes with PML on all sides (regions `air`, `sapphire`, `silicon` and the absorbing pieces `<region>.pml_xmin`, ...) and
-/// acoustic modes of the solid (silicon and sapphire, rotated crystal, PML in the sapphire) at a small
-/// out-of-plane wave number.
+/// acoustic modes of the solid (silicon and sapphire, rotated crystal, PML in the sapphire) in
+/// plane strain.
 pub fn sos_strip() -> Project {
     use femcore::material::*;
     let um = 1e-6;
@@ -379,7 +379,6 @@ pub fn sos_strip() -> Project {
         // clamped: the outer sides and bottom of the sapphire block
         so.bcs = vec![rule(&mg, "outer & in_box([-1, 0, -1], [1, 0, 1e-12], within)", fixed_all())];
         so.study = Study::Eigenfrequency { n_modes: 8, f_search: 9.47e9 };
-        so.out_of_plane = Some(2.3172 * 2.0 * std::f64::consts::PI * 9.47e9 / 299792458.0);
     }
     p
 }

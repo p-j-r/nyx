@@ -53,11 +53,6 @@ pub fn check_inputs(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String
     if !spec.thickness.is_finite() {
         return Err("the 2D thickness is NaN or infinite".into());
     }
-    if let Some(kz) = spec.out_of_plane {
-        if !kz.is_finite() {
-            return Err("the out-of-plane wave number is NaN or infinite".into());
-        }
-    }
     // everything else (tensors, PML data, thermal expansion): scan the printed form of the spec,
     // outside of quoted strings, for the words NaN and inf
     let text = format!("{spec:?}");

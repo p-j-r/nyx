@@ -4,7 +4,7 @@ One line per contract. Bump the version here in the same commit that changes the
 
 | Contract | Exemplar / snapshot | Version | Changed | Why |
 |---|---|---|---|---|
-| problem_spec | `problem_spec.v1.json` | 1.1 | 2026-11-03 | `Physics::Brillouin`, `BrillouinSpec` and the `brillouin` key removed (phase 1, ADR 24). Deliberate rewrite; no reader of the old file is kept. Superseded by `problem_spec.v2.json` in phase 4 |
+| problem_spec | `problem_spec.v1.json` | 1.2 | 2026-11-04 | `Physics::Brillouin`, `BrillouinSpec` and the `brillouin` key removed (phase 1, ADR 24); 1.2: the `out_of_plane` key removed (sms_kz model, ADR 24 amendment). Deliberate rewrite; no reader of the old file is kept. Superseded by `problem_spec.v2.json` in phase 4 |
 | store_workflow | `store_workflow.v1.json` | 1.0 | 2026-11-03 | first snapshot; the format number inside the file is `nyx = 1` |
 | store_run | `store_run.v1.json` | 1.0 | 2026-11-03 | first snapshot |
 | mcp_tools | `mcp_tools.v1.json` | 1.0 | 2026-11-03 | first snapshot, 9 tools |
@@ -17,7 +17,7 @@ One line per contract. Bump the version here in the same commit that changes the
 | solve_result | `solve_result.v2.json` | 2.0 | 2026-11-04 | `SolveResult`, `Solution`, `Field`, `CellField`, `Scalar` of `nyx-physics` are serialisable (R27); no `analysis` member |
 | physics_descriptors | `physics_descriptors.v1.json` | 1.0 | 2026-11-04 | serde shape of the descriptor types (`StudyDesc`, `BcDesc`, `PropDesc`, `ParamDesc`, `FieldDesc`, `FieldLink`, `Sizing`) |
 | physics_dfs | `physics_dfs.v1.json` | 1.0 | 2026-11-04 | first descriptors of `dfs`, read from the current kernels; the phase 4 owner refines them (bump here) |
-| physics_sms | `physics_sms.v1.json` | 1.0 | 2026-11-04 | same, `sms` |
+| physics_sms | `physics_sms.v1.json` | 1.1 | 2026-11-04 | first descriptors of `sms`; 1.1: the `kz` study parameter removed with the out-of-plane model |
 | physics_ems | `physics_ems.v1.json` | 1.0 | 2026-11-04 | same, `ems` |
 | physics_api | (tests only) the `Physics` trait surface, registry rules, error codes | 1.0 | 2026-11-04 | `crates/nyx-physics/tests/contracts.rs`; changing a method is a bump |
 

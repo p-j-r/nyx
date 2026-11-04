@@ -487,9 +487,6 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
     let t0 = Instant::now();
     let mut tl = Instant::now();
     let order = spec.order;
-    if let (Some(kz), 2) = (spec.out_of_plane, mesh.dim) {
-        return crate::sms_kz::solve_solid_kz(mesh, spec, kz);
-    }
     if spec.materials.has_pml() {
         return match spec.study {
             Study::Eigenfrequency { .. } => crate::sms_pml::solve_solid_pml(mesh, spec),

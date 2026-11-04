@@ -9,7 +9,7 @@ use serde_json::json;
 
 fn example() -> ProblemSpec {
     let mut s = ProblemSpec::new("sms", 2, "eigenfrequency");
-    s.study.params = json!({ "n_modes": 6, "f_search": 1e9, "kz": 3.0 });
+    s.study.params = json!({ "n_modes": 6, "f_search": 1e9 });
     s.materials.insert(
         "beam".into(),
         MaterialAssign::Props([("E".to_string(), 169e9), ("nu".to_string(), 0.22), ("rho".to_string(), 2329.0)].into()),

@@ -369,10 +369,6 @@ pub struct ProblemSpec {
     pub solver: LinearSolver,
     #[serde(default)]
     pub output: OutputSpec,
-    /// solid mechanics on a 2D cross-section: out-of-plane wave number k (rad/m), positive for a wave along +y; the three
-    /// displacement components live on the cross-section (eigenfrequencies only)
-    #[serde(default)]
-    pub out_of_plane: Option<f64>,
     /// domains that do not take part in this physics (for example air in a solid mechanics study):
     /// they carry no stiffness or mass and the dofs they alone touch are held at zero
     #[serde(default)]
@@ -390,7 +386,7 @@ impl ProblemSpec {
             Physics::Solid => Study::Static,
             Physics::Emw => Study::Modes { freq: 10e9, n_target: 1.0, evanescent: false, n_modes: 4 },
         };
-        ProblemSpec { physics, order: 2, materials: Materials::default(), bcs: vec![], study, plane: Plane::Strain, thickness: 1.0, thermal: None, solver: LinearSolver::Auto, output: OutputSpec::default(), out_of_plane: None, inactive: vec![], periodic: vec![] }
+        ProblemSpec { physics, order: 2, materials: Materials::default(), bcs: vec![], study, plane: Plane::Strain, thickness: 1.0, thermal: None, solver: LinearSolver::Auto, output: OutputSpec::default(), inactive: vec![], periodic: vec![] }
     }
 }
 

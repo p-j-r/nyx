@@ -9,7 +9,7 @@
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
 //! * linear algebra: `sparse`, `csparse` (sparse matrices, real and complex), `linalg` (sparse factorisations, dense
 //!   eigenproblems), `amg` (multigrid and CG), `eigen` (shift-and-invert Krylov), `lobpcg` (multigrid eigensolver)
-//! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (out-of-plane wave number), `sms_pml`,
+//! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (the shared cross-section solid kernel, today for rings), `sms_pml`,
 //!   `sms_lrb` (absorbing boundaries), `sms_floquet` and `periodic` (periodic cells), `sms_axisym` (bodies of
 //!   revolution); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
 //! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)

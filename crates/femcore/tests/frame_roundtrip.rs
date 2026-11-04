@@ -76,26 +76,6 @@ fn a_plate_pressed_from_above_moves_down_in_z_and_is_stressed_in_z_and_y() {
 }
 
 #[test]
-fn the_shear_mode_of_a_clamped_plate_at_zero_wave_number_moves_along_y() {
-    // at k = 0 the out-of-plane displacement decouples; clamped on all sides: f = (1/2) sqrt(mu/rho) sqrt(1/a^2 + 1/b^2)
-    let (a, b) = (0.02, 0.01);
-    let mesh = common::rect(a, b, 24, 12);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.materials.default.insert("E".into(), 70e9);
-    s.materials.default.insert("nu".into(), 0.3);
-    s.materials.default.insert("rho".into(), 2700.0);
-    s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
-    s.out_of_plane = Some(0.0);
-    s.bcs = vec![Bc { on: None, labels: vec![1, 2, 3, 4], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
-    let r = solve(&mesh, &s);
-    assert_eq!(names(&r), sorted(&["ux", "uy", "uz", "|u|", "|uy|"]));
-    let mu = 70e9 / (2.0 * 1.3);
-    let want = 0.5 * (mu / 2700.0f64).sqrt() * (1.0 / (a * a) + 1.0 / (b * b)).sqrt();
-    let i = r.solutions.iter().position(|x| (x.value.unwrap() - want).abs() < 2e-3 * want).expect("the shear mode");
-    assert!(peak(&r, i, "uy") > 100.0 * peak(&r, i, "ux").max(peak(&r, i, "uz")), "ux {} uy {} uz {}", peak(&r, i, "ux"), peak(&r, i, "uy"), peak(&r, i, "uz"));
-}
-
-#[test]
 fn the_lowest_mode_of_a_pec_guide_has_its_field_along_the_short_side_z() {
     // 30 x 15 mm, air, 12 GHz: TE10 has E along the short side, which in the wafer frame is z
     let mesh = common::rect(0.03, 0.015, 24, 12);
