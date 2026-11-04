@@ -47,7 +47,7 @@ direction the light travels, z is the surface normal. The 2D solver kernels read
 result fields in them (`uz`, `szz`, ...); `femcore::section` is the one place with axis numbers (a 2D mesh is the x-z plane,
 the out-of-plane axis is y, and everything propagates along +y).
 
-## 3. The mesh (`mesh.rs`, `mesher.rs`, `mesher3d.rs`, `refine3d.rs`, `cellmesh.rs`)
+## 3. The mesh (`mesh/`, `meshing/`, `adapt/`)
 
 A `SimplexMesh` is a list of points, a list of cells (3 points per triangle, 4 per tetrahedron) with a
 **domain number** each, and a list of **boundary facets** (edges in 2D, triangles in 3D) with a
@@ -55,10 +55,10 @@ A `SimplexMesh` is a list of points, a list of cells (3 points per triangle, 4 p
 condition applies (for a rectangle 1 = left, 2 = bottom, 3 = top,
 4 = right).
 
-Meshes come from four places: generated rectangles and blocks (`mesh.rs`); 2D shapes (rectangles, circles,
-polygons, with holes and per-shape element size) triangulated with refinement by `mesher.rs`, optionally
+Meshes come from four places: generated rectangles and blocks (`mesh/mod.rs`); 2D shapes (rectangles, circles,
+polygons, with holes and per-shape element size) triangulated with refinement by `meshing/mesher.rs`, optionally
 extruded into 3D layers; 3D solids (boxes, spheres, cylinders, extrusions) filled with well-shaped tetrahedra by
-`mesher3d.rs` (isosurface stuffing, with local refinement in `refine3d.rs`). Meshes given as lists of cells (`cellmesh.rs`) are accepted too: cells that are not
+`tests/common/solid3d` (isosurface stuffing, with local refinement; a test fixture since phase 2, not part of the library). Meshes given as mixed cells (`mesh/cells.rs`) are accepted too: cells that are not
 simplices (quadrilaterals, hexahedra, prisms) are cut into triangles/tetrahedra without adding points.
 
 **Unknown numbering.** For P1 the unknowns are the mesh points. For P2 they are the points followed by one
@@ -267,11 +267,11 @@ or "LOBPCG stalled" mean a fallback to the direct method happened.
 | `validate.rs` | refuses NaN/infinity before and after a solve |
 | `progress.rs` | cancel flag, current stage, stage log (thread-local, so solver functions keep their signatures) |
 | `par.rs` | the shared thread pool and the factorisation pool |
-| `mesh.rs` | simplex meshes, unknown numbering, structured generators, relabelling by boxes |
-| `mesher.rs` | 2D shapes → triangles (constrained Delaunay + Ruppert refinement), extrusion to 3D |
-| `mesher3d.rs`, `refine3d.rs` | 3D solids → tetrahedra (isosurface stuffing; fitted interfaces and edges; bisection refinement) |
-| `view.rs` | surface of any mesh for drawing, including cells the solvers cannot use |
-| `cellmesh.rs` | meshes as lists of mixed cells (quadrilaterals, hexahedra, prisms) before they are cut into simplices |
+| `mesh/mod.rs` | simplex meshes (the solver view), unknown numbering, structured generators, relabelling by boxes |
+| `meshing/mesher.rs` | 2D shapes → triangles (constrained Delaunay + Ruppert refinement), extrusion to 3D |
+| `tests/common/solid3d` | (test fixture) 3D solids → tetrahedra (isosurface stuffing; fitted interfaces and edges; bisection refinement) |
+| `mesh/view.rs` | surface of any mesh for drawing, including cells the solvers cannot use |
+| `mesh/cells.rs` | the one mesh model: mixed cells (triangles, quadrilaterals, tetrahedra, prisms, hexahedra), cut into simplices for the solvers; `adapt/` holds the metric adaptation |
 | `fem.rs` | quadrature, shape functions, scalar matrices, constraints, direct-vs-multigrid choice |
 | `fields.rs` | gradients at nodes, node averaging, plotting surface |
 | `material.rs` | anisotropic stiffness/permittivity/conductivity/expansion tensors, crystal rotation |

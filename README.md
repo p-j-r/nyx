@@ -50,7 +50,7 @@ Cells that are not tetrahedra are cut into tetrahedra with no extra vertices (`S
 every face, so neighbours always agree). The older star split (a vertex at every face and cell centre,
 24 and 14 tetrahedra) is kept as `SplitMode::Star`. The minimal split has far fewer cells and unknowns
 (a quarter of the cells for hexahedra), and the AMG-CG solve needs several times fewer iterations on it.
-Meshes of mixed cells are described by `femcore::cellmesh::CellMesh`; `SimplexMesh::from_cells_split` converts them.
+Meshes of mixed cells are described by `femcore::mesh::cells::CellMesh` (the one mesh model, labels from 1); `SimplexMesh::from_cells_split` cuts them into the triangles or tetrahedra the solvers use.
 
 ## Nanophotonics cross-sections
 
@@ -89,7 +89,7 @@ Schwarz preconditioners, time steppers, nonlinear solvers, optimisers, for real 
 (metric-based 2D mesh adaptation, structured PML meshes with quadrilaterals, prisms and hexahedra, the lossless `.fmsh` file format) were
 merged from the `inspired-rust-port` repository (BSD-2-Clause). They have their own tests (`tests/solvers`, `tests/meshers.rs`, the unit
 tests of both modules) and are **not yet wired into the physics modules**, which still use the older `eigen`, `lobpcg`, `amg` and `linalg`.
-`meshers::interop` converts between the mesher's mesh types and the nyx ones and turns PML regions into `Pml` domains.
+`meshing::pml_box::pml_domains` turns the PML regions into `Pml` domains; `adapt::work` converts between the solver mesh and the adaptation's working mesh.
 Provenance, licences, what the authors measured and the plan for swapping the solvers in: `docs/ports/README.md`.
 
 ## Polarization analysis and the photonic use cases
@@ -162,7 +162,7 @@ elements; it still wins for static solves, and the eigenfrequency study then cho
 
 ## 3D mesher (Solids)
 
-The Solids geometry kind has been removed from the application (every geometry is now a `geom` model); the mesher itself stays in `femcore::mesher3d` and builds tetrahedral meshes of boxes, spheres, cylinders and extruded outlines, painted
+The Solids geometry kind has been removed from the application (every geometry is now a `geom` model); the 3D solid mesher is kept only as the test fixture `crates/femcore/tests/common/solid3d` (it was `femcore::mesher3d`) and builds tetrahedral meshes of boxes, spheres, cylinders and extruded outlines, painted
 in order (a later body overrides earlier ones, domain 0 is a hole). The method is isosurface stuffing
 (Labelle and Shewchuk, 2007, as implemented in Quartet): fill the solid with the tetrahedra of a
 body-centred cubic lattice, move lattice vertices that lie within alpha of an edge length of the surface onto
@@ -269,5 +269,5 @@ this project (it finds repeated eigenvalues such as the degenerate modes of a sq
 ## Limits
 
 * Linear materials only (no contact or nonlinear solids). Perfectly matched layers are available for the waveguide modes and for solid eigenfrequencies (complex coordinate stretching, complex neff or frequency); low-reflecting boundaries need a search frequency (they make the problem quadratic) and cannot be combined with periodic conditions yet. Anisotropic data is supported: crystal stiffness (cubic, hexagonal, trigonal, orthotropic) with Euler-angle orientation, and tensor conductivity, permittivity and thermal expansion. For the waveguide modes the crystal must be oriented with the propagation axis z as a principal axis.
-* Meshes: the app meshes `geom` models (2D, optionally swept along y). Quadrilaterals, hexahedra and prisms given as a `CellMesh` are split into triangles/tetrahedra (exact for straight-sided cells; a hexahedron becomes 6 tetrahedra (24 with the old star split, see above)). Pyramids are not supported (view only). The 2D mesher (`femcore::mesher`) meshes 2D rectangles, circles and polygons (overlapping shapes, holes, per-shape element size, boundaries numbered per shape edge) with constrained Delaunay triangulation and Ruppert refinement (the `spade` crate), and can extrude the 2D mesh through layers into 3D tetrahedra. `femcore::mesher3d` meshes boxes, spheres, cylinders and extruded outlines in 3D (see the 3D mesher section); the application no longer offers it.
+* Meshes: the app meshes `geom` models (2D, optionally swept along y). Quadrilaterals, hexahedra and prisms given as a `CellMesh` are split into triangles/tetrahedra (exact for straight-sided cells; a hexahedron becomes 6 tetrahedra (24 with the old star split, see above)). Pyramids are not supported (view only). The 2D mesher (`femcore::meshing::mesher`) meshes 2D rectangles, circles and polygons (overlapping shapes, holes, per-shape element size, boundaries numbered per shape edge) with constrained Delaunay triangulation and Ruppert refinement (the `spade` crate), and can extrude the 2D mesh through layers into 3D tetrahedra. the 3D solid mesher (boxes, spheres, cylinders, extruded outlines; see the 3D mesher section) is a test fixture under `crates/femcore/tests/common/solid3d`; the application no longer offers it.
 * Dense eigendecomposition is used for transient heat up to about 2500 free dofs.
