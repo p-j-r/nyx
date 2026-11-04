@@ -62,7 +62,7 @@ Items are ordered by how much they matter to the solvers; "depends on" names wha
 ## 6. Process / hygiene
 
 * The older brief's M0 items are still open: the four chip benchmarks with baseline numbers for the hand-tuned meshes, and the offline
-  Mmg / Omega_h comparison (question 12 of the brief was never answered).
+  Mmg / Omega_h comparison (question 12 of the brief was never answered). **Dropped (paul, 2026-11-04, decision D1): the Mmg/Omega_h comparison is not going to be done.**
 * Provenance and licence notes (`PROVENANCE.md`, `THIRD_PARTY_NOTICES.md`) cover the ported crate; the new files were written from the
   published formulas and the standard algorithms (Ericson for the triangle closest point; Dobrzynski-Frey style operators), with no
   third-party code read. No separate provenance entry was added for them.
