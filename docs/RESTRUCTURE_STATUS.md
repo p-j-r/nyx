@@ -25,6 +25,8 @@ Last updated: 2026-11-04, by the foundation session.
 
 Bookmarks stack: `main` (= `arch-model-adrs` tip f74c12ea) <- `restructure-0-baselines` <- `restructure-1-delete-sbs-chips` <- `restructure-foundation`.
 
+Bookmarks that exist after the machine restart (2026-11-04, none is merged into another yet; whoever integrates decides the order): `restructure-1b-remove-sms-kz` and `restructure-1c-gate-answers` (children of the foundation; 1c holds every answered gate and should be the base of new sessions), `restructure-2-mesh`, `restructure-2b-mesh3d-adapter`, `restructure-3-linalg`, `restructure-3x-g2-experiment`, `restructure-4e-engine-core` (engine core early, approved), `restructure-6-materials`, `restructure-7a-connect`. Not created yet: `restructure-9a-structurizr`. Each session records its own state in its own section below.
+
 ## How to start a working session
 
 ```
