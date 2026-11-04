@@ -14,9 +14,9 @@ parallel = ["dep:rayon"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
 rayon = { version = "1", optional = true }
 
 [dev-dependencies]
-serde_json = { version = "1", features = ["float_roundtrip"] }
 proptest = "1"
 

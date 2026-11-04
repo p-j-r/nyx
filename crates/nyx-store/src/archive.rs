@@ -200,6 +200,16 @@ pub fn strip_paths_xml(xml: &str) -> Result<(String, usize), String> {
             _ => {}
         }
     }
+    // the engine's specs are JSON text; the old ones are `nyx_project` XML
+    if xml.trim_start().starts_with('{') {
+        let mut v: serde_json::Value = serde_json::from_str(xml).map_err(|e| format!("not a nyx project: {e}"))?;
+        let mut n = 0;
+        walk(&mut v, &mut n);
+        if n == 0 {
+            return Ok((xml.to_string(), 0));
+        }
+        return Ok((serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?, n));
+    }
     let (root, mut v) = femcore::xmlio::xml_to_value(xml)?;
     let mut n = 0;
     walk(&mut v, &mut n);

@@ -2,6 +2,7 @@
 pub mod arrange;
 pub mod complex;
 pub mod curve;
+pub mod describe;
 pub mod diff;
 pub mod error;
 pub mod eval;
