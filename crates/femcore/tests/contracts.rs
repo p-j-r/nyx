@@ -33,6 +33,19 @@ fn check_exemplar(name: &str, got: &str) {
     assert_eq!(want.replace("\r\n", "\n").trim_end(), got.trim_end(), "{name} no longer matches the contract exemplar; this is an interface change (ADR 19)");
 }
 
+/// Like `check_exemplar`, but compares the parsed JSON values, never the text or the key order (ADR 26).
+fn check_exemplar_value(name: &str, got: &Value) {
+    let path = contract_file(name);
+    if std::env::var_os("NYX_WRITE_CONTRACT").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("{}\n", serde_json::to_string_pretty(got).unwrap())).unwrap();
+        return;
+    }
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let want: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&want, got, "{name} no longer matches the contract exemplar; this is an interface change (ADR 19)");
+}
+
 // ---------------------------------------------------------------------------------------------------------------- problem_spec
 
 /// One spec per physics, each touching the fields of that physics that saved projects, nyx-store's concept card and the mesher's physics
@@ -410,7 +423,7 @@ fn mesh_cell_model_matches_the_exemplar() {
             "labels": "copied"
         }
     });
-    check_exemplar("mesh_cells.v1.json", &serde_json::to_string_pretty(&got).unwrap());
+    check_exemplar_value("mesh_cells.v1.json", &got);
 }
 
 #[test]
