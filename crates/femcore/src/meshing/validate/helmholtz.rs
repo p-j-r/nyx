@@ -264,7 +264,7 @@ pub fn assemble<const D: usize>(
     let mut mass = BandMatrix::new(n, bw);
     let mut rhs = vec![ZERO; n];
 
-    let bb = crate::mesh::native::bbox_of(&mesh.points);
+    let bb = crate::adapt::work::bbox_of(&mesh.points);
     let size = (0..D).map(|a| bb[a][1] - bb[a][0]).fold(0.0, f64::max);
     let on_outer = |p: &[f64; D]| {
         (0..D).any(|ax| (p[ax] - bb[ax][0]).abs() < 1e-9 * size || (p[ax] - bb[ax][1]).abs() < 1e-9 * size)

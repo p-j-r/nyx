@@ -13,7 +13,7 @@ use crate::adapt::field3::BackgroundMetric3;
 use crate::adapt::metric::{complexity_for_elements, intersect, isotropic, lp_metrics, map_eig, symmetrize, LpOptions, Sym};
 use crate::adapt::ops3::AdaptOptions3;
 use crate::adapt::topo3::TopoOptions3;
-use crate::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
+use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
 use crate::problem::SolveResult;
 use std::collections::HashMap;
 use std::time::Instant;

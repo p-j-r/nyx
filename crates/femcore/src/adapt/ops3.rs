@@ -190,7 +190,7 @@ pub fn split_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry
             for from in [b, a] {
                 let child = replace(&tt, from, w.pts.len() as u32);
                 let p: [[f64; 3]; 4] = std::array::from_fn(|i| if child[i] == w.pts.len() as u32 { m } else { w.pts[child[i] as usize] });
-                let vol = crate::mesh::native::simplex_signed_measure::<3>(&p);
+                let vol = crate::adapt::work::simplex_signed_measure::<3>(&p);
                 let mm: [Sym<3>; 4] = std::array::from_fn(|i| if child[i] == w.pts.len() as u32 { met_m } else { w.met[child[i] as usize] });
                 if !(vol > 1e-6 * old) || simplex_quality::<3>(&p, Some(&mm)) < opt.split_qmin {
                     ok = false;
@@ -662,7 +662,7 @@ pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometr
             let tt = w.tets[t as usize];
             let p: [[f64; 3]; 4] = std::array::from_fn(|i| if tt[i] == v { np } else { w.pts[tt[i] as usize] });
             let m: [Sym<3>; 4] = std::array::from_fn(|i| if tt[i] == v { new_met } else { w.met[tt[i] as usize] });
-            if !(crate::mesh::native::simplex_signed_measure::<3>(&p) > 0.0) {
+            if !(crate::adapt::work::simplex_signed_measure::<3>(&p) > 0.0) {
                 ok = false;
                 break;
             }

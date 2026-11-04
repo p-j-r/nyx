@@ -216,7 +216,7 @@ pub fn adapt_tets(
     opt: &crate::adapt::ops3::AdaptOptions3,
 ) -> Result<(SimplexMesh, crate::adapt::drive::AdaptReport), String> {
     use crate::adapt::{drive3::adapt3, field3::BackgroundMetric3, topo3::TopoOptions3};
-    use crate::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
+    use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
     let metrics = metrics_d::<3>(spec, mesh, sz, ceiling)?;
     let old = simplex_to_adapt::<3>(mesh)?;
     let field = BackgroundMetric3::new_graded(&old, &metrics, grade);

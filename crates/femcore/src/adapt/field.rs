@@ -6,7 +6,7 @@
 //! of the next one.
 
 use super::metric::{Sym, exp_sym, isotropic, log_spd, symmetrize};
-use crate::mesh::native::SimplexMesh;
+use crate::adapt::work::SimplexMesh;
 
 /// A metric defined everywhere in the domain.
 pub trait MetricField<const D: usize>: Sync {

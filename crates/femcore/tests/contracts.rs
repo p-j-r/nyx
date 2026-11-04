@@ -284,7 +284,7 @@ fn mesh_cells_are_positively_oriented_in_2d() {
 
 mod mixed {
     use femcore::mesh::cells::CellMesh;
-    use femcore::mesh::interop::simplex_to_adapt;
+    use femcore::adapt::work::simplex_to_adapt;
     use femcore::mesh::SimplexMesh;
     use femcore::meshing::pml_box::{build_pml, PmlSpec};
 
@@ -351,7 +351,7 @@ fn mesh_fmsh_round_trip_and_version() {
     use femcore::mesh::cells::CellMesh;
     use femcore::mesh::io::fmsh;
     use femcore::meshing::pml_box::{build_pml, PmlSpec};
-    use femcore::mesh::interop::simplex_to_adapt;
+    use femcore::adapt::work::simplex_to_adapt;
     let plate = femcore::meshing::geomdrive::plate(1.0, 1.0, 0.25).unwrap().mesh;
     let phys = simplex_to_adapt::<2>(&plate).unwrap();
     let m: CellMesh<2> = build_pml(&phys, &PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 2) }).unwrap().mesh;

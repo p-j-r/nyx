@@ -16,7 +16,7 @@
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;
 use crate::adapt::metric::{complexity_for_elements, intersect, lp_metrics, map_eig, symmetrize, LpOptions, Sym};
-use crate::mesh::interop::simplex_to_adapt;
+use crate::adapt::work::simplex_to_adapt;
 use crate::adapt::field::BackgroundMetric2;
 use crate::meshing::{adapt_to_field, adapt_to_metrics, geometry_floor, Adaptive};
 use crate::problem::SolveResult;

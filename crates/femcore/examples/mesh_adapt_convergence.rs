@@ -8,7 +8,7 @@ use femcore::adapt::drive::{AdaptOptions, adapt2};
 use femcore::adapt::field::BackgroundMetric2;
 use femcore::adapt::metric::*;
 use femcore::mesh::fixtures::{Field, Gaussian, ObliqueLayer, box_tri, rect_tri};
-use femcore::mesh::native::SimplexMesh;
+use femcore::adapt::work::SimplexMesh;
 use femcore::mesh::quality::{edge_stats, mesh_quality};
 use std::time::Instant;
 

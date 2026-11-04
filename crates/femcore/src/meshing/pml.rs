@@ -17,7 +17,7 @@ use crate::meshing::geomdrive::MeshedGeom;
 use crate::mesh::cells::CellMesh;
 use crate::mesh::SimplexMesh;
 use crate::meshing::pml_box::{build_pml, PmlSpec};
-use crate::mesh::interop::simplex_to_adapt;
+use crate::adapt::work::simplex_to_adapt;
 use geom::model::RegionKind;
 use std::collections::{HashMap, HashSet};
 
@@ -193,7 +193,7 @@ pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String> {
     };
     let faces = built.mesh.boundary_faces_ordered();
     for f in faces {
-        let key = crate::mesh::native::facet_key(&f);
+        let key = crate::adapt::work::facet_key(&f);
         let owner = owners[&key] as usize;
         let physical = f.iter().all(|&v| (v as usize) < n_phys_points);
         let label = match physical.then(|| facet_label.get(&sorted_pair(f[0], f[1]))).flatten() {

@@ -3,7 +3,7 @@
 
 use super::field::MetricField;
 use super::metric::{exp_sym, grade, log_spd, symmetrize, Sym};
-use crate::mesh::native::SimplexMesh;
+use crate::adapt::work::SimplexMesh;
 
 pub struct BackgroundMetric3 {
     pts: Vec<[f64; 3]>,

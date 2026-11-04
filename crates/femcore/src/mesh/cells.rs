@@ -14,7 +14,7 @@
 //! face's global vertex ids alone (the diagonal through its smallest id), and every hex or prism is
 //! split as a cone from its smallest-id vertex.
 
-use crate::mesh::native::{FacetKey, SimplexMesh, facet_key, simplex_signed_measure};
+use crate::adapt::work::{FacetKey, SimplexMesh, facet_key, simplex_signed_measure};
 use std::collections::HashMap;
 
 /// Cell shapes.

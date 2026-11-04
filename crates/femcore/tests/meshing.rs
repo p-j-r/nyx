@@ -114,7 +114,7 @@ fn adapted_interface_vertices_lie_on_the_circle_and_the_core_area_converges() {
 }
 
 fn mesh_quality_of(mesh: &femcore::mesh::SimplexMesh) -> f64 {
-    let a = femcore::mesh::interop::simplex_to_adapt::<2>(mesh).unwrap();
+    let a = femcore::adapt::work::simplex_to_adapt::<2>(mesh).unwrap();
     mesh_quality(&a, None).min
 }
 

@@ -8,7 +8,7 @@
 
 use crate::adapt::metric::{Sym, det, identity, length};
 use crate::mesh::cells::{CellMesh, CellType};
-use crate::mesh::native::{SimplexMesh, simplex_signed_measure};
+use crate::adapt::work::{SimplexMesh, simplex_signed_measure};
 
 /// Mean-ratio quality of a simplex with vertices `p` (`D + 1` points), optionally in the metric
 /// obtained by averaging the vertex metrics. Negative for inverted simplices.

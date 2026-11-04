@@ -68,9 +68,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/solvers/*` | 8, 11 | ported solver library |
 | `crates/femcore/src/mesh/mod.rs` | 4 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
 | `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
-| `crates/femcore/src/mesh/native.rs` | 5, 4 | dimension-generic native mesh (was `meshers/mesh.rs`) |
 | `crates/femcore/src/mesh/cells.rs` | 5 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
-| `crates/femcore/src/mesh/interop.rs` | 5, 4 | border between the two mesh families, to be deleted in phase 2 |
 | `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
 | `crates/femcore/src/meshing/README.md` | 4, 7 | where mesher3d and refine3d went (R05) |
@@ -85,6 +83,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/validate/*` | 7 | |
 | `crates/femcore/src/adapt/par.rs` | 11 | R03 |
 | `crates/femcore/src/adapt/estimate*.rs` | 7, 17 | |
+| `crates/femcore/src/adapt/work.rs` | 5, 4, 7 | the adaptation's private simplex working mesh and its conversion from and to the solver mesh (was `mesh/native.rs`, `mesh/interop.rs`) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
 | `crates/femcore/src/problem.rs` | 1, 9, 19 | |
 | `crates/femcore/src/material.rs` | 1 | |

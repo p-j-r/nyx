@@ -137,6 +137,7 @@ Each phase is its own jj bookmark `restructure-<n>-<name>` in its own workspace 
 ### Phase 4. `nyx-physics` and the physics crates
 * Create `nyx-physics` with the trait, envelope, descriptors, result types, error enum (with `Cancelled`), registry type.
 * Move `dfs` into `nyx-dfs` first (simplest), then `sms*` into `nyx-sms`, then `ems*` into `nyx-ems`. Each crate owns its spec types and descriptors; `Materials` property names are validated against descriptors (R12). The EM study is named in the study (waveguide `Modes` vs `Cavity`), no dispatch on mesh dimension (R10).
+* **Remove `mesh::SimplexMesh` (ADR 32).** Each physics crate reads the native `femcore::mesh::cells::CellMesh` and numbers its own unknowns (nodes, edges, faces of its element family); `SimplexMesh`, `SimplexMesh::from_cells_split` and `SplitReport` are deleted. Quadrilaterals, prisms and hexahedra are then solved natively (no cut in PML layers). Until a physics has moved, it keeps reading the `SimplexMesh` view of the cells.
 * Rewrite the tests against the new problem API. **The golden tests must give the same numbers as before** (this proves no physics changed); only the way the problem is built changes.
 * Done when `solve()` is replaced by `registry.get(id).solve(...)`, no crate outside the physics crates names a physics, and the `kernel_stages` and `problem_spec` contracts are rewritten for the envelope with `.v2.` exemplars.
 
@@ -258,3 +259,4 @@ After phase 1, phases 2, 3 and 6 touch different files and can be done by separa
 * Section 5 item 1: counts are taken for the whole root workspace; JSON key order is never compared (ADR 26).
 * Phase 2 should land a pure file-move commit first (no logic change) so the mesher feature work can branch from it (status file, "Mesher features").
 * Gate answers (paul, 2026-11-03): G1 keep `ems_axisym`/`sms_axisym` but check their implementation (phase 3 and 4 owners); `sms_kz` out-of-plane model removed by paul's instruction on 2026-11-04 (bookmark `restructure-1b-remove-sms-kz`); G3 crate names as written; G4 TOML.
+* Phase 2 (paul, 2026-11-04): domains and boundaries are numbered from 1 everywhere; `mesher3d`/`refine3d` are kept as a test fixture (`crates/femcore/tests/common/solid3d`) until the 3D geom adapter decides; the adaptation keeps a private simplex working mesh (`adapt::work`, ADR 32 amendment); removal of `SimplexMesh` is a phase 4 deliverable.

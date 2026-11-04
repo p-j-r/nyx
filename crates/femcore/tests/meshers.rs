@@ -7,7 +7,7 @@ use femcore::adapt::field::{BackgroundMetric2, MetricField};
 use femcore::adapt::geom::{PolylineGeometry, circle_projector};
 use femcore::adapt::metric::*;
 use femcore::mesh::fixtures::{Field, Gaussian, box_tri, rect_tri, side_label};
-use femcore::mesh::native::SimplexMesh;
+use femcore::adapt::work::SimplexMesh;
 use femcore::mesh::quality::{edge_stats, mesh_quality};
 
 fn iso(h: f64) -> impl Fn(&[f64; 2]) -> Sym<2> + Sync {

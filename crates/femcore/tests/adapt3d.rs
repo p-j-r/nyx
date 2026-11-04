@@ -6,7 +6,7 @@ use femcore::adapt::metric::{edge_length, from_sizes, Sym};
 use femcore::adapt::ops3::AdaptOptions3;
 use femcore::adapt::topo3::TopoOptions3;
 use femcore::mesh::fixtures::box_tet;
-use femcore::mesh::native::SimplexMesh;
+use femcore::adapt::work::SimplexMesh;
 use std::collections::BTreeSet;
 mod common;
 
@@ -197,7 +197,7 @@ fn edge_removal_and_surface_flips_never_worsen_the_worst_tetrahedron() {
 #[test]
 fn frozen_periodic_faces_survive_adaptation_and_the_floquet_cell_still_solves() {
     use femcore::adapt::topo3::TopoOptions3;
-    use femcore::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
+    use femcore::adapt::work::{simplex_from_adapt, simplex_to_adapt};
     use femcore::problem::*;
     // a periodic cell of a PEC guide (see tests/emw3d.rs): faces 2 (y = 0) and 5 (y = l) are Floquet partners and must stay congruent
     let (a, b, l) = (0.03, 0.015, 0.01);

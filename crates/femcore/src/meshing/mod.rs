@@ -29,7 +29,7 @@ use crate::adapt::metric::{intersect, isotropic, Sym};
 use physics_size::PhysicsSizing;
 use crate::problem::ProblemSpec;
 use crate::adapt::topo::{Sig, Work2};
-use crate::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
+use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
 use geom::diff::{diff, ChangeKind};
 use geom::eval::{Evaluated, Evaluator, Tier};
 use geom::labels::LabelMap;

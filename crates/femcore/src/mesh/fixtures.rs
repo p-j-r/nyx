@@ -2,7 +2,7 @@
 //! scalar fields with exact gradients and Hessians.
 
 use crate::adapt::metric::Sym;
-use crate::mesh::native::SimplexMesh;
+use crate::adapt::work::SimplexMesh;
 
 /// Label of the boundary facet on the minimum / maximum side of axis `a`: `1 + 2a + side`.
 pub fn side_label(axis: usize, max_side: bool) -> i32 {

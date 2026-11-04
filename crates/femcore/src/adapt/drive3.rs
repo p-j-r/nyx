@@ -7,7 +7,7 @@ use super::geom3::{FacetGeometry, Geometry3};
 use super::metric::Sym;
 use super::ops3::{all_edges_of, collapse_pass, edge_removal_pass, elen, flip_pass, smooth_pass, split_pass, surface_flip_pass, tet_q, unresolved_frozen, AdaptOptions3};
 use super::topo3::{TopoOptions3, Work3};
-use crate::mesh::native::SimplexMesh;
+use crate::adapt::work::SimplexMesh;
 
 pub struct Adapted3 {
     pub mesh: SimplexMesh<3>,

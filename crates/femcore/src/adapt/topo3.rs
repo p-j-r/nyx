@@ -20,7 +20,7 @@
 use super::field::MetricField;
 use super::metric::Sym;
 use super::topo::{ekey, Edge, FxMap, Sig};
-use crate::mesh::native::{facet_key, SimplexMesh};
+use crate::adapt::work::{facet_key, SimplexMesh};
 use std::collections::{BTreeSet, HashMap};
 
 /// Sorted vertex triple.
