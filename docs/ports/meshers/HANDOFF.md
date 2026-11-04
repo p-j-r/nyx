@@ -130,3 +130,7 @@ The brief says: stop and report after M2, M4, M9 and M13. M2 and M4 were reporte
 * The recalled literature citations (see `femmesh/docs/REFERENCES.md`), including whether `grade` equals Alauzet's gradation.
 * Assembly of the hot kernels was not inspected; no `callgrind`. Speed numbers are wall-clock on a shared VM.
 * Adaptation quality in 3D (nothing exists), threaded adaptation (M13, nothing exists), goal-oriented adaptivity (M10-M11, nothing exists).
+
+## Where the solid mesher went (2026-11-04)
+
+`mesher3d` and `refine3d` are kept, as a test fixture, in `crates/femcore/tests/common/solid3d/` (README there). paul wants them kept for now; nothing in the library calls them. After the phase 2 file moves the other mesher modules live in `crates/femcore/src/{mesh,meshing,adapt}/` (ADR 31).

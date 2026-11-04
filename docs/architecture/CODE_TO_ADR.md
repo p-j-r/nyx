@@ -74,6 +74,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/mesh/interop.rs` | 5, 4 | border between the two mesh families, to be deleted in phase 2 |
 | `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
+| `crates/femcore/src/meshing/README.md` | 4, 7 | where mesher3d and refine3d went (R05) |
 | `crates/femcore/src/meshing/mod.rs` | 6, 7, 18 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
 | `crates/femcore/src/meshing/geomdrive.rs` | 2, 6 | |
 | `crates/femcore/src/meshing/mesher.rs` | 6, 2 | 2D triangulation core |
