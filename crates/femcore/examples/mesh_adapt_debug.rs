@@ -1,11 +1,11 @@
 //! Single adaptation run with a per-iteration log, for diagnosing the cases of `adapt_convergence`.
 //! Usage: `cargo run --release --example adapt_debug -- <p|inf> <target> <gauss|layer|ridge> [grade_g]`
 
-use femcore::meshers::adapt::drive::{AdaptOptions, adapt2};
-use femcore::meshers::adapt::field::BackgroundMetric2;
-use femcore::meshers::adapt::metric::*;
-use femcore::meshers::fixtures::{Field, Gaussian, ObliqueLayer, box_tri, rect_tri};
-use femcore::meshers::quality::{edge_stats, mesh_quality};
+use femcore::adapt::drive::{AdaptOptions, adapt2};
+use femcore::adapt::field::BackgroundMetric2;
+use femcore::adapt::metric::*;
+use femcore::mesh::fixtures::{Field, Gaussian, ObliqueLayer, box_tri, rect_tri};
+use femcore::mesh::quality::{edge_stats, mesh_quality};
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
@@ -70,7 +70,7 @@ fn main() {
         let v = r.mesh.cell(c);
         let pts: Vec<[f64; 2]> = v.iter().map(|&i| r.mesh.points[i as usize]).collect();
         let ms = [r.metrics[v[0] as usize], r.metrics[v[1] as usize], r.metrics[v[2] as usize]];
-        let qq = femcore::meshers::quality::simplex_quality::<2>(&pts, Some(&ms));
+        let qq = femcore::mesh::quality::simplex_quality::<2>(&pts, Some(&ms));
         if qq < worst.0 {
             worst = (qq, c);
         }

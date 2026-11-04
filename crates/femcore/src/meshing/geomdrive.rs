@@ -15,7 +15,7 @@
 //! labels of an interface, `pml_materials` the stretching of every absorbing piece from the data of the `Pml` feature.
 
 use crate::mesh::SimplexMesh;
-use crate::mesher::{mesh_chains, Chain, Fill, MeshParams};
+use crate::meshing::mesher::{mesh_chains, Chain, Fill, MeshParams};
 use crate::problem::{Pml, PmlDir, ProblemSpec};
 use geom::eval::{Evaluated, Tier};
 use geom::labels::LabelMap;
@@ -274,7 +274,7 @@ pub struct Block {
 pub fn block(lx: f64, ly: f64, lz: f64, h: f64, ny: usize) -> Result<Block, String> {
     let p = plate(lx, lz, h)?;
     let nb = p.mesh.facet_labels.iter().copied().max().unwrap_or(0);
-    let mesh = crate::mesher::extrude_y(&sort_nodes(&p.mesh), &[crate::mesher::Layer { thickness: ly, n: ny, domain_offset: 0 }], 0.0)?;
+    let mesh = crate::meshing::mesher::extrude_y(&sort_nodes(&p.mesh), &[crate::meshing::mesher::Layer { thickness: ly, n: ny, domain_offset: 0 }], 0.0)?;
     Ok(Block { mesh, domain: p.domain, xmin: p.xmin, xmax: p.xmax, zmin: p.zmin, zmax: p.zmax, ymin: vec![nb + 1], ymax: vec![nb + 2] })
 }
 

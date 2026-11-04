@@ -15,7 +15,7 @@
 
 use super::field::MetricField;
 use super::metric::Sym;
-use crate::meshers::mesh::SimplexMesh;
+use crate::mesh::native::SimplexMesh;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -371,8 +371,8 @@ impl Work2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::field::UniformSize;
-    use crate::meshers::fixtures::{box_tri, side_label};
+    use crate::adapt::field::UniformSize;
+    use crate::mesh::fixtures::{box_tri, side_label};
 
     #[test]
     fn square_classification_and_roundtrip() {
@@ -397,9 +397,9 @@ mod tests {
         assert_eq!(mets.len(), m.n_points());
         assert_eq!(back.points, m.points);
         assert_eq!(back.cells, m.cells);
-        let mut a: Vec<_> = (0..m.n_facets()).map(|f| (crate::meshers::mesh::facet_key(m.facet(f)), m.facet_label[f])).collect();
+        let mut a: Vec<_> = (0..m.n_facets()).map(|f| (crate::mesh::native::facet_key(m.facet(f)), m.facet_label[f])).collect();
         let mut b: Vec<_> =
-            (0..back.n_facets()).map(|f| (crate::meshers::mesh::facet_key(back.facet(f)), back.facet_label[f])).collect();
+            (0..back.n_facets()).map(|f| (crate::mesh::native::facet_key(back.facet(f)), back.facet_label[f])).collect();
         a.sort();
         b.sort();
         assert_eq!(a, b);

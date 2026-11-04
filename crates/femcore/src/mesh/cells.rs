@@ -14,7 +14,7 @@
 //! face's global vertex ids alone (the diagonal through its smallest id), and every hex or prism is
 //! split as a cone from its smallest-id vertex.
 
-use crate::meshers::mesh::{FacetKey, SimplexMesh, facet_key, simplex_signed_measure};
+use crate::mesh::native::{FacetKey, SimplexMesh, facet_key, simplex_signed_measure};
 use std::collections::HashMap;
 
 /// Cell shapes.
@@ -262,7 +262,7 @@ impl<const D: usize> CellMesh<D> {
             }
             // the measure of a split prism / hex ignores inversion, the corner Jacobians do not
             if !matches!(self.types[c], CellType::Tri | CellType::Tet) {
-                let sj = crate::meshers::quality::cell_scaled_jacobian_min(self, c);
+                let sj = crate::mesh::quality::cell_scaled_jacobian_min(self, c);
                 if !(sj > 0.0) {
                     return Err(format!("cell {c} ({:?}): inverted (min scaled Jacobian {sj:e})", self.types[c]));
                 }

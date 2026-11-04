@@ -1,5 +1,5 @@
 //! Spherical PEC cavity timing: cargo run --release -p femcore --example cavity_bench -- h order
-use femcore::mesher3d::*;
+use femcore::meshing::mesher3d::*;
 use femcore::problem::*;
 fn main() {
     let a: Vec<f64> = std::env::args().skip(1).filter_map(|s| s.parse().ok()).collect();

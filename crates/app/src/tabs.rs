@@ -228,8 +228,8 @@ fn aniso_editor(ui: &mut Ui, phys: Physics, d: i32, an: &mut Anisotropy, props: 
 }
 
 /// Layers along y (the propagation axis) of a swept cross-section.
-fn extrude_editor(ui: &mut Ui, extrude: &mut Option<Vec<femcore::mesher::Layer>>) {
-    use femcore::mesher::Layer;
+fn extrude_editor(ui: &mut Ui, extrude: &mut Option<Vec<femcore::meshing::mesher::Layer>>) {
+    use femcore::meshing::mesher::Layer;
     let mut on = extrude.is_some();
     if ui.checkbox(&mut on, "Sweep along y into 3D layers").changed() {
         *extrude = if on { Some(vec![Layer { thickness: 0.1, n: 2, domain_offset: 0 }]) } else { None };

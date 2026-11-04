@@ -33,7 +33,7 @@
 //! indices, labels, cell types and structured coordinates compress much better. Nothing is lossy.
 
 use super::entropy::{self, Model};
-use crate::meshers::cellmesh::{CellMesh, CellType};
+use crate::mesh::cells::{CellMesh, CellType};
 
 const MAGIC: &[u8; 4] = b"FMSH";
 const VERSION: u8 = 2;
@@ -504,7 +504,7 @@ pub fn load_dataset<const D: usize>(path: &std::path::Path) -> Result<Dataset<D>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::fixtures::{box_tet, box_tri};
+    use crate::mesh::fixtures::{box_tet, box_tri};
 
     fn same<const D: usize>(a: &CellMesh<D>, b: &CellMesh<D>) {
         assert_eq!(a.points.len(), b.points.len());

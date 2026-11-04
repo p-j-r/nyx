@@ -14,7 +14,7 @@
 //! The thin-slab limit gives an analytic reference: for a very wide wire the quasi-TE mode tends to the TE0 mode of the
 //! symmetric slab and the quasi-TM mode to its TM0 mode (`slab_neff`).
 
-use crate::geomdrive::MeshedGeom;
+use crate::meshing::geomdrive::MeshedGeom;
 use crate::problem::*;
 use geom::model::Model;
 use geom::select::Selector;
@@ -171,7 +171,7 @@ impl SoiWire {
 
     /// The cross-section meshed from the exact model: the mesh, the names of its domains and boundaries, and the evaluation.
     pub fn mesh(&self) -> Result<MeshedGeom, String> {
-        let ev = crate::geomdrive::evaluate(&self.model().list)?;
+        let ev = crate::meshing::geomdrive::evaluate(&self.model().list)?;
         crate::meshing::mesh_evaluated(ev, &crate::meshing::MeshPlan::simple(self.h_far))
     }
 

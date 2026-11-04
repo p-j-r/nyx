@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let mesh = crate::geomdrive::plate(1.0, 0.5, 0.2).unwrap().mesh;
+        let mesh = crate::meshing::geomdrive::plate(1.0, 0.5, 0.2).unwrap().mesh;
         let mut spec = ProblemSpec::new(Physics::Heat);
         spec.materials.default.insert("k".into(), 2.0);
         spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }];
@@ -586,7 +586,7 @@ mod tests {
     fn xdmf_describes_the_h5_data_consistently() {
         // quadratic triangles and tetrahedra: the midside nodes must sit at the midpoints the VTK/XDMF
         // numbering says, and every dimension the XML states must match the HDF5 datasets
-        for (mesh, name) in [(crate::geomdrive::plate(1.0, 0.5, 0.4).unwrap().mesh, "tri"), (crate::geomdrive::block(1.0, 0.5, 0.4, 0.5, 1).unwrap().mesh, "tet")] {
+        for (mesh, name) in [(crate::meshing::geomdrive::plate(1.0, 0.5, 0.4).unwrap().mesh, "tri"), (crate::meshing::geomdrive::block(1.0, 0.5, 0.4, 0.5, 1).unwrap().mesh, "tet")] {
             let mut spec = ProblemSpec::new(if mesh.dim == 2 { Physics::Solid } else { Physics::Heat });
             let r = if mesh.dim == 2 {
                 spec.materials.default.insert("E".into(), 1e9);
@@ -669,7 +669,7 @@ mod tests {
     /// write only their own rows into one file, which must equal what one serial process writes.
     #[test]
     fn partitioned_writes_equal_a_serial_write() {
-        let b = crate::geomdrive::block(1.0, 0.5, 0.4, 0.34, 2).unwrap();
+        let b = crate::meshing::geomdrive::block(1.0, 0.5, 0.4, 0.34, 2).unwrap();
         let mesh = b.mesh.clone();
         let mut spec = ProblemSpec::new(Physics::Heat);
         spec.materials.default.insert("k".into(), 1.0);
@@ -706,7 +706,7 @@ mod tests {
     #[test]
     fn serial_output_is_readable_from_the_c_library_layout() {
         // text is stored as UTF-8 bytes: the JSON of the spec must parse straight from the dataset
-        let mesh = crate::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
+        let mesh = crate::meshing::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
         let mut spec = ProblemSpec::new(Physics::Heat);
         spec.materials.default.insert("k".into(), 1.0);
         let path = std::env::temp_dir().join(format!("nyx-bytes-{}.h5", std::process::id()));
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn parallel_mode_reports_what_is_missing() {
         if !mode_available(H5Mode::Parallel) {
-            let mesh = crate::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
+            let mesh = crate::meshing::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
             let r = SolveResult::default();
             let err = write_results(&std::env::temp_dir().join("never.h5"), H5Mode::Parallel, &mesh, None, &r).unwrap_err();
             assert!(err.contains("MPI"));

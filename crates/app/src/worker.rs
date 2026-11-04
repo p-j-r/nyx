@@ -10,7 +10,7 @@ use eframe::egui;
 use femcore::fields::Display;
 use femcore::mesh::SimplexMesh;
 use femcore::problem::*;
-use femcore::view::ViewMesh;
+use femcore::mesh::view::ViewMesh;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use femcore::progress::Progress;

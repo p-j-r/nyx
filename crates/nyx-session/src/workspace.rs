@@ -5,7 +5,7 @@
 //! again returns the same handle without recomputing. Meshes and solver results stay in memory; what is written to the session folder is
 //! the journal (`journal.jsonl`), the geometry model of every geometry (`g_*.geom.json`, the `geom` crate's own format) and a digest of every result.
 
-use femcore::geomdrive::MeshedGeom;
+use femcore::meshing::geomdrive::MeshedGeom;
 use femcore::problem::ProblemSpec;
 use serde::Serialize;
 use serde_json::{json, Value};

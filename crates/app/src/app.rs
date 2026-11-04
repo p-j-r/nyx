@@ -308,7 +308,7 @@ impl App {
                     self.set_error(e)
                 }
                 Msg::H5(name, Ok((mesh, s))) => {
-                    self.doc.view = Some(Arc::new(femcore::view::ViewMesh::from_simplex(&mesh)));
+                    self.doc.view = Some(Arc::new(femcore::mesh::view::ViewMesh::from_simplex(&mesh)));
                     self.doc.mesh = Some(mesh.clone());
                     self.doc.source = name.clone();
                     self.after_mesh_change();

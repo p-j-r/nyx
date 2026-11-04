@@ -1,5 +1,5 @@
 //! Speed of the 3D mesher: cargo run --release -p femcore --example mesh3d_bench [h ...]
-use femcore::mesher3d::*;
+use femcore::meshing::mesher3d::*;
 use std::time::Instant;
 
 fn main() {

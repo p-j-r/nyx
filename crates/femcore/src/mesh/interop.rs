@@ -1,5 +1,5 @@
-//! Bridges between the nyx mesh types (`crate::mesh::SimplexMesh`, `crate::cellmesh::CellMesh`) and the dimension-generic
-//! types the ported mesher works on (`meshers::mesh::SimplexMesh<D>`, `meshers::cellmesh::CellMesh<D>`).
+//! Bridges between the nyx mesh types (`crate::mesh::SimplexMesh`, `crate::mesh::cellmesh::CellMesh`) and the dimension-generic
+//! types the ported mesher works on (`mesh::native::SimplexMesh<D>`, `mesh::cells::CellMesh<D>`).
 //!
 //! The mesher was written against stand-ins for the nyx types (see `docs/ports/meshers/HANDOFF.md`); rather than rewrite
 //! ten thousand lines of tested adaptation code onto flat arrays, the stand-ins stay as the mesher's working types and
@@ -13,11 +13,11 @@
 //!   stretches along the bounding box of a domain's cells, which is exactly how the mesher cuts its regions, so the
 //!   direction of the stretch is the sign of the region code.
 
-use crate::cellmesh::{CellMesh as NyxCells, ElementType};
+use crate::mesh::cellmesh::{CellMesh as NyxCells, ElementType};
 use crate::mesh::SimplexMesh as NyxMesh;
-use crate::meshers::adapt::pml::PmlMesh;
-use crate::meshers::cellmesh::{CellMesh, CellType};
-use crate::meshers::mesh::SimplexMesh;
+use crate::meshing::pml_box::PmlMesh;
+use crate::mesh::cells::{CellMesh, CellType};
+use crate::mesh::native::SimplexMesh;
 use crate::problem::{Pml, PmlDir};
 use std::collections::BTreeMap;
 
@@ -122,9 +122,9 @@ pub fn pml_domains<const D: usize>(pml: &PmlMesh<D>, strength: f64, order: f64, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::drive::{AdaptOptions, adapt2};
-    use crate::meshers::adapt::field::UniformSize;
-    use crate::meshers::adapt::pml::{PmlSpec, build_pml};
+    use crate::adapt::drive::{AdaptOptions, adapt2};
+    use crate::adapt::field::UniformSize;
+    use crate::meshing::pml_box::{PmlSpec, build_pml};
 
     fn area(m: &NyxMesh) -> f64 {
         (0..m.n_cells())
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn a_nyx_mesh_survives_the_round_trip_and_the_adaptation() {
-        let nyx = crate::geomdrive::plate(2.0, 1.0, 0.2).unwrap().mesh;
+        let nyx = crate::meshing::geomdrive::plate(2.0, 1.0, 0.2).unwrap().mesh;
         let a = simplex_to_adapt::<2>(&nyx).unwrap();
         a.check().unwrap();
         assert!((a.total_measure().abs() - 2.0).abs() < 1e-12);
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn a_2d_pml_mesh_splits_into_a_valid_nyx_mesh_with_matching_pml_domains() {
-        let nyx = crate::geomdrive::plate(1.0, 1.0, 0.125).unwrap().mesh;
+        let nyx = crate::meshing::geomdrive::plate(1.0, 1.0, 0.125).unwrap().mesh;
         let phys = simplex_to_adapt::<2>(&nyx).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 3) };
         let pml = build_pml(&phys, &spec).unwrap();
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn a_3d_pml_mesh_splits_into_tetrahedra_of_the_right_volume() {
-        let nyx = crate::geomdrive::block(1.0, 1.0, 1.0, 0.34, 3).unwrap().mesh;
+        let nyx = crate::meshing::geomdrive::block(1.0, 1.0, 1.0, 0.34, 3).unwrap().mesh;
         let phys = simplex_to_adapt::<3>(&nyx).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<3>::uniform(0.5, 1) };
         let pml = build_pml(&phys, &spec).unwrap();

@@ -20,8 +20,8 @@
 
 use super::band::{BandLu, BandMatrix, rcm};
 use super::cplx::{C64, ONE, ZERO};
-use crate::meshers::adapt::pml::PmlMesh;
-use crate::meshers::cellmesh::{CellMesh, CellType};
+use crate::meshing::pml_box::PmlMesh;
+use crate::mesh::cells::{CellMesh, CellType};
 
 /// PML profile parameters.
 #[derive(Clone, Copy, Debug)]
@@ -264,7 +264,7 @@ pub fn assemble<const D: usize>(
     let mut mass = BandMatrix::new(n, bw);
     let mut rhs = vec![ZERO; n];
 
-    let bb = crate::meshers::mesh::bbox_of(&mesh.points);
+    let bb = crate::mesh::native::bbox_of(&mesh.points);
     let size = (0..D).map(|a| bb[a][1] - bb[a][0]).fold(0.0, f64::max);
     let on_outer = |p: &[f64; D]| {
         (0..D).any(|ax| (p[ax] - bb[ax][0]).abs() < 1e-9 * size || (p[ax] - bb[ax][1]).abs() < 1e-9 * size)
@@ -390,8 +390,8 @@ pub fn gaussian_source<const D: usize>(x0: [f64; D], w: f64) -> impl Fn(&[f64; D
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::pml::{PmlSpec, build_pml};
-    use crate::meshers::fixtures::box_tri;
+    use crate::meshing::pml_box::{PmlSpec, build_pml};
+    use crate::mesh::fixtures::box_tri;
     use std::f64::consts::PI;
 
     fn quad_grid(n: usize) -> CellMesh<2> {
@@ -471,7 +471,7 @@ mod tests {
 
     // ---- 3D ----
 
-    use crate::meshers::fixtures::box_tet;
+    use crate::mesh::fixtures::box_tet;
 
     /// Unit-cube hexahedral grid, optionally extruded from triangles into prisms.
     fn hex_grid(n: usize) -> CellMesh<3> {

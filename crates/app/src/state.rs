@@ -7,11 +7,11 @@
 use crate::colormap::Colormap;
 use femcore::fields::Display;
 use femcore::problem::*;
-use femcore::view::ViewMesh;
+use femcore::mesh::view::ViewMesh;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// The geometry of a project: one `geom` model (exact regions and edges with names and rules, see `femcore::geomdrive`). A 2D model is
+/// The geometry of a project: one `geom` model (exact regions and edges with names and rules, see `femcore::meshing::geomdrive`). A 2D model is
 /// the x-z cross-section, meshed with triangles of size `h`; with `extrude` layers it is swept along y (the propagation axis) into
 /// tetrahedra, which is how 3D problems are made until `geom` meshes general 3D models.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -20,12 +20,12 @@ pub struct GeometrySpec {
     pub list: geom::model::FeatureList,
     /// global element size
     pub h: f64,
-    pub extrude: Option<Vec<femcore::mesher::Layer>>,
+    pub extrude: Option<Vec<femcore::meshing::mesher::Layer>>,
     /// Mesh adaptively (`femcore::meshing::Mesher::Adaptive`): the factor on the element sizes the model asks for, smaller than one for a
     /// finer mesh whose boundary and interface vertices lie on the exact curves. `None` is the simple mesher.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapt_scale: Option<f64>,
-    /// Size the mesh from the physics of the problem it is built for (`femcore::physics_size`: points per wavelength by element order,
+    /// Size the mesh from the physics of the problem it is built for (`femcore::meshing::physics_size`: points per wavelength by element order,
     /// shorter in high-index or slow-wave domains), on top of the sizes the model asks for. Needs a problem with a wavelength (EM waves,
     /// solid-mechanics eigenfrequencies); other physics mesh as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -43,7 +43,7 @@ impl TryFrom<serde_json::Value> for GeometrySpec {
             list: geom::model::FeatureList,
             h: f64,
             #[serde(default)]
-            extrude: Option<Vec<femcore::mesher::Layer>>,
+            extrude: Option<Vec<femcore::meshing::mesher::Layer>>,
             #[serde(default)]
             adapt_scale: Option<f64>,
             #[serde(default)]
@@ -72,8 +72,8 @@ impl GeometrySpec {
         GeometrySpec { list, h, extrude: None, adapt_scale: None, physics_sizing: false }
     }
 
-    /// A 2D model swept along y through `layers` (see `femcore::mesher::extrude_y`).
-    pub fn model_extruded(list: geom::model::FeatureList, h: f64, layers: Vec<femcore::mesher::Layer>) -> Self {
+    /// A 2D model swept along y through `layers` (see `femcore::meshing::mesher::extrude_y`).
+    pub fn model_extruded(list: geom::model::FeatureList, h: f64, layers: Vec<femcore::meshing::mesher::Layer>) -> Self {
         GeometrySpec { list, h, extrude: Some(layers), adapt_scale: None, physics_sizing: false }
     }
 
@@ -82,18 +82,18 @@ impl GeometrySpec {
         let mut m = geom::model::Model::new_2d();
         let r = m.rect("plate", (0.0, 0.0), (lx, lz));
         m.overlay(&[("plate", r)]);
-        let layers = len.map(|l| vec![femcore::mesher::Layer { thickness: l, n: ((l / h).round() as usize).clamp(1, 200), domain_offset: 0 }]);
+        let layers = len.map(|l| vec![femcore::meshing::mesher::Layer { thickness: l, n: ((l / h).round() as usize).clamp(1, 200), domain_offset: 0 }]);
         GeometrySpec { list: m.list, h, extrude: layers, adapt_scale: None, physics_sizing: false }
     }
 
     /// Evaluates and meshes the model: the mesh with the names of its regions and boundaries.
-    pub fn build_named(&self) -> Result<femcore::geomdrive::MeshedGeom, String> {
+    pub fn build_named(&self) -> Result<femcore::meshing::geomdrive::MeshedGeom, String> {
         self.build_named_for(None)
     }
 
     /// Like `build_named`, for the problem it will be solved with: when `physics_sizing` is set and the problem has a wavelength, the
     /// mesh is also sized by it (`femcore::meshing::mesh_for_problem`). A problem without a wavelength (statics, heat) meshes as before.
-    pub fn build_named_for(&self, problem: Option<&ProblemSpec>) -> Result<femcore::geomdrive::MeshedGeom, String> {
+    pub fn build_named_for(&self, problem: Option<&ProblemSpec>) -> Result<femcore::meshing::geomdrive::MeshedGeom, String> {
         if self.list.dim != 2 {
             return Err("a 3D model cannot be meshed yet: model the x-z cross-section in 2D and sweep it along y with layers".into());
         }
@@ -108,7 +108,7 @@ impl GeometrySpec {
             Some(p) if self.physics_sizing && matches!(p.physics, Physics::Emw | Physics::Solid) => {
                 let adaptive = femcore::meshing::MeshPlan::adaptive(self.h, self.adapt_scale.unwrap_or(1.0));
                 let plan = femcore::meshing::MeshPlan { pml: plan.pml, ..adaptive };
-                let sz = femcore::physics_size::PhysicsSizing::default();
+                let sz = femcore::meshing::physics_size::PhysicsSizing::default();
                 Some(femcore::meshing::mesh_for_problem(&self.list, &plan, p, &sz)?.0)
             }
             _ => None,
@@ -118,7 +118,7 @@ impl GeometrySpec {
             None => femcore::meshing::mesh_model(&self.list, &plan)?,
         };
         if let Some(layers) = &self.extrude {
-            g.mesh = femcore::mesher::extrude_y(&g.mesh, layers, 0.0)?;
+            g.mesh = femcore::meshing::mesher::extrude_y(&g.mesh, layers, 0.0)?;
         }
         Ok(g)
     }
@@ -134,7 +134,7 @@ impl GeometrySpec {
 
     /// The names of the model for the mesh built from it: what a rule can select. `ymin` and `ymax` name the two ends of a swept model.
     pub fn names(&self, mesh: &femcore::mesh::SimplexMesh) -> Result<Names, String> {
-        let ev = femcore::geomdrive::evaluate(&self.list)?;
+        let ev = femcore::meshing::geomdrive::evaluate(&self.list)?;
         let labels = ev.label_map().map_err(|e| e.to_string())?;
         let top = mesh.facet_labels.iter().copied().max().unwrap_or(0);
         let ends = self.extrude.is_some().then_some((top - 1, top));
@@ -155,7 +155,7 @@ impl Names {
             ("ymin", Some((a, _))) => Ok(vec![a]),
             ("ymax", Some((_, b))) => Ok(vec![b]),
             ("ymin" | "ymax", None) => Err("ymin and ymax are the ends of a model swept along y; this model is not swept".into()),
-            (r, _) => femcore::geomdrive::select_labels(&self.ev, &self.labels, r),
+            (r, _) => femcore::meshing::geomdrive::select_labels(&self.ev, &self.labels, r),
         }
     }
 

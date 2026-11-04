@@ -1,9 +1,9 @@
-use femcore::meshers::adapt::drive::AdaptOptions;
-use femcore::meshers::adapt::geom::PolylineGeometry;
-use femcore::meshers::adapt::metric::*;
-use femcore::meshers::adapt::ops::*;
-use femcore::meshers::adapt::topo::{TopoOptions, Work2};
-use femcore::meshers::fixtures::{box_tri, side_label};
+use femcore::adapt::drive::AdaptOptions;
+use femcore::adapt::geom::PolylineGeometry;
+use femcore::adapt::metric::*;
+use femcore::adapt::ops::*;
+use femcore::adapt::topo::{TopoOptions, Work2};
+use femcore::mesh::fixtures::{box_tri, side_label};
 
 fn main() {
     let m = box_tri([[0.0, 1.0], [0.0, 1.0]], 5, 5);

@@ -8,11 +8,11 @@
 //!
 //! Usage: `cargo run --release --example pml_reflection -- [wavelengths=3] [points_per_wavelength=12]`
 
-use femcore::meshers::adapt::pml::{PmlSpec, build_pml};
-use femcore::meshers::cellmesh::CellMesh;
-use femcore::meshers::fixtures::box_tri;
-use femcore::meshers::validate::cplx::C64;
-use femcore::meshers::validate::helmholtz::{Profile, Solution, gaussian_source, rel_l2, solve};
+use femcore::meshing::pml_box::{PmlSpec, build_pml};
+use femcore::mesh::cells::CellMesh;
+use femcore::mesh::fixtures::box_tri;
+use femcore::meshing::validate::cplx::C64;
+use femcore::meshing::validate::helmholtz::{Profile, Solution, gaussian_source, rel_l2, solve};
 use std::time::Instant;
 
 fn main() {

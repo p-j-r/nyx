@@ -1,7 +1,7 @@
 //! Physics on meshes made from geom models: what the solvers promise on curved boundaries and holes, and the sweep of a section along y.
 mod common;
-use femcore::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
-use femcore::mesher::{extrude_y, Layer};
+use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+use femcore::meshing::mesher::{extrude_y, Layer};
 use femcore::problem::*;
 use geom::model::{Model, RegionKind};
 use geom::select::Selector;
@@ -74,7 +74,7 @@ fn assert_conforming(m: &femcore::mesh::SimplexMesh) {
 
 #[test]
 fn a_section_swept_along_y_is_conforming_and_solves_exactly() {
-    let p = femcore::geomdrive::plate(1.0, 0.4, 0.1).unwrap();
+    let p = femcore::meshing::geomdrive::plate(1.0, 0.4, 0.1).unwrap();
     let layers = vec![Layer { thickness: 0.2, n: 2, domain_offset: 0 }, Layer { thickness: 0.1, n: 1, domain_offset: 10 }];
     let m3 = extrude_y(&p.mesh, &layers, 0.0).unwrap();
     assert_eq!(m3.n_cells(), p.mesh.n_cells() * 3 * 3);

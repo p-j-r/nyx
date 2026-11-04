@@ -1,12 +1,12 @@
 //! 3D metric adaptation: refinement of boxes towards isotropic and anisotropic metrics keeps volumes, labelled faces, interfaces,
 //! creases and corners, and reaches the metric. Recomputes volume, area and edge lengths independently of the code under test.
-use femcore::meshers::adapt::drive3::adapt3;
-use femcore::meshers::adapt::field::UniformSize;
-use femcore::meshers::adapt::metric::{edge_length, from_sizes, Sym};
-use femcore::meshers::adapt::ops3::AdaptOptions3;
-use femcore::meshers::adapt::topo3::TopoOptions3;
-use femcore::meshers::fixtures::box_tet;
-use femcore::meshers::mesh::SimplexMesh;
+use femcore::adapt::drive3::adapt3;
+use femcore::adapt::field::UniformSize;
+use femcore::adapt::metric::{edge_length, from_sizes, Sym};
+use femcore::adapt::ops3::AdaptOptions3;
+use femcore::adapt::topo3::TopoOptions3;
+use femcore::mesh::fixtures::box_tet;
+use femcore::mesh::native::SimplexMesh;
 use std::collections::BTreeSet;
 mod common;
 
@@ -53,7 +53,7 @@ fn qmin(m: &SimplexMesh<3>, met: &Sym<3>) -> f64 {
     (0..m.n_cells()).map(|c| {
         let v = m.cell(c);
         let p: Vec<[f64; 3]> = v.iter().map(|&i| m.points[i as usize]).collect();
-        femcore::meshers::quality::simplex_quality::<3>(&p, Some(&[*met; 4]))
+        femcore::mesh::quality::simplex_quality::<3>(&p, Some(&[*met; 4]))
     }).fold(f64::INFINITY, f64::min)
 }
 
@@ -196,8 +196,8 @@ fn edge_removal_and_surface_flips_never_worsen_the_worst_tetrahedron() {
 
 #[test]
 fn frozen_periodic_faces_survive_adaptation_and_the_floquet_cell_still_solves() {
-    use femcore::meshers::adapt::topo3::TopoOptions3;
-    use femcore::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
+    use femcore::adapt::topo3::TopoOptions3;
+    use femcore::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
     use femcore::problem::*;
     // a periodic cell of a PEC guide (see tests/emw3d.rs): faces 2 (y = 0) and 5 (y = l) are Floquet partners and must stay congruent
     let (a, b, l) = (0.03, 0.015, 0.01);

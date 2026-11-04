@@ -5,11 +5,11 @@
 //!
 //! Usage: `cargo run --release --example pml_3d -- [phys_cells=6] [wavelengths=1]`
 
-use femcore::meshers::adapt::pml::{PmlSpec, build_pml};
-use femcore::meshers::cellmesh::CellMesh;
-use femcore::meshers::fixtures::box_tet;
-use femcore::meshers::validate::cplx::C64;
-use femcore::meshers::validate::helmholtz::{Profile, gaussian_source, rel_l2, solve};
+use femcore::meshing::pml_box::{PmlSpec, build_pml};
+use femcore::mesh::cells::CellMesh;
+use femcore::mesh::fixtures::box_tet;
+use femcore::meshing::validate::cplx::C64;
+use femcore::meshing::validate::helmholtz::{Profile, gaussian_source, rel_l2, solve};
 use std::time::Instant;
 
 fn main() {

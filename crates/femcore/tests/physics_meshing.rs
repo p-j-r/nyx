@@ -1,9 +1,9 @@
 //! Meshes sized by the physics of the study (`physics_size`, `meshing::mesh_for_problem`): the wavelength per domain sets the element
 //! size, and the mode index the solver then finds agrees with the closed form of a PEC guide.
 use femcore::ems::{solve_emw, C0};
-use femcore::geomdrive::evaluate;
+use femcore::meshing::geomdrive::evaluate;
 use femcore::meshing::{mesh_for_problem, Adaptive, MeshPlan, Mesher};
-use femcore::physics_size::PhysicsSizing;
+use femcore::meshing::physics_size::PhysicsSizing;
 use femcore::problem::*;
 use geom::model::{Model, RegionKind};
 
@@ -71,7 +71,7 @@ fn a_higher_index_domain_gets_a_finer_mesh() {
     let mut spec = ProblemSpec::new(Physics::Emw);
     spec.order = 1;
     spec.study = Study::Modes { freq: 100e9, n_target: 2.0, evanescent: false, n_modes: 2 };
-    let g0 = femcore::geomdrive::mesh_geom_2d(ev, &femcore::geomdrive::GeomMeshOpts::new(0.5e-3)).unwrap();
+    let g0 = femcore::meshing::geomdrive::mesh_geom_2d(ev, &femcore::meshing::geomdrive::GeomMeshOpts::new(0.5e-3)).unwrap();
     let (cl, co) = (g0.domain("clad").unwrap(), g0.domain("core").unwrap());
     spec.materials.set(cl, "eps_r", 1.0);
     spec.materials.set(co, "eps_r", 9.0);
@@ -102,8 +102,8 @@ fn a_higher_index_domain_gets_a_finer_mesh() {
 
 // ---- vector-field estimator -------------------------------------------------------------------------------------------------------
 
-use femcore::estimate::{estimator_metrics, Estimator};
-use femcore::geomdrive::{mesh_geom_2d, GeomMeshOpts, MeshedGeom};
+use femcore::adapt::estimate::{estimator_metrics, Estimator};
+use femcore::meshing::geomdrive::{mesh_geom_2d, GeomMeshOpts, MeshedGeom};
 use femcore::meshing::adapt_to_metrics;
 
 /// A dielectric core (eps 9) in a PEC-walled cladding (eps 1), 1 mm square.
@@ -162,8 +162,8 @@ fn e_field_components_as_one_vector_need_fewer_cells_than_intersected_components
 // ---- 3D: a PEC cavity meshed from its physics ----------------------------------------------------------------------------------------
 
 mod common;
-use femcore::meshers::adapt::ops3::AdaptOptions3;
-use femcore::physics_size::adapt_tets;
+use femcore::adapt::ops3::AdaptOptions3;
+use femcore::meshing::physics_size::adapt_tets;
 
 fn cavity_modes(a: f64, b: f64, d: f64, fmax: f64) -> Vec<f64> {
     let mut out = vec![];
@@ -210,8 +210,8 @@ fn a_cavity_meshed_from_its_physics_reproduces_the_first_modes() {
 
 #[test]
 fn a_real_stretch_layer_on_an_adapted_cavity_equals_the_longer_cavity() {
-    use femcore::meshers::adapt::pml::PmlSpec;
-    use femcore::pml3::{add_pml_3d, apply_materials};
+    use femcore::meshing::pml_box::PmlSpec;
+    use femcore::meshing::pml3::{add_pml_3d, apply_materials};
     // PML with the real stretch 2 over a layer of d/2 on the +z end equals a cavity of length d + 2 * d / 2 = 2d. The physical block is
     // first adapted to the physics; its box faces, edges and corners stay exact, so the layers can be swept from it
     let (a, b, d) = (0.04, 0.03, 0.02);
@@ -240,8 +240,8 @@ fn a_real_stretch_layer_on_an_adapted_cavity_equals_the_longer_cavity() {
 
 #[test]
 fn layers_on_all_six_sides_with_a_unit_stretch_equal_the_bigger_cavity() {
-    use femcore::meshers::adapt::pml::PmlSpec;
-    use femcore::pml3::{add_pml_3d, apply_materials};
+    use femcore::meshing::pml_box::PmlSpec;
+    use femcore::meshing::pml3::{add_pml_3d, apply_materials};
     // re = 1 and no loss: the layers are plain vacuum. Faces are prisms, edges and corners hexahedra; all 26 layer domains are in play
     let (a, b, d, t) = (0.04, 0.03, 0.02, 0.01);
     let exact = cavity_modes(a + 2.0 * t, b + 2.0 * t, d + 2.0 * t, 20e9);
@@ -266,8 +266,8 @@ fn layers_on_all_six_sides_with_a_unit_stretch_equal_the_bigger_cavity() {
 /// Lowest three complex frequencies (Hz, as (Re f, Im f)) of the guide a x b closed by a PEC wall at z = 0 and by PML layers beyond
 /// z = d, on a block with `n` cells along x and `layers` PML layers (the other directions scale with it).
 fn pml_end_modes(n: usize, layers: usize, strength: f64, t: f64) -> Vec<(f64, f64)> {
-    use femcore::meshers::adapt::pml::PmlSpec;
-    use femcore::pml3::{add_pml_3d, apply_materials};
+    use femcore::meshing::pml_box::PmlSpec;
+    use femcore::meshing::pml3::{add_pml_3d, apply_materials};
     let (a, b, d) = (0.04, 0.03, 0.02);
     let phys = common::block(a, b, d, n, n * 3 / 4, n * 3 / 4);
     let mut spec = ProblemSpec::new(Physics::Emw);
@@ -310,8 +310,8 @@ fn pml_end_converges_with_the_mesh() {
 fn the_3d_loop_beats_uniform_meshes_for_a_cavity_mode_at_order_two() {
     // measured in `the_3d_loop_against_uniform_blocks`: at order 2 the loop reaches 2.6e-6 on 494 tets where uniform blocks give 1.8e-4 on 696.
     // At order 1 it does NOT beat uniform blocks: the Hessian of the vertex-averaged piecewise-constant field is too noisy to steer
-    use femcore::estimate::Estimator;
-    use femcore::estimate3::{solve_adaptively3, LoopSettings3};
+    use femcore::adapt::estimate::Estimator;
+    use femcore::adapt::estimate3::{solve_adaptively3, LoopSettings3};
     let (a, b, d) = (0.04, 0.03, 0.02);
     let exact = cavity_modes(a, b, d, 20e9)[0];
     let mut spec = ProblemSpec::new(Physics::Emw);
@@ -342,8 +342,8 @@ fn the_3d_loop_beats_uniform_meshes_for_a_cavity_mode_at_order_two() {
 #[test]
 #[ignore = "study: adaptive loop against uniform blocks of similar size"]
 fn the_3d_loop_against_uniform_blocks() {
-    use femcore::estimate::Estimator;
-    use femcore::estimate3::{solve_adaptively3, LoopSettings3};
+    use femcore::adapt::estimate::Estimator;
+    use femcore::adapt::estimate3::{solve_adaptively3, LoopSettings3};
     let (a, b, d) = (0.04, 0.03, 0.02);
     let exact = cavity_modes(a, b, d, 20e9)[0];
     for order in [1usize, 2] {

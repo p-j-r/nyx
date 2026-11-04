@@ -1,7 +1,7 @@
 //! Error estimation and the solve-estimate-adapt loop for the meshes of `meshing`.
 //!
 //! The estimator is the standard recovered-Hessian one: the interpolation error of a P1 field is governed by its second derivatives, so
-//! the metric that equidistributes it is built from a Hessian recovered from the nodal values (`meshers::adapt::metric::lp_metrics`).
+//! the metric that equidistributes it is built from a Hessian recovered from the nodal values (`adapt::metric::lp_metrics`).
 //! Two points are specific to nyx:
 //!
 //! * **Recovery never crosses a material interface.** The normal component of a field jumps there, and a recovery averaged over both sides
@@ -13,11 +13,11 @@
 //! `solve_adaptively` runs the loop: solve on the simple mesh, build a metric from the result, adapt, solve again, until the quantity of
 //! interest (n_eff, a frequency, a peak value) changes by less than a tolerance between two cycles.
 
-use crate::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts, MeshedGeom};
+use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;
-use crate::meshers::adapt::metric::{complexity_for_elements, intersect, lp_metrics, map_eig, symmetrize, LpOptions, Sym};
-use crate::meshers::interop::simplex_to_adapt;
-use crate::meshers::adapt::field::BackgroundMetric2;
+use crate::adapt::metric::{complexity_for_elements, intersect, lp_metrics, map_eig, symmetrize, LpOptions, Sym};
+use crate::mesh::interop::simplex_to_adapt;
+use crate::adapt::field::BackgroundMetric2;
 use crate::meshing::{adapt_to_field, adapt_to_metrics, geometry_floor, Adaptive};
 use crate::problem::SolveResult;
 use geom::model::FeatureList;

@@ -6,8 +6,8 @@ use super::geom::{Geometry2, PolylineGeometry};
 use super::metric::Sym;
 use super::ops::{all_edges, collapse_pass, elen, flip_pass, smooth_pass, split_pass, tri_quality, unresolved_frozen};
 use super::topo::{TopoOptions, Work2};
-use crate::meshers::mesh::SimplexMesh;
-use crate::meshers::timer::Phases;
+use crate::mesh::native::SimplexMesh;
+use crate::adapt::timer::Phases;
 
 #[derive(Clone, Debug)]
 pub struct AdaptOptions {

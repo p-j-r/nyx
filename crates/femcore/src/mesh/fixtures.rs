@@ -1,8 +1,8 @@
 //! Test fixtures: structured box meshes, labelled like the output of a CAD mesher, and analytic
 //! scalar fields with exact gradients and Hessians.
 
-use crate::meshers::adapt::metric::Sym;
-use crate::meshers::mesh::SimplexMesh;
+use crate::adapt::metric::Sym;
+use crate::mesh::native::SimplexMesh;
 
 /// Label of the boundary facet on the minimum / maximum side of axis `a`: `1 + 2a + side`.
 pub fn side_label(axis: usize, max_side: bool) -> i32 {
@@ -25,7 +25,7 @@ pub fn rect_tri(xs: &[f64], ys: &[f64]) -> SimplexMesh<2> {
     for j in 0..ny - 1 {
         for i in 0..nx - 1 {
             let q = [id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)];
-            let [t0, t1] = crate::meshers::cellmesh::split_quad(&q);
+            let [t0, t1] = crate::mesh::cells::split_quad(&q);
             m.push_cell(&t0, 1);
             m.push_cell(&t1, 1);
         }
@@ -81,7 +81,7 @@ pub fn brick_tet(xs: &[f64], ys: &[f64], zs: &[f64]) -> SimplexMesh<3> {
     m.orient_positive();
     // boundary facets: each boundary brick face is a quad -> 2 triangles via the split rule
     let mut quad = |q: [u32; 4], lab: i32| {
-        let [t0, t1] = crate::meshers::cellmesh::split_quad(&q);
+        let [t0, t1] = crate::mesh::cells::split_quad(&q);
         m.push_facet(&t0, lab);
         m.push_facet(&t1, lab);
     };

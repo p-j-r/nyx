@@ -1108,10 +1108,10 @@ pub fn mesh_3d(spec: &Spec3d) -> Result<(SimplexMesh, Report3d), String> {
         s
     };
     let field = Field { bodies };
-    let project = |mid: [f64; 3], pa: [f64; 3], pb: [f64; 3], kind: crate::refine3d::EdgeKind| -> [f64; 3] {
+    let project = |mid: [f64; 3], pa: [f64; 3], pb: [f64; 3], kind: crate::meshing::refine3d::EdgeKind| -> [f64; 3] {
         let len = len3([pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]]);
         let mut p = mid;
-        if kind == crate::refine3d::EdgeKind::Boundary {
+        if kind == crate::meshing::refine3d::EdgeKind::Boundary {
             p = newton(&|q| field.f(q), p, len);
         }
         // a curved face of a body that carries both ends of the edge
@@ -1126,7 +1126,7 @@ pub fn mesh_3d(spec: &Spec3d) -> Result<(SimplexMesh, Report3d), String> {
             p
         }
     };
-    let (mesh, rr) = crate::refine3d::refine_to_size(&mesh, &size, &project, 1.3, 60_000_000 / 12)?;
+    let (mesh, rr) = crate::meshing::refine3d::refine_to_size(&mesh, &size, &project, 1.3, 60_000_000 / 12)?;
     report.cells = rr.cells_after;
     report.refined = rr.bisections;
     lap("  mesh3d: local refinement");

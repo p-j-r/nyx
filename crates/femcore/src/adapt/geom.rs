@@ -102,9 +102,9 @@ pub fn sdf_projector(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::field::UniformSize;
-    use crate::meshers::adapt::topo::TopoOptions;
-    use crate::meshers::fixtures::{box_tri, side_label};
+    use crate::adapt::field::UniformSize;
+    use crate::adapt::topo::TopoOptions;
+    use crate::mesh::fixtures::{box_tri, side_label};
 
     #[test]
     fn polyline_projects_onto_sides() {

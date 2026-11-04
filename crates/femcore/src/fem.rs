@@ -904,7 +904,7 @@ mod tests {
     #[test]
     fn p2_laplace_reproduces_quadratic() {
         // -laplace(u) = -4 with u = x^2 + y^2 on the unit square, Dirichlet from the exact solution
-        let m = crate::geomdrive::plate(1.0, 1.0, 0.2).unwrap().mesh;
+        let m = crate::meshing::geomdrive::plate(1.0, 1.0, 0.2).unwrap().mesh;
         let k = assemble_laplace(&m, 2, &vec![1.0; m.n_cells()]);
         let f = assemble_source(&m, 2, &vec![-4.0; m.n_cells()]);
         let x = m.dof_coordinates(2);
@@ -918,7 +918,7 @@ mod tests {
 
     #[test]
     fn p2_laplace_3d_reproduces_quadratic() {
-        let m = crate::geomdrive::block(1.0, 1.0, 1.0, 0.34, 3).unwrap().mesh;
+        let m = crate::meshing::geomdrive::block(1.0, 1.0, 1.0, 0.34, 3).unwrap().mesh;
         let k = assemble_laplace(&m, 2, &vec![1.0; m.n_cells()]);
         let f = assemble_source(&m, 2, &vec![-6.0; m.n_cells()]);
         let x = m.dof_coordinates(2);

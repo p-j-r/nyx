@@ -4,13 +4,13 @@
 //!
 //! Usage: `cargo run --release --example fmsh_size`
 
-use femcore::meshers::adapt::drive::{AdaptOptions, adapt2};
-use femcore::meshers::adapt::field::BackgroundMetric2;
-use femcore::meshers::adapt::metric::*;
-use femcore::meshers::adapt::pml::{PmlSpec, build_pml};
-use femcore::meshers::cellmesh::CellMesh;
-use femcore::meshers::fixtures::{Field as _, Gaussian, box_tet, box_tri, rect_tri};
-use femcore::meshers::io::fmsh::{Field, Step, decode_dataset, encode_steps};
+use femcore::adapt::drive::{AdaptOptions, adapt2};
+use femcore::adapt::field::BackgroundMetric2;
+use femcore::adapt::metric::*;
+use femcore::meshing::pml_box::{PmlSpec, build_pml};
+use femcore::mesh::cells::CellMesh;
+use femcore::mesh::fixtures::{Field as _, Gaussian, box_tet, box_tri, rect_tri};
+use femcore::mesh::io::fmsh::{Field, Step, decode_dataset, encode_steps};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -122,7 +122,7 @@ fn main() {
         value: 1.0,
         fields: vec![
             Field::scalar_on_points("u", u),
-            Field { name: "E".into(), location: femcore::meshers::io::fmsh::Location::Point, components: 2, data: ev },
+            Field { name: "E".into(), location: femcore::mesh::io::fmsh::Location::Point, components: 2, data: ev },
         ],
     }];
     report("adapted tri, mesh only", &am, &[]);

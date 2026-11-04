@@ -3,7 +3,7 @@
 //!
 //! `add_pml_3d` takes any conforming tetrahedral mesh whose boundary lies on the faces of its bounding box (a block, or such a block
 //! adapted by `physics_size::adapt_tets`, which keeps the box faces, edges and corners exactly) and sweeps the layers outward from it
-//! (`meshers::adapt::pml::build_pml`). The result has
+//! (`meshing::pml_box::build_pml`). The result has
 //!
 //! * `cells`: the mixed mesh as a nyx `CellMesh` (tetrahedra, prisms, hexahedra, boundary triangles and quadrilaterals), for solvers that
 //!   take those cells natively;
@@ -14,10 +14,10 @@
 //! A material that crosses the interface continues into a PML copy of itself; `apply_materials` copies the material data of the physical
 //! domains to the layer labels and registers the `Pml` entries, so a `ProblemSpec` for the physical mesh becomes one for the full mesh.
 
-use crate::cellmesh::CellMesh as NyxCells;
+use crate::mesh::cellmesh::CellMesh as NyxCells;
 use crate::mesh::{SimplexMesh, SplitReport};
-use crate::meshers::adapt::pml::{build_pml, PmlMesh, PmlSpec};
-use crate::meshers::interop::{cells_to_nyx, pml_domains, simplex_to_adapt};
+use crate::meshing::pml_box::{build_pml, PmlMesh, PmlSpec};
+use crate::mesh::interop::{cells_to_nyx, pml_domains, simplex_to_adapt};
 use crate::problem::{Materials, Pml};
 use std::collections::BTreeMap;
 

@@ -16,7 +16,7 @@ use super::field::MetricField;
 use super::geom::Geometry2;
 use super::metric::{Sym, edge_length};
 use super::topo::{Edge, Snap, VClass, Work2, ekey, tri_area};
-use crate::meshers::quality::simplex_quality;
+use crate::mesh::quality::simplex_quality;
 
 /// Metric length of the edge `(a, b)`.
 pub fn elen(w: &Work2, a: u32, b: u32) -> f64 {

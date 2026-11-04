@@ -25,7 +25,7 @@
 use super::soi::{Cladding, SoiWire};
 
 use crate::mesh::SimplexMesh;
-use crate::mesher::{extrude_y, Layer};
+use crate::meshing::mesher::{extrude_y, Layer};
 use crate::problem::*;
 use geom::labels::LabelMap;
 use geom::model::Model;

@@ -1,13 +1,13 @@
 //! Replays the driver loop on one case and reports the first operator pass that creates a
 //! triangle of metric quality below a threshold. Usage: `adapt_trace <p|inf> <target> [grade_g]`
 
-use femcore::meshers::adapt::drive::AdaptOptions;
-use femcore::meshers::adapt::field::BackgroundMetric2;
-use femcore::meshers::adapt::geom::PolylineGeometry;
-use femcore::meshers::adapt::metric::*;
-use femcore::meshers::adapt::ops::*;
-use femcore::meshers::adapt::topo::Work2;
-use femcore::meshers::fixtures::{Field, Gaussian, box_tri, rect_tri};
+use femcore::adapt::drive::AdaptOptions;
+use femcore::adapt::field::BackgroundMetric2;
+use femcore::adapt::geom::PolylineGeometry;
+use femcore::adapt::metric::*;
+use femcore::adapt::ops::*;
+use femcore::adapt::topo::Work2;
+use femcore::mesh::fixtures::{Field, Gaussian, box_tri, rect_tri};
 
 fn minq(w: &Work2) -> (f64, usize) {
     let mut m = (f64::INFINITY, 0);

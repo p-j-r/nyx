@@ -3,7 +3,7 @@
 //! solutions on the meshes.
 mod common;
 use femcore::mesh::SimplexMesh;
-use femcore::mesher3d::*;
+use femcore::meshing::mesher3d::*;
 use femcore::problem::*;
 use std::collections::HashMap;
 

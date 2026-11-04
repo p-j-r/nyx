@@ -1,8 +1,8 @@
 //! The unified meshing interface: the simple and the adaptive mesher make meshes of the same model with the same names and labels, and
 //! the adaptive one puts its boundary and interface vertices on the exact curves of the geometry.
-use femcore::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
 use femcore::meshing::{mesh_model, Adaptive, MeshPlan, Mesher};
-use femcore::meshers::quality::mesh_quality;
+use femcore::mesh::quality::mesh_quality;
 use femcore::problem::*;
 use geom::model::{Model, RegionKind};
 use std::collections::BTreeSet;
@@ -114,7 +114,7 @@ fn adapted_interface_vertices_lie_on_the_circle_and_the_core_area_converges() {
 }
 
 fn mesh_quality_of(mesh: &femcore::mesh::SimplexMesh) -> f64 {
-    let a = femcore::meshers::interop::simplex_to_adapt::<2>(mesh).unwrap();
+    let a = femcore::mesh::interop::simplex_to_adapt::<2>(mesh).unwrap();
     mesh_quality(&a, None).min
 }
 
@@ -188,7 +188,7 @@ fn soi_wire_modes_on_the_simple_and_the_adaptive_mesh() {
 
 // ------------------------------------------------------------------ estimator and loop
 
-use femcore::estimate::{recovered_hessians, solve_adaptively, Estimator, LoopSettings};
+use femcore::adapt::estimate::{recovered_hessians, solve_adaptively, Estimator, LoopSettings};
 
 #[test]
 fn the_recovered_hessian_of_a_quadratic_is_its_constant_hessian() {
@@ -246,7 +246,7 @@ fn the_loop_improves_poisson_on_a_disk_and_reports_its_cycles() {
     let mut st = LoopSettings::new(0.25);
     st.max_cycles = 4;
     st.rel_tol = 1e-6;
-    let mut solve = |g: &femcore::geomdrive::MeshedGeom| {
+    let mut solve = |g: &femcore::meshing::geomdrive::MeshedGeom| {
         let mut s = ProblemSpec::new(Physics::Electrostatics);
         s.materials.default.insert("rho_v".into(), femcore::dfs::EPS0);
         s.bcs = vec![Bc { on: None, labels: g.select("outer").unwrap(), kind: BcKind::Ground }];
@@ -274,7 +274,7 @@ fn the_loop_on_the_soi_wire_converges_n_eff() {
     st.estimator = Estimator { fields: vec!["|E|".into()], ..Estimator::default() };
     st.max_cycles = 4;
     st.rel_tol = 2e-6;
-    let mut solve = |g: &femcore::geomdrive::MeshedGeom| {
+    let mut solve = |g: &femcore::meshing::geomdrive::MeshedGeom| {
         let res = femcore::solve::solve(&g.mesh, &wire.spec(g), &mut SolveState::default())?;
         let n = res.solutions.iter().filter_map(|s| s.neff.map(|n| n.0)).fold(0.0, f64::max);
         Ok((res, n))
@@ -336,7 +336,7 @@ fn the_cache_answers_repeats_and_equal_models_without_meshing() {
 
 #[test]
 fn extruding_through_other_layers_reuses_the_section() {
-    use femcore::mesher::Layer;
+    use femcore::meshing::mesher::Layer;
     let mut cache = MeshCache::default();
     let plan = MeshPlan::simple(0.2);
     let list = core_in_clad(0.4).list;
@@ -346,7 +346,7 @@ fn extruding_through_other_layers_reuses_the_section() {
     assert!(matches!(r1, Reuse::Meshed { .. }));
     assert_eq!(r2, Reuse::Hit);
     assert_eq!(a.mesh.n_cells(), b.mesh.n_cells());
-    let top = |g: &femcore::geomdrive::MeshedGeom| (0..g.mesh.n_points()).map(|i| g.mesh.points[3 * i + 1]).fold(0.0, f64::max);
+    let top = |g: &femcore::meshing::geomdrive::MeshedGeom| (0..g.mesh.n_points()).map(|i| g.mesh.points[3 * i + 1]).fold(0.0, f64::max);
     assert!((top(&a) - 1.0).abs() < 1e-12 && (top(&b) - 2.0).abs() < 1e-12);
 }
 
@@ -383,7 +383,7 @@ fn cache_sweep_timing() {
 #[ignore]
 fn warm_start_study() {
     use femcore::usecases::soi::SoiWire;
-    let run = |w: f64, warm: Option<femcore::estimate::WarmStart>| {
+    let run = |w: f64, warm: Option<femcore::adapt::estimate::WarmStart>| {
         let wire = SoiWire { width: w, ..SoiWire::default() };
         let mut st = LoopSettings::new(wire.h_far);
         st.estimator = Estimator { fields: vec!["|E|".into()], ..Estimator::default() };
@@ -391,7 +391,7 @@ fn warm_start_study() {
         st.rel_tol = 3e-6;
         st.warm = warm;
         let mut solves = 0;
-        let mut solve = |g: &femcore::geomdrive::MeshedGeom| {
+        let mut solve = |g: &femcore::meshing::geomdrive::MeshedGeom| {
             solves += 1;
             let res = femcore::solve::solve(&g.mesh, &wire.spec(g), &mut SolveState::default())?;
             let n = res.solutions.iter().filter_map(|s| s.neff.map(|n| n.0)).fold(0.0, f64::max);
@@ -513,7 +513,7 @@ fn a_model_without_layers_is_left_alone_and_a_round_window_is_refused() {
 /// 3D by sweeping the 2D section: the adapted (and the structured-layer) section extruded along y fills the right volume with positive tets.
 #[test]
 fn an_adapted_section_extruded_to_3d_has_the_volume_and_the_labels() {
-    use femcore::mesher::Layer;
+    use femcore::meshing::mesher::Layer;
     let layers = vec![Layer { thickness: 0.6, n: 3, domain_offset: 0 }];
     let vol = |m: &femcore::mesh::SimplexMesh| -> (f64, f64) {
         let (mut total, mut min) = (0.0, f64::INFINITY);
@@ -549,7 +549,7 @@ fn an_adapted_section_extruded_to_3d_has_the_volume_and_the_labels() {
 
 #[test]
 fn native_structured_layers_keep_their_quadrilaterals_and_split_to_the_simplex_mesh() {
-    use femcore::meshing_pml::{structured_pml, structured_pml_native, Native};
+    use femcore::meshing::pml::{structured_pml, structured_pml_native, Native};
     let m = boxed_pml();
     let start = mesh_model(&m.list, &MeshPlan::simple(0.25)).unwrap();
     let (split, report) = structured_pml(start.clone()).unwrap();

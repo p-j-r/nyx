@@ -3,7 +3,7 @@
 
 use super::field::MetricField;
 use super::metric::{exp_sym, grade, log_spd, symmetrize, Sym};
-use crate::meshers::mesh::SimplexMesh;
+use crate::mesh::native::SimplexMesh;
 
 pub struct BackgroundMetric3 {
     pts: Vec<[f64; 3]>,
@@ -117,8 +117,8 @@ impl MetricField<3> for BackgroundMetric3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::metric::{isotropic, sizes};
-    use crate::meshers::fixtures::box_tet;
+    use crate::adapt::metric::{isotropic, sizes};
+    use crate::mesh::fixtures::box_tet;
 
     #[test]
     fn background_reproduces_log_linear_fields_and_clamps_outside() {

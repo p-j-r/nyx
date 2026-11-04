@@ -17,7 +17,7 @@ pub mod native;
 pub mod quality;
 pub mod view;
 
-use crate::cellmesh::CellMesh;
+use crate::mesh::cellmesh::CellMesh;
 use std::collections::BTreeSet;
 
 /// How hexahedra, prisms and boundary quadrilaterals are cut into simplices in 3D.

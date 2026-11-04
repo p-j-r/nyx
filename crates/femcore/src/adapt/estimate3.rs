@@ -1,19 +1,19 @@
 //! Error estimation and the solve-estimate-adapt loop for tetrahedral meshes (the 3D counterpart of `estimate`, without the 2D geometry
-//! pipeline: the start mesh is any tetrahedral mesh, adaptation is `meshers::adapt::drive3`).
+//! pipeline: the start mesh is any tetrahedral mesh, adaptation is `adapt::drive3`).
 //!
 //! The estimator is the recovered-Hessian one: for each vertex and each domain label meeting there, a quadratic is fitted by least squares
 //! to the nodal values on the patch of vertices of that label (never across a material interface), and the absolute Hessians are
 //! combined into a metric for about `target_cells` tetrahedra (`metric::lp_metrics`). `Estimator` is the one of `estimate`
 //! (fields by name, `combine` for the components of a vector field).
 
-use crate::estimate::Estimator;
+use crate::adapt::estimate::Estimator;
 use crate::mesh::SimplexMesh;
-use crate::meshers::adapt::drive3::adapt3;
-use crate::meshers::adapt::field3::BackgroundMetric3;
-use crate::meshers::adapt::metric::{complexity_for_elements, intersect, isotropic, lp_metrics, map_eig, symmetrize, LpOptions, Sym};
-use crate::meshers::adapt::ops3::AdaptOptions3;
-use crate::meshers::adapt::topo3::TopoOptions3;
-use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
+use crate::adapt::drive3::adapt3;
+use crate::adapt::field3::BackgroundMetric3;
+use crate::adapt::metric::{complexity_for_elements, intersect, isotropic, lp_metrics, map_eig, symmetrize, LpOptions, Sym};
+use crate::adapt::ops3::AdaptOptions3;
+use crate::adapt::topo3::TopoOptions3;
+use crate::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
 use crate::problem::SolveResult;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -266,7 +266,7 @@ pub fn solve_adaptively3(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::fixtures::box_tet;
+    use crate::mesh::fixtures::box_tet;
 
     #[test]
     fn the_recovery_is_exact_for_quadratics_on_an_unstructured_mesh() {

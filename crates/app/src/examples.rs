@@ -5,8 +5,8 @@
 
 use crate::colormap::Colormap;
 use crate::state::*;
-use femcore::geomdrive::MeshedGeom;
-use femcore::mesher::Layer;
+use femcore::meshing::geomdrive::MeshedGeom;
+use femcore::meshing::mesher::Layer;
 use femcore::problem::*;
 use geom::model::Model;
 use geom::select::Selector;

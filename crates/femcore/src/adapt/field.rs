@@ -6,7 +6,7 @@
 //! of the next one.
 
 use super::metric::{Sym, exp_sym, isotropic, log_spd, symmetrize};
-use crate::meshers::mesh::SimplexMesh;
+use crate::mesh::native::SimplexMesh;
 
 /// A metric defined everywhere in the domain.
 pub trait MetricField<const D: usize>: Sync {
@@ -154,8 +154,8 @@ impl MetricField<2> for BackgroundMetric2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::metric::sizes;
-    use crate::meshers::fixtures::box_tri;
+    use crate::adapt::metric::sizes;
+    use crate::mesh::fixtures::box_tri;
 
     #[test]
     fn graded_constructor_limits_size_growth() {

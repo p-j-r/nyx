@@ -7,7 +7,7 @@
 use crate::guide;
 use crate::params::*;
 use crate::workspace::*;
-use femcore::geomdrive;
+use femcore::meshing::geomdrive;
 use femcore::mesh::SimplexMesh;
 use femcore::polarization::PolClass;
 use femcore::problem::{ProblemSpec, SolveResult, SolveState};

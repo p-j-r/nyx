@@ -173,9 +173,9 @@ pub fn sdf_projector3(sdf: impl Fn(&[f64; 3]) -> f64 + Send + Sync + 'static) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::field::UniformSize;
-    use crate::meshers::adapt::topo3::{TopoOptions3, VClass3};
-    use crate::meshers::fixtures::box_tet;
+    use crate::adapt::field::UniformSize;
+    use crate::adapt::topo3::{TopoOptions3, VClass3};
+    use crate::mesh::fixtures::box_tet;
 
     #[test]
     fn triangle_closest_point_covers_face_edge_and_vertex_regions() {

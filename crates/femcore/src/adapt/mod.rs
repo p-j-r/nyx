@@ -15,6 +15,3 @@ pub mod estimate;
 pub mod estimate3;
 pub mod par;
 pub mod timer;
-
-// TEMP (phase 2, commit 2 removes it): the structured PML generator moved to `meshing::pml_box`.
-pub use crate::meshing::pml_box as pml;

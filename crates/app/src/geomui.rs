@@ -4,7 +4,7 @@
 //! typical model); meshing stays behind the Build button.
 
 use eframe::egui::{self, Color32, ComboBox, RichText, TextEdit, Ui};
-use femcore::view::ViewMesh;
+use femcore::mesh::view::ViewMesh;
 use geom::eval::Evaluated;
 use geom::expr::{Env, Expr};
 use geom::labels::LabelMap;
@@ -61,7 +61,7 @@ impl State {
         }
         self.ev = None;
         self.preview = None;
-        match femcore::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map(|lm| (ev, lm)).map_err(|e| e.to_string())) {
+        match femcore::meshing::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map(|lm| (ev, lm)).map_err(|e| e.to_string())) {
             Ok((ev, lm)) => {
                 self.warnings = ev.warnings.clone();
                 self.preview = preview(&ev, &lm).map(Arc::new);

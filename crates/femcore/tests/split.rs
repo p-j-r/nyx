@@ -2,7 +2,7 @@
 //! conforming, fill the same volume and solve exactly for linear fields.
 mod common;
 use femcore::mesh::{SimplexMesh, SplitMode};
-use femcore::cellmesh::{ElementType, CellMesh};
+use femcore::mesh::cellmesh::{ElementType, CellMesh};
 use femcore::problem::*;
 use femcore::sms::solve_solid;
 use std::collections::HashMap;

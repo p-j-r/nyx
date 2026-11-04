@@ -2,7 +2,7 @@
 //! (quadrilaterals, hexahedra, prisms...), of which only the surface is kept.
 
 use crate::mesh::SimplexMesh;
-use crate::cellmesh::CellMesh;
+use crate::mesh::cellmesh::CellMesh;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Default)]

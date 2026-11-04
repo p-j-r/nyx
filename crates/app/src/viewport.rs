@@ -5,7 +5,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stro
 use crate::scene::{Colors, Scene, SceneData};
 use eframe::egui::epaint::{Mesh, Vertex, WHITE_UV};
 use femcore::fields::Display;
-use femcore::view::ViewMesh;
+use femcore::mesh::view::ViewMesh;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -551,7 +551,7 @@ mod tests {
 
     #[test]
     fn picking_finds_boundaries_in_2d_and_3d() {
-        let p = femcore::geomdrive::plate(2.0, 1.0, 0.5).unwrap();
+        let p = femcore::meshing::geomdrive::plate(2.0, 1.0, 0.5).unwrap();
         let view = ViewMesh::from_simplex(&p.mesh);
         let mut cam = Camera::default();
         cam.fit(view.bbox, Vec2::new(800.0, 600.0), false, 0.0);
@@ -567,7 +567,7 @@ mod tests {
         let far = cam.project([1.0, 0.5, 0.0], c).0;
         assert_eq!(pick_boundary(&sc, &view, far), None);
 
-        let b = femcore::geomdrive::block(1.0, 1.0, 1.0, 0.5, 2).unwrap();
+        let b = femcore::meshing::geomdrive::block(1.0, 1.0, 1.0, 0.5, 2).unwrap();
         let v3 = ViewMesh::from_simplex(&b.mesh);
         let mut cam = Camera::default();
         cam.fit(v3.bbox, Vec2::new(800.0, 600.0), true, 0.0);
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn label_anchors_sit_on_the_boundaries() {
-        let p = femcore::geomdrive::plate(2.0, 1.0, 0.5).unwrap();
+        let p = femcore::meshing::geomdrive::plate(2.0, 1.0, 0.5).unwrap();
         let view = ViewMesh::from_simplex(&p.mesh);
         let a = label_anchors(&view);
         let mut labels: Vec<i32> = a.iter().map(|x| x.0).collect();

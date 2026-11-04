@@ -20,7 +20,7 @@
 use super::field::MetricField;
 use super::metric::Sym;
 use super::topo::{ekey, Edge, FxMap, Sig};
-use crate::meshers::mesh::{facet_key, SimplexMesh};
+use crate::mesh::native::{facet_key, SimplexMesh};
 use std::collections::{BTreeSet, HashMap};
 
 /// Sorted vertex triple.
@@ -404,8 +404,8 @@ impl Work3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::adapt::field::UniformSize;
-    use crate::meshers::fixtures::box_tet;
+    use crate::adapt::field::UniformSize;
+    use crate::mesh::fixtures::box_tet;
 
     fn count(w: &Work3) -> (usize, usize, usize, usize) {
         let mut c = (0, 0, 0, 0);

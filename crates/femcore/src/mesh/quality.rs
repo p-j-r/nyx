@@ -6,9 +6,9 @@
 //! their smallest corner scaled Jacobian. These are computed straight from the coordinates so they
 //! can serve as an independent check of the code that produced the mesh.
 
-use crate::meshers::adapt::metric::{Sym, det, identity, length};
-use crate::meshers::cellmesh::{CellMesh, CellType};
-use crate::meshers::mesh::{SimplexMesh, simplex_signed_measure};
+use crate::adapt::metric::{Sym, det, identity, length};
+use crate::mesh::cells::{CellMesh, CellType};
+use crate::mesh::native::{SimplexMesh, simplex_signed_measure};
 
 /// Mean-ratio quality of a simplex with vertices `p` (`D + 1` points), optionally in the metric
 /// obtained by averaging the vertex metrics. Negative for inverted simplices.
@@ -111,9 +111,9 @@ pub struct EdgeStats {
     pub histogram: [usize; 9],
 }
 
-/// Edge-length statistics of `mesh`; lengths use [`crate::meshers::adapt::metric::edge_length`].
+/// Edge-length statistics of `mesh`; lengths use [`crate::adapt::metric::edge_length`].
 pub fn edge_stats<const D: usize>(mesh: &SimplexMesh<D>, metrics: Option<&[Sym<D>]>) -> EdgeStats {
-    use crate::meshers::adapt::metric::edge_length;
+    use crate::adapt::metric::edge_length;
     let id = identity::<D>();
     let mut s = EdgeStats { min: f64::INFINITY, ..Default::default() };
     let bounds = [0.3, 0.6, std::f64::consts::FRAC_1_SQRT_2, 0.9, 1.3, std::f64::consts::SQRT_2, 2.0, 5.0];
@@ -257,7 +257,7 @@ mod tests {
         // right isosceles-like triangle stretched 10x in x; metric undoes the stretch
         let h = 3f64.sqrt() / 2.0;
         let t = [[0.0, 0.0], [10.0, 0.0], [5.0, h]];
-        let m = crate::meshers::adapt::metric::from_sizes(&[10.0, 1.0], &identity::<2>());
+        let m = crate::adapt::metric::from_sizes(&[10.0, 1.0], &identity::<2>());
         let ms = [m, m, m];
         assert!((simplex_quality::<2>(&t, Some(&ms)) - 1.0).abs() < 1e-13);
         assert!(simplex_quality::<2>(&t, None) < 0.5);

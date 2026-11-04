@@ -3,8 +3,9 @@
 //!
 //! * entry and plumbing: `solve` (one entry point for every physics), `problem` (what is solved: the problem and result
 //!   types), `validate` (refuses NaN/infinity), `progress` (stage log, cancel), `par` (the shared thread pools)
-//! * meshes: `mesh` (simplex meshes, numbering of unknowns), `geomdrive` (geom models to meshes and named problems), `mesher` (2D shapes to triangles, extrusion), `mesher3d` and
-//!   `refine3d` (3D solids to tetrahedra), `view` (surface for drawing), `cellmesh` (mixed-cell meshes)
+//! * meshes: `mesh` (the meshes: `SimplexMesh` and its numbering of unknowns, the native per-cell-type mesh `native` and `cells`, `view`, `cellmesh` (legacy), `io` for `.fmsh`, `quality`, `fixtures`)
+//! * meshing: `meshing` (geom models to meshes: `MeshPlan`, `geomdrive`, `mesher` 2D shapes to triangles, `mesher3d` and `refine3d` 3D solids to tetrahedra, structured PML `pml`, `pml3`, `pml_box`, `physics_size`, `validate`)
+//! * adaptation: `adapt` (metric adaptation 2D and 3D, error estimators `estimate`, `estimate3`)
 //! * finite-element basics: `fem` (quadrature, shape functions, scalar matrices, constraints), `fields` (gradients, node
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
 //! * linear algebra: `sparse`, `csparse` (sparse matrices, real and complex), `linalg` (sparse factorisations, dense
@@ -14,7 +15,7 @@
 //!   revolution); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
 //! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)
 //! * ported libraries: `solvers` (Krylov, eigen, preconditioner, time-stepping and optimisation library for real and complex
-//!   systems) and `meshers` (metric mesh adaptation, structured PML meshes, `.fmsh` files), see docs/ports
+//!   systems) (the mesher port lives in `mesh`, `meshing` and `adapt`), see docs/ports
 //! * files: `xmlio` (project XML), `h5io` (HDF5/XDMF results, feature `hdf5`)
 //!
 //! Lint note: `clippy::needless_range_loop` is allowed crate-wide. The numerical kernels (element matrices, orthogonalisation,
@@ -63,17 +64,3 @@ pub mod sparse;
 pub mod usecases;
 pub mod xmlio;
 
-// TEMPORARY compatibility paths (phase 2, step 1: the pure file move). Everything below moved; the old paths keep
-// compiling so that no other file changes in the move commit. Step 2 rewrites the callers and deletes this block.
-pub use adapt::{estimate, estimate3};
-pub use mesh::{cellmesh, view};
-pub use meshing::{geomdrive, mesher, mesher3d, physics_size, pml3, refine3d};
-pub use meshing::pml as meshing_pml;
-pub mod meshers {
-    pub use crate::adapt;
-    pub use crate::adapt::{par, timer};
-    pub use crate::mesh::cells as cellmesh;
-    pub use crate::mesh::native as mesh;
-    pub use crate::mesh::{fixtures, interop, io, quality};
-    pub use crate::meshing::validate;
-}

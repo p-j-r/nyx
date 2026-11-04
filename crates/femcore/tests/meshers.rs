@@ -2,13 +2,13 @@
 //! and conservation figures are recomputed here from the output coordinates, independently of
 //! the code under test.
 
-use femcore::meshers::adapt::drive::{AdaptOptions, adapt2, adapt2_with};
-use femcore::meshers::adapt::field::{BackgroundMetric2, MetricField};
-use femcore::meshers::adapt::geom::{PolylineGeometry, circle_projector};
-use femcore::meshers::adapt::metric::*;
-use femcore::meshers::fixtures::{Field, Gaussian, box_tri, rect_tri, side_label};
-use femcore::meshers::mesh::SimplexMesh;
-use femcore::meshers::quality::{edge_stats, mesh_quality};
+use femcore::adapt::drive::{AdaptOptions, adapt2, adapt2_with};
+use femcore::adapt::field::{BackgroundMetric2, MetricField};
+use femcore::adapt::geom::{PolylineGeometry, circle_projector};
+use femcore::adapt::metric::*;
+use femcore::mesh::fixtures::{Field, Gaussian, box_tri, rect_tri, side_label};
+use femcore::mesh::native::SimplexMesh;
+use femcore::mesh::quality::{edge_stats, mesh_quality};
 
 fn iso(h: f64) -> impl Fn(&[f64; 2]) -> Sym<2> + Sync {
     move |_| isotropic::<2>(h)
@@ -29,7 +29,7 @@ fn label_area(m: &SimplexMesh<2>, label: i32) -> f64 {
     (0..m.n_cells()).filter(|&c| m.cell_label[c] == label).map(|c| m.measure(c)).sum()
 }
 
-fn report(name: &str, a: &femcore::meshers::adapt::drive::Adapted) {
+fn report(name: &str, a: &femcore::adapt::drive::Adapted) {
     let q = mesh_quality(&a.mesh, Some(&a.metrics));
     let e = edge_stats(&a.mesh, Some(&a.metrics));
     println!(
@@ -190,7 +190,7 @@ fn curved_boundary_converges_to_the_circle() {
     for j in 0..n {
         for i in 0..n {
             let q = [id[&(i, j)], id[&(i + 1, j)], id[&(i + 1, j + 1)], id[&(i, j + 1)]];
-            let [t0, t1] = femcore::meshers::cellmesh::split_quad(&q);
+            let [t0, t1] = femcore::mesh::cells::split_quad(&q);
             m.push_cell(&t0, 1);
             m.push_cell(&t1, 1);
         }
@@ -327,7 +327,7 @@ fn frozen_boundary_is_untouched_and_others_adapt() {
     let m = rect_tri(&xs, &ys);
     let frozen = side_label(0, false); // x = 0
     let opt = AdaptOptions {
-        topo: femcore::meshers::adapt::topo::TopoOptions { frozen_labels: vec![frozen], ..Default::default() },
+        topo: femcore::adapt::topo::TopoOptions { frozen_labels: vec![frozen], ..Default::default() },
         ..Default::default()
     };
     let a = adapt2(&m, &iso(0.04), &opt).unwrap();
@@ -353,7 +353,7 @@ fn unresolved_frozen_edges_terminate_and_are_reported() {
     // a frozen side far coarser than the metric asks for: cannot be fixed, must not run away
     let m = box_tri([[0.0, 1.0], [0.0, 1.0]], 5, 5);
     let opt = AdaptOptions {
-        topo: femcore::meshers::adapt::topo::TopoOptions { frozen_labels: vec![side_label(0, false)], ..Default::default() },
+        topo: femcore::adapt::topo::TopoOptions { frozen_labels: vec![side_label(0, false)], ..Default::default() },
         ..Default::default()
     };
     let a = adapt2(&m, &iso(0.04), &opt).unwrap();

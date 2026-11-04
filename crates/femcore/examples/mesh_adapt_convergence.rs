@@ -4,12 +4,12 @@
 //! Error norms are recomputed here by quadrature on the output mesh, independently of the adaptation code.
 //! Usage: `cargo run --release --example adapt_convergence -- [max_target_elements=128000]`
 
-use femcore::meshers::adapt::drive::{AdaptOptions, adapt2};
-use femcore::meshers::adapt::field::BackgroundMetric2;
-use femcore::meshers::adapt::metric::*;
-use femcore::meshers::fixtures::{Field, Gaussian, ObliqueLayer, box_tri, rect_tri};
-use femcore::meshers::mesh::SimplexMesh;
-use femcore::meshers::quality::{edge_stats, mesh_quality};
+use femcore::adapt::drive::{AdaptOptions, adapt2};
+use femcore::adapt::field::BackgroundMetric2;
+use femcore::adapt::metric::*;
+use femcore::mesh::fixtures::{Field, Gaussian, ObliqueLayer, box_tri, rect_tri};
+use femcore::mesh::native::SimplexMesh;
+use femcore::mesh::quality::{edge_stats, mesh_quality};
 use std::time::Instant;
 
 /// 7-point degree-5 rule on the reference triangle (barycentric points and weights summing to 1).

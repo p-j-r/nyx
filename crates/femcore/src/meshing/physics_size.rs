@@ -17,7 +17,7 @@
 
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
-use crate::meshers::adapt::metric::{isotropic, sym_eig, Sym};
+use crate::adapt::metric::{isotropic, sym_eig, Sym};
 use crate::problem::{Physics, ProblemSpec, Study, TensorKind};
 use std::collections::BTreeMap;
 
@@ -206,17 +206,17 @@ pub fn metrics_d<const D: usize>(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &Ph
 
 /// Adapts a tetrahedral mesh to the physics of `spec`: the sizes of `vertex_sizes` (capped at `ceiling`), graded with slope `grade`,
 /// carried to the new vertices by a background field. Domain labels and boundary-facet labels pass through; corners, creases and
-/// material interfaces are kept as `meshers::adapt::topo3` classifies them. Returns the mesh and the report.
+/// material interfaces are kept as `adapt::topo3` classifies them. Returns the mesh and the report.
 pub fn adapt_tets(
     mesh: &SimplexMesh,
     spec: &ProblemSpec,
     sz: &PhysicsSizing,
     ceiling: f64,
     grade: f64,
-    opt: &crate::meshers::adapt::ops3::AdaptOptions3,
-) -> Result<(SimplexMesh, crate::meshers::adapt::drive::AdaptReport), String> {
-    use crate::meshers::adapt::{drive3::adapt3, field3::BackgroundMetric3, topo3::TopoOptions3};
-    use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
+    opt: &crate::adapt::ops3::AdaptOptions3,
+) -> Result<(SimplexMesh, crate::adapt::drive::AdaptReport), String> {
+    use crate::adapt::{drive3::adapt3, field3::BackgroundMetric3, topo3::TopoOptions3};
+    use crate::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
     let metrics = metrics_d::<3>(spec, mesh, sz, ceiling)?;
     let old = simplex_to_adapt::<3>(mesh)?;
     let field = BackgroundMetric3::new_graded(&old, &metrics, grade);
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn optical_wavelength_is_shortened_by_the_index() {
-        let m = crate::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
+        let m = crate::meshing::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
         let mut s = ProblemSpec::new(Physics::Emw);
         s.materials.default.insert("eps_r".into(), 4.0);
         s.study = Study::Modes { freq: 10e9, n_target: 1.5, evanescent: false, n_modes: 1 };
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn pml_domains_are_coarser_and_inactive_domains_have_no_elastic_wave() {
-        let mut m = crate::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
+        let mut m = crate::meshing::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
         let half = m.n_cells() / 2;
         for l in m.cell_labels.iter_mut().skip(half) {
             *l = 2;

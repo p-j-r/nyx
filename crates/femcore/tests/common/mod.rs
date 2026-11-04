@@ -19,7 +19,7 @@ fn relabel(mesh: &mut SimplexMesh, map: &[(&[i32], i32)]) {
 /// columns are the plane the 2D kernels see; the boundary numbers are the ones these tests have always used: 1 x = 0, 2 y = 0, 3 y = ly,
 /// 4 x = lx (the second axis is z of the wafer's x-z plane).
 pub fn rect(lx: f64, ly: f64, nx: usize, ny: usize) -> SimplexMesh {
-    let p = femcore::geomdrive::plate(lx, ly, (lx / nx as f64).min(ly / ny as f64)).unwrap();
+    let p = femcore::meshing::geomdrive::plate(lx, ly, (lx / nx as f64).min(ly / ny as f64)).unwrap();
     let mut m = p.mesh;
     relabel(&mut m, &[(&p.xmin, 1), (&p.zmin, 2), (&p.zmax, 3), (&p.xmax, 4)]);
     m
@@ -28,7 +28,7 @@ pub fn rect(lx: f64, ly: f64, nx: usize, ny: usize) -> SimplexMesh {
 /// A box `[0, lx] x [0, ly] x [0, lz]`: the x-z rectangle of `geomdrive::block` swept along y through `ny` layers. Boundary numbers:
 /// 1 x = 0, 2 y = 0, 3 z = 0, 4 z = lz, 5 y = ly, 6 x = lx.
 pub fn block(lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize) -> SimplexMesh {
-    let b = femcore::geomdrive::block(lx, ly, lz, (lx / nx as f64).min(lz / nz as f64), ny).unwrap();
+    let b = femcore::meshing::geomdrive::block(lx, ly, lz, (lx / nx as f64).min(lz / nz as f64), ny).unwrap();
     let mut m = b.mesh;
     relabel(&mut m, &[(&b.xmin, 1), (&b.ymin, 2), (&b.zmin, 3), (&b.zmax, 4), (&b.ymax, 5), (&b.xmax, 6)]);
     m
@@ -42,7 +42,7 @@ fn geom_plate(m: &mut geom::model::Model, parts: &[(&str, (f64, f64), (f64, f64)
 /// The rectangle `[0, lx] x [0, ly]` in two domains, 1 for `x < xc` and 2 for `x > xc`, meeting along the line `x = xc` (a model of two
 /// rectangles, so the interface is a mesh edge). Boundary numbers as `rect`.
 pub fn rect_split_x(lx: f64, ly: f64, xc: f64, h: f64) -> SimplexMesh {
-    use femcore::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+    use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
     let mut m = geom::model::Model::new_2d();
     geom_plate(&mut m, &[("a", (0.0, 0.0), (xc, ly)), ("b", (xc, 0.0), (lx, ly))]);
     let g = mesh_geom_2d(evaluate(&m.list).unwrap(), &GeomMeshOpts::new(h)).unwrap();
@@ -56,15 +56,15 @@ pub fn rect_split_x(lx: f64, ly: f64, xc: f64, h: f64) -> SimplexMesh {
 /// The box `[0, lx] x [0, ly] x [0, lz]` in two domains, 1 for `z < zc` and 2 for `z > zc`: the x-z section of two stacked rectangles swept
 /// along y through `ny` layers. Boundary numbers as `block`.
 pub fn block_split_z(lx: f64, ly: f64, lz: f64, zc: f64, h: f64, ny: usize) -> SimplexMesh {
-    use femcore::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
-    use femcore::mesher::{extrude_y, Layer};
+    use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+    use femcore::meshing::mesher::{extrude_y, Layer};
     let mut m = geom::model::Model::new_2d();
     geom_plate(&mut m, &[("lower", (0.0, 0.0), (lx, zc)), ("upper", (0.0, zc), (lx, lz))]);
     let g = mesh_geom_2d(evaluate(&m.list).unwrap(), &GeomMeshOpts::new(h)).unwrap();
     assert_eq!((g.domain("lower"), g.domain("upper")), (Some(1), Some(2)));
     let (xmin, xmax, zmin, zmax) = (g.select("plane(x = 0)").unwrap(), g.select(&format!("plane(x = {lx:e})")).unwrap(), g.select("plane(z = 0)").unwrap(), g.select(&format!("plane(z = {lz:e})")).unwrap());
     let nb = g.mesh.facet_labels.iter().copied().max().unwrap();
-    let mut mesh = extrude_y(&femcore::geomdrive::sort_nodes(&g.mesh), &[Layer { thickness: ly, n: ny, domain_offset: 0 }], 0.0).unwrap();
+    let mut mesh = extrude_y(&femcore::meshing::geomdrive::sort_nodes(&g.mesh), &[Layer { thickness: ly, n: ny, domain_offset: 0 }], 0.0).unwrap();
     relabel(&mut mesh, &[(&xmin, 1), (&[nb + 1], 2), (&zmin, 3), (&zmax, 4), (&[nb + 2], 5), (&xmax, 6)]);
     mesh
 }
@@ -72,11 +72,11 @@ pub fn block_split_z(lx: f64, ly: f64, lz: f64, zc: f64, h: f64, ny: usize) -> S
 /// A stack along y of `a x a` sections (x-z): layer `k` is `layers[k] = (thickness, number of element layers)` and domain `k + 1`.
 /// Boundary numbers as `block`; the side walls can be paired by Floquet conditions (1 with 6, 3 with 4) and so can the ends (2 with 5).
 pub fn stack_y(a: f64, layers: &[(f64, usize)], h: f64) -> SimplexMesh {
-    use femcore::mesher::{extrude_y, Layer};
-    let p = femcore::geomdrive::plate(a, a, h).unwrap();
+    use femcore::meshing::mesher::{extrude_y, Layer};
+    let p = femcore::meshing::geomdrive::plate(a, a, h).unwrap();
     let nb = p.mesh.facet_labels.iter().copied().max().unwrap();
     let ls: Vec<Layer> = layers.iter().enumerate().map(|(k, (t, n))| Layer { thickness: *t, n: *n, domain_offset: k as i32 }).collect();
-    let mut mesh = extrude_y(&femcore::geomdrive::sort_nodes(&p.mesh), &ls, 0.0).unwrap();
+    let mut mesh = extrude_y(&femcore::meshing::geomdrive::sort_nodes(&p.mesh), &ls, 0.0).unwrap();
     relabel(&mut mesh, &[(&p.xmin, 1), (&[nb + 1], 2), (&p.zmin, 3), (&p.zmax, 4), (&[nb + 2], 5), (&p.xmax, 6)]);
     mesh
 }
@@ -97,7 +97,7 @@ pub fn part(x0: f64, z0: f64, x1: f64, z1: f64, domain: i32, h: Option<f64>) -> 
 /// The rectangles laid over each other in order (later ones win), as a geom model meshed with element size `h`; the cells carry the
 /// domain numbers asked for. The boundary numbers are those of the model's edges.
 pub fn parts_mesh(parts: &[RectPart], h: f64) -> SimplexMesh {
-    use femcore::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+    use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
     let mut m = geom::model::Model::new_2d();
     let names: Vec<String> = (0..parts.len()).map(|k| format!("part{k}")).collect();
     let ids: Vec<(&str, geom::model::FeatureId)> = parts.iter().zip(&names).map(|(p, n)| (n.as_str(), m.rect(n, p.lo, p.hi))).collect();

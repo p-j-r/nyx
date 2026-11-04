@@ -64,7 +64,7 @@ fn a_layer_along_y_does_not_exist_on_a_2d_cross_section() {
 
 #[test]
 fn the_absorbing_pieces_of_a_geom_model_come_out_in_wafer_names() {
-    use femcore::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
+    use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};
     use geom::model::Model;
     let mut m = Model::new_2d();
     let air = m.rect("air", (-2.0, -1.0), (2.0, 1.0));

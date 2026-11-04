@@ -25,8 +25,8 @@
 //! The result is a [`CellMesh`]; [`CellMesh::split_to_simplices`] gives the simplex fallback for
 //! solvers that cannot take quads, prisms or hexahedra yet. Physical vertices keep their ids.
 
-use crate::meshers::cellmesh::{CellMesh, CellType};
-use crate::meshers::mesh::{FacetKey, SimplexMesh, bbox_of, facet_key};
+use crate::mesh::cells::{CellMesh, CellType};
+use crate::mesh::native::{FacetKey, SimplexMesh, bbox_of, facet_key};
 use std::collections::HashMap;
 
 /// Layer specification. Axis `a`, side `s` (0 = minimum, 1 = maximum face of the box); a side
@@ -221,7 +221,7 @@ fn orient<const D: usize>(t: CellType, v: &mut [u32], pts: &[[f64; D]]) {
     let mut probe = CellMesh::<D>::new();
     probe.points = pts.to_vec();
     probe.push_cell(t, v, 0);
-    if crate::meshers::quality::cell_scaled_jacobian_min(&probe, 0) < 0.0 {
+    if crate::mesh::quality::cell_scaled_jacobian_min(&probe, 0) < 0.0 {
         let swaps: &[(usize, usize)] = match t {
             CellType::Tri => &[(1, 2)],
             CellType::Quad => &[(1, 3)],
@@ -481,8 +481,8 @@ pub fn build_pml<const D: usize>(phys: &SimplexMesh<D>, spec: &PmlSpec<D>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meshers::fixtures::{box_tet, box_tri, rect_tri};
-    use crate::meshers::quality::cellmesh_quality;
+    use crate::mesh::fixtures::{box_tet, box_tri, rect_tri};
+    use crate::mesh::quality::cellmesh_quality;
 
     fn area_with_pml(w: f64, h: f64, spec: &PmlSpec<2>) -> f64 {
         let ext = |a: usize, len: f64| {
@@ -546,7 +546,7 @@ mod tests {
         let q = cellmesh_quality(&p.mesh);
         assert!(q.min > 0.4);
         for ci in p.n_physical_cells..p.mesh.n_cells() {
-            let v = crate::meshers::quality::cell_scaled_jacobian_min(&p.mesh, ci);
+            let v = crate::mesh::quality::cell_scaled_jacobian_min(&p.mesh, ci);
             assert!((v - 1.0).abs() < 1e-12, "cell {ci}: {v}");
         }
         // area by region
@@ -617,8 +617,8 @@ mod tests {
         assert!((p.mesh.total_measure() - 1.4 * 1.3).abs() < 1e-12);
         // physical sides without PML keep their boundary and labels
         let phys_labels: std::collections::HashSet<i32> = p.mesh.facet_label.iter().cloned().collect();
-        assert!(phys_labels.contains(&crate::meshers::fixtures::side_label(0, false)));
-        assert!(phys_labels.contains(&crate::meshers::fixtures::side_label(1, true)));
+        assert!(phys_labels.contains(&crate::mesh::fixtures::side_label(0, false)));
+        assert!(phys_labels.contains(&crate::mesh::fixtures::side_label(1, true)));
         assert!(phys_labels.contains(&7));
     }
 
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(bk.len(), 6 * 18 + 12 * 12 + 8 * 12);
         assert_eq!(p.mesh.n_facets(), bk.len());
         for ci in p.n_physical_cells..p.mesh.n_cells() {
-            assert!(crate::meshers::quality::cell_scaled_jacobian_min(&p.mesh, ci) > 0.5);
+            assert!(crate::mesh::quality::cell_scaled_jacobian_min(&p.mesh, ci) > 0.5);
         }
         // simplex fallback is conforming and has the same volume
         let s = p.mesh.split_to_simplices().unwrap();

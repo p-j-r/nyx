@@ -3,7 +3,7 @@
 //!
 //! * `Mesher::Simple`: chords of every geom edge, constrained Delaunay triangulation, Ruppert refinement, lattice points in finer regions
 //!   (`geomdrive::mesh_geom_2d`). Fast, predictable, what the app has always used. Right for most 2D cross-sections.
-//! * `Mesher::Adaptive`: the same start, then the metric adaptation of `meshers::adapt` towards a size field built from the model alone
+//! * `Mesher::Adaptive`: the same start, then the metric adaptation of `adapt` towards a size field built from the model alone
 //!   (region sizes, `Size` rules, absorbing layers, curvature of the edges), graded. Vertices that move or are created on a boundary or an
 //!   interface land on the *exact* geom edge (`GeomOracle2`), not on the chord polygon, and the vertices of the geometry never move. Labels
 //!   of cells and facets are carried through unchanged, so names, selectors and boundary conditions mean the same on either mesh.
@@ -21,17 +21,17 @@ pub mod pml_box;
 pub mod refine3d;
 pub mod validate;
 
-use crate::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
+use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;
-pub use crate::meshing_pml::{structured_pml, PmlMode, PmlReport};
-use crate::meshers::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
-use crate::meshers::adapt::field::{BackgroundMetric2, MetricField};
-use crate::meshers::adapt::geom::Geometry2;
-use crate::meshers::adapt::metric::{intersect, isotropic, Sym};
+pub use crate::meshing::pml::{structured_pml, PmlMode, PmlReport};
+use crate::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
+use crate::adapt::field::{BackgroundMetric2, MetricField};
+use crate::adapt::geom::Geometry2;
+use crate::adapt::metric::{intersect, isotropic, Sym};
 use physics_size::PhysicsSizing;
 use crate::problem::ProblemSpec;
-use crate::meshers::adapt::topo::{Sig, Work2};
-use crate::meshers::interop::{simplex_from_adapt, simplex_to_adapt};
+use crate::adapt::topo::{Sig, Work2};
+use crate::mesh::interop::{simplex_from_adapt, simplex_to_adapt};
 use geom::diff::{diff, ChangeKind};
 use geom::eval::{Evaluated, Evaluator, Tier};
 use geom::labels::LabelMap;
@@ -465,9 +465,9 @@ impl MeshCache {
     }
 
     /// The section of `list` swept along y through `layers`. The section is the cached part: changing only the layers re-extrudes it.
-    pub fn mesh_extruded(&mut self, list: &FeatureList, plan: &MeshPlan, layers: &[crate::mesher::Layer]) -> Result<(MeshedGeom, Reuse), String> {
+    pub fn mesh_extruded(&mut self, list: &FeatureList, plan: &MeshPlan, layers: &[crate::meshing::mesher::Layer]) -> Result<(MeshedGeom, Reuse), String> {
         let (mut g, reuse) = self.mesh(list, plan)?;
-        g.mesh = crate::mesher::extrude_y(&g.mesh, layers, 0.0)?;
+        g.mesh = crate::meshing::mesher::extrude_y(&g.mesh, layers, 0.0)?;
         Ok((g, reuse))
     }
 }

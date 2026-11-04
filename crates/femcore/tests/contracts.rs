@@ -283,13 +283,13 @@ fn mesh_cells_are_positively_oriented_in_2d() {
 }
 
 mod mixed {
-    use femcore::cellmesh::CellMesh as NyxCells;
+    use femcore::mesh::cellmesh::CellMesh as NyxCells;
     use femcore::mesh::SimplexMesh;
-    use femcore::meshers::adapt::pml::{build_pml, PmlSpec};
-    use femcore::meshers::interop::{cells_to_nyx, simplex_to_adapt};
+    use femcore::meshing::pml_box::{build_pml, PmlSpec};
+    use femcore::mesh::interop::{cells_to_nyx, simplex_to_adapt};
 
     pub fn pml_cells() -> NyxCells {
-        let plate = femcore::geomdrive::plate(1.0, 1.0, 0.125).unwrap().mesh;
+        let plate = femcore::meshing::geomdrive::plate(1.0, 1.0, 0.125).unwrap().mesh;
         let phys = simplex_to_adapt::<2>(&plate).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 3) };
         cells_to_nyx(&build_pml(&phys, &spec).unwrap().mesh)
@@ -350,11 +350,11 @@ fn mesh_quadrilaterals_are_stored_in_tensor_product_order_and_split_exactly() {
 
 #[test]
 fn mesh_fmsh_round_trip_and_version() {
-    use femcore::meshers::cellmesh::CellMesh;
-    use femcore::meshers::io::fmsh;
-    use femcore::meshers::adapt::pml::{build_pml, PmlSpec};
-    use femcore::meshers::interop::simplex_to_adapt;
-    let plate = femcore::geomdrive::plate(1.0, 1.0, 0.25).unwrap().mesh;
+    use femcore::mesh::cells::CellMesh;
+    use femcore::mesh::io::fmsh;
+    use femcore::meshing::pml_box::{build_pml, PmlSpec};
+    use femcore::mesh::interop::simplex_to_adapt;
+    let plate = femcore::meshing::geomdrive::plate(1.0, 1.0, 0.25).unwrap().mesh;
     let phys = simplex_to_adapt::<2>(&plate).unwrap();
     let m: CellMesh<2> = build_pml(&phys, &PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 2) }).unwrap().mesh;
     let bytes = fmsh::encode(&m);

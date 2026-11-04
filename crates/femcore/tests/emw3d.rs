@@ -75,7 +75,7 @@ fn first_order_elements_converge_more_slowly() {
 #[test]
 fn spherical_cavity_lowest_mode_on_a_stuffed_mesh() {
     // TM mode of a PEC sphere: k R = 2.7437 (three-fold degenerate); the mesh follows the sphere to O(h^2)
-    use femcore::mesher3d::*;
+    use femcore::meshing::mesher3d::*;
     let r = 0.05;
     let spec3 = Spec3d { bodies: vec![Body3d { solid: Solid::Sphere { c: [0.0; 3], r }, domain: 1, h: None }], h: 0.012, alpha: 0.3, snap_features: true, min_layers: 2.0 };
     let (mesh, _) = mesh_3d(&spec3).unwrap();
