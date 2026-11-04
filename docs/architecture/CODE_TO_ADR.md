@@ -66,15 +66,27 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/rustfmt.toml` | 13 | only formatted crate (R23) |
 | `crates/geom/Cargo.toml` | 3, 13 | serde only |
 | `crates/femcore/src/solvers/*` | 8, 11 | ported solver library |
-| `crates/femcore/src/meshers/io/*` | 16 | `.fmsh` |
-| `crates/femcore/src/meshers/interop.rs` | 5, 4 | border between the two mesh families |
-| `crates/femcore/src/meshers/cellmesh.rs` | 5 | |
-| `crates/femcore/src/meshers/mesh.rs` | 5, 4 | |
-| `crates/femcore/src/meshers/par.rs` | 11 | R03 |
-| `crates/femcore/src/meshers/adapt/pml.rs` | 7, 5 | |
-| `crates/femcore/src/meshers/adapt/*` | 7 | |
-| `crates/femcore/src/meshers/validate/*` | 7 | |
-| `crates/femcore/src/meshers/*` | 7 | quality, fixtures, timer, mod |
+| `crates/femcore/src/mesh/mod.rs` | 4 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
+| `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
+| `crates/femcore/src/mesh/cellmesh.rs` | 5, 4 | the nyx `CellMesh`, to be deleted in phase 2 |
+| `crates/femcore/src/mesh/native.rs` | 5, 4 | dimension-generic native mesh (was `meshers/mesh.rs`) |
+| `crates/femcore/src/mesh/cells.rs` | 5 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
+| `crates/femcore/src/mesh/interop.rs` | 5, 4 | border between the two mesh families, to be deleted in phase 2 |
+| `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
+| `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
+| `crates/femcore/src/meshing/mod.rs` | 6, 7, 18 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
+| `crates/femcore/src/meshing/geomdrive.rs` | 2, 6 | |
+| `crates/femcore/src/meshing/mesher.rs` | 6, 2 | 2D triangulation core |
+| `crates/femcore/src/meshing/mesher3d.rs` | 4, 7 | R05 |
+| `crates/femcore/src/meshing/refine3d.rs` | 7 | |
+| `crates/femcore/src/meshing/pml3.rs` | 5, 7 | |
+| `crates/femcore/src/meshing/pml.rs` | 5, 7 | structured PML for the nyx mesh (was `meshing_pml.rs`) |
+| `crates/femcore/src/meshing/pml_box.rs` | 7, 5 | structured PML generator (was `meshers/adapt/pml.rs`) |
+| `crates/femcore/src/meshing/physics_size.rs` | 17 | |
+| `crates/femcore/src/meshing/validate/*` | 7 | |
+| `crates/femcore/src/adapt/par.rs` | 11 | R03 |
+| `crates/femcore/src/adapt/estimate*.rs` | 7, 17 | |
+| `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
 | `crates/femcore/src/problem.rs` | 1, 9, 19 | |
 | `crates/femcore/src/material.rs` | 1 | |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
@@ -91,9 +103,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/usecases/*` | 22, 2 | |
 | `crates/femcore/src/analysis.rs` | 21 | |
 | `crates/femcore/src/polarization.rs` | 21 | |
-| `crates/femcore/src/mesh.rs` | 4 | |
-| `crates/femcore/src/cellmesh.rs` | 5, 4 | |
-| `crates/femcore/src/view.rs` | 4 | draw-only mesh |
 | `crates/femcore/src/fields.rs` | 9 | cell fields |
 | `crates/femcore/src/fem.rs` | 4, 8 | element basics, original stack |
 | `crates/femcore/src/sparse.rs` | 8, 11 | original stack (R02) |
@@ -102,15 +111,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/amg.rs` | 8 | original stack |
 | `crates/femcore/src/eigen.rs` | 8 | original stack |
 | `crates/femcore/src/lobpcg.rs` | 8 | original stack |
-| `crates/femcore/src/geomdrive.rs` | 2, 6 | |
-| `crates/femcore/src/mesher.rs` | 6, 2 | 2D triangulation core |
-| `crates/femcore/src/mesher3d.rs` | 4, 7 | R05 |
-| `crates/femcore/src/refine3d.rs` | 7 | |
-| `crates/femcore/src/pml3.rs` | 5, 7 | |
-| `crates/femcore/src/meshing.rs` | 6, 7, 18 | |
-| `crates/femcore/src/meshing_pml.rs` | 5, 7 | |
-| `crates/femcore/src/physics_size.rs` | 17 | |
-| `crates/femcore/src/estimate*.rs` | 7, 17 | |
 | `crates/femcore/src/xmlio.rs` | 13, 19 | |
 | `crates/femcore/src/h5io.rs` | 13, 16 | |
 | `crates/femcore/src/lib.rs` | 12 | module map |
