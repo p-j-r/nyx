@@ -8,7 +8,7 @@
 //! cells, and the new vertex on an edge that lies on the boundary of the solid or on an interface
 //! between domains is moved onto the true (curved) surface by the caller's projection.
 
-use crate::mesh::SimplexMesh;
+use femcore::mesh::SimplexMesh;
 use std::collections::HashMap;
 
 type P3 = [f64; 3];

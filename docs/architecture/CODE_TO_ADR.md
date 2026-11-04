@@ -77,8 +77,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/mod.rs` | 6, 7, 18 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
 | `crates/femcore/src/meshing/geomdrive.rs` | 2, 6 | |
 | `crates/femcore/src/meshing/mesher.rs` | 6, 2 | 2D triangulation core |
-| `crates/femcore/src/meshing/mesher3d.rs` | 4, 7 | R05 |
-| `crates/femcore/src/meshing/refine3d.rs` | 7 | |
+| `crates/femcore/tests/common/solid3d/*` | 4, 7 | R05: stuffed solid meshes (sphere cavity), test fixture only, was `meshing/mesher3d.rs`, `refine3d.rs` |
 | `crates/femcore/src/meshing/pml3.rs` | 5, 7 | |
 | `crates/femcore/src/meshing/pml.rs` | 5, 7 | structured PML for the nyx mesh (was `meshing_pml.rs`) |
 | `crates/femcore/src/meshing/pml_box.rs` | 7, 5 | structured PML generator (was `meshers/adapt/pml.rs`) |
@@ -128,7 +127,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/meshing.rs` | 6 | |
 | `crates/femcore/tests/physics_meshing.rs` | 17, 7 | |
 | `crates/femcore/tests/geom_meshes.rs` | 2, 6 | |
-| `crates/femcore/tests/mesher3d.rs` | 4 | |
 | `crates/femcore/tests/split.rs` | 4, 5 | |
 | `crates/femcore/tests/finite_guard.rs` | 9 | |
 | `crates/femcore/tests/cancel_and_log.rs` | 9 | |

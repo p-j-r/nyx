@@ -26,7 +26,7 @@
 //! 4 y=max, 5 z=min, 6 z=max. Cylinder: 1 side, 2 base,
 //! 3 top. Sphere: 1.
 
-use crate::mesh::SimplexMesh;
+use femcore::mesh::SimplexMesh;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -361,7 +361,7 @@ impl Lattice {
 }
 
 fn threads() -> usize {
-    crate::par::threads()
+    femcore::par::threads()
 }
 
 /// Runs `f(range)` on blocks of `0..n` in parallel and returns the results in order.
@@ -687,7 +687,7 @@ pub fn mesh_3d(spec: &Spec3d) -> Result<(SimplexMesh, Report3d), String> {
     let tol = 1e-9 * hmin;
     let alpha = spec.alpha;
     let mut tl = std::time::Instant::now();
-    let mut lap = |what: &str| crate::sms::lap(&mut tl, what);
+    let mut lap = |what: &str| { femcore::progress::lap(what, tl.elapsed().as_secs_f64()); tl = std::time::Instant::now(); };
 
     // 1. classify the lattice vertices for every cutting surface: -1 inside, +1 outside, 0 on it
     let mut cls: Vec<Vec<i8>> = Vec::with_capacity(ns);
@@ -1108,10 +1108,10 @@ pub fn mesh_3d(spec: &Spec3d) -> Result<(SimplexMesh, Report3d), String> {
         s
     };
     let field = Field { bodies };
-    let project = |mid: [f64; 3], pa: [f64; 3], pb: [f64; 3], kind: crate::meshing::refine3d::EdgeKind| -> [f64; 3] {
+    let project = |mid: [f64; 3], pa: [f64; 3], pb: [f64; 3], kind: super::refine3d::EdgeKind| -> [f64; 3] {
         let len = len3([pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]]);
         let mut p = mid;
-        if kind == crate::meshing::refine3d::EdgeKind::Boundary {
+        if kind == super::refine3d::EdgeKind::Boundary {
             p = newton(&|q| field.f(q), p, len);
         }
         // a curved face of a body that carries both ends of the edge
@@ -1126,7 +1126,7 @@ pub fn mesh_3d(spec: &Spec3d) -> Result<(SimplexMesh, Report3d), String> {
             p
         }
     };
-    let (mesh, rr) = crate::meshing::refine3d::refine_to_size(&mesh, &size, &project, 1.3, 60_000_000 / 12)?;
+    let (mesh, rr) = super::refine3d::refine_to_size(&mesh, &size, &project, 1.3, 60_000_000 / 12)?;
     report.cells = rr.cells_after;
     report.refined = rr.bisections;
     lap("  mesh3d: local refinement");

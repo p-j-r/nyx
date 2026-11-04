@@ -13,12 +13,10 @@
 
 pub mod geomdrive;
 pub mod mesher;
-pub mod mesher3d;
 pub mod physics_size;
 pub mod pml;
 pub mod pml3;
 pub mod pml_box;
-pub mod refine3d;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
