@@ -3,15 +3,20 @@
 //! eigenmode solver on a periodic cell of the same PEC guide (a different formulation sharing only the tensor). Both are written in the
 //! wafer axes: the guide runs along y, the crystal axis is tilted in the y-z plane against the propagation direction, the 2D problem goes
 //! through `solve::solve` (so the frame adapter turns the crystal into the kernel's axes) and the 3D cell is periodic along y.
-//! The last test drives the 2D kernel directly in its own axes (`ems::solve_emw`).
+//! The last test drives the 2D kernel directly in its own axes (`nyx_ems::solve_waveguide`).
 mod common;
 use femcore::material::*;
-use femcore::problem::*;
+use femcore::props::*;
+use nyx_ems::Study;
 
 const C0: f64 = 299_792_458.0;
 
 fn crystal(tilt_deg: f64) -> Anisotropy {
-    Anisotropy { permittivity: Some(Tensor::Diagonal { x: 4.0, y: 4.0, z: 6.5 }), euler_deg: [0.0, tilt_deg, 0.0], ..Default::default() }
+    Anisotropy {
+        permittivity: Some(Tensor::Diagonal { x: 4.0, y: 4.0, z: 6.5 }),
+        euler_deg: [0.0, tilt_deg, 0.0],
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -21,26 +26,27 @@ fn a_tilted_uniaxial_crystal_in_a_pec_guide_has_the_same_modes_in_2d_and_in_a_3d
     let tilt = 40.0;
     // 3D cell
     let mesh3 = common::block(a, l, b, 6, 2, 3);
-    let mut s3 = ProblemSpec::new(Physics::Emw);
+    let mut s3 = common::emw();
     s3.order = 2;
     s3.materials.aniso.insert(1, crystal(tilt));
     s3.periodic = vec![Periodic { source: vec![2], dest: vec![5], phase }];
-    let f_est = C0 / (2.0 * std::f64::consts::PI * 4.8f64.sqrt()) * ((std::f64::consts::PI / a).powi(2) + beta * beta).sqrt();
-    s3.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * f_est };
-    let r3 = femcore::solve::solve(&mesh3, &s3, &mut SolveState::default()).unwrap();
+    let f_est =
+        C0 / (2.0 * std::f64::consts::PI * 4.8f64.sqrt()) * ((std::f64::consts::PI / a).powi(2) + beta * beta).sqrt();
+    s3.study = Study::Cavity { n_modes: 4, f_search: 0.9 * f_est };
+    let r3 = common::solve(&mesh3, &s3).unwrap();
     let f3: Vec<f64> = r3.solutions.iter().map(|x| x.value.unwrap()).collect();
     println!("3D frequencies (GHz): {:?}", f3.iter().map(|f| f / 1e9).collect::<Vec<_>>());
     // 2D at every 3D frequency: some mode must have beta
     let mesh2 = common::rect(a, b, 24, 12);
     let mut matched = 0;
     for &f in &f3 {
-        let mut s2 = ProblemSpec::new(Physics::Emw);
+        let mut s2 = common::emw();
         s2.order = 2;
         s2.materials.aniso.insert(1, crystal(tilt));
         let k0 = 2.0 * std::f64::consts::PI * f / C0;
         s2.study = Study::Modes { freq: f, n_target: beta / k0, evanescent: false, n_modes: 3 };
-        let r2 = femcore::solve::solve(&mesh2, &s2, &mut SolveState::default()).unwrap();
-        let betas: Vec<f64> = r2.solutions.iter().map(|s| s.neff.unwrap().0 * k0).collect();
+        let r2 = common::solve(&mesh2, &s2).unwrap();
+        let betas: Vec<f64> = r2.solutions.iter().map(|s| common::neff(s).0 * k0).collect();
         println!("f = {:.4} GHz: 2D betas {betas:.2?} (cell: {beta:.2})", f / 1e9);
         if betas.iter().any(|x| (x / beta - 1.0).abs() < 4e-3) {
             matched += 1;
@@ -54,15 +60,15 @@ fn the_coupled_solver_reduces_to_the_uncoupled_one_without_tilt() {
     // a crystal with its axis along z (no xz/yz terms) goes through the real solver; forcing the complex path with a PML-free
     // complex solver must give the same effective indices
     let mesh = common::rect(0.03, 0.015, 12, 6);
-    let mut s = ProblemSpec::new(Physics::Emw);
+    let mut s = common::emw();
     s.order = 2;
     s.materials.aniso.insert(1, crystal(0.0));
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-    let real = femcore::ems::solve_emw(&mesh, &s).unwrap();
-    let (eps, mu) = femcore::ems_pml::cell_materials(&mesh, &s.materials).unwrap();
-    let cm = femcore::ems_pml::solve_modes_complex(&mesh, 12e9, &eps, &mu, femcore::linalg::csr::c(1.6, 0.0), 3, 2).unwrap();
+    let real = common::solve(&mesh, &s).unwrap();
+    let (eps, mu) = femcore::optical::cell_materials(&mesh, &s.materials).unwrap();
+    let cm = nyx_ems::solve_modes_complex(&mesh, 12e9, &eps, &mu, femcore::linalg::csr::c(1.6, 0.0), 3, 2).unwrap();
     for (r, z) in real.solutions.iter().zip(&cm.neff) {
-        assert!((r.neff.unwrap().0 - z.re).abs() < 1e-8 && z.im.abs() < 1e-8, "{} against {}", r.neff.unwrap().0, z.re);
+        assert!((common::neff(r).0 - z.re).abs() < 1e-8 && z.im.abs() < 1e-8, "{} against {}", common::neff(r).0, z.re);
     }
 }
 
@@ -71,12 +77,12 @@ fn modes_along_plus_y_and_minus_y_have_the_same_effective_indices_and_different_
     // everything propagates along +y; the other direction is kept as a test hook. A lossless reciprocal guide has the
     // same neff both ways, but the longitudinal field of a tilted crystal (xz/yz terms) is not simply the mirror image
     let mesh = common::rect(0.03, 0.015, 12, 6);
-    let mut s = ProblemSpec::new(Physics::Emw);
+    let mut s = common::emw();
     s.order = 2;
     s.materials.aniso.insert(1, crystal(40.0));
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-    let fwd = femcore::optical::solve_optical_wafer(&mesh, &s, 1.0).unwrap();
-    let bwd = femcore::optical::solve_optical_wafer(&mesh, &s, -1.0).unwrap();
+    let fwd = nyx_ems::solve_optical_wafer(&mesh, &s, 1.0).unwrap();
+    let bwd = nyx_ems::solve_optical_wafer(&mesh, &s, -1.0).unwrap();
     assert!(fwd.left_handed && !bwd.left_handed);
     for (a, b) in fwd.modes.iter().zip(&bwd.modes) {
         assert!((a.neff.re - b.neff.re).abs() < 1e-7, "{} against {}", a.neff.re, b.neff.re);

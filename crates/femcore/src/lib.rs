@@ -12,7 +12,8 @@
 //!   `linalg::driver` is the door the kernels use)
 //! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (the shared cross-section solid kernel, today for rings), `sms_pml`,
 //!   `sms_lrb` (absorbing boundaries), `sms_floquet` and `periodic` (periodic cells), `sms_axisym` (bodies of
-//!   revolution); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
+//!   revolution); the electromagnetic kernels are in `nyx-ems` (ADR 45); `edge` (the 2D edge-element basis) and `pml` (coordinate
+//!   stretching) are what they share with `optical` and the solid kernels
 //! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)
 //! * ported libraries: `linalg` (see above; Krylov, eigen, preconditioner, time-stepping and optimisation library for
 //!   real and complex systems) and the mesher port in `mesh`, `meshing` and `adapt`, see docs/ports
@@ -26,10 +27,7 @@
 #![allow(clippy::needless_range_loop, clippy::neg_cmp_op_on_partial_ord)]
 pub mod analysis;
 pub mod optical;
-pub mod ems;
-pub mod ems3d;
-pub mod ems_axisym;
-pub mod ems_pml;
+pub mod edge;
 pub mod expr;
 pub mod fem;
 pub mod fields;
@@ -41,6 +39,7 @@ pub mod mesh;
 pub mod meshing;
 pub mod par;
 pub mod periodic;
+pub mod pml;
 pub mod polarization;
 pub mod problem;
 pub mod props;

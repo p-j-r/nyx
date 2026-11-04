@@ -251,32 +251,32 @@ impl BraggGrating {
     }
 
     /// The Bragg frequency of the unperturbed wire of mean width: `f = c / (2 period n_eff)` for a phase of `pi`.
-    pub fn bragg_frequency_estimate(&self) -> Result<f64, String> {
-        let n = fundamental_neff(&self.wire(self.mean_width() - self.width))?;
+    pub fn bragg_frequency_estimate(&self, solver: super::Solver) -> Result<f64, String> {
+        let n = fundamental_neff(&self.wire(self.mean_width() - self.width), solver)?;
         Ok(C0 * (self.phase / self.period) / (2.0 * std::f64::consts::PI * n))
     }
 
     /// The period at which the unperturbed wire of mean width is Bragg-matched at `wavelength`: `lambda / (2 n_eff)`.
-    pub fn matched_period(&self) -> Result<f64, String> {
-        Ok(self.wavelength / (2.0 * fundamental_neff(&self.wire(self.mean_width() - self.width))?))
+    pub fn matched_period(&self, solver: super::Solver) -> Result<f64, String> {
+        Ok(self.wavelength / (2.0 * fundamental_neff(&self.wire(self.mean_width() - self.width), solver)?))
     }
 
     /// Meshes and solves the cell at the configured Floquet phase.
-    pub fn solve(&self) -> Result<SolveResult, String> {
+    pub fn solve(&self, solver: super::Solver) -> Result<SolveResult, String> {
         let cell = self.mesh()?;
-        let f0 = 0.95 * self.bragg_frequency_estimate()?;
-        crate::solve::solve(&cell.mesh, &self.spec(&cell, f0), &mut SolveState::default())
+        let f0 = 0.95 * self.bragg_frequency_estimate(solver)?;
+        solver(&cell.mesh, &self.spec(&cell, f0))
     }
 
     /// The stop band: solves the cell at the band edge (phase `pi`) and measures the splitting of the two lowest modes.
-    pub fn band_edges(&self) -> Result<BandEdges, String> {
+    pub fn band_edges(&self, solver: super::Solver) -> Result<BandEdges, String> {
         let at_edge = BraggGrating { phase: std::f64::consts::PI, n_modes: self.n_modes.max(2), ..self.clone() };
-        let r = at_edge.solve()?;
-        at_edge.band_edges_of(&r)
+        let r = at_edge.solve(solver)?;
+        at_edge.band_edges_of(&r, solver)
     }
 
     /// The stop band from a solution of the cell at the band edge (`solve` with the phase `pi`).
-    pub fn band_edges_of(&self, r: &SolveResult) -> Result<BandEdges, String> {
+    pub fn band_edges_of(&self, r: &SolveResult, solver: super::Solver) -> Result<BandEdges, String> {
         let mut f: Vec<f64> = r.solutions.iter().filter_map(|s| s.value).collect();
         f.sort_by(|a, b| a.total_cmp(b));
         if f.len() < 2 {
@@ -285,7 +285,7 @@ impl BraggGrating {
         let (f_low, f_high) = (f[0], f[1]);
         let mean = 0.5 * (f_low + f_high);
         let wire = self.wire(self.mean_width() - self.width);
-        let ng = group_index(&wire)?;
+        let ng = group_index(&wire, solver)?;
         let kappa = std::f64::consts::PI * ng * (f_high - f_low) / C0;
         // coupled-mode estimate from the effective indices of the two sections of the teeth
         let extra = match self.kind {
@@ -293,15 +293,15 @@ impl BraggGrating {
             GratingKind::Asymmetric => self.tooth,
             GratingKind::Uniform => 0.0,
         };
-        let delta = (fundamental_neff(&self.wire(extra))? - fundamental_neff(&self.wire(0.0))?).abs();
+        let delta = (fundamental_neff(&self.wire(extra), solver)? - fundamental_neff(&self.wire(0.0), solver)?).abs();
         let kappa_estimate = 2.0 * delta * (std::f64::consts::PI * self.duty).sin() / self.wavelength;
         Ok(BandEdges { f_low, f_high, gap_fraction: (f_high - f_low) / mean, kappa, group_index: ng, stopband: C0 / mean * (f_high - f_low) / mean, bragg_wavelength: C0 / mean, kappa_estimate })
     }
 }
 
 /// Effective index of the fundamental quasi-TE mode of a wire (the mode with the largest x share among the modes found).
-pub fn fundamental_neff(w: &SoiWire) -> Result<f64, String> {
-    let r = w.solve()?;
+pub fn fundamental_neff(w: &SoiWire, solver: super::Solver) -> Result<f64, String> {
+    let r = w.solve(solver)?;
     let a = r.analysis.as_ref().ok_or("the mode study carries no polarization analysis")?;
     let best = a
         .rows
@@ -315,10 +315,10 @@ pub fn fundamental_neff(w: &SoiWire) -> Result<f64, String> {
 }
 
 /// Group index `n_g = n_eff - lambda dn_eff/dlambda` of the fundamental quasi-TE mode, by central differences over +-1 % in wavelength.
-pub fn group_index(w: &SoiWire) -> Result<f64, String> {
+pub fn group_index(w: &SoiWire, solver: super::Solver) -> Result<f64, String> {
     let rel = 0.01;
     let (a, b) = (SoiWire { wavelength: w.wavelength * (1.0 - rel), ..w.clone() }, SoiWire { wavelength: w.wavelength * (1.0 + rel), ..w.clone() });
-    let (na, nb, n0) = (fundamental_neff(&a)?, fundamental_neff(&b)?, fundamental_neff(w)?);
+    let (na, nb, n0) = (fundamental_neff(&a, solver)?, fundamental_neff(&b, solver)?, fundamental_neff(w, solver)?);
     let dn_dl = (nb - na) / (w.wavelength * 2.0 * rel);
     Ok(n0 - w.wavelength * dn_dl)
 }

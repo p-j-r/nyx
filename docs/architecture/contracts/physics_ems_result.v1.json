@@ -1,0 +1,313 @@
+{
+  "axisymmetric_modes": {
+    "physics": "ems",
+    "scalars": [
+      "f1 (Hz)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": false,
+        "has_value": true,
+        "label_prefix": "mode 1"
+      }
+    ],
+    "study": "axisymmetric_modes"
+  },
+  "cavity": {
+    "physics": "ems",
+    "scalars": [
+      "f1 (Hz)",
+      "f2 (Hz)",
+      "polarization 1",
+      "polarization 2"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": false,
+        "has_value": true,
+        "label_prefix": "mode 1"
+      },
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": false,
+        "has_value": true,
+        "label_prefix": "mode 2"
+      }
+    ],
+    "study": "cavity"
+  },
+  "modes_complex": {
+    "physics": "ems",
+    "scalars": [
+      "neff 1",
+      "Q 1 = Re/(2|Im|) of neff",
+      "neff 2",
+      "Q 2 = Re/(2|Im|) of neff",
+      "polarization 1",
+      "polarization 2"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ez",
+          "Ey"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Exz|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Ey|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": false,
+        "label_prefix": "mode 1"
+      },
+      {
+        "cell_fields": [
+          "Ex",
+          "Ez",
+          "Ey"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Exz|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Ey|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": false,
+        "label_prefix": "mode 2"
+      }
+    ],
+    "study": "modes"
+  },
+  "modes_real": {
+    "physics": "ems",
+    "scalars": [
+      "neff 1",
+      "neff 2",
+      "polarization 1",
+      "polarization 2"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ez",
+          "Ey"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Exz|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Ey|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": false,
+        "label_prefix": "mode 1"
+      },
+      {
+        "cell_fields": [
+          "Ex",
+          "Ez",
+          "Ey"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Exz|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Ey|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": false,
+        "label_prefix": "mode 2"
+      }
+    ],
+    "study": "modes"
+  }
+}

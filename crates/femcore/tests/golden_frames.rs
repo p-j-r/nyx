@@ -10,8 +10,6 @@ use femcore::problem::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-const C0: f64 = 299_792_458.0;
-
 fn record(r: &SolveResult) -> Value {
     let mut sols = vec![];
     for s in &r.solutions {
@@ -176,49 +174,6 @@ fn cell_fields_reproduce_the_plot_fields(mesh: &femcore::mesh::SimplexMesh, r: &
 // ---------------------------------------------------------------------- scalar kernels
 
 // ---------------------------------------------------------------------- optical modes
-
-#[test]
-fn golden_soi_wire_modes() {
-    let wire = femcore::usecases::soi::SoiWire { n_modes: 2, ..Default::default() };
-    golden("emw_soi_wire", &wire.solve().unwrap(), 1e-8);
-}
-
-#[test]
-fn golden_soi_wire_with_sloped_wall_hybrid_modes() {
-    let wire = femcore::usecases::soi::SoiWire { width: 300e-9, sidewall_left_deg: Some(75.0), n_modes: 2, ..Default::default() };
-    golden("emw_soi_hybrid", &wire.solve().unwrap(), 1e-8);
-}
-
-fn crystal(tilt_deg: f64) -> Anisotropy {
-    Anisotropy { permittivity: Some(Tensor::Diagonal { x: 4.0, y: 4.0, z: 6.5 }), euler_deg: [0.0, tilt_deg, 0.0], ..Default::default() }
-}
-
-#[test]
-fn golden_tilted_crystal_in_a_pec_guide() {
-    // the coupled (xz/yz) path of the complex solver, then the uncoupled real path
-    for (name, tilt) in [("emw_pec_tilted", 40.0), ("emw_pec_straight", 0.0)] {
-        let mesh = common::rect(0.03, 0.015, 12, 6);
-        let mut s = ProblemSpec::new(Physics::Emw);
-        s.order = 2;
-        s.materials.aniso.insert(1, crystal(tilt));
-        s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-        golden(name, &solve(&mesh, &s), 1e-7);
-    }
-}
-
-#[test]
-fn golden_pec_guide_with_a_pml() {
-    let mesh = common::rect_split_x(0.03, 0.015, 0.02, 0.0025);
-    let mut s = ProblemSpec::new(Physics::Emw);
-    s.order = 2;
-    s.materials.set(1, "eps_r", 4.0);
-    s.materials.set(2, "eps_r", 1.0);
-    // absorbing layer on the right (domain 2) along x
-    s.materials.pml.insert(2, Pml { x: PmlDir::Plus, ..Pml::default() });
-    s.study = Study::Modes { freq: 12e9, n_target: 1.5, evanescent: false, n_modes: 3 };
-    let _ = C0;
-    golden("emw_pml_x", &solve(&mesh, &s), 1e-7);
-}
 
 // ---------------------------------------------------------------------- solid mechanics
 

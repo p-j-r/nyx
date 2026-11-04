@@ -39,3 +39,6 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 39 | [The store takes spec text and a card function](adr/0039-the-store-takes-spec-text-and-a-card-function.md) | `nyx-store`, `nyx-engine::store_link` |
 | 40 | [3D geom models meshed by the lattice mesher (`Domain3`)](adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md) | `femcore::meshing::{mesher3d, refine3d, geomdrive3}` |
 | 41 | [A physics crate owns its typed problem; the window reaches it through a legacy bridge](adr/0041-physics-crate-pattern-and-the-legacy-bridge.md) | `nyx-dfs`, `nyx-physics::decode`, `nyx-engine::legacy` |
+| 45 | [The EM kernels move into `nyx-ems`; what they share stays in `femcore`](adr/0045-ems-moves-into-nyx-ems.md) | `nyx-ems`, `femcore::{edge, pml, optical}` |
+| 46 | [The axisymmetric EM kernel is checked against closed forms and gets a study](adr/0046-axisymmetric-ems-checked-and-given-a-study.md) | `nyx-ems::axisym` |
+| 47 | [`ems` in the legacy bridge; the use cases take their solver as an argument](adr/0047-ems-in-the-legacy-bridge-and-the-use-cases.md) | `nyx-engine::legacy::ems`, `femcore::usecases` |

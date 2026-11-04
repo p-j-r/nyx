@@ -427,7 +427,9 @@ pub fn soi_hybrid_wire() -> Project {
 /// the propagation axis.
 fn bragg_project(grating: &femcore::usecases::bragg::BraggGrating) -> Project {
     let cell = grating.mesh().expect("the grating mesh");
-    let f_search = 0.95 * grating.bragg_frequency_estimate().expect("the Bragg frequency of the wire");
+    let f_search = 0.95 * grating
+        .bragg_frequency_estimate(&|m, s| nyx_engine::legacy::solve(m, s, &mut Default::default()))
+        .expect("the Bragg frequency of the wire");
     let geometry = GeometrySpec::model_extruded(grating.cross_section().list, grating.h_far, grating.layers());
     let mut p = base(geometry, Physics::Emw);
     *p.spec_mut(Physics::Emw) = grating.spec(&cell, f_search);

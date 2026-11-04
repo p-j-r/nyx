@@ -133,7 +133,7 @@ pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: Cros
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let stretch = if spec.materials.has_pml() { Some(crate::ems_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
+    let stretch = if spec.materials.has_pml() { Some(crate::pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
     let k = match kind {
         CrossSection::Axisymmetric(m) => crate::sms_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
     };

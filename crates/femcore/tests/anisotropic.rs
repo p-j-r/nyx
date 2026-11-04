@@ -148,33 +148,6 @@ fn isotropic_plane_strain_free_expansion_is_stress_free() {
 }
 
 #[test]
-fn anisotropic_waveguide_te_modes_use_the_right_permittivity_component() {
-    // PEC rectangle a x b (x lateral, z the vertical axis, propagation along y) filled with diag(eps_x, eps_y, eps_z): TE10 (E along z) has
-    // n^2 = eps_z - (pi/(a k0))^2, TE01 (E along x) has n^2 = eps_x - (pi/(b k0))^2; eps_y plays no role
-    let (a, b, f) = (22.86e-3, 10.16e-3, 12e9);
-    let (ex, ey, ez) = (5.0, 2.0, 3.0);
-    let mesh = common::rect(a, b, 24, 12);
-    let k0 = 2.0 * std::f64::consts::PI * f / femcore::ems::C0;
-    let n10 = (ez - (std::f64::consts::PI / a / k0).powi(2)).sqrt();
-    let n01 = (ex - (std::f64::consts::PI / b / k0).powi(2)).sqrt();
-    let mut spec = ProblemSpec::new(Physics::Emw);
-    spec.materials.aniso.insert(1, Anisotropy { permittivity: Some(Tensor::Diagonal { x: ex, y: ey, z: ez }), ..Default::default() });
-    spec.study = Study::Modes { freq: f, n_target: 1.6, evanescent: false, n_modes: 6 };
-    let r = femcore::ems::solve_emw(&mesh, &spec).unwrap();
-    let got: Vec<f64> = r.solutions.iter().map(|s| s.neff.unwrap().0).collect();
-    for want in [n10, n01] {
-        let best = got.iter().map(|g| (g - want).abs()).fold(f64::MAX, f64::min);
-        assert!(best < 2e-3 * want, "n = {want}: nearest {best} ({got:?})");
-    }
-    // a crystal tilted against the propagation axis (xz/yz terms) is solved exactly by the complex solver (checked against a 3D
-    // periodic cell in `aniso_optics.rs`); here only that it runs and stays close to the untilted modes
-    let mut tilted = spec.clone();
-    tilted.materials.aniso.get_mut(&1).unwrap().euler_deg = [0.0, 30.0, 0.0];
-    let r = femcore::ems::solve_emw(&mesh, &tilted).unwrap();
-    assert!(!r.solutions.is_empty() && r.solutions[0].neff.unwrap().0 > 1.0);
-}
-
-#[test]
 fn nonpositive_definite_stiffness_is_rejected() {
     let mesh = common::rect(1.0, 0.2, 4, 2);
     let mut spec = solid_spec(Plane::Strain, Study::Static);

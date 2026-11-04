@@ -27,5 +27,5 @@ export NYX_PROFILE=1
 step bench         cargo run --release -p nyx-engine --example bench
 step profile3d     cargo run --release -p "$pkg" --example profile3d -- 16 16 16 p2
 step mem_profile   cargo run --release -p "$pkg" --example mem_profile -- 12 12 12 p2 static auto
-step cavity_bench  cargo run --release -p "$pkg" --example cavity_bench -- 0.012 2
+step cavity_bench  cargo run --release -p nyx-engine --example cavity_bench -- 0.012 2
 step solve_scaling cargo run --release -p "$pkg" --example solve_scaling

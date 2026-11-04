@@ -137,49 +137,91 @@
   "fields": {
     "axisymmetric_modes": [
       {
-        "components": [
-          "x",
-          "y",
-          "z"
-        ],
-        "doc": "electric field of a mode (x lateral, z normal, y along the propagation)",
-        "name": "E",
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
         "unit": "a.u."
       },
       {
         "components": [],
-        "doc": "magnitude",
-        "name": "|E|",
+        "doc": "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (2D axisymmetric: azimuthal)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
         "unit": "a.u."
       }
     ],
     "cavity": [
       {
-        "components": [
-          "x",
-          "y",
-          "z"
-        ],
-        "doc": "electric field of a mode",
-        "name": "E",
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (2D axisymmetric: azimuthal)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
         "unit": "a.u."
       }
     ],
     "modes": [
       {
-        "components": [
-          "x",
-          "y",
-          "z"
-        ],
-        "doc": "electric field of a mode (x lateral, z normal, y along the propagation)",
-        "name": "E",
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
         "unit": "a.u."
       },
       {
         "components": [],
-        "doc": "magnitude",
-        "name": "|E|",
+        "doc": "magnitude of the transverse (in-plane) part",
+        "name": "|Exz|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the longitudinal part (along the propagation)",
+        "name": "|Ey|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "lateral component (real solver; `Re Ex` for a complex mode)",
+        "name": "Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "component along the propagation (real solver; `Re Ey` for a complex mode)",
+        "name": "Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "surface-normal component (real solver; `Re Ez` for a complex mode)",
+        "name": "Ez",
         "unit": "a.u."
       }
     ]
@@ -427,13 +469,14 @@
                 "properties": {
                   "azimuthal_order": {
                     "default": 0,
-                    "description": "Azimuthal order",
-                    "minimum": 0,
+                    "description": "Azimuthal order. the field goes as exp(-j m theta); m > 0 runs along +y",
+                    "maximum": 100000,
+                    "minimum": -100000,
                     "type": "integer"
                   },
-                  "freq": {
+                  "f_search": {
                     "default": 193400000000000.0,
-                    "description": "Frequency [Hz]",
+                    "description": "Search around [Hz]. the modes nearest this frequency are returned",
                     "minimum": 2.2250738585072014e-308,
                     "type": "number"
                   },
@@ -442,15 +485,10 @@
                     "description": "Number of modes",
                     "minimum": 1,
                     "type": "integer"
-                  },
-                  "n_target": {
-                    "default": 1.0,
-                    "description": "Effective index near",
-                    "type": "number"
                   }
                 },
                 "required": [
-                  "freq"
+                  "f_search"
                 ],
                 "type": "object"
               }
@@ -571,41 +609,28 @@
       "name": "Axisymmetric modes",
       "params": [
         {
-          "doc": "",
+          "doc": "the modes nearest this frequency are returned",
           "kind": {
             "default": 193400000000000.0,
             "max": null,
             "min": 2.2250738585072014e-308,
             "type": "number"
           },
-          "label": "Frequency",
-          "name": "freq",
+          "label": "Search around",
+          "name": "f_search",
           "required": true,
           "unit": "Hz"
         },
         {
-          "doc": "",
+          "doc": "the field goes as exp(-j m theta); m > 0 runs along +y",
           "kind": {
             "default": 0,
-            "max": null,
-            "min": 0,
+            "max": 100000,
+            "min": -100000,
             "type": "integer"
           },
           "label": "Azimuthal order",
           "name": "azimuthal_order",
-          "required": false,
-          "unit": ""
-        },
-        {
-          "doc": "",
-          "kind": {
-            "default": 1.0,
-            "max": null,
-            "min": null,
-            "type": "number"
-          },
-          "label": "Effective index near",
-          "name": "n_target",
           "required": false,
           "unit": ""
         },

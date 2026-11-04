@@ -194,37 +194,3 @@ fn edge_removal_and_surface_flips_never_worsen_the_worst_tetrahedron() {
     assert!(on.1 > 0.02);
 }
 
-#[test]
-fn frozen_periodic_faces_survive_adaptation_and_the_floquet_cell_still_solves() {
-    use femcore::adapt::topo3::TopoOptions3;
-    use femcore::adapt::work::{simplex_from_adapt, simplex_to_adapt};
-    use femcore::problem::*;
-    // a periodic cell of a PEC guide (see tests/emw3d.rs): faces 2 (y = 0) and 5 (y = l) are Floquet partners and must stay congruent
-    let (a, b, l) = (0.03, 0.015, 0.01);
-    // boundary numbers of common::block: 1 x = 0, 2 y = 0, 3 z = 0, 4 z = lz, 5 y = ly, 6 x = lx
-    let nyx = common::block(a, l, b, 6, 3, 2);
-    let before = simplex_to_adapt::<3>(&nyx).unwrap();
-    let topo = TopoOptions3 { frozen_labels: vec![2, 5], ..TopoOptions3::default() };
-    // finer than the start inside, as fine as the start on the frozen faces
-    let out = adapt3(&before, &UniformSize(0.0035), &topo, &AdaptOptions3::default()).unwrap();
-    let after = simplex_from_adapt(&out.mesh);
-    assert!(after.n_cells() > nyx.n_cells());
-    let on = |m: &femcore::mesh::SimplexMesh, y: f64| -> BTreeSet<[u64; 2]> {
-        (0..m.n_points()).filter(|&i| (m.points[3 * i + 1] - y).abs() < 1e-15).map(|i| [m.points[3 * i].to_bits(), m.points[3 * i + 2].to_bits()]).collect()
-    };
-    assert_eq!(on(&nyx, 0.0), on(&after, 0.0), "the y = 0 face is unchanged");
-    assert_eq!(on(&nyx, l), on(&after, l), "the y = l face is unchanged");
-    // TE10 with Floquet phase 0.8 over the cell: f = c/2 sqrt((1/a)^2 + (beta/pi)^2)
-    let phase = 0.8f64;
-    let c0 = 299_792_458.0;
-    let exact = 0.5 * c0 * ((1.0 / a).powi(2) + (phase / l / std::f64::consts::PI).powi(2)).sqrt();
-    let mut s = ProblemSpec::new(Physics::Emw);
-    s.order = 2;
-    s.materials.default.insert("eps_r".into(), 1.0);
-    s.periodic = vec![Periodic { source: vec![2], dest: vec![5], phase }];
-    s.study = Study::Eigenfrequency { n_modes: 3, f_search: 0.95 * exact };
-    let r = femcore::solve::solve(&after, &s, &mut SolveState::default()).unwrap();
-    let got: Vec<f64> = r.solutions.iter().map(|x| x.value.unwrap()).collect();
-    eprintln!("{} -> {} tets, Floquet TE10 {:.6e} vs {:.6e}", nyx.n_cells(), after.n_cells(), got[0], exact);
-    assert!((got[0] / exact - 1.0).abs() < 5e-3, "{got:?} vs {exact}");
-}

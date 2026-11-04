@@ -1,7 +1,7 @@
 //! Use case: the optical modes of a silicon wire on 300 nm silicon-on-insulator at 1550 nm.
 //!
 //! A silicon core of thickness `thickness` (300 nm by default) and `width` on a buried oxide (BOX), under an oxide or air
-//! cladding. The cross-section is a geom model (exact lines, named regions) meshed by `geomdrive`, the modes come from the full-vector solver of `emw` (Nedelec
+//! cladding. The cross-section is a geom model (exact lines, named regions) meshed by `geomdrive`, the modes come from the full-vector solver of `nyx-ems` (Nedelec
 //! degree 2 + P2, perfectly conducting walls far from the core) and every solve carries the Stokes/Poincare analysis of
 //! `analysis`: the quasi-TE and quasi-TM modes sit at the two ends of the equator of the sphere, hybrid modes (sloped
 //! side walls, rib slab, near the TE-TM crossing) move off the poles of the x/y axis and lose degree of polarization.
@@ -191,10 +191,11 @@ impl SoiWire {
         s
     }
 
-    /// Meshes and solves; the result carries the polarization analysis (`SolveResult::analysis`).
-    pub fn solve(&self) -> Result<SolveResult, String> {
+    /// Meshes and solves with `solver` (the kernels live in `nyx-ems`; the window and the tests pass `nyx_engine::legacy::solve`); the result
+    /// carries the polarization analysis (`SolveResult::analysis`).
+    pub fn solve(&self, solver: super::Solver) -> Result<SolveResult, String> {
         let g = self.mesh()?;
-        crate::solve::solve(&g.mesh, &self.spec(&g), &mut SolveState::default())
+        solver(&g.mesh, &self.spec(&g))
     }
 
     /// The same silicon thickness as an infinite slab: reference for very wide wires.

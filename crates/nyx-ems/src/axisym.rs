@@ -17,13 +17,19 @@
 //! adequate for well-confined whispering-gallery modes in a large enough domain. The mesh must not
 //! touch the axis `r = 0`.
 
-use crate::optical::fine_rule;
-use crate::linalg::csr::{c, CCoo, CCsr, C};
-use crate::linalg::driver::eigs_complex;
-use crate::ems::{cell_data, edge_basis, tri_g, CellData, C0};
-use crate::fem::*;
-use crate::mesh::SimplexMesh;
-use crate::problem::*;
+use crate::modes::C0;
+use crate::problem::{Problem, Study};
+use crate::Solved;
+use femcore::edge::{cell_data, edge_basis, tri_g, CellData};
+use femcore::fem::*;
+use femcore::fields::{local_bary, node_average, CellFields};
+use femcore::linalg::csr::{c, CCoo, CCsr, C};
+use femcore::linalg::driver::eigs_complex;
+use femcore::optical::{fine_rule, EPS0, MU0};
+use femcore::pml::stretch;
+use femcore::props::{Materials, Pml, PmlDir};
+use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
+use std::time::Instant;
 
 /// Material data of every cell of an axisymmetric problem (diagonal tensors in the order r, z, theta; complex inside
 /// perfectly matched layers).
@@ -35,16 +41,32 @@ pub struct AxiMaterial {
 
 impl AxiMaterial {
     /// Isotropic `eps_r` and `mu_r = 1` per domain (`index`: refractive index per domain label, default 1).
-    pub fn from_indices(mesh: &SimplexMesh, index: &std::collections::BTreeMap<i32, f64>) -> AxiMaterial {
-        let eps: Vec<[C; 3]> = (0..mesh.n_cells()).map(|ci| { let n = index.get(&mesh.cell_labels[ci]).copied().unwrap_or(1.0); [c(n * n, 0.0); 3] }).collect();
+    pub fn from_indices(mesh: &Discretisation, index: &std::collections::BTreeMap<i32, f64>) -> AxiMaterial {
+        let eps: Vec<[C; 3]> = (0..mesh.n_cells())
+            .map(|ci| {
+                let n = index.get(&mesh.cell_labels[ci]).copied().unwrap_or(1.0);
+                [c(n * n, 0.0); 3]
+            })
+            .collect();
         AxiMaterial { mu: vec![[c(1.0, 0.0); 3]; eps.len()], eps }
+    }
+
+    /// `eps_r` and `mu_r` per domain from the problem's materials (default 1), absorbing layers (`Materials::pml`) included.
+    pub fn from_materials(mesh: &Discretisation, m: &Materials) -> Result<AxiMaterial, String> {
+        let eps = m.cell_values(mesh, "eps_r", Some(1.0))?;
+        let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
+        let mat = AxiMaterial {
+            eps: eps.iter().map(|&e| [c(e, 0.0); 3]).collect(),
+            mu: mu.iter().map(|&u| [c(u, 0.0); 3]).collect(),
+        };
+        Ok(mat.with_pml(mesh, &m.pml))
     }
 
     /// Absorbing layers by complex coordinate stretching of `r` and `z` (`Pml::x` is the r direction, `Pml::z` the z direction).
     /// With the stretches `s_r = dr~/dr`, `s_z` and `s_theta = r~/r`, the layer is the material
     /// `eps_i -> eps_i s_1 s_2 s_3 / s_i^2` (and the same for `mu`) in the physical coordinates, `r~` being the integral of
     /// `s_r` from the interface of the layer.
-    pub fn with_pml(mut self, mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> AxiMaterial {
+    pub fn with_pml(mut self, mesh: &Discretisation, pml: &std::collections::BTreeMap<i32, Pml>) -> AxiMaterial {
         let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
         for ci in 0..mesh.n_cells() {
             let l = mesh.cell_labels[ci];
@@ -68,7 +90,7 @@ impl AxiMaterial {
                     cen[k] += mesh.point(v as usize)[k] / 3.0;
                 }
             }
-            let (sr, sz) = crate::ems_pml::stretch(p, [p.x, p.z], cen, *lo, *hi);
+            let (sr, sz) = stretch(p, [p.x, p.z], cen, *lo, *hi);
             // r~ at the centre of the cell
             let r = cen[0];
             let len = (hi[0] - lo[0]).max(1e-300);
@@ -117,14 +139,14 @@ pub struct Fields3 {
 }
 
 pub(crate) struct AxiCtx<'a> {
-    pub mesh: &'a SimplexMesh,
+    pub mesh: &'a Discretisation,
     pub geo: Geometry,
     pub cd: CellData,
     pub order: usize,
 }
 
 impl<'a> AxiCtx<'a> {
-    pub fn new(mesh: &'a SimplexMesh, order: usize) -> Self {
+    pub fn new(mesh: &'a Discretisation, order: usize) -> Self {
         AxiCtx { mesh, geo: geometry(mesh), cd: cell_data(mesh, order), order }
     }
 
@@ -170,19 +192,26 @@ impl<'a> AxiCtx<'a> {
         let cr = -(ez * im) / r - dty;
         let ct = -cth;
         let cz = dtx + et / r + er * im / r;
-        let q = c(0.0, 1.0) / (omega * crate::optical::MU0);
+        let q = c(0.0, 1.0) / (omega * MU0);
         let mu = mat.mu[ci];
         // H in the order (r, z, theta)
         let h = [cr * q / mu[0], cz * q / mu[1], ct * q / mu[2]];
         let e = [er, ez, et];
         let eps = mat.eps[ci];
-        let d = [e[0] * eps[0] * crate::optical::EPS0, e[1] * eps[1] * crate::optical::EPS0, e[2] * eps[2] * crate::optical::EPS0];
+        let d = [e[0] * eps[0] * EPS0, e[1] * eps[1] * EPS0, e[2] * eps[2] * EPS0];
         Fields3 { e, d, h }
     }
 }
 
 /// Modes with frequency nearest `f_target` at azimuthal order `m` (`nev` of them).
-pub fn solve_axisym_modes(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, f_target: f64, nev: usize, order: usize) -> Result<AxiModes, String> {
+pub fn solve_axisym_modes(
+    mesh: &Discretisation,
+    mat: &AxiMaterial,
+    m: f64,
+    f_target: f64,
+    nev: usize,
+    order: usize,
+) -> Result<AxiModes, String> {
     let asm = assemble_axisym(mesh, mat, m, order)?;
     solve_axisym_pairs(&asm, f_target, nev)
 }
@@ -198,7 +227,7 @@ pub struct AxiAssembly {
     pub n_tot: usize,
 }
 
-pub fn assemble_axisym(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, order: usize) -> Result<AxiAssembly, String> {
+pub fn assemble_axisym(mesh: &Discretisation, mat: &AxiMaterial, m: f64, order: usize) -> Result<AxiAssembly, String> {
     if mesh.dim != 2 {
         return Err("an axisymmetric problem needs a 2D mesh in (r, z)".into());
     }
@@ -254,9 +283,13 @@ pub fn assemble_axisym(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, order: usi
             for i in 0..nb {
                 for j in 0..nb {
                     // C components are (r, theta, z): mu index (r, z, theta)
-                    let kk = cb[i][0].conj() * cb[j][0] / mu[0] + cb[i][1].conj() * cb[j][1] / mu[2] + cb[i][2].conj() * cb[j][2] / mu[1];
+                    let kk = cb[i][0].conj() * cb[j][0] / mu[0]
+                        + cb[i][1].conj() * cb[j][1] / mu[2]
+                        + cb[i][2].conj() * cb[j][2] / mu[1];
                     kl[i * nb + j] += kk * wr;
-                    let mm = eps[0] * (eb[i][0] * eb[j][0]) + eps[1] * (eb[i][1] * eb[j][1]) + eps[2] * (eb[i][2] * eb[j][2]);
+                    let mm = eps[0] * (eb[i][0] * eb[j][0])
+                        + eps[1] * (eb[i][1] * eb[j][1])
+                        + eps[2] * (eb[i][2] * eb[j][2]);
                     ml[i * nb + j] += mm * wr;
                 }
             }
@@ -271,10 +304,16 @@ pub fn assemble_axisym(mesh: &SimplexMesh, mat: &AxiMaterial, m: f64, order: usi
     let b_full: CCsr = b_coo.to_csr();
     // perfectly conducting walls on the exterior facets
     let exterior = mesh.exterior_facets();
-    let mut be: Vec<usize> = (0..mesh.n_facets()).filter(|&f| exterior[f]).map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1])).collect();
+    let mut be: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| exterior[f])
+        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
+        .collect();
     be.sort_unstable();
     be.dedup();
-    let mut bn: Vec<usize> = (0..mesh.n_facets()).filter(|&f| exterior[f]).flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>()).collect();
+    let mut bn: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| exterior[f])
+        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
+        .collect();
     bn.sort_unstable();
     bn.dedup();
     let mut fixed: Vec<usize> = be.clone();
@@ -312,19 +351,29 @@ pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Resul
     if modes.is_empty() {
         return Err("no mode converged near the target frequency".into());
     }
-    Ok(AxiModes { m, freqs: modes.iter().map(|x| x.0.re).collect(), freqs_c: modes.iter().map(|x| x.0).collect(), vectors: modes.into_iter().map(|x| x.1).collect(), order, converged: pairs.converged })
+    Ok(AxiModes {
+        m,
+        freqs: modes.iter().map(|x| x.0.re).collect(),
+        freqs_c: modes.iter().map(|x| x.0).collect(),
+        vectors: modes.into_iter().map(|x| x.1).collect(),
+        order,
+        converged: pairs.converged,
+    })
 }
-
-#[allow(dead_code)]
-fn _unused(_: &Physics) {}
 
 /// The electric field of mode `j` at the quadrature points of every cell outside the absorbing layers (`in_pml`), as the samples of a
 /// polarization analysis: `ex` = E_r (the in-plane, "TE-like" direction), `ey` = E_z (normal to the plane of the ring), `ez` = E_theta (the
 /// direction of propagation). Each point carries the weight `r * area` of the volume of revolution it stands for. The triple (r, z, theta)
 /// is left-handed, so the analysis of a ring reads the sense of rotation with `TimeConvention::MinusI`.
-pub fn mode_samples(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: usize, in_pml: &[bool]) -> Vec<crate::polarization::Sample> {
+pub fn mode_samples(
+    mesh: &Discretisation,
+    mat: &AxiMaterial,
+    modes: &AxiModes,
+    j: usize,
+    in_pml: &[bool],
+) -> Vec<femcore::polarization::Sample> {
     let ctx = AxiCtx::new(mesh, modes.order);
-    let (pts, wts) = crate::optical::fine_rule();
+    let (pts, wts) = fine_rule();
     let omega = 2.0 * std::f64::consts::PI * modes.freqs[j];
     let mut out = Vec::with_capacity(mesh.n_cells() * pts.len());
     for ci in 0..mesh.n_cells() {
@@ -334,7 +383,12 @@ pub fn mode_samples(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: 
         for (l, w) in pts.iter().zip(&wts) {
             let f = ctx.fields(&modes.vectors[j], modes.m, omega, mat, ci, l);
             let cx = |z: C| [z.re, z.im];
-            out.push(crate::polarization::Sample { ex: cx(f.e[0]), ey: cx(f.e[1]), ez: cx(f.e[2]), w: w * ctx.geo.vol[ci] * ctx.radius(ci, l) });
+            out.push(femcore::polarization::Sample {
+                ex: cx(f.e[0]),
+                ey: cx(f.e[1]),
+                ez: cx(f.e[2]),
+                w: w * ctx.geo.vol[ci] * ctx.radius(ci, l),
+            });
         }
     }
     out
@@ -343,7 +397,7 @@ pub fn mode_samples(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: 
 /// The power `P = 2 Int Re(conj(E_z) H_r - conj(E_r) H_z) dA` of mode `j` along `+theta` (W for the amplitudes of the mode), with the
 /// fields of the time convention `e^{j omega t}` (`H = j curl E / (omega mu)`). With the azimuthal dependence `exp(-i m theta)` it is positive
 /// for `m > 0` and negative for `m < 0`: the wave runs along `+theta`, wafer `+y`.
-pub fn power_along_theta(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes, j: usize) -> f64 {
+pub fn power_along_theta(mesh: &Discretisation, mat: &AxiMaterial, modes: &AxiModes, j: usize) -> f64 {
     let ctx = AxiCtx::new(mesh, modes.order);
     let (pts, wts) = fine_rule();
     let omega = 2.0 * std::f64::consts::PI * modes.freqs[j];
@@ -355,4 +409,103 @@ pub fn power_along_theta(mesh: &SimplexMesh, mat: &AxiMaterial, modes: &AxiModes
         }
     }
     p
+}
+
+/// Stage 3: the electric field of mode `j` at the local nodes of every cell, as plot fields (`|E|`, `Re Ex`, `Re Ey`, `Re Ez`, wafer names: x is
+/// r, z is z, y is theta; the phase is rotated so that the largest component is real; scaled to max |E| = 1) and as the complex components per
+/// cell in the same phase and scale.
+pub fn axisym_fields_cells(
+    mesh: &Discretisation,
+    mat: &AxiMaterial,
+    modes: &AxiModes,
+    j: usize,
+) -> (Vec<Field>, CellFields) {
+    let order = modes.order;
+    let ctx = AxiCtx::new(mesh, order);
+    let (nc, nloc) = (mesh.n_cells(), mesh.nloc(order));
+    let lam = local_bary(2, order);
+    let omega = 2.0 * std::f64::consts::PI * modes.freqs[j];
+    let mut e = vec![[c(0.0, 0.0); 3]; nc * nloc];
+    for ci in 0..nc {
+        for (a, l) in lam.iter().enumerate() {
+            e[ci * nloc + a] = ctx.fields(&modes.vectors[j], modes.m, omega, mat, ci, &[l[0], l[1], l[2]]).e;
+        }
+    }
+    let big =
+        e.iter().flat_map(|v| v.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+    let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+    let mag: Vec<f64> = e.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
+    let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
+    let avg = |vals: Vec<f64>| node_average(mesh, &vals.iter().map(|x| x * s).collect::<Vec<f64>>(), 1, order);
+    // the components are stored in the order (r, z, theta) = wafer (x, z, y)
+    let fields = vec![
+        Field::scalar("|E|", "a.u.", avg(mag)),
+        Field::scalar("Re Ex", "a.u.", avg(e.iter().map(|v| (v[0] * rot).re).collect())),
+        Field::scalar("Re Ey", "a.u.", avg(e.iter().map(|v| (v[2] * rot).re).collect())),
+        Field::scalar("Re Ez", "a.u.", avg(e.iter().map(|v| (v[1] * rot).re).collect())),
+    ];
+    let mut cells = CellFields::new(mesh, order);
+    for (k, name) in [(0, "Ex"), (2, "Ey"), (1, "Ez")] {
+        let z: Vec<C> = e.iter().map(|v| v[k] * rot * s).collect();
+        cells.push_complex(name, "a.u.", z.iter().map(|x| x.re).collect(), z.iter().map(|x| x.im).collect());
+    }
+    (fields, cells)
+}
+
+/// The modes of a body of revolution for an `AxisymmetricModes` study: the three stages, one solution per mode with its frequency (and Q when
+/// absorbing layers make it complex).
+pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<Solved, String> {
+    let t0 = Instant::now();
+    let Study::AxisymmetricModes { f_search, azimuthal_order, n_modes } = problem.study.clone() else {
+        return Err("an axisymmetric problem needs an AxisymmetricModes study".into());
+    };
+    if f_search <= 0.0 {
+        return Err("the search frequency must be positive".into());
+    }
+    if n_modes < 1 {
+        return Err("at least one mode is needed".into());
+    }
+    let mat = AxiMaterial::from_materials(mesh, &problem.materials)?;
+    let asm = assemble_axisym(mesh, &mat, azimuthal_order as f64, problem.order)?;
+    let modes = solve_axisym_pairs(&asm, f_search, n_modes)?;
+    let mut solutions = vec![];
+    let mut scalars = vec![];
+    for (j, f) in modes.freqs_c.iter().enumerate() {
+        let (fields, cells) = axisym_fields_cells(mesh, &mat, &modes, j);
+        let lossy = f.im.abs() > 1e-12 * f.re.abs().max(1.0);
+        let label = if lossy {
+            format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, f.re / (2.0 * f.im.abs()))
+        } else {
+            format!("mode {}: {:.6} GHz", j + 1, f.re / 1e9)
+        };
+        solutions.push(Solution {
+            label,
+            fields,
+            cell_fields: cell_fields_of(&cells),
+            value: Some(f.re),
+            ..Default::default()
+        });
+        if lossy {
+            scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
+            scalars.push((format!("Q{}", j + 1), Scalar::Num(f.re / (2.0 * f.im.abs()))));
+        } else {
+            scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(f.re)));
+        }
+    }
+    let mut log = vec![format!("azimuthal order {azimuthal_order}, {} dofs, shift {:.4e} Hz", asm.n_tot, f_search)];
+    if !modes.converged {
+        log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
+    }
+    let result = SolveResult {
+        physics: "ems".into(),
+        study: "axisymmetric_modes".into(),
+        order: problem.order as u8,
+        dim: 2,
+        solutions,
+        scalars,
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: asm.n_tot,
+    };
+    Ok(Solved::with_analysis(result, None))
 }

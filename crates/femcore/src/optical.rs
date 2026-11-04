@@ -1,12 +1,13 @@
-//! Optical modes of a 2D cross-section as a field-evaluable set: the modes of `ems`/`ems_pml` together with the material data
+//! Optical modes of a 2D cross-section as a field-evaluable set: the modes of the `nyx-ems` mode solvers together with the material data
 //! needed to evaluate their E, D and H on the mesh, the vacuum constants, the 24-point quadrature rule used for field
 //! integrals, and the samplers the polarization analysis (`analysis`, `polarization`) is built on. Everything works on the native
 //! mesh with the finite-element basis functions of the mode solvers. (Split out of `sbs`, which held it next to the Brillouin
-//! coupling integrals; the Brillouin code is gone, see ADR 24.)
+//! coupling integrals; the Brillouin code is gone, see ADR 24.) The solvers that produce a set live in `nyx-ems` since restructure
+//! phase 4 (ADR 45); the complex material tensors they and the field sampler share (`EpsC`, `MuC`, `cell_materials`) stay here.
 
 use crate::linalg::csr::{c, C};
-use crate::ems::{cell_data, edge_basis, tri_g, CellData, EpsCell, Modes, C0};
-use crate::ems_pml::{cell_materials, cell_materials_signed, solve_modes_complex, EpsC, ModesC, MuC};
+use crate::edge::{cell_data, edge_basis, tri_g, CellData};
+use crate::pml::stretch;
 use crate::fem::*;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
@@ -14,6 +15,79 @@ use std::collections::BTreeSet;
 
 pub const EPS0: f64 = 8.854_187_812_8e-12;
 pub const MU0: f64 = 1.256_637_062_12e-6;
+/// Speed of light in vacuum (m/s).
+pub const C0: f64 = 299_792_458.0;
+
+#[derive(Clone, Copy, Debug)]
+pub struct EpsC {
+    pub xx: C,
+    pub xy: C,
+    pub yy: C,
+    pub zz: C,
+    /// couplings of the transverse components x, y to the propagation axis
+    pub xz: C,
+    pub yz: C,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MuC {
+    pub x: C,
+    pub y: C,
+    pub z: C,
+}
+
+
+/// Complex material tensors of every cell including the PML stretching, in the local axes of the mode solvers (`section::local_tensor`).
+/// The layers of a cross-section absorb along the wafer axes x and z.
+pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
+    cell_materials_signed(mesh, m, crate::section::PROP_SIGN)
+}
+
+/// As `cell_materials` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
+pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
+    let tens: Vec<_> = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(|t| crate::section::local_tensor_signed(t, prop_sign)).collect();
+    let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
+    // bounding boxes of the PML domains
+    let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
+    for c in 0..mesh.n_cells() {
+        let l = mesh.cell_labels[c];
+        if m.pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off) {
+            let e = boxes.entry(l).or_insert(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]));
+            for &v in mesh.cell(c) {
+                let p = mesh.point(v as usize);
+                for k in 0..2 {
+                    e.0[k] = e.0[k].min(p[k]);
+                    e.1[k] = e.1[k].max(p[k]);
+                }
+            }
+        }
+    }
+    let mut eps = Vec::with_capacity(mesh.n_cells());
+    let mut mus = Vec::with_capacity(mesh.n_cells());
+    for ci in 0..mesh.n_cells() {
+        let t = tens[ci];
+        let l = mesh.cell_labels[ci];
+        let (mut sx, mut sy) = (c(1.0, 0.0), c(1.0, 0.0));
+        if let (Some(p), Some((lo, hi))) = (m.pml.get(&l), boxes.get(&l)) {
+            let v = mesh.cell(ci);
+            let mut cen = [0.0; 2];
+            for &i in v {
+                for k in 0..2 {
+                    cen[k] += mesh.point(i as usize)[k] / 3.0;
+                }
+            }
+            let s = stretch(p, [p.x, p.z], cen, *lo, *hi);
+            sx = s.0;
+            sy = s.1;
+        }
+        let (lx, ly, lz) = (sy / sx, sx / sy, sx * sy);
+        // eps_ij -> det(S) eps_ij / (s_i s_j) with S = diag(sx, sy, 1): the diagonal gets lx, ly, lz, xy is unchanged,
+        // xz and yz are multiplied by sy and sx
+        eps.push(EpsC { xx: lx * t[0][0], xy: c(t[0][1], 0.0), yy: ly * t[1][1], zz: lz * t[2][2], xz: sy * t[0][2], yz: sx * t[1][2] });
+        mus.push(MuC { x: lx * mu[ci], y: ly * mu[ci], z: lz * mu[ci] });
+    }
+    Ok((eps, mus))
+}
 
 // ------------------------------------------------------------------ optical modes
 
@@ -39,47 +113,6 @@ pub struct OpticalSet {
     /// the local axes (lateral, normal, propagation) of the solver form a left-handed triple (propagation along +y), which reverses the
     /// sense of rotation of the polarization
     pub left_handed: bool,
-}
-
-fn from_real(m: &Modes) -> Vec<OptMode> {
-    (0..m.neff.len())
-        .map(|j| OptMode { neff: c(m.neff[j].0, m.neff[j].1), et: m.et[j].iter().map(|&x| c(x, 0.0)).collect(), phi: m.phi[j].iter().map(|&x| c(x, 0.0)).collect() })
-        .collect()
-}
-
-fn from_complex(m: &ModesC) -> Vec<OptMode> {
-    (0..m.neff.len()).map(|j| OptMode { neff: m.neff[j], et: m.et[j].clone(), phi: m.phi[j].clone() }).collect()
-}
-
-/// Solves the optical modes of `spec` (a `Physics::Emw` problem with a `Modes` study in wafer axes), propagating along `+y`; complex
-/// materials and PMLs go through the complex solver.
-pub fn solve_optical(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<OpticalSet, String> {
-    solve_optical_wafer(mesh, spec, crate::section::PROP_SIGN)
-}
-
-/// Like `solve_optical` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
-pub fn solve_optical_wafer(mesh: &SimplexMesh, spec: &ProblemSpec, prop_sign: f64) -> Result<OpticalSet, String> {
-    let Study::Modes { freq, n_target, evanescent, n_modes } = spec.study.clone() else {
-        return Err("the optical problem needs a Modes study".into());
-    };
-    if freq <= 0.0 || n_modes < 1 {
-        return Err("frequency must be positive and at least one mode is needed".into());
-    }
-    let (eps, mu) = cell_materials_signed(mesh, &spec.materials, prop_sign)?;
-    let in_pml: Vec<bool> = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off)).collect();
-    let coupled = eps.iter().any(|e| e.xz.norm() > 0.0 || e.yz.norm() > 0.0);
-    let (modes, converged) = if spec.materials.has_pml() || coupled {
-        let target = if evanescent { c(0.0, n_target) } else { c(n_target, 0.0) };
-        let m = solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, spec.order)?;
-        (from_complex(&m), m.converged)
-    } else {
-        let tens: Vec<_> = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(|t| crate::section::local_tensor_signed(t, prop_sign)).collect();
-        let e: Vec<EpsCell> = tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
-        let mur = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-        let m = crate::ems::solve_modes_tensor(mesh, freq, &e, &mur, n_target, evanescent, n_modes, spec.order)?;
-        (from_real(&m), m.converged)
-    };
-    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes, converged, in_pml, left_handed: crate::section::is_left_handed(prop_sign) })
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -196,20 +229,6 @@ pub fn mode_samples(mesh: &SimplexMesh, set: &OpticalSet, j: usize) -> Vec<crate
     }
     out
 }
-
-/// The optical modes found by `ems::solve_modes_tensor` for `spec` as an `OpticalSet`, to evaluate their fields.
-pub(crate) fn optical_set_real(mesh: &SimplexMesh, spec: &ProblemSpec, m: &Modes, freq: f64) -> Result<OpticalSet, String> {
-    let (eps, mu) = cell_materials(mesh, &spec.materials)?;
-    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_real(m), converged: m.converged, in_pml: vec![false; mesh.n_cells()], left_handed: crate::section::is_left_handed(crate::section::PROP_SIGN) })
-}
-
-/// The modes of `ems_pml::solve_modes_complex` for `spec` as an `OpticalSet`.
-pub(crate) fn optical_set_complex(mesh: &SimplexMesh, spec: &ProblemSpec, m: &ModesC, freq: f64) -> Result<OpticalSet, String> {
-    let (eps, mu) = cell_materials(mesh, &spec.materials)?;
-    let in_pml = (0..mesh.n_cells()).map(|ci| spec.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off)).collect();
-    Ok(OpticalSet { freq, order: spec.order, eps, mu, modes: from_complex(m), converged: m.converged, in_pml, left_handed: crate::section::is_left_handed(crate::section::PROP_SIGN) })
-}
-
 
 /// The 4 x 6-point rule on the four sub-triangles of a triangle (24 points, degree 4 on each part).
 pub fn fine_rule() -> (Vec<[f64; 3]>, Vec<f64>) {

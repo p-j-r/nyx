@@ -21,54 +21,20 @@
 //! gradients of edge bubbles, 2 interior) with P2 phi, the accuracy of quadratic
 //! elements on the same mesh.
 
-use crate::linalg::driver::EigOpts;
-use crate::linalg::driver::eigs_general;
-use crate::fem::*;
-use crate::fields::{local_bary, node_average, CellFields};
-use crate::mesh::SimplexMesh;
-use crate::problem::*;
-use crate::section::{local_component, local_tensor};
-use crate::linalg::csr::{Coo, RCsr as Csr};
+use crate::problem::{Problem, Study};
+use crate::Solved;
+use femcore::edge::{cell_data, edge_basis, tri_g};
+use femcore::fem::*;
+use femcore::fields::{local_bary, node_average, CellFields};
+use femcore::linalg::csr::{Coo, RCsr as Csr};
+use femcore::linalg::driver::eigs_general;
+use femcore::linalg::driver::EigOpts;
+use femcore::props::TensorKind;
+use femcore::section::{local_component, local_tensor};
+use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use std::time::Instant;
 
-pub const C0: f64 = 299_792_458.0;
-const PAIRS: [(usize, usize); 3] = [(0, 1), (0, 2), (1, 2)];
-
-fn cross(u: [f64; 2], v: [f64; 2]) -> f64 {
-    u[0] * v[1] - u[1] * v[0]
-}
-
-/// Nedelec basis at barycentric point `l` of one cell with barycentric gradients `g[i]`:
-/// `w[s]` and `curl[s]` for the local functions (3 Whitney signed to the global edge
-/// direction, then for order 2 the gradients of the three edge bubbles and two interior
-/// functions).
-pub(crate) fn edge_basis(l: &[f64], g: &[[f64; 2]; 3], sign: &[f64; 3], order: usize, w: &mut [[f64; 2]], curl: &mut [f64]) {
-    for (s, &(a, b)) in PAIRS.iter().enumerate() {
-        for k in 0..2 {
-            w[s][k] = (l[a] * g[b][k] - l[b] * g[a][k]) * sign[s];
-        }
-        curl[s] = 2.0 * cross(g[a], g[b]) * sign[s];
-    }
-    if order == 2 {
-        for (s, &(a, b)) in PAIRS.iter().enumerate() {
-            for k in 0..2 {
-                w[3 + s][k] = l[a] * g[b][k] + l[b] * g[a][k];
-            }
-            curl[3 + s] = 0.0;
-        }
-        let wab = |a: usize, b: usize| [l[a] * g[b][0] - l[b] * g[a][0], l[a] * g[b][1] - l[b] * g[a][1]];
-        let cab = |a: usize, b: usize| 2.0 * cross(g[a], g[b]);
-        let w01 = wab(0, 1);
-        let w12 = wab(1, 2);
-        for k in 0..2 {
-            w[6][k] = l[2] * w01[k];
-            w[7][k] = l[0] * w12[k];
-        }
-        curl[6] = cross(g[2], w01) + l[2] * cab(0, 1);
-        curl[7] = cross(g[0], w12) + l[0] * cab(1, 2);
-    }
-}
-
+pub use femcore::optical::C0;
 /// Relative permittivity of one cell in the local axes (lateral x, normal y, propagation z): the transverse 2x2 block (xx, xy, yy) and zz. The
 /// cross-section must be oriented so that the propagation axis is a principal axis of the
 /// permittivity (no xz or yz terms).
@@ -93,50 +59,35 @@ pub struct Modes {
     pub complex_wanted: bool,
 }
 
-pub(crate) struct CellData {
-    pub(crate) sign: Vec<[f64; 3]>,
-    pub(crate) gdofs: Vec<Vec<usize>>,
-    pub(crate) net: usize,
-}
-
-pub(crate) fn cell_data(mesh: &SimplexMesh, order: usize) -> CellData {
-    let (nc, ne) = (mesh.n_cells(), mesh.n_edges());
-    let mut sign = vec![[1.0; 3]; nc];
-    let mut gdofs = Vec::with_capacity(nc);
-    for c in 0..nc {
-        let v = mesh.cell(c);
-        let eid = mesh.cell_edge_ids(c);
-        for (s, &(a, b)) in PAIRS.iter().enumerate() {
-            sign[c][s] = if v[a] < v[b] { 1.0 } else { -1.0 };
-        }
-        let mut g: Vec<usize> = eid.iter().map(|&e| e as usize).collect();
-        if order == 2 {
-            g.extend(eid.iter().map(|&e| ne + e as usize));
-            g.push(2 * ne + 2 * c);
-            g.push(2 * ne + 2 * c + 1);
-        }
-        gdofs.push(g);
-    }
-    let net = if order == 1 { ne } else { 2 * ne + 2 * nc };
-    CellData { sign, gdofs, net }
-}
-
-pub(crate) fn tri_g(geo: &Geometry, c: usize) -> [[f64; 2]; 3] {
-    let b = c * 6;
-    [[geo.g[b], geo.g[b + 1]], [geo.g[b + 2], geo.g[b + 3]], [geo.g[b + 4], geo.g[b + 5]]]
-}
-
 /// Modes nearest the effective index `n_target` (real, or imaginary if `evanescent`) at
 /// frequency `freq` (Hz). `eps_r` and `mu_r` hold one value per cell.
 #[allow(clippy::too_many_arguments)]
-pub fn solve_modes(mesh: &SimplexMesh, freq: f64, eps_r: &[f64], mu_r: &[f64], n_target: f64, evanescent: bool, k: usize, order: usize) -> Result<Modes, String> {
+pub fn solve_modes(
+    mesh: &Discretisation,
+    freq: f64,
+    eps_r: &[f64],
+    mu_r: &[f64],
+    n_target: f64,
+    evanescent: bool,
+    k: usize,
+    order: usize,
+) -> Result<Modes, String> {
     let eps: Vec<EpsCell> = eps_r.iter().map(|&e| EpsCell { xx: e, xy: 0.0, yy: e, zz: e }).collect();
     solve_modes_tensor(mesh, freq, &eps, mu_r, n_target, evanescent, k, order)
 }
 
 /// As `solve_modes` with a permittivity tensor per cell.
 #[allow(clippy::too_many_arguments)]
-pub fn solve_modes_tensor(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], n_target: f64, evanescent: bool, k: usize, order: usize) -> Result<Modes, String> {
+pub fn solve_modes_tensor(
+    mesh: &Discretisation,
+    freq: f64,
+    eps_r: &[EpsCell],
+    mu_r: &[f64],
+    n_target: f64,
+    evanescent: bool,
+    k: usize,
+    order: usize,
+) -> Result<Modes, String> {
     let asm = assemble_modes(mesh, freq, eps_r, mu_r, order)?;
     solve_mode_pairs(&asm, n_target, evanescent, k)
 }
@@ -155,7 +106,13 @@ pub struct ModeAssembly {
     pub k0: f64,
 }
 
-pub fn assemble_modes(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], order: usize) -> Result<ModeAssembly, String> {
+pub fn assemble_modes(
+    mesh: &Discretisation,
+    freq: f64,
+    eps_r: &[EpsCell],
+    mu_r: &[f64],
+    order: usize,
+) -> Result<ModeAssembly, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -204,7 +161,9 @@ pub fn assemble_modes(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r: &[
             for s in 0..nloc_e {
                 for t in 0..nloc_e {
                     wm[s * nloc_e + t] += wq * (w[s][0] * w[t][0] + w[s][1] * w[t][1]);
-                    wme[s * nloc_e + t] += wq * (w[s][0] * (ec.xx * w[t][0] + ec.xy * w[t][1]) + w[s][1] * (ec.xy * w[t][0] + ec.yy * w[t][1]));
+                    wme[s * nloc_e + t] += wq
+                        * (w[s][0] * (ec.xx * w[t][0] + ec.xy * w[t][1])
+                            + w[s][1] * (ec.xy * w[t][0] + ec.yy * w[t][1]));
                     se[s * nloc_e + t] += wq * curl[s] * curl[t];
                 }
                 for a in 0..nl {
@@ -241,10 +200,16 @@ pub fn assemble_modes(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r: &[
     // boundary nodes (and boundary edge midpoints for P2)
     // walls are the exterior facets only: facets on interfaces between domains are not conductors
     let exterior = mesh.exterior_facets();
-    let mut be: Vec<usize> = (0..mesh.n_facets()).filter(|&f| exterior[f]).map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1])).collect();
+    let mut be: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| exterior[f])
+        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
+        .collect();
     be.sort_unstable();
     be.dedup();
-    let mut bn: Vec<usize> = (0..mesh.n_facets()).filter(|&f| exterior[f]).flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>()).collect();
+    let mut bn: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| exterior[f])
+        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
+        .collect();
     bn.sort_unstable();
     bn.dedup();
     let mut fixed: Vec<usize> = be.clone();
@@ -304,13 +269,19 @@ pub fn solve_mode_pairs(asm: &ModeAssembly, n_target: f64, evanescent: bool, k: 
 
 /// Nodal fields of one mode: transverse and longitudinal field at every dof (node average of
 /// the element values), scaled to max |E| = 1, under wafer names: `|E|`, `|Exz|` (in the plane), `|Ey|` and `Ey` (along the guide), `Ex`, `Ez`.
-pub fn mode_fields(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order: usize) -> Vec<Field> {
+pub fn mode_fields(mesh: &Discretisation, modes: &Modes, j: usize, freq: f64, order: usize) -> Vec<Field> {
     mode_fields_cells(mesh, modes, j, freq, order).0
 }
 
 /// Stage 3: `mode_fields` and, next to them, the components `Ex`, `Ez` (in the plane) and `Ey` (along the guide) at the
 /// local dofs of every cell, with the same scale and sign as the plot fields (whose node average they reproduce).
-pub fn mode_fields_cells(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64, order: usize) -> (Vec<Field>, CellFields) {
+pub fn mode_fields_cells(
+    mesh: &Discretisation,
+    modes: &Modes,
+    j: usize,
+    freq: f64,
+    order: usize,
+) -> (Vec<Field>, CellFields) {
     let k0 = 2.0 * std::f64::consts::PI * freq / C0;
     let (nc, nloc) = (mesh.n_cells(), mesh.nloc(order));
     let geo = geometry(mesh);
@@ -362,7 +333,7 @@ pub fn mode_fields_cells(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64,
     // sign convention: the largest transverse component positive
     let big = etxn.iter().chain(etyn.iter()).cloned().fold(0.0f64, |m, x| if x.abs() > m.abs() { x } else { m });
     let sg = if big < 0.0 { -1.0 } else { 1.0 };
-    let f = |name: &str, v: Vec<f64>| Field { name: name.into(), unit: "a.u.".into(), values: v };
+    let f = |name: &str, v: Vec<f64>| Field::scalar(name, "a.u.", v);
     let (lat, nor, prop) = (local_component(0), local_component(1), local_component(2));
     let mut cells = CellFields::new(mesh, order);
     let ez_cell: Vec<f64> = (0..nc)
@@ -386,12 +357,15 @@ pub fn mode_fields_cells(mesh: &SimplexMesh, modes: &Modes, j: usize, freq: f64,
     (fields, cells)
 }
 
-pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
-    if spec.materials.has_pml() {
-        return crate::ems_pml::solve_emw_complex(mesh, spec);
+/// The guided modes of a 2D cross-section for a `Modes` study: stages 1 to 3 of the real solver, or the complex solver (`modes_complex`)
+/// when the problem has absorbing layers, a tilted crystal, or a complex pair among the wanted eigenvalues. The result carries the
+/// polarization of the modes (scalars and log, as before the move; the analysis itself is in `Solved::analysis`).
+pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solved, String> {
+    if problem.materials.has_pml() {
+        return crate::modes_complex::solve_waveguide_complex(mesh, problem);
     }
     let t0 = Instant::now();
-    let Study::Modes { freq, n_target, evanescent, n_modes } = spec.study.clone() else {
+    let Study::Modes { freq, n_target, evanescent, n_modes } = problem.study.clone() else {
         return Err("mode analysis needs a Modes study".into());
     };
     if freq <= 0.0 {
@@ -400,34 +374,38 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
     if n_modes < 1 {
         return Err("at least one mode is needed".into());
     }
-    let tens: Vec<_> = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(local_tensor).collect();
+    let tens: Vec<_> =
+        problem.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(local_tensor).collect();
     for t in &tens {
         let scale = t[0][0].abs().max(t[1][1].abs()).max(t[2][2].abs()).max(1e-300);
         if t[0][2].abs() > 1e-9 * scale || t[1][2].abs() > 1e-9 * scale {
             // a crystal whose axes are tilted against the propagation axis: the complex solver handles the
             // coupling of the longitudinal and the transverse field exactly
-            return crate::ems_pml::solve_emw_complex(mesh, spec);
+            return crate::modes_complex::solve_waveguide_complex(mesh, problem);
         }
     }
-    let eps: Vec<EpsCell> = tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
-    let mur = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    let modes = solve_modes_tensor(mesh, freq, &eps, &mur, n_target, evanescent, n_modes, spec.order)?;
+    let eps: Vec<EpsCell> =
+        tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
+    let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
+    let modes = solve_modes_tensor(mesh, freq, &eps, &mur, n_target, evanescent, n_modes, problem.order)?;
     if modes.complex_wanted {
         // a leaky or complex-propagation-constant mode is among the nearest eigenvalues: the complex solver represents it (complex vectors)
-        crate::progress::note("a complex eigenvalue pair of the real mode pencil is among the wanted modes: solving again in complex arithmetic");
-        return crate::ems_pml::solve_emw_complex(mesh, spec);
+        femcore::progress::note(
+            "a complex eigenvalue pair of the real mode pencil is among the wanted modes: solving again in complex arithmetic",
+        );
+        return crate::modes_complex::solve_waveguide_complex(mesh, problem);
     }
     let mut solutions = vec![];
     let mut scalars = vec![];
     for j in 0..modes.neff.len() {
         let (re, im) = modes.neff[j];
         let txt = if im.abs() > 1e-9 * re.abs().max(1.0) { format!("{re:.6} {im:+.4}i") } else { format!("{re:.6}") };
-        let (fields, cell_fields) = mode_fields_cells(mesh, &modes, j, freq, spec.order);
+        let (fields, cell_fields) = mode_fields_cells(mesh, &modes, j, freq, problem.order);
         solutions.push(Solution {
             label: format!("mode {}: neff = {txt}", j + 1),
             fields,
-            cell_fields: Some(cell_fields),
-            neff: Some((re, im)),
+            cell_fields: cell_fields_of(&cell_fields),
+            eigenvalue: Some([re, im]),
             ..Default::default()
         });
         scalars.push((format!("neff {}", j + 1), Scalar::Text(txt)));
@@ -439,19 +417,27 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
     if modes.neff.len() < n_modes {
         log.push(format!("only {} of {} real-valued modes were found near the target", modes.neff.len(), n_modes));
     }
-    let mut result = SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order), ..Default::default() };
+    let result = SolveResult {
+        physics: "ems".into(),
+        study: "modes".into(),
+        order: problem.order as u8,
+        dim: 2,
+        solutions,
+        scalars,
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: mesh.n_dofs(problem.order),
+    };
+    let mut analysis = None;
     if !modes.neff.is_empty() {
-        if let Ok(set) = crate::optical::optical_set_real(mesh, spec, &modes, freq) {
-            crate::analysis::analyze_optical(mesh, &set, &Default::default()).attach(&mut result);
+        if let Ok(set) = crate::optical::optical_set_real(mesh, problem, &modes, freq) {
+            analysis = Some(femcore::analysis::analyze_optical(mesh, &set, &Default::default()));
         }
     }
-    Ok(result)
+    Ok(Solved::with_analysis(result, analysis))
 }
 
 /// Number of edge-element dofs plus phi dofs (for reporting).
-pub fn n_unknowns(mesh: &SimplexMesh, order: usize) -> usize {
+pub fn n_unknowns(mesh: &Discretisation, order: usize) -> usize {
     cell_data(mesh, order).net + mesh.n_dofs(order)
 }
-
-#[allow(dead_code)]
-fn _unused(_: &Csr) {}

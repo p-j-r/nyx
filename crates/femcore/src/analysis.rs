@@ -380,15 +380,25 @@ impl Analysis {
     /// Adds the result to a solver's output: one summary entry per mode in the scalars, the table in the log and the
     /// whole analysis for the analysis tab and the exports.
     pub fn attach(self, result: &mut SolveResult) {
+        let (scalars, log) = self.summary();
+        result.scalars.extend(scalars.into_iter().map(|(n, t)| (n, Scalar::Text(t))));
+        result.log.extend(log);
+        result.analysis = Some(self);
+    }
+
+    /// What `attach` adds to the scalars (one text per mode) and to the log (the table), for the physics crates whose result is not the old
+    /// `SolveResult`.
+    pub fn summary(&self) -> (Vec<(String, String)>, Vec<String>) {
+        let mut scalars = vec![];
         for (i, r) in self.rows.iter().enumerate() {
             if let Some(m) = &r.report {
                 let text = format!("{}  TE {:.3}  Ey {:.3}  P {:.3}  s = ({:+.3}, {:+.3}, {:+.3})", m.class.label(), m.te_fraction, m.long_fraction, m.dop, m.sphere[0], m.sphere[1], m.sphere[2]);
-                result.scalars.push((format!("polarization {}", i + 1), Scalar::Text(text)));
+                scalars.push((format!("polarization {}", i + 1), text));
             }
         }
-        result.log.push("polarization of the modes (Stokes parameters; s1 > 0 is x, the lateral direction, s1 < 0 is z, the surface normal):".into());
-        result.log.extend(self.table().lines().filter(|l| !l.is_empty()).map(|l| l.to_string()));
-        result.analysis = Some(self);
+        let mut log = vec!["polarization of the modes (Stokes parameters; s1 > 0 is x, the lateral direction, s1 < 0 is z, the surface normal):".to_string()];
+        log.extend(self.table().lines().filter(|l| !l.is_empty()).map(|l| l.to_string()));
+        (scalars, log)
     }
 }
 

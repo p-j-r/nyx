@@ -149,9 +149,14 @@ pub fn check_wafer_input(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), S
 /// The propagation axis is the axis a Floquet pair of the problem is periodic along (the first one found); without periodic
 /// conditions it is `y`. The surface normal is `z` unless the problem is periodic along z, then `y`.
 pub fn axes_of_3d_problem(spec: &ProblemSpec, mesh: &SimplexMesh) -> ([usize; 3], bool) {
+    axes_of_3d_periodic(&spec.periodic, mesh)
+}
+
+/// `axes_of_3d_problem` from the Floquet pairs alone (what a physics crate has).
+pub fn axes_of_3d_periodic(periodic: &[Periodic], mesh: &SimplexMesh) -> ([usize; 3], bool) {
     let mut long = 1;
     // a Floquet pair maps the facets of `source` onto those of `dest`: the periodic axis is the one the two groups differ in
-    if let Some(p) = spec.periodic.first() {
+    if let Some(p) = periodic.first() {
         let centre = |labels: &[i32]| -> [f64; 3] {
             let (mut c, mut n) = ([0.0f64; 3], 0.0f64);
             for f in 0..mesh.n_facets() {

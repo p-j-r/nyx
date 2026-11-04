@@ -1,17 +1,18 @@
 //! Waveguide mode analysis against closed forms.
 mod common;
-use femcore::ems::*;
-use femcore::problem::*;
+use nyx_ems::*;
+use nyx_ems::{Problem, Study};
+use nyx_physics::SolveResult;
 
-fn emw_spec(eps: f64, freq: f64, target: f64, evanescent: bool, n: usize) -> ProblemSpec {
-    let mut s = ProblemSpec::new(Physics::Emw);
+fn emw_spec(eps: f64, freq: f64, target: f64, evanescent: bool, n: usize) -> Problem {
+    let mut s = common::emw();
     s.materials.default.insert("eps_r".into(), eps);
     s.study = Study::Modes { freq, n_target: target, evanescent, n_modes: n };
     s
 }
 
 fn real_neff(r: &SolveResult) -> Vec<f64> {
-    r.solutions.iter().map(|s| s.neff.unwrap().0).collect()
+    r.solutions.iter().map(|s| common::neff(s).0).collect()
 }
 
 const WR90: (f64, f64) = (22.86e-3, 10.16e-3);
@@ -29,7 +30,7 @@ fn filled_wr90_propagating_modes_match_the_closed_form() {
     let m = common::rect(WR90.0, WR90.1, 24, 12);
     for (mm, nn) in [(1, 0), (2, 0), (0, 1), (1, 1)] {
         let exact = neff_squared(2.1, 12e9, mm, nn).sqrt();
-        let r = solve_emw(&m, &emw_spec(2.1, 12e9, exact * 1.001, false, 3)).unwrap();
+        let r = common::solve(&m, &emw_spec(2.1, 12e9, exact * 1.001, false, 3)).unwrap();
         let best = real_neff(&r).iter().map(|n| (n - exact).abs()).fold(f64::MAX, f64::min);
         assert!(best < 3e-4, "mode ({mm},{nn}) with neff {exact}: nearest found {best} away");
     }
@@ -40,8 +41,8 @@ fn filled_wr90_evanescent_modes_match_the_closed_form() {
     // below cutoff neff is imaginary, neff = -i sqrt(kc^2 / k0^2 - eps_r)
     let m = common::rect(WR90.0, WR90.1, 24, 12);
     let exact = neff_squared(2.1, 12e9, 3, 0).abs().sqrt();
-    let r = solve_emw(&m, &emw_spec(2.1, 12e9, exact, true, 4)).unwrap();
-    let best = r.solutions.iter().map(|s| (s.neff.unwrap().1.abs() - exact).abs()).fold(f64::MAX, f64::min);
+    let r = common::solve(&m, &emw_spec(2.1, 12e9, exact, true, 4)).unwrap();
+    let best = r.solutions.iter().map(|s| (common::neff(s).1.abs() - exact).abs()).fold(f64::MAX, f64::min);
     assert!(best < 3e-3, "TE30 attenuation {exact}: nearest found {best} away");
 }
 
@@ -56,9 +57,13 @@ fn ez_field_of_the_tm11_mode_is_sin_sin() {
     let exact = neff_squared(2.1, 12e9, 1, 1).sqrt();
     let modes = solve_modes(&m, 12e9, &eps, &mur, exact * 1.001, false, 2, 2).unwrap();
     let norm = |v: &Vec<f64>| v.iter().map(|x| x * x).sum::<f64>();
-    let j = (0..modes.phi.len()).max_by(|&p, &q| norm(&modes.phi[p]).partial_cmp(&norm(&modes.phi[q])).unwrap()).unwrap();
+    let j =
+        (0..modes.phi.len()).max_by(|&p, &q| norm(&modes.phi[p]).partial_cmp(&norm(&modes.phi[q])).unwrap()).unwrap();
     let x = m.dof_coordinates(2);
-    let shape: Vec<f64> = x.chunks(2).map(|p| (std::f64::consts::PI * p[0] / a).sin() * (std::f64::consts::PI * p[1] / b).sin()).collect();
+    let shape: Vec<f64> = x
+        .chunks(2)
+        .map(|p| (std::f64::consts::PI * p[0] / a).sin() * (std::f64::consts::PI * p[1] / b).sin())
+        .collect();
     let p = &modes.phi[j];
     let c = p.iter().zip(&shape).map(|(u, v)| u * v).sum::<f64>() / shape.iter().map(|v| v * v).sum::<f64>();
     let num: f64 = p.iter().zip(&shape).map(|(u, v)| (u - c * v).powi(2)).sum::<f64>().sqrt();
@@ -71,7 +76,7 @@ fn empty_wr90_closed_form() {
     // empty WR-90 at 20 GHz: neff = sqrt(1 - (kc/k0)^2), kc^2 = (m pi/a)^2 + (n pi/b)^2
     let (a, b) = (22.86e-3, 10.16e-3);
     let m = common::rect(a, b, 24, 12);
-    let r = solve_emw(&m, &emw_spec(1.0, 20e9, 0.95, false, 4)).unwrap();
+    let r = common::solve(&m, &emw_spec(1.0, 20e9, 0.95, false, 4)).unwrap();
     let k0 = 2.0 * std::f64::consts::PI * 20e9 / C0;
     let mut exact: Vec<f64> = vec![];
     for (mm, nn) in [(1, 0), (2, 0), (0, 1), (1, 1), (3, 0)] {
@@ -93,12 +98,15 @@ fn slab_loaded_guide_matches_transcendental_root() {
     // WR-90-like guide half... eps_r 4 in a layer of width d next to the wall, the rest air: the
     // lowest-order LSE mode with Ey = 0 satisfies k1 cot(k1 d) + k2 cot(k2 (a - d)) = 0
     let (a, b, d, f) = (22.86e-3, 10.16e-3, 11.43e-3, 8e9);
-    let m = common::parts_mesh(&[common::part(0.0, 0.0, a, b, 1, None), common::part(0.0, 0.0, d, b, 2, None)], (a / 36.0).min(b / 8.0));
-    let mut s = ProblemSpec::new(Physics::Emw);
+    let m = common::parts_mesh(
+        &[common::part(0.0, 0.0, a, b, 1, None), common::part(0.0, 0.0, d, b, 2, None)],
+        (a / 36.0).min(b / 8.0),
+    );
+    let mut s = common::emw();
     s.materials.set(1, "eps_r", 1.0);
     s.materials.set(2, "eps_r", 4.0);
     s.study = Study::Modes { freq: f, n_target: 1.7, evanescent: false, n_modes: 3 };
-    let r = solve_emw(&m, &s).unwrap();
+    let r = common::solve(&m, &s).unwrap();
     let k0 = 2.0 * std::f64::consts::PI * f / C0;
     // the TE-to-y mode with a dielectric slab at x in [0, d]: solve for beta by bisection on
     // tan(k1 d) / k1 = -tan(k2 (a-d)) / k2 with k1^2 = 4 k0^2 - b^2, k2^2 = k0^2 - b^2
@@ -123,7 +131,11 @@ fn slab_loaded_guide_matches_transcendental_root() {
             let (mut lo, mut hi) = (prev.0, x);
             for _ in 0..60 {
                 let mid = 0.5 * (lo + hi);
-                if g(lo) * g(mid) <= 0.0 { hi = mid } else { lo = mid }
+                if g(lo) * g(mid) <= 0.0 {
+                    hi = mid
+                } else {
+                    lo = mid
+                }
             }
             roots.push(0.5 * (lo + hi));
         }
@@ -145,7 +157,7 @@ fn order_one_converges_toward_order_two() {
     for order in [1usize, 2] {
         let mut s = emw_spec(1.0, 20e9, 0.945, false, 2);
         s.order = order;
-        let r = solve_emw(&m, &s).unwrap();
+        let r = common::solve(&m, &s).unwrap();
         e.push(real_neff(&r).iter().map(|n| (n - exact).abs()).fold(f64::MAX, f64::min));
     }
     assert!(e[1] < e[0] * 0.2, "order 1 error {} vs order 2 error {}", e[0], e[1]);
@@ -154,7 +166,7 @@ fn order_one_converges_toward_order_two() {
 #[test]
 fn mode_fields_are_normalised_and_finite() {
     let m = common::rect(WR90.0, WR90.1, 12, 6);
-    let r = solve_emw(&m, &emw_spec(2.1, 12e9, 0.54, false, 3)).unwrap();
+    let r = common::solve(&m, &emw_spec(2.1, 12e9, 0.54, false, 3)).unwrap();
     for s in &r.solutions {
         let e = s.field("|E|").unwrap();
         assert!((e.values.iter().cloned().fold(0.0, f64::max) - 1.0).abs() < 1e-12);

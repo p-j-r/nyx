@@ -11,7 +11,7 @@
 
 use crate::linalg::csr::{c, CCoo, CCsr, C};
 use crate::linalg::driver::eigs_complex;
-use crate::ems_pml::cell_stretches;
+use crate::pml::cell_stretches;
 use crate::fem::*;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;

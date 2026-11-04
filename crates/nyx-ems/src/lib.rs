@@ -1,18 +1,67 @@
 //! nyx-ems: electromagnetic waves (`ems`, ADR 12): guided modes of a 2D cross-section (real or complex, with absorbing layers and
 //! tilted crystals), axisymmetric modes, and the eigenfrequencies of 3D cavities and Floquet cells.
 //!
-//! SKELETON (restructure foundation). It declares what `ems` is to the rest of nyx; the kernels (`femcore::ems`, `ems_pml`,
-//! `ems_axisym`, `ems3d`, `optical`) move in here in phase 4, after phases 2 and 3. The study is named in the problem (waveguide `modes`
-//! versus `cavity`), not guessed from the mesh dimension (ROUGH_SPOTS R10). Until the kernels arrive `solve` answers
-//! `Error::NotYetMoved`. The descriptors are the first version, read from the current kernels; the phase 4 owner refines them and
-//! bumps `docs/architecture/contracts/physics_ems.v1.json` with a `VERSIONS.md` entry.
+//! The crate holds the typed problem (`problem`, decoded from the envelope by `problem::decode`), the kernels in the three stages of ADR 9
+//! (`modes`: real waveguide modes, `modes_complex`: complex modes with PML or a tilted crystal, `axisym`: bodies of revolution,
+//! `cavity`: 3D eigenfrequencies; `optical`: the modes as the field-evaluable set of the polarization analysis) and the `Physics`
+//! implementation below. Moved here from `femcore::{ems, ems_pml, ems_axisym, ems3d}` in restructure phase 4 (ADR 41, 45). The study is named
+//! in the problem (waveguide `modes` versus `cavity`), not guessed from the mesh dimension (ROUGH_SPOTS R10).
+//!
+//! The polarization of 2D modes and cavity modes is still computed here by `femcore::analysis` (it moves to `nyx-analysis` in phase 5) and
+//! appears as the scalars `polarization N` and in the log, as before; `run_analysed` also returns the `Analysis` itself for the window.
 
+// The kernels index several arrays with one loop variable, the form that matches the formulas (as in femcore).
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments, clippy::type_complexity)]
+
+pub mod axisym;
+pub mod cavity;
+pub mod modes;
+pub mod modes_complex;
+pub mod optical;
+pub mod problem;
+
+pub use axisym::{
+    assemble_axisym, axisym_fields_cells, power_along_theta, solve_axisym_modes, solve_axisym_pairs,
+    solve_axisymmetric, AxiAssembly, AxiMaterial, AxiModes,
+};
+pub use cavity::{assemble_emw_eigen, emw_eigen_fields, solve_cavity, solve_emw_modes, EmwAssembly, EmwSolve};
+pub use modes::{
+    assemble_modes, mode_fields, mode_fields_cells, n_unknowns, solve_mode_pairs, solve_modes, solve_modes_tensor,
+    solve_waveguide, EpsCell, ModeAssembly, Modes, C0,
+};
+pub use modes_complex::{
+    assemble_modes_complex, mode_fields_complex, mode_fields_complex_cells, solve_mode_pairs_complex,
+    solve_modes_complex, solve_waveguide_complex, ModeAssemblyC, ModesC,
+};
+pub use optical::{solve_optical, solve_optical_wafer};
+pub use problem::{decode, Problem, Study};
+
+use femcore::analysis::Analysis;
+use femcore::progress::{self, Progress};
 use nyx_physics::Mesh;
 use nyx_physics::*;
+use std::sync::Arc;
+
+/// What a study returns: the result, and the polarization analysis of the modes that is in it as scalars and log lines (the window shows
+/// the analysis itself; `None` for the studies that have none).
+pub struct Solved {
+    pub result: SolveResult,
+    pub analysis: Option<Analysis>,
+}
+
+impl Solved {
+    /// Adds the summary of the polarization analysis to the scalars and the log of `result`, as the old kernels did.
+    pub(crate) fn with_analysis(mut result: SolveResult, analysis: Option<Analysis>) -> Solved {
+        if let Some(a) = &analysis {
+            let (scalars, log) = a.summary();
+            result.scalars.extend(scalars.into_iter().map(|(n, t)| (n, Scalar::Text(t))));
+            result.log.extend(log);
+        }
+        Solved { result, analysis }
+    }
+}
 
 pub struct Ems;
-
-const WAFER: [&str; 3] = ["x", "y", "z"];
 
 impl Physics for Ems {
     fn id(&self) -> &'static str {
@@ -43,9 +92,11 @@ impl Physics for Ems {
                 doc: "Whispering-gallery and other modes of a body of revolution; the mesh is the (r, z) half plane with x = r.".into(),
                 dims: Dims::Two,
                 params: vec![
-                    ParamDesc::number("freq", "Frequency", "Hz", 1.934e14, "").required().range(Some(f64::MIN_POSITIVE), None),
-                    ParamDesc::integer("azimuthal_order", "Azimuthal order", 0, 0, ""),
-                    ParamDesc::number("n_target", "Effective index near", "", 1.0, ""),
+                    ParamDesc::number("f_search", "Search around", "Hz", 1.934e14, "the modes nearest this frequency are returned")
+                        .required()
+                        .range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::integer("azimuthal_order", "Azimuthal order", 0, -100000, "the field goes as exp(-j m theta); m > 0 runs along +y")
+                        .range(Some(-100000.0), Some(100000.0)),
                     ParamDesc::integer("n_modes", "Number of modes", 4, 1, ""),
                 ],
             },
@@ -111,17 +162,25 @@ impl Physics for Ems {
     }
 
     fn fields(&self, study: &str) -> Vec<FieldDesc> {
+        // The fields are scalar arrays under the flat names of the window (wafer axes: x lateral, z normal, y along the propagation). A
+        // real mode (real solver) has the signed components `Ex`, `Ey`, `Ez`; a complex one (absorbing layers, tilted crystal, loss) has
+        // their real parts `Re Ex`, ... after the phase is rotated so that the largest component is real. The complex components are the
+        // per-cell fields `Ex`, `Ey`, `Ez` of the solution.
         match study {
-            "modes" | "axisymmetric_modes" => vec![
-                FieldDesc::new(
-                    "E",
-                    "a.u.",
-                    &WAFER,
-                    "electric field of a mode (x lateral, z normal, y along the propagation)",
-                ),
-                FieldDesc::new("|E|", "a.u.", &[], "magnitude"),
+            "modes" => vec![
+                FieldDesc::new("|E|", "a.u.", &[], "magnitude of the electric field, scaled to a maximum of 1"),
+                FieldDesc::new("|Exz|", "a.u.", &[], "magnitude of the transverse (in-plane) part"),
+                FieldDesc::new("|Ey|", "a.u.", &[], "magnitude of the longitudinal part (along the propagation)"),
+                FieldDesc::new("Ex", "a.u.", &[], "lateral component (real solver; `Re Ex` for a complex mode)"),
+                FieldDesc::new("Ey", "a.u.", &[], "component along the propagation (real solver; `Re Ey` for a complex mode)"),
+                FieldDesc::new("Ez", "a.u.", &[], "surface-normal component (real solver; `Re Ez` for a complex mode)"),
             ],
-            "cavity" => vec![FieldDesc::new("E", "a.u.", &WAFER, "electric field of a mode")],
+            "axisymmetric_modes" | "cavity" => vec![
+                FieldDesc::new("|E|", "a.u.", &[], "magnitude of the electric field, scaled to a maximum of 1"),
+                FieldDesc::new("Re Ex", "a.u.", &[], "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real"),
+                FieldDesc::new("Re Ey", "a.u.", &[], "real part of the y component (2D axisymmetric: azimuthal)"),
+                FieldDesc::new("Re Ez", "a.u.", &[], "real part of the surface-normal component"),
+            ],
             _ => vec![],
         }
     }
@@ -134,10 +193,27 @@ impl Physics for Ems {
         vec![FieldLink::new("ems.temperature", "temperature")]
     }
 
-    fn validate(&self, spec: &ProblemSpec, _mesh: &Mesh) -> Result<(), Error> {
-        // the element orders the kernels have (phase 4 adds the checks that need the mesh)
+    fn validate(&self, spec: &ProblemSpec, mesh: &Mesh) -> Result<(), Error> {
         if !(1..=2).contains(&spec.order) {
             return Err(Error::Unsupported(format!("ems supports element order 1 and 2, not {}", spec.order)));
+        }
+        check_mesh(mesh)?;
+        // the study names the kernel, the mesh must be of its dimension
+        let studies = self.studies();
+        if let Some(sd) = studies.iter().find(|s| s.kind == spec.study.kind) {
+            let ok = match sd.dims {
+                Dims::Two => mesh.dim() == 2,
+                Dims::Three => mesh.dim() == 3,
+                Dims::Both => true,
+            };
+            if !ok {
+                return Err(Error::invalid(format!(
+                    "the study '{}' needs a {} mesh, this one is {}D",
+                    sd.kind,
+                    if sd.dims == Dims::Two { "2D" } else { "3D" },
+                    mesh.dim()
+                )));
+            }
         }
         Ok(())
     }
@@ -147,9 +223,54 @@ impl Physics for Ems {
         Sizing { order: spec.order, headroom: 1.0, wavelengths: Default::default() }
     }
 
-    fn solve(&self, _mesh: &Mesh, _spec: &ProblemSpec, _ctx: &mut Ctx) -> Result<SolveResult, Error> {
-        Err(Error::NotYetMoved(
-            "ems: the kernels still live in femcore::ems* and move into this crate in restructure phase 4".into(),
-        ))
+    fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {
+        validate_spec(self, spec)?;
+        self.validate(spec, mesh)?;
+        let problem = decode(spec, ctx)?;
+        run(mesh, &problem, &ctx.progress)
     }
+}
+
+/// Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the
+/// stage log to the result. `Physics::solve` is this after `decode`; code that already has mesh numbers calls it directly.
+pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error> {
+    run_analysed(mesh, problem, progress).map(|s| s.result)
+}
+
+/// `run` that also hands out the polarization analysis of the modes (what the window shows; it is in the scalars and the log of the result
+/// in any case).
+pub fn run_analysed(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<Solved, Error> {
+    let _installed = progress::install(progress);
+    let first_line = progress.log().len();
+    if !(1..=2).contains(&problem.order) {
+        return Err(Error::invalid("element order must be 1 or 2"));
+    }
+    if progress.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    check_mesh(mesh)?;
+    problem.check_finite().map_err(Error::NonFinite)?;
+    let mut solved = {
+        let _s = progress::stage(format!(
+            "solving EM waves (mode analysis) on a {}D mesh of {} cells",
+            mesh.dim(),
+            mesh.n_cells()
+        ));
+        let d = discretise(mesh)?;
+        // a layer along y has no meaning in the plane of a cross-section (x-z)
+        if d.dim == 2 {
+            if let Some((dom, _)) = problem.materials.pml.iter().find(|(_, p)| p.y != femcore::props::PmlDir::Off) {
+                return Err(Error::invalid(format!("the perfectly matched layer of domain {dom} absorbs along y, which is out of the plane of a 2D cross-section (x-z): use z for the direction of the surface normal")));
+            }
+        }
+        match problem.study {
+            Study::Modes { .. } => solve_waveguide(&d, problem),
+            Study::AxisymmetricModes { .. } => solve_axisymmetric(&d, problem),
+            Study::Cavity { .. } => solve_cavity(&d, problem),
+        }
+        .map_err(Error::from_kernel)?
+    };
+    check_result_finite(&solved.result)?;
+    solved.result.log.extend(progress.log().into_iter().skip(first_line));
+    Ok(solved)
 }

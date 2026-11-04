@@ -100,7 +100,7 @@ orientation, TE and longitudinal shares, a class (quasi-TE, quasi-TM, linear, el
 resolved pair (the eigensolver returns an arbitrary mixture of degenerate modes). The application shows it in the **Analysis** tab (sphere, mode list, table, CSV and SVG
 export); the table is also in the solver log and the batch output. Modules `femcore::polarization` and `femcore::analysis`.
 
-Use cases (Examples 16 to 19, modules `femcore::usecases::{soi, bragg}`, studies `soi_modes` and `bragg_gratings` in `crates/femcore/examples`):
+Use cases (Examples 16 to 19, modules `femcore::usecases::{soi, bragg}`, studies `soi_modes` and `bragg_gratings` in `crates/nyx-engine/examples`):
 the modes of a wire on **300 nm SOI** at 1550 nm (TE0 2.6718, TM0 2.3337, against the infinite slab's 3.049 and 2.616; a sloped wall mixes the nearly degenerate pair of a 300 nm
 wire into two states tilted by 45 degrees), and **symmetric and asymmetric Bragg gratings** in that wire as 3D Floquet cells at the band edge (stop band 5.8 nm for
 80 nm teeth on both sides, 3.2 nm for one side, coarse mesh). Numbers, checks and limits: `docs/photonic_use_cases.md`.

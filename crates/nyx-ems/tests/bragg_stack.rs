@@ -5,7 +5,8 @@
 //! of the first gap are what the Bragg grating use case measures, here on a structure whose answer is known. Modes come in pairs
 //! (two polarizations).
 mod common;
-use femcore::problem::*;
+use femcore::props::*;
+use nyx_ems::Study;
 
 const C0: f64 = 299_792_458.0;
 
@@ -55,7 +56,7 @@ fn the_floquet_cell_reproduces_the_band_edges_of_a_dielectric_stack() {
         // the stack runs along y (the propagation axis of the wafer frame): two layers of the x-z section swept along y
         let n0 = (nz as f64 * d[0] / l).round() as usize;
         let mesh = common::stack_y(a, &[(d[0], n0), (d[1], nz - n0)], a / 2.0);
-        let mut s = ProblemSpec::new(Physics::Emw);
+        let mut s = common::emw();
         s.order = 2;
         for (dom, nn) in [(1, n[0]), (2, n[1])] {
             s.materials.set(dom, "eps_r", nn * nn);
@@ -66,15 +67,18 @@ fn the_floquet_cell_reproduces_the_band_edges_of_a_dielectric_stack() {
             Periodic { source: vec![3], dest: vec![4], phase: 0.0 },
             Periodic { source: vec![2], dest: vec![5], phase: std::f64::consts::PI },
         ];
-        s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.97 * f_lo };
-        let r = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
+        s.study = Study::Cavity { n_modes: 4, f_search: 0.97 * f_lo };
+        let r = common::solve(&mesh, &s).unwrap();
         let mut f: Vec<f64> = r.solutions.iter().map(|x| x.value.unwrap()).collect();
         f.sort_by(|x, y| x.total_cmp(y));
         // two polarizations: the lower edge twice, then the upper edge twice
         let mut worst = 0.0f64;
         for (got, exact) in [(f[0], f_lo), (f[1], f_lo), (f[2], f_hi), (f[3], f_hi)] {
             worst = worst.max((got / exact - 1.0).abs());
-            assert!((got / exact - 1.0).abs() < 0.015, "nz = {nz}: {got:e} against {exact:e} (modes {f:?}, exact edges {f_lo:e} and {f_hi:e})");
+            assert!(
+                (got / exact - 1.0).abs() < 0.015,
+                "nz = {nz}: {got:e} against {exact:e} (modes {f:?}, exact edges {f_lo:e} and {f_hi:e})"
+            );
         }
         errs.push(worst);
         // the gap itself (a small difference of two frequencies) is right to better than 2 %

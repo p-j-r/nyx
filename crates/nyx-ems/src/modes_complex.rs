@@ -22,14 +22,17 @@
 //! `(A0 + j b_prev A1) x = -b^2 B x`, and the iteration stops when `b` changes by less than
 //! `COUPLED_BETA_TOL` (relative) between two steps.
 
-use crate::linalg::csr::{c, CCoo, CCsr, C};
-use crate::linalg::driver::eigs_complex;
-use crate::ems::{cell_data, edge_basis, tri_g, C0};
-use crate::fem::*;
-use crate::fields::{local_bary, node_average, CellFields};
-use crate::mesh::SimplexMesh;
-use crate::problem::*;
-use crate::section::local_component;
+use crate::modes::C0;
+use crate::problem::{Problem, Study};
+use crate::Solved;
+use femcore::edge::{cell_data, edge_basis, tri_g};
+use femcore::fem::*;
+use femcore::fields::{local_bary, node_average, CellFields};
+use femcore::linalg::csr::{c, CCoo, CCsr, C};
+use femcore::linalg::driver::eigs_complex;
+use femcore::optical::{cell_materials, EpsC, MuC};
+use femcore::section::local_component;
+use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use std::time::Instant;
 
 /// Relative change of the propagation constant at which the coupled (tilted-crystal) fixed-point iteration stops.
@@ -42,24 +45,6 @@ use std::time::Instant;
 /// after one or two steps without changing the result beyond ~1e-9.
 const COUPLED_BETA_TOL: f64 = 1e-8;
 
-#[derive(Clone, Copy, Debug)]
-pub struct EpsC {
-    pub xx: C,
-    pub xy: C,
-    pub yy: C,
-    pub zz: C,
-    /// couplings of the transverse components x, y to the propagation axis
-    pub xz: C,
-    pub yz: C,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct MuC {
-    pub x: C,
-    pub y: C,
-    pub z: C,
-}
-
 pub struct ModesC {
     pub neff: Vec<C>,
     pub et: Vec<Vec<C>>,
@@ -67,76 +52,16 @@ pub struct ModesC {
     pub converged: bool,
 }
 
-/// Stretch factors along the two axes of the mesh (`dirs`, the layer directions of each) of a cell centre for a PML specification and the
-/// bounding box of its domain.
-pub fn stretch(p: &Pml, dirs: [PmlDir; 2], centre: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> (C, C) {
-    let one = |dir: PmlDir, x: f64, lo: f64, hi: f64| -> C {
-        let t = match dir {
-            PmlDir::Off => return c(1.0, 0.0),
-            PmlDir::Plus => (x - lo) / (hi - lo).max(1e-300),
-            PmlDir::Minus => (hi - x) / (hi - lo).max(1e-300),
-        };
-        let t = t.clamp(0.0, 1.0);
-        let prof = if p.order == 0.0 { 1.0 } else { t.powf(p.order) };
-        c(p.re, -p.strength * prof)
-    };
-    (one(dirs[0], centre[0], lo[0], hi[0]), one(dirs[1], centre[1], lo[1], hi[1]))
-}
-
-/// Complex material tensors of every cell including the PML stretching, in the local axes of the mode solvers (`section::local_tensor`).
-/// The layers of a cross-section absorb along the wafer axes x and z.
-pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
-    cell_materials_signed(mesh, m, crate::section::PROP_SIGN)
-}
-
-/// As `cell_materials` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
-pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
-    let tens: Vec<_> = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(|t| crate::section::local_tensor_signed(t, prop_sign)).collect();
-    let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
-    // bounding boxes of the PML domains
-    let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
-    for c in 0..mesh.n_cells() {
-        let l = mesh.cell_labels[c];
-        if m.pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off) {
-            let e = boxes.entry(l).or_insert(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]));
-            for &v in mesh.cell(c) {
-                let p = mesh.point(v as usize);
-                for k in 0..2 {
-                    e.0[k] = e.0[k].min(p[k]);
-                    e.1[k] = e.1[k].max(p[k]);
-                }
-            }
-        }
-    }
-    let mut eps = Vec::with_capacity(mesh.n_cells());
-    let mut mus = Vec::with_capacity(mesh.n_cells());
-    for ci in 0..mesh.n_cells() {
-        let t = tens[ci];
-        let l = mesh.cell_labels[ci];
-        let (mut sx, mut sy) = (c(1.0, 0.0), c(1.0, 0.0));
-        if let (Some(p), Some((lo, hi))) = (m.pml.get(&l), boxes.get(&l)) {
-            let v = mesh.cell(ci);
-            let mut cen = [0.0; 2];
-            for &i in v {
-                for k in 0..2 {
-                    cen[k] += mesh.point(i as usize)[k] / 3.0;
-                }
-            }
-            let s = stretch(p, [p.x, p.z], cen, *lo, *hi);
-            sx = s.0;
-            sy = s.1;
-        }
-        let (lx, ly, lz) = (sy / sx, sx / sy, sx * sy);
-        // eps_ij -> det(S) eps_ij / (s_i s_j) with S = diag(sx, sy, 1): the diagonal gets lx, ly, lz, xy is unchanged,
-        // xz and yz are multiplied by sy and sx
-        eps.push(EpsC { xx: lx * t[0][0], xy: c(t[0][1], 0.0), yy: ly * t[1][1], zz: lz * t[2][2], xz: sy * t[0][2], yz: sx * t[1][2] });
-        mus.push(MuC { x: lx * mu[ci], y: ly * mu[ci], z: lz * mu[ci] });
-    }
-    Ok((eps, mus))
-}
-
 /// Modes with complex effective index nearest `n_target` (complex).
-pub fn solve_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[MuC], n_target: C, k: usize, order: usize) -> Result<ModesC, String> {
+pub fn solve_modes_complex(
+    mesh: &Discretisation,
+    freq: f64,
+    eps: &[EpsC],
+    mu: &[MuC],
+    n_target: C,
+    k: usize,
+    order: usize,
+) -> Result<ModesC, String> {
     let asm = assemble_modes_complex(mesh, freq, eps, mu, order)?;
     solve_mode_pairs_complex(&asm, n_target, k)
 }
@@ -154,7 +79,13 @@ pub struct ModeAssemblyC {
     pub k0: f64,
 }
 
-pub fn assemble_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &[MuC], order: usize) -> Result<ModeAssemblyC, String> {
+pub fn assemble_modes_complex(
+    mesh: &Discretisation,
+    freq: f64,
+    eps: &[EpsC],
+    mu: &[MuC],
+    order: usize,
+) -> Result<ModeAssemblyC, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -183,7 +114,8 @@ pub fn assemble_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &
         let (m1, m2) = (c(1.0, 0.0) / m.y, c(1.0, 0.0) / m.x); // rotated mu_t^-1
         let imz = c(1.0, 0.0) / m.z;
         let n2 = nloc_e * nloc_e;
-        let (mut wxx, mut wyy, mut wxy, mut wyx, mut se) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+        let (mut wxx, mut wyy, mut wxy, mut wyx, mut se) =
+            (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
         let (mut gx, mut gy) = (vec![0.0; nloc_e * nl], vec![0.0; nloc_e * nl]);
         let (mut kxx, mut kyy, mut tp) = (vec![0.0; nl * nl], vec![0.0; nl * nl], vec![0.0; nl * nl]);
         let (mut nxm, mut nym) = (vec![0.0; nloc_e * nl], vec![0.0; nloc_e * nl]);
@@ -225,7 +157,9 @@ pub fn assemble_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &
         let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
         let ar = c(area, 0.0);
         let k2 = c(k0 * k0, 0.0);
-        let amat: Vec<C> = (0..n2).map(|i| (imz * se[i] - k2 * (e.xx * wxx[i] + e.yy * wyy[i] + e.xy * (wxy[i] + wyx[i]))) * ar).collect();
+        let amat: Vec<C> = (0..n2)
+            .map(|i| (imz * se[i] - k2 * (e.xx * wxx[i] + e.yy * wyy[i] + e.xy * (wxy[i] + wyx[i]))) * ar)
+            .collect();
         a_coo.push_block(rows_e, rows_e, &amat);
         let tm: Vec<C> = (0..n2).map(|i| (m1 * wxx[i] + m2 * wyy[i]) * ar).collect();
         b_coo.push_block(rows_e, rows_e, &tm);
@@ -250,10 +184,16 @@ pub fn assemble_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &
     // PEC walls
     // walls are the exterior facets only: facets on interfaces between domains are not conductors
     let exterior = mesh.exterior_facets();
-    let mut be: Vec<usize> = (0..mesh.n_facets()).filter(|&f| exterior[f]).map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1])).collect();
+    let mut be: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| exterior[f])
+        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
+        .collect();
     be.sort_unstable();
     be.dedup();
-    let mut bn: Vec<usize> = (0..mesh.n_facets()).filter(|&f| exterior[f]).flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>()).collect();
+    let mut bn: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| exterior[f])
+        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
+        .collect();
     bn.sort_unstable();
     bn.dedup();
     let mut fixed: Vec<usize> = be.clone();
@@ -301,7 +241,17 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
         for i in 0..pairs.values.len() {
             let pick = |z: C| -> C {
                 // forward-propagating (positive real part) or, for an evanescent mode, decaying (negative imaginary part) root
-                if z.re.abs() < 1e-9 * z.norm() { if z.im > 0.0 { -z } else { z } } else if z.re < 0.0 { -z } else { z }
+                if z.re.abs() < 1e-9 * z.norm() {
+                    if z.im > 0.0 {
+                        -z
+                    } else {
+                        z
+                    }
+                } else if z.re < 0.0 {
+                    -z
+                } else {
+                    z
+                }
             };
             let mut beta = pick((-pairs.values[i]).sqrt());
             if beta.re.abs() < 0.1 * beta.im.abs() {
@@ -312,12 +262,12 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
             // fixed-point iteration beta -> beta(A1 at beta) with Aitken acceleration every third step
             let mut hist: Vec<C> = vec![];
             for it in 0..10 {
-                crate::progress::check()?;
+                femcore::progress::check()?;
                 let cmat = af.add_scaled(a1f, c(0.0, 1.0) * beta);
-                let one = eigs_complex(&cmat, &bf, -(beta * beta), 1, 1e-11, 400)?;
+                let one = eigs_complex(&cmat, bf, -(beta * beta), 1, 1e-11, 400)?;
                 let nb = pick((-one.values[0]).sqrt());
                 let change = (nb - beta).norm() / beta.norm();
-                crate::progress::note(format!("tilted-crystal coupling, optical mode {}: refinement step {}, relative change of the propagation constant {change:.1e} (stop below {COUPLED_BETA_TOL:.0e})", i + 1, it + 1));
+                femcore::progress::note(format!("tilted-crystal coupling, optical mode {}: refinement step {}, relative change of the propagation constant {change:.1e} (stop below {COUPLED_BETA_TOL:.0e})", i + 1, it + 1));
                 hist.push(beta);
                 beta = nb;
                 last = Some(one);
@@ -378,13 +328,19 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
 
 /// Nodal magnitude fields of a complex mode, scaled to max |E| = 1, under wafer names: `|E|, |Exz|, |Ey|, Re Ex,
 /// Re Ez, Re Ey` (real parts after rotating the phase so that the largest component is real).
-pub fn mode_fields_complex(mesh: &SimplexMesh, modes: &ModesC, j: usize, freq: f64, order: usize) -> Vec<Field> {
+pub fn mode_fields_complex(mesh: &Discretisation, modes: &ModesC, j: usize, freq: f64, order: usize) -> Vec<Field> {
     mode_fields_complex_cells(mesh, modes, j, freq, order).0
 }
 
 /// Stage 3: `mode_fields_complex` and, next to them, the complex components `Ex`, `Ez`, `Ey` at the local dofs of every
 /// cell, in the phase of the plot fields and with their scale (the node average of the real parts is `Re E..`).
-pub fn mode_fields_complex_cells(mesh: &SimplexMesh, modes: &ModesC, j: usize, freq: f64, order: usize) -> (Vec<Field>, CellFields) {
+pub fn mode_fields_complex_cells(
+    mesh: &Discretisation,
+    modes: &ModesC,
+    j: usize,
+    freq: f64,
+    order: usize,
+) -> (Vec<Field>, CellFields) {
     let k0 = 2.0 * std::f64::consts::PI * freq / C0;
     let (nc, nloc) = (mesh.n_cells(), mesh.nloc(order));
     let geo = geometry(mesh);
@@ -415,7 +371,12 @@ pub fn mode_fields_complex_cells(mesh: &SimplexMesh, modes: &ModesC, j: usize, f
             ez[ci * nloc + a] = jb * modes.phi[j][pd[a]];
         }
     }
-    let big = ex.iter().chain(ey.iter()).chain(ez.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+    let big =
+        ex.iter()
+            .chain(ey.iter())
+            .chain(ez.iter())
+            .cloned()
+            .fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
     let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
     let n = mesh.n_dofs(order);
     let avg = |v: &[f64]| node_average(mesh, v, 1, order);
@@ -428,13 +389,18 @@ pub fn mode_fields_complex_cells(mesh: &SimplexMesh, modes: &ModesC, j: usize, f
     let ezn = azm;
     let tot: Vec<f64> = (0..n).map(|i| etn[i].hypot(ezn[i])).collect();
     let s = 1.0 / tot.iter().cloned().fold(0.0, f64::max).max(1e-300);
-    let f = |name: &str, v: Vec<f64>| Field { name: name.into(), unit: "a.u.".into(), values: v.iter().map(|x| x * s).collect() };
+    let f = |name: &str, v: Vec<f64>| Field::scalar(name, "a.u.", v.iter().map(|x| x * s).collect());
     let (lat, nor, prop) = (local_component(0), local_component(1), local_component(2));
     let signed = |c: &[C], sign: f64| -> Vec<f64> { avg(&re(c)).iter().map(|x| x * sign).collect() };
     let mut cells = CellFields::new(mesh, order);
     for (comp, v, sign) in [(lat, &ex, lat.1), (nor, &ey, nor.1), (prop, &ez, prop.1)] {
         let rotated: Vec<C> = v.iter().map(|z| *z * rot * s * sign).collect();
-        cells.push_complex(format!("E{}", comp.0), "a.u.", rotated.iter().map(|z| z.re).collect(), rotated.iter().map(|z| z.im).collect());
+        cells.push_complex(
+            format!("E{}", comp.0),
+            "a.u.",
+            rotated.iter().map(|z| z.re).collect(),
+            rotated.iter().map(|z| z.im).collect(),
+        );
     }
     let fields = vec![
         f("|E|", tot.clone()),
@@ -447,24 +413,31 @@ pub fn mode_fields_complex_cells(mesh: &SimplexMesh, modes: &ModesC, j: usize, f
     (fields, cells)
 }
 
-pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
+/// The modes of a `Modes` study in the complex solver: absorbing layers, lossy or complex materials, a crystal tilted against the guide.
+pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Result<Solved, String> {
     let t0 = Instant::now();
-    let Study::Modes { freq, n_target, evanescent, n_modes } = spec.study.clone() else {
+    let Study::Modes { freq, n_target, evanescent, n_modes } = problem.study.clone() else {
         return Err("mode analysis needs a Modes study".into());
     };
     if freq <= 0.0 || n_modes < 1 {
         return Err("frequency must be positive and at least one mode is needed".into());
     }
-    let (eps, mu) = cell_materials(mesh, &spec.materials)?;
+    let (eps, mu) = cell_materials(mesh, &problem.materials)?;
     let target = if evanescent { c(0.0, n_target) } else { c(n_target, 0.0) };
-    let modes = solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, spec.order)?;
+    let modes = solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, problem.order)?;
     let mut solutions = vec![];
     let mut scalars = vec![];
     for j in 0..modes.neff.len() {
         let z = modes.neff[j];
         let txt = format!("{:.6} {:+.3e}i", z.re, z.im);
-        let (fields, cell_fields) = mode_fields_complex_cells(mesh, &modes, j, freq, spec.order);
-        solutions.push(Solution { label: format!("mode {}: neff = {txt}", j + 1), fields, cell_fields: Some(cell_fields), neff: Some((z.re, z.im)), ..Default::default() });
+        let (fields, cell_fields) = mode_fields_complex_cells(mesh, &modes, j, freq, problem.order);
+        solutions.push(Solution {
+            label: format!("mode {}: neff = {txt}", j + 1),
+            fields,
+            cell_fields: cell_fields_of(&cell_fields),
+            eigenvalue: Some([z.re, z.im]),
+            ..Default::default()
+        });
         scalars.push((format!("neff {}", j + 1), Scalar::Text(txt)));
         let q = if z.im.abs() > 0.0 && z.re > 0.0 { z.re / (2.0 * z.im.abs()) } else { f64::INFINITY };
         if q.is_finite() {
@@ -475,67 +448,22 @@ pub fn solve_emw_complex(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Solve
     if !modes.converged {
         log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
     }
-    let mut result = SolveResult { order: spec.order, dim: 2, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: mesh.n_dofs(spec.order), ..Default::default() };
-    if !modes.neff.is_empty() {
-        if let Ok(set) = crate::optical::optical_set_complex(mesh, spec, &modes, freq) {
-            crate::analysis::analyze_optical(mesh, &set, &Default::default()).attach(&mut result);
-        }
-    }
-    Ok(result)
-}
-
-#[allow(dead_code)]
-fn _unused(_: &CCsr) {}
-
-/// Complex stretch factors `(sx, sy, sz)` of every cell of a 2D or 3D mesh for the PML domains of
-/// `pml` (cells of other domains get 1). The profile is evaluated at the cell centre against the
-/// bounding box of its domain.
-pub fn cell_stretches(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C; 3]> {
-    cell_stretches_by(mesh, pml, |p, d| crate::section::mesh_pml_dirs(p, d))
-}
-
-fn cell_stretches_by(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>, dirs: impl Fn(&Pml, usize) -> [PmlDir; 3]) -> Vec<[C; 3]> {
-    let d = mesh.dim;
-    let mut boxes: std::collections::BTreeMap<i32, ([f64; 3], [f64; 3])> = Default::default();
-    for ci in 0..mesh.n_cells() {
-        let l = mesh.cell_labels[ci];
-        if pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off) {
-            let e = boxes.entry(l).or_insert(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]));
-            for &v in mesh.cell(ci) {
-                let pt = mesh.point(v as usize);
-                for k in 0..d {
-                    e.0[k] = e.0[k].min(pt[k]);
-                    e.1[k] = e.1[k].max(pt[k]);
-                }
-            }
-        }
-    }
-    (0..mesh.n_cells())
-        .map(|ci| {
-            let mut s = [c(1.0, 0.0); 3];
-            if let (Some(p), Some((lo, hi))) = (pml.get(&mesh.cell_labels[ci]), boxes.get(&mesh.cell_labels[ci])) {
-                let mut cen = [0.0; 3];
-                for &v in mesh.cell(ci) {
-                    for k in 0..d {
-                        cen[k] += mesh.point(v as usize)[k] / (d as f64 + 1.0);
-                    }
-                }
-                for (k, dir) in dirs(p, d).into_iter().enumerate().take(d) {
-                    s[k] = stretch_one(p, dir, cen[k], lo[k], hi[k]);
-                }
-            }
-            s
-        })
-        .collect()
-}
-
-fn stretch_one(p: &Pml, dir: PmlDir, x: f64, lo: f64, hi: f64) -> C {
-    let t = match dir {
-        PmlDir::Off => return c(1.0, 0.0),
-        PmlDir::Plus => (x - lo) / (hi - lo).max(1e-300),
-        PmlDir::Minus => (hi - x) / (hi - lo).max(1e-300),
+    let result = SolveResult {
+        physics: "ems".into(),
+        study: "modes".into(),
+        order: problem.order as u8,
+        dim: 2,
+        solutions,
+        scalars,
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: mesh.n_dofs(problem.order),
     };
-    let t = t.clamp(0.0, 1.0);
-    let prof = if p.order == 0.0 { 1.0 } else { t.powf(p.order) };
-    c(p.re, -p.strength * prof)
+    let mut analysis = None;
+    if !modes.neff.is_empty() {
+        if let Ok(set) = crate::optical::optical_set_complex(mesh, problem, &modes, freq) {
+            analysis = Some(femcore::analysis::analyze_optical(mesh, &set, &Default::default()));
+        }
+    }
+    Ok(Solved::with_analysis(result, analysis))
 }

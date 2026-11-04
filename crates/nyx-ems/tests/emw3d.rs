@@ -1,6 +1,7 @@
 //! Electromagnetic eigenmodes of 3D cavities.
 mod common;
-use femcore::problem::*;
+use femcore::props::*;
+use nyx_ems::{Problem, Study};
 
 const C0: f64 = 299_792_458.0;
 
@@ -29,12 +30,12 @@ fn cavity_modes(a: f64, b: f64, d: f64, fmax: f64) -> Vec<f64> {
     out
 }
 
-fn spec(order: usize, f_search: f64, n: usize) -> ProblemSpec {
-    let mut s = ProblemSpec::new(Physics::Emw);
+fn spec(order: usize, f_search: f64, n: usize) -> Problem {
+    let mut s = common::emw();
     s.order = order;
     s.materials.default.insert("eps_r".into(), 1.0);
     s.materials.default.insert("mu_r".into(), 1.0);
-    s.study = Study::Eigenfrequency { n_modes: n, f_search };
+    s.study = Study::Cavity { n_modes: n, f_search };
     s
 }
 
@@ -45,7 +46,7 @@ fn box_cavity_modes_match_the_analytic_frequencies() {
     let exact = cavity_modes(a, b, d, 20e9);
     // quadratic Nedelec elements on 60 cells: all of the first six modes within about 1e-3, and no
     // spurious (gradient) modes below the first physical one
-    let r = femcore::solve::solve(&mesh, &spec(2, 0.9 * exact[0], 6), &mut SolveState::default()).unwrap();
+    let r = common::solve(&mesh, &spec(2, 0.9 * exact[0], 6)).unwrap();
     let got: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
     for (g, e) in got.iter().zip(&exact) {
         assert!((g / e - 1.0).abs() < 2e-3, "{g} vs {e}: all {got:?} vs {exact:?}");
@@ -53,7 +54,7 @@ fn box_cavity_modes_match_the_analytic_frequencies() {
     assert!(got[0] > 0.95 * exact[0]);
     // a finer mesh improves them
     let fine = common::block(a, b, d, 8, 6, 4);
-    let r = femcore::solve::solve(&fine, &spec(2, 0.9 * exact[0], 6), &mut SolveState::default()).unwrap();
+    let r = common::solve(&fine, &spec(2, 0.9 * exact[0], 6)).unwrap();
     for (s, e) in r.solutions.iter().zip(&exact) {
         assert!((s.value.unwrap() / e - 1.0).abs() < 6e-4, "{} vs {e}", s.value.unwrap());
     }
@@ -66,7 +67,7 @@ fn first_order_elements_converge_more_slowly() {
     let mut errs = vec![];
     for (nx, ny, nz) in [(4, 3, 2), (8, 6, 4)] {
         let mesh = common::block(a, b, d, nx, ny, nz);
-        let r = femcore::solve::solve(&mesh, &spec(1, 0.9 * exact[0], 1), &mut SolveState::default()).unwrap();
+        let r = common::solve(&mesh, &spec(1, 0.9 * exact[0], 1)).unwrap();
         errs.push((r.solutions[0].value.unwrap() / exact[0] - 1.0).abs());
     }
     assert!(errs[1] < 0.4 * errs[0], "second-order convergence expected: {errs:?}");
@@ -79,7 +80,7 @@ fn spherical_cavity_lowest_mode_on_a_stuffed_mesh() {
     let r = 0.05;
     let mesh = femcore::meshing::geomdrive3::sphere_cavity(r, 0.012).unwrap().mesh;
     let exact = C0 * 2.7437 / (2.0 * std::f64::consts::PI * r);
-    let res = femcore::solve::solve(&mesh, &spec(2, exact, 4), &mut SolveState::default()).unwrap();
+    let res = common::solve(&mesh, &spec(2, exact, 4)).unwrap();
     let f: Vec<f64> = res.solutions.iter().map(|s| s.value.unwrap()).collect();
     assert!(f.iter().take(3).all(|v| (v / exact - 1.0).abs() < 0.01), "{f:?} vs {exact}");
     // three modes of the degenerate triplet, then a clearly higher one
@@ -92,13 +93,16 @@ fn a_real_stretch_makes_the_cavity_longer() {
     let (a, b, d) = (0.04, 0.03, 0.02);
     let mesh = common::block_split_z(a, b, d, 0.5 * d, d / 6.0, 4);
     let mut s = spec(2, 0.0, 4);
-    s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * C0 / 2.0 * ((1.0 / a).powi(2) + (1.0 / (1.5 * d)).powi(2)).sqrt() };
+    s.study =
+        Study::Cavity { n_modes: 4, f_search: 0.9 * C0 / 2.0 * ((1.0 / a).powi(2) + (1.0 / (1.5 * d)).powi(2)).sqrt() };
     s.materials.set(1, "eps_r", 1.0);
     s.materials.set(2, "eps_r", 1.0);
     s.materials.set(1, "mu_r", 1.0);
     s.materials.set(2, "mu_r", 1.0);
-    s.materials.pml.insert(2, Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Plus, strength: 0.0, order: 0.0, re: 2.0 });
-    let res = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
+    s.materials
+        .pml
+        .insert(2, Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Plus, strength: 0.0, order: 0.0, re: 2.0 });
+    let res = common::solve(&mesh, &s).unwrap();
     let exact = cavity_modes(a, b, 1.5 * d, 20e9);
     let got: Vec<f64> = res.solutions.iter().map(|x| x.value.unwrap()).collect();
     for (g, e) in got.iter().zip(&exact) {
@@ -116,8 +120,8 @@ fn guide_cell(order: usize, phase: f64, nx: usize, ny: usize, nz: usize, l: f64)
     // TE10: f = c / 2 sqrt((1/a)^2 + (beta/pi)^2), beta = (phase + 2 pi m) / l
     let beta = phase / l;
     let f_te10 = 0.5 * C0 * ((1.0 / a).powi(2) + (beta / std::f64::consts::PI).powi(2)).sqrt();
-    s.study = Study::Eigenfrequency { n_modes: 3, f_search: 0.95 * f_te10 };
-    let r = femcore::solve::solve(&mesh, &s, &mut SolveState::default()).unwrap();
+    s.study = Study::Cavity { n_modes: 3, f_search: 0.95 * f_te10 };
+    let r = common::solve(&mesh, &s).unwrap();
     r.solutions.iter().map(|x| x.value.unwrap()).collect()
 }
 
@@ -140,8 +144,8 @@ fn cavity_modes_carry_a_polarization_analysis() {
     let (a, b, d) = (0.04, 0.03, 0.02);
     let mesh = common::block(a, b, d, 5, 4, 3);
     let exact = cavity_modes(a, b, d, 20e9);
-    let r = femcore::solve::solve(&mesh, &spec(2, 0.9 * exact[0], 3), &mut SolveState::default()).unwrap();
-    let an = r.analysis.as_ref().expect("a polarization analysis");
+    let solved = common::try_solve_analysed(&mesh, &spec(2, 0.9 * exact[0], 3)).unwrap();
+    let (r, an) = (&solved.result, solved.analysis.as_ref().expect("a polarization analysis"));
     assert_eq!(an.value_label, "f (THz)");
     let zero = an.rows[0].report.as_ref().unwrap();
     assert!(zero.sphere[0] < -0.99 && zero.te_fraction < 0.01 && zero.long_fraction < 0.01, "{zero:?}");
