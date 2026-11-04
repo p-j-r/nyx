@@ -171,13 +171,7 @@ impl Physics for Dfs {
         if !(1..=2).contains(&spec.order) {
             return Err(Error::Unsupported(format!("dfs supports element order 1 and 2, not {}", spec.order)));
         }
-        if let Some(i) = mesh.points.iter().position(|v| !v.is_finite()) {
-            return Err(Error::NonFinite(format!(
-                "the mesh has a non-finite coordinate (point {}, axis {}): NaN or infinity in the geometry",
-                i / mesh.dim.max(1),
-                i % mesh.dim.max(1)
-            )));
-        }
+        check_mesh(mesh)?;
         Ok(())
     }
 
@@ -205,16 +199,10 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
     if progress.is_cancelled() {
         return Err(Error::Cancelled);
     }
-    if let Some(i) = mesh.points.iter().position(|v| !v.is_finite()) {
-        return Err(Error::NonFinite(format!(
-            "the mesh has a non-finite coordinate (point {}, axis {}): NaN or infinity in the geometry",
-            i / mesh.dim.max(1),
-            i % mesh.dim.max(1)
-        )));
-    }
+    check_mesh(mesh)?;
     problem.check_finite().map_err(Error::NonFinite)?;
     let mut result = {
-        let _s = progress::stage(format!("solving diffusion on a {}D mesh of {} cells", mesh.dim, mesh.n_cells()));
+        let _s = progress::stage(format!("solving diffusion on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
         let d = discretise(mesh)?;
         match problem.study {
             Study::Electrostatic => solve_electrostatics(&d, problem),

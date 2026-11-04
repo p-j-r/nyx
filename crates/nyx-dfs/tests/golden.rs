@@ -5,14 +5,14 @@ mod common;
 use femcore::material::*;
 use nyx_dfs::{Bc, BcKind, Problem, Study};
 use nyx_physics::testkit::{cell_fields_reproduce_the_plot_fields, golden};
-use nyx_physics::{Mesh, SolveResult};
+use nyx_physics::{Discretisation, SolveResult};
 
 fn dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
 }
 
 /// Solves and checks that the cell fields of the fields stage reproduce the plot fields.
-fn checked(mesh: &Mesh, p: &Problem) -> SolveResult {
+fn checked(mesh: &Discretisation, p: &Problem) -> SolveResult {
     let r = common::solve(mesh, p);
     cell_fields_reproduce_the_plot_fields(mesh, &r);
     r

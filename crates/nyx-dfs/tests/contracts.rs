@@ -94,7 +94,7 @@ fn the_envelope_solves_through_the_trait_and_agrees_with_the_typed_problem() {
     spec.bcs.push(BcSpec { on: "right".into(), kind: "ground".into(), params: serde_json::Value::Null });
     let table = Table;
     let mut ctx = Ctx::new(&table);
-    let r = Dfs.solve(&mesh, &spec, &mut ctx).unwrap();
+    let r = Dfs.solve(&Mesh::from_solver_mesh(&mesh).unwrap(), &spec, &mut ctx).unwrap();
     assert_eq!((r.physics.as_str(), r.study.as_str(), r.order, r.dim), ("dfs", "electrostatic", 2, 2));
     let mut p = nyx_dfs::Problem::new(nyx_dfs::Study::Electrostatic, 2);
     p.materials.set(1, "eps_r", 4.2);
@@ -116,7 +116,7 @@ fn the_envelope_solves_through_the_trait_and_agrees_with_the_typed_problem() {
 
 #[test]
 fn the_envelope_is_refused_where_it_is_wrong() {
-    let mesh = femcore::testkit::rect(1.0, 0.5, 4, 2);
+    let mesh = Mesh::from_solver_mesh(&femcore::testkit::rect(1.0, 0.5, 4, 2)).unwrap();
     let table = Table;
     // an unknown region
     let mut spec = ProblemSpec::new("dfs", 2, "heat_stationary");

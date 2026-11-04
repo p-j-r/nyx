@@ -4,16 +4,17 @@
 use femcore::progress::Progress;
 pub use femcore::testkit::*;
 use nyx_dfs::Problem;
-use nyx_physics::{Mesh, SolveResult};
+use nyx_physics::{Discretisation, Mesh, SolveResult};
 use std::collections::BTreeSet;
 
-/// Solves a typed problem (what `Physics::solve` does after `decode`).
-pub fn solve(mesh: &Mesh, p: &Problem) -> SolveResult {
+/// Solves a typed problem on a fixture mesh (what `Physics::solve` does after `decode`).
+pub fn solve(mesh: &Discretisation, p: &Problem) -> SolveResult {
     try_solve(mesh, p).unwrap()
 }
 
-pub fn try_solve(mesh: &Mesh, p: &Problem) -> Result<SolveResult, String> {
-    nyx_dfs::run(mesh, p, &Progress::new()).map_err(|e| e.to_string())
+pub fn try_solve(mesh: &Discretisation, p: &Problem) -> Result<SolveResult, String> {
+    let exchange = Mesh::from_solver_mesh(mesh)?;
+    nyx_dfs::run(&exchange, p, &Progress::new()).map_err(|e| e.to_string())
 }
 
 /// The flat names of the fields of the first solution, sorted.

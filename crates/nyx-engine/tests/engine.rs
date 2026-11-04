@@ -71,7 +71,7 @@ impl Physics for Tst {
             physics: "tst".into(),
             study: spec.study.kind.clone(),
             order: spec.order,
-            dim: mesh.dim as u8,
+            dim: mesh.dim() as u8,
             dofs: mesh.n_cells(),
             seconds: 0.01,
             solutions: vec![Solution {

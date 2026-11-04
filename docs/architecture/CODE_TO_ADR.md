@@ -69,6 +69,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/mesh/mod.rs` | 4 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
 | `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
 | `crates/femcore/src/mesh/cells.rs` | 5 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
+| `crates/femcore/src/mesh/exchange.rs` | 32, 41 | the mesh a physics is given (native cell mesh, 2D or 3D) and its numbering of unknowns |
 | `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
 | `crates/femcore/src/meshing/mod.rs` | 6, 7, 18 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |

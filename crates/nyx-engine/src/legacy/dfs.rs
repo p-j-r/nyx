@@ -48,7 +48,8 @@ pub fn solve(
     progress: &Arc<Progress>,
 ) -> Result<old::SolveResult, String> {
     let problem = problem_from_old(spec)?;
-    let r = nyx_dfs::run(mesh, &problem, progress).map_err(error_text)?;
+    let exchange = nyx_physics::Mesh::from_solver_mesh(mesh)?;
+    let r = nyx_dfs::run(&exchange, &problem, progress).map_err(error_text)?;
     if spec.physics == old::Physics::Heat {
         // a later solid study can take the last temperature as its thermal load
         state.heat_t = r.solutions.last().and_then(|s| s.field("T")).map(|f| f.values.clone());

@@ -9,6 +9,7 @@
 //! them into simplices without new vertices (`SplitMode::Minimal`).
 
 pub mod cells;
+pub mod exchange;
 pub mod fixtures;
 
 pub mod io;
@@ -16,6 +17,7 @@ pub mod io;
 pub mod quality;
 pub mod view;
 
+pub use exchange::Mesh;
 use crate::mesh::cells::CellMesh as NativeCells;
 use std::collections::BTreeSet;
 
@@ -73,7 +75,6 @@ impl SplitReport {
 
 /// The mesh type the physics crates take (`nyx_physics::Mesh`). Today it is the simplex mesh; restructure phase 2 makes it the one native
 /// per-cell-type mesh (ADR 5). Code outside femcore names the mesh through this alias so that change is one line.
-pub type Mesh = SimplexMesh;
 
 #[derive(Clone, Debug)]
 pub struct SimplexMesh {

@@ -21,10 +21,17 @@ pub struct MeshedModel {
 }
 
 impl MeshedModel {
-    pub fn new(mesh: Mesh, eval: Arc<Evaluated>, labels: LabelMap, swept: bool) -> MeshedModel {
+    /// From the mesh the mesher made (the solver mesh of femcore) to the exchange mesh the physics are given.
+    pub fn new(
+        mesh: femcore::mesh::SimplexMesh,
+        eval: Arc<Evaluated>,
+        labels: LabelMap,
+        swept: bool,
+    ) -> Result<MeshedModel, Error> {
         let top = mesh.facet_labels.iter().copied().max().unwrap_or(0);
         let ends = swept.then_some((top - 1, top));
-        MeshedModel { mesh: Arc::new(mesh), eval, labels, ends }
+        let mesh = Mesh::from_solver_mesh(&mesh).map_err(Error::Invalid)?;
+        Ok(MeshedModel { mesh: Arc::new(mesh), eval, labels, ends })
     }
 
     pub fn mesh(&self) -> &Arc<Mesh> {
@@ -43,7 +50,7 @@ impl MeshedModel {
         boundaries.dedup();
         json!({
             "cells": self.mesh.n_cells(),
-            "dim": self.mesh.dim,
+            "dim": self.mesh.dim(),
             "regions": self.labels.domains.iter().map(|d| json!({ "label": d.id, "name": d.name })).collect::<Vec<_>>(),
             "boundaries": boundaries,
             "groups": self.labels.groups.iter().map(|g| json!({ "name": g.name, "rule": g.rule })).collect::<Vec<_>>(),
@@ -160,6 +167,6 @@ impl Mesher for FemcoreMesher {
                 .collect();
             mesh = femcore::meshing::mesher::extrude_y(&mesh, &layers, 0.0).map_err(Error::Invalid)?;
         }
-        Ok(MeshedModel::new(mesh, eval, labels, s.sweep.is_some()))
+        MeshedModel::new(mesh, eval, labels, s.sweep.is_some())
     }
 }

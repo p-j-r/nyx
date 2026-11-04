@@ -27,18 +27,26 @@ pub mod validate;
 
 pub use desc::*;
 pub use error::Error;
-/// The mesh type physics take. Today `femcore::mesh::SimplexMesh`; restructure phase 2 makes it the one native mesh. Name it through this path.
+/// The mesh a physics is given: the one native cell mesh, 2D or 3D (restructure phase 4, ADR 32 and 41; it was `SimplexMesh`).
 pub use femcore::mesh::Mesh;
-/// The mesh with the numbering of unknowns (edges, P2 dofs) a kernel assembles on. Today the same type as `Mesh`; the removal of
-/// `SimplexMesh` (ADR 32, ADR 41) makes `Mesh` the native cell mesh and gives each solve its own `Discretisation` built by `discretise`.
-/// Kernels name only these two paths, never `femcore::mesh::SimplexMesh`.
+/// The numbering of unknowns (edges, P2 dofs) a kernel assembles on. Each solve builds its own from the `Mesh` with `discretise`. The type
+/// is still the solver mesh of femcore, which the window uses until phase 7. Kernels name only `Mesh` and `Discretisation`.
 pub type Discretisation = femcore::mesh::SimplexMesh;
 
-/// The `Discretisation` a physics assembles on, made from the `Mesh` it was given.
-pub fn discretise(mesh: &Mesh) -> Result<std::borrow::Cow<'_, Discretisation>, Error> {
-    Ok(std::borrow::Cow::Borrowed(mesh))
+/// The `Discretisation` a physics assembles on, made from the `Mesh` it was given (non-simplex cells are cut into simplices).
+pub fn discretise(mesh: &Mesh) -> Result<Discretisation, Error> {
+    mesh.discretise().map_err(Error::invalid)
 }
-pub use decode::{materials_by_label, resolve_conditions, Params, ResolvedBc};
+
+/// Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis.
+pub fn check_mesh(mesh: &Mesh) -> Result<(), Error> {
+    match mesh.first_non_finite() {
+        Some((i, k)) => Err(Error::NonFinite(format!(
+            "the mesh has a non-finite coordinate (point {i}, axis {k}): NaN or infinity in the geometry"
+        ))),
+        None => Ok(()),
+    }
+}
 pub use physics::{Ctx, LabelResolver, Physics};
 pub use registry::Registry;
 pub use result::{cell_fields_back, cell_fields_of, CellField, Field, Scalar, Solution, SolveResult};
