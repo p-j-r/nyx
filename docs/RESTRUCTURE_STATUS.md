@@ -153,3 +153,21 @@ Gates of the plan not yet answered: **G2** (tolerance and reference platform; ne
 
 * 2026-11-03: architecture model, 23 ADRs, 28 rough spots, contract tests (bookmark `arch-model-adrs`), restructure plan written.
 * 2026-11-04: foundation session: `nyx2` created, phases 0 and 1, workspace layout, `nyx-physics` and the skeletons, ADRs 24 to 27, parallel list.
+
+## Phase 2 (mesh session, workspace `nyx2-mesh`, bookmark `restructure-2-mesh`)
+
+State 2026-11-04: **step 1 to 3 done, the rest not started.**
+
+Done (jj commits on the bookmark, in order):
+1. `a4f8aa69` pure file move into `femcore::{mesh, meshing, adapt}` (ADR 31 lists the new paths); only `mod` lines, one import and a lint allow changed; old paths kept as a temporary re-export block.
+2. `1fe9e8aa` `CODE_TO_ADR.md` rows for the moved files (`check_code_to_adr.sh` passes).
+3. `5f36745b` all callers (femcore, tests, examples, app, nyx-session) use the new paths; the re-export block is gone; `lib.rs` module map updated.
+4. `cdaa9b43` ADR 31.
+
+Checks at `cdaa9b43`: `cargo build --release --workspace --all-targets` ok; `cargo test --release --workspace --no-fail-fast`: **764 passed, 2 failed, 9 ignored**, identical to the foundation baseline (the failures are the two known `golden_frames` `ems` tests, R22/G2). No logic changed; no golden, contract exemplar or benchmark touched (benchmarks not re-run: a pure move cannot change them, they are measured at the end of the phase).
+
+Not done yet (in the plan's order): one native mesh (`mesh::native`/`cells` become the only mesh, `SimplexMesh` a view), delete `mesh::cellmesh` and `mesh::interop`, numbering from 1 everywhere, one PML generator (`meshing::pml` and `meshing::pml_box` still both exist), neutral `Sizing` in `femcore::meshing` with `nyx_physics::Sizing` re-exporting it, `adapt::par` onto `femcore::par`, `mesher3d`/`refine3d` as test fixtures only, rewritten `mesh_*` contracts and schemas (ADR 19), ADRs for those decisions (number 32 and up; coordinate with the linalg thread), best-of-3 benchmarks on an idle machine.
+
+Gate questions for paul (open; defaults will be used and kept easy to reverse): R05 keep `mesher3d`/`refine3d` as test fixtures only (default yes); domains and boundaries numbered from 1 everywhere (default yes); neutral `Sizing` in `femcore::meshing::Sizing` re-exported by `nyx_physics` (default yes).
+
+Notes for other sessions: any file that names the old paths (`femcore::geomdrive`, `femcore::meshers::*`, `crate::view`, `crate::estimate*`, and so on) must use `femcore::meshing::geomdrive`, `femcore::mesh::native` etc.; rebase onto `restructure-2-mesh` or apply the same path rewrite.
