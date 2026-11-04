@@ -176,3 +176,4 @@ Left for others / later:
 * Numbers marked "approximate" in `materials/silicon.toml` (dn_dT) and the mechanical, thermal values of silica and sapphire are typical handbook values; check before quantitative use.
 * `femcore --test contracts` and the other sessions' files were not touched.
 
+Test run of this session (`cargo test --release --workspace --no-fail-fast`, Windows, other sessions compiling at the same time): 809 passed, 9 ignored, 3 failed: the two known `golden_frames` failures (R22) and `nyx-store workspace::tests::dashboard_rules_hide_after_three_days_cap_pin_and_never_delete`, which passes when run alone (an unrelated, probably order- or id-dependent flake in a crate this phase did not touch; noted for whoever owns `nyx-store`).
