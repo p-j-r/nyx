@@ -65,3 +65,11 @@ Related: ADR numbers refer to `adr/`, contract names to `contracts/`.
 * `geom` has golden models with closed-form expectations and bit-exact serde round-trip tests.
 * Determinism has a test (`determinism.rs`, `solvers/determinism`).
 * Every library file begins with a header comment; the history in git is one commit per decision with a descriptive subject, which is what the ADRs were written from.
+
+## Resolved by the restructure (mesh phase, 2026-11-04; details in ADR 31 and 32)
+
+* **R01** two `CellMesh` and two `SimplexMesh` types: `mesh::cells::CellMesh<D>` is the one mesh; the nyx `CellMesh`/`ElementType` are deleted; `mesh::SimplexMesh` is the solver view (to be removed in phase 4); the adaptation's private working mesh is `adapt::work::SimplexMesh<D>`.
+* **R03** (mesher part): `meshers/par.rs` is gone; its fixed-chunk reductions live in `femcore::par` (ADR 11 amendment).
+* **R04** three PML mechanisms: `pml_box::build_pml` is the one generator of structured layers; `pml_geom` and `pml3` are adapters; the inline layers are a property of the geom model.
+* **R05** legacy 3D mesher: `mesher3d`/`refine3d` left the library and are kept as the test fixture `crates/femcore/tests/common/solid3d` (paul wants them kept; a geom adapter for general 3D shapes is a separate thread).
+* **R09** label bases: domains and boundaries are numbered from 1 everywhere, no shift code left; contract `mesh_cells.v1.json`.
