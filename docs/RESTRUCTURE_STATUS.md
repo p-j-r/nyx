@@ -294,7 +294,7 @@ State 2026-11-04: **done on the bookmark, not merged.** Based on `restructure-2-
 
 ## Phase 4 (physics session, workspace `nyx2-phase4`, bookmarks `restructure-4-physics`, `restructure-4a-base`)
 
-Updated 2026-11-04. **State: the merge, the rename, the shared groundwork and `dfs` are done; `sms` and `ems` are not moved yet; `SimplexMesh` is not removed yet.** Read ADR 41 first: it is the pattern and the checklist for the next two physics.
+Updated 2026-11-04. **State: the merge, the rename, the shared groundwork, `dfs` and the removal of `SimplexMesh` from the physics interface are done (bookmark `restructure-4-physics`; `restructure-4a-base` is the commit before the mesh change); `sms` and `ems` are not moved yet (two threads).** Read ADR 41 first: it is the pattern and the checklist for the next two physics.
 
 **Done**
 * **Merge** of `restructure-2-mesh` and `restructure-3-linalg` (conflicts only in docs and `femcore/src/lib.rs`), bookmark `restructure-4-physics`. `femcore::solvers` renamed `femcore::linalg` (module, `tests/linalg`, imports, docs). `restructure-2b-mesh3d-adapter` rebased onto the merge (ADR 40, one test-file conflict resolved); `restructure-4e-engine-core` merged in (engine core with the stale mesher paths fixed). The line with all of it is `restructure-4a-base`.
@@ -311,13 +311,13 @@ Updated 2026-11-04. **State: the merge, the rename, the shared groundwork and `d
 
 **Decisions and deviations**
 * **Legacy bridge** (coordinator agreed): the window and the MCP session still build the old `ProblemSpec`; they reach moved kernels through `nyx_engine::legacy`. It goes with `femcore::problem` and `femcore::solve` in phase 7.
-* **`SimplexMesh` removal** (coordinator agreed to this reading): the type leaves the public vocabulary and the trait in the next step; the numbering becomes the per-solve `Discretisation`; non-simplex cells are still cut into simplices so goldens keep their numbers; native quadrilaterals, prisms and hexahedra are a later, golden-changing step. ADR 41 item 5.
+* **`SimplexMesh` removal** (coordinator agreed to this reading): **done** (commit f326636a): `Physics` takes `femcore::mesh::Mesh`, the native cell mesh in 2D or 3D (`mesh/exchange.rs`), and each solve builds the numbering `Discretisation` with `nyx_physics::discretise` (a unit test pins that the round trip reproduces the solver mesh exactly); the struct `SimplexMesh` itself stays in femcore for the mesher and the window until phase 7; non-simplex cells are still cut into simplices so goldens keep their numbers; native quadrilaterals, prisms and hexahedra are a later, golden-changing step. ADR 41 item 5.
 * The adaptation loops became generic (`PlotFields`); a signature change of `solve_adaptively[3]`, no change in behaviour.
 * Contract `physics_dfs` 1.1: the physics option `solver` replaces `ProblemSpec::solver`.
 
 **Open / next**
 1. `sms` and `ems` (two threads from `restructure-4a-base`); each deletes its `femcore` module and arm, moves its goldens and tests, bumps its `physics_<id>` exemplar.
-2. `SimplexMesh` removal (after the kernels, or in parallel if nobody else touches `mesh/mod.rs` and the mesher): `Mesh` = native cell mesh, `discretise` builds the numbering.
+2. (done) `SimplexMesh` removal from the interface. Left for phase 7: rename the struct to `Discretisation` and let the mesher produce `Mesh` directly when the window is rewired.
 3. `Physics::sizing` for sms and ems, then delete `physics_size::spec_sizing` and `mesh_for_problem`.
 4. Rewrite the contracts for the envelope (`kernel_stages`, `problem_spec`) once all three physics are in; delete `problem_spec.v1`.
 5. Idle-machine benchmarks against a control run of the parent commit, best of three (not taken yet; the machine is shared).
