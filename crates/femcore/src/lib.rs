@@ -10,9 +10,7 @@
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
 //! * linear algebra: `linalg` (the one library: `Csr<T>` matrices, direct and Krylov solvers, eigensolvers, multigrid;
 //!   `linalg::driver` is the door the kernels use)
-//! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (the shared cross-section solid kernel, today for rings), `sms_pml`,
-//!   `sms_lrb` (absorbing boundaries), `sms_floquet` and `periodic` (periodic cells), `sms_axisym` (bodies of
-//!   revolution); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
+//! * physics: `dfs` (electrostatics, heat), `sms` (in the `nyx-sms` crate since phase 4) with `periodic` (Floquet pairs, shared with `ems3d`; stays here); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
 //! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)
 //! * ported libraries: `linalg` (see above; Krylov, eigen, preconditioner, time-stepping and optimisation library for
 //!   real and complex systems) and the mesher port in `mesh`, `meshing` and `adapt`, see docs/ports
@@ -46,12 +44,6 @@ pub mod problem;
 pub mod props;
 pub mod progress;
 pub mod section;
-pub mod sms;
-pub mod sms_axisym;
-pub mod sms_floquet;
-pub mod sms_kz;
-pub mod sms_lrb;
-pub mod sms_pml;
 pub mod solve;
 pub mod testkit;
 pub mod linalg;

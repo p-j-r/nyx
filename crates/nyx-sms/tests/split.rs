@@ -1,9 +1,10 @@
+//! (Moved from femcore with the solid kernel, whose uniaxial bar is the oracle.)
 //! Meshes with quadrilaterals, hexahedra and prisms are split into simplices; the result must be
 //! conforming, fill the same volume and solve exactly for linear fields.
 mod common;
 use femcore::mesh::{SimplexMesh, SplitMode};
-use femcore::problem::*;
-use femcore::sms::solve_solid;
+use nyx_sms::*;
+
 use femcore::mesh::cells::{CellMesh as NativeCells, CellType};
 use std::collections::HashMap;
 
@@ -89,7 +90,9 @@ fn hex_block(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Cell
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
-                for (dk, dj, di) in [(0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)] {
+                for (dk, dj, di) in
+                    [(0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)]
+                {
                     hex.push(vid(i + di, j + dj, k + dk));
                 }
             }
@@ -117,7 +120,11 @@ fn hex_block(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Cell
             q(vid(i, j, nz), vid(i + 1, j, nz), vid(i, j + 1, nz), vid(i + 1, j + 1, nz), 6);
         }
     }
-    CellMesh { sdim: 3, points: grid_points(nx, ny, nz, lx, ly, lz), types: vec![et("quad", 4, quad, qdom), et("hex", 8, hex, vec![1; nh])] }
+    CellMesh {
+        sdim: 3,
+        points: grid_points(nx, ny, nz, lx, ly, lz),
+        types: vec![et("quad", 4, quad, qdom), et("hex", 8, hex, vec![1; nh])],
+    }
 }
 
 /// A block of prisms: each (i, j) square is cut into two triangles that are extruded in z.
@@ -166,7 +173,11 @@ fn prism_block(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Ce
         }
     }
     let np = pd.len();
-    CellMesh { sdim: 3, points: grid_points(nx, ny, nz, lx, ly, lz), types: vec![et("tri", 3, tri, td), et("quad", 4, quad, qd), et("prism", 6, prism, vec![1; np])] }
+    CellMesh {
+        sdim: 3,
+        points: grid_points(nx, ny, nz, lx, ly, lz),
+        types: vec![et("tri", 3, tri, td), et("quad", 4, quad, qd), et("prism", 6, prism, vec![1; np])],
+    }
 }
 
 fn volume(m: &SimplexMesh) -> f64 {
@@ -232,17 +243,17 @@ fn quads_become_triangles_and_solve_exactly() {
     assert!((volume(&m) - 0.2).abs() < 1e-14);
     assert_eq!(m.boundary_labels(), vec![1, 2, 3, 4]);
     // uniaxial plane stress: ux = sigma x / E, exact in P2
-    let mut spec = ProblemSpec::new(Physics::Solid);
+    let mut spec = Problem::new(Study::Static, 2);
     spec.plane = Plane::Stress;
     spec.materials.default.insert("E".into(), 1e9);
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
-        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
+        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { labels: vec![4], kind: BcKind::Load([1e6, 0.0, 0.0]) },
     ];
-    let r = solve_solid(&m, &spec, &SolveState::default()).unwrap();
-    let ux = &r.solutions[0].field("ux").unwrap().values;
+    let r = solve_solid(&m, &spec).unwrap();
+    let ux = &r.solutions[0].flat("ux").unwrap();
     let x = m.dof_coordinates(2);
     let exact: Vec<f64> = (0..ux.len()).map(|i| 1e6 * x[2 * i] / 1e9).collect();
     assert!(common::maxdiff(ux, &exact) < 1e-12);
@@ -251,17 +262,17 @@ fn quads_become_triangles_and_solve_exactly() {
 fn uniaxial_3d(m: &SimplexMesh, volume_expected: f64) {
     assert!((volume(m) - volume_expected).abs() < 1e-12 * volume_expected);
     assert_conforming(m);
-    let mut spec = ProblemSpec::new(Physics::Solid);
+    let mut spec = Problem::new(Study::Static, 2);
     spec.materials.default.insert("E".into(), 1e9);
     spec.materials.default.insert("nu".into(), 0.0);
     spec.bcs = vec![
-        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![5], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![2], kind: BcKind::Load([1e6, 0.0, 0.0]) },
+        Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { labels: vec![3], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { labels: vec![5], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } },
+        Bc { labels: vec![2], kind: BcKind::Load([1e6, 0.0, 0.0]) },
     ];
-    let r = solve_solid(m, &spec, &SolveState::default()).unwrap();
-    let ux = &r.solutions[0].field("ux").unwrap().values;
+    let r = solve_solid(m, &spec).unwrap();
+    let ux = &r.solutions[0].flat("ux").unwrap();
     let x = m.dof_coordinates(2);
     let exact: Vec<f64> = (0..ux.len()).map(|i| 1e6 * x[3 * i] / 1e9).collect();
     assert!(common::maxdiff(ux, &exact) < 1e-12, "{}", common::maxdiff(ux, &exact));
@@ -310,7 +321,11 @@ fn minimal_split_conforms_for_any_vertex_numbering() {
         for v in 0..n as usize {
             points[perm[v] as usize * 3..perm[v] as usize * 3 + 3].copy_from_slice(&nm.points[v * 3..v * 3 + 3]);
         }
-        let types = nm.types.iter().map(|t| et(&t.name, t.nep, t.elem.iter().map(|&v| perm[v as usize]).collect(), t.dom.clone())).collect();
+        let types = nm
+            .types
+            .iter()
+            .map(|t| et(&t.name, t.nep, t.elem.iter().map(|&v| perm[v as usize]).collect(), t.dom.clone()))
+            .collect();
         let sc = CellMesh { sdim: 3, points, types };
         let (m, _) = SimplexMesh::from_cells_split_with(&native::<3>(&sc), SplitMode::Minimal).unwrap();
         assert_eq!(m.n_cells(), 18 * 6);

@@ -1,13 +1,31 @@
 //! nyx-sms: solid mechanics (`sms`, ADR 12): static and eigenfrequency studies of isotropic and anisotropic solids, in 2D (plane strain or
-//! stress) and 3D, with absorbing layers and Floquet-periodic pairs.
+//! stress) and 3D, with absorbing layers (perfectly matched layers and low-reflecting boundaries) and Floquet-periodic pairs.
 //!
-//! SKELETON (restructure foundation). It declares what `sms` is to the rest of nyx; the kernels (`femcore::sms`, `sms_kz`, `sms_pml`,
-//! `sms_lrb`, `sms_floquet`, `sms_axisym`, `periodic`) move in here in phase 4, after phases 2 and 3. Until then `solve` answers
-//! `Error::NotYetMoved`. The descriptors are the first version, read from the current kernels and `ProblemSpec`; the phase 4 owner
-//! refines them and bumps `docs/architecture/contracts/physics_sms.v1.json` with a `VERSIONS.md` entry.
+//! The crate holds the typed problem (`problem`, decoded from the envelope by `problem::decode`), the kernels in the three stages of
+//! ADR 9 (`solid`: static and real eigenfrequencies; `pml`, `lrb`, `floquet`: the complex-frequency variants; `axisym` and
+//! `cross_section`: bodies of revolution on their half-plane) and the `Physics` implementation below. Moved here from
+//! `femcore::{sms, sms_pml, sms_lrb, sms_floquet, sms_axisym, sms_kz}` in restructure phase 4 (ADR 42). `femcore::periodic` (the Floquet
+//! reduction, shared with 3D EM waves) stays in femcore.
 
+// The kernels index several arrays with one loop variable, the form that matches the formulas (as in femcore).
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments, clippy::type_complexity)]
+
+pub mod axisym;
+pub mod cross_section;
+pub mod floquet;
+pub mod lrb;
+pub mod pml;
+pub mod problem;
+pub mod solid;
+
+pub use cross_section::{solve_solid_axisym, CrossModes};
+pub use problem::{decode, Bc, BcKind, Plane, Problem, Study, ThermalExpansion, ThermalSource};
+pub use solid::{solve_solid, Setup};
+
+use femcore::progress::{self, Progress};
 use nyx_physics::Mesh;
 use nyx_physics::*;
+use std::sync::Arc;
 
 pub struct Sms;
 
@@ -112,7 +130,6 @@ impl Physics for Sms {
             PropDesc::new("nu", "Poisson's ratio", "", Scalar, &[], None),
             PropDesc::new("rho", "Density", "kg/m^3", Scalar, &["eigenfrequency"], None),
             PropDesc::new("alpha", "Thermal expansion", "1/K", Tensor, &["static"], Some(0.0)),
-            PropDesc::new("stiffness", "Elastic matrix (Voigt)", "Pa", Tensor, &[], None),
         ]
     }
 
@@ -130,6 +147,13 @@ impl Physics for Sms {
             ),
             ParamDesc::number("temperature", "Uniform temperature", "K", 293.15, "used with thermal = uniform"),
             ParamDesc::number("t_ref", "Reference temperature", "K", 293.15, "the stress-free temperature"),
+            ParamDesc::choice(
+                "solver",
+                "Linear solver",
+                &["auto", "direct", "iterative"],
+                "auto",
+                "auto: sparse direct for small systems, multigrid-preconditioned CG (static) or LOBPCG (lowest modes) for large ones; direct: Cholesky; iterative: multigrid",
+            ),
             ParamDesc::names(
                 "inactive",
                 "Inactive regions",
@@ -157,11 +181,11 @@ impl Physics for Sms {
         vec![FieldLink::new("sms.temperature", "temperature")]
     }
 
-    fn validate(&self, spec: &ProblemSpec, _mesh: &Mesh) -> Result<(), Error> {
-        // the element orders the kernels have (phase 4 adds the checks that need the mesh)
+    fn validate(&self, spec: &ProblemSpec, mesh: &Mesh) -> Result<(), Error> {
         if !(1..=2).contains(&spec.order) {
             return Err(Error::Unsupported(format!("sms supports element order 1 and 2, not {}", spec.order)));
         }
+        check_mesh(mesh)?;
         Ok(())
     }
 
@@ -170,9 +194,35 @@ impl Physics for Sms {
         Sizing { order: spec.order, headroom: 1.5, wavelengths: Default::default() }
     }
 
-    fn solve(&self, _mesh: &Mesh, _spec: &ProblemSpec, _ctx: &mut Ctx) -> Result<SolveResult, Error> {
-        Err(Error::NotYetMoved(
-            "sms: the kernels still live in femcore::sms* and move into this crate in restructure phase 4".into(),
-        ))
+    fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {
+        validate_spec(self, spec)?;
+        self.validate(spec, mesh)?;
+        let problem = decode(spec, ctx)?;
+        run(mesh, &problem, &ctx.progress)
     }
+}
+
+/// Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the
+/// stage log to the result. `Physics::solve` is this after `decode`; code that already has mesh numbers calls it directly.
+pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error> {
+    let _installed = progress::install(progress);
+    let first_line = progress.log().len();
+    if !(1..=2).contains(&problem.order) {
+        return Err(Error::invalid("element order must be 1 or 2"));
+    }
+    if progress.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    check_mesh(mesh)?;
+    problem.check_finite().map_err(Error::NonFinite)?;
+    let mut result = {
+        let _s =
+            progress::stage(format!("solving solid mechanics on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
+        let d = discretise(mesh)?;
+        problem.check_wafer(d.dim).map_err(Error::invalid)?;
+        solve_solid(&d, problem).map_err(Error::from_kernel)?
+    };
+    check_result_finite(&result)?;
+    result.log.extend(progress.log().into_iter().skip(first_line));
+    Ok(result)
 }

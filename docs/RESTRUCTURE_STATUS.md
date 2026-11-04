@@ -321,3 +321,30 @@ Updated 2026-11-04. **State: the merge, the rename, the shared groundwork and `d
 3. `Physics::sizing` for sms and ems, then delete `physics_size::spec_sizing` and `mesh_for_problem`.
 4. Rewrite the contracts for the envelope (`kernel_stages`, `problem_spec`) once all three physics are in; delete `problem_spec.v1`.
 5. Idle-machine benchmarks against a control run of the parent commit, best of three (not taken yet; the machine is shared).
+
+## Phase 4: sms (workspace `nyx2-sms`, bookmark `restructure-4-sms`, based on `restructure-4-physics` at `f326636a`)
+
+Updated 2026-11-04. **State: `sms` is moved into `nyx-sms`; goldens unchanged.** ADR 42 (the move, the typed problem, the result shape), ADR 43 (bodies of revolution stay a library entry), ADR 44 (what stays in femcore and the few shared lines touched).
+
+**Done**
+* `crates/nyx-sms`: `problem` (typed `Problem`, `decode`), `solid` (was `sms`), `pml`, `lrb`, `floquet`, `axisym`, `cross_section` (was `sms_kz`), `run`, `Physics::solve`. Kernels edited for types only. `femcore::{sms, sms_pml, sms_lrb, sms_floquet, sms_axisym, sms_kz}` are deleted; `femcore::solve` answers an error for `Physics::Solid`.
+* Bridge `nyx_engine::legacy::sms`: old problem to typed, `FromHeat` to `Imported(state.heat_t)`, result back, **`disp` filled** from the vector field `u` (real studies) or `Re u{x,z,y}` (complex modes). `neff` stays `None` for sms. The arm is in `legacy::solve_with`.
+* Descriptors `physics_sms` 1.2 (option `solver`; property `stiffness` removed), new exemplar `physics_sms_result.v1.json` 1.0, `kernel_stages` 1.3.
+* **Goldens moved unchanged and passing**: `solid_static_sapphire_strain`, `solid_static_sapphire_stress_thermal`, `solid_eigen_sapphire`, `solid_eigen_floquet`, `solid_eigen_pml_x`, `solid_eigen_pml_z`, `ring_model_axes` to `crates/nyx-sms/tests/golden/`; `solid_static_thermal_from_heat` to `crates/nyx-engine/tests/golden/`. Nothing was regenerated.
+* **Tests moved** to `crates/nyx-sms/tests`: `solid`, `solid_pml`, `anisotropic` (solid half), `stages` (4 tests), `ring_frame` (5 of 6), `axisym_closed_form` (ring), `amg_solve`, `cancel_and_log`, `determinism`, `finite_guard` (+ the finite result check of the new result), `frame` (2), `frame_roundtrip` (1), `geom_meshes` (plate with a hole), `golden`, `split` (whole file: a solid bar is its oracle). New in `contracts.rs`: envelope against typed problem (bits), layer and Floquet pair through the envelope, imported temperature, refusals, stage API, result-shape exemplar. femcore keeps the ems halves of those files. Benchmarks `eig_beam`, `mem_profile`, `profile3d` moved to `nyx-engine/examples` (`tools/baseline.sh` updated).
+* **Checks** (`cargo test --release --workspace --no-fail-fast`, shared machine): **787 passed, 2 failed, 7 ignored**; the two failures are the known SOI-wire goldens (R22). Baseline of `f326636a`: 775 / 2 / 9 (the ignored count differs because the runs were taken on different targets; not investigated). `cargo clippy -D warnings` and `cargo fmt` clean for `nyx-sms` and `nyx-engine`; `check_code_to_adr.sh` passes.
+
+**Axisymmetric kernel check (G1)**: the ring tests (`axisym_closed_form.rs`, `ring_frame.rs`) pass on the moved code with their thresholds (breathing mode 2e-3, flexure 2e-2); the figures quoted in phase 3 were not re-measured.
+
+**For the merge (see ADR 44)**
+* Shared lines I edited: `femcore/src/{lib,solve,progress,validate,fem,ems3d,h5io}.rs` and `linalg/amg_elastic/mod.rs` (`sms::lap` became `progress::lap_since`; if the ems move deletes or edits `ems3d.rs`, take its version and call `progress::lap_since`), `nyx-engine/src/legacy/mod.rs` (one `pub mod`, one arm), ADR_INDEX, CODE_TO_ADR, contracts README and VERSIONS, `tools/baseline.sh`.
+* `nyx-sms` calls `femcore::ems_pml::cell_stretches`: it must stay public in femcore (or move to `props`).
+* Test files edited on both sides: `femcore/tests/{golden_frames,stages,anisotropic,ring_frame,axisym_closed_form,frame_roundtrip,contracts}.rs` (my hunks removed the solid parts only; ems parts untouched).
+* `CLAUDE.md` still calls `nyx-sms` a skeleton; left for the merge since it says the same of `nyx-ems`.
+
+**Open / not done**
+1. `Physics::sizing` for sms is the skeleton's (no wavelengths); `physics_size::spec_sizing` stays.
+2. Axisymmetric solid study is not in the envelope (ADR 43).
+3. Anisotropic stiffness cannot be given through the envelope until the material files (phase 6).
+4. Descriptor `fields` for the eigenfrequency study lists `u`; a lossy mode has `Re ux`, `Re uz` (ADR 42 point 4).
+5. Benchmarks of the solid examples not re-timed (shared machine).

@@ -13,10 +13,10 @@
 //! with the symmetry of the ring (isotropic, or averaged around the axis with
 //! `average_about_axis`) are exact. A mesh must not touch the axis `r = 0`.
 
-use crate::linalg::csr::{c, CCoo, CCsr, C};
-use crate::fem::*;
-use crate::material::M6;
-use crate::mesh::SimplexMesh;
+use femcore::fem::*;
+use femcore::linalg::csr::{c, CCoo, CCsr, C};
+use femcore::material::M6;
+use nyx_physics::Discretisation;
 
 /// The stiffness (solver Voigt order xx, yy, zz, xy, yz, xz in the frame of the cross-section)
 /// averaged over rotations of the crystal about the axis `axis` (0, 1 or 2): what a ring sees when the
@@ -78,7 +78,13 @@ pub fn average_about_axis(c6: &M6, axis: usize, samples: usize) -> M6 {
 // The B-matrix tables below are written `row * nd + component * nloc + a` for every entry, including the ones with a
 // zero factor, so that all lines read alike.
 #[allow(clippy::erasing_op)]
-pub fn assemble_stiffness_axisym(mesh: &SimplexMesh, c6: &[M6], order: usize, m: f64, stretch: Option<&[[C; 3]]>) -> Result<CCsr, String> {
+pub fn assemble_stiffness_axisym(
+    mesh: &Discretisation,
+    c6: &[M6],
+    order: usize,
+    m: f64,
+    stretch: Option<&[[C; 3]]>,
+) -> Result<CCsr, String> {
     let re = RefElement::new(2, order, 2 * order + 2);
     let geo = geometry(mesh);
     let nloc = re.nloc;
@@ -107,7 +113,9 @@ pub fn assemble_stiffness_axisym(mesh: &SimplexMesh, c6: &[M6], order: usize, m:
             let lam = barycentric(&re, q, order);
             let r = lam[0] * xs[0] + lam[1] * xs[1] + lam[2] * xs[2];
             if r <= 0.0 {
-                return Err("the mesh of an axisymmetric problem must lie in r > 0 (it touches or crosses the axis)".into());
+                return Err(
+                    "the mesh of an axisymmetric problem must lie in r > 0 (it touches or crosses the axis)".into()
+                );
             }
             let beta = c(0.0, -m / r);
             let inv_r = 1.0 / r;
@@ -178,7 +186,7 @@ fn barycentric(re: &RefElement, q: usize, order: usize) -> [f64; 3] {
 }
 
 /// Mass matrix `rho r` over `3 * n_dofs` unknowns, with the PML stretch determinant as a complex weight.
-pub fn assemble_mass_axisym(mesh: &SimplexMesh, rho: &[f64], order: usize, stretch: Option<&[[C; 3]]>) -> CCsr {
+pub fn assemble_mass_axisym(mesh: &Discretisation, rho: &[f64], order: usize, stretch: Option<&[[C; 3]]>) -> CCsr {
     let re = RefElement::new(2, order, 2 * order + 1);
     let geo = geometry(mesh);
     let nloc = re.nloc;

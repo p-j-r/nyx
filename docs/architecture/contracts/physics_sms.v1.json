@@ -324,6 +324,22 @@
       "unit": "K"
     },
     {
+      "doc": "auto: sparse direct for small systems, multigrid-preconditioned CG (static) or LOBPCG (lowest modes) for large ones; direct: Cholesky; iterative: multigrid",
+      "kind": {
+        "default": "auto",
+        "options": [
+          "auto",
+          "direct",
+          "iterative"
+        ],
+        "type": "choice"
+      },
+      "label": "Linear solver",
+      "name": "solver",
+      "required": false,
+      "unit": ""
+    },
+    {
       "doc": "regions with no stiffness or mass (for example air); the dofs only they touch are held at zero",
       "kind": {
         "default": [],
@@ -371,14 +387,6 @@
         "static"
       ],
       "unit": "1/K"
-    },
-    {
-      "default": null,
-      "kind": "tensor",
-      "label": "Elastic matrix (Voigt)",
-      "name": "stiffness",
-      "needed_by": [],
-      "unit": "Pa"
     }
   ],
   "schema": {
@@ -627,10 +635,6 @@
                 "rho": {
                   "description": "Density [kg/m^3]",
                   "type": "number"
-                },
-                "stiffness": {
-                  "description": "Elastic matrix (Voigt) [Pa]",
-                  "type": "number"
                 }
               },
               "type": "object"
@@ -662,6 +666,16 @@
             "enum": [
               "strain",
               "stress"
+            ],
+            "type": "string"
+          },
+          "solver": {
+            "default": "auto",
+            "description": "Linear solver. auto: sparse direct for small systems, multigrid-preconditioned CG (static) or LOBPCG (lowest modes) for large ones; direct: Cholesky; iterative: multigrid",
+            "enum": [
+              "auto",
+              "direct",
+              "iterative"
             ],
             "type": "string"
           },

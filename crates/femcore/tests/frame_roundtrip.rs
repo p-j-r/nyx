@@ -32,26 +32,6 @@ fn solve(mesh: &SimplexMesh, spec: &ProblemSpec) -> SolveResult {
 }
 
 #[test]
-fn a_plate_pressed_from_above_moves_down_in_z_and_is_stressed_in_z_and_y() {
-    let mesh = common::rect(1.0, 0.5, 8, 4);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.materials.default.insert("E".into(), 70e9);
-    s.materials.default.insert("nu".into(), 0.3);
-    // fixed on the bottom, a downward traction on the top
-    s.bcs = vec![
-        Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![3], kind: BcKind::Load([0.0, 0.0, -1e6]) },
-    ];
-    let r = solve(&mesh, &s);
-    assert_eq!(names(&r), sorted(&["sxx", "sxz", "syy", "szz", "ux", "uz", "von Mises", "|u|"]));
-    assert!(mean(&r, "uz") < 0.0, "the plate is pushed down: {}", mean(&r, "uz"));
-    // plane strain: sigma_zz = -1 MPa, and the out-of-plane stress is sigma_yy = nu (sigma_xx + sigma_zz), about -0.3 MPa (sigma_xx is not
-    // zero near the clamped bottom)
-    assert!((mean(&r, "szz") / -1e6 - 1.0).abs() < 0.02, "{}", mean(&r, "szz"));
-    assert!(mean(&r, "syy") < -0.2e6 && mean(&r, "syy") > -0.45e6, "{}", mean(&r, "syy"));
-}
-
-#[test]
 fn the_lowest_mode_of_a_pec_guide_has_its_field_along_the_short_side_z() {
     // 30 x 15 mm, air, 12 GHz: TE10 has E along the short side, which in the wafer frame is z
     let mesh = common::rect(0.03, 0.015, 24, 12);

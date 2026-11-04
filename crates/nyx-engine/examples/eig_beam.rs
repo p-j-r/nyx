@@ -1,8 +1,9 @@
 //! Eigenfrequencies of a block beam (fixed at x = 0) with a chosen linear-solver setting, to compare the multigrid/LOBPCG
 //! path with the sparse factorisation and to time them:
 //!
-//!   cargo run --release -p femcore --example eig_beam -- LX LY LZ NXxNYxNZ auto|direct|iter [order]
-//!   cargo run --release -p femcore --example eig_beam -- 1 0.1 0.1 40x8x8 auto      (the slender 70,000-unknown beam of bench.rs)
+//!   cargo run --release -p nyx-engine --example eig_beam -- LX LY LZ NXxNYxNZ auto|direct|iter [order]
+//!   cargo run --release -p nyx-engine --example eig_beam -- 1 0.1 0.1 40x8x8 auto      (the slender 70,000-unknown beam of bench.rs)
+#[path = "../../femcore/examples/benchmesh/mod.rs"]
 mod benchmesh;
 use femcore::problem::*;
 use std::time::Instant;
@@ -27,7 +28,7 @@ fn main() {
     s.solver = solver;
     s.order = order;
     let t = Instant::now();
-    let r = femcore::solve::solve(&m, &s, &mut SolveState::default()).unwrap();
+    let r = nyx_engine::legacy::solve(&m, &s, &mut SolveState::default()).unwrap();
     println!("{:.1} s, {} cells, {} dofs, solver {:?}", t.elapsed().as_secs_f64(), m.n_cells(), r.dofs, solver);
     for (name, v) in &r.scalars {
         if let Scalar::Num(x) = v {

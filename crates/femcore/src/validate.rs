@@ -64,7 +64,7 @@ pub fn check_inputs(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String
 }
 
 /// Byte position of the first bare `NaN` / `inf` token outside quotes in a `Debug` string.
-fn non_finite_token(text: &str) -> Option<usize> {
+pub fn non_finite_token(text: &str) -> Option<usize> {
     let b = text.as_bytes();
     let mut in_str = false;
     let mut i = 0;

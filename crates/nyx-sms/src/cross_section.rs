@@ -1,21 +1,21 @@
 //! The shared kernel of the elastic cross-section models: stiffness and mass on a 2D mesh with three displacement components, the
-//! constraints, absorbing layers and low-reflecting boundaries, the complex eigensolve and the fields. Today it serves the axisymmetric
-//! model (`sms_axisym`: bodies of revolution, azimuthal order `m`). The out-of-plane wave-number model (`u(x, z) exp(-j k y)`) that
-//! was the other client is removed (paul, 2026-11-04). The file keeps its name until phase 4 moves it into `nyx-sms`.
+//! constraints, absorbing layers and low-reflecting boundaries, the complex eigensolve and the fields. It serves the axisymmetric
+//! model (`axisym`: bodies of revolution, azimuthal order `m`); it was `femcore::sms_kz`, the shared part of the removed out-of-plane
+//! wave-number model (paul, 2026-11-04), and moved here in restructure phase 4 (ADR 42). A library entry (`solve_solid_axisym`), not
+//! reachable through the envelope yet: the ring checks (`tests/axisym_closed_form.rs`, `tests/ring_frame.rs`) and the golden `ring_model_axes` use it.
 
-use crate::linalg::csr::{c, CCsr, C};
-use crate::fem::*;
-use crate::material::M6;
-use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::fem::check_boundary_labels;
-use crate::problem::Bc;
+use femcore::fem::check_boundary_labels;
+use femcore::fem::*;
+use femcore::linalg::csr::RCsr as Csr;
+use femcore::linalg::csr::{c, CCsr, C};
+use femcore::material::M6;
+use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
+use std::time::Instant;
 
-fn check_labels(mesh: &crate::mesh::SimplexMesh, bcs: &[Bc]) -> Result<(), String> {
+fn check_labels(mesh: &Discretisation, bcs: &[Bc]) -> Result<(), String> {
     check_boundary_labels(mesh, bcs.iter().flat_map(|b| b.labels.iter().copied()))
 }
-use crate::linalg::csr::RCsr as Csr;
-use std::time::Instant;
 
 fn ccsr_block_diag(blocks: &[&CCsr]) -> CCsr {
     let n: usize = blocks.iter().map(|b| b.nrows()).sum();
@@ -43,8 +43,8 @@ const PLANE_AXES: [usize; 3] = [0, 2, 1];
 
 /// The complex eigenvectors behind a cross-section solid result: displacement over all `3 * n_dofs(order)` dofs (component blocks), the complex
 /// frequencies in Hz, in the order of the solutions.
-pub struct KzModes {
-    pub kz: f64,
+pub struct CrossModes {
+    pub m_az: f64,
     pub freqs: Vec<C>,
     pub vectors: Vec<Vec<C>>,
     pub c6: Vec<M6>,
@@ -61,11 +61,15 @@ pub enum CrossSection {
 
 /// Elastic modes of a body of revolution with azimuthal dependence `exp(-i m theta)` on the (r, z) half
 /// plane (mesh x = r, y = z): the displacement components are (u_r, u_z, u_theta) in this order.
-pub fn solve_solid_axisym(mesh: &SimplexMesh, spec: &ProblemSpec, m: f64) -> Result<(SolveResult, KzModes), String> {
+pub fn solve_solid_axisym(mesh: &Discretisation, spec: &Problem, m: f64) -> Result<(SolveResult, CrossModes), String> {
     solve_cross_section(mesh, spec, CrossSection::Axisymmetric(m))
 }
 
-pub fn solve_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSection) -> Result<(SolveResult, KzModes), String> {
+pub fn solve_cross_section(
+    mesh: &Discretisation,
+    spec: &Problem,
+    kind: CrossSection,
+) -> Result<(SolveResult, CrossModes), String> {
     let t0 = Instant::now();
     let asm = assemble_cross_section(mesh, spec, kind)?;
     let solved = solve_cross_section_modes(&asm)?;
@@ -96,7 +100,11 @@ pub struct CrossAssembly {
     pub has_loss: bool,
 }
 
-pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: CrossSection) -> Result<CrossAssembly, String> {
+pub fn assemble_cross_section(
+    mesh: &Discretisation,
+    spec: &Problem,
+    kind: CrossSection,
+) -> Result<CrossAssembly, String> {
     if mesh.dim != 2 {
         return Err("a cross-section model needs a 2D mesh".into());
     }
@@ -107,18 +115,19 @@ pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: Cros
     check_labels(mesh, &spec.bcs)?;
     let mut c6 = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?;
     // the blocks of the displacement are (x, z, y) (for a ring: r, z, theta): the stiffness in the Voigt order of those axes
-    c6 = c6.iter().map(|c| crate::section::plane_stiffness(c, 2)).collect();
+    c6 = c6.iter().map(|c| femcore::section::plane_stiffness(c, 2)).collect();
     {
         // a crystal's axes stay fixed while the local frame turns around the ring: the stiffness of the axisymmetric
         // model is the average over rotations about the ring axis (the y direction of the (r, z) plane); exact for isotropic materials
         for m in c6.iter_mut() {
-            *m = crate::sms_axisym::average_about_axis(m, 1, 16);
+            *m = crate::axisym::average_about_axis(m, 1, 16);
         }
     }
     let n1 = mesh.n_dofs(order);
     let n = 3 * n1;
     // fixed boundaries (zero displacement components)
-    let mut fixed_set: std::collections::BTreeSet<usize> = untouched_dofs(mesh, order, 3, &spec.inactive).into_iter().collect();
+    let mut fixed_set: std::collections::BTreeSet<usize> =
+        untouched_dofs(mesh, order, 3, &spec.inactive).into_iter().collect();
     for bc in &spec.bcs {
         if let BcKind::Fixed { fixed, .. } = &bc.kind {
             let bd = boundary_dofs(mesh, &bc.labels, order);
@@ -133,9 +142,12 @@ pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: Cros
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let stretch = if spec.materials.has_pml() { Some(crate::ems_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
+    let stretch =
+        if spec.materials.has_pml() { Some(femcore::ems_pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
     let k = match kind {
-        CrossSection::Axisymmetric(m) => crate::sms_axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?,
+        CrossSection::Axisymmetric(m) => {
+            crate::axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?
+        }
     };
     let mut rho = spec.materials.cell_values(mesh, "rho", None)?;
     for (c, r) in rho.iter_mut().enumerate() {
@@ -145,8 +157,14 @@ pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: Cros
     }
     // mass: weighted by the determinant of the stretch in the layers (complex there)
     let mc = match &stretch {
-        _ if matches!(kind, CrossSection::Axisymmetric(_)) => crate::sms_axisym::assemble_mass_axisym(mesh, &rho, order, stretch.as_deref()),
-        None => to_complex(&Csr::block_diag(&[&assemble_mass(mesh, order, &rho), &assemble_mass(mesh, order, &rho), &assemble_mass(mesh, order, &rho)])),
+        _ if matches!(kind, CrossSection::Axisymmetric(_)) => {
+            crate::axisym::assemble_mass_axisym(mesh, &rho, order, stretch.as_deref())
+        }
+        None => to_complex(&Csr::block_diag(&[
+            &assemble_mass(mesh, order, &rho),
+            &assemble_mass(mesh, order, &rho),
+            &assemble_mass(mesh, order, &rho),
+        ])),
         Some(st) => {
             let w: Vec<C> = (0..mesh.n_cells()).map(|i| st[i][0] * st[i][1]).collect();
             let re_part: Vec<f64> = rho.iter().zip(&w).map(|(r, z)| r * z.re).collect();
@@ -164,18 +182,29 @@ pub fn assemble_cross_section(mesh: &SimplexMesh, spec: &ProblemSpec, kind: Cros
     }
     let kf = k.submatrix(&free, &free);
     let mf = mc.submatrix(&free, &free);
-    let lrb_labels: Vec<i32> = spec.bcs.iter().filter(|b| matches!(b.kind, BcKind::LowReflecting)).flat_map(|b| b.labels.iter().copied()).collect();
+    let lrb_labels: Vec<i32> = spec
+        .bcs
+        .iter()
+        .filter(|b| matches!(b.kind, BcKind::LowReflecting))
+        .flat_map(|b| b.labels.iter().copied())
+        .collect();
     if !lrb_labels.is_empty() && f_search <= 0.0 {
-        return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());
+        return Err(
+            "low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into()
+        );
     }
-    let cf = if lrb_labels.is_empty() { None } else { Some(crate::sms_lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free)) };
+    let cf = if lrb_labels.is_empty() {
+        None
+    } else {
+        Some(crate::lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free))
+    };
     let has_loss = stretch.is_some() || !lrb_labels.is_empty();
     Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss })
 }
 
 /// Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them.
 pub struct CrossSolve {
-    pub modes: KzModes,
+    pub modes: CrossModes,
     /// Krylov dimension of the eigensolver
     pub dim: usize,
 }
@@ -183,15 +212,20 @@ pub struct CrossSolve {
 /// Stage 2: the complex eigenpairs (`K - w^2 M` or the quadratic problem with the low-reflecting damping) nearest the
 /// search frequency, as complex frequencies in Hz with their displacement over all dofs, sorted by real part.
 pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, String> {
-    let CrossSection::Axisymmetric(kz) = asm.kind;
+    let CrossSection::Axisymmetric(m_az) = asm.kind;
     let (n_modes, f_search, free, n) = (asm.n_modes, asm.f_search, &asm.free, asm.n);
     let (kf, mf) = (&asm.kf, &asm.mf);
     // the shift: the requested frequency, or just below the spectrum for the lowest modes
     let sigma = if f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
     // (frequencies, displacement vectors over the free dofs, converged, Krylov dimension)
     type Found = (Vec<(C, usize)>, Vec<Vec<C>>, bool, usize);
-    let (mut modes, vectors, converged, kdim): Found = if asm.cf.is_none() {
-        let pairs = crate::linalg::driver::eigs_complex(kf, mf, c(sigma, 0.0), n_modes, 1e-9, 400)?;
+    let (mut modes, vectors, converged, kdim): Found = if let Some(cf) = asm.cf.as_ref() {
+        let (omegas, vecs, conv, dim) =
+            crate::lrb::quadratic_modes(kf, mf, cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
+        let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
+        (modes, vecs, conv, dim)
+    } else {
+        let pairs = femcore::linalg::driver::eigs_complex(kf, mf, c(sigma, 0.0), n_modes, 1e-9, 400)?;
         let modes = pairs
             .values
             .iter()
@@ -206,11 +240,6 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
             })
             .collect();
         (modes, pairs.vectors.clone(), pairs.converged, pairs.dim)
-    } else {
-        let cf = asm.cf.as_ref().unwrap();
-        let (omegas, vecs, conv, dim) = crate::sms_lrb::quadratic_modes(kf, mf, cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
-        let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
-        (modes, vecs, conv, dim)
     };
     modes.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
     let mut out_freqs: Vec<C> = vec![];
@@ -223,12 +252,26 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
         out_freqs.push(fz);
         out_vectors.push(u);
     }
-    Ok(CrossSolve { modes: KzModes { kz, freqs: out_freqs, vectors: out_vectors, c6: asm.c6.clone(), rho: asm.rho.clone(), converged }, dim: kdim })
+    Ok(CrossSolve {
+        modes: CrossModes {
+            m_az,
+            freqs: out_freqs,
+            vectors: out_vectors,
+            c6: asm.c6.clone(),
+            rho: asm.rho.clone(),
+            converged,
+        },
+        dim: kdim,
+    })
 }
 
 /// Stage 3: the plot fields `|u|`, `ux`, `uz`, `uy`, `|uy|` of every mode (largest component real, unit maximum), the
 /// displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
-pub fn cross_section_fields(mesh: &SimplexMesh, asm: &CrossAssembly, solved: &CrossSolve) -> Result<SolveResult, String> {
+pub fn cross_section_fields(
+    mesh: &Discretisation,
+    asm: &CrossAssembly,
+    solved: &CrossSolve,
+) -> Result<SolveResult, String> {
     let (n1, order, has_loss) = (asm.n1, asm.order, asm.has_loss);
     let modes = &solved.modes;
     let mut solutions = vec![];
@@ -247,16 +290,17 @@ pub fn cross_section_fields(mesh: &SimplexMesh, asm: &CrossAssembly, solved: &Cr
         // the names of the three blocks: wafer (x, z, y); for a ring (r, z, theta) = (x, z, y)
         let names = ["ux", "uz", "uy"];
         let fields = vec![
-            Field { name: "|u|".into(), unit: "a.u.".into(), values: mag },
-            Field { name: names[0].into(), unit: "a.u.".into(), values: re(&ux) },
-            Field { name: names[1].into(), unit: "a.u.".into(), values: re(&uy) },
-            Field { name: names[2].into(), unit: "a.u.".into(), values: re(&uz) },
-            Field { name: format!("|{}|", names[2]), unit: "a.u.".into(), values: uz.iter().map(|z| z.norm()).collect() },
+            Field::scalar("|u|", "a.u.", mag),
+            Field::scalar(names[0], "a.u.", re(&ux)),
+            Field::scalar(names[1], "a.u.", re(&uy)),
+            Field::scalar(names[2], "a.u.", re(&uz)),
+            Field::scalar(format!("|{}|", names[2]), "a.u.", uz.iter().map(|z| z.norm()).collect()),
         ];
         let nloc = mesh.nloc(order);
-        let mut cells = crate::fields::CellFields::new(mesh, order);
+        let mut cells = femcore::fields::CellFields::new(mesh, order);
         for (k, name) in names.iter().enumerate() {
-            let (mut re_c, mut im_c) = (Vec::with_capacity(mesh.n_cells() * nloc), Vec::with_capacity(mesh.n_cells() * nloc));
+            let (mut re_c, mut im_c) =
+                (Vec::with_capacity(mesh.n_cells() * nloc), Vec::with_capacity(mesh.n_cells() * nloc));
             let mut dofs = Vec::new();
             for cell in 0..mesh.n_cells() {
                 mesh.cell_dofs(cell, order, &mut dofs);
@@ -268,31 +312,42 @@ pub fn cross_section_fields(mesh: &SimplexMesh, asm: &CrossAssembly, solved: &Cr
             }
             cells.push_complex(*name, "a.u.", re_c, im_c);
         }
-        let mut disp = vec![0.0; n1 * 2];
-        for a in 0..n1 {
-            disp[a * 2] = ux[a].re;
-            disp[a * 2 + 1] = uy[a].re;
-        }
         if has_loss && fz.im.abs() > 0.0 {
             let q = fz.re / (2.0 * fz.im.abs());
-            solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, fz.re, fz.im, q), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(freq), ..Default::default() });
+            solutions.push(Solution {
+                label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, fz.re, fz.im, q),
+                fields,
+                cell_fields: cell_fields_of(&cells),
+                value: Some(freq),
+                ..Default::default()
+            });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", fz.re, fz.im))));
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
         } else {
-            solutions.push(Solution { label: format!("mode {}: {:.6} Hz", j + 1, freq), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(freq), ..Default::default() });
+            solutions.push(Solution {
+                label: format!("mode {}: {:.6} Hz", j + 1, freq),
+                fields,
+                cell_fields: cell_fields_of(&cells),
+                value: Some(freq),
+                ..Default::default()
+            });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
         }
     }
     if solutions.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
     }
-    let kz = modes.kz;
+    let m_az = modes.m_az;
     let what = match asm.kind {
-        CrossSection::Axisymmetric(_) => format!("axisymmetric, azimuthal order m = {kz}"),
+        CrossSection::Axisymmetric(_) => format!("axisymmetric, azimuthal order m = {m_az}"),
     };
-    let mut log = vec![format!("{what}; complex Hermitian eigenproblem, Krylov dimension {}{}", solved.dim, if modes.converged { "" } else { " (not every pair converged; those are omitted)" })];
+    let mut log = vec![format!(
+        "{what}; complex Hermitian eigenproblem, Krylov dimension {}{}",
+        solved.dim,
+        if modes.converged { "" } else { " (not every pair converged; those are omitted)" }
+    )];
     if asm.fixed.is_empty() {
         log.push("no fixed boundary: the lowest modes may be rigid-body-like".into());
     }
-    Ok(SolveResult { order, dim: 2, solutions, scalars, log, dofs: asm.n, ..Default::default() })
+    Ok(SolveResult { order: order as u8, dim: 2, solutions, scalars, log, dofs: asm.n, ..Default::default() })
 }

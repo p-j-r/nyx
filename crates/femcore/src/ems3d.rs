@@ -433,7 +433,7 @@ pub fn assemble_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<EmwA
     let ned = Ned3::new(mesh, order, vkey);
     let n = ned.n_dofs();
     let (k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
-    crate::sms::lap(&mut tl, "emw3d: numbering and assembly");
+    crate::progress::lap_since(&mut tl, "emw3d: numbering and assembly");
     // perfect electric conductor on the exterior boundary, except the periodic boundaries
     let exterior = mesh.exterior_facets();
     let periodic_labels: Vec<i32> = spec.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
@@ -496,7 +496,7 @@ pub fn assemble_emw_eigen(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<EmwA
         CCsr::from_raw(nred, nred_nodes.n_reduced(), indptr, indices, data)
     };
     let g_h = crate::periodic::ccsr_adjoint(&g_red);
-    crate::sms::lap(&mut tl, "emw3d: reduction and gradient matrix");
+    crate::progress::lap_since(&mut tl, "emw3d: reduction and gradient matrix");
     // shift: the requested frequency; without one, the frequency of a wave that fits the cavity
     let (lo, hi) = mesh.bbox();
     let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
@@ -515,7 +515,7 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
     let (vectors, dim, converged): (Vec<Vec<C>>, usize, bool);
     if is_real(kc) && is_real(mc) && is_real(g_red) {
         let (kr, mr, gr) = (to_real(kc), to_real(mc), to_real(g_red));
-        crate::sms::lap(&mut tl, "emw3d: matrices");
+        crate::progress::lap_since(&mut tl, "emw3d: matrices");
         let gt = gr.transpose();
         let s_mat = crate::linalg::amg_elastic::spmm(&gt, &crate::linalg::amg_elastic::spmm(&mr, &gr));
         let s_solver = crate::linalg::driver::DirectSolver::new(&s_mat, true)?;
@@ -528,7 +528,7 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
                 *a -= b;
             }
         };
-        crate::sms::lap(&mut tl, "emw3d: projection factorisation");
+        crate::progress::lap_since(&mut tl, "emw3d: projection factorisation");
         let pairs = crate::linalg::driver::eigs_sym_indefinite(&kr, &mr, sigma, n_modes, &EigOpts::default(), Some(&project))?;
         for (i, l) in pairs.values.iter().enumerate() {
             freqs.push((c(l.max(0.0).sqrt() * (C0 / (2.0 * std::f64::consts::PI)), 0.0), i));
@@ -549,7 +549,7 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
                 *a -= *b;
             }
         };
-        crate::sms::lap(&mut tl, "emw3d: projection factorisation");
+        crate::progress::lap_since(&mut tl, "emw3d: projection factorisation");
         let pairs = crate::linalg::driver::eigs_complex_projected(&kc, &mc, c(sigma, 0.0), n_modes, 1e-9, 500, Some(&project))?;
         for (i, l) in pairs.values.iter().enumerate() {
             if pairs.residuals.get(i).is_some_and(|r| *r > 1e-6) {
@@ -565,7 +565,7 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
         dim = pairs.dim;
         converged = pairs.converged;
     }
-    crate::sms::lap(&mut tl, "emw3d: eigenvalue iteration");
+    crate::progress::lap_since(&mut tl, "emw3d: eigenvalue iteration");
     freqs.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
     Ok(EmwSolve { freqs, vectors, dim, converged })
 }

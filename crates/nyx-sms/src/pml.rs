@@ -9,13 +9,13 @@
 //! with complex symmetric K and M. The frequency is `f = omega / (2 pi)` (complex) and the
 //! quality factor `Q = Re f / (2 |Im f|)`.
 
-use crate::linalg::csr::{c, CCoo, CCsr, C};
-use crate::linalg::driver::eigs_complex;
-use crate::ems_pml::cell_stretches;
-use crate::fem::*;
-use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::sms::{d_matrix, dof_layout, setup};
+use crate::solid::{d_matrix, dof_layout, setup};
+use femcore::ems_pml::cell_stretches;
+use femcore::fem::*;
+use femcore::linalg::csr::{c, CCoo, CCsr, C};
+use femcore::linalg::driver::eigs_complex;
+use nyx_physics::{cell_fields_of, Discretisation, Scalar, Solution, SolveResult};
 use std::time::Instant;
 
 /// Complex strain-displacement matrix from complex shape gradients `g[a*d + k]`.
@@ -38,7 +38,7 @@ fn b_matrix_c(g: &[C], nloc: usize, d: usize, b: &mut [C]) {
     }
 }
 
-pub fn solve_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, String> {
+pub fn solve_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let asm = assemble_solid_pml(mesh, spec)?;
     let solved = solve_pml_modes(&asm)?;
@@ -68,7 +68,7 @@ pub struct PmlSolve {
     pub converged: bool,
 }
 
-pub fn assemble_solid_pml(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<PmlAssembly, String> {
+pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String> {
     let order = spec.order;
     let st = setup(mesh, spec)?;
     let (d, n1) = (st.d, st.n1);
@@ -161,19 +161,24 @@ pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String> {
     let sigma = if asm.f_search > 0.0 { (2.0 * std::f64::consts::PI * asm.f_search).powi(2) } else { -1.0 };
     let pairs = eigs_complex(&asm.kff, &asm.mff, c(sigma, 0.0), asm.n_modes, 1e-9, 600)?;
     // frequencies, sorted by real part
-    let mut freqs: Vec<(usize, C)> = pairs.values.iter().enumerate().map(|(i, l)| {
-        let mut f = l.sqrt() / (2.0 * std::f64::consts::PI);
-        if f.re < 0.0 {
-            f = -f;
-        }
-        (i, f)
-    }).collect();
+    let mut freqs: Vec<(usize, C)> = pairs
+        .values
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let mut f = l.sqrt() / (2.0 * std::f64::consts::PI);
+            if f.re < 0.0 {
+                f = -f;
+            }
+            (i, f)
+        })
+        .collect();
     freqs.sort_by(|a, b| a.1.re.partial_cmp(&b.1.re).unwrap());
     Ok(PmlSolve { freqs, vectors: pairs.vectors.clone(), dim: pairs.dim, converged: pairs.converged })
 }
 
 /// Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q.
-pub fn pml_fields(mesh: &SimplexMesh, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String> {
+pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String> {
     let (order, d, n) = (asm.order, asm.d, asm.n);
     let mut solutions = vec![];
     let mut scalars = vec![];
@@ -182,17 +187,27 @@ pub fn pml_fields(mesh: &SimplexMesh, asm: &PmlAssembly, solved: &PmlSolve) -> R
         for (a, &dof) in asm.free.iter().enumerate() {
             u[dof] = solved.vectors[*i][a];
         }
-        let (fields, disp, cells) = crate::sms::complex_mode_fields(mesh, order, &u);
+        let (fields, cells) = crate::solid::complex_mode_fields(mesh, order, &u);
         let q = if f.im.abs() > 0.0 { f.re / (2.0 * f.im.abs()) } else { f64::INFINITY };
-        solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz", j + 1, f.re, f.im), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(f.re), ..Default::default() });
+        solutions.push(Solution {
+            label: format!("mode {}: {:.6e} {:+.3e}i Hz", j + 1, f.re, f.im),
+            fields,
+            cell_fields: cell_fields_of(&cells),
+            value: Some(f.re),
+            ..Default::default()
+        });
         scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
         if q.is_finite() {
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
         }
     }
-    let mut log = vec![format!("complex eigenproblem with PML, Krylov dimension {}{}", solved.dim, if solved.converged { "" } else { " (not fully converged)" })];
+    let mut log = vec![format!(
+        "complex eigenproblem with PML, Krylov dimension {}{}",
+        solved.dim,
+        if solved.converged { "" } else { " (not fully converged)" }
+    )];
     if !asm.has_fixed {
         log.push("no fixed boundary: the lowest modes are rigid-body motions".into());
     }
-    Ok(SolveResult { order, dim: d, solutions, scalars, log, dofs: n, ..Default::default() })
+    Ok(SolveResult { order: order as u8, dim: d as u8, solutions, scalars, log, dofs: n, ..Default::default() })
 }

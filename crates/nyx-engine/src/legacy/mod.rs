@@ -12,6 +12,7 @@ use nyx_physics::{Error, Scalar, Solution, SolveResult};
 use std::sync::Arc;
 
 pub mod dfs;
+pub mod sms;
 
 /// `femcore::solve::solve` for the window: the kernels of every physics, wherever they live now.
 pub fn solve(mesh: &SimplexMesh, spec: &old::ProblemSpec, state: &mut SolveState) -> Result<old::SolveResult, String> {
@@ -29,7 +30,8 @@ pub fn solve_with(
 ) -> Result<old::SolveResult, String> {
     match spec.physics {
         OldPhysics::Electrostatics | OldPhysics::Heat => dfs::solve(mesh, spec, state, progress),
-        // sms and ems move into their crates in phase 4; until then femcore runs them
+        OldPhysics::Solid => sms::solve(mesh, spec, state, progress),
+        // ems moves into its crate in phase 4; until then femcore runs it
         _ => femcore::solve::solve_with(mesh, spec, state, progress),
     }
 }

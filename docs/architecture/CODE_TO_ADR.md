@@ -97,7 +97,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/section.rs` | 1 | |
 | `crates/femcore/src/props.rs` | 41, 25 | shared per-domain data (materials, PML, periodic pairs, linear solver); replaced by material files in phase 6 |
 | `crates/femcore/src/testkit.rs` | 41, 10 | mesh fixtures of the tests of every physics crate |
-| `crates/femcore/src/sms*.rs` | 1, 9, 12 | |
 | `crates/femcore/src/periodic.rs` | 12, 9 | Floquet pairs; belongs to no single physics |
 | `crates/femcore/src/ems*.rs` | 1, 9, 12 | |
 | `crates/femcore/src/optical.rs` | 21, 9 | optical mode sets and field sampling (split out of `sbs.rs` in phase 1) |
@@ -157,12 +156,15 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-physics/*` | 25, 19 | the Physics trait, envelope, descriptors, registry |
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
 | `crates/nyx-dfs/*` | 41, 25, 12, 9 | diffusion: typed problem, electrostatics and heat kernels (moved from femcore::dfs), descriptors |
-| `crates/nyx-sms/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
+| `crates/nyx-sms/tests/golden/*` | 10, 42 | the sms goldens (and `ring_model_axes`), moved unchanged from femcore |
+| `crates/nyx-sms/src/{axisym,cross_section}.rs` | 43, 42 | bodies of revolution on their half-plane (library entry, not in the envelope) |
+| `crates/nyx-sms/*` | 42, 41, 25, 12, 9 | solid mechanics: typed problem, static, eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
 | `crates/nyx-ems/*` | 25, 12 | skeleton: descriptors; kernels move in phase 4 |
 | `crates/nyx-analysis/*` | 25, 21 | skeleton: the Analysis trait; content moves in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/src/legacy/*` | 41 | bridge from the old window problem to the physics crates; deleted in phase 7 |
-| `crates/nyx-engine/tests/legacy_thermal.rs` | 41, 10 | heat feeding thermal expansion through the bridge |
+| `crates/nyx-engine/tests/golden/*` | 10, 42 | `solid_static_thermal_from_heat`, moved unchanged from femcore |
+| `crates/nyx-engine/tests/legacy_thermal.rs` | 41, 42, 10 | heat feeding thermal expansion through the bridge |
 | `crates/nyx-engine/examples/*` | 41, 9 | benchmarks and logs that drive every physics |
 | `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
 <!-- map:end -->

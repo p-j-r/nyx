@@ -1,9 +1,9 @@
-//! Linear elastic solid mechanics (linear elastic material) on P1/P2
-//! triangles (plane stress or plane strain) and tetrahedra: static solve with boundary loads,
-//! prescribed displacements and thermal expansion, eigenfrequencies, stress and von Mises.
-//! Materials may be anisotropic (a 6x6 stiffness per domain, see `material`).
+//! Linear elastic solid mechanics on P1/P2 triangles (plane stress or plane strain) and tetrahedra: static solve with boundary loads,
+//! prescribed displacements and thermal expansion, eigenfrequencies, stress and von Mises. Moved here from `femcore::sms` in restructure
+//! phase 4 (ADR 42): the kernels are unchanged, they read the typed `Problem` and give `nyx_physics` results.
+//! Materials may be anisotropic (a 6x6 stiffness per domain, see `femcore::material`).
 //!
-//! Everything is in the wafer axes (`section`): a 2D mesh is the x-z cross-section, y the axis out of it. Dof layout: all displacements
+//! Everything is in the wafer axes (`femcore::section`): a 2D mesh is the x-z cross-section, y the axis out of it. Dof layout: all displacements
 //! along the first mesh axis, then along the second (then the third): (x, z) on a cross-section, (x, y, z) in 3D. Voigt order of stresses
 //! and strains with engineering shear strains: (xx, yy, zz, xy, yz, xz) in 3D; on a cross-section the Voigt order of the axes (x, z, y),
 //! (xx, zz, yy, xz, zy, xy), that `section::plane_stiffness` gives the stiffness in.
@@ -14,23 +14,23 @@
 //! its out-of-plane part loads the in-plane stress through the stiffness, which for an isotropic
 //! material is the (1 + nu) alpha dT in-plane free expansion that plane strain gives.
 
-use crate::linalg::driver::EigOpts;
-use crate::linalg::driver::eigs_sym;
-use crate::fem::*;
-use crate::linalg::csr::{c, C};
-use crate::fields::{gradients_at_nodes, node_average, CellFields};
-use crate::material::{M3, M6};
-use crate::mesh::SimplexMesh;
 use crate::problem::*;
-use crate::fem::check_boundary_labels;
-use crate::problem::Bc;
-
-fn check_labels(mesh: &crate::mesh::SimplexMesh, bcs: &[Bc]) -> Result<(), String> {
-    check_boundary_labels(mesh, bcs.iter().flat_map(|b| b.labels.iter().copied()))
-}
-use crate::linalg::csr::RCsr as Csr;
+use femcore::fem::check_boundary_labels;
+use femcore::fem::*;
+use femcore::fields::{gradients_at_nodes, node_average, CellFields};
+use femcore::linalg::csr::RCsr as Csr;
+use femcore::linalg::csr::{c, C};
+use femcore::linalg::driver::eigs_sym;
+use femcore::linalg::driver::EigOpts;
+use femcore::material::{M3, M6};
+use femcore::props::{LinearSolver, TensorKind};
+use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use rayon::prelude::*;
 use std::time::Instant;
+
+fn check_labels(mesh: &Discretisation, bcs: &[Bc]) -> Result<(), String> {
+    check_boundary_labels(mesh, bcs.iter().flat_map(|b| b.labels.iter().copied()))
+}
 
 /// Indices of the in-plane components (xx, zz, xz) in the solver's Voigt order on a cross-section.
 const INPLANE: [usize; 3] = [0, 1, 3];
@@ -93,7 +93,13 @@ pub(crate) fn b_matrix(grad: &[f64], nloc: usize, d: usize, b: &mut [f64]) {
     }
 }
 
-pub(crate) fn dof_layout(mesh: &SimplexMesh, order: usize, c: usize, scratch: &mut Vec<usize>, full: &mut Vec<usize>) {
+pub(crate) fn dof_layout(
+    mesh: &Discretisation,
+    order: usize,
+    c: usize,
+    scratch: &mut Vec<usize>,
+    full: &mut Vec<usize>,
+) {
     let n1 = mesh.n_dofs(order);
     mesh.cell_dofs(c, order, scratch);
     full.clear();
@@ -103,7 +109,7 @@ pub(crate) fn dof_layout(mesh: &SimplexMesh, order: usize, c: usize, scratch: &m
 }
 
 /// Stiffness matrix with a (possibly anisotropic) stiffness per cell.
-pub fn assemble_solid(mesh: &SimplexMesh, c6: &[M6], order: usize, plane: Plane, thickness: f64) -> Csr {
+pub fn assemble_solid(mesh: &Discretisation, c6: &[M6], order: usize, plane: Plane, thickness: f64) -> Csr {
     let d = mesh.dim;
     let re = RefElement::new(d, order, if order > 1 { 2 * (order - 1) } else { 1 });
     let geo = geometry(mesh);
@@ -153,7 +159,16 @@ pub fn assemble_solid(mesh: &SimplexMesh, c6: &[M6], order: usize, plane: Plane,
 /// Load vector of the thermal strain `alpha (T - Tref)`; `t` is the temperature at the scalar
 /// dofs of the mesh and `alpha` the expansion tensor of every cell.
 #[allow(clippy::too_many_arguments)]
-pub fn thermal_load(mesh: &SimplexMesh, c6: &[M6], alpha: &[M3], t_field: &[f64], tref: f64, order: usize, plane: Plane, thickness: f64) -> Vec<f64> {
+pub fn thermal_load(
+    mesh: &Discretisation,
+    c6: &[M6],
+    alpha: &[M3],
+    t_field: &[f64],
+    tref: f64,
+    order: usize,
+    plane: Plane,
+    thickness: f64,
+) -> Vec<f64> {
     let d = mesh.dim;
     let re = RefElement::new(d, order, 2 * order);
     let geo = geometry(mesh);
@@ -163,7 +178,7 @@ pub fn thermal_load(mesh: &SimplexMesh, c6: &[M6], alpha: &[M3], t_field: &[f64]
     let n1 = mesh.n_dofs(order);
     let nc = mesh.n_cells();
     // cells in blocks on several threads, each with its own load vector, added up at the end
-    let nt = if nc < 4000 { 1 } else { crate::par::threads_up_to(8) };
+    let nt = if nc < 4000 { 1 } else { femcore::par::threads_up_to(8) };
     let chunk = nc.div_ceil(nt).max(1);
     let (re, geo) = (&re, &geo);
     let parts: Vec<Vec<f64>> = (0..nt)
@@ -209,7 +224,15 @@ pub fn thermal_load(mesh: &SimplexMesh, c6: &[M6], alpha: &[M3], t_field: &[f64]
 /// Cauchy stress (solver Voigt order, six components, also in 2D) at every local node of every
 /// cell from the displacement gradients `grad[p*d*d + i*d + k] = d u_i / d x_k`. `eth` holds the
 /// thermal strain vector per cell node, or is empty.
-pub fn stress_at_nodes(grad: &[f64], nc: usize, nloc: usize, d: usize, c6: &[M6], plane: Plane, eth: &[[f64; 6]]) -> Vec<[f64; 6]> {
+pub fn stress_at_nodes(
+    grad: &[f64],
+    nc: usize,
+    nloc: usize,
+    d: usize,
+    c6: &[M6],
+    plane: Plane,
+    eth: &[[f64; 6]],
+) -> Vec<[f64; 6]> {
     let mut out = vec![[0.0; 6]; nc * nloc];
     for c in 0..nc {
         let dm = if d == 2 && plane == Plane::Stress { Some(d_matrix(&c6[c], 2, Plane::Stress)) } else { None };
@@ -251,7 +274,8 @@ pub fn stress_at_nodes(grad: &[f64], nc: usize, nloc: usize, d: usize, c6: &[M6]
 /// von Mises stress of a six-component stress.
 pub fn von_mises(s: &[f64; 6]) -> f64 {
     let (sx, sy, sz, sxy, syz, sxz) = (s[0], s[1], s[2], s[3], s[4], s[5]);
-    (0.5 * ((sx - sy).powi(2) + (sy - sz).powi(2) + (sz - sx).powi(2)) + 3.0 * (sxy * sxy + syz * syz + sxz * sxz)).sqrt()
+    (0.5 * ((sx - sy).powi(2) + (sy - sz).powi(2) + (sz - sx).powi(2)) + 3.0 * (sxy * sxy + syz * syz + sxz * sxz))
+        .sqrt()
 }
 
 pub struct Setup {
@@ -262,11 +286,16 @@ pub struct Setup {
     pub vals: Vec<f64>,
 }
 
-pub fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, String> {
+pub fn setup(mesh: &Discretisation, spec: &Problem) -> Result<Setup, String> {
     let d = mesh.dim;
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
-    let c6: Vec<M6> = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?.iter().map(|c| crate::section::plane_stiffness(c, d)).collect();
+    let c6: Vec<M6> = spec
+        .materials
+        .cell_stiffness_skipping(mesh, &spec.inactive)?
+        .iter()
+        .map(|c| femcore::section::plane_stiffness(c, d))
+        .collect();
     let n1 = mesh.n_dofs(order);
     let mut seen = std::collections::BTreeMap::new();
     for dof in untouched_dofs(mesh, order, d, &spec.inactive) {
@@ -275,7 +304,7 @@ pub fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, String> {
     for bc in &spec.bcs {
         if let BcKind::Fixed { fixed, values } = &bc.kind {
             let bd = boundary_dofs(mesh, &bc.labels, order);
-            for (k, &w) in crate::section::wafer_axes(d).iter().enumerate() {
+            for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
                 if fixed[w] {
                     for &dof in &bd {
                         seen.entry(dof + k * n1).or_insert(values[w]);
@@ -295,17 +324,25 @@ pub struct Thermal {
     pub tref: f64,
 }
 
-/// Stage 3 of the real solid kernels: plot fields (`|u|`, `von Mises`, `u{x,y,z}`, stresses under wafer names), the
-/// displacement per dof, and the same components per cell without averaging.
-fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Plane, thermal: Option<&Thermal>, with_stress: bool) -> (Vec<Field>, Vec<f64>, CellFields) {
+/// Stage 3 of the real solid kernels: the displacement as one vector field `u` (flat names `|u|`, `ux`, `uz`; its values are the
+/// displacement per dof), `von Mises` and the stresses under wafer names, and the same components per cell without averaging.
+fn fields_of(
+    mesh: &Discretisation,
+    u: &[f64],
+    order: usize,
+    st: &Setup,
+    plane: Plane,
+    thermal: Option<&Thermal>,
+    with_stress: bool,
+) -> (Vec<Field>, CellFields) {
     let d = st.d;
     let n1 = st.n1;
     let nloc = mesh.nloc(order);
     let nc = mesh.n_cells();
-    let mut fields = vec![];
+    let names = femcore::section::component_names(d);
+    let comps: Vec<Vec<f64>> = (0..d).map(|k| u[k * n1..(k + 1) * n1].to_vec()).collect();
+    let mut fields = vec![Field::vector("u", "m", names, &comps)];
     let mut cells = CellFields::new(mesh, order);
-    let unorm: Vec<f64> = (0..n1).map(|i| (0..d).map(|k| u[k * n1 + i] * u[k * n1 + i]).sum::<f64>().sqrt()).collect();
-    fields.push(Field { name: "|u|".into(), unit: "m".into(), values: unorm });
     if with_stress {
         let mut tl = Instant::now();
         let grad = gradients_at_nodes(mesh, u, d, order);
@@ -323,53 +360,50 @@ fn fields_of(mesh: &SimplexMesh, u: &[f64], order: usize, st: &Setup, plane: Pla
         let s = stress_at_nodes(&grad, nc, nloc, d, &st.c6, plane, &eth);
         lap(&mut tl, "  stress at nodes");
         let vm: Vec<f64> = s.iter().map(von_mises).collect();
-        fields.push(Field { name: "von Mises".into(), unit: "Pa".into(), values: node_average(mesh, &vm, 1, order) });
+        fields.push(Field::scalar("von Mises", "Pa", node_average(mesh, &vm, 1, order)));
         cells.push_real("von Mises", "Pa", vm);
-        for (k, ax) in crate::section::component_names(d).iter().enumerate() {
-            fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
-            cells.push_real(format!("u{ax}"), "m", crate::fem::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
+        for (k, ax) in names.iter().enumerate() {
+            cells.push_real(
+                format!("u{ax}"),
+                "m",
+                femcore::fem::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order),
+            );
         }
-        let comps: &[usize] = if d == 2 { &[0, 1, 3, 2] } else { &[0, 1, 2, 3, 4, 5] };
-        for &idx in comps {
+        let idxs: &[usize] = if d == 2 { &[0, 1, 3, 2] } else { &[0, 1, 2, 3, 4, 5] };
+        for &idx in idxs {
             let v: Vec<f64> = s.iter().map(|x| x[idx]).collect();
-            fields.push(Field { name: crate::section::stress_name(d, idx).into(), unit: "Pa".into(), values: node_average(mesh, &v, 1, order) });
-            cells.push_real(crate::section::stress_name(d, idx), "Pa", v);
+            fields.push(Field::scalar(femcore::section::stress_name(d, idx), "Pa", node_average(mesh, &v, 1, order)));
+            cells.push_real(femcore::section::stress_name(d, idx), "Pa", v);
         }
     } else {
-        for (k, ax) in crate::section::component_names(d).iter().enumerate() {
-            fields.push(Field { name: format!("u{ax}"), unit: "m".into(), values: u[k * n1..(k + 1) * n1].to_vec() });
-            cells.push_real(format!("u{ax}"), "m", crate::fem::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order));
+        for (k, ax) in names.iter().enumerate() {
+            cells.push_real(
+                format!("u{ax}"),
+                "m",
+                femcore::fem::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order),
+            );
         }
     }
-    let mut disp = vec![0.0; n1 * d];
-    for i in 0..n1 {
-        for k in 0..d {
-            disp[i * d + k] = u[k * n1 + i];
-        }
-    }
-    (fields, disp, cells)
+    (fields, cells)
 }
 
 /// Stage 3 of the complex-frequency solid kernels (PML, Floquet, low-reflecting): the mode shape `u` over all dofs
-/// (component blocks) with its largest component made real and of unit modulus, as the plot fields `|u|`, `Re u{x,y,z}`,
-/// the displacement of the real parts, and the complex components per cell.
-pub(crate) fn complex_mode_fields(mesh: &SimplexMesh, order: usize, u: &[C]) -> (Vec<Field>, Vec<f64>, CellFields) {
+/// (component blocks) with its largest component made real and of unit modulus, as the plot fields `|u|` and `Re u{x,z}` (scalars: the
+/// vector `Re u` would add a norm `|Re u|` that the pre-restructure results do not have), and the complex components per cell.
+pub(crate) fn complex_mode_fields(mesh: &Discretisation, order: usize, u: &[C]) -> (Vec<Field>, CellFields) {
     let (d, n1) = (mesh.dim, mesh.n_dofs(order));
     let big = u.iter().cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
     let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
     let scale = 1.0 / big.norm().max(1e-300);
     let mag: Vec<f64> = (0..n1).map(|a| (0..d).map(|k| u[k * n1 + a].norm_sqr()).sum::<f64>().sqrt() * scale).collect();
-    let mut fields = vec![Field { name: "|u|".into(), unit: "a.u.".into(), values: mag }];
-    let mut disp = vec![0.0; n1 * d];
+    let mut fields = vec![Field::scalar("|u|", "a.u.", mag)];
     let mut cells = CellFields::new(mesh, order);
     let nloc = mesh.nloc(order);
-    for (comp, ax) in crate::section::component_names(d).iter().enumerate() {
+    for (comp, ax) in femcore::section::component_names(d).iter().enumerate() {
         let v: Vec<f64> = (0..n1).map(|a| (u[comp * n1 + a] * rot * scale).re).collect();
-        for a in 0..n1 {
-            disp[a * d + comp] = v[a];
-        }
-        fields.push(Field { name: format!("Re u{ax}"), unit: "a.u.".into(), values: v });
-        let (mut re_c, mut im_c) = (Vec::with_capacity(mesh.n_cells() * nloc), Vec::with_capacity(mesh.n_cells() * nloc));
+        fields.push(Field::scalar(format!("Re u{ax}"), "a.u.", v));
+        let (mut re_c, mut im_c) =
+            (Vec::with_capacity(mesh.n_cells() * nloc), Vec::with_capacity(mesh.n_cells() * nloc));
         let mut dofs = Vec::new();
         for cell in 0..mesh.n_cells() {
             mesh.cell_dofs(cell, order, &mut dofs);
@@ -381,22 +415,35 @@ pub(crate) fn complex_mode_fields(mesh: &SimplexMesh, order: usize, u: &[C]) -> 
         }
         cells.push_complex(format!("u{ax}"), "a.u.", re_c, im_c);
     }
-    (fields, disp, cells)
+    (fields, cells)
 }
 
 /// Stage 2 of the real solid eigenfrequency kernel: the `nm` eigenpairs of `K u = w^2 M u` on the free dofs nearest the
 /// search frequency (shift-invert Lanczos; for the lowest modes of a large problem LOBPCG with a multigrid
 /// preconditioner, with a factorisation as the fallback), and a note on which route was taken.
 #[allow(clippy::too_many_arguments)]
-pub fn solve_real_modes(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, k: &Csr, m: &Csr, free: &[usize], nm: usize, f_search: f64) -> Result<(crate::linalg::driver::EigPairs, Option<String>), String> {
+pub fn solve_real_modes(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &Setup,
+    k: &Csr,
+    m: &Csr,
+    free: &[usize],
+    nm: usize,
+    f_search: f64,
+) -> Result<(femcore::linalg::driver::EigPairs, Option<String>), String> {
     let (d, order) = (st.d, spec.order);
-    let kff = k.submatrix(&free, &free);
-    let mff = m.submatrix(&free, &free);
+    let kff = k.submatrix(free, free);
+    let mff = m.submatrix(free, free);
     let mut eig_note: Option<String> = None;
     let sigma = if f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
     // for the lowest modes (shift below the spectrum) K - sigma M is positive definite and large
     // 3D problems are solved with multigrid-preconditioned CG instead of a sparse factorisation
-    let big = if mesh.dim == 3 { free.len() > crate::fem::LOBPCG_MIN_FREE } else { free.len() > crate::fem::AMG_THRESHOLD };
+    let big = if mesh.dim == 3 {
+        free.len() > femcore::fem::LOBPCG_MIN_FREE
+    } else {
+        free.len() > femcore::fem::AMG_THRESHOLD
+    };
     let want_amg = match spec.solver {
         LinearSolver::Direct => false,
         LinearSolver::Iterative => sigma <= 0.0,
@@ -404,29 +451,48 @@ pub fn solve_real_modes(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, k: &
     };
     let pairs = if want_amg {
         // no factorisation: block preconditioned CG (LOBPCG) with one multigrid cycle as preconditioner
-        let shifted_full = k.add_scaled(&m, -sigma);
-        let sys = crate::fem::AmgSystem::new(mesh, order, d, &shifted_full, &st.fixed)?;
+        let shifted_full = k.add_scaled(m, -sigma);
+        let sys = femcore::fem::AmgSystem::new(mesh, order, d, &shifted_full, &st.fixed)?;
         let factor = sys.convergence_factor();
         // multigrid that converges slowly (very thin or stretched parts) loses to a factorisation
         // unless the factorisation would not fit
-        let use_amg = spec.solver == LinearSolver::Iterative || factor <= crate::fem::LOBPCG_MAX_FACTOR || free.len() > crate::fem::FACTORISE_MAX_FREE;
+        let use_amg = spec.solver == LinearSolver::Iterative
+            || factor <= femcore::fem::LOBPCG_MAX_FACTOR
+            || free.len() > femcore::fem::FACTORISE_MAX_FREE;
         if use_amg {
             // in Auto mode a stalled iteration gives up early and the factorisation takes over
             let guard = spec.solver != LinearSolver::Iterative;
-            let res = crate::linalg::driver::lobpcg_guarded(&kff, &mff, nm, nm.clamp(4, 8), &|r: &[f64]| sys.precondition_free(r), 1e-8, 400, guard);
+            let res = femcore::linalg::driver::lobpcg_guarded(
+                &kff,
+                &mff,
+                nm,
+                nm.clamp(4, 8),
+                &|r: &[f64]| sys.precondition_free(r),
+                1e-8,
+                400,
+                guard,
+            );
             match res {
                 Ok(r) if r.converged || spec.solver == LinearSolver::Iterative => {
-                    eig_note = Some(format!("LOBPCG with AMG preconditioner: {} levels {:?}, convergence factor {:.2}, setup {:.1} s{}", sys.n_levels(), sys.sizes(), factor, sys.setup_seconds, if r.converged { "" } else { " (not fully converged)" }));
+                    eig_note = Some(format!(
+                        "LOBPCG with AMG preconditioner: {} levels {:?}, convergence factor {:.2}, setup {:.1} s{}",
+                        sys.n_levels(),
+                        sys.sizes(),
+                        factor,
+                        sys.setup_seconds,
+                        if r.converged { "" } else { " (not fully converged)" }
+                    ));
                     r
                 }
-                Err(e) if e.starts_with(crate::linalg::driver::STALLED) => {
+                Err(e) if e.starts_with(femcore::linalg::driver::STALLED) => {
                     eig_note = Some(format!("{e}; used a sparse factorisation instead"));
                     eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?
                 }
                 _ => eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?,
             }
         } else {
-            eig_note = Some(format!("multigrid converges slowly here (factor {factor:.2}), used a sparse factorisation"));
+            eig_note =
+                Some(format!("multigrid converges slowly here (factor {factor:.2}), used a sparse factorisation"));
             eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?
         }
     } else {
@@ -443,7 +509,7 @@ pub struct StaticAssembly {
     pub thermal: Option<Thermal>,
 }
 
-pub fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, st: &Setup, k: Csr) -> Result<StaticAssembly, String> {
+pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr) -> Result<StaticAssembly, String> {
     if st.fixed.is_empty() {
         return Err("a static solid problem needs a fixed boundary (otherwise it floats freely)".into());
     }
@@ -452,7 +518,7 @@ pub fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveStat
     let mut f = vec![0.0; n];
     for bc in &spec.bcs {
         if let BcKind::Load(t) = &bc.kind {
-            for (comp, &w) in crate::section::wafer_axes(d).iter().enumerate() {
+            for (comp, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
                 if t[w] != 0.0 {
                     let tc = t[w] * if d == 2 { thk } else { 1.0 };
                     add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f, d, comp);
@@ -462,13 +528,18 @@ pub fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveStat
     }
     let mut thermal: Option<Thermal> = None;
     if let Some(th) = &spec.thermal {
-        let alpha: Vec<M3> = spec.materials.cell_tensor(mesh, TensorKind::Expansion, Some(0.0))?.iter().map(|a| crate::section::plane_tensor(a, d)).collect();
+        let alpha: Vec<M3> = spec
+            .materials
+            .cell_tensor(mesh, TensorKind::Expansion, Some(0.0))?
+            .iter()
+            .map(|a| femcore::section::plane_tensor(a, d))
+            .collect();
         let t = match &th.source {
             ThermalSource::Uniform(tv) => vec![*tv; n1],
-            ThermalSource::FromHeat => match &state.heat_t {
-                Some(t) if t.len() == n1 => t.clone(),
-                _ => return Err("no heat-transfer result on this mesh and element order; solve Heat transfer first".into()),
-            },
+            ThermalSource::Imported(t) if t.len() == n1 => t.clone(),
+            ThermalSource::Imported(_) => {
+                return Err("no heat-transfer result on this mesh and element order; solve Heat transfer first".into())
+            }
         };
         let fth = thermal_load(mesh, &st.c6, &alpha, &t, th.t_ref, order, spec.plane, thk);
         f.iter_mut().zip(&fth).for_each(|(a, b)| *a += b);
@@ -478,49 +549,71 @@ pub fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveStat
 }
 
 /// Stage 2: the displacement (component blocks) by the linear solver `spec.solver` names, and its note.
-pub fn solve_static(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, asm: &StaticAssembly) -> Result<(Vec<f64>, Option<String>), String> {
+pub fn solve_static(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &Setup,
+    asm: &StaticAssembly,
+) -> Result<(Vec<f64>, Option<String>), String> {
     solve_spd(mesh, spec.order, st.d, spec.solver, &asm.k, &asm.f, &st.fixed, &st.vals)
 }
 
-/// Records the time since `t` under the label `what` in the stage log (and on stderr when NYX_PROFILE is set),
-/// then restarts `t`. See `progress::lap` for how labels are treated.
-pub(crate) fn lap(t: &mut Instant, what: &str) {
-    crate::progress::lap(what, t.elapsed().as_secs_f64());
-    *t = Instant::now();
-}
+pub(crate) use femcore::progress::lap_since as lap;
 
-pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -> Result<SolveResult, String> {
+/// Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting
+/// boundaries in their own modules. The result carries `physics`, `study`, `order`, `dim`, the solutions, scalars, log, time and dofs.
+pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let mut tl = Instant::now();
+    let mut result = solve_variant(mesh, spec, t0, &mut tl)?;
+    result.physics = "sms".into();
+    result.study = spec.study.kind().into();
+    Ok(result)
+}
+
+fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut Instant) -> Result<SolveResult, String> {
     let order = spec.order;
     if spec.materials.has_pml() {
         return match spec.study {
-            Study::Eigenfrequency { .. } => crate::sms_pml::solve_solid_pml(mesh, spec),
-            _ => Err("perfectly matched layers are used with the Eigenfrequency study (they give complex frequencies and Q)".into()),
+            Study::Eigenfrequency { .. } => crate::pml::solve_solid_pml(mesh, spec),
+            _ => Err(
+                "perfectly matched layers are used with the Eigenfrequency study (they give complex frequencies and Q)"
+                    .into(),
+            ),
         };
     }
     let st = setup(mesh, spec)?;
-    lap(&mut tl, "setup (materials, constraints)");
+    lap(tl, "setup (materials, constraints)");
     let (d, n1) = (st.d, st.n1);
     let n = d * n1;
     let thk = spec.thickness;
     let k = assemble_solid(mesh, &st.c6, order, spec.plane, thk);
-    lap(&mut tl, "stiffness assembly");
+    lap(tl, "stiffness assembly");
     match &spec.study {
         Study::Static => {
-            let asm = assemble_static(mesh, spec, state, &st, k)?;
-            lap(&mut tl, "loads");
+            let asm = assemble_static(mesh, spec, &st, k)?;
+            lap(tl, "loads");
             let (u, note) = solve_static(mesh, spec, &st, &asm)?;
-            lap(&mut tl, "linear solve");
-            let (fields, disp, cells) = fields_of(mesh, &u, order, &st, spec.plane, asm.thermal.as_ref(), true);
-            lap(&mut tl, "fields (gradients, stress, averaging)");
-            let umax = fields[0].values.iter().cloned().fold(0.0, f64::max);
-            let vmax = fields.iter().find(|f| f.name == "von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);
+            lap(tl, "linear solve");
+            let (fields, cells) = fields_of(mesh, &u, order, &st, spec.plane, asm.thermal.as_ref(), true);
+            lap(tl, "fields (gradients, stress, averaging)");
+            let unorm = |i: usize| (0..d).map(|k| u[k * n1 + i] * u[k * n1 + i]).sum::<f64>().sqrt();
+            let umax = (0..n1).map(unorm).fold(0.0, f64::max);
+            let vmax =
+                fields.iter().find(|f| f.name == "von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);
             Ok(SolveResult {
-                order,
-                dim: d,
-                solutions: vec![Solution { label: "static".into(), fields, cell_fields: Some(cells), disp: Some(disp), ..Default::default() }],
-                scalars: vec![("max |u| (m)".into(), Scalar::Num(umax)), ("max von Mises (Pa)".into(), Scalar::Num(vmax))],
+                order: order as u8,
+                dim: d as u8,
+                solutions: vec![Solution {
+                    label: "static".into(),
+                    fields,
+                    cell_fields: cell_fields_of(&cells),
+                    ..Default::default()
+                }],
+                scalars: vec![
+                    ("max |u| (m)".into(), Scalar::Num(umax)),
+                    ("max von Mises (Pa)".into(), Scalar::Num(vmax)),
+                ],
                 log: note.into_iter().collect(),
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
@@ -539,11 +632,16 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
             let blocks: Vec<&Csr> = (0..d).map(|_| &m1).collect();
             let m = Csr::block_diag(&blocks);
             if !spec.periodic.is_empty() {
-                return crate::sms_floquet::solve_floquet(mesh, spec, &st, &k, &m, *n_modes, *f_search, t0);
+                return crate::floquet::solve_floquet(mesh, spec, &st, &k, &m, *n_modes, *f_search, t0);
             }
-            let lrb_labels: Vec<i32> = spec.bcs.iter().filter(|b| matches!(b.kind, BcKind::LowReflecting)).flat_map(|b| b.labels.iter().copied()).collect();
+            let lrb_labels: Vec<i32> = spec
+                .bcs
+                .iter()
+                .filter(|b| matches!(b.kind, BcKind::LowReflecting))
+                .flat_map(|b| b.labels.iter().copied())
+                .collect();
             if !lrb_labels.is_empty() {
-                return crate::sms_lrb::solve_lrb(mesh, spec, &st, &k, &m, &rho, &lrb_labels, *n_modes, *f_search, t0);
+                return crate::lrb::solve_lrb(mesh, spec, &st, &k, &m, &rho, &lrb_labels, *n_modes, *f_search, t0);
             }
             let free = free_dofs(n, &st.fixed);
             let nm = *n_modes;
@@ -565,24 +663,44 @@ pub fn solve_solid(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState) -
                 if mx > 0.0 {
                     u.iter_mut().for_each(|x| *x /= mx);
                 }
-                let (fields, disp, cells) = fields_of(mesh, &u, order, &st, spec.plane, None, false);
-                solutions.push(Solution { label: format!("mode {}: {:.6} Hz", j + 1, freq), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(freq), ..Default::default() });
+                let (fields, cells) = fields_of(mesh, &u, order, &st, spec.plane, None, false);
+                solutions.push(Solution {
+                    label: format!("mode {}: {:.6} Hz", j + 1, freq),
+                    fields,
+                    cell_fields: cell_fields_of(&cells),
+                    value: Some(freq),
+                    ..Default::default()
+                });
                 scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
             }
-            let mut log = vec![format!("Krylov dimension {}{}", pairs.dim, if pairs.converged { "" } else { " (not fully converged)" })];
+            let mut log = vec![format!(
+                "Krylov dimension {}{}",
+                pairs.dim,
+                if pairs.converged { "" } else { " (not fully converged)" }
+            )];
             log.extend(eig_note);
             if st.fixed.is_empty() {
-                log.push("no fixed boundary: the first six (3D) or three (2D) modes are rigid-body motions at ~0 Hz".into());
+                log.push(
+                    "no fixed boundary: the first six (3D) or three (2D) modes are rigid-body motions at ~0 Hz".into(),
+                );
             }
-            Ok(SolveResult { order, dim: d, solutions, scalars, log, seconds: t0.elapsed().as_secs_f64(), dofs: n, ..Default::default() })
+            Ok(SolveResult {
+                order: order as u8,
+                dim: d as u8,
+                solutions,
+                scalars,
+                log,
+                seconds: t0.elapsed().as_secs_f64(),
+                dofs: n,
+                ..Default::default()
+            })
         }
-        _ => Err("solid mechanics supports Static and Eigenfrequency studies".into()),
     }
 }
 
 /// Element-wise stress at the centroid of every cell, one row per cell:
 /// `[sxx, sxz, szx, szz, syy, von Mises]` in 2D (the in-plane axes are x and z), `[s (3x3 row-major), von Mises]` in 3D.
-pub fn centroid_stress(mesh: &SimplexMesh, u: &[f64], c6: &[M6], plane: Plane, order: usize) -> Vec<Vec<f64>> {
+pub fn centroid_stress(mesh: &Discretisation, u: &[f64], c6: &[M6], plane: Plane, order: usize) -> Vec<Vec<f64>> {
     let d = mesh.dim;
     let n1 = mesh.n_dofs(order);
     let geo = geometry(mesh);

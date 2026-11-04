@@ -220,6 +220,12 @@ pub fn lap(what: &str, seconds: f64) {
     }
 }
 
+/// `lap` for the time since `t`, then restarts `t` (the helper the kernels use between their stages).
+pub fn lap_since(t: &mut std::time::Instant, what: &str) {
+    lap(what, t.elapsed().as_secs_f64());
+    *t = std::time::Instant::now();
+}
+
 /// Fraction (0..1) of the current stage that is done, for a progress bar.
 pub fn fraction(f: f64) {
     if let Some(p) = current() {

@@ -1,15 +1,14 @@
 //! Heat feeding a solid study (thermal expansion from a temperature field), through the window bridge `nyx_engine::legacy` (ADR 41): dfs runs
-//! in its crate, the solid kernel is still in femcore. These two tests need both physics, so they live here and not in a physics crate.
-//! When `nyx-sms` takes the solid kernel, they become the coupled-chain tests of the engine (temperature exported by dfs, imported by sms).
+//! and sms run in their crates. These two tests need both physics, so they live here and not in a physics crate.
+//! The coupled chain through the trait (temperature exported by dfs, imported by sms through `Ctx::inputs`) is tested in `nyx-sms/tests/contracts.rs`.
 use femcore::material::*;
 use femcore::problem::*;
-use femcore::sms::solve_solid;
 use femcore::testkit::rect;
 use nyx_physics as np;
 use nyx_physics::testkit::golden;
 
 fn dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../femcore/tests/golden_frames")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
 }
 
 /// An old-shaped result as a `nyx_physics::SolveResult` (every flat field becomes a scalar field), for the golden harness.
@@ -94,11 +93,13 @@ fn heat_result_drives_thermal_expansion() {
         spec.thermal = Some(ThermalExpansion { source, t_ref: 293.15 });
         spec
     };
-    let a = solve_solid(&mesh, &mk(ThermalSource::FromHeat), &state).unwrap();
-    let b = solve_solid(&mesh, &mk(ThermalSource::Uniform(393.15)), &state).unwrap();
+    let solve_solid =
+        |spec: &ProblemSpec, state: &SolveState| nyx_engine::legacy::solve(&mesh, spec, &mut state.clone());
+    let a = solve_solid(&mk(ThermalSource::FromHeat), &state).unwrap();
+    let b = solve_solid(&mk(ThermalSource::Uniform(393.15)), &state).unwrap();
     let (ua, ub) = (&a.solutions[0].field("ux").unwrap().values, &b.solutions[0].field("ux").unwrap().values);
     assert!(maxdiff(ua, ub) < 1e-12);
-    assert!(solve_solid(&mesh, &mk(ThermalSource::FromHeat), &SolveState::default()).is_err());
+    assert!(solve_solid(&mk(ThermalSource::FromHeat), &SolveState::default()).is_err());
 }
 
 #[test]

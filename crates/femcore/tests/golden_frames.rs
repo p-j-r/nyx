@@ -2,7 +2,7 @@
 //!
 //! Each case is a wafer-frame problem. The golden file `tests/golden_frames/<case>.json` holds the names of every field of every solution, the
 //! scalars and effective indices, and for every field a few numbers (sum of |v|, max |v|, the values at fixed dofs). A ported kernel must
-//! reproduce them to round-off. `NYX_WRITE_GOLDEN=1 cargo test --test golden_frames` writes the files (`NYX_WRITE_GOLDEN=solid` only those named solid*) (do that only on a kernel that is known
+//! reproduce them to round-off. `NYX_WRITE_GOLDEN=1 cargo test --test golden_frames` writes the files (do that only on a kernel that is known
 //! to be right, i.e. before porting it).
 mod common;
 use femcore::material::*;
@@ -218,103 +218,5 @@ fn golden_pec_guide_with_a_pml() {
     s.study = Study::Modes { freq: 12e9, n_target: 1.5, evanescent: false, n_modes: 3 };
     let _ = C0;
     golden("emw_pml_x", &solve(&mesh, &s), 1e-7);
-}
-
-// ---------------------------------------------------------------------- solid mechanics
-
-fn sapphire_euler() -> [f64; 3] {
-    [30.0, 40.0, 10.0]
-}
-
-fn sapphire() -> Anisotropy {
-    let st = Stiffness::Trigonal { c11: 497.35e9, c12: 163.97e9, c13: 112.20e9, c14: -23.58e9, c33: 499.11e9, c44: 147.39e9 };
-    Anisotropy { stiffness: Some(st), expansion: Some(Tensor::Diagonal { x: 5.0e-6, y: 5.0e-6, z: 6.0e-6 }), euler_deg: sapphire_euler(), ..Default::default() }
-}
-
-fn clamped_left(spec: &mut ProblemSpec) {
-    spec.bcs.push(Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } });
-}
-
-#[test]
-fn golden_solid_static_tilted_sapphire_plane_strain() {
-    // a generic crystal orientation turns every entry of the stiffness; loads along x and z, a sliding wall at the bottom
-    let mesh = common::rect(1.0, 0.2, 10, 3);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.order = 2;
-    s.plane = Plane::Strain;
-    s.materials.aniso.insert(1, sapphire());
-    s.materials.default.insert("rho".into(), 3980.0);
-    clamped_left(&mut s);
-    s.bcs.push(Bc { on: None, labels: vec![4], kind: BcKind::Load([2.0e6, 0.0, -1.5e6]) });
-    s.bcs.push(Bc { on: None, labels: vec![2], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0, 0.0, 1.0e-7] } });
-    golden("solid_static_sapphire_strain", &solve(&mesh, &s), 1e-8);
-}
-
-#[test]
-fn golden_solid_static_plane_stress_with_thermal_expansion() {
-    let mesh = common::rect(1.0, 0.2, 10, 3);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.order = 2;
-    s.plane = Plane::Stress;
-    s.materials.aniso.insert(1, sapphire());
-    s.thermal = Some(ThermalExpansion { source: ThermalSource::Uniform(393.15), t_ref: 293.15 });
-    clamped_left(&mut s);
-    golden("solid_static_sapphire_stress_thermal", &solve(&mesh, &s), 1e-8);
-}
-
-#[test]
-fn golden_solid_eigenfrequencies_tilted_sapphire() {
-    let mesh = common::rect(1.0e-3, 0.2e-3, 10, 3);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.order = 2;
-    s.materials.aniso.insert(1, sapphire());
-    s.materials.default.insert("rho".into(), 3980.0);
-    clamped_left(&mut s);
-    s.study = Study::Eigenfrequency { n_modes: 5, f_search: 0.0 };
-    golden("solid_eigen_sapphire", &solve(&mesh, &s), 1e-8);
-}
-
-#[test]
-fn golden_solid_eigenfrequencies_floquet_cell() {
-    // a phononic cell: the sides x = 0 and x = lx are periodic with a phase
-    let mesh = common::rect(1.0e-3, 0.3e-3, 8, 3);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.order = 2;
-    s.materials.aniso.insert(1, sapphire());
-    s.materials.default.insert("rho".into(), 3980.0);
-    s.periodic = vec![Periodic { source: vec![1], dest: vec![4], phase: 1.2 }];
-    s.study = Study::Eigenfrequency { n_modes: 4, f_search: 1.0e6 };
-    golden("solid_eigen_floquet", &solve(&mesh, &s), 1e-7);
-}
-
-#[test]
-fn golden_solid_eigenfrequencies_with_a_pml() {
-    // a clamped isotropic bar whose right end is an absorbing layer along x
-    let mesh = common::rect(1.0, 0.1, 30, 3);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.order = 2;
-    s.plane = Plane::Strain;
-    for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
-        s.materials.default.insert(k.into(), v);
-    }
-    clamped_left(&mut s);
-    s.materials.pml.insert(1, Pml { x: PmlDir::Plus, strength: 0.1, order: 0.0, ..Pml::default() });
-    s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
-    golden("solid_eigen_pml_x", &solve(&mesh, &s), 1e-7);
-}
-
-#[test]
-fn golden_solid_eigenfrequencies_with_a_pml_along_z() {
-    // a plate on a substrate: the layer is the lower part of a tall section and absorbs along the surface normal z
-    let mesh = common::rect(0.2, 1.0, 3, 30);
-    let mut s = ProblemSpec::new(Physics::Solid);
-    s.order = 2;
-    s.plane = Plane::Strain;
-    s.materials.aniso.insert(1, sapphire());
-    s.materials.default.insert("rho".into(), 3980.0);
-    s.bcs.push(Bc { on: None, labels: vec![3], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } });
-    s.materials.pml.insert(1, Pml { z: PmlDir::Minus, strength: 0.1, order: 0.0, ..Pml::default() });
-    s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
-    golden("solid_eigen_pml_z", &solve(&mesh, &s), 1e-7);
 }
 
