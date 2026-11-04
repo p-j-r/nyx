@@ -1,0 +1,20 @@
+# Lithium niobate, congruently grown, uniaxial about the crystal z (optic) axis: optical data only.
+format = 1
+name = "lithium_niobate"
+description = "Congruent lithium niobate, 21 degC (optical data only)"
+source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.4, 5.0]
+source = { cite = "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, as in the refractiveindex.info database (LiNbO3, Zelmon-o and Zelmon-e, CC0)", url = "https://refractiveindex.info/?shelf=main&book=LiNbO3&page=Zelmon-o", doi = "10.1364/JOSAB.14.003319", verified = "2026-11-04" }
+
+[optical.ordinary]
+model = "sellmeier"
+B = [2.6734, 1.2290, 12.614]
+C = [0.01764, 0.05914, 474.60]
+
+[optical.extraordinary]
+model = "sellmeier"
+B = [2.9804, 0.5981, 8.9543]
+C = [0.02047, 0.0666, 416.08]

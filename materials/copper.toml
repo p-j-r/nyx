@@ -1,0 +1,21 @@
+# Copper: optical data only (Lorentz-Drude fit of Rakic et al. 1998).
+format = 1
+name = "copper"
+description = "Copper, evaporated film, room temperature (optical data only)"
+source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.2066, 12.398]
+model = "drude_lorentz"
+frequency_unit = "eV"
+plasma_frequency = 10.83
+damping = 0.030
+drude_weight = 0.575
+oscillators = [
+  [0.061, 0.291, 0.378],
+  [0.104, 2.957, 1.056],
+  [0.723, 5.300, 3.213],
+  [0.638, 11.18, 4.305],
+]
+source = { cite = "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them", url = "https://refractiveindex.info/?shelf=main&book=Cu&page=Rakic-LD", doi = "10.1364/AO.37.005271", verified = "2026-11-04" }

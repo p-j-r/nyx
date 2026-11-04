@@ -37,7 +37,7 @@ Write `"496.8 GPa"`, or `{ value = 496.8, unit = "GPa" }`, or a bare number when
 
 ## Top level
 
-`format` (required), `name`, `description`, `source` (text or a list of references: always say where numbers come from), `notes`, `density`. The orientation of a crystal is not in the material: the project places it with Bunge Euler angles.
+`format` (required), `name`, `description`, `source` (where the numbers come from, see "Provenance"), `notes`, `density`, `extends` (see "Starting from another material"). The orientation of a crystal is not in the material: the project places it with Bunge Euler angles.
 
 ## `[elastic]`: the stiffness
 
@@ -111,8 +111,13 @@ Optical properties are models evaluated at the study wavelength. Write the wavel
 | `sellmeier` | `B`, and `C` (squared resonance wavelengths) or `lambda0` (resonance wavelengths), optional `A` (default 1) | `n^2 = A + sum B x^2 / (x^2 - C)` |
 | `cauchy` | `coefficients = [A, B, C, ...]` | `n = A + B/x^2 + C/x^4 + ...` |
 | `tabulated` | `data = [[wavelength, n], ...]` or with a third column `k`; optional `interpolation = "linear"` (default monotone cubic `"pchip"`) | table |
+| `schott` | `coefficients = [a0, a1, a2, a3, a4, a5]` | `n^2 = a0 + a1 x^2 + a2 x^-2 + a3 x^-4 + a4 x^-6 + a5 x^-8` (Schott glass catalogue) |
+| `herzberger` | `coefficients = [A, B, C, D, E, F]` | `n = A + B L + C L^2 + D x^2 + E x^4 + F x^6`, `L = 1/(x^2 - 0.028 um^2)` (the 0.028 is converted to your wavelength unit) |
+| `drude` | `frequency_unit`, `plasma_frequency`, `damping`, optional `eps_inf` (default 1), `drude_weight` (default 1) | `eps = eps_inf - f0 Wp^2 / (w^2 - j g w)` (free carriers, metals) |
+| `lorentz` | `frequency_unit`, `plasma_frequency`, `oscillators = [[f, resonance, damping], ...]`, optional `eps_inf` | `eps = eps_inf + sum f Wp^2 / (w0^2 - w^2 + j g w)` |
+| `drude_lorentz` | both of the above | the sum of both (Rakic et al. 1998 write metals this way) |
 
-Rules: `range = [min, max]` is required for `sellmeier` and `cauchy` (published coefficients hold only there); a table's range is its extent. **A wavelength outside the range is an error**, never an extrapolation; `extrapolate = "linear"` in a table allows it on purpose. `dn_dT = "1.8e-4 1/K"` adds a thermo-optic shift `dn_dT (T - reference_temperature)` (default reference 293.15 K) when a temperature is given. A uniaxial crystal uses the tables `[optical.ordinary]` and `[optical.extraordinary]` (unique axis along crystal z), a biaxial one `[optical.x]`, `[optical.y]`, `[optical.z]`; each holds its own model.
+Rules: `range = [min, max]` is required for every formula model, i.e. everything but `constant` and `tabulated` (published coefficients hold only there); a table's range is its extent. **A wavelength outside the range is an error**, never an extrapolation; `extrapolate = "linear"` in a table allows it on purpose. `dn_dT = "1.87e-4 1/K"` adds a thermo-optic shift `dn_dT (T - reference_temperature)` (default reference 293.15 K) when a temperature is given. A uniaxial crystal uses the tables `[optical.ordinary]` and `[optical.extraordinary]` (unique axis along crystal z), a biaxial one `[optical.x]`, `[optical.y]`, `[optical.z]`; each holds its own model.
 
 ```toml
 [optical]
@@ -125,7 +130,29 @@ lambda0 = [0.0684043, 0.1162414, 9.896161]
 
 ## The library
 
-`materials/*.toml` (silicon, silica, sapphire, air) is loaded at run time with `Library::load_dir`; a material is found by its file name, ignoring case. Numbers marked as approximate in a file's `notes` should be checked before quantitative use.
+`materials/*.toml` is loaded at run time with `Library::load_dir`; a material is found by its file name, ignoring case. Shipped: `silicon`, `silica`, `sapphire`, `air` (mechanical, thermal, electrical and optical data) and, with optical data only, `gold`, `silver`, `copper`, `aluminium` (Lorentz-Drude fits of Rakic et al. 1998, 0.25 to 6 um for gold, to 12 um for silver and copper, 0.06 to 248 um for aluminium), `silicon_nitride` (Luke 2015, a film) and `lithium_niobate` (Zelmon 1997, ordinary and extraordinary). `materials/examples/` holds files that are not part of the library, for example `silicon_measured.toml`. Every table of every file names its source; values that could not be checked against a publication say "approximate" or "unverified" in that source (silicon thermal conductivity and permittivity, silica permittivity, the sapphire thermal, expansion and permittivity values, air).
+
+## Provenance: where a number comes from
+
+The top of a file and each table (`[elastic]`, `[thermal]`, `[electrical]`, `[optical]`, and each axis of `[optical]` if it differs) may carry `source`: a citation text, a table `{ cite = "...", url = "https://...", doi = "10.xxxx/...", verified = "2026-11-04" }`, or a list of those. `verified` is the date on which someone compared the values with the publication; an entry without it must say "approximate" or "unverified" in its text (the library test enforces this for the shipped files). The loader keeps the sources (`MaterialSpec.source`, `Elastic.source`, `Thermal.source`, `Electrical.source`, `Optical.source`, `AxisModel.source`) and writes them back.
+
+## Starting from another material
+
+To change a few values of a library material (your own measured index, a different density) write a short file that starts from it:
+
+```toml extends
+format = 1
+extends = "silicon"
+source = "Own ellipsometry, 2026-11 (example)"
+
+[optical]
+wavelength_unit = "um"
+range = [1.5, 1.6]
+model = "tabulated"
+data = [[1.50, 3.4799, 0.0], [1.55, 3.4761, 0.0], [1.60, 3.4722, 0.0]]
+```
+
+Rules: the base is looked up by name in the same library (a missing base or a loop is reported with the chain); every top-level key you write replaces the base's; a table (`[elastic]`, `[thermal]`, `[electrical]`, `[optical]`) is replaced as a whole, never mixed key by key, so a half-replaced stiffness cannot occur and a unit never follows a value it was not written for; the `name` is not inherited; all checks run on the combined result. Read such a file with `library.read(text, "name")`; `Library::load_dir` resolves `extends` between the files of the folder. `materials/examples/silicon_measured.toml` is an example.
 
 ## From Rust
 

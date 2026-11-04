@@ -1,37 +1,44 @@
 # Single-crystal silicon at room temperature. Crystal axes along the cube edges (orientation is set in the project).
+# Every table carries its own source; a value that is only approximate says so in its source text.
 format = 1
 name = "silicon"
 description = "Single-crystal silicon, 293 K"
-source = [
-  "Stiffness: typical room-temperature values, Hopcroft et al., J. Microelectromech. Syst. 19, 229 (2010) (rounded; the nyx test suite uses these)",
-  "Refractive index: H. H. Li, J. Phys. Chem. Ref. Data 9, 561 (1980) as tabulated for 293 K by the refractiveindex.info database (CC0)",
-]
-notes = "dn_dT is approximate (about 1.8e-4 1/K near 1.55 um); check it against a measurement before quantitative thermo-optic work."
+source = { cite = "Compiled from the per-table sources below. Density 2329 kg/m^3 (2.329 g/cm^3): El-Cat silicon properties page and Sydor/Ohara data sheet (2.33 g/cm^3), checked 2026-11-04", verified = "2026-11-04" }
 density = "2329 kg/m^3"
 
 [elastic]
 class = "cubic"
 unit = "GPa"
-c11 = 165.7
+c11 = 165.6
 c12 = 63.9
-c44 = 79.6
+c44 = 79.5
+source = { cite = "M. A. Hopcroft, W. D. Nix, T. W. Kenny, What is the Young's modulus of silicon?, J. Microelectromech. Syst. 19, 229-238 (2010), table of elastic constants (c11 165.6, c12 63.9, c44 79.5 GPa, rounded as in the paper)", url = "https://sites.engineering.ucsb.edu/~sumita/courses/Courses/ME141B/HopcroftJMEMS.pdf", verified = "2026-11-04" }
 
 [thermal]
-conductivity = 130.0
+conductivity = 148.0
 conductivity_unit = "W/(m*K)"
 specific_heat = "700 J/(kg*K)"
 expansion = 2.6e-6
 expansion_unit = "1/K"
+source = [
+  { cite = "Thermal expansion 2.6e-6 1/K and specific heat 0.7 J/(g K): BYU cleanroom semiconductor constants; expansion also PVEducation general properties of silicon", url = "https://cleanroom.byu.edu/Semiconductor-Constants", verified = "2026-11-04" },
+  { cite = "APPROXIMATE thermal conductivity at 300 K: 148 W/(m K) (El-Cat silicon properties); other compilations give 130 (Ioffe NSM), 150 (PVEducation), 156; it depends on doping, isotopes and temperature", url = "https://www.el-cat.com/silicon-properties.htm", verified = "2026-11-04" },
+]
 
 [electrical]
 permittivity = 11.7
+source = { cite = "APPROXIMATE static relative permittivity: 11.7 (PVEducation, Ioffe NSM); 11.9 is also quoted (El-Cat)", url = "https://www.pveducation.org/pvcdrom/materials/general-properties-of-silicon", verified = "2026-11-04" }
 
 [optical]
 wavelength_unit = "um"
 range = [1.2, 14.0]
 reference_temperature = "293.15 K"
 model = "tabulated"
-dn_dT = "1.8e-4 1/K"
+dn_dT = "1.87e-4 1/K"
+source = [
+  { cite = "H. H. Li, Refractive index of silicon and germanium and its wavelength and temperature derivatives, J. Phys. Chem. Ref. Data 9, 561 (1980); table for 293 K as in the refractiveindex.info database (Si, Li-293K, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si&page=Li-293K", doi = "10.1063/1.555624", verified = "2026-11-04" },
+  { cite = "dn_dT: 1.87e-4 1/K at 295 K and 1.55 um, D. B. Frey, D. B. Leviton, T. J. Madison, Temperature-dependent refractive index of silicon and germanium, Proc. SPIE 6273 (2006), arXiv:physics/0606168, as quoted in a secondary compilation (photonica.io); Komma et al., Appl. Phys. Lett. 101, 041905 (2012) measured it at 1550 nm. It varies with wavelength and temperature, so it is applied as a constant shift", url = "https://arxiv.org/abs/physics/0606168", verified = "2026-11-04" },
+]
 data = [
   [1.20, 3.5167], [1.22, 3.5133], [1.24, 3.5102], [1.26, 3.5072], [1.28, 3.5043], [1.30, 3.5016],
   [1.32, 3.4990], [1.34, 3.4965], [1.36, 3.4941], [1.38, 3.4918], [1.40, 3.4896], [1.45, 3.4845],

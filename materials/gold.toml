@@ -1,0 +1,22 @@
+# Gold: optical data only (Lorentz-Drude fit of Rakic et al. 1998). Other properties are not part of this file.
+format = 1
+name = "gold"
+description = "Gold, evaporated film, room temperature (optical data only)"
+source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.2480, 6.1992]
+model = "drude_lorentz"
+frequency_unit = "eV"
+plasma_frequency = 9.03
+damping = 0.053
+drude_weight = 0.760
+oscillators = [
+  [0.024, 0.415, 0.241],
+  [0.010, 0.830, 0.345],
+  [0.071, 2.969, 0.870],
+  [0.601, 4.304, 2.494],
+  [4.384, 13.32, 2.214],
+]
+source = { cite = "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them", url = "https://refractiveindex.info/?shelf=main&book=Au&page=Rakic-LD", doi = "10.1364/AO.37.005271", verified = "2026-11-04" }

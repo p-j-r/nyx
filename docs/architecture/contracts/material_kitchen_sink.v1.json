@@ -53,7 +53,15 @@
       ]
     ],
     "class": "Orthotropic",
-    "exact_constants": true
+    "exact_constants": true,
+    "source": [
+      {
+        "cite": "Invented for the contract test",
+        "doi": null,
+        "url": null,
+        "verified": null
+      }
+    ]
   },
   "electrical": {
     "conductivity": {
@@ -69,7 +77,15 @@
         0.0,
         0.0
       ]
-    }
+    },
+    "source": [
+      {
+        "cite": "Electrical reference",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-04"
+      }
+    ]
   },
   "name": "kitchen_sink",
   "notes": "An orthotropic crystal with a different dispersion model along each axis.",
@@ -90,7 +106,15 @@
               ]
             }
           },
-          "dn_dt": 0.00002
+          "dn_dt": 0.00002,
+          "source": [
+            {
+              "cite": "Axis x reference",
+              "doi": null,
+              "url": null,
+              "verified": null
+            }
+          ]
         },
         {
           "dispersion": {
@@ -102,7 +126,8 @@
               ]
             }
           },
-          "dn_dt": 0.0
+          "dn_dt": 0.0,
+          "source": []
         },
         {
           "dispersion": {
@@ -126,7 +151,8 @@
               ]
             }
           },
-          "dn_dt": 0.00001
+          "dn_dt": 0.00001,
+          "source": []
         }
       ]
     },
@@ -135,12 +161,30 @@
       1.6
     ],
     "reference_temperature": 293.15,
+    "source": [
+      {
+        "cite": "Optical reference shared by the three axes",
+        "doi": null,
+        "url": null,
+        "verified": null
+      }
+    ],
     "unit_m": 1e-6,
     "wavelength_unit": "um"
   },
   "source": [
-    "Invented for the contract test",
-    "Second reference"
+    {
+      "cite": "Invented for the contract test",
+      "doi": null,
+      "url": null,
+      "verified": null
+    },
+    {
+      "cite": "Second reference",
+      "doi": null,
+      "url": null,
+      "verified": null
+    }
   ],
   "thermal": {
     "conductivity": {
@@ -160,6 +204,20 @@
         0.0
       ]
     },
+    "source": [
+      {
+        "cite": "First thermal reference",
+        "doi": null,
+        "url": null,
+        "verified": null
+      },
+      {
+        "cite": "Second thermal reference (APPROXIMATE)",
+        "doi": "10.1000/thermal",
+        "url": "https://example.org/thermal",
+        "verified": "2026-11-04"
+      }
+    ],
     "specific_heat": 800.0
   }
 }

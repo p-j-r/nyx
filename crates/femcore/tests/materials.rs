@@ -31,36 +31,41 @@ fn close6(a: &[[f64; 6]; 6], b: &[[f64; 6]; 6], tol: f64) {
 // ----- the library -----
 
 #[test]
-fn the_library_has_the_four_materials() {
+fn the_library_has_its_materials() {
     let lib = library();
-    assert_eq!(lib.names(), vec!["air", "sapphire", "silica", "silicon"]);
+    assert_eq!(lib.names(), vec!["air", "aluminium", "copper", "gold", "lithium_niobate", "sapphire", "silica", "silicon", "silicon_nitride", "silver"]);
     assert!(lib.get("Silicon").is_some(), "lookup ignores case");
-    let e = lib.require("gold").unwrap_err().to_string();
-    assert!(e.contains("available: air, sapphire, silica, silicon"), "{e}");
+    let e = lib.require("platinum").unwrap_err().to_string();
+    assert!(e.contains("available: air, aluminium, copper, gold"), "{e}");
 }
 
 #[test]
-fn library_stiffness_equals_the_in_code_data_it_replaces() {
+fn library_stiffness_agrees_with_the_in_code_data_it_replaces() {
+    // the code still carries the earlier rounded numbers; the library holds the values checked against the literature (see
+    // material_library.rs), which differ in the third digit for silicon and in the secondary tensors of sapphire
     let lib = library();
     let (st, eps, k, alpha, rho) = sapphire();
     let s = lib.get("sapphire").unwrap();
     for euler in [[0.0; 3], [17.0, 33.0, 71.0]] {
         close6(&s.elastic.as_ref().unwrap().global(euler), &stiffness_global(&st, euler), 1e-12);
-        close6(&lib.get("silicon").unwrap().elastic.as_ref().unwrap().global(euler), &stiffness_global(&silicon(), euler), 1e-12);
+        close6(&lib.get("silicon").unwrap().elastic.as_ref().unwrap().global(euler), &stiffness_global(&silicon(), euler), 2e-3);
     }
     assert_eq!(s.density, Some(rho));
     let a = s.anisotropy([0.0; 3]);
     for (got, want) in [(a.permittivity.unwrap(), eps), (a.conductivity.unwrap(), k), (a.expansion.unwrap(), alpha)] {
-        assert_eq!(got.matrix(), want.matrix());
+        let (g, w) = (got.matrix(), want.matrix());
+        for i in 0..3 {
+            assert!((g[i][i] - w[i][i]).abs() <= 0.1 * w[i][i].abs(), "{g:?} vs {w:?}");
+        }
     }
 }
 
 #[test]
 fn legacy_scalars_of_silica() {
     let m = library().get("silica").unwrap().legacy_scalars();
-    assert!((m["E"] - 73.1e9).abs() < 1e-3 * 73.1e9 * 1e-6 + 1.0);
-    assert!((m["nu"] - 0.17).abs() < 1e-12);
-    assert_eq!(m["rho"], 2203.0);
+    assert!((m["E"] - 72.7e9).abs() < 1e-6 * 72.7e9);
+    assert!((m["nu"] - 0.16).abs() < 1e-12);
+    assert_eq!(m["rho"], 2201.0);
     assert_eq!(m["eps_r"], 3.75);
 }
 
@@ -92,7 +97,7 @@ fn silicon_table_reproduces_li_and_the_thermo_optic_shift() {
     let o = lib.get("silicon").unwrap().optical.as_ref().unwrap();
     assert_eq!(o.nk(0, 1.55e-6, None).unwrap().0, 3.4757);
     let warm = o.nk(0, 1.55e-6, Some(303.15)).unwrap().0;
-    assert!((warm - (3.4757 + 1.8e-4 * 10.0)).abs() < 1e-12);
+    assert!((warm - (3.4757 + 1.87e-4 * 10.0)).abs() < 1e-12);
     let ng = o.group_index(0, 1.55e-6, None).unwrap();
     assert!(ng > 3.5 && ng < 3.7, "group index of silicon near 1.55 um is about 3.6, got {ng}");
 }
@@ -365,8 +370,8 @@ fn optical_models_are_validated() {
     let e = err("[optical]\nwavelength_unit = \"um\"\nrange = [0.5, 3.0]\nmodel = \"tabulated\"\ndata = [[1.0, 1.5], [2.0, 1.4]]\n");
     assert!(e.contains("wider than the table") && e.contains("extrapolate"), "{e}");
     assert!(parse("[optical]\nwavelength_unit = \"um\"\nrange = [0.5, 3.0]\nmodel = \"tabulated\"\nextrapolate = \"linear\"\ndata = [[1.0, 1.5], [2.0, 1.4]]\n").is_ok());
-    let e = err("[optical]\nmodel = \"lorentz\"\n");
-    assert!(e.contains("unknown model 'lorentz'"), "{e}");
+    let e = err("[optical]\nmodel = \"bogus\"\n");
+    assert!(e.contains("unknown model 'bogus'"), "{e}");
     let e = err("[optical]\nmodel = \"constant\"\nn = 1.5\n[optical.ordinary]\nmodel = \"constant\"\nn = 1.5\n");
     assert!(e.contains("cannot be combined"), "{e}");
     let e = err("[optical.ordinary]\nmodel = \"constant\"\nn = 1.5\n");
@@ -392,9 +397,15 @@ fn every_toml_example_of_the_guide_reads() {
     let mut n = 0;
     for block in text.split("```toml").skip(1) {
         let body = block.split("```").next().unwrap();
+        if let Some(rest) = body.strip_prefix(" extends\n") {
+            // an example that starts from a library material
+            library().read(rest, "guide").unwrap_or_else(|e| panic!("{e}\n{rest}"));
+            n += 1;
+            continue;
+        }
         let full = if body.trim_start().starts_with("format") { body.to_string() } else { format!("format = 1\n{body}") };
         MaterialSpec::from_toml(&full).unwrap_or_else(|e| panic!("{e}\n{body}"));
         n += 1;
     }
-    assert!(n >= 5, "found {n} examples");
+    assert!(n >= 6, "found {n} examples");
 }

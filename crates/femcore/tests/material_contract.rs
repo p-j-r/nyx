@@ -63,3 +63,10 @@ fn the_schema_lists_exactly_the_keys_the_loader_knows() {
     assert_eq!(keys(&s["properties"]["optical"]), optical, "[optical]");
     assert_eq!(keys(&s["$defs"]["model"]), set(k.model), "model table");
 }
+
+#[test]
+fn model_kitchen_sink_resolves_to_the_exemplar() {
+    let text = std::fs::read_to_string(contracts().join("material_kitchen_sink_models.v1.toml")).unwrap();
+    let m = MaterialSpec::from_toml(&text).unwrap_or_else(|e| panic!("{e}"));
+    check("material_kitchen_sink_models.v1.json", &serde_json::to_value(&m).unwrap());
+}

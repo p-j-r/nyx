@@ -2,17 +2,21 @@
 format = 1
 name = "air"
 description = "Air (optically vacuum)"
+source = "Compiled from the per-table sources below. Density 1.2 kg/m^3 is the usual room-temperature figure: APPROXIMATE, not checked against a reference in this library"
 density = "1.2 kg/m^3"
 
 [thermal]
 conductivity = 0.026
 conductivity_unit = "W/(m*K)"
 specific_heat = "1005 J/(kg*K)"
+source = { cite = "APPROXIMATE and UNVERIFIED handbook-type values for dry air near 300 K (conductivity 0.026 W/(m K), specific heat 1005 J/(kg K)); not compared with a source in this library", verified = "2026-11-04" }
 
 [electrical]
 permittivity = 1.0
 permeability = 1.0
+source = { cite = "Defined: air is treated as vacuum (relative permittivity and permeability 1); the true permittivity of air at 1 atm is 1.0006", verified = "2026-11-04" }
 
 [optical]
 model = "constant"
 n = 1.0
+source = { cite = "Defined: n = 1 (vacuum). Real air at 1 atm is about 1.0003; use a constant model with that value if it matters", verified = "2026-11-04" }

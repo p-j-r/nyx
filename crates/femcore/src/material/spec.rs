@@ -279,8 +279,14 @@ pub struct Library {
     tables: BTreeMap<String, toml::Table>,
 }
 
-fn nearest<'a>(name: &str, names: impl Iterator<Item = &'a String>) -> Option<&'a String> {
-    names.min_by_key(|n| super::reader::edit_distance(name, n)).filter(|n| super::reader::edit_distance(name, n) <= 3)
+/// The library names closest to `name`: all that tie for the smallest edit distance, which must be at most 3.
+fn nearest<'a>(name: &str, names: impl Iterator<Item = &'a String>) -> Vec<&'a String> {
+    let scored: Vec<(usize, &String)> = names.map(|n| (super::reader::edit_distance(name, n), n)).collect();
+    let best = scored.iter().map(|(d, _)| *d).min().unwrap_or(usize::MAX);
+    if best > 3 {
+        return Vec::new();
+    }
+    scored.into_iter().filter(|(d, _)| *d == best).map(|(_, n)| n).collect()
 }
 
 impl Library {
@@ -384,7 +390,8 @@ impl Library {
 }
 
 fn missing_base<'a>(who: &str, base: &str, names: impl Iterator<Item = &'a String> + Clone) -> MaterialError {
-    let hint = nearest(&base.to_ascii_lowercase(), names.clone()).map(|n| format!("; did you mean \"{n}\"?")).unwrap_or_default();
+    let close = nearest(&base.to_ascii_lowercase(), names.clone());
+    let hint = if close.is_empty() { String::new() } else { format!("; did you mean {}?", close.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(" or ")) };
     MaterialError {
         material: who.to_string(),
         path: "extends".into(),

@@ -33,3 +33,5 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 27 | [`nyx2`: second repository, a jj workspace per session](adr/0027-nyx2-repository-and-jj-workspace-per-working-session.md) | process |
 | 29 | [Materials are TOML files with explicit units and a checked stiffness](adr/0029-material-files-are-toml-with-explicit-units.md) | `material`, `materials/` |
 | 30 | [Optical properties are dispersion models evaluated at the study wavelength](adr/0030-optical-dispersion-models-evaluated-at-the-study-wavelength.md) | `material::optics` |
+| 34 | [A material may extend another and replaces whole tables](adr/0034-a-material-may-extend-another-and-replaces-whole-tables.md) | `material::spec` (`extends`) |
+| 35 | [Provenance, oscillator models and the checked library](adr/0035-material-provenance-oscillator-models-and-the-checked-library.md) | `material::{source,optics}`, `materials/` |
