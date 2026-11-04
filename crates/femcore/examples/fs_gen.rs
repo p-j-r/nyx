@@ -11,10 +11,10 @@
 //!   pml2d:nx:ny:smax                       complex symmetric pencil A x = λ B x with an absorbing
 //!                                          layer (B = diag(1 − iσ(x,y))), complex eigenvalues
 
-use femcore::solvers::bundle::Bundle;
-use femcore::solvers::csr::{Csr, laplacian_1d, laplacian_2d, laplacian_3d, mass_1d};
-use femcore::solvers::rng::random_vector;
-use femcore::solvers::{C64, Scalar};
+use femcore::linalg::bundle::Bundle;
+use femcore::linalg::csr::{Csr, laplacian_1d, laplacian_2d, laplacian_3d, mass_1d};
+use femcore::linalg::rng::random_vector;
+use femcore::linalg::{C64, Scalar};
 use std::path::Path;
 
 fn num<T: std::str::FromStr>(p: &[&str], i: usize) -> T {

@@ -8,14 +8,14 @@
 //! * adaptation: `adapt` (metric adaptation 2D and 3D, error estimators `estimate`, `estimate3`)
 //! * finite-element basics: `fem` (quadrature, shape functions, scalar matrices, constraints), `fields` (gradients, node
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
-//! * linear algebra: `sparse`, `csparse` (sparse matrices, real and complex), `linalg` (sparse factorisations, dense
-//!   eigenproblems), `amg` (multigrid and CG), `eigen` (shift-and-invert Krylov), `lobpcg` (multigrid eigensolver)
+//! * linear algebra: `linalg` (the one library: `Csr<T>` matrices, direct and Krylov solvers, eigensolvers, multigrid;
+//!   `linalg::driver` is the door the kernels use)
 //! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (the shared cross-section solid kernel, today for rings), `sms_pml`,
 //!   `sms_lrb` (absorbing boundaries), `sms_floquet` and `periodic` (periodic cells), `sms_axisym` (bodies of
 //!   revolution); `ems` (2D waveguide modes), `ems_pml` (complex modes, tilted crystals), `ems_axisym`, `ems3d` (3D cavities)
 //! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)
-//! * ported libraries: `solvers` (Krylov, eigen, preconditioner, time-stepping and optimisation library for real and complex
-//!   systems) (the mesher port lives in `mesh`, `meshing` and `adapt`), see docs/ports
+//! * ported libraries: `linalg` (see above; Krylov, eigen, preconditioner, time-stepping and optimisation library for
+//!   real and complex systems) and the mesher port in `mesh`, `meshing` and `adapt`, see docs/ports
 //! * files: `xmlio` (project XML), `h5io` (HDF5/XDMF results, feature `hdf5`)
 //!
 //! Lint note: `clippy::needless_range_loop` is allowed crate-wide. The numerical kernels (element matrices, orthogonalisation,
@@ -24,11 +24,8 @@
 //! the machine code. `too_many_arguments` is allowed on the few assembly/solver entry points that take a full problem
 //! description (each marked where it applies).
 #![allow(clippy::needless_range_loop, clippy::neg_cmp_op_on_partial_ord)]
-pub mod amg;
 pub mod analysis;
 pub mod optical;
-pub mod csparse;
-pub mod eigen;
 pub mod ems;
 pub mod ems3d;
 pub mod ems_axisym;
@@ -38,9 +35,7 @@ pub mod fem;
 pub mod fields;
 #[cfg(feature = "hdf5-metno")]
 pub mod h5io;
-pub mod linalg;
 pub mod material;
-pub mod lobpcg;
 pub mod adapt;
 pub mod mesh;
 pub mod meshing;
@@ -58,9 +53,8 @@ pub mod sms_kz;
 pub mod sms_lrb;
 pub mod sms_pml;
 pub mod solve;
-pub mod solvers;
+pub mod linalg;
 pub mod validate;
-pub mod sparse;
 pub mod usecases;
 pub mod xmlio;
 

@@ -4,7 +4,7 @@
 //! mesh with the finite-element basis functions of the mode solvers. (Split out of `sbs`, which held it next to the Brillouin
 //! coupling integrals; the Brillouin code is gone, see ADR 24.)
 
-use crate::csparse::{c, C};
+use crate::linalg::csr::{c, C};
 use crate::ems::{cell_data, edge_basis, tri_g, CellData, EpsCell, Modes, C0};
 use crate::ems_pml::{cell_materials, cell_materials_signed, solve_modes_complex, EpsC, ModesC, MuC};
 use crate::fem::*;

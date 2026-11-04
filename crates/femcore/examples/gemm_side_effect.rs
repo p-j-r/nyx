@@ -6,9 +6,9 @@
 //!   cargo run --release --example gemm_side_effect
 //!   cargo run --release --example gemm_side_effect --features portable-kernels   # control
 
-use femcore::solvers::C64;
-use femcore::solvers::basis::Basis;
-use femcore::solvers::rng::random_vector;
+use femcore::linalg::C64;
+use femcore::linalg::basis::Basis;
+use femcore::linalg::rng::random_vector;
 use std::time::Instant;
 
 fn time_dots(v: &Basis<C64>, w: &[C64], k: usize) -> f64 {

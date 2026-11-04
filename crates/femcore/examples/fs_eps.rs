@@ -14,12 +14,12 @@
 //!   --factor-threads global|seq|<n> [global]   --solve-threads global|seq|<n> [seq]
 //!   --history (log the error estimates of every restart)
 
-use femcore::solvers::C64;
-use femcore::solvers::bundle::{Bundle, read_meta};
-use femcore::solvers::direct::{Definiteness, ThreadPolicy, Threads};
-use femcore::solvers::eps::{EpsOptions, EpsReason, Which, krylov_schur};
-use femcore::solvers::faer_glue::FaerScalar;
-use femcore::solvers::problem::{EigenProblem, KrylovSchurShiftInvert, ShiftInvertEigenSolver, Symmetry};
+use femcore::linalg::C64;
+use femcore::linalg::bundle::{Bundle, read_meta};
+use femcore::linalg::direct::{Definiteness, ThreadPolicy, Threads};
+use femcore::linalg::eps::{EpsOptions, EpsReason, Which, krylov_schur};
+use femcore::linalg::faer_glue::FaerScalar;
+use femcore::linalg::problem::{EigenProblem, KrylovSchurShiftInvert, ShiftInvertEigenSolver, Symmetry};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -66,7 +66,7 @@ fn json_values(v: &[C64]) -> String {
     v.iter().map(|z| format!("[{:.17e},{:.17e}]", z.re, z.im)).collect::<Vec<_>>().join(",")
 }
 
-fn history_json(h: &[femcore::solvers::eps::HistoryEntry]) -> String {
+fn history_json(h: &[femcore::linalg::eps::HistoryEntry]) -> String {
     if h.is_empty() {
         return String::new();
     }

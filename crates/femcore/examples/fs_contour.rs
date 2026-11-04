@@ -5,14 +5,14 @@
 //!   --center-re x --center-im y --a r --b s   ellipse semi-axes (b defaults to a)
 //!   --nodes 24 --block 8 --moments 4 --workers 1 --reps 3 --rank-tol 1e-12
 
-use femcore::solvers::bundle::{Bundle, read_meta};
-use femcore::solvers::contour::{ContourOptions, Ellipse, contour_eigs};
-use femcore::solvers::{C64, Csr};
+use femcore::linalg::bundle::{Bundle, read_meta};
+use femcore::linalg::contour::{ContourOptions, Ellipse, contour_eigs};
+use femcore::linalg::{C64, Csr};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-fn run<T: femcore::solvers::faer_glue::FaerScalar>(dir: &str, kv: &HashMap<String, String>) {
+fn run<T: femcore::linalg::faer_glue::FaerScalar>(dir: &str, kv: &HashMap<String, String>) {
     let bun = Bundle::<T>::read(Path::new(dir)).expect("read bundle");
     let f = |k: &str, d: f64| kv.get(k).map_or(d, |s| s.parse().expect(k));
     let u = |k: &str, d: usize| kv.get(k).map_or(d, |s| s.parse().expect(k));

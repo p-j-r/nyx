@@ -11,11 +11,12 @@
 //! `[0 I; -K -C] z = lambda [I 0; 0 M] z` with `lambda = i omega` and `z = (u, lambda u)` by complex
 //! shift-and-invert Arnoldi; the frequencies are complex and give the quality factor.
 
-use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
+use crate::linalg::csr::{c, CCoo, CCsr, C};
+use crate::linalg::driver::eigs_complex;
 use crate::fem::*;
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
-use crate::sparse::{Coo, Csr};
+use crate::linalg::csr::{Coo, RCsr as Csr};
 use std::collections::HashMap;
 
 /// Pressure and shear speeds of an anisotropic stiffness (Voigt averages) and density.
@@ -101,7 +102,7 @@ pub fn damping_matrix(mesh: &SimplexMesh, c6: &[M6], rho: &[f64], labels: &[i32]
 }
 
 fn to_complex(a: &Csr) -> CCsr {
-    CCsr { nrows: a.nrows, ncols: a.ncols, indptr: a.indptr.clone(), indices: a.indices.clone(), data: a.data.iter().map(|&v| c(v, 0.0)).collect() }
+    a.to_complex()
 }
 
 /// Eigenvalues, eigenvectors, whether all converged, and the Krylov dimension used.
@@ -110,7 +111,7 @@ pub type QuadraticModes = (Vec<C>, Vec<Vec<C>>, bool, usize);
 /// Eigenpairs `omega` (complex, rad/s) near `omega_s` of `(K + i omega C - omega^2 M) u = 0` over the free
 /// dofs; also returns the displacement vectors, whether all converged and the Krylov dimension.
 pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize) -> Result<QuadraticModes, String> {
-    let n = kf.nrows;
+    let n = kf.nrows();
     let cc = to_complex(cf);
     // A = [[0, I], [-K, -C]], B = [[I, 0], [0, M]]
     let mut a = CCoo::new(2 * n, 2 * n);
@@ -124,20 +125,20 @@ pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize)
         b.vals.push(c(1.0, 0.0));
     }
     for r in 0..n {
-        for p in kf.indptr[r]..kf.indptr[r + 1] {
+        for p in kf.indptr()[r]..kf.indptr()[r + 1] {
             a.rows.push((n + r) as u32);
-            a.cols.push(kf.indices[p] as u32);
-            a.vals.push(-kf.data[p]);
+            a.cols.push(kf.indices()[p] as usize as u32);
+            a.vals.push(-kf.values()[p]);
         }
-        for p in cc.indptr[r]..cc.indptr[r + 1] {
+        for p in cc.indptr()[r]..cc.indptr()[r + 1] {
             a.rows.push((n + r) as u32);
-            a.cols.push((n + cc.indices[p]) as u32);
-            a.vals.push(-cc.data[p]);
+            a.cols.push((n + cc.indices()[p] as usize) as u32);
+            a.vals.push(-cc.values()[p]);
         }
-        for p in mf.indptr[r]..mf.indptr[r + 1] {
+        for p in mf.indptr()[r]..mf.indptr()[r + 1] {
             b.rows.push((n + r) as u32);
-            b.cols.push((n + mf.indices[p]) as u32);
-            b.vals.push(mf.data[p]);
+            b.cols.push((n + mf.indices()[p] as usize) as u32);
+            b.vals.push(mf.values()[p]);
         }
     }
     let (ac, bc) = (a.to_csr(), b.to_csr());
@@ -162,7 +163,7 @@ pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize)
 /// Eigenfrequencies with low-reflecting boundaries for the real stiffness and mass matrices of
 /// `sms.rs` (2D plane problems and 3D).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant) -> Result<crate::problem::SolveResult, String> {
+pub fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant) -> Result<crate::problem::SolveResult, String> {
     let asm = assemble_lrb(mesh, spec, st, k, m, rho_cells, labels, n_modes, f_search)?;
     let solved = solve_lrb_modes(&asm)?;
     let r = lrb_fields(mesh, &asm, &solved)?;
@@ -171,7 +172,7 @@ pub(crate) fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, 
 
 /// Stage 1 of the solid kernel with low-reflecting boundaries: stiffness, mass and the boundary damping on the free dofs
 /// (the eigenproblem is quadratic in the frequency).
-pub(crate) struct LrbAssembly {
+pub struct LrbAssembly {
     pub order: usize,
     pub d: usize,
     pub n: usize,
@@ -192,7 +193,7 @@ pub struct LrbSolve {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn assemble_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64) -> Result<LrbAssembly, String> {
+pub fn assemble_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64) -> Result<LrbAssembly, String> {
     if f_search <= 0.0 {
         return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());
     }
@@ -213,7 +214,7 @@ pub(crate) fn assemble_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpe
 }
 
 /// Stage 2: the quadratic eigenpairs nearest the search frequency.
-pub(crate) fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String> {
+pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String> {
     let (omegas, vectors, converged, dim) = quadratic_modes(&asm.kf, &asm.mf, &asm.cf, 2.0 * std::f64::consts::PI * asm.f_search, asm.n_modes)?;
     if omegas.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
@@ -222,7 +223,7 @@ pub(crate) fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String> {
 }
 
 /// Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q.
-pub(crate) fn lrb_fields(mesh: &SimplexMesh, asm: &LrbAssembly, solved: &LrbSolve) -> Result<crate::problem::SolveResult, String> {
+pub fn lrb_fields(mesh: &SimplexMesh, asm: &LrbAssembly, solved: &LrbSolve) -> Result<crate::problem::SolveResult, String> {
     use crate::problem::*;
     let (n, d) = (asm.n, asm.d);
     let (omegas, vecs, free) = (&solved.omegas, &solved.vectors, &asm.free);

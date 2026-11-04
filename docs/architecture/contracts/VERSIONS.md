@@ -23,3 +23,5 @@ One line per contract. Bump the version here in the same commit that changes the
 | physics_api | (tests only) the `Physics` trait surface, registry rules, error codes | 1.0 | 2026-11-04 | `crates/nyx-physics/tests/contracts.rs`; changing a method is a bump |
 
 The file name carries the major version (`.v1.`). A breaking change adds `.v2.` next to `.v1.`, keeps the old file for the reader of the previous major, and updates the test.
+| linalg_options | `linalg_options.v1.json` | 1.1 | 2026-11-04 | 1.1 adds `par_solve_min_n` (default 0, serde default so 1.0 files still read); 1.0 was the first snapshot: `EigenOptions { tol, block, ncv }` and defaults of `femcore::solvers::driver` (ADR 33); API and closed-form checks in `crates/femcore/tests/linalg_contract.rs` |
+| kernel_stages | (tests only) public stage functions | 1.2 | 2026-11-04 | the stage functions of plain `sms`, `sms_lrb` and `ems3d` are public (R26, phase 3); additive |

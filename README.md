@@ -87,7 +87,7 @@ The kz solid kernel and the axisymmetric kernels that it was built on stay as or
 `femcore::solvers` (Krylov methods, block Krylov-Schur / Jacobi-Davidson / LOBPCG / contour eigensolvers, AMG / AMS / ADS / ILU /
 Schwarz preconditioners, time steppers, nonlinear solvers, optimisers, for real and complex systems) and `femcore::meshers`
 (metric-based 2D mesh adaptation, structured PML meshes with quadrilaterals, prisms and hexahedra, the lossless `.fmsh` file format) were
-merged from the `inspired-rust-port` repository (BSD-2-Clause). They have their own tests (`tests/solvers`, `tests/meshers.rs`, the unit
+merged from the `inspired-rust-port` repository (BSD-2-Clause). They have their own tests (`tests/linalg`, `tests/meshers.rs`, the unit
 tests of both modules) and are **not yet wired into the physics modules**, which still use the older `eigen`, `lobpcg`, `amg` and `linalg`.
 `meshing::pml_box::pml_domains` turns the PML regions into `Pml` domains; `adapt::work` converts between the solver mesh and the adaptation's working mesh.
 Provenance, licences, what the authors measured and the plan for swapping the solvers in: `docs/ports/README.md`.

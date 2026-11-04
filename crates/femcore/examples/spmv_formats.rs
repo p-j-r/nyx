@@ -1,9 +1,9 @@
 //! SpMV speed and memory: CSR vs block CSR (3×3 blocks, elasticity-like) and CSR vs symmetric
 //! (upper-triangle) storage for a complex symmetric matrix. `cargo run --release --example spmv_formats`.
-use femcore::solvers::bsr::{Bsr, SymCsr};
-use femcore::solvers::csr::laplacian_3d;
-use femcore::solvers::rng::random_vector;
-use femcore::solvers::{C64, Csr};
+use femcore::linalg::bsr::{Bsr, SymCsr};
+use femcore::linalg::csr::laplacian_3d;
+use femcore::linalg::rng::random_vector;
+use femcore::linalg::{C64, Csr};
 use std::time::Instant;
 
 fn blockify(a: &Csr<f64>, b: usize) -> Csr<f64> {

@@ -6,12 +6,12 @@
 //! Matrices follow `examples/lu_scaling.rs` of nyx as described in the port list: a complex
 //! symmetric 2-D problem (LU) and a real SPD 3-D problem (Cholesky and, for comparison, LU).
 
-use femcore::solvers::csr::{Csr, laplacian_2d, laplacian_3d};
-use femcore::solvers::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
-use femcore::solvers::{C64, Scalar};
+use femcore::linalg::csr::{Csr, laplacian_2d, laplacian_3d};
+use femcore::linalg::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
+use femcore::linalg::{C64, Scalar};
 use std::time::Instant;
 
-fn report<T: femcore::solvers::faer_glue::FaerScalar>(label: &str, a: &Csr<T>, def: Definiteness, shifts: &[T]) {
+fn report<T: femcore::linalg::faer_glue::FaerScalar>(label: &str, a: &Csr<T>, def: Definiteness, shifts: &[T]) {
     let t0 = Instant::now();
     let mut f = ShiftedFactorization::new(a, None, def).expect("setup");
     let setup = t0.elapsed().as_secs_f64();

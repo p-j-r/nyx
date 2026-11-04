@@ -1,9 +1,9 @@
 //! TOAR vs Krylov–Schur shift-and-invert on the explicit 2n linearisation (time and basis memory).
-use femcore::solvers::csr::{laplacian_2d, mass_1d};
-use femcore::solvers::direct::Definiteness;
-use femcore::solvers::problem::{EigenProblem, KrylovSchurShiftInvert, ShiftInvertEigenSolver, Symmetry};
-use femcore::solvers::toar::{QuadraticProblem, ToarOptions, toar_shift_invert};
-use femcore::solvers::{C64, Csr};
+use femcore::linalg::csr::{laplacian_2d, mass_1d};
+use femcore::linalg::direct::Definiteness;
+use femcore::linalg::problem::{EigenProblem, KrylovSchurShiftInvert, ShiftInvertEigenSolver, Symmetry};
+use femcore::linalg::toar::{QuadraticProblem, ToarOptions, toar_shift_invert};
+use femcore::linalg::{C64, Csr};
 use std::time::Instant;
 
 fn main() {

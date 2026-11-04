@@ -6,22 +6,22 @@
 //!   --restart 30   --side left|right [left]   --orth cgs|mgs|cgs-refine [cgs]   --norm pc|unpc|natural [pc]
 //!   --reps 3   --petsc-sign-test 1 (reproduce PETSc's COCG breakdown test, for parity runs)
 
-use femcore::solvers::amg::{Amg, AmgOptions};
-use femcore::solvers::bundle::{Bundle, read_meta};
-use femcore::solvers::ilu::{Ic, Ilu};
-use femcore::solvers::ksp::{
+use femcore::linalg::amg::{Amg, AmgOptions};
+use femcore::linalg::bundle::{Bundle, read_meta};
+use femcore::linalg::ilu::{Ic, Ilu};
+use femcore::linalg::ksp::{
     Bicgstab, BicgstabOptions, Cg, CgKind, CgNorm, CgOptions, Gmres, GmresOptions, Minres, MinresOptions,
     Orthogonalization, PcSide, SolveInfo, Tolerances,
 };
-use femcore::solvers::linop::{Identity, Preconditioner};
-use femcore::solvers::pc::Jacobi;
-use femcore::solvers::schwarz::{Schwarz, SchwarzKind, SchwarzOptions, contiguous_partition};
-use femcore::solvers::{C64, Csr};
+use femcore::linalg::linop::{Identity, Preconditioner};
+use femcore::linalg::pc::Jacobi;
+use femcore::linalg::schwarz::{Schwarz, SchwarzKind, SchwarzOptions, contiguous_partition};
+use femcore::linalg::{C64, Csr};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-fn run<T: femcore::solvers::faer_glue::FaerScalar>(dir: &str, kv: &HashMap<String, String>) {
+fn run<T: femcore::linalg::faer_glue::FaerScalar>(dir: &str, kv: &HashMap<String, String>) {
     let bun = Bundle::<T>::read(Path::new(dir)).expect("read bundle");
     let a = &bun.a;
     let b = bun.v0.clone().expect("bundle needs v0.mtx as the right-hand side");

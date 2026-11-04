@@ -4,7 +4,7 @@ Date: 2026-10-31
 
 ## Status
 
-Accepted as an interim state (commit `7a9a85e`, "Merge the solver and mesher ports into femcore"). The swap-in is open work.
+Accepted as an interim state (commit `7a9a85e`, "Merge the solver and mesher ports into femcore"). The swap-in is open work. **Superseded by ADR 33** (phase 3 wired it and deleted the old modules).
 
 ## Context
 

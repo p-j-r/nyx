@@ -7,9 +7,9 @@
 //! A kernel that is memory-bound should run at or near the streaming figure; if not, the code
 //! generation (not the algorithm) is the problem. Pitfall 1 of the handoff brief: always look.
 
-use femcore::solvers::basis::Basis;
-use femcore::solvers::rng::random_vector;
-use femcore::solvers::{C64, Scalar};
+use femcore::linalg::basis::Basis;
+use femcore::linalg::rng::random_vector;
+use femcore::linalg::{C64, Scalar};
 use std::hint::black_box;
 use std::time::Instant;
 

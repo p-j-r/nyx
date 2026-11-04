@@ -2,9 +2,9 @@
 //! Helmholtz operator on a warped mesh (on an axis-aligned box the assembled GLL matrices are very sparse, ~3(p+1) per
 //! row, and assembly wins: see docs/LEARNINGS.md) at (almost) fixed unknown count and growing polynomial degree.
 //! `cargo run --release --example matfree_bench [axis_nodes_target]`  (build with `--features parallel` for threads)
-use femcore::solvers::linop::LinearOperator;
-use femcore::solvers::matfree::{Boundary, SpectralBox};
-use femcore::solvers::rng::random_vector;
+use femcore::linalg::linop::LinearOperator;
+use femcore::linalg::matfree::{Boundary, SpectralBox};
+use femcore::linalg::rng::random_vector;
 use std::time::Instant;
 
 fn time_apply(op: &dyn LinearOperator<f64>, x: &[f64], y: &mut [f64]) -> f64 {

@@ -1,9 +1,9 @@
 //! ROM sweep vs one full solve per frequency: 2-D damped Helmholtz-like problem, 120 × 120 unknowns.
-use femcore::solvers::csr::laplacian_2d;
-use femcore::solvers::direct::Definiteness;
-use femcore::solvers::nep::{NepTerm, NonlinearEigenProblem};
-use femcore::solvers::sweep::{SweepOptions, direct_sweep, rom_sweep};
-use femcore::solvers::{C64, Csr};
+use femcore::linalg::csr::laplacian_2d;
+use femcore::linalg::direct::Definiteness;
+use femcore::linalg::nep::{NepTerm, NonlinearEigenProblem};
+use femcore::linalg::sweep::{SweepOptions, direct_sweep, rom_sweep};
+use femcore::linalg::{C64, Csr};
 
 fn main() {
     let (nx, ny) = (120usize, 120usize);

@@ -1,11 +1,11 @@
 //! S4 study: HODLR compression and the O(n log² n) direct solve on a kernel matrix, and the off-diagonal ranks
 //! of the Schur complement on a separator of a 2-D grid (the dense front that a low-rank multifrontal solver
 //! would compress). `cargo run --release --example lowrank_study`
-use femcore::solvers::Csr;
-use femcore::solvers::csr::laplacian_2d;
-use femcore::solvers::lowrank::{Hodlr, HodlrOptions};
-use femcore::solvers::rng::random_vector;
-use femcore::solvers::sparse_lu::{LuOptions, SparseLu};
+use femcore::linalg::Csr;
+use femcore::linalg::csr::laplacian_2d;
+use femcore::linalg::lowrank::{Hodlr, HodlrOptions};
+use femcore::linalg::rng::random_vector;
+use femcore::linalg::sparse_lu::{LuOptions, SparseLu};
 use std::time::Instant;
 
 fn main() {

@@ -4,13 +4,13 @@
 //!
 //!   cargo run --release --example solve_scaling -- [n2d] [n3d]
 
-use femcore::solvers::csr::{Csr, laplacian_2d, laplacian_3d};
-use femcore::solvers::direct::{Definiteness, ShiftedFactorization, ShiftedSolver, Threads};
-use femcore::solvers::rng::random_vector;
-use femcore::solvers::{C64, Scalar};
+use femcore::linalg::csr::{Csr, laplacian_2d, laplacian_3d};
+use femcore::linalg::direct::{Definiteness, ShiftedFactorization, ShiftedSolver, Threads};
+use femcore::linalg::rng::random_vector;
+use femcore::linalg::{C64, Scalar};
 use std::time::Instant;
 
-fn run<T: femcore::solvers::faer_glue::FaerScalar>(label: &str, a: &Csr<T>, def: Definiteness, sigma: T) {
+fn run<T: femcore::linalg::faer_glue::FaerScalar>(label: &str, a: &Csr<T>, def: Definiteness, sigma: T) {
     let n = a.nrows();
     let mut f = ShiftedFactorization::new(a, None, def).unwrap();
     // FEMSOLVE_SOLVE_THREADS=global|seq|<n> overrides the (sequential) default solve policy.

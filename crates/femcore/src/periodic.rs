@@ -6,7 +6,7 @@
 //! with a weighted union-find (so edges and corners shared by several periodic pairs resolve to one
 //! free dof per class), and applied as a reduction `x = P x_red`: the reduced matrices are `P^H A P`.
 
-use crate::csparse::{c, CCoo, CCsr, C};
+use crate::linalg::csr::{c, CCoo, CCsr, C};
 use crate::mesh::SimplexMesh;
 use crate::problem::Periodic;
 use std::collections::{BTreeSet, HashMap};
@@ -233,7 +233,7 @@ impl Reduction {
             }
             indptr.push(indices.len());
         }
-        CCsr { nrows: self.n, ncols: self.n_reduced(), indptr, indices, data }
+        CCsr::from_raw(self.n, self.n_reduced(), indptr, indices, data)
     }
 
     pub fn expand(&self, xr: &[C]) -> Vec<C> {
@@ -243,23 +243,23 @@ impl Reduction {
 
 /// Sparse complex product.
 pub fn ccsr_mul(a: &CCsr, b: &CCsr) -> CCsr {
-    assert_eq!(a.ncols, b.nrows);
+    assert_eq!(a.ncols(), b.nrows());
     let (mut indptr, mut indices, mut data) = (vec![0usize], vec![], vec![]);
-    let mut mark = vec![usize::MAX; b.ncols];
-    let mut acc = vec![c(0.0, 0.0); b.ncols];
+    let mut mark = vec![usize::MAX; b.ncols()];
+    let mut acc = vec![c(0.0, 0.0); b.ncols()];
     let mut touched: Vec<usize> = vec![];
-    for i in 0..a.nrows {
+    for i in 0..a.nrows() {
         touched.clear();
-        for ka in a.indptr[i]..a.indptr[i + 1] {
-            let (k, av) = (a.indices[ka], a.data[ka]);
-            for kb in b.indptr[k]..b.indptr[k + 1] {
-                let j = b.indices[kb];
+        for ka in a.indptr()[i]..a.indptr()[i + 1] {
+            let (k, av) = (a.indices()[ka] as usize, a.values()[ka]);
+            for kb in b.indptr()[k]..b.indptr()[k + 1] {
+                let j = b.indices()[kb] as usize;
                 if mark[j] != i {
                     mark[j] = i;
                     acc[j] = c(0.0, 0.0);
                     touched.push(j);
                 }
-                acc[j] += av * b.data[kb];
+                acc[j] += av * b.values()[kb];
             }
         }
         touched.sort_unstable();
@@ -269,13 +269,13 @@ pub fn ccsr_mul(a: &CCsr, b: &CCsr) -> CCsr {
         }
         indptr.push(indices.len());
     }
-    CCsr { nrows: a.nrows, ncols: b.ncols, indptr, indices, data }
+    CCsr::from_raw(a.nrows(), b.ncols(), indptr, indices, data)
 }
 
 /// Conjugate transpose.
 pub fn ccsr_adjoint(a: &CCsr) -> CCsr {
     let t = a.transpose();
-    CCsr { data: t.data.iter().map(|z| z.conj()).collect(), ..t }
+    t.conj()
 }
 
 /// `P^H A P`.

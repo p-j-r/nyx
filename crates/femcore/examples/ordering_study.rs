@@ -8,8 +8,8 @@ use faer::sparse::SparseColMatRef;
 use faer::sparse::SymbolicSparseColMatRef;
 use faer::sparse::linalg::cholesky::{CholeskySymbolicParams, SymmetricOrdering, factorize_symbolic_cholesky};
 use faer::{Par, Side};
-use femcore::solvers::Csr;
-use femcore::solvers::csr::{laplacian_2d, laplacian_3d};
+use femcore::linalg::Csr;
+use femcore::linalg::csr::{laplacian_2d, laplacian_3d};
 use std::collections::VecDeque;
 use std::time::Instant;
 

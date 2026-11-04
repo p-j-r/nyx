@@ -1,10 +1,10 @@
 //! 2-D heat equation `y' + L y = 0` on a 200×200 grid with the variable-step BDF: steps, factorisations
 //! and where the time goes (`cargo run --release --example ts_bench`).
-use femcore::solvers::csr::laplacian_2d;
-use femcore::solvers::direct::Definiteness;
-use femcore::solvers::ts::bdf::{BdfOptions, bdf_solve};
-use femcore::solvers::ts::newmark::{NewmarkParams, newmark_solve};
-use femcore::solvers::{Csr, rng::random_vector};
+use femcore::linalg::csr::laplacian_2d;
+use femcore::linalg::direct::Definiteness;
+use femcore::linalg::ts::bdf::{BdfOptions, bdf_solve};
+use femcore::linalg::ts::newmark::{NewmarkParams, newmark_solve};
+use femcore::linalg::{Csr, rng::random_vector};
 
 fn main() {
     if std::env::args().any(|a| a == "reuse") {
@@ -59,7 +59,7 @@ fn main() {
 pub fn reuse_study() {
     let n3 = 40;
     let n = n3 * n3 * n3;
-    let (m, k) = (Csr::<f64>::identity(n), femcore::solvers::csr::laplacian_3d(n3));
+    let (m, k) = (Csr::<f64>::identity(n), femcore::linalg::csr::laplacian_3d(n3));
     let y0 = random_vector::<f64>(n, 1);
     for reuse in [0.0, 0.3] {
         let opts = BdfOptions {

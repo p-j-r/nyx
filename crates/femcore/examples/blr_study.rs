@@ -2,12 +2,12 @@
 //! multifrontal factor is stored, how fast factorisation and solve are, and how accurate the compressed solver is
 //! (direct, after iterative refinement, and as a GMRES preconditioner). `cargo run --release --example blr_study`
 //! Optional arguments: `n2d n3d block min_front`.
-use femcore::solvers::blr::{BlrLu, BlrOptions};
-use femcore::solvers::csr::{laplacian_2d, laplacian_3d};
-use femcore::solvers::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
-use femcore::solvers::ksp::{Gmres, GmresOptions, PcSide, Tolerances};
-use femcore::solvers::rng::random_vector;
-use femcore::solvers::{C64, Csr};
+use femcore::linalg::blr::{BlrLu, BlrOptions};
+use femcore::linalg::csr::{laplacian_2d, laplacian_3d};
+use femcore::linalg::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
+use femcore::linalg::ksp::{Gmres, GmresOptions, PcSide, Tolerances};
+use femcore::linalg::rng::random_vector;
+use femcore::linalg::{C64, Csr};
 use std::time::Instant;
 
 fn helmholtz(l: &Csr<f64>, k2: f64, sigma: f64) -> Csr<C64> {

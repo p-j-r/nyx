@@ -13,7 +13,7 @@ fn electrostatics_stages_compose_to_the_one_call_solver() {
     spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
     let whole = femcore::dfs::solve_electrostatics(&mesh, &spec).unwrap();
     let asm = femcore::dfs::assemble_electrostatics(&mesh, &spec).unwrap();
-    assert_eq!(asm.k.nrows, mesh.n_dofs(spec.order));
+    assert_eq!(asm.k.nrows(), mesh.n_dofs(spec.order));
     let (v, _) = femcore::dfs::solve_potential(&mesh, &spec, &asm).unwrap();
     let (fields, cells) = femcore::dfs::electrostatics_fields(&mesh, spec.order, &v);
     let want = &whole.solutions[0];
@@ -107,7 +107,7 @@ fn elastic_cross_section_stages_compose_to_the_one_call_solver() {
     s.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.0 };
     let (whole, wm) = solve_cross_section(&mesh, &s, CrossSection::Axisymmetric(2.0)).unwrap();
     let asm = assemble_cross_section(&mesh, &s, CrossSection::Axisymmetric(2.0)).unwrap();
-    assert_eq!(asm.kf.nrows, asm.free.len());
+    assert_eq!(asm.kf.nrows(), asm.free.len());
     let solved = solve_cross_section_modes(&asm).unwrap();
     assert_eq!(solved.modes.freqs, wm.freqs);
     let r = cross_section_fields(&mesh, &asm, &solved).unwrap();
@@ -145,7 +145,7 @@ fn solid_pml_stages_compose_to_the_one_call_solver() {
     s.study = Study::Eigenfrequency { n_modes: 3, f_search: 0.0 };
     let whole = femcore::sms_pml::solve_solid_pml(&mesh, &s).unwrap();
     let asm = femcore::sms_pml::assemble_solid_pml(&mesh, &s).unwrap();
-    assert_eq!(asm.kff.nrows, asm.free.len());
+    assert_eq!(asm.kff.nrows(), asm.free.len());
     let solved = femcore::sms_pml::solve_pml_modes(&asm).unwrap();
     let staged = femcore::sms_pml::pml_fields(&mesh, &asm, &solved).unwrap();
     same_solution_fields(&whole, &staged);
@@ -190,7 +190,7 @@ fn floquet_stages_compose_to_the_one_call_solver() {
     let rho = s.materials.cell_values(&mesh, "rho", None).unwrap();
     let rho_t: Vec<f64> = rho.iter().map(|r| r * s.thickness).collect();
     let m1 = femcore::fem::assemble_mass(&mesh, s.order, &rho_t);
-    let m = femcore::sparse::Csr::block_diag(&[&m1, &m1]);
+    let m = femcore::linalg::csr::RCsr::block_diag(&[&m1, &m1]);
     let asm = femcore::sms_floquet::assemble_floquet(&mesh, &s, &st, &k, &m, 3, 1.0e6).unwrap();
     assert!(asm.nred < asm.n);
     let solved = femcore::sms_floquet::solve_floquet_modes(&asm).unwrap();

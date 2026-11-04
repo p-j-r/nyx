@@ -1,13 +1,13 @@
 //! S2/LU experiment: what does a user-chosen fill-reducing ordering buy for *LU* (the matrices faer's LU
-//! orders with its own COLAMD)? Compares `femcore::solvers::sparse_lu::SparseLu` with natural / AMD / nested
+//! orders with its own COLAMD)? Compares `femcore::linalg::sparse_lu::SparseLu` with natural / AMD / nested
 //! dissection against faer's supernodal sparse LU (`ShiftedFactorization`, `Definiteness::General`) on a 2-D
 //! and a 3-D complex-symmetric Helmholtz-type matrix: factor entries, factorisation and solve time, residual.
 //! `cargo run --release --example lu_ordering_study [n2d n3d]`
-use femcore::solvers::csr::{laplacian_2d, laplacian_3d};
-use femcore::solvers::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
-use femcore::solvers::rng::random_vector;
-use femcore::solvers::sparse_lu::{LuOptions, LuOrdering, SparseLu};
-use femcore::solvers::{C64, Csr};
+use femcore::linalg::csr::{laplacian_2d, laplacian_3d};
+use femcore::linalg::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
+use femcore::linalg::rng::random_vector;
+use femcore::linalg::sparse_lu::{LuOptions, LuOrdering, SparseLu};
+use femcore::linalg::{C64, Csr};
 use std::time::Instant;
 
 fn shifted(l: &Csr<f64>, k2: f64, sigma: f64) -> Csr<C64> {

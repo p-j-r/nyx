@@ -3,10 +3,10 @@
 //! Newton on the same two problems as `harness/c/petsc_snes.c` (Bratu `−Δu − μ e^u` on an `nx × nx` grid with
 //! spacing `1/(nx+1)`, and the diagonal arctan system) and one JSON line with the residual-norm history.
 
-use femcore::solvers::Csr;
-use femcore::solvers::csr::laplacian_2d;
-use femcore::solvers::direct::Definiteness;
-use femcore::solvers::snes::{LineSearch, NewtonOptions, newton};
+use femcore::linalg::Csr;
+use femcore::linalg::csr::laplacian_2d;
+use femcore::linalg::direct::Definiteness;
+use femcore::linalg::snes::{LineSearch, NewtonOptions, newton};
 use std::collections::HashMap;
 
 fn main() {

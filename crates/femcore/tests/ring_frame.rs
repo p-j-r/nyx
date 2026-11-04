@@ -142,7 +142,7 @@ fn a_torsional_ring_mode_is_the_wafer_y_component() {
 
 #[test]
 fn the_ring_kernel_has_exp_minus_i_m_theta_with_theta_along_wafer_plus_y() {
-    use femcore::csparse::c;
+    use femcore::linalg::csr::c;
     let mesh = ring_mesh();
     let c6 = vec![isotropic_stiffness(70e9, 0.33); mesh.n_cells()];
     let k = femcore::sms_axisym::assemble_stiffness_axisym(&mesh, &c6, 2, 1.0, None).unwrap();
@@ -156,7 +156,7 @@ fn the_ring_kernel_has_exp_minus_i_m_theta_with_theta_along_wafer_plus_y() {
         }
         u
     };
-    let size = |v: Vec<femcore::csparse::C>| v.iter().map(|z| z.norm()).fold(0.0, f64::max);
+    let size = |v: Vec<femcore::linalg::csr::C>| v.iter().map(|z| z.norm()).fold(0.0, f64::max);
     let translation = size(k.matvec(&uniform(-1.0)));
     let wrong = size(k.matvec(&uniform(1.0)));
     assert!(wrong > 1e3, "the check cannot fail: |K u(+i)| = {wrong}");

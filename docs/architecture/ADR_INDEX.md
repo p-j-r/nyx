@@ -11,10 +11,10 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 5 | [Meshes stay native: one cell type per cell](adr/0005-native-mixed-cell-mesh.md) | `cellmesh`, `meshers`, `pml3` |
 | 6 | [One meshing interface (MeshPlan)](adr/0006-one-meshing-interface.md) | `meshing` |
 | 7 | [Metric adaptation and structured PML](adr/0007-metric-adaptation-and-structured-pml.md) | `meshers`, `estimate` |
-| 8 | [Ported solver library merged, not wired](adr/0008-ported-solver-library-staged-not-wired.md) | `solvers` |
+| 8 | [Ported solver library merged, not wired](adr/0008-ported-solver-library-staged-not-wired.md) | `linalg` |
 | 9 | [Every kernel is three stages](adr/0009-kernels-are-three-stages.md) | kernels, `solve` |
 | 10 | [Golden files are the numerical oracle](adr/0010-golden-files-are-the-numerical-oracle.md) | tests |
-| 11 | [Determinism by fixed chunks](adr/0011-determinism-by-fixed-chunks.md) | `par`, `solvers::par` |
+| 11 | [Determinism by fixed chunks](adr/0011-determinism-by-fixed-chunks.md) | `par`, `linalg::par` |
 | 12 | [Three-letter physics codes](adr/0012-three-letter-physics-codes.md) | `dfs sms ems sbs` |
 | 13 | [Pure Rust, no Python, HDF5 optional](adr/0013-pure-rust-no-python.md) | build |
 | 14 | [Workflow store: JSON manifests, `.nyx` archives](adr/0014-workflow-store-json-manifests-and-nyx-archives.md) | `nyx-store` |
@@ -33,3 +33,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 27 | [`nyx2`: second repository, a jj workspace per session](adr/0027-nyx2-repository-and-jj-workspace-per-working-session.md) | process |
 | 31 | [femcore holds meshes, meshing and adaptation in three module trees](adr/0031-mesh-meshing-adapt-module-layout.md) | `femcore::{mesh, meshing, adapt}` |
 | 32 | [One native mesh; `SimplexMesh` as the solver view](adr/0032-one-native-mesh-simplexmesh-as-a-view.md) | `femcore::mesh` (proposed) |
+| 33 | [One linear algebra: the ported library behind one driver](adr/0033-one-linear-algebra-driver-facade.md) | `linalg::driver`, phase 3 |
