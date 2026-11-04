@@ -15,14 +15,14 @@ pub mod geomdrive;
 pub mod mesher;
 pub mod physics_size;
 pub mod sizing;
-pub mod pml;
+pub mod pml_geom;
 pub mod pml3;
 pub mod pml_box;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;
-pub use crate::meshing::pml::{structured_pml, PmlMode, PmlReport};
+pub use crate::meshing::pml_geom::{structured_pml, PmlMode, PmlReport};
 use crate::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
 use crate::adapt::field::{BackgroundMetric2, MetricField};
 use crate::adapt::geom::Geometry2;

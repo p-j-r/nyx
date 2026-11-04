@@ -21,7 +21,7 @@ Four mesh types exist today: `mesh::SimplexMesh` (the solver contract: P1/P2 num
 
 ## Steps (each its own commit, suite at baseline after each)
 
-1. Labels: 1-based boundary numbers in `pml.rs`, the view reader and `from_cells` (delete the shift in `interop`); rewrite the `mesh_*` contract on purpose (ADR 19, `VERSIONS.md`).
+1. Labels: 1-based boundary numbers in `pml_geom.rs`, the view reader and `from_cells` (delete the shift in `interop`); rewrite the `mesh_*` contract on purpose (ADR 19, `VERSIONS.md`).
 2. `pml.rs`/`pml3.rs` return `cells::CellMesh`; `SimplexMesh::from_cells_split*` takes it; rebuild the hex/prism/quad cases of `tests/split.rs` on it.
 3. **Amended (paul and the coordinator, 2026-11-04):** the adaptation keeps a private working mesh. `mesh::native` moves to `adapt::work` and `mesh::interop` is dissolved (the two conversion functions live in `adapt::work`, `pml_domains` in `meshing::pml_box`), so the public mesh vocabulary is `mesh::cells::CellMesh` plus the `SimplexMesh` solver view; adaptation is not ported onto `CellMesh` (cost below).
 4. `mesh::cellmesh` and `mesh::interop` are gone (step 2 and 3); `adapt::work::SimplexMesh<D>` stays internal to `adapt`.
@@ -51,7 +51,7 @@ When the physics crates exist (phase 4), each physics reads the native `CellMesh
 
 ## Step 5 (done): one PML generator
 
-`meshing::pml_box::build_pml` (2D quadrilateral layers, 3D prisms and hexahedra) is the only generator of structured layers. `meshing::pml` (`structured_pml`, `structured_pml_native`) and `meshing::pml3` (`add_pml_3d`) are adapters: they turn a geom model's `Pml` feature, or a box-shaped tetrahedral mesh, into a `PmlSpec`, call `build_pml`, and cut the result for the simplex solvers. The inline mode (geom's `Pml` pieces meshed as ordinary regions, `PmlMode::Inline`) is a property of the geom model, not a second generator. Guarantee, now a contract test (`mesh_pml_generator_keeps_the_physical_vertex_and_cell_numbers`): the output mesh starts with the physical vertices and cells unchanged in id, order, connectivity and label, and the layers are appended; this is what the mesher feature chart item P3 (adapt the physical mesh, regenerate the layers, map fields back by id) needs, and it holds in 2D and 3D.
+`meshing::pml_box::build_pml` (2D quadrilateral layers, 3D prisms and hexahedra) is the only generator of structured layers. `meshing::pml_geom` (`structured_pml`, `structured_pml_native`) and `meshing::pml3` (`add_pml_3d`) are adapters: they turn a geom model's `Pml` feature, or a box-shaped tetrahedral mesh, into a `PmlSpec`, call `build_pml`, and cut the result for the simplex solvers. The inline mode (geom's `Pml` pieces meshed as ordinary regions, `PmlMode::Inline`) is a property of the geom model, not a second generator. Guarantee, now a contract test (`mesh_pml_generator_keeps_the_physical_vertex_and_cell_numbers`): the output mesh starts with the physical vertices and cells unchanged in id, order, connectivity and label, and the layers are appended; this is what the mesher feature chart item P3 (adapt the physical mesh, regenerate the layers, map fields back by id) needs, and it holds in 2D and 3D.
 
 ## Step 6 (done): the neutral `Sizing`
 

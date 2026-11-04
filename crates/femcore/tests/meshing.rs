@@ -549,7 +549,7 @@ fn an_adapted_section_extruded_to_3d_has_the_volume_and_the_labels() {
 
 #[test]
 fn native_structured_layers_keep_their_quadrilaterals_and_split_to_the_simplex_mesh() {
-    use femcore::meshing::pml::{structured_pml, structured_pml_native, Native};
+    use femcore::meshing::pml_geom::{structured_pml, structured_pml_native, Native};
     let m = boxed_pml();
     let start = mesh_model(&m.list, &MeshPlan::simple(0.25)).unwrap();
     let (split, report) = structured_pml(start.clone()).unwrap();

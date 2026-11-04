@@ -77,7 +77,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/mesher.rs` | 6, 2 | 2D triangulation core |
 | `crates/femcore/tests/common/solid3d/*` | 4, 7 | R05: stuffed solid meshes (sphere cavity), test fixture only, was `meshing/mesher3d.rs`, `refine3d.rs` |
 | `crates/femcore/src/meshing/pml3.rs` | 5, 7 | |
-| `crates/femcore/src/meshing/pml.rs` | 5, 7 | structured PML for the nyx mesh (was `meshing_pml.rs`) |
+| `crates/femcore/src/meshing/pml_geom.rs` | 5, 7 | structured PML for a meshed geom model, an adapter over `pml_box` (was `meshing_pml.rs`, then `meshing/pml.rs`) |
 | `crates/femcore/src/meshing/pml_box.rs` | 7, 5 | structured PML generator (was `meshers/adapt/pml.rs`) |
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
 | `crates/femcore/src/meshing/sizing.rs` | 17, 25 | the neutral Sizing a physics reports to the mesher (re-exported by nyx-physics) |
