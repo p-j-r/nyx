@@ -331,12 +331,15 @@ pub struct Elastic {
     pub class: Option<Class>,
     /// true if the file gave the independent constants of `class` (so the file can be written back as constants)
     pub exact_constants: bool,
+    /// where the stiffness comes from
+    #[serde(default)]
+    pub source: Vec<super::source::Source>,
 }
 
 impl Elastic {
     pub fn from_matrix(c: M6) -> Result<Elastic, String> {
         check_matrix(&c, None)?;
-        Ok(Elastic { c, class: None, exact_constants: false })
+        Ok(Elastic { c, class: None, exact_constants: false, source: Vec::new() })
     }
 
     /// Class and independent constants in Pa, for example `(Class::Cubic, [("c11", 165.7e9), ...])`.
@@ -349,7 +352,7 @@ impl Elastic {
         }
         let c = class.expand(&|n| get(n).unwrap_or(0.0));
         check_matrix(&c, Some(class))?;
-        Ok(Elastic { c, class: Some(class), exact_constants: true })
+        Ok(Elastic { c, class: Some(class), exact_constants: true, source: Vec::new() })
     }
 
     /// Isotropic from Young's modulus and Poisson's ratio.
@@ -536,7 +539,7 @@ impl Elastic {
                 invert6(&sm).ok_or_else(|| s.err("", "the compliance matrix is singular, so no stiffness exists"))?
             };
             check_matrix(&cm, Some(class)).map_err(|m| s.err("", m))?;
-            Elastic { c: cm, class: Some(class), exact_constants: letter == 'c' }
+            Elastic { c: cm, class: Some(class), exact_constants: letter == 'c', source: Vec::new() }
         } else {
             let (key, dim, u) = if s.has("matrix") { ("matrix", Dim::Pressure, unit.as_deref()) } else { ("compliance", Dim::Compliance, cunit.as_deref()) };
             let tree = s.quantities(key, dim, u)?.unwrap();
@@ -547,11 +550,12 @@ impl Elastic {
                 invert6(&m).ok_or_else(|| s.err(key, "the compliance matrix is singular, so no stiffness exists"))?
             };
             check_matrix(&c, class).map_err(|m| s.err(key, m))?;
-            Elastic { c, class, exact_constants: false }
+            Elastic { c, class, exact_constants: false, source: Vec::new() }
         };
         if let Some(c) = class {
             el.class = Some(c);
         }
+        el.source = super::source::read_sources(s, "source")?;
         Ok(el)
     }
 
@@ -560,6 +564,9 @@ impl Elastic {
         let mut t = toml::Table::new();
         let f = |x: f64| toml::Value::Float(x / 1e9);
         t.insert("unit".into(), "GPa".into());
+        if let Some(v) = super::source::write_sources(&self.source) {
+            t.insert("source".into(), v);
+        }
         match (self.class, self.exact_constants) {
             (Some(class), true) => {
                 t.insert("class".into(), class.name().into());

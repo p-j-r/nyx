@@ -5,6 +5,7 @@
 use super::elastic::Elastic;
 use super::optics::{self, Optical, OpticsError};
 use super::reader::{MaterialError, Section};
+use super::source::{read_sources, write_sources, Source};
 use super::tensor::{Requirement, TensorProp};
 use super::units::Dim;
 use super::{Anisotropy, Stiffness};
@@ -18,6 +19,8 @@ pub const FORMAT: i64 = 1;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Thermal {
+    #[serde(default)]
+    pub source: Vec<Source>,
     /// W/(m K)
     pub conductivity: Option<TensorProp>,
     /// J/(kg K)
@@ -28,6 +31,8 @@ pub struct Thermal {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Electrical {
+    #[serde(default)]
+    pub source: Vec<Source>,
     /// relative, at low frequency
     pub permittivity: Option<TensorProp>,
     /// relative
@@ -41,7 +46,7 @@ pub struct MaterialSpec {
     pub name: String,
     pub description: Option<String>,
     /// references the numbers come from
-    pub source: Vec<String>,
+    pub source: Vec<Source>,
     pub notes: Option<String>,
     /// kg/m^3
     pub density: Option<f64>,
@@ -52,9 +57,9 @@ pub struct MaterialSpec {
 }
 
 const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "extends", "density", "density_unit", "elastic", "thermal", "electrical", "optical"];
-const ELASTIC_KEYS: &[&str] = &["unit", "compliance_unit", "class", "unique_axis", "matrix", "compliance", "E", "nu", "lambda", "mu", "K", "G", "c11", "c12", "c44"];
-const THERMAL_KEYS: &[&str] = &["conductivity", "conductivity_unit", "specific_heat", "specific_heat_unit", "expansion", "expansion_unit"];
-const ELECTRICAL_KEYS: &[&str] = &["permittivity", "permeability", "conductivity", "conductivity_unit"];
+const ELASTIC_KEYS: &[&str] = &["source", "unit", "compliance_unit", "class", "unique_axis", "matrix", "compliance", "E", "nu", "lambda", "mu", "K", "G", "c11", "c12", "c44"];
+const THERMAL_KEYS: &[&str] = &["source", "conductivity", "conductivity_unit", "specific_heat", "specific_heat_unit", "expansion", "expansion_unit"];
+const ELECTRICAL_KEYS: &[&str] = &["source", "permittivity", "permeability", "conductivity", "conductivity_unit"];
 
 fn positive(s: &Section, key: &str, v: Option<f64>, what: &str) -> Result<Option<f64>, MaterialError> {
     match v {
@@ -95,15 +100,7 @@ impl MaterialSpec {
         s.string("name")?;
         let description = s.string("description")?;
         let notes = s.string("notes")?;
-        let source = match s.value("source") {
-            None => Vec::new(),
-            Some(toml::Value::String(x)) => vec![x.clone()],
-            Some(toml::Value::Array(a)) => a
-                .iter()
-                .map(|v| v.as_str().map(str::to_string).ok_or_else(|| s.err("source", "must be text, or a list of texts")))
-                .collect::<Result<_, _>>()?,
-            Some(_) => return Err(s.err("source", "must be text, or a list of texts")),
-        };
+        let source = read_sources(&mut s, "source")?;
         let density = s.quantity("density", Dim::Density, None)?;
         let density = positive(&s, "density", density, "the density")?;
 
@@ -118,6 +115,7 @@ impl MaterialSpec {
 
         let mut thermal = Thermal::default();
         if let Some(mut t) = s.sub("thermal")? {
+            thermal.source = read_sources(&mut t, "source")?;
             thermal.conductivity = TensorProp::read(&mut t, "conductivity", Dim::ThermalConductivity, Requirement::PositiveDefinite, "thermal conductivity")?;
             let cp = t.quantity("specific_heat", Dim::SpecificHeat, None)?;
             thermal.specific_heat = positive(&t, "specific_heat", cp, "the specific heat")?;
@@ -127,6 +125,7 @@ impl MaterialSpec {
 
         let mut electrical = Electrical::default();
         if let Some(mut t) = s.sub("electrical")? {
+            electrical.source = read_sources(&mut t, "source")?;
             electrical.permittivity = TensorProp::read(&mut t, "permittivity", Dim::Dimensionless, Requirement::PositiveDefinite, "relative permittivity")?;
             let mu = t.number("permeability")?;
             electrical.permeability = positive(&t, "permeability", mu, "the relative permeability")?;
@@ -172,14 +171,8 @@ impl MaterialSpec {
         if let Some(d) = &self.description {
             t.insert("description".into(), d.clone().into());
         }
-        match self.source.len() {
-            0 => {}
-            1 => {
-                t.insert("source".into(), self.source[0].clone().into());
-            }
-            _ => {
-                t.insert("source".into(), toml::Value::Array(self.source.iter().map(|x| x.clone().into()).collect()));
-            }
+        if let Some(v) = write_sources(&self.source) {
+            t.insert("source".into(), v);
         }
         if let Some(n) = &self.notes {
             t.insert("notes".into(), n.clone().into());
@@ -191,6 +184,9 @@ impl MaterialSpec {
             t.insert("elastic".into(), toml::Value::Table(e.write()));
         }
         let mut th = toml::Table::new();
+        if let Some(v) = write_sources(&self.thermal.source) {
+            th.insert("source".into(), v);
+        }
         put_tensor(&mut th, "conductivity", self.thermal.conductivity.as_ref(), Some("W/(m*K)"));
         if let Some(c) = self.thermal.specific_heat {
             th.insert("specific_heat".into(), format!("{c} J/(kg*K)").into());
@@ -200,6 +196,9 @@ impl MaterialSpec {
             t.insert("thermal".into(), toml::Value::Table(th));
         }
         let mut el = toml::Table::new();
+        if let Some(v) = write_sources(&self.electrical.source) {
+            el.insert("source".into(), v);
+        }
         put_tensor(&mut el, "permittivity", self.electrical.permittivity.as_ref(), None);
         if let Some(m) = self.electrical.permeability {
             el.insert("permeability".into(), toml::Value::Float(m));

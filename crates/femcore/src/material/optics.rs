@@ -4,6 +4,7 @@
 //! The wavelength unit is declared in the file. A wavelength outside the declared range is an error: nothing extrapolates silently.
 
 use super::reader::{MaterialError, Section};
+use super::source::{read_sources, write_sources, Source};
 use super::units::{self, Dim};
 use super::M3;
 use num_complex::Complex64;
@@ -33,6 +34,13 @@ pub enum Dispersion {
     /// `n = sum_i coefficients[i] x^(-2 i)`
     Cauchy { coefficients: Vec<f64> },
     Tabulated { lambda: Vec<f64>, n: Vec<f64>, k: Vec<f64>, interpolation: Interp, extrapolate: Extrapolate },
+    /// Schott glass formula: `n^2 = a0 + a1 x^2 + a2 x^-2 + a3 x^-4 + a4 x^-6 + a5 x^-8`
+    Schott { coefficients: Vec<f64> },
+    /// Herzberger: `n = A + B L + C L^2 + D x^2 + E x^4 + F x^6`, `L = 1/(x^2 - 0.028 um^2)`
+    Herzberger { coefficients: Vec<f64> },
+    /// Drude and Lorentz oscillators in the permittivity, `e^{j omega t}` convention:
+    /// `eps = eps_inf - f0 Wp^2/(w^2 - j g0 w) + sum_k f_k Wp^2/(w0_k^2 - w^2 + j g_k w)`. Frequencies in rad/s.
+    Oscillators { eps_inf: f64, plasma: f64, drude: Option<[f64; 2]>, lorentz: Vec<[f64; 3]>, frequency_unit: String },
 }
 
 impl Dispersion {
@@ -42,6 +50,13 @@ impl Dispersion {
             Dispersion::Sellmeier { .. } => "sellmeier",
             Dispersion::Cauchy { .. } => "cauchy",
             Dispersion::Tabulated { .. } => "tabulated",
+            Dispersion::Schott { .. } => "schott",
+            Dispersion::Herzberger { .. } => "herzberger",
+            Dispersion::Oscillators { drude, lorentz, .. } => match (drude.is_some(), lorentz.is_empty()) {
+                (true, true) => "drude",
+                (false, _) => "lorentz",
+                (true, false) => "drude_lorentz",
+            },
         }
     }
 }
@@ -49,6 +64,9 @@ impl Dispersion {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AxisModel {
     pub dispersion: Dispersion,
+    /// where this axis's data come from (if it differs from the `[optical]` table)
+    #[serde(default)]
+    pub source: Vec<Source>,
     /// thermo-optic coefficient dn/dT in 1/K (0 if none)
     pub dn_dt: f64,
 }
@@ -63,6 +81,9 @@ pub enum Axes {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Optical {
+    /// where the optical data come from
+    #[serde(default)]
+    pub source: Vec<Source>,
     /// as written in the file (empty if only constant models are used)
     pub wavelength_unit: String,
     /// metres per unit of wavelength
@@ -176,7 +197,7 @@ fn interpolate(x: &[f64], y: &[f64], interp: Interp, at: f64, extend: bool) -> O
 
 impl Dispersion {
     /// `(n, k, dn/dx, dk/dx)` at the wavelength `x` (file units); `None` if a table does not cover `x`.
-    fn eval(&self, x: f64) -> Option<(f64, f64, f64, f64)> {
+    fn eval(&self, x: f64, unit_m: f64) -> Option<(f64, f64, f64, f64)> {
         match self {
             Dispersion::Constant { n, k } => Some((*n, *k, 0.0, 0.0)),
             Dispersion::Sellmeier { a, b, c } => {
@@ -208,6 +229,55 @@ impl Dispersion {
                 let (nv, dn) = interpolate(lambda, n, *interpolation, x, ext)?;
                 let (kv, dk) = interpolate(lambda, k, *interpolation, x, ext)?;
                 Some((nv, kv, dn, dk))
+            }
+            Dispersion::Schott { coefficients: a } => {
+                let n2 = a[0] + a[1] * x.powi(2) + a[2] * x.powi(-2) + a[3] * x.powi(-4) + a[4] * x.powi(-6) + a[5] * x.powi(-8);
+                let dn2 = 2.0 * a[1] * x - 2.0 * a[2] * x.powi(-3) - 4.0 * a[3] * x.powi(-5) - 6.0 * a[4] * x.powi(-7) - 8.0 * a[5] * x.powi(-9);
+                if n2 <= 0.0 || !n2.is_finite() {
+                    return None;
+                }
+                let n = n2.sqrt();
+                Some((n, 0.0, dn2 / (2.0 * n), 0.0))
+            }
+            Dispersion::Herzberger { coefficients: c } => {
+                // the constant 0.028 is in um^2: express it in the square of the file's wavelength unit
+                let l0 = 0.028e-12 / (unit_m * unit_m);
+                let d = x * x - l0;
+                if d == 0.0 {
+                    return None;
+                }
+                let n = c[0] + c[1] / d + c[2] / (d * d) + c[3] * x.powi(2) + c[4] * x.powi(4) + c[5] * x.powi(6);
+                let dn = -2.0 * x * c[1] / (d * d) - 4.0 * x * c[2] / (d * d * d) + 2.0 * c[3] * x + 4.0 * c[4] * x.powi(3) + 6.0 * c[5] * x.powi(5);
+                if !n.is_finite() {
+                    return None;
+                }
+                Some((n, 0.0, dn, 0.0))
+            }
+            Dispersion::Oscillators { eps_inf, plasma, drude, lorentz, .. } => {
+                use num_complex::Complex64 as C;
+                let lam = x * unit_m;
+                let w = 2.0 * std::f64::consts::PI * 299_792_458.0 / lam;
+                let j = C::new(0.0, 1.0);
+                let wp2 = plasma * plasma;
+                let mut eps = C::new(*eps_inf, 0.0);
+                let mut deps = C::new(0.0, 0.0); // d eps / d w
+                if let Some([f0, g0]) = drude {
+                    let q = C::new(w * w, 0.0) - j * (g0 * w);
+                    eps -= (f0 * wp2) / q;
+                    deps += (f0 * wp2) * (C::new(2.0 * w, 0.0) - j * *g0) / (q * q);
+                }
+                for [f, w0, g] in lorentz {
+                    let dd = C::new(w0 * w0 - w * w, 0.0) + j * (g * w);
+                    eps += (f * wp2) / dd;
+                    deps += (f * wp2) * (C::new(2.0 * w, 0.0) - j * *g) / (dd * dd);
+                }
+                let nc = eps.sqrt();
+                if !(nc.re.is_finite() && nc.im.is_finite()) || nc.norm() == 0.0 {
+                    return None;
+                }
+                let dn_dlam = deps / (nc * 2.0) * (-w / lam);
+                // n - j k = sqrt(eps), so k = -Im; derivatives are per file unit
+                Some((nc.re, -nc.im, dn_dlam.re * unit_m, -dn_dlam.im * unit_m))
             }
         }
     }
@@ -273,7 +343,7 @@ impl Optical {
                 return Err(out_of(lo, hi));
             }
         }
-        let (mut n, k, dn, dk) = m.dispersion.eval(x).ok_or(OpticsError::NotFinite { lambda_m })?;
+        let (mut n, k, dn, dk) = m.dispersion.eval(x, self.unit_m).ok_or(OpticsError::NotFinite { lambda_m })?;
         if let Some(t) = temp_k {
             n += m.dn_dt * (t - self.reference_temperature);
         }
@@ -362,6 +432,7 @@ impl Optical {
             Some(_) => return Err(s.err("range", "must be a list of two wavelengths, for example [0.21, 6.7]")),
         };
         let reference_temperature = s.quantity("reference_temperature", Dim::Temperature, None)?.unwrap_or(293.15);
+        let source = read_sources(s, "source")?;
 
         let sub_names = ["ordinary", "extraordinary", "x", "y", "z"];
         let has_sub: Vec<&str> = sub_names.iter().copied().filter(|k| s.has(k)).collect();
@@ -395,7 +466,7 @@ impl Optical {
                 return Err(s.err("", "mixes ordinary/extraordinary with x/y/z tables; use one of the two forms"));
             }
         };
-        let opt = Optical { wavelength_unit: unit_text.unwrap_or_default(), unit_m, range, reference_temperature, axes };
+        let opt = Optical { source, wavelength_unit: unit_text.unwrap_or_default(), unit_m, range, reference_temperature, axes };
         opt.validate().map_err(|(path, m)| s.err(&path, m))?;
         Ok(opt)
     }
@@ -433,7 +504,7 @@ impl Optical {
                     }
                     let _ = b;
                 }
-                Dispersion::Cauchy { .. } => {}
+                Dispersion::Cauchy { .. } | Dispersion::Schott { .. } | Dispersion::Herzberger { .. } | Dispersion::Oscillators { .. } => {}
                 Dispersion::Tabulated { lambda, n, k, .. } => {
                     if let Some((tlo, thi)) = self.range {
                         if m.dispersion.table_extent().is_some() && (tlo < lambda[0] * (1.0 - 1e-12) || thi > lambda[lambda.len() - 1] * (1.0 + 1e-12)) {
@@ -458,8 +529,8 @@ impl Optical {
             if !matches!(m.dispersion, Dispersion::Constant { .. } | Dispersion::Tabulated { .. }) {
                 for i in 0..=128 {
                     let x = lo + (hi - lo) * i as f64 / 128.0;
-                    match m.dispersion.eval(x) {
-                        Some((n, ..)) if n > 0.0 && n.is_finite() => {}
+                    match m.dispersion.eval(x, self.unit_m) {
+                        Some((n, k, ..)) if n.is_finite() && k.is_finite() && (n > 0.0 || (n >= 0.0 && matches!(m.dispersion, Dispersion::Oscillators { .. }))) => {}
                         _ => return Err(at(format!("the {} model gives no positive, finite index at the wavelength {x} (inside the declared range {lo} to {hi}); check the coefficients and the unit", m.dispersion.name()))),
                     }
                 }
@@ -470,6 +541,9 @@ impl Optical {
 
     pub fn write(&self) -> toml::Table {
         let mut t = toml::Table::new();
+        if let Some(v) = write_sources(&self.source) {
+            t.insert("source".into(), v);
+        }
         if !self.wavelength_unit.is_empty() {
             t.insert("wavelength_unit".into(), self.wavelength_unit.clone().into());
         }
@@ -505,12 +579,13 @@ struct Ctx {
 }
 
 fn read_model_finish(s: &mut Section, ctx: &Ctx) -> Result<AxisModel, MaterialError> {
-    let m = read_model(s, ctx)?;
+    let mut m = read_model(s, ctx)?;
+    m.source = read_sources(s, "source")?;
     s.finish(MODEL_KEYS)?;
     Ok(m)
 }
 
-pub const MODEL_KEYS: &[&str] = &["model", "n", "k", "eps", "A", "B", "C", "lambda0", "coefficients", "data", "interpolation", "extrapolate", "dn_dT", "dn_dT_unit"];
+pub const MODEL_KEYS: &[&str] = &["model", "n", "k", "eps", "A", "B", "C", "lambda0", "coefficients", "data", "interpolation", "extrapolate", "dn_dT", "dn_dT_unit", "source", "frequency_unit", "eps_inf", "plasma_frequency", "damping", "drude_weight", "oscillators"];
 
 fn floats(s: &mut Section, key: &str) -> Result<Option<Vec<f64>>, MaterialError> {
     s.numbers(key)
@@ -621,9 +696,81 @@ fn read_model(s: &mut Section, ctx: &Ctx) -> Result<AxisModel, MaterialError> {
             let _ = ctx.unit_m;
             Dispersion::Tabulated { lambda, n, k, interpolation, extrapolate }
         }
-        other => return Err(s.err("model", format!("unknown model '{other}'; use constant, sellmeier, cauchy or tabulated"))),
+        "schott" | "herzberger" => {
+            need_unit(s)?;
+            let name = kind.to_ascii_lowercase();
+            let coefficients = floats(s, "coefficients")?.ok_or_else(|| {
+                if name == "schott" {
+                    s.err("coefficients", "the Schott model needs coefficients = [a0, a1, a2, a3, a4, a5] for n^2 = a0 + a1 x^2 + a2 x^-2 + a3 x^-4 + a4 x^-6 + a5 x^-8")
+                } else {
+                    s.err("coefficients", "the Herzberger model needs coefficients = [A, B, C, D, E, F] for n = A + B L + C L^2 + D x^2 + E x^4 + F x^6, L = 1/(x^2 - 0.028 um^2)")
+                }
+            })?;
+            if coefficients.len() != 6 {
+                return Err(s.err("coefficients", format!("the {name} model needs exactly 6 coefficients (found {}); write 0 for the ones you do not have", coefficients.len())));
+            }
+            if name == "schott" {
+                Dispersion::Schott { coefficients }
+            } else {
+                Dispersion::Herzberger { coefficients }
+            }
+        }
+        "drude" | "lorentz" | "drude_lorentz" => {
+            let name = kind.to_ascii_lowercase();
+            let fu = s
+                .string("frequency_unit")?
+                .ok_or_else(|| s.err("frequency_unit", "is required for this model: the frequencies are in this unit (for example frequency_unit = \"eV\", \"THz\" or \"rad/s\")"))?;
+            let scale = units::to_si(1.0, &fu, Dim::Frequency).map_err(|m| s.err("frequency_unit", m))?;
+            need_unit(s)?;
+            let eps_inf = s.number("eps_inf")?.unwrap_or(1.0);
+            let plasma = s
+                .quantity("plasma_frequency", Dim::Frequency, Some(&fu))?
+                .ok_or_else(|| s.err("plasma_frequency", "is missing; give the plasma frequency (the energy or frequency scale of the oscillator strengths)"))?;
+            if plasma <= 0.0 {
+                return Err(s.err("plasma_frequency", "must be positive"));
+            }
+            let drude = if name == "lorentz" {
+                if s.has("damping") || s.has("drude_weight") {
+                    return Err(s.err("damping", "belongs to a Drude term; use model = \"drude\" or \"drude_lorentz\""));
+                }
+                None
+            } else {
+                let g = s.quantity("damping", Dim::Frequency, Some(&fu))?.ok_or_else(|| s.err("damping", "is missing; a Drude term needs its damping (collision frequency)"))?;
+                if g <= 0.0 {
+                    return Err(s.err("damping", "must be positive (zero damping gives a lossless metal and a pole at zero frequency)"));
+                }
+                let f0 = s.number("drude_weight")?.unwrap_or(1.0);
+                Some([f0, g])
+            };
+            let lorentz = if name == "drude" {
+                if s.has("oscillators") {
+                    return Err(s.err("oscillators", "belongs to Lorentz terms; use model = \"lorentz\" or \"drude_lorentz\""));
+                }
+                Vec::new()
+            } else {
+                let rows = match s.value("oscillators") {
+                    Some(toml::Value::Array(r)) if !r.is_empty() => r,
+                    _ => return Err(s.err("oscillators", "needs oscillators = [[f, resonance, damping], ...] with one row per Lorentz term (f is the weight, the other two are in frequency_unit)")),
+                };
+                let mut v = Vec::new();
+                for (i, row) in rows.iter().enumerate() {
+                    let toml::Value::Array(r) = row else { return Err(s.err("oscillators", format!("row {} must be [f, resonance, damping]", i + 1))) };
+                    if r.len() != 3 {
+                        return Err(s.err("oscillators", format!("row {} has {} entries; expected [f, resonance, damping]", i + 1, r.len())));
+                    }
+                    let x: Vec<f64> = r.iter().map(|e| s.number_of("oscillators", e)).collect::<Result<_, _>>()?;
+                    if x[1] <= 0.0 || x[2] < 0.0 {
+                        return Err(s.err("oscillators", format!("row {}: the resonance must be positive and the damping not negative", i + 1)));
+                    }
+                    v.push([x[0], x[1] * scale, x[2] * scale]);
+                }
+                v
+            };
+            Dispersion::Oscillators { eps_inf, plasma, drude, lorentz, frequency_unit: fu }
+        }
+        other => return Err(s.err("model", format!("unknown model '{other}'; use constant, sellmeier, cauchy, schott, herzberger, drude, lorentz, drude_lorentz or tabulated"))),
     };
-    Ok(AxisModel { dispersion, dn_dt })
+    Ok(AxisModel { dispersion, source: Vec::new(), dn_dt })
 }
 
 fn fl(v: &[f64]) -> toml::Value {
@@ -664,6 +811,30 @@ fn write_model(t: &mut toml::Table, m: &AxisModel) {
                 t.insert("extrapolate".into(), "linear".into());
             }
         }
+        Dispersion::Schott { coefficients } | Dispersion::Herzberger { coefficients } => {
+            t.insert("coefficients".into(), fl(coefficients));
+        }
+        Dispersion::Oscillators { eps_inf, plasma, drude, lorentz, frequency_unit } => {
+            let s = freq_scale(frequency_unit);
+            t.insert("frequency_unit".into(), frequency_unit.clone().into());
+            if *eps_inf != 1.0 {
+                t.insert("eps_inf".into(), toml::Value::Float(*eps_inf));
+            }
+            t.insert("plasma_frequency".into(), toml::Value::Float(plasma / s));
+            if let Some([f0, g0]) = drude {
+                t.insert("damping".into(), toml::Value::Float(g0 / s));
+                if *f0 != 1.0 {
+                    t.insert("drude_weight".into(), toml::Value::Float(*f0));
+                }
+            }
+            if !lorentz.is_empty() {
+                let rows = lorentz.iter().map(|[f, w0, g]| fl(&[*f, w0 / s, g / s])).collect();
+                t.insert("oscillators".into(), toml::Value::Array(rows));
+            }
+        }
+    }
+    if let Some(v) = write_sources(&m.source) {
+        t.insert("source".into(), v);
     }
     if m.dn_dt != 0.0 {
         t.insert("dn_dT".into(), format!("{} 1/K", m.dn_dt).into());
@@ -676,11 +847,13 @@ mod tests {
 
     fn silica() -> Optical {
         Optical {
+            source: Vec::new(),
             wavelength_unit: "um".into(),
             unit_m: 1e-6,
             range: Some((0.21, 6.7)),
             reference_temperature: 293.15,
             axes: Axes::Isotropic(AxisModel {
+                source: Vec::new(),
                 dispersion: Dispersion::Sellmeier { a: 1.0, b: vec![0.6961663, 0.4079426, 0.8974794], c: vec![0.0684043_f64.powi(2), 0.1162414_f64.powi(2), 9.896161_f64.powi(2)] },
                 dn_dt: 0.0,
             }),
@@ -734,3 +907,7 @@ mod tests {
 
 /// Keys of the `[optical]` table itself (the model keys of an isotropic material live there too).
 pub const OPTICAL_KEYS: &[&str] = &["wavelength_unit", "range", "reference_temperature", "ordinary", "extraordinary", "x", "y", "z"];
+
+fn freq_scale(unit: &str) -> f64 {
+    units::to_si(1.0, unit, Dim::Frequency).unwrap_or(1.0)
+}

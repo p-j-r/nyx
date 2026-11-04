@@ -13,6 +13,7 @@ pub mod elastic;
 pub mod optics;
 pub mod reader;
 pub mod schema;
+pub mod source;
 pub mod spec;
 pub mod tensor;
 pub mod units;
@@ -20,6 +21,7 @@ pub mod units;
 pub use elastic::{Class, Elastic, Unique};
 pub use optics::{Dispersion, Optical, OpticsError};
 pub use reader::MaterialError;
+pub use source::Source;
 pub use spec::{merge_over, Library, MaterialSpec};
 pub use tensor::TensorProp;
 

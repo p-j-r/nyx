@@ -18,6 +18,8 @@ pub enum Dim {
     /// inverse pressure, m^2/N
     Compliance,
     ElectricalConductivity,
+    /// angular frequency, frequency or photon energy; the SI value is rad/s
+    Frequency,
 }
 
 impl Dim {
@@ -33,6 +35,7 @@ impl Dim {
             Dim::PerKelvin => "a coefficient per kelvin, for example 1/K or ppm/K",
             Dim::Compliance => "a compliance, for example 1/GPa",
             Dim::ElectricalConductivity => "an electrical conductivity, for example S/m",
+            Dim::Frequency => "a frequency or energy, for example eV, THz or rad/s",
         }
     }
 }
@@ -63,6 +66,7 @@ fn prefix(p: &str) -> Option<f64> {
         "M" => 1e6,
         "G" => 1e9,
         "T" => 1e12,
+        "P" => 1e15,
         _ => return None,
     })
 }
@@ -90,7 +94,15 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
         "degC" | "C" => return Some((Dim::Temperature, 1.0)),
         "angstrom" => return Some((Dim::Length, 1e-10)),
         "S/m" => return Some((Dim::ElectricalConductivity, 1.0)),
+        "rad/s" => return Some((Dim::Frequency, 1.0)),
+        "1/cm" | "cm^-1" | "cm-1" => return Some((Dim::Frequency, 2.0 * std::f64::consts::PI * 299_792_458.0 * 100.0)),
         _ => {}
+    }
+    if let Some(f) = with_prefix(&u, "eV") {
+        return Some((Dim::Frequency, f * 1.602_176_634e-19 / 1.054_571_817e-34));
+    }
+    if let Some(f) = with_prefix(&u, "Hz") {
+        return Some((Dim::Frequency, f * 2.0 * std::f64::consts::PI));
     }
     if let Some(f) = with_prefix(&u, "Pa") {
         return Some((Dim::Pressure, f));
