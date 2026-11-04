@@ -62,7 +62,7 @@ Each row is one working session in its own jj workspace of `nyx2`, started from 
 
 Waits for the above: phase 4 (needs 2 and 3), then 5 (needs 4), 7 (needs 4, 5, 6), 8, 9. **Phase 4 can fan out after its first step**: one session lands `dfs` (and any change to `nyx-physics` it needs), then `sms` and `ems` are separate files and can be moved by two sessions at once.
 
-Not in the plan, needs paul's go: **engine core early.** `Project`, the command set and the job runner of `nyx-engine` do not depend on the kernels (solve is stubbed by `NotYetMoved`). Starting them before phase 4 would overlap with phase 2 only in `app/src/state.rs` and the meshing calls. The plan puts phase 7 after 4; say if you want it earlier.
+**Engine core early: approved (2026-11-04), thread started from `restructure-1c-gate-answers`.** `Project`, the command set and the job runner of `nyx-engine` do not depend on the kernels (solve is stubbed by `NotYetMoved`). Starting them before phase 4 would overlap with phase 2 only in `app/src/state.rs` and the meshing calls. The plan puts phase 7 after 4; say if you want it earlier.
 
 ## Baselines
 
@@ -151,7 +151,7 @@ That file lives uncommitted in the old checkout (`nyx/docs/ports/meshers/FEATURE
 
 ## Open questions for paul
 
-Gates of the plan not yet answered: none of the plan's gates is open now (G1 to G6 answered, see above). Still open: the mesh session's three defaults, the materials session's three defaults, engine core early, mesher-feature decisions D1 and D2. New: the session list above (engine core early? Docker for Structurizr?), and whether to free `nyx-jj/target`.
+Nothing is open for paul from the foundation any more: the plan's gates G1 to G6 are answered, and the coordinator reports the rest settled on 2026-11-04: mesh defaults accepted (`mesher3d`/`refine3d` kept as a fixture with a README, numbering from 1, `Sizing` in `femcore::meshing`), materials settled in its own thread (further models added, sources verified, unverified values flagged), mesher decision D1 = skip Mmg, D2 answered (the geom 3D finding went to paul), and **engine core early = yes** (a thread "Build engine core early" started from `restructure-1c-gate-answers`).
 
 ## Log
 
