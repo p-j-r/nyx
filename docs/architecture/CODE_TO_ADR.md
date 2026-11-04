@@ -82,7 +82,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
 | `crates/femcore/src/meshing/sizing.rs` | 17, 25 | the neutral Sizing a physics reports to the mesher (re-exported by nyx-physics) |
 | `crates/femcore/src/meshing/validate/*` | 7 | |
-| `crates/femcore/src/adapt/par.rs` | 11 | R03 |
+| `crates/femcore/src/par.rs` | 11 | R03; the fixed-chunk reductions of the adaptation live here too (was `adapt/par.rs`) |
 | `crates/femcore/src/adapt/estimate*.rs` | 7, 17 | |
 | `crates/femcore/src/adapt/work.rs` | 5, 4, 7 | the adaptation's private simplex working mesh and its conversion from and to the solver mesh (was `mesh/native.rs`, `mesh/interop.rs`) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
@@ -91,7 +91,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/validate.rs` | 9 | |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
-| `crates/femcore/src/par.rs` | 11 | |
 | `crates/femcore/src/solve.rs` | 9, 1 | |
 | `crates/femcore/src/section.rs` | 1 | |
 | `crates/femcore/src/dfs.rs` | 9, 12 | |

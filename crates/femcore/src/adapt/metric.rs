@@ -17,7 +17,7 @@
 //! Everything here is written from the published formulae (see `docs/REFERENCES.md`); no third-party
 //! code was read or copied.
 
-use crate::adapt::par;
+use crate::par;
 
 /// Symmetric `D x D` matrix (full storage, row-major).
 pub type Sym<const D: usize> = [[f64; D]; D];

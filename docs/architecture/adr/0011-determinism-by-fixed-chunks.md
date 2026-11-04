@@ -25,8 +25,12 @@ Parallel floating-point sums depend on the order of addition. Results that chang
 
 ## Code
 
-`crates/femcore/src/par.rs`, `solvers/par.rs`, `meshers/par.rs`.
+`crates/femcore/src/par.rs`, `solvers/par.rs`.
 
 ## Contract
 
 Covered by the existing determinism tests; `contracts/kernel_stages` does not repeat them.
+
+## Amendment 2026-11-04 (mesh phase)
+
+The mesher's own `par` module is gone: its fixed-chunk reductions (`CHUNK`, `fold_chunks_mut`, `sum_range`) moved into `femcore::par`, and the metric adaptation now takes its thread count from `femcore::par::threads()` (`NYX_THREADS`, at most 32); `FEMMESH_THREADS` no longer exists. Results are bit-identical for any thread count by the chunk rule, so nothing but the variable name changes (R03 is resolved for the mesher; the solver library keeps `solvers/par.rs`).

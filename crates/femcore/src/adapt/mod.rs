@@ -13,6 +13,5 @@ pub mod topo;
 pub mod topo3;
 pub mod estimate;
 pub mod estimate3;
-pub mod par;
 pub mod timer;
 pub mod work;

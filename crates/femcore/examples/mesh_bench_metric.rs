@@ -92,7 +92,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let n: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(200_000);
     let reps: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(7);
-    let nt = femcore::adapt::par::threads();
+    let nt = femcore::par::threads();
     println!("# lp_metrics: fused vs unfused ({} threads for the parallel column)\n", nt);
     println!(
         "| dim | vertices | unfused ms | fused 1T ms | fused {nt}T ms | fused/unfused speedup | thread speedup | bit-identical across threads | fused complexity miss | unfused complexity miss |"
