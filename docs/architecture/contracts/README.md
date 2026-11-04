@@ -16,6 +16,7 @@ The rule is ADR 19. Each contract is an exemplar file here plus a test that gene
 | `solve_result` v2 | serde shape of a result | same, `solve_result_v2_*` | same |
 | `physics_descriptors`, `physics_api` | descriptor types; trait surface, registry rules, error codes | same | same |
 | `physics_dfs`, `physics_sms`, `physics_ems` | the descriptors each physics declares (studies, conditions, properties, fields, couplings, generated JSON Schema) | `crates/nyx-{dfs,sms,ems}/tests/contracts.rs` | `cargo test --release -p nyx-dfs -p nyx-sms -p nyx-ems --test contracts` |
+| `material_schema`, `material_example` | the JSON Schema of material file format 1; a file using every section and the `MaterialSpec` it resolves to; the schema lists exactly the loader's keys | `crates/femcore/tests/material_contract.rs` | `cargo test --release -p femcore --test material_contract` |
 | `layering` (tests only) | which workspace crate may depend on which | `crates/nyx-engine/tests/layering.rs` | `cargo test --release -p nyx-engine --test layering` |
 
 Rewriting an exemplar: `NYX_WRITE_CONTRACT=1 cargo test ... --test contracts <test name>`. Do it only with a `VERSIONS.md` entry. None of these tests depends on frozen floating-point values, so they pass on a machine where the golden files fail (R22).

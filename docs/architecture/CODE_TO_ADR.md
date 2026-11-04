@@ -76,7 +76,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshers/validate/*` | 7 | |
 | `crates/femcore/src/meshers/*` | 7 | quality, fixtures, timer, mod |
 | `crates/femcore/src/problem.rs` | 1, 9, 19 | |
-| `crates/femcore/src/material.rs` | 1 | |
+| `crates/femcore/src/material/*` | 1, 29, 30 | spec, units, elastic, tensor, optics, schema (phase 6) |
+| `materials/*` | 29, 30 | the shipped material library (TOML) |
+| `docs/MATERIALS.md` | 29, 30 | |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/validate.rs` | 9 | |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
@@ -115,6 +117,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/h5io.rs` | 13, 16 | |
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16 | |
+| `crates/femcore/tests/material*.rs` | 29, 30, 19 | behaviour and contract tests of the material format |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/stages.rs` | 9 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |

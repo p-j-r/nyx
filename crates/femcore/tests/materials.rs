@@ -385,3 +385,16 @@ fn library_reports_every_broken_file() {
     assert_eq!(errs.len(), 2);
     assert!(errs.iter().any(|e| e.material.contains("bad1")) && errs.iter().any(|e| e.material.contains("bad2")));
 }
+
+#[test]
+fn every_toml_example_of_the_guide_reads() {
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/MATERIALS.md")).unwrap();
+    let mut n = 0;
+    for block in text.split("```toml").skip(1) {
+        let body = block.split("```").next().unwrap();
+        let full = if body.trim_start().starts_with("format") { body.to_string() } else { format!("format = 1\n{body}") };
+        MaterialSpec::from_toml(&full).unwrap_or_else(|e| panic!("{e}\n{body}"));
+        n += 1;
+    }
+    assert!(n >= 5, "found {n} examples");
+}

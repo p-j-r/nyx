@@ -20,5 +20,7 @@ One line per contract. Bump the version here in the same commit that changes the
 | physics_sms | `physics_sms.v1.json` | 1.0 | 2026-11-04 | same, `sms` |
 | physics_ems | `physics_ems.v1.json` | 1.0 | 2026-11-04 | same, `ems` |
 | physics_api | (tests only) the `Physics` trait surface, registry rules, error codes | 1.0 | 2026-11-04 | `crates/nyx-physics/tests/contracts.rs`; changing a method is a bump |
+| material_schema | `material_schema.v1.json` | 1.0 | 2026-11-04 | JSON Schema of material file format 1 (`femcore::material::schema`, ADR 29, 30); test `crates/femcore/tests/material_contract.rs` checks it lists exactly the keys the loader accepts |
+| material_example | `material_kitchen_sink.v1.toml` + `.json` | 1.0 | 2026-11-04 | one file using every section of format 1 and the resolved `MaterialSpec` it must read to (SI values, Voigt matrix in Pa) |
 
 The file name carries the major version (`.v1.`). A breaking change adds `.v2.` next to `.v1.`, keeps the old file for the reader of the previous major, and updates the test.

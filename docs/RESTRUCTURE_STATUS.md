@@ -17,7 +17,7 @@ Last updated: 2026-11-04, by the foundation session.
 | 3x | G2 experiment (read-only) | ready | `restructure-3x-g2-experiment` | |
 | 4 | nyx-physics content, kernels into the physics crates | waits for 2 and 3 | | the interface exists (F); gate G3 answered |
 | 5 | nyx-analysis | waits for 4 | | |
-| 6 | Materials | ready (G4 answered: TOML) | `restructure-6-materials` | |
+| 6 | Materials | **implemented**, awaiting paul's three answers (defaults in its section) | `restructure-6-materials` | ADR 29, 30; `docs/MATERIALS.md` |
 | 7 | nyx-engine, MCP parity, thin app | waits for 4, 5, 6 | | gate G5; 7a (connect merge) is ready now |
 | 8 | File format | waits for 7 | | gate G6 |
 | 9 | Close-out | waits for 8 | | |
@@ -155,16 +155,24 @@ Gates of the plan not yet answered: **G2** (tolerance and reference platform; ne
 
 ## Materials session (phase 6), written by the materials session, 2026-11-04
 
-State: **started, stopped early (usage limit)**. Bookmark `restructure-6-materials`, workspace `nyx2-materials`.
+State: **implemented, awaiting paul's answers to three questions** (defaults below). Bookmark `restructure-6-materials` (workspace `nyx2-materials`), cut from `restructure-foundation`. Nothing pushed.
 
-Done (not compiled or tested yet; `cargo check -p femcore` is the first thing to run):
-* `crates/femcore/src/material.rs` moved unchanged to `material/mod.rs` (same module path, no API change).
-* `toml` dependency (feature `preserve_order`) added to `femcore`.
+Done:
+* `femcore::material` is now a folder: `mod.rs` (the old API, unchanged except the new variant `Stiffness::General(M6)`), `units.rs`, `reader.rs` (TOML sections, unknown keys with suggestions, plain errors), `elastic.rs`, `tensor.rs`, `optics.rs`, `spec.rs` (`MaterialSpec`, `Library`), `schema.rs`. `toml` (feature `preserve_order`) is a `femcore` dependency.
+* Elastic: class and constants (isotropic, cubic, hexagonal, trigonal, tetragonal, orthotropic, monoclinic y or z, triclinic), reduced matrix (upper triangle or full), compliance (constants or matrix; the shear factors are derived), E/nu, lambda/mu, K/G; symmetry, stability (Mandel eigenvalues, Born criteria for cubic), class consistency and derived-entry checks. Tensors: 1, 3, 6 entries, 3x3, `{perp, par}`, with positivity checks.
+* Optics: constant, Sellmeier, Cauchy, tabulated n,k (PCHIP or linear), per axis (ordinary/extraordinary or x/y/z), declared wavelength unit, required validity range for formula models, errors outside the range, `dn_dT`, complex index `n - jk`, `d(n)/d(lambda)`, group index, permittivity tensor rotated into the wafer frame.
+* Library `materials/{silicon,silica,sapphire,air}.toml` (loaded at run time; `Library::load_dir`). Silica and sapphire use the Malitson coefficients quoted from the refractiveindex.info database; silicon the Li (293 K) table. Tests pin the library to the in-code `sapphire()` and `silicon()`.
+* ADR 29 and 30 (not 28: the connect session took it), `docs/MATERIALS.md` (user guide; its TOML examples are tested), schema `material_schema.v1.json`, `material_kitchen_sink.v1.{toml,json}`, `VERSIONS.md` and `contracts/README.md` rows, `CODE_TO_ADR.md` rows (`check_code_to_adr.sh` passes).
+* Tests: 20 unit tests in the module, `crates/femcore/tests/materials.rs` (28: published values, all stiffness forms, round trips, every error message), `tests/material_contract.rs` (3). Layering test unchanged and passing.
 
-Design decided (nothing written yet), for whoever continues:
-* New files under `material/`: `units.rs` (quantities as `"496.8 GPa"`, `{value,unit}` or bare number with a declared `unit`), `elastic.rs` (class + constants, upper-triangle or full 6x6 matrix, compliance; class table by layout of entries; checks: symmetry, positive definite via Mandel eigenvalues, class consistency, derived entries checked, unknown keys with "did you mean"), `tensor.rs` (one, three, six entries, 3x3, or `{perp,par}`), `optics.rs` (constant, Sellmeier, Cauchy, tabulated n,k with PCHIP or linear, no silent extrapolation, `range` required for formula models, declared `wavelength_unit`, `dn_dT` with reference temperature, per axis: isotropic / ordinary+extraordinary / x,y,z; time convention n - jk), `spec.rs` (`MaterialSpec`, TOML read and write, `Library::load_dir`), `schema.rs` (versioned JSON Schema, `format = 1`).
-* Add `Stiffness::General(M6)` to the legacy enum so a general matrix reaches the old `Anisotropy`; keep `sapphire()`/`silicon()` until the library location is answered, with a test that they agree with `materials/*.toml`.
-* Library `materials/*.toml` at the repository root (silicon from the Li 1993 table, silica Malitson, sapphire Malitson o and e, air). Verified coefficients from refractiveindex.info: silica B = 0.6961663, 0.4079426, 0.8974794 with resonance wavelengths 0.0684043, 0.1162414, 9.896161 um (range 0.21 to 6.7 um); sapphire o: B = 1.4313493, 0.65054713, 5.3414021, lambda0 = 0.0726631, 0.1193242, 18.028251 (0.2 to 5 um); sapphire e: B = 1.5039759, 0.55069141, 6.5927379, lambda0 = 0.0740288, 0.1216529, 20.072248; silicon at 293 K n(1.55 um) = 3.4757.
-* Tests to write: `tests/material_contract.rs` (own file, not `contracts.rs`, to avoid conflicts), exemplars `material_schema.v1.json` and a kitchen-sink `.toml` using every key; ADRs 28 and 29 (check the other workspaces for number clashes), `docs/MATERIALS.md`, `CODE_TO_ADR.md` rows for `material/**` and `materials/**`, `VERSIONS.md` lines.
+Defaults I used for the questions to paul (each is a one-line change):
+1. **Library location**: `materials/*.toml` at the repository root, loaded at run time (`Library::load_dir(path)`); the code holds no copy. Change: move the folder and the path in `tests/materials.rs`.
+2. **refractiveindex.info import**: not implemented; `source` records provenance. The sellmeier model accepts `lambda0` (the resonance wavelengths, as that database lists them), so coefficients paste without conversion.
+3. **Dispersion models**: constant, Sellmeier, Cauchy, tabulated first. Lorentz, Drude, Schott, Herzberger are additions to the `Dispersion` enum.
 
-Open questions sent to paul: library location, refractiveindex.info import, which dispersion models first (defaults used above).
+Left for others / later:
+* `sapphire()` and `silicon()` are still in `material/mod.rs` and used by the app and tests; the plan says remove them. Removing needs the app to load the library (engine, phase 7). The app can already use `MaterialSpec::anisotropy(euler)` and `legacy_scalars()`.
+* Wiring evaluation into a study (`ems` property descriptor `optical.eps`, a wavelength sweep in the engine) is phase 4 and 7.
+* Numbers marked "approximate" in `materials/silicon.toml` (dn_dT) and the mechanical, thermal values of silica and sapphire are typical handbook values; check before quantitative use.
+* `femcore --test contracts` and the other sessions' files were not touched.
+
