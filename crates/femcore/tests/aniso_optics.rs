@@ -60,7 +60,7 @@ fn the_coupled_solver_reduces_to_the_uncoupled_one_without_tilt() {
     s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
     let real = femcore::ems::solve_emw(&mesh, &s).unwrap();
     let (eps, mu) = femcore::ems_pml::cell_materials(&mesh, &s.materials).unwrap();
-    let cm = femcore::ems_pml::solve_modes_complex(&mesh, 12e9, &eps, &mu, femcore::csparse::c(1.6, 0.0), 3, 2).unwrap();
+    let cm = femcore::ems_pml::solve_modes_complex(&mesh, 12e9, &eps, &mu, femcore::solvers::csr::c(1.6, 0.0), 3, 2).unwrap();
     for (r, z) in real.solutions.iter().zip(&cm.neff) {
         assert!((r.neff.unwrap().0 - z.re).abs() < 1e-8 && z.im.abs() < 1e-8, "{} against {}", r.neff.unwrap().0, z.re);
     }

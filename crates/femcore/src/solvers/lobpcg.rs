@@ -39,6 +39,8 @@ pub struct LobpcgOptions {
     pub which: LobpcgWhich,
     /// Iterations without 1 % improvement of the worst active residual before reporting a stall.
     pub stall_window: usize,
+    /// Relative improvement of the worst active residual that counts as progress (0.01 = 1 %).
+    pub stall_gain: f64,
     pub seed: u64,
 }
 
@@ -51,6 +53,7 @@ impl LobpcgOptions {
             max_it: 500,
             which: LobpcgWhich::Lowest,
             stall_window: 200,
+            stall_gain: 0.01,
             seed: 0x10B9,
         }
     }
@@ -237,7 +240,7 @@ pub fn lobpcg<T: FaerScalar>(
             break;
         }
         let worst = active.iter().filter(|&&j| j < opts.nev).map(|&j| residual[j]).fold(0.0, f64::max);
-        if worst < 0.99 * best_worst {
+        if worst < (1.0 - opts.stall_gain) * best_worst {
             best_worst = worst;
             since_improve = 0;
         } else {

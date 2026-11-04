@@ -21,13 +21,14 @@
 //! gradients of edge bubbles, 2 interior) with P2 phi, the accuracy of quadratic
 //! elements on the same mesh.
 
-use crate::eigen::{eigs_general, EigOpts};
+use crate::solvers::driver::EigOpts;
+use crate::solvers::driver::eigs_general;
 use crate::fem::*;
 use crate::fields::{local_bary, node_average, CellFields};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
 use crate::section::{local_component, local_tensor};
-use crate::sparse::{Coo, Csr};
+use crate::solvers::csr::{Coo, RCsr as Csr};
 use std::time::Instant;
 
 pub const C0: f64 = 299_792_458.0;
@@ -87,6 +88,9 @@ pub struct Modes {
     /// phi = Ez / (j beta) per mode at the P1/P2 dofs
     pub phi: Vec<Vec<f64>>,
     pub converged: bool,
+    /// a converged complex pair of the real pencil (a leaky mode or one with a complex propagation constant) lies among the wanted
+    /// eigenvalues: this real solve cannot represent it, and `solve_emw` repeats the study in the complex solver of `ems_pml`.
+    pub complex_wanted: bool,
 }
 
 pub(crate) struct CellData {
@@ -255,9 +259,10 @@ pub fn assemble_modes(mesh: &SimplexMesh, freq: f64, eps_r: &[EpsCell], mu_r: &[
     // scale the phi block by 1/k0 so both blocks have comparable magnitude
     let scale: Vec<f64> = (0..n_tot).map(|i| if i < net { 1.0 } else { 1.0 / k0 }).collect();
     let mut bs = b_full.clone();
-    for r in 0..bs.nrows {
+    for r in 0..bs.nrows() {
         for p in bs.row_range(r) {
-            bs.data[p] *= scale[r] * scale[bs.indices[p]];
+            let s = scale[r] * scale[bs.indices()[p] as usize];
+            bs.values_mut()[p] *= s;
         }
     }
     Ok(ModeAssembly { a: a_full.submatrix(&free, &free), b: bs.submatrix(&free, &free), free, n_tot, net, k0 })
@@ -293,6 +298,7 @@ pub fn solve_mode_pairs(asm: &ModeAssembly, n_target: f64, evanescent: bool, k: 
         et: out.iter().map(|o| o.1.clone()).collect(),
         phi: out.iter().map(|o| o.2.clone()).collect(),
         converged: pairs.converged,
+        complex_wanted: pairs.complex_found,
     })
 }
 
@@ -406,6 +412,11 @@ pub fn solve_emw(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<SolveResult, 
     let eps: Vec<EpsCell> = tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
     let mur = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     let modes = solve_modes_tensor(mesh, freq, &eps, &mur, n_target, evanescent, n_modes, spec.order)?;
+    if modes.complex_wanted {
+        // a leaky or complex-propagation-constant mode is among the nearest eigenvalues: the complex solver represents it (complex vectors)
+        crate::progress::note("a complex eigenvalue pair of the real mode pencil is among the wanted modes: solving again in complex arithmetic");
+        return crate::ems_pml::solve_emw_complex(mesh, spec);
+    }
     let mut solutions = vec![];
     let mut scalars = vec![];
     for j in 0..modes.neff.len() {

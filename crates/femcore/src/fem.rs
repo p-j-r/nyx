@@ -10,9 +10,9 @@
 //! preconditioned with smoothed-aggregation multigrid (`AmgSystem`, `amg`), falling back to the factorisation if
 //! multigrid does not converge. The thresholds that decide are `AMG_THRESHOLD*` and `LOBPCG_MIN_FREE`.
 
-use crate::linalg::SparseSolver;
+use crate::solvers::driver::DirectSolver;
 use crate::mesh::SimplexMesh;
-use crate::sparse::{Coo, Csr};
+use crate::solvers::csr::{Coo, RCsr as Csr};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 
@@ -507,7 +507,7 @@ pub fn dirichlet_constraints(mesh: &SimplexMesh, values: &BTreeMap<i32, f64>, or
 
 /// Solves `K u = f` with `u[fixed] = values` by elimination.
 pub fn solve_dirichlet(k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<Vec<f64>, String> {
-    let n = k.nrows;
+    let n = k.nrows();
     let mut is_fixed = vec![false; n];
     for &i in fixed {
         is_fixed[i] = true;
@@ -524,7 +524,7 @@ pub fn solve_dirichlet(k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> R
     let kfx = k.submatrix(&free, fixed);
     let kx = kfx.matvec(values);
     let rhs: Vec<f64> = free.iter().enumerate().map(|(a, &i)| f[i] - kx[a]).collect();
-    let sol = SparseSolver::new(&kff, true)?.solve(&rhs);
+    let sol = DirectSolver::new(&kff, true)?.solve(&rhs);
     for (a, &i) in free.iter().enumerate() {
         u[i] = sol[a];
     }
@@ -655,7 +655,7 @@ pub struct AmgSystem {
     inv: Vec<usize>,
     dscale: f64,
     mp: Csr,
-    amg: crate::amg::Amg,
+    amg: crate::solvers::amg_elastic::Amg,
     pub setup_seconds: f64,
 }
 
@@ -664,7 +664,7 @@ impl AmgSystem {
     /// columns are ignored); `ncomp` is 1 for a scalar field and `dim` for displacements.
     pub fn new(mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize]) -> Result<AmgSystem, String> {
         let t_setup = std::time::Instant::now();
-        let n = a.nrows;
+        let n = a.nrows();
         let n1 = n / ncomp;
         let mut is_fixed = vec![false; n];
         for &i in fixed {
@@ -689,7 +689,7 @@ impl AmgSystem {
             m.submatrix(&perm, &perm)
         };
         let ns = near_nullspace(mesh, order, ncomp, &is_fixed, &perm);
-        let opts = crate::amg::AmgOptions::default();
+        let opts = crate::solvers::amg_elastic::AmgOptions::default();
         let amg = if order == 2 && !opts.no_p1_coarse {
             // linear interpolation of P1 into P2: vertex nodes are the identity, an edge node the mean of its two ends
             let nv = mesh.n_points();
@@ -706,10 +706,10 @@ impl AmgSystem {
                 }
                 indptr.push(indices.len());
             }
-            let lin = Csr { nrows: n1, ncols: nv, indptr, indices, data };
-            crate::amg::Amg::new_p2(&mp, ns, ncomp, &opts, &lin)?
+            let lin = Csr::from_raw(n1, nv, indptr, indices, data);
+            crate::solvers::amg_elastic::Amg::new_p2(&mp, ns, ncomp, &opts, &lin)?
         } else {
-            crate::amg::Amg::new(&mp, ns, ncomp, &opts)?
+            crate::solvers::amg_elastic::Amg::new(&mp, ns, ncomp, &opts)?
         };
         let free = free_dofs(n, fixed);
         let mut inv = vec![0usize; n];
@@ -720,23 +720,23 @@ impl AmgSystem {
     }
 
     fn constrained(a: &Csr, is_fixed: &[bool], dscale: f64) -> Csr {
-        let n = a.nrows;
-        let mut m = Csr { nrows: n, ncols: n, indptr: vec![0], indices: vec![], data: vec![] };
+        let n = a.nrows();
+        let (mut indptr, mut indices, mut data) = (vec![0usize], Vec::<usize>::new(), Vec::<f64>::new());
         for r in 0..n {
             if is_fixed[r] {
-                m.indices.push(r);
-                m.data.push(dscale);
+                indices.push(r);
+                data.push(dscale);
             } else {
-                for p in a.indptr[r]..a.indptr[r + 1] {
-                    if !is_fixed[a.indices[p]] {
-                        m.indices.push(a.indices[p]);
-                        m.data.push(a.data[p]);
+                for p in a.indptr()[r]..a.indptr()[r + 1] {
+                    if !is_fixed[a.indices()[p] as usize] {
+                        indices.push(a.indices()[p] as usize);
+                        data.push(a.values()[p]);
                     }
                 }
             }
-            m.indptr.push(m.indices.len());
+            indptr.push(indices.len());
         }
-        m
+        Csr::from_raw(n, n, indptr, indices, data)
     }
 
     pub fn n_levels(&self) -> usize {
@@ -769,7 +769,7 @@ impl AmgSystem {
             }
             None => &self.mp,
         };
-        let res = crate::amg::pcg(a, &rp, &self.amg, tol, max_iter);
+        let res = crate::solvers::amg_elastic::pcg(a, &rp, &self.amg, tol, max_iter);
         let mut x = vec![0.0; self.n];
         for r in 0..self.n {
             x[self.perm[r]] = res.x[r];
@@ -792,7 +792,7 @@ impl AmgSystem {
             .collect();
         let rp: Vec<f64> = self.perm.iter().map(|&i| b[i]).collect();
         let its = 8;
-        let res = crate::amg::pcg(&self.mp, &rp, &self.amg, 1e-300, its);
+        let res = crate::solvers::amg_elastic::pcg(&self.mp, &rp, &self.amg, 1e-300, its);
         res.relative_residual.max(1e-300).powf(1.0 / its as f64)
     }
 
@@ -835,7 +835,7 @@ impl AmgSystem {
 #[allow(clippy::too_many_arguments)]
 pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::problem::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String> {
     use crate::problem::LinearSolver;
-    let n_free = k.nrows - fixed.len();
+    let n_free = k.nrows() - fixed.len();
     let iterative = match solver {
         LinearSolver::Direct => false,
         LinearSolver::Iterative => true,
@@ -845,7 +845,7 @@ pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::
         return Ok((solve_dirichlet(k, f, fixed, values)?, None));
     }
     let mut tl = std::time::Instant::now();
-    let n = k.nrows;
+    let n = k.nrows();
     // right-hand side with the constraints moved over
     let mut uvec = vec![0.0; n];
     for (&i, &v) in fixed.iter().zip(values) {

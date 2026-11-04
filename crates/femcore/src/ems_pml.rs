@@ -22,7 +22,8 @@
 //! `(A0 + j b_prev A1) x = -b^2 B x`, and the iteration stops when `b` changes by less than
 //! `COUPLED_BETA_TOL` (relative) between two steps.
 
-use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
+use crate::solvers::csr::{c, CCoo, CCsr, C};
+use crate::solvers::driver::eigs_complex;
 use crate::ems::{cell_data, edge_basis, tri_g, C0};
 use crate::fem::*;
 use crate::fields::{local_bary, node_average, CellFields};
@@ -266,18 +267,20 @@ pub fn assemble_modes_complex(mesh: &SimplexMesh, freq: f64, eps: &[EpsC], mu: &
     let free = free_dofs(n_tot, &fixed);
     // scale the phi block by 1/k0
     let scale: Vec<f64> = (0..n_tot).map(|i| if i < net { 1.0 } else { 1.0 / k0 }).collect();
-    for r in 0..b_full.nrows {
-        for p in b_full.indptr[r]..b_full.indptr[r + 1] {
-            b_full.data[p] *= scale[r] * scale[b_full.indices[p]];
+    for r in 0..b_full.nrows() {
+        for p in b_full.indptr()[r]..b_full.indptr()[r + 1] {
+            let s = scale[r] * scale[b_full.indices()[p] as usize];
+            b_full.values_mut()[p] *= s;
         }
     }
     let af = a_full.submatrix(&free, &free);
     let bf = b_full.submatrix(&free, &free);
     let a1 = if has_coupling {
         let mut a1 = a1_coo.to_csr();
-        for r in 0..a1.nrows {
-            for p in a1.indptr[r]..a1.indptr[r + 1] {
-                a1.data[p] *= scale[r] * scale[a1.indices[p]];
+        for r in 0..a1.nrows() {
+            for p in a1.indptr()[r]..a1.indptr()[r + 1] {
+                let s = scale[r] * scale[a1.indices()[p] as usize];
+                a1.values_mut()[p] *= s;
             }
         }
         Some(a1.submatrix(&free, &free))

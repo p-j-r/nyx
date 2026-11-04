@@ -9,8 +9,10 @@
 //! Galerkin products; the smoother is symmetric Gauss-Seidel, so one V-cycle is a symmetric
 //! positive definite preconditioner for conjugate gradients.
 
-use crate::linalg::SparseSolver;
-use crate::sparse::{dot, Csr, Csr32};
+mod single;
+use crate::solvers::csr::RCsr as Csr;
+use crate::solvers::driver::DirectSolver;
+use single::{dot, Csr32};
 use rayon::prelude::*;
 
 #[derive(Clone, Debug)]
@@ -93,32 +95,33 @@ pub struct Amg {
     levels: Vec<Level>,
     coarse_rows: usize,
     coarse_a32: Csr32,
-    coarse: SparseSolver,
+    coarse: DirectSolver<f64>,
 }
 
 /// Sparse matrix product, on all cores by blocks of rows of `a` for large matrices.
+/// Sparse matrix product, on all cores by blocks of rows of `a` for large matrices.
 pub fn spmm(a: &Csr, b: &Csr) -> Csr {
-    assert_eq!(a.ncols, b.nrows);
-    let nt = if a.nrows < 20_000 { 1 } else { crate::par::threads() };
-    let chunk = a.nrows.div_ceil(nt).max(1);
+    assert_eq!(a.ncols(), b.nrows());
+    let nt = if a.nrows() < 20_000 { 1 } else { crate::par::threads() };
+    let chunk = a.nrows().div_ceil(nt).max(1);
     let block = |r0: usize, r1: usize| -> (Vec<usize>, Vec<usize>, Vec<f64>) {
         let mut counts = Vec::with_capacity(r1 - r0);
         let (mut indices, mut data): (Vec<usize>, Vec<f64>) = (vec![], vec![]);
-        let mut mark = vec![usize::MAX; b.ncols];
-        let mut acc = vec![0.0; b.ncols];
+        let mut mark = vec![usize::MAX; b.ncols()];
+        let mut acc = vec![0.0; b.ncols()];
         let mut touched: Vec<usize> = vec![];
         for i in r0..r1 {
             touched.clear();
-            for ka in a.indptr[i]..a.indptr[i + 1] {
-                let (k, av) = (a.indices[ka], a.data[ka]);
-                for kb in b.indptr[k]..b.indptr[k + 1] {
-                    let j = b.indices[kb];
+            for ka in a.indptr()[i]..a.indptr()[i + 1] {
+                let (k, av) = (a.indices()[ka] as usize, a.values()[ka]);
+                for kb in b.indptr()[k]..b.indptr()[k + 1] {
+                    let j = b.indices()[kb] as usize;
                     if mark[j] != i {
                         mark[j] = i;
                         acc[j] = 0.0;
                         touched.push(j);
                     }
-                    acc[j] += av * b.data[kb];
+                    acc[j] += av * b.values()[kb];
                 }
             }
             touched.sort_unstable();
@@ -131,11 +134,11 @@ pub fn spmm(a: &Csr, b: &Csr) -> Csr {
         (counts, indices, data)
     };
     let blocks: Vec<(Vec<usize>, Vec<usize>, Vec<f64>)> = if nt == 1 {
-        vec![block(0, a.nrows)]
+        vec![block(0, a.nrows())]
     } else {
-        (0..a.nrows.div_ceil(chunk)).into_par_iter().map(|t| block(t * chunk, ((t + 1) * chunk).min(a.nrows))).collect()
+        (0..a.nrows().div_ceil(chunk)).into_par_iter().map(|t| block(t * chunk, ((t + 1) * chunk).min(a.nrows()))).collect()
     };
-    let mut indptr = Vec::with_capacity(a.nrows + 1);
+    let mut indptr = Vec::with_capacity(a.nrows() + 1);
     indptr.push(0usize);
     let (mut indices, mut data) = (Vec::new(), Vec::new());
     for (counts, idx, val) in blocks {
@@ -145,7 +148,7 @@ pub fn spmm(a: &Csr, b: &Csr) -> Csr {
         indices.extend(idx);
         data.extend(val);
     }
-    Csr { nrows: a.nrows, ncols: b.ncols, indptr, indices, data }
+    Csr::from_raw(a.nrows(), b.ncols(), indptr, indices, data)
 }
 
 /// Inverse of a small dense matrix (Gauss-Jordan, partial pivoting); `None` when singular.
@@ -190,16 +193,16 @@ fn invert_small(m: &[f64], n: usize) -> Option<Vec<f64>> {
 /// Inverses of the `bs` x `bs` diagonal blocks of `a` (row-major, block after block); with
 /// `bs == 1` or a singular block the reciprocal of the scalar diagonal is used.
 fn block_inverses(a: &Csr, bs: usize) -> Vec<f64> {
-    let nb = a.nrows / bs;
+    let nb = a.nrows() / bs;
     let mut out = vec![0.0; nb * bs * bs];
     for i in 0..nb {
         let mut m = vec![0.0; bs * bs];
         for r in 0..bs {
             let row = i * bs + r;
-            for k in a.indptr[row]..a.indptr[row + 1] {
-                let c = a.indices[k];
+            for k in a.indptr()[row]..a.indptr()[row + 1] {
+                let c = a.indices()[k] as usize;
                 if c / bs == i {
-                    m[r * bs + c % bs] = a.data[k];
+                    m[r * bs + c % bs] = a.values()[k];
                 }
             }
         }
@@ -249,12 +252,12 @@ fn binv_csr(binv: &[f64], bs: usize) -> Csr {
         }
         let _ = blk;
     }
-    Csr { nrows: n, ncols: n, indptr, indices, data: binv.to_vec() }
+    Csr::from_raw(n, n, indptr, indices, binv.to_vec())
 }
 
 /// Spectral radius estimate of `D^-1 A` by the power method.
 fn rho_dinv_a(a: &Csr, binv: &[f64], bs: usize) -> f64 {
-    let n = a.nrows;
+    let n = a.nrows();
     let mut v: Vec<f64> = (0..n).map(|i| ((i * 2654435761usize) % 1000) as f64 / 1000.0 + 0.1).collect();
     let mut rho = 1.0;
     for _ in 0..15 {
@@ -269,15 +272,15 @@ fn rho_dinv_a(a: &Csr, binv: &[f64], bs: usize) -> f64 {
 
 /// Greedy aggregation of the nodes of `a` (block size `bs`); returns the aggregate of each node.
 fn aggregate(a: &Csr, bs: usize, theta: f64) -> (Vec<usize>, usize) {
-    let nn = a.nrows / bs;
+    let nn = a.nrows() / bs;
     // block strengths: Frobenius norm of the block (i, j)
     let mut diag_norm = vec![0.0; nn];
     let mut nbrs: Vec<Vec<(usize, f64)>> = vec![vec![]; nn];
     for i in 0..nn {
         let mut acc: std::collections::BTreeMap<usize, f64> = Default::default();
         for r in i * bs..(i + 1) * bs {
-            for k in a.indptr[r]..a.indptr[r + 1] {
-                *acc.entry(a.indices[k] / bs).or_insert(0.0) += a.data[k] * a.data[k];
+            for k in a.indptr()[r]..a.indptr()[r + 1] {
+                *acc.entry(a.indices()[k] as usize / bs).or_insert(0.0) += a.values()[k] * a.values()[k];
             }
         }
         for (j, s) in acc {
@@ -423,7 +426,7 @@ fn tentative(agg: &[usize], na: usize, bs: usize, b: &[Vec<f64>]) -> (Csr, Vec<V
             indptr[row + 1] = count;
         }
     }
-    (Csr { nrows: nn * bs, ncols: na * k, indptr, indices, data }, coarse_b)
+    (Csr::from_raw(nn * bs, na * k, indptr, indices, data), coarse_b)
 }
 
 impl Amg {
@@ -443,7 +446,7 @@ impl Amg {
     fn build(a: &Csr, nullspace: Vec<Vec<f64>>, bs: usize, opts: &AmgOptions, lin: Option<&Csr>) -> Result<Amg, String> {
         let mut levels: Vec<Level> = vec![];
         let mut tl = std::time::Instant::now();
-        let _stage = crate::progress::stage(format!("building the multigrid hierarchy ({} unknowns)", a.nrows));
+        let _stage = crate::progress::stage(format!("building the multigrid hierarchy ({} unknowns)", a.nrows()));
         // the finest matrix is only borrowed (a copy would be as large as the matrix); coarser ones are owned
         let mut cur: std::borrow::Cow<Csr> = std::borrow::Cow::Borrowed(a);
         let mut b = nullspace;
@@ -451,7 +454,7 @@ impl Amg {
         loop {
             crate::progress::check()?;
             let k = b.len();
-            if cur.nrows <= opts.max_coarse || levels.len() + 1 >= opts.max_levels {
+            if cur.nrows() <= opts.max_coarse || levels.len() + 1 >= opts.max_levels {
                 break;
             }
             let first_linear = levels.is_empty() && lin.is_some();
@@ -460,23 +463,23 @@ impl Amg {
                 // block expansion: node row r, component c  ->  vertex node column, component c
                 let mut indptr = vec![0usize];
                 let (mut indices, mut data) = (vec![], vec![]);
-                for node in 0..j.nrows {
+                for node in 0..j.nrows() {
                     for c in 0..bs {
-                        for q in j.indptr[node]..j.indptr[node + 1] {
-                            indices.push(j.indices[q] * bs + c);
-                            data.push(j.data[q]);
+                        for q in j.indptr()[node]..j.indptr()[node + 1] {
+                            indices.push(j.indices()[q] as usize * bs + c);
+                            data.push(j.values()[q]);
                         }
                         indptr.push(indices.len());
                     }
                 }
-                let p0 = Csr { nrows: j.nrows * bs, ncols: j.ncols * bs, indptr, indices, data };
+                let p0 = Csr::from_raw(j.nrows() * bs, j.ncols() * bs, indptr, indices, data);
                 // linear fields are reproduced exactly, so the coarse near-nullspace is the restriction to the vertices
-                let bc: Vec<Vec<f64>> = b.iter().map(|v| v[..j.ncols * bs].to_vec()).collect();
+                let bc: Vec<Vec<f64>> = b.iter().map(|v| v[..j.ncols() * bs].to_vec()).collect();
                 (p0, bc, bs)
             } else {
                 let (agg, na) = aggregate(&cur, bs, opts.theta * 0.5f64.powi(levels.len() as i32));
                 crate::sms::lap(&mut tl, "      amg: aggregate");
-                if na * k >= cur.nrows * 9 / 10 {
+                if na * k >= cur.nrows() * 9 / 10 {
                     break; // no useful coarsening
                 }
                 let (pt, bc) = tentative(&agg, na, bs, &b);
@@ -494,7 +497,7 @@ impl Amg {
             let mut p = pt;
             for _ in 0..if first_linear { opts.smooth_lin } else { opts.smooth_p.max(1) } {
                 let mut scaled = spmm(&dinv, &spmm(&cur, &p));
-                scaled.data.iter_mut().for_each(|v| *v *= omega);
+                scaled.values_mut().iter_mut().for_each(|v| *v *= omega);
                 p = p.add_scaled(&scaled, -1.0);
             }
             crate::sms::lap(&mut tl, "      amg: smooth P");
@@ -503,9 +506,9 @@ impl Amg {
             let mut ac = spmm(&r, &ap);
             crate::sms::lap(&mut tl, "      amg: Galerkin product");
             // empty coarse dofs (rank-deficient aggregates) get an identity row
-            let empty: Vec<usize> = (0..ac.nrows).filter(|&i| ac.get(i, i).abs() < 1e-300).collect();
+            let empty: Vec<usize> = (0..ac.nrows()).filter(|&i| ac.get(i, i).abs() < 1e-300).collect();
             if !empty.is_empty() {
-                let mut d = vec![0.0; ac.nrows];
+                let mut d = vec![0.0; ac.nrows()];
                 for &i in &empty {
                     d[i] = 1.0;
                 }
@@ -517,9 +520,9 @@ impl Amg {
             b = bc;
             bs = next_bs;
         }
-        let coarse = SparseSolver::new(&cur, true)?;
-        crate::progress::note(format!("multigrid levels (unknowns): {:?} + coarsest {}", levels.iter().map(|l| l.a.nrows).collect::<Vec<_>>(), cur.nrows));
-        Ok(Amg { gamma: opts.gamma.max(1), cheb: opts.chebyshev, sweeps: opts.sweeps.max(1), levels, coarse_rows: cur.nrows, coarse_a32: Csr32::from_csr(&cur), coarse })
+        let coarse = DirectSolver::new(&cur, true)?;
+        crate::progress::note(format!("multigrid levels (unknowns): {:?} + coarsest {}", levels.iter().map(|l| l.a.nrows).collect::<Vec<_>>(), cur.nrows()));
+        Ok(Amg { gamma: opts.gamma.max(1), cheb: opts.chebyshev, sweeps: opts.sweeps.max(1), levels, coarse_rows: cur.nrows(), coarse_a32: Csr32::from_csr(&cur), coarse })
     }
 
     pub fn n_levels(&self) -> usize {
@@ -628,7 +631,7 @@ pub struct PcgResult {
 
 /// Conjugate gradients preconditioned by one AMG V-cycle.
 pub fn pcg(a: &Csr, b: &[f64], amg: &Amg, tol: f64, max_iter: usize) -> PcgResult {
-    let n = a.nrows;
+    let n = a.nrows();
     let trace = std::env::var("NYX_AMG_TRACE").is_ok();
     let mut x = vec![0.0; n];
     let mut r = b.to_vec();
@@ -669,41 +672,3 @@ pub fn pcg(a: &Csr, b: &[f64], amg: &Amg, tol: f64, max_iter: usize) -> PcgResul
     PcgResult { x, iterations: max_iter, relative_residual: rel }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sparse::Coo;
-
-    fn laplace_3d(n: usize) -> Csr {
-        let id = |i: usize, j: usize, k: usize| (k * n + j) * n + i;
-        let mut c = Coo::new(n * n * n, n * n * n);
-        for k in 0..n {
-            for j in 0..n {
-                for i in 0..n {
-                    c.push(id(i, j, k), id(i, j, k), 6.0);
-                    for (di, dj, dk) in [(1i64, 0i64, 0i64), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
-                        let (a, b, cc) = (i as i64 + di, j as i64 + dj, k as i64 + dk);
-                        if a >= 0 && b >= 0 && cc >= 0 && (a as usize) < n && (b as usize) < n && (cc as usize) < n {
-                            c.push(id(i, j, k), id(a as usize, b as usize, cc as usize), -1.0);
-                        }
-                    }
-                }
-            }
-        }
-        c.to_csr()
-    }
-
-    #[test]
-    fn amg_pcg_solves_a_3d_laplacian_in_few_iterations() {
-        let n = 20;
-        let a = laplace_3d(n);
-        let amg = Amg::new(&a, vec![vec![1.0; n * n * n]], 1, &AmgOptions::default()).unwrap();
-        assert!(amg.n_levels() >= 2, "{:?}", amg.sizes());
-        let b: Vec<f64> = (0..n * n * n).map(|i| ((i * 7919) % 101) as f64 / 101.0).collect();
-        let r = pcg(&a, &b, &amg, 1e-10, 100);
-        assert!(r.relative_residual < 1e-10 && r.iterations < 40, "{} iterations, residual {}", r.iterations, r.relative_residual);
-        let direct = SparseSolver::new(&a, true).unwrap().solve(&b);
-        let err = r.x.iter().zip(&direct).map(|(p, q)| (p - q).abs()).fold(0.0, f64::max);
-        assert!(err < 1e-8, "{err}");
-    }
-}

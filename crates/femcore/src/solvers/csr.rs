@@ -10,6 +10,9 @@ use crate::solvers::scalar::{C64, Scalar};
 use crate::solvers::vecops::CHUNK;
 use std::fmt;
 
+mod assembly;
+pub use assembly::*;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CsrError {
     BadIndptr(&'static str),

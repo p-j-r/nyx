@@ -18,7 +18,8 @@
 //! touch the axis `r = 0`.
 
 use crate::optical::fine_rule;
-use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
+use crate::solvers::csr::{c, CCoo, CCsr, C};
+use crate::solvers::driver::eigs_complex;
 use crate::ems::{cell_data, edge_basis, tri_g, CellData, C0};
 use crate::fem::*;
 use crate::mesh::SimplexMesh;

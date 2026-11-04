@@ -65,7 +65,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/LICENSE` | 3 | |
 | `crates/geom/rustfmt.toml` | 13 | only formatted crate (R23) |
 | `crates/geom/Cargo.toml` | 3, 13 | serde only |
-| `crates/femcore/src/solvers/*` | 8, 11 | ported solver library |
+| `crates/femcore/src/solvers/*` | 33, 8, 11 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver |
 | `crates/femcore/src/meshers/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/meshers/interop.rs` | 5, 4 | border between the two mesh families |
 | `crates/femcore/src/meshers/cellmesh.rs` | 5 | |
@@ -96,12 +96,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/view.rs` | 4 | draw-only mesh |
 | `crates/femcore/src/fields.rs` | 9 | cell fields |
 | `crates/femcore/src/fem.rs` | 4, 8 | element basics, original stack |
-| `crates/femcore/src/sparse.rs` | 8, 11 | original stack (R02) |
-| `crates/femcore/src/csparse.rs` | 8 | original stack |
-| `crates/femcore/src/linalg.rs` | 8 | original stack |
-| `crates/femcore/src/amg.rs` | 8 | original stack |
-| `crates/femcore/src/eigen.rs` | 8 | original stack |
-| `crates/femcore/src/lobpcg.rs` | 8 | original stack |
 | `crates/femcore/src/geomdrive.rs` | 2, 6 | |
 | `crates/femcore/src/mesher.rs` | 6, 2 | 2D triangulation core |
 | `crates/femcore/src/mesher3d.rs` | 4, 7 | R05 |
@@ -114,6 +108,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/xmlio.rs` | 13, 19 | |
 | `crates/femcore/src/h5io.rs` | 13, 16 | |
 | `crates/femcore/src/lib.rs` | 12 | module map |
+| `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
+| `crates/femcore/tests/axisym_closed_form.rs` | 33, 1 | the two axisymmetric kernels against closed forms |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16 | |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/stages.rs` | 9 | |
@@ -168,5 +164,5 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 ## Gaps this index shows
 
 * Files with no ADR of their own: benchmarks and studies in `examples/`. They are measurements, not decisions.
-* Modules whose ADR is retrospective and thin on rationale because the history gives only the subject line: `fem.rs`, `sparse.rs`, `csparse.rs`, `linalg.rs`, `amg.rs`, `eigen.rs`, `lobpcg.rs` (ADR 8 covers them as the "original stack"), `mesher3d.rs`, `refine3d.rs` (ADR 4, 7), `dfs.rs`, `sms*.rs`, `ems*.rs`, `sbs*.rs` as physics (ADR 9, 12 are about structure and naming, not about the choice of formulation; `docs/HOW_IT_WORKS.md` is the explanation of the formulations).
+* Modules whose ADR is retrospective and thin on rationale because the history gives only the subject line: `fem.rs`, `mesher3d.rs`, `refine3d.rs` (ADR 4, 7), `dfs.rs`, `sms*.rs`, `ems*.rs`, `sbs*.rs` as physics (ADR 9, 12 are about structure and naming, not about the choice of formulation; `docs/HOW_IT_WORKS.md` is the explanation of the formulations).
 * Decisions with no ADR because they are not recorded anywhere I could read: choice of `faer`, `spade`, `eframe`; choice of P1/P2 and Nedelec 1/2 as the element families (ADR 4 only states what exists); the Brillouin gain formulation. Ask paul if they should be written down.

@@ -13,7 +13,7 @@
 //! with the symmetry of the ring (isotropic, or averaged around the axis with
 //! `average_about_axis`) are exact. A mesh must not touch the axis `r = 0`.
 
-use crate::csparse::{c, CCoo, CCsr, C};
+use crate::solvers::csr::{c, CCoo, CCsr, C};
 use crate::fem::*;
 use crate::material::M6;
 use crate::mesh::SimplexMesh;

@@ -9,7 +9,8 @@
 //! with complex symmetric K and M. The frequency is `f = omega / (2 pi)` (complex) and the
 //! quality factor `Q = Re f / (2 |Im f|)`.
 
-use crate::csparse::{c, eigs_complex, CCoo, CCsr, C};
+use crate::solvers::csr::{c, CCoo, CCsr, C};
+use crate::solvers::driver::eigs_complex;
 use crate::ems_pml::cell_stretches;
 use crate::fem::*;
 use crate::mesh::SimplexMesh;

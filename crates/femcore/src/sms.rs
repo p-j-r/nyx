@@ -14,15 +14,16 @@
 //! its out-of-plane part loads the in-plane stress through the stiffness, which for an isotropic
 //! material is the (1 + nu) alpha dT in-plane free expansion that plane strain gives.
 
-use crate::eigen::{eigs_sym, EigOpts};
+use crate::solvers::driver::EigOpts;
+use crate::solvers::driver::eigs_sym;
 use crate::fem::*;
-use crate::csparse::{c, C};
+use crate::solvers::csr::{c, C};
 use crate::fields::{gradients_at_nodes, node_average, CellFields};
 use crate::material::{M3, M6};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
 use crate::dfs::check_labels;
-use crate::sparse::Csr;
+use crate::solvers::csr::RCsr as Csr;
 use rayon::prelude::*;
 use std::time::Instant;
 
@@ -283,10 +284,10 @@ pub fn setup(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Setup, String> {
     Ok(Setup { d, n1, c6, fixed, vals })
 }
 
-pub(crate) struct Thermal {
-    pub(crate) alpha: Vec<M3>,
-    pub(crate) t: Vec<f64>,
-    pub(crate) tref: f64,
+pub struct Thermal {
+    pub alpha: Vec<M3>,
+    pub t: Vec<f64>,
+    pub tref: f64,
 }
 
 /// Stage 3 of the real solid kernels: plot fields (`|u|`, `von Mises`, `u{x,y,z}`, stresses under wafer names), the
@@ -382,7 +383,7 @@ pub(crate) fn complex_mode_fields(mesh: &SimplexMesh, order: usize, u: &[C]) -> 
 /// search frequency (shift-invert Lanczos; for the lowest modes of a large problem LOBPCG with a multigrid
 /// preconditioner, with a factorisation as the fallback), and a note on which route was taken.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn solve_real_modes(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, k: &Csr, m: &Csr, free: &[usize], nm: usize, f_search: f64) -> Result<(crate::eigen::EigPairs, Option<String>), String> {
+pub fn solve_real_modes(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, k: &Csr, m: &Csr, free: &[usize], nm: usize, f_search: f64) -> Result<(crate::solvers::driver::EigPairs, Option<String>), String> {
     let (d, order) = (st.d, spec.order);
     let kff = k.submatrix(&free, &free);
     let mff = m.submatrix(&free, &free);
@@ -407,37 +408,37 @@ pub(crate) fn solve_real_modes(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setu
         if use_amg {
             // in Auto mode a stalled iteration gives up early and the factorisation takes over
             let guard = spec.solver != LinearSolver::Iterative;
-            let res = crate::lobpcg::lobpcg_guarded(&kff, &mff, nm, nm.clamp(4, 8), &|r: &[f64]| sys.precondition_free(r), 1e-8, 400, guard);
+            let res = crate::solvers::driver::lobpcg_guarded(&kff, &mff, nm, nm.clamp(4, 8), &|r: &[f64]| sys.precondition_free(r), 1e-8, 400, guard);
             match res {
                 Ok(r) if r.converged || spec.solver == LinearSolver::Iterative => {
                     eig_note = Some(format!("LOBPCG with AMG preconditioner: {} levels {:?}, convergence factor {:.2}, setup {:.1} s{}", sys.n_levels(), sys.sizes(), factor, sys.setup_seconds, if r.converged { "" } else { " (not fully converged)" }));
                     r
                 }
-                Err(e) if e.starts_with(crate::lobpcg::STALLED) => {
+                Err(e) if e.starts_with(crate::solvers::driver::STALLED) => {
                     eig_note = Some(format!("{e}; used a sparse factorisation instead"));
-                    eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
+                    eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?
                 }
-                _ => eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?,
+                _ => eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?,
             }
         } else {
             eig_note = Some(format!("multigrid converges slowly here (factor {factor:.2}), used a sparse factorisation"));
-            eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
+            eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?
         }
     } else {
-        eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default())?
+        eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?
     };
     Ok((pairs, eig_note))
 }
 
 /// Stage 1 of the static solid kernel: the load vector (boundary tractions in wafer axes, thermal expansion) next to the
 /// stiffness matrix. A static problem needs a fixed boundary.
-pub(crate) struct StaticAssembly {
-    pub(crate) k: Csr,
-    pub(crate) f: Vec<f64>,
-    pub(crate) thermal: Option<Thermal>,
+pub struct StaticAssembly {
+    pub k: Csr,
+    pub f: Vec<f64>,
+    pub thermal: Option<Thermal>,
 }
 
-pub(crate) fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, st: &Setup, k: Csr) -> Result<StaticAssembly, String> {
+pub fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &SolveState, st: &Setup, k: Csr) -> Result<StaticAssembly, String> {
     if st.fixed.is_empty() {
         return Err("a static solid problem needs a fixed boundary (otherwise it floats freely)".into());
     }
@@ -472,7 +473,7 @@ pub(crate) fn assemble_static(mesh: &SimplexMesh, spec: &ProblemSpec, state: &So
 }
 
 /// Stage 2: the displacement (component blocks) by the linear solver `spec.solver` names, and its note.
-pub(crate) fn solve_static(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, asm: &StaticAssembly) -> Result<(Vec<f64>, Option<String>), String> {
+pub fn solve_static(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, asm: &StaticAssembly) -> Result<(Vec<f64>, Option<String>), String> {
     solve_spd(mesh, spec.order, st.d, spec.solver, &asm.k, &asm.f, &st.fixed, &st.vals)
 }
 

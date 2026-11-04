@@ -2,16 +2,17 @@
 //! waveguide cells): the stiffness and mass matrices are reduced by the periodic constraints and the
 //! complex Hermitian eigenproblem is solved with the complex shift-and-invert Arnoldi solver.
 
-use crate::csparse::{c, eigs_complex, CCsr, C};
+use crate::solvers::csr::{c, CCsr, C};
+use crate::solvers::driver::eigs_complex;
 use crate::mesh::SimplexMesh;
 use crate::periodic::{congruence, match_vertices, nodal_relations, Reduction};
 use crate::problem::*;
 use crate::sms::Setup;
-use crate::sparse::Csr;
+use crate::solvers::csr::RCsr as Csr;
 use std::time::Instant;
 
 fn to_complex(a: &Csr) -> CCsr {
-    CCsr { nrows: a.nrows, ncols: a.ncols, indptr: a.indptr.clone(), indices: a.indices.clone(), data: a.data.iter().map(|&v| c(v, 0.0)).collect() }
+    a.to_complex()
 }
 
 #[allow(clippy::too_many_arguments)]

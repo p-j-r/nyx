@@ -7,11 +7,11 @@
 use crate::expr::eval_at;
 use crate::fem::*;
 use crate::fields::{gradients_at_nodes, node_average, CellFields};
-use crate::linalg::{gen_eigh, SparseSolver};
+use crate::solvers::driver::{dense_gen_eigh as gen_eigh, DirectSolver};
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
 use crate::material::M3;
-use crate::sparse::Csr;
+use crate::solvers::csr::RCsr as Csr;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
@@ -114,7 +114,7 @@ pub fn assemble_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result
     } else {
         assemble_laplace(mesh, order, &eps.iter().map(|e| EPS0 * e).collect::<Vec<_>>())
     };
-    let n = k.nrows;
+    let n = k.nrows();
     let mut f = if rho.iter().any(|&r| r != 0.0) { assemble_source(mesh, order, &rho) } else { vec![0.0; n] };
     let mut volt: BTreeMap<i32, f64> = BTreeMap::new();
     for bc in &spec.bcs {
@@ -194,7 +194,7 @@ pub fn solve_electrostatics(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<So
         scalars,
         log: solver_note.into_iter().collect(),
         seconds: t0.elapsed().as_secs_f64(),
-        dofs: asm.k.nrows,
+        dofs: asm.k.nrows(),
         ..Default::default()
     })
 }
@@ -220,7 +220,7 @@ pub fn assemble_heat(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<HeatSyste
     } else {
         assemble_laplace(mesh, order, &ktensor.iter().map(|t| t[0][0]).collect::<Vec<_>>())
     };
-    let n = k.nrows;
+    let n = k.nrows();
     let q = spec.materials.cell_values(mesh, "Q", Some(0.0))?;
     let mut f = if q.iter().any(|&x| x != 0.0) { assemble_source(mesh, order, &q) } else { vec![0.0; n] };
     let mut tfix: BTreeMap<i32, f64> = BTreeMap::new();
@@ -278,7 +278,7 @@ pub struct HeatStates {
 
 pub fn solve_heat_states(mesh: &SimplexMesh, spec: &ProblemSpec, sys: &HeatSystem) -> Result<HeatStates, String> {
     let order = spec.order;
-    let n = sys.k.nrows;
+    let n = sys.k.nrows();
     let mut log = vec![];
     match &spec.study {
         Study::Stationary => {
@@ -310,11 +310,11 @@ pub fn solve_heat_states(mesh: &SimplexMesh, spec: &ProblemSpec, sys: &HeatSyste
                 // steady part by multigrid-preconditioned CG (falls back to a factorisation if that fails)
                 match solve_spd(mesh, order, 1, spec.solver, &sys.k, &sys.f, &sys.fixed, &sys.vals) {
                     Ok((u, _)) => free.iter().map(|&i| u[i]).collect(),
-                    Err(_) if spec.solver == LinearSolver::Auto => SparseSolver::new(&kff, true)?.solve(&rhs0),
+                    Err(_) if spec.solver == LinearSolver::Auto => DirectSolver::new(&kff, true)?.solve(&rhs0),
                     Err(e) => return Err(e),
                 }
             } else {
-                SparseSolver::new(&kff, true)?.solve(&rhs0)
+                DirectSolver::new(&kff, true)?.solve(&rhs0)
             };
             let coords = mesh.dof_coordinates(order);
             let mut y0 = eval_at(t0_expr, &coords, mesh.dim).map_err(|e| format!("initial temperature: {e}"))?;
@@ -363,7 +363,7 @@ pub fn solve_heat_states(mesh: &SimplexMesh, spec: &ProblemSpec, sys: &HeatSyste
                     _ => None,
                 };
                 let a1_full = if amg_sys.is_some() { Some(m.scaled(1.0 / dt).add_scaled(&sys.k, 1.0)) } else { None };
-                let (s1, s2) = if amg_sys.is_some() { (None, None) } else { (Some(SparseSolver::new(&a1, true)?), Some(SparseSolver::new(&a2, true)?)) };
+                let (s1, s2) = if amg_sys.is_some() { (None, None) } else { (Some(DirectSolver::new(&a1, true)?), Some(DirectSolver::new(&a2, true)?)) };
                 let solve1 = |b: &[f64]| -> Result<Vec<f64>, String> {
                     match (&amg_sys, &s1) {
                         (Some(a), _) => a.solve_free(a1_full.as_ref(), b, 1e-10),
@@ -435,7 +435,7 @@ pub fn solve_heat(mesh: &SimplexMesh, spec: &ProblemSpec, state: &mut SolveState
         scalars: vec![("T min (K)".into(), Scalar::Num(lo)), ("T max (K)".into(), Scalar::Num(hi))],
         log: st.log,
         seconds: t0.elapsed().as_secs_f64(),
-        dofs: sys.k.nrows,
+        dofs: sys.k.nrows(),
         ..Default::default()
     })
 }

@@ -3,34 +3,34 @@
 //! model (`sms_axisym`: bodies of revolution, azimuthal order `m`). The out-of-plane wave-number model (`u(x, z) exp(-j k y)`) that
 //! was the other client is removed (paul, 2026-11-04). The file keeps its name until phase 4 moves it into `nyx-sms`.
 
-use crate::csparse::{c, CCsr, C};
+use crate::solvers::csr::{c, CCoo, CCsr, C};
 use crate::fem::*;
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
 use crate::problem::*;
 use crate::dfs::check_labels;
-use crate::sparse::Csr;
+use crate::solvers::csr::RCsr as Csr;
 use std::time::Instant;
 
 fn ccsr_block_diag(blocks: &[&CCsr]) -> CCsr {
-    let n: usize = blocks.iter().map(|b| b.nrows).sum();
+    let n: usize = blocks.iter().map(|b| b.nrows()).sum();
     let (mut indptr, mut indices, mut data) = (vec![0usize], vec![], vec![]);
     let mut off = 0;
     for b in blocks {
-        for r in 0..b.nrows {
-            for k in b.indptr[r]..b.indptr[r + 1] {
-                indices.push(b.indices[k] + off);
-                data.push(b.data[k]);
+        for r in 0..b.nrows() {
+            for k in b.indptr()[r]..b.indptr()[r + 1] {
+                indices.push(b.indices()[k] as usize + off);
+                data.push(b.values()[k]);
             }
             indptr.push(indices.len());
         }
-        off += b.ncols;
+        off += b.ncols();
     }
-    CCsr { nrows: n, ncols: off, indptr, indices, data }
+    CCsr::from_raw(n, off, indptr, indices, data)
 }
 
 fn to_complex(a: &Csr) -> CCsr {
-    CCsr { nrows: a.nrows, ncols: a.ncols, indptr: a.indptr.clone(), indices: a.indices.clone(), data: a.data.iter().map(|&v| c(v, 0.0)).collect() }
+    a.to_complex()
 }
 
 /// The wafer axis (0 = x, 1 = y, 2 = z) of each displacement block: x, z, y (for a ring r, z, theta).
@@ -186,7 +186,7 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
     // (frequencies, displacement vectors over the free dofs, converged, Krylov dimension)
     type Found = (Vec<(C, usize)>, Vec<Vec<C>>, bool, usize);
     let (mut modes, vectors, converged, kdim): Found = if asm.cf.is_none() {
-        let pairs = crate::csparse::eigs_complex(kf, mf, c(sigma, 0.0), n_modes, 1e-9, 400)?;
+        let pairs = crate::solvers::driver::eigs_complex(kf, mf, c(sigma, 0.0), n_modes, 1e-9, 400)?;
         let modes = pairs
             .values
             .iter()

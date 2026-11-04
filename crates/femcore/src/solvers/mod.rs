@@ -21,8 +21,10 @@
 
 pub mod ads;
 pub mod amg;
+pub mod amg_elastic;
 pub mod ams;
 pub mod basis;
+pub mod arnoldi_real;
 pub mod blr;
 pub mod bsr;
 pub mod bundle;
@@ -31,6 +33,7 @@ pub mod contour;
 pub mod csr;
 pub mod dense;
 pub mod direct;
+pub mod driver;
 pub mod eps;
 pub mod expm;
 pub mod faer_glue;

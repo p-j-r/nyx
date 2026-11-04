@@ -1,6 +1,6 @@
 //! Perfectly matched layers and complex materials in the mode solver.
 mod common;
-use femcore::csparse::c;
+use femcore::solvers::csr::c;
 use femcore::ems::{self, C0};
 use femcore::ems_pml::*;
 use femcore::problem::*;

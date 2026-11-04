@@ -220,12 +220,64 @@ pub(crate) fn assemble<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>, lower: bool) -
     Ok(Assembled { col_ptr, row_idx, a: av, b: bv })
 }
 
+/// The lower-triangle union pattern of symmetric `A` and `B` in O(nnz) without sorting: column `c` of the lower triangle is row `c` of
+/// the CSR from the diagonal on (symmetry), and the rows are merged with the rows of `B` (or the identity). Falls back to [`assemble`]
+/// when a row is not sorted.
+pub(crate) fn assemble_lower_sorted<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>) -> Result<Assembled<T>, SolverError> {
+    let n = a.nrows();
+    if a.ncols() != n || b.is_some_and(|b| b.nrows() != n || b.ncols() != n) || !a.has_sorted_unique_rows() || b.is_some_and(|b| !b.has_sorted_unique_rows()) {
+        return assemble(a, b, true);
+    }
+    if a.nnz() + n >= u32::MAX as usize / 2 {
+        return Err(SolverError::TooLarge);
+    }
+    let cap = a.nnz() / 2 + n;
+    let (mut col_ptr, mut row_idx) = (vec![0u32; n + 1], Vec::with_capacity(cap));
+    let (mut av, mut bv): (Vec<T>, Vec<T>) = (Vec::with_capacity(cap), Vec::with_capacity(cap));
+    for c in 0..n {
+        let (ac, avs) = a.row(c);
+        let mut i = ac.partition_point(|&x| (x as usize) < c);
+        match b {
+            Some(b) => {
+                let (bc, bvs) = b.row(c);
+                let mut j = bc.partition_point(|&x| (x as usize) < c);
+                while i < ac.len() || j < bc.len() {
+                    let (ca, cb) = (ac.get(i).copied().unwrap_or(u32::MAX), bc.get(j).copied().unwrap_or(u32::MAX));
+                    let cm = ca.min(cb);
+                    let x = if ca == cm { i += 1; avs[i - 1] } else { T::ZERO };
+                    let y = if cb == cm { j += 1; bvs[j - 1] } else { T::ZERO };
+                    row_idx.push(cm);
+                    av.push(x);
+                    bv.push(y);
+                }
+            }
+            None => {
+                if i >= ac.len() || ac[i] as usize != c {
+                    row_idx.push(c as u32);
+                    av.push(T::ZERO);
+                    bv.push(T::ONE);
+                }
+                for k in i..ac.len() {
+                    row_idx.push(ac[k]);
+                    av.push(avs[k]);
+                    bv.push(if ac[k] as usize == c { T::ONE } else { T::ZERO });
+                }
+            }
+        }
+        col_ptr[c + 1] = row_idx.len() as u32;
+    }
+    Ok(Assembled { col_ptr, row_idx, a: av, b: bv })
+}
+
 /// `faer`-backed [`ShiftedSolver`] with symbolic reuse.
 pub struct ShiftedFactorization<T: FaerScalar> {
     n: usize,
     definiteness: Definiteness,
-    full: Assembled<T>,
+    /// Union pattern of the whole matrix; built on first use when the Cholesky path (which reads the lower triangle only) is enough.
+    full: Option<Assembled<T>>,
     lower: Option<Assembled<T>>,
+    /// Copies of the inputs kept only while `full` is not built (positive definite case).
+    src: Option<(Csr<T>, Option<Csr<T>>)>,
     vals: Vec<T>,
     sym_lu: Option<SymbolicLu<u32>>,
     sym_llt: Option<SymbolicCholesky<u32>>,
@@ -245,14 +297,19 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     /// lower triangles are used by the Cholesky path).
     pub fn new(a: &Csr<T>, b: Option<&Csr<T>>, definiteness: Definiteness) -> Result<Self, SolverError> {
         let t0 = Instant::now();
-        let full = assemble(a, b, false)?;
-        let lower = if definiteness == Definiteness::PositiveDefinite { Some(assemble(a, b, true)?) } else { None };
-        let nnz = full.row_idx.len();
+        let pd = definiteness == Definiteness::PositiveDefinite;
+        let (full, lower, src) = if pd {
+            (None, Some(assemble_lower_sorted(a, b)?), Some((a.clone(), b.cloned())))
+        } else {
+            (Some(assemble(a, b, false)?), None, None)
+        };
+        let nnz = full.as_ref().map_or_else(|| lower.as_ref().map_or(0, |l| 2 * l.row_idx.len()), |f| f.row_idx.len());
         Ok(Self {
             n: a.nrows(),
             definiteness,
             full,
             lower,
+            src,
             vals: vec![T::ZERO; nnz],
             sym_lu: None,
             sym_llt: None,
@@ -282,15 +339,29 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     /// must be identical to the one the object was built with (otherwise `InvalidArgument`);
     /// [`ShiftedSolver::set_shift`] must be called again before solving.
     pub fn replace_matrices(&mut self, a: &Csr<T>, b: Option<&Csr<T>>) -> Result<(), SolverError> {
+        self.ensure_full()?;
         let full = assemble(a, b, false)?;
-        if full.col_ptr != self.full.col_ptr || full.row_idx != self.full.row_idx {
+        let old = self.full.as_ref().unwrap();
+        if full.col_ptr != old.col_ptr || full.row_idx != old.row_idx {
             return Err(SolverError::InvalidArgument("sparsity pattern differs from the one analysed"));
         }
         if self.definiteness == Definiteness::PositiveDefinite {
-            self.lower = Some(assemble(a, b, true)?);
+            self.lower = Some(assemble_lower_sorted(a, b)?);
+            self.src = Some((a.clone(), b.cloned()));
         }
-        self.full = full;
+        self.full = Some(full);
         self.have = Used::None;
+        Ok(())
+    }
+
+    /// Builds the full union pattern if only the lower triangle exists so far (needed by the LU path).
+    fn ensure_full(&mut self) -> Result<(), SolverError> {
+        if self.full.is_none() {
+            let (a, b) = self.src.as_ref().expect("source matrices kept while the full pattern is missing");
+            self.full = Some(assemble(a, b.as_ref(), false)?);
+            let nnz = self.full.as_ref().unwrap().row_idx.len();
+            self.vals = vec![T::ZERO; nnz];
+        }
         Ok(())
     }
 
@@ -379,21 +450,22 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     }
 
     fn do_lu(&mut self, sigma: T) -> Result<(), SolverError> {
+        self.ensure_full()?;
         let n = self.n;
         let par = self.threads.factor.par();
         if self.sym_lu.is_none() {
             let t0 = Instant::now();
             self.sym_lu = Some(
-                factorize_symbolic_lu(Self::pattern(&self.full, n), Default::default())
+                factorize_symbolic_lu(Self::pattern(self.full.as_ref().unwrap(), n), Default::default())
                     .map_err(|_| SolverError::OutOfMemory)?,
             );
             self.stats.analyse_secs += t0.elapsed().as_secs_f64();
             self.stats.symbolic_count += 1;
         }
         let mut vals = std::mem::take(&mut self.vals);
-        Self::shifted_values(&self.full, sigma, &mut vals);
+        Self::shifted_values(self.full.as_ref().unwrap(), sigma, &mut vals);
         let sym = self.sym_lu.as_ref().unwrap();
-        let mat = SparseColMatRef::new(Self::pattern(&self.full, n), T::faer_slice(&vals));
+        let mat = SparseColMatRef::new(Self::pattern(self.full.as_ref().unwrap(), n), T::faer_slice(&vals));
         let t0 = Instant::now();
         let mut mem = MemBuffer::new(sym.factorize_numeric_lu_scratch::<T::Elem>(par, Default::default()));
         let res = sym.factorize_numeric_lu::<T::Elem>(

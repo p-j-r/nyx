@@ -23,11 +23,8 @@
 //! the machine code. `too_many_arguments` is allowed on the few assembly/solver entry points that take a full problem
 //! description (each marked where it applies).
 #![allow(clippy::needless_range_loop)]
-pub mod amg;
 pub mod analysis;
 pub mod optical;
-pub mod csparse;
-pub mod eigen;
 pub mod ems;
 pub mod ems3d;
 pub mod ems_axisym;
@@ -40,9 +37,7 @@ pub mod fields;
 pub mod geomdrive;
 #[cfg(feature = "hdf5-metno")]
 pub mod h5io;
-pub mod linalg;
 pub mod material;
-pub mod lobpcg;
 pub mod mesh;
 pub mod meshers;
 pub mod mesher;
@@ -69,7 +64,6 @@ pub mod sms_pml;
 pub mod solve;
 pub mod solvers;
 pub mod validate;
-pub mod sparse;
 pub mod usecases;
 pub mod view;
 pub mod xmlio;
