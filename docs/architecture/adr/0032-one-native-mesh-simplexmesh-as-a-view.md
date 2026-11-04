@@ -48,3 +48,7 @@ Risk is in step 3 (adaptation speed and determinism; ADR 11) and in the numberin
 ## Phase 4 deliverable: remove `SimplexMesh`
 
 When the physics crates exist (phase 4), each physics reads the native `CellMesh` and numbers its own unknowns (edges, faces, nodes for its element family). Then `mesh::SimplexMesh`, `from_cells_split` and the split report go away; quadrilaterals, prisms and hexahedra are solved natively, which also removes the unknowns that the cut adds in PML layers. Until then `SimplexMesh` is the solver view of the one mesh.
+
+## Step 5 (done): one PML generator
+
+`meshing::pml_box::build_pml` (2D quadrilateral layers, 3D prisms and hexahedra) is the only generator of structured layers. `meshing::pml` (`structured_pml`, `structured_pml_native`) and `meshing::pml3` (`add_pml_3d`) are adapters: they turn a geom model's `Pml` feature, or a box-shaped tetrahedral mesh, into a `PmlSpec`, call `build_pml`, and cut the result for the simplex solvers. The inline mode (geom's `Pml` pieces meshed as ordinary regions, `PmlMode::Inline`) is a property of the geom model, not a second generator. Guarantee, now a contract test (`mesh_pml_generator_keeps_the_physical_vertex_and_cell_numbers`): the output mesh starts with the physical vertices and cells unchanged in id, order, connectivity and label, and the layers are appended; this is what the mesher feature chart item P3 (adapt the physical mesh, regenerate the layers, map fields back by id) needs, and it holds in 2D and 3D.

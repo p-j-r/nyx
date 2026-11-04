@@ -347,6 +347,35 @@ fn mesh_quadrilaterals_are_counter_clockwise_and_split_exactly() {
 }
 
 #[test]
+fn mesh_pml_generator_keeps_the_physical_vertex_and_cell_numbers() {
+    // The one PML generator (`meshing::pml_box::build_pml`, ADR 32) appends the layers to the physical mesh: vertex ids, cell order,
+    // connectivity and labels of the physical part are unchanged, so a field on the physical mesh maps back by id (the solve-adapt loop
+    // of the mesher feature chart, item P3, relies on it).
+    use femcore::adapt::work::simplex_to_adapt;
+    use femcore::meshing::pml_box::{build_pml, PmlSpec};
+    fn check<const D: usize>(phys: &femcore::adapt::work::SimplexMesh<D>, pml: &femcore::meshing::pml_box::PmlMesh<D>) {
+        assert_eq!(pml.n_physical_points, phys.points.len());
+        assert_eq!(pml.n_physical_cells, phys.n_cells());
+        assert!(pml.mesh.points.len() > phys.points.len(), "layer vertices are appended");
+        assert_eq!(&pml.mesh.points[..phys.points.len()], &phys.points[..], "physical coordinates by id");
+        for c in 0..phys.n_cells() {
+            let mut want = phys.cells[c * (D + 1)..(c + 1) * (D + 1)].to_vec();
+            let mut got = pml.mesh.cell(c).to_vec();
+            want.sort_unstable();
+            got.sort_unstable();
+            assert_eq!(got, want, "cell {c}");
+            assert_eq!(pml.mesh.label[c], phys.cell_label[c], "label of cell {c}");
+        }
+    }
+    let plate = femcore::meshing::geomdrive::plate(1.0, 1.0, 0.125).unwrap().mesh;
+    let phys2 = simplex_to_adapt::<2>(&plate).unwrap();
+    check(&phys2, &build_pml(&phys2, &PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 3) }).unwrap());
+    let block = femcore::meshing::geomdrive::block(1.0, 1.0, 1.0, 0.34, 3).unwrap().mesh;
+    let phys3 = simplex_to_adapt::<3>(&block).unwrap();
+    check(&phys3, &build_pml(&phys3, &PmlSpec { outer_label: Some(1), ..PmlSpec::<3>::uniform(0.5, 1) }).unwrap());
+}
+
+#[test]
 fn mesh_fmsh_round_trip_and_version() {
     use femcore::mesh::cells::CellMesh;
     use femcore::mesh::io::fmsh;
