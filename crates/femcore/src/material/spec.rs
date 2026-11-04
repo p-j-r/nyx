@@ -51,7 +51,7 @@ pub struct MaterialSpec {
     pub optical: Option<Optical>,
 }
 
-const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "density", "density_unit", "elastic", "thermal", "electrical", "optical"];
+const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "extends", "density", "density_unit", "elastic", "thermal", "electrical", "optical"];
 const ELASTIC_KEYS: &[&str] = &["unit", "compliance_unit", "class", "unique_axis", "matrix", "compliance", "E", "nu", "lambda", "mu", "K", "G", "c11", "c12", "c44"];
 const THERMAL_KEYS: &[&str] = &["conductivity", "conductivity_unit", "specific_heat", "specific_heat_unit", "expansion", "expansion_unit"];
 const ELECTRICAL_KEYS: &[&str] = &["permittivity", "permeability", "conductivity", "conductivity_unit"];
@@ -71,8 +71,20 @@ impl MaterialSpec {
             path: String::new(),
             message: format!("the file is not valid TOML: {e}"),
         })?;
+        Self::from_table(&table, fallback_name)
+    }
+
+    /// Reads a material from a parsed table (already merged with its base if it had `extends`).
+    pub fn from_table(table: &toml::Table, fallback_name: &str) -> Result<MaterialSpec, MaterialError> {
         let name = table.get("name").and_then(|v| v.as_str()).unwrap_or(fallback_name).to_string();
-        let mut s = Section::new(&name, "", &table);
+        let mut s = Section::new(&name, "", table);
+        if let Some(base) = table.get("extends") {
+            let base = base.as_str().unwrap_or("?");
+            return Err(s.err(
+                "extends",
+                format!("extends = \"{base}\" can only be read together with its base material: load the file through Library::load_dir or Library::read, which find \"{base}\" in the library"),
+            ));
+        }
 
         match s.value("format") {
             Some(toml::Value::Integer(FORMAT)) => {}
@@ -260,9 +272,16 @@ fn put_tensor(t: &mut toml::Table, key: &str, v: Option<&TensorProp>, unit: Opti
 }
 
 /// A folder of material files, loaded at run time. Materials are found by file name (without `.toml`), ignoring case.
+/// A file may start from another material of the library with `extends = "name"` (see `merge_over`).
 #[derive(Clone, Debug, Default)]
 pub struct Library {
     materials: BTreeMap<String, MaterialSpec>,
+    /// the tables after `extends` was resolved, which later files and `read` extend in turn
+    tables: BTreeMap<String, toml::Table>,
+}
+
+fn nearest<'a>(name: &str, names: impl Iterator<Item = &'a String>) -> Option<&'a String> {
+    names.min_by_key(|n| super::reader::edit_distance(name, n)).filter(|n| super::reader::edit_distance(name, n) <= 3)
 }
 
 impl Library {
@@ -273,10 +292,40 @@ impl Library {
         })?;
         let mut files: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().and_then(|x| x.to_str()) == Some("toml")).collect();
         files.sort();
-        let (mut materials, mut errors) = (BTreeMap::new(), Vec::new());
+        let (mut raw, mut errors) = (BTreeMap::new(), Vec::new());
         for f in files {
-            let key = f.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
-            match MaterialSpec::load(&f) {
+            let stem = f.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+            let text = match std::fs::read_to_string(&f) {
+                Ok(t) => t,
+                Err(e) => {
+                    errors.push(MaterialError { material: stem, path: String::new(), message: format!("cannot read {}: {e}", f.display()) });
+                    continue;
+                }
+            };
+            match text.parse::<toml::Table>() {
+                Ok(t) => {
+                    raw.insert(stem.to_ascii_lowercase(), (stem, t));
+                }
+                Err(e) => errors.push(MaterialError { material: stem, path: String::new(), message: format!("the file is not valid TOML: {e}") }),
+            }
+        }
+        let (mut materials, mut tables) = (BTreeMap::new(), BTreeMap::new());
+        for key in raw.keys().cloned().collect::<Vec<_>>() {
+            let stem = raw[&key].0.clone();
+            let merged = resolve(&key, &raw, &mut Vec::new(), &mut tables);
+            let result = merged.and_then(|t| {
+                let extends = raw[&key].1.get("extends").and_then(|v| v.as_str()).map(str::to_string);
+                MaterialSpec::from_table(&t, &stem).map_err(|mut e| {
+                    if let Some(b) = extends {
+                        e.message.push_str(&format!(" (this material extends \"{b}\"; the combined result is checked)"));
+                    }
+                    if e.material != stem {
+                        e.material = format!("{} (file {stem}.toml)", e.material);
+                    }
+                    e
+                })
+            });
+            match result {
                 Ok(m) => {
                     materials.insert(key, m);
                 }
@@ -284,10 +333,29 @@ impl Library {
             }
         }
         if errors.is_empty() {
-            Ok(Library { materials })
+            Ok(Library { materials, tables })
         } else {
             Err(errors)
         }
+    }
+
+    /// Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder,
+    /// for example one embedded in a project).
+    pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError> {
+        let table: toml::Table = text.parse().map_err(|e: toml::de::Error| MaterialError {
+            material: fallback_name.to_string(),
+            path: String::new(),
+            message: format!("the file is not valid TOML: {e}"),
+        })?;
+        let merged = match table.get("extends") {
+            None => table,
+            Some(b) => {
+                let base = b.as_str().ok_or_else(|| MaterialError { material: fallback_name.to_string(), path: "extends".into(), message: "must be the name of a library material in quotes".into() })?;
+                let bt = self.tables.get(&base.to_ascii_lowercase()).ok_or_else(|| missing_base(fallback_name, base, self.tables.keys()))?;
+                merge_over(bt, &table)
+            }
+        };
+        MaterialSpec::from_table(&merged, fallback_name)
     }
 
     pub fn get(&self, name: &str) -> Option<&MaterialSpec> {
@@ -314,6 +382,66 @@ impl Library {
     pub fn is_empty(&self) -> bool {
         self.materials.is_empty()
     }
+}
+
+fn missing_base<'a>(who: &str, base: &str, names: impl Iterator<Item = &'a String> + Clone) -> MaterialError {
+    let hint = nearest(&base.to_ascii_lowercase(), names.clone()).map(|n| format!("; did you mean \"{n}\"?")).unwrap_or_default();
+    MaterialError {
+        material: who.to_string(),
+        path: "extends".into(),
+        message: format!("extends = \"{base}\", but the library has no material of that name{hint} (available: {})", names.cloned().collect::<Vec<_>>().join(", ")),
+    }
+}
+
+/// The table of `key` with its `extends` chain resolved. `stack` is the chain being resolved, to detect loops.
+fn resolve(key: &str, raw: &BTreeMap<String, (String, toml::Table)>, stack: &mut Vec<String>, done: &mut BTreeMap<String, toml::Table>) -> Result<toml::Table, MaterialError> {
+    if let Some(t) = done.get(key) {
+        return Ok(t.clone());
+    }
+    let (stem, table) = &raw[key];
+    let Some(base) = table.get("extends") else {
+        done.insert(key.to_string(), table.clone());
+        return Ok(table.clone());
+    };
+    let err = |m: String| MaterialError { material: stem.clone(), path: "extends".into(), message: m };
+    let base = base.as_str().ok_or_else(|| err("must be the name of a library material in quotes".into()))?;
+    let bkey = base.to_ascii_lowercase();
+    stack.push(key.to_string());
+    if stack.contains(&bkey) {
+        let mut chain: Vec<String> = stack.iter().map(|k| raw[k].0.clone()).collect();
+        chain.push(raw[&bkey].0.clone());
+        stack.pop();
+        return Err(err(format!("the extends chain forms a loop: {}. A material cannot start from itself, directly or through others", chain.join(" -> "))));
+    }
+    if !raw.contains_key(&bkey) {
+        stack.pop();
+        return Err(missing_base(stem, base, raw.keys()));
+    }
+    let base_table = resolve(&bkey, raw, stack, done);
+    stack.pop();
+    let base_table = base_table.map_err(|e| err(format!("its base \"{base}\" has a problem: {}", e.message)))?;
+    let merged = merge_over(&base_table, table);
+    done.insert(key.to_string(), merged.clone());
+    Ok(merged)
+}
+
+/// `over` laid over `base`: every top-level key of `over` replaces the one of `base`, and a table (`elastic`, `thermal`, `electrical`,
+/// `optical`) is replaced as a whole, never mixed key by key, so a half-replaced stiffness cannot occur. `name` is not inherited; a
+/// unit key (`density_unit`) of the base does not follow a value that replaces the base's (units are never assumed).
+pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table {
+    let mut r = base.clone();
+    r.remove("extends");
+    r.remove("name");
+    for (k, v) in over {
+        if k == "extends" {
+            continue;
+        }
+        r.insert(k.clone(), v.clone());
+        if k == "density" && !over.contains_key("density_unit") {
+            r.remove("density_unit");
+        }
+    }
+    r
 }
 
 /// The keys each table of a material file accepts (the contract test compares them with the JSON Schema).

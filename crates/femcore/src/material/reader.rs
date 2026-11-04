@@ -41,7 +41,7 @@ pub struct Section<'a> {
     used: BTreeSet<String>,
 }
 
-fn edit_distance(a: &str, b: &str) -> usize {
+pub(crate) fn edit_distance(a: &str, b: &str) -> usize {
     let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
     let mut prev: Vec<usize> = (0..=b.len()).collect();
     for i in 1..=a.len() {

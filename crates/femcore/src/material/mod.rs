@@ -20,7 +20,7 @@ pub mod units;
 pub use elastic::{Class, Elastic, Unique};
 pub use optics::{Dispersion, Optical, OpticsError};
 pub use reader::MaterialError;
-pub use spec::{Library, MaterialSpec};
+pub use spec::{merge_over, Library, MaterialSpec};
 pub use tensor::TensorProp;
 
 pub type M3 = [[f64; 3]; 3];
