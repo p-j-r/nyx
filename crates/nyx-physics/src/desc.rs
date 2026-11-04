@@ -2,7 +2,6 @@
 //! Schemas from them, the mesher reads the sizing hint, and the engine validates a problem against them. All plain serde data.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Which meshes a study runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,13 +224,6 @@ impl FieldLink {
     }
 }
 
-/// What the mesher needs from a physics to size the elements before any solution exists.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Sizing {
-    /// element order the problem asks for
-    pub order: u8,
-    /// factor on the search frequency of an eigenfrequency study (the answer may lie above the guess)
-    pub headroom: f64,
-    /// the shortest wavelength (m) the physics wants resolved, by region name; regions without a wave are absent
-    pub wavelengths: BTreeMap<String, f64>,
-}
+/// What the mesher needs from a physics to size the elements before any solution exists. Defined by the mesher (phase 2), so that the
+/// meshing code knows no physics; the physics crates fill it in (`Physics::sizing`).
+pub use femcore::meshing::Sizing;

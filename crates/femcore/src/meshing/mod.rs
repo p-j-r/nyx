@@ -14,6 +14,7 @@
 pub mod geomdrive;
 pub mod mesher;
 pub mod physics_size;
+pub mod sizing;
 pub mod pml;
 pub mod pml3;
 pub mod pml_box;
@@ -27,6 +28,7 @@ use crate::adapt::field::{BackgroundMetric2, MetricField};
 use crate::adapt::geom::Geometry2;
 use crate::adapt::metric::{intersect, isotropic, Sym};
 use physics_size::PhysicsSizing;
+pub use sizing::Sizing;
 use crate::problem::ProblemSpec;
 use crate::adapt::topo::{Sig, Work2};
 use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};

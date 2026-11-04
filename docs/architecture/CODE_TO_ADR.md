@@ -80,6 +80,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/pml.rs` | 5, 7 | structured PML for the nyx mesh (was `meshing_pml.rs`) |
 | `crates/femcore/src/meshing/pml_box.rs` | 7, 5 | structured PML generator (was `meshers/adapt/pml.rs`) |
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
+| `crates/femcore/src/meshing/sizing.rs` | 17, 25 | the neutral Sizing a physics reports to the mesher (re-exported by nyx-physics) |
 | `crates/femcore/src/meshing/validate/*` | 7 | |
 | `crates/femcore/src/adapt/par.rs` | 11 | R03 |
 | `crates/femcore/src/adapt/estimate*.rs` | 7, 17 | |

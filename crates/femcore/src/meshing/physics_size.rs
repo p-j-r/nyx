@@ -1,4 +1,6 @@
-//! Element sizes from the physics of a `ProblemSpec`: how fine a mesh must be for the waves the study looks for, before any solution exists.
+//! Element sizes from the physics: how fine a mesh must be for the waves the study looks for, before any solution exists. The core takes the
+//! neutral `meshing::Sizing` a physics reports (`cell_sizes_for`, `vertex_sizes_for`, `metrics_for`, `adapt_tets_for`); the functions that take a
+//! `ProblemSpec` are the adapter for the old kernels (`spec_sizing`) and go when the physics crates report their own `Sizing` (phase 4).
 //!
 //! Every wave problem has a shortest wavelength per domain, and a mesh resolves it with a number of points per wavelength that depends on the
 //! element order. This module finds that wavelength from the materials and the study, divides it by the points per wavelength, and hands back
@@ -17,6 +19,7 @@
 
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
+use super::sizing::{label_names, Sizing};
 use crate::adapt::metric::{isotropic, sym_eig, Sym};
 use crate::problem::{Physics, ProblemSpec, Study, TensorKind};
 use std::collections::BTreeMap;
@@ -156,28 +159,42 @@ pub fn wave_speed_range(c: &M6, rho: f64) -> (f64, f64) {
     (lo.sqrt(), hi.sqrt())
 }
 
-/// Target element size of every cell: the shortest wavelength of its domain over the points per wavelength, relaxed in PML domains.
-/// Cells of domains without a wave get `f64::INFINITY`.
-pub fn cell_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
-    if !(sz.pml_relax >= 1.0 && sz.ppw(spec.order) > 0.0) {
-        return Err("points per wavelength must be positive and pml_relax at least 1".into());
+// ---- from a neutral `Sizing` (what a physics reports) to element sizes ----
+
+/// Target element size of every cell: the shortest wavelength of its domain, divided by the headroom and by the points per wavelength, and
+/// relaxed in PML domains. `resolve` turns the region names of `sizing` into domain labels (`sizing::label_names` for a mesh with numbers
+/// only). Cells of domains without a wave get `f64::INFINITY`.
+pub fn cell_sizes_for(
+    sizing: &Sizing,
+    resolve: &dyn Fn(&str) -> Option<i32>,
+    cell_labels: &[i32],
+    pml: &dyn Fn(i32) -> bool,
+    sz: &PhysicsSizing,
+) -> Result<Vec<f64>, String> {
+    let order = sizing.order as usize;
+    if !(sz.pml_relax >= 1.0 && sz.ppw(order) > 0.0 && sizing.headroom > 0.0) {
+        return Err("points per wavelength and headroom must be positive and pml_relax at least 1".into());
     }
-    let lam = wavelengths_with(spec, mesh, sz.eigen_headroom)?;
-    let ppw = sz.ppw(spec.order);
-    let pml = |d: i32| spec.materials.pml.contains_key(&d);
-    Ok(mesh
-        .cell_labels
+    let lam = sizing.resolve(resolve)?;
+    let ppw = sz.ppw(order);
+    Ok(cell_labels
         .iter()
         .map(|&d| match lam.get(&d) {
-            Some(&l) => l / ppw * if pml(d) { sz.pml_relax } else { 1.0 },
+            Some(&l) => l / sizing.headroom / ppw * if pml(d) { sz.pml_relax } else { 1.0 },
             None => f64::INFINITY,
         })
         .collect())
 }
 
 /// Target element size at every vertex: the smallest of the cells that meet there. A vertex of cells without a wave gets `f64::INFINITY`.
-pub fn vertex_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
-    let cs = cell_sizes(spec, mesh, sz)?;
+pub fn vertex_sizes_for(
+    sizing: &Sizing,
+    resolve: &dyn Fn(&str) -> Option<i32>,
+    mesh: &SimplexMesh,
+    pml: &dyn Fn(i32) -> bool,
+    sz: &PhysicsSizing,
+) -> Result<Vec<f64>, String> {
+    let cs = cell_sizes_for(sizing, resolve, &mesh.cell_labels, pml, sz)?;
     let mut vh = vec![f64::INFINITY; mesh.n_points()];
     for (c, &h) in cs.iter().enumerate() {
         for &v in mesh.cell(c) {
@@ -187,26 +204,83 @@ pub fn vertex_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) 
     Ok(vh)
 }
 
-/// Isotropic metric of the physics size at every vertex of a 2D mesh. Vertices without a wave get `ceiling` (a size the caller would accept
-/// anywhere, typically the global size).
+/// Isotropic metric of the physics size at every vertex of a mesh of any dimension (`D` = 2 or 3). Vertices without a wave get `ceiling` (a
+/// size the caller would accept anywhere, typically the global size).
+pub fn metrics_for<const D: usize>(
+    sizing: &Sizing,
+    resolve: &dyn Fn(&str) -> Option<i32>,
+    mesh: &SimplexMesh,
+    pml: &dyn Fn(i32) -> bool,
+    sz: &PhysicsSizing,
+    ceiling: f64,
+) -> Result<Vec<Sym<D>>, String> {
+    if mesh.dim != D {
+        return Err(format!("a {}D mesh, but metrics for {D}D were asked", mesh.dim));
+    }
+    Ok(vertex_sizes_for(sizing, resolve, mesh, pml, sz)?.into_iter().map(|h| isotropic::<D>(h.min(ceiling).max(1e-300))).collect())
+}
+
+/// Adapts a tetrahedral mesh to a neutral `Sizing`: the sizes of `vertex_sizes_for` (capped at `ceiling`), graded with slope `grade`,
+/// carried to the new vertices by a background field. Domain labels and boundary-facet labels pass through; corners, creases and
+/// material interfaces are kept as `adapt::topo3` classifies them. Returns the mesh and the report.
+#[allow(clippy::too_many_arguments)]
+pub fn adapt_tets_for(
+    mesh: &SimplexMesh,
+    sizing: &Sizing,
+    resolve: &dyn Fn(&str) -> Option<i32>,
+    pml: &dyn Fn(i32) -> bool,
+    sz: &PhysicsSizing,
+    ceiling: f64,
+    grade: f64,
+    opt: &crate::adapt::ops3::AdaptOptions3,
+) -> Result<(SimplexMesh, crate::adapt::drive::AdaptReport), String> {
+    use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
+    use crate::adapt::{drive3::adapt3, field3::BackgroundMetric3, topo3::TopoOptions3};
+    let metrics = metrics_for::<3>(sizing, resolve, mesh, pml, sz, ceiling)?;
+    let old = simplex_to_adapt::<3>(mesh)?;
+    let field = BackgroundMetric3::new_graded(&old, &metrics, grade);
+    let out = adapt3(&old, &field, &TopoOptions3::default(), opt)?;
+    Ok((simplex_from_adapt(&out.mesh), out.report))
+}
+
+// ---- the adapter from `ProblemSpec` (until the physics crates report their own `Sizing`, phase 4) ----
+
+/// The `Sizing` of a problem as the old kernels define it: element order, the headroom of an eigenfrequency study, and the shortest
+/// wavelength of every domain (keys are the decimal labels, see `sizing::label_names`).
+pub fn spec_sizing(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Sizing, String> {
+    let eigen = matches!(spec.study, Study::Eigenfrequency { f_search, .. } if f_search > 0.0);
+    let lam = wavelengths_with(spec, mesh, 1.0)?;
+    Ok(Sizing::by_label(spec.order as u8, if eigen { sz.eigen_headroom } else { 1.0 }, &lam))
+}
+
+fn pml_of(spec: &ProblemSpec) -> impl Fn(i32) -> bool + '_ {
+    move |d| spec.materials.pml.contains_key(&d)
+}
+
+/// Target element size of every cell of `mesh` for the problem `spec` (see [`cell_sizes_for`]).
+pub fn cell_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
+    cell_sizes_for(&spec_sizing(spec, mesh, sz)?, &label_names, &mesh.cell_labels, &pml_of(spec), sz)
+}
+
+/// Target element size at every vertex for the problem `spec` (see [`vertex_sizes_for`]).
+pub fn vertex_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
+    vertex_sizes_for(&spec_sizing(spec, mesh, sz)?, &label_names, mesh, &pml_of(spec), sz)
+}
+
+/// Isotropic metric of the physics size at every vertex of a 2D mesh. Vertices without a wave get `ceiling`.
 pub fn metrics(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing, ceiling: f64) -> Result<Vec<Sym<2>>, String> {
     if mesh.dim != 2 {
         return Err("physics metrics are for 2D meshes".into());
     }
-    Ok(vertex_sizes(spec, mesh, sz)?.into_iter().map(|h| isotropic::<2>(h.min(ceiling).max(1e-300))).collect())
+    metrics_d::<2>(spec, mesh, sz, ceiling)
 }
 
-/// Isotropic metric of the physics size at every vertex of a mesh of any dimension (`D` = 2 or 3). Vertices without a wave get `ceiling`.
+/// Isotropic metric of the physics size at every vertex of a mesh of any dimension (`D` = 2 or 3) for the problem `spec`.
 pub fn metrics_d<const D: usize>(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing, ceiling: f64) -> Result<Vec<Sym<D>>, String> {
-    if mesh.dim != D {
-        return Err(format!("a {}D mesh, but metrics for {D}D were asked", mesh.dim));
-    }
-    Ok(vertex_sizes(spec, mesh, sz)?.into_iter().map(|h| isotropic::<D>(h.min(ceiling).max(1e-300))).collect())
+    metrics_for::<D>(&spec_sizing(spec, mesh, sz)?, &label_names, mesh, &pml_of(spec), sz, ceiling)
 }
 
-/// Adapts a tetrahedral mesh to the physics of `spec`: the sizes of `vertex_sizes` (capped at `ceiling`), graded with slope `grade`,
-/// carried to the new vertices by a background field. Domain labels and boundary-facet labels pass through; corners, creases and
-/// material interfaces are kept as `adapt::topo3` classifies them. Returns the mesh and the report.
+/// Adapts a tetrahedral mesh to the physics of `spec` (see [`adapt_tets_for`]).
 pub fn adapt_tets(
     mesh: &SimplexMesh,
     spec: &ProblemSpec,
@@ -215,13 +289,7 @@ pub fn adapt_tets(
     grade: f64,
     opt: &crate::adapt::ops3::AdaptOptions3,
 ) -> Result<(SimplexMesh, crate::adapt::drive::AdaptReport), String> {
-    use crate::adapt::{drive3::adapt3, field3::BackgroundMetric3, topo3::TopoOptions3};
-    use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
-    let metrics = metrics_d::<3>(spec, mesh, sz, ceiling)?;
-    let old = simplex_to_adapt::<3>(mesh)?;
-    let field = BackgroundMetric3::new_graded(&old, &metrics, grade);
-    let out = adapt3(&old, &field, &TopoOptions3::default(), opt)?;
-    Ok((simplex_from_adapt(&out.mesh), out.report))
+    adapt_tets_for(mesh, &spec_sizing(spec, mesh, sz)?, &label_names, &pml_of(spec), sz, ceiling, grade, opt)
 }
 
 #[cfg(test)]
