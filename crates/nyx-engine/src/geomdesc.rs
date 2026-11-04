@@ -1,4 +1,4 @@
-//! Descriptors of the feature operations: for every `Op` its kind, what it does, its fields with their types and defaults, and the JSON
+//! Descriptors of the geom feature operations (they live here, not in `geom`, because `geom` depends on serde only: ADR 3): for every `Op` its kind, what it does, its fields with their types and defaults, and the JSON
 //! Schema built from them. The MCP server generates one tool per descriptor (restructure gate G5: every tool geom offers, none hand-picked),
 //! the window can build its forms from the same table, and `build_op` turns the friendly arguments of a tool call (selectors as text,
 //! features by name) into the `Op` the feature list stores.
@@ -6,10 +6,16 @@
 //! Completeness is enforced twice: `kind_of` matches every `Op` variant, so a new variant does not compile until it is listed here, and
 //! the tests check that the field names of every descriptor equal the serde field names of a sample operation of that kind.
 
-use crate::error::{GeomError, GeomResult};
-use crate::model::{FeatureList, Op};
-use crate::select::Selector;
+use geom::model::{FeatureList, Op};
+use geom::select::Selector;
+use nyx_physics::Error;
 use serde_json::{json, Map, Value};
+
+type GeomResult<T> = Result<T, Error>;
+
+fn inv(text: String) -> Error {
+    Error::Invalid(text)
+}
 
 /// How the value of one field is written in a tool call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,7 +111,10 @@ const SWEEP_AXIS_DOC: &str = "the axis of the sweep";
 /// Every operation, in a fixed order (shapes, builders, naming, boundary).
 pub fn all() -> Vec<OpDesc> {
     use Group::{Boundary, Build, Labels, Shape};
-    use Ty::{Axis, Expr, Exprs, Feature, Features, Keep, Naming, Pattern, Pins, Points, Regions, Selector, Sides, Steps, Text, TextList};
+    use Ty::{
+        Axis, Expr, Exprs, Feature, Features, Keep, Naming, Pattern, Pins, Points, Regions, Selector, Sides, Steps,
+        Text, TextList,
+    };
     let d = |kind, title, doc, group, dims, fields| OpDesc { kind, title, doc, group, dims, fields };
     vec![
         d("Rect", "Rectangle", "A rectangle in the x-z cross-section, given by its two corners.", Shape, &[2], vec![
@@ -278,9 +287,13 @@ fn ty_schema(t: Ty) -> Value {
     match t {
         Ty::Expr => expr_schema(),
         Ty::Exprs(n) => json!({ "type": "array", "items": expr_schema(), "minItems": n, "maxItems": n }),
-        Ty::Points(n) => json!({ "type": "array", "items": { "type": "array", "items": expr_schema(), "minItems": n, "maxItems": n }, "minItems": 3 }),
+        Ty::Points(n) => {
+            json!({ "type": "array", "items": { "type": "array", "items": expr_schema(), "minItems": n, "maxItems": n }, "minItems": 3 })
+        }
         Ty::Axis => json!({ "enum": ["X", "Y", "Z"] }),
-        Ty::Feature => json!({ "oneOf": [{ "type": "string" }, { "type": "integer" }], "description": "the name of an earlier feature (or its id)" }),
+        Ty::Feature => {
+            json!({ "oneOf": [{ "type": "string" }, { "type": "integer" }], "description": "the name of an earlier feature (or its id)" })
+        }
         Ty::Features => json!({ "type": "array", "items": { "oneOf": [{ "type": "string" }, { "type": "integer" }] } }),
         Ty::Text => json!({ "type": "string" }),
         Ty::TextList => json!({ "type": "array", "items": { "type": "string" } }),
@@ -348,36 +361,36 @@ fn feature_ref(list: &FeatureList, v: &Value, what: &str) -> GeomResult<Value> {
         Value::Number(n) if n.is_u64() => {
             let id = n.as_u64().unwrap() as u32;
             if list.feature(id).is_none() {
-                return Err(GeomError(format!("{what}: there is no feature with id {id}")));
+                return Err(inv(format!("{what}: there is no feature with id {id}")));
             }
             Ok(json!(id))
         }
         Value::String(s) => match list.feature_by_name(s) {
             Some(f) => Ok(json!(f.id)),
-            None => Err(GeomError(format!(
+            None => Err(inv(format!(
                 "{what}: there is no feature named '{s}' (the features are: {})",
                 list.features.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ")
             ))),
         },
-        other => Err(GeomError(format!("{what}: a feature is given by its name or id, not {other}"))),
+        other => Err(inv(format!("{what}: a feature is given by its name or id, not {other}"))),
     }
 }
 
 fn selector_value(v: &Value, what: &str) -> GeomResult<Value> {
     match v {
         Value::String(s) => {
-            let sel = Selector::parse(s).map_err(|e| GeomError(format!("{what}: {e}")))?;
-            serde_json::to_value(sel).map_err(|e| GeomError(e.to_string()))
+            let sel = Selector::parse(s).map_err(|e| inv(format!("{what}: {e}")))?;
+            serde_json::to_value(sel).map_err(|e| inv(e.to_string()))
         }
         other if other.is_object() => Ok(other.clone()),
-        other => Err(GeomError(format!("{what}: a selector is written as text, e.g. \"outer & plane(x = 0)\", not {other}"))),
+        other => Err(inv(format!("{what}: a selector is written as text, e.g. \"outer & plane(x = 0)\", not {other}"))),
     }
 }
 
 fn convert(list: &FeatureList, f: &FieldDesc, v: &Value, kind: &str) -> GeomResult<Value> {
     let what = format!("{kind}.{}", f.name);
     let items = |v: &Value| -> GeomResult<Vec<Value>> {
-        v.as_array().cloned().ok_or_else(|| GeomError(format!("{what} must be a list")))
+        v.as_array().cloned().ok_or_else(|| inv(format!("{what} must be a list")))
     };
     Ok(match f.ty {
         Ty::Feature => feature_ref(list, v, &what)?,
@@ -386,9 +399,13 @@ fn convert(list: &FeatureList, f: &FieldDesc, v: &Value, kind: &str) -> GeomResu
         Ty::Regions => {
             let mut out = vec![];
             for r in items(v)? {
-                let o = r.as_object().ok_or_else(|| GeomError(format!("{what}: each region is an object {{name, input, kind}}")))?;
+                let o = r
+                    .as_object()
+                    .ok_or_else(|| inv(format!("{what}: each region is an object {{name, input, kind}}")))?;
                 let mut o = o.clone();
-                let input = o.get("input").ok_or_else(|| GeomError(format!("{what}: a region needs `input` (the feature it is painted from)")))?;
+                let input = o
+                    .get("input")
+                    .ok_or_else(|| inv(format!("{what}: a region needs `input` (the feature it is painted from)")))?;
                 let id = feature_ref(list, input, &what)?;
                 o.insert("input".into(), id);
                 o.entry("kind").or_insert(json!("Material"));
@@ -400,8 +417,9 @@ fn convert(list: &FeatureList, f: &FieldDesc, v: &Value, kind: &str) -> GeomResu
         Ty::Pins => {
             let mut out = vec![];
             for p in items(v)? {
-                let mut o = p.as_object().cloned().ok_or_else(|| GeomError(format!("{what}: each pin is an object {{sel, id}}")))?;
-                let sel = o.get("sel").ok_or_else(|| GeomError(format!("{what}: a pin needs `sel`")))?;
+                let mut o =
+                    p.as_object().cloned().ok_or_else(|| inv(format!("{what}: each pin is an object {{sel, id}}")))?;
+                let sel = o.get("sel").ok_or_else(|| inv(format!("{what}: a pin needs `sel`")))?;
                 let sel = selector_value(sel, &what)?;
                 o.insert("sel".into(), sel);
                 out.push(Value::Object(o));
@@ -417,17 +435,20 @@ fn convert(list: &FeatureList, f: &FieldDesc, v: &Value, kind: &str) -> GeomResu
 /// which is the same reader that loads a saved feature list.
 pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op> {
     let d = find(kind).ok_or_else(|| {
-        GeomError(format!("there is no operation '{kind}' (they are: {})", all().iter().map(|d| d.kind).collect::<Vec<_>>().join(", ")))
+        inv(format!(
+            "there is no operation '{kind}' (they are: {})",
+            all().iter().map(|d| d.kind).collect::<Vec<_>>().join(", ")
+        ))
     })?;
     let empty = Map::new();
     let given = match args {
         Value::Null => &empty,
         Value::Object(m) => m,
-        other => return Err(GeomError(format!("the arguments of {kind} must be an object, not {other}"))),
+        other => return Err(inv(format!("the arguments of {kind} must be an object, not {other}"))),
     };
     for k in given.keys() {
         if !d.fields.iter().any(|f| f.name == k) {
-            return Err(GeomError(format!(
+            return Err(inv(format!(
                 "{kind} has no field '{k}' (it has: {})",
                 d.fields.iter().map(|f| f.name).collect::<Vec<_>>().join(", ")
             )));
@@ -440,7 +461,7 @@ pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op> 
                 out.insert(f.name.into(), convert(list, f, v, kind)?);
             }
             _ if f.required => {
-                return Err(GeomError(format!("{kind} needs `{}`: {}", f.name, f.doc)));
+                return Err(inv(format!("{kind} needs `{}`: {}", f.name, f.doc)));
             }
             _ => {
                 out.insert(f.name.into(), f.default.clone());
@@ -449,7 +470,7 @@ pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op> 
     }
     let mut tagged = Map::new();
     tagged.insert(kind.into(), Value::Object(out));
-    serde_json::from_value::<Op>(Value::Object(tagged)).map_err(|e| GeomError(format!("{kind}: {e}")))
+    serde_json::from_value::<Op>(Value::Object(tagged)).map_err(|e| inv(format!("{kind}: {e}")))
 }
 
 /// The arguments of an existing operation in the form `build_op` takes (features by name, selectors as text): what an editing tool shows
@@ -467,7 +488,9 @@ pub fn args_of(list: &FeatureList, op: &Op) -> Value {
         let nv = match f.ty {
             Ty::Feature => name_of(&val),
             Ty::Features => Value::Array(val.as_array().into_iter().flatten().map(&name_of).collect()),
-            Ty::Selector => serde_json::from_value::<Selector>(val.clone()).map(|s| json!(s.to_string())).unwrap_or(val),
+            Ty::Selector => {
+                serde_json::from_value::<Selector>(val.clone()).map(|s| json!(s.to_string())).unwrap_or(val)
+            }
             Ty::Regions => Value::Array(
                 val.as_array()
                     .into_iter()
@@ -487,7 +510,8 @@ pub fn args_of(list: &FeatureList, op: &Op) -> Value {
                     .flatten()
                     .map(|p| {
                         let mut p = p.clone();
-                        if let Some(s) = p.get("sel").cloned().and_then(|s| serde_json::from_value::<Selector>(s).ok()) {
+                        if let Some(s) = p.get("sel").cloned().and_then(|s| serde_json::from_value::<Selector>(s).ok())
+                        {
                             p["sel"] = json!(s.to_string());
                         }
                         p

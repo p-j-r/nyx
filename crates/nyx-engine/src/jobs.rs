@@ -17,7 +17,10 @@ pub type JobId = u64;
 pub enum JobOutput {
     Mesh(Arc<MeshedModel>),
     /// the mesh the solve used (built inside the job when none was current) and one result per physics, in solve order
-    Solved { model: Arc<MeshedModel>, results: Vec<SolveResult> },
+    Solved {
+        model: Arc<MeshedModel>,
+        results: Vec<SolveResult>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -82,11 +85,11 @@ impl JobRunner {
         self.slots.lock().expect("job table").insert(id, slot.clone());
         let progress = slot.progress.clone();
         std::thread::spawn(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(progress)))
-                .unwrap_or_else(|p| {
-                    let text = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned());
-                    Err(Error::Solver(format!("the job stopped unexpectedly: {}", text.unwrap_or_else(|| "panic".into()))))
-                });
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(progress))).unwrap_or_else(|p| {
+                let text =
+                    p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned());
+                Err(Error::Solver(format!("the job stopped unexpectedly: {}", text.unwrap_or_else(|| "panic".into()))))
+            });
             let mut g = slot.inner.lock().expect("job slot");
             g.seconds = slot.started.elapsed().as_secs_f64();
             g.state = match &r {

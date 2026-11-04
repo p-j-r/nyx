@@ -1,12 +1,12 @@
 //! The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed
 //! methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list and `call()` into its tool calls,
-//! so a tool is a command and nothing else. The geometry tools are generated from `geom::describe` (gate G5: every operation, none picked by
+//! so a tool is a command and nothing else. The geometry tools are generated from `geomdesc` (gate G5: every operation, none picked by
 //! hand), the physics-dependent schemas come from the registry.
 
 use crate::engine::Engine;
+use crate::geomdesc as gd;
 use crate::geometry;
 use crate::project::{MeshSettings, Project};
-use geom::describe as gd;
 use nyx_physics::{contract, BcSpec, Error, MaterialAssign, ProblemSpec, StudySpec};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -88,7 +88,9 @@ fn opt_bool(a: &Value, k: &str, default: bool) -> bool {
 }
 
 fn get_u64(a: &Value, k: &str) -> Result<u64, Error> {
-    a.get(k).and_then(Value::as_u64).ok_or_else(|| Error::invalid(format!("`{k}` is required and must be a whole number")))
+    a.get(k)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| Error::invalid(format!("`{k}` is required and must be a whole number")))
 }
 
 fn ok() -> R {
@@ -98,7 +100,7 @@ fn ok() -> R {
 // ------------------------------------------------------------------------------------------------------------- the catalog
 
 impl Engine {
-    /// Every command of this build, with its schema. The geometry `add_*` commands come from `geom::describe`; the choices of physics from
+    /// Every command of this build, with its schema. The geometry `add_*` commands come from `geomdesc`; the choices of physics from
     /// the registry.
     pub fn catalog(&self) -> Vec<CommandDesc> {
         use Access::*;
@@ -166,7 +168,13 @@ impl Engine {
             if let Some(p) = s.get_mut("properties").and_then(Value::as_object_mut) {
                 p.insert("name".into(), text("a name for the feature; default the kind and a number (`rect1`)"));
             }
-            c.push(cmd(&gd::tool_name(d.kind), d.title, &format!("{} [{}; dimensions {:?}]", d.doc, d.group.name(), d.dims), Edit, s));
+            c.push(cmd(
+                &gd::tool_name(d.kind),
+                d.title,
+                &format!("{} [{}; dimensions {:?}]", d.doc, d.group.name(), d.dims),
+                Edit,
+                s,
+            ));
         }
         c
     }
@@ -180,7 +188,12 @@ impl Engine {
         if let Some(kind) = geom_kind(name) {
             let mut fields = a.clone();
             let given = fields.remove("name");
-            let n = geometry::add_feature(&mut self.project.geometry, kind, given.as_ref().and_then(Value::as_str), &Value::Object(fields))?;
+            let n = geometry::add_feature(
+                &mut self.project.geometry,
+                kind,
+                given.as_ref().and_then(Value::as_str),
+                &Value::Object(fields),
+            )?;
             return Ok(json!({ "name": n, "features": self.project.geometry.features.len() }));
         }
         match name {
@@ -397,14 +410,20 @@ impl Engine {
         let id = get_str(args, "physics")?.to_string();
         let p = crate::physics_for(&self.registry, &id)?;
         if self.project.spec(&id).is_some() {
-            return Err(Error::invalid(format!("the project already has '{id}'; change it with set_study and the other commands")));
+            return Err(Error::invalid(format!(
+                "the project already has '{id}'; change it with set_study and the other commands"
+            )));
         }
         if self.project.physics.len() >= 3 {
             return Err(Error::invalid("a project loads one to three physics"));
         }
         let kind = match opt_str(args, "study") {
             Some(k) => k.to_string(),
-            None => p.studies().first().map(|s| s.kind.clone()).ok_or_else(|| Error::invalid(format!("{id} lists no study")))?,
+            None => p
+                .studies()
+                .first()
+                .map(|s| s.kind.clone())
+                .ok_or_else(|| Error::invalid(format!("{id} lists no study")))?,
         };
         let order = args.get("order").and_then(Value::as_u64).unwrap_or(1) as u8;
         let mut spec = ProblemSpec::new(&id, order, &kind);
@@ -433,7 +452,10 @@ impl Engine {
         if names.is_empty() || region.contains('.') || region.contains(',') || names.contains(&base) {
             return Ok(());
         }
-        Err(Error::invalid(format!("the geometry has no region '{region}' (the regions are: {}); add the overlay first", names.join(", "))))
+        Err(Error::invalid(format!(
+            "the geometry has no region '{region}' (the regions are: {}); add the overlay first",
+            names.join(", ")
+        )))
     }
 
     fn set_mesh(&mut self, args: &Value) -> R {
@@ -442,8 +464,16 @@ impl Engine {
         for (k, v) in a {
             match k.as_str() {
                 "h" => s.h = v.as_f64().ok_or_else(|| Error::invalid("`h` is a number in metres"))?,
-                "adapt_scale" => s.adapt_scale = if v.is_null() { None } else { Some(v.as_f64().ok_or_else(|| Error::invalid("`adapt_scale` is a number or null"))?) },
-                "physics_sizing" => s.physics_sizing = v.as_bool().ok_or_else(|| Error::invalid("`physics_sizing` is true or false"))?,
+                "adapt_scale" => {
+                    s.adapt_scale = if v.is_null() {
+                        None
+                    } else {
+                        Some(v.as_f64().ok_or_else(|| Error::invalid("`adapt_scale` is a number or null"))?)
+                    }
+                }
+                "physics_sizing" => {
+                    s.physics_sizing = v.as_bool().ok_or_else(|| Error::invalid("`physics_sizing` is true or false"))?
+                }
                 "sweep" => {
                     s.sweep = if v.is_null() {
                         None
@@ -451,7 +481,11 @@ impl Engine {
                         Some(serde_json::from_value(v.clone()).map_err(|e| Error::invalid(format!("`sweep`: {e}")))?)
                     }
                 }
-                other => return Err(Error::invalid(format!("set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, sweep)"))),
+                other => {
+                    return Err(Error::invalid(format!(
+                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, sweep)"
+                    )))
+                }
             }
         }
         if !(s.h > 0.0 && s.h.is_finite()) {
@@ -491,17 +525,27 @@ impl Engine {
 
     fn result_field(&self, args: &Value) -> R {
         let p = get_str(args, "physics")?;
-        let stored = self.results.get(p).ok_or_else(|| Error::invalid(format!("there is no result for '{p}' yet; solve first")))?;
+        let stored = self
+            .results
+            .get(p)
+            .ok_or_else(|| Error::invalid(format!("there is no result for '{p}' yet; solve first")))?;
         let i = args.get("solution").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let sol = stored.result.solutions.get(i).ok_or_else(|| Error::invalid(format!("the result has {} solutions; there is no {i}", stored.result.solutions.len())))?;
+        let sol = stored.result.solutions.get(i).ok_or_else(|| {
+            Error::invalid(format!("the result has {} solutions; there is no {i}", stored.result.solutions.len()))
+        })?;
         let name = get_str(args, "field")?;
         let f = sol.field(name).ok_or_else(|| {
-            Error::invalid(format!("no field '{name}' (the fields are: {})", sol.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ")))
+            Error::invalid(format!(
+                "no field '{name}' (the fields are: {})",
+                sol.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ")
+            ))
         })?;
         let max = args.get("max_values").and_then(Value::as_u64).unwrap_or(2000).max(1) as usize;
         let stride = f.values.len().div_ceil(max).max(1);
         let values: Vec<f64> = f.values.iter().step_by(stride).copied().collect();
-        Ok(json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values }))
+        Ok(
+            json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values }),
+        )
     }
 }
 

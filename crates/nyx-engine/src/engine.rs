@@ -110,7 +110,8 @@ impl Engine {
     pub fn start_mesh(&mut self) -> Result<JobId, Error> {
         self.project.geometry.validate().map_err(|e| Error::invalid(format!("geometry: {e}")))?;
         let key = self.mesh_key();
-        let (mesher, geometry, settings) = (self.mesher.clone(), self.project.geometry.clone(), self.project.mesh.clone());
+        let (mesher, geometry, settings) =
+            (self.mesher.clone(), self.project.geometry.clone(), self.project.mesh.clone());
         let id = self.jobs.start("mesh", move |progress| {
             if progress.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -170,7 +171,9 @@ impl Engine {
     /// Waits for a job and applies it.
     pub fn wait(&mut self, id: JobId) -> Result<Value, Error> {
         if !self.pending.contains_key(&id) {
-            return Err(Error::invalid(format!("job {id} is not waiting to be applied (it was applied already, or there is no such job)")));
+            return Err(Error::invalid(format!(
+                "job {id} is not waiting to be applied (it was applied already, or there is no such job)"
+            )));
         }
         let outcome = self.jobs.wait(id);
         self.apply(id, outcome)
@@ -193,7 +196,8 @@ impl Engine {
                         "physics": r.physics, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(),
                         "scalars": r.scalars,
                     }));
-                    self.results.insert(r.physics.clone(), Stored { result: Arc::new(r.clone()), stamp: stamp.clone() });
+                    self.results
+                        .insert(r.physics.clone(), Stored { result: Arc::new(r.clone()), stamp: stamp.clone() });
                 }
                 let mut log = self.jobs.log(id);
                 for r in &results {
@@ -241,9 +245,13 @@ impl Engine {
     pub fn save_to_workspace(&mut self, workspace: Option<PathBuf>) -> Result<Value, Error> {
         if let Some(l) = self.link.as_mut() {
             let v = l.commit(&self.project)?;
-            return Ok(json!({ "workflow": l.dir.wf.id, "experiment": l.experiment, "version": v.unwrap_or(l.dir.wf.version), "changed": v.is_some() }));
+            return Ok(
+                json!({ "workflow": l.dir.wf.id, "experiment": l.experiment, "version": v.unwrap_or(l.dir.wf.version), "changed": v.is_some() }),
+            );
         }
-        let root = workspace.or_else(|| self.workspace.clone()).ok_or_else(|| Error::invalid("name a workspace folder (`workspace`) to save into"))?;
+        let root = workspace
+            .or_else(|| self.workspace.clone())
+            .ok_or_else(|| Error::invalid("name a workspace folder (`workspace`) to save into"))?;
         std::fs::create_dir_all(&root).map_err(|e| Error::invalid(format!("{}: {e}", root.display())))?;
         let link = StoreLink::create(&root, &self.project, "ai")?;
         let v = json!({ "workflow": link.dir.wf.id, "folder": link.dir.root, "experiment": link.experiment, "version": link.dir.wf.version, "changed": true });

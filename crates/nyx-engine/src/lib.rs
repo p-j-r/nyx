@@ -2,7 +2,7 @@
 //! over it: every action of either is a command of the engine (restructure phase 7, ADR 23 and 25).
 //!
 //! * `project`: `Project` (feature list, mesh settings, one problem per physics), saved as JSON
-//! * `geometry`: editing a feature list; the operations come from `geom::describe`
+//! * `geometry`: editing a feature list; the operations come from `geomdesc`
 //! * `meshing`: `MeshedModel` (mesh and names, the label resolver) and the `Mesher` seam that restructure phase 2 rewrites
 //! * `jobs`: the job runner (progress, cancel); `solve`: the coupled chain of physics; `store_link`: persistence through `nyx-store`
 //! * `engine`: `Engine`, the state around one project; `commands`: every action by name, JSON in and out, with schemas (`catalog`)
@@ -13,6 +13,7 @@
 
 pub mod commands;
 pub mod engine;
+pub mod geomdesc;
 pub mod geometry;
 pub mod jobs;
 pub mod meshing;

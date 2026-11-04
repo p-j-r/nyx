@@ -19,7 +19,13 @@ impl Physics for Tst {
         "Test physics"
     }
     fn studies(&self) -> Vec<StudyDesc> {
-        vec![StudyDesc { kind: "const".into(), name: "Constant".into(), doc: "".into(), dims: Dims::Both, params: vec![] }]
+        vec![StudyDesc {
+            kind: "const".into(),
+            name: "Constant".into(),
+            doc: "".into(),
+            dims: Dims::Both,
+            params: vec![],
+        }]
     }
     fn bc_kinds(&self) -> Vec<BcDesc> {
         vec![BcDesc {
@@ -74,7 +80,10 @@ impl Physics for Tst {
                 value: Some(1.0),
                 ..Default::default()
             }],
-            scalars: vec![("boundary labels".into(), Scalar::Num(n_boundary as f64)), ("cells".into(), Scalar::Num(mesh.n_cells() as f64))],
+            scalars: vec![
+                ("boundary labels".into(), Scalar::Num(n_boundary as f64)),
+                ("cells".into(), Scalar::Num(mesh.n_cells() as f64)),
+            ],
             log: vec!["solved the stand-in".into()],
         })
     }
@@ -200,8 +209,12 @@ fn build_strip(e: &mut Engine) {
     call(e, "add_rect", json!({ "name": "window", "min": [-2e-6, -1.5e-6], "max": [2e-6, 1.5e-6] }));
     call(e, "add_rect", json!({ "name": "box", "min": [-2e-6, -1.5e-6], "max": [2e-6, 0.0] }));
     call(e, "add_rect", json!({ "name": "core", "min": ["-w/2", 0.0], "max": ["w/2", "t"] }));
-    call(e, "add_overlay", json!({ "regions": [
-        { "name": "air", "input": "window" }, { "name": "oxide", "input": "box" }, { "name": "silicon", "input": "core" } ] }));
+    call(
+        e,
+        "add_overlay",
+        json!({ "regions": [
+        { "name": "air", "input": "window" }, { "name": "oxide", "input": "box" }, { "name": "silicon", "input": "core" } ] }),
+    );
 }
 
 // ------------------------------------------------------------------------------------------------------ tests
@@ -217,7 +230,11 @@ fn the_strip_is_built_meshed_and_solved_through_commands_alone() {
 
     call(&mut e, "add_physics", json!({ "physics": "tst", "study": "const" }));
     call(&mut e, "set_material", json!({ "physics": "tst", "region": "silicon", "material": { "k": 150.0 } }));
-    call(&mut e, "add_condition", json!({ "physics": "tst", "on": "outer", "kind": "fix", "params": { "value": 293.0 } }));
+    call(
+        &mut e,
+        "add_condition",
+        json!({ "physics": "tst", "on": "outer", "kind": "fix", "params": { "value": 293.0 } }),
+    );
     let mesh = call(&mut e, "mesh_build", json!({}));
     assert!(mesh["mesh"]["cells"].as_u64().unwrap() > 50, "{mesh}");
     let solved = call(&mut e, "solve_run", json!({}));
@@ -244,8 +261,12 @@ fn the_rib_and_the_ring_are_built_and_meshed_through_commands_alone() {
     call(&mut e, "add_rect", json!({ "name": "window", "min": [-2e-6, -1.5e-6], "max": [2e-6, 1.5e-6] }));
     call(&mut e, "add_rect", json!({ "name": "slab", "min": [-2e-6, 0.0], "max": [2e-6, 1e-7] }));
     call(&mut e, "add_rect", json!({ "name": "rib", "min": [-2.5e-7, 1e-7], "max": [2.5e-7, 3e-7] }));
-    call(&mut e, "add_overlay", json!({ "regions": [
-        { "name": "air", "input": "window" }, { "name": "slab", "input": "slab" }, { "name": "rib", "input": "rib" } ] }));
+    call(
+        &mut e,
+        "add_overlay",
+        json!({ "regions": [
+        { "name": "air", "input": "window" }, { "name": "slab", "input": "slab" }, { "name": "rib", "input": "rib" } ] }),
+    );
     assert_eq!(call(&mut e, "mesh_build", json!({}))["mesh"]["regions"].as_array().unwrap().len(), 3);
 
     call(&mut e, "project_new", json!({ "title": "Ring", "h": 4e-7 }));
@@ -253,7 +274,11 @@ fn the_rib_and_the_ring_are_built_and_meshed_through_commands_alone() {
     call(&mut e, "add_circle", json!({ "name": "outer_disc", "center": [0.0, 0.0], "r": 5e-6 }));
     call(&mut e, "add_circle", json!({ "name": "inner_disc", "center": [0.0, 0.0], "r": 4.5e-6 }));
     call(&mut e, "add_difference", json!({ "name": "ring", "a": "outer_disc", "b": ["inner_disc"] }));
-    call(&mut e, "add_overlay", json!({ "regions": [ { "name": "air", "input": "window" }, { "name": "ring", "input": "ring" } ] }));
+    call(
+        &mut e,
+        "add_overlay",
+        json!({ "regions": [ { "name": "air", "input": "window" }, { "name": "ring", "input": "ring" } ] }),
+    );
     let m = call(&mut e, "mesh_build", json!({}));
     assert_eq!(m["mesh"]["regions"].as_array().unwrap().len(), 2, "{m}");
     // editing by name: widen the ring by moving the inner disc
@@ -270,14 +295,17 @@ fn refusals_leave_the_project_as_it_was_and_say_what_is_wrong() {
     assert!(err(&mut e, "add_rect", json!({ "name": "box", "min": [0, 0], "max": [1, 1] })).contains("exists"));
     assert!(err(&mut e, "add_rect", json!({ "min": [0, 0] })).contains("needs `max`"));
     assert!(err(&mut e, "remove_feature", json!({ "name": "box" })).contains("is used by overlay1"));
-    assert!(err(&mut e, "add_overlay", json!({ "regions": [{ "name": "x", "input": "core" }] })).contains("only one Overlay"));
+    assert!(err(&mut e, "add_overlay", json!({ "regions": [{ "name": "x", "input": "core" }] }))
+        .contains("only one Overlay"));
     assert!(err(&mut e, "add_union", json!({ "ids": ["nothing"] })).contains("no feature named 'nothing'"));
     assert!(err(&mut e, "rename_feature", json!({ "name": "core", "new_name": "a.b" })).contains("reserved"));
     assert!(err(&mut e, "frobnicate", json!({})).contains("list_commands"));
     assert!(err(&mut e, "add_physics", json!({ "physics": "zzz" })).contains("no physics 'zzz'"));
-    assert!(err(&mut e, "set_material", json!({ "physics": "tst", "region": "silicon", "material": "x" })).contains("the project has no physics 'tst'"));
+    assert!(err(&mut e, "set_material", json!({ "physics": "tst", "region": "silicon", "material": "x" }))
+        .contains("the project has no physics 'tst'"));
     call(&mut e, "add_physics", json!({ "physics": "tst" }));
-    assert!(err(&mut e, "set_material", json!({ "physics": "tst", "region": "nowhere", "material": "x" })).contains("no region 'nowhere'"));
+    assert!(err(&mut e, "set_material", json!({ "physics": "tst", "region": "nowhere", "material": "x" }))
+        .contains("no region 'nowhere'"));
     assert_eq!(e.project().geometry, before.geometry, "no refused edit changed the geometry");
     // the project check names a property no physics reads
     call(&mut e, "set_material", json!({ "physics": "tst", "region": "silicon", "material": { "bogus": 1.0 } }));
@@ -353,7 +381,7 @@ fn a_project_is_stored_solved_into_the_run_table_and_reopened() {
     let runs = call(&mut e, "store_runs", json!({}));
     assert_eq!(runs.as_array().unwrap().len(), 1);
     assert_eq!(runs[0]["status"], "ok");
-    assert_eq!(runs[0]["metrics"]["cells"].as_f64().unwrap() > 50.0, true);
+    assert!(runs[0]["metrics"]["cells"].as_f64().unwrap() > 50.0);
     assert_eq!(runs[0]["params"]["w"], 5e-7, "numeric model parameters are the run's parameters");
     let run_dir = folder.join("e1").join("runs").join(runs[0]["id"].as_str().unwrap());
     assert!(run_dir.join("result_tst.json").exists() && run_dir.join("log.txt").exists());
@@ -362,7 +390,9 @@ fn a_project_is_stored_solved_into_the_run_table_and_reopened() {
     call(&mut e, "set_param", json!({ "name": "w", "value": 6e-7 }));
     let again = call(&mut e, "store_save", json!({}));
     assert_eq!((again["version"].clone(), again["changed"].clone()), (json!(2), json!(true)));
-    let card = nyx_store::WorkflowDir::open_with(&folder, nyx_engine::store_link::card_of).unwrap().wf.experiments[0].card.clone();
+    let card = nyx_store::WorkflowDir::open_with(&folder, nyx_engine::store_link::card_of).unwrap().wf.experiments[0]
+        .card
+        .clone();
     assert!(card.summary.starts_with("2D, 4 features, 3 regions, tst const"), "{}", card.summary);
     assert!(card.keywords.contains(&"silicon".to_string()));
 
@@ -390,7 +420,11 @@ fn the_project_json_is_stable_and_round_trips() {
     call(&mut f, "project_new", json!({}));
     call(&mut f, "project_open", json!({ "path": path.to_str().unwrap() }));
     assert_eq!(f.project(), e.project());
-    assert!(f.call("project_load", &json!({ "json": "{\"title\": 1}" })).unwrap_err().to_string().contains("not a nyx project"));
+    assert!(f
+        .call("project_load", &json!({ "json": "{\"title\": 1}" }))
+        .unwrap_err()
+        .to_string()
+        .contains("not a nyx project"));
 }
 
 #[test]
@@ -417,8 +451,8 @@ fn every_geometry_operation_has_an_add_command_and_every_command_has_a_schema() 
     sorted.sort_unstable();
     sorted.dedup();
     assert_eq!(sorted.len(), names.len(), "a command name is used twice");
-    for d in geom::describe::all() {
-        assert!(names.contains(&geom::describe::tool_name(d.kind).as_str()), "no command for {}", d.kind);
+    for d in nyx_engine::geomdesc::all() {
+        assert!(names.contains(&nyx_engine::geomdesc::tool_name(d.kind).as_str()), "no command for {}", d.kind);
     }
     for c in &cat {
         assert_eq!(c.schema["type"], "object", "{}", c.name);
@@ -432,4 +466,3 @@ fn every_geometry_operation_has_an_add_command_and_every_command_has_a_schema() 
         }
     }
 }
-

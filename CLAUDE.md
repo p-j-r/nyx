@@ -12,7 +12,7 @@ Desktop finite-element application for photonics and phononics, in pure Rust. No
 | `crates/nyx-dfs`, `nyx-sms`, `nyx-ems` | one physics each. **Skeletons**: descriptors and contract tests now, `solve` answers `NotYetMoved` until phase 4 moves the kernels in |
 | `crates/nyx-analysis` | analyses of results (skeleton; polarization moves in at phase 5) |
 | `crates/nyx-store` | workspace, workflow, experiment and run storage |
-| `crates/nyx-engine` | the registry of compiled-in physics (cargo features `dfs sms ems`) and the layering test; `Project` and commands arrive in phase 7 |
+| `crates/nyx-engine` | `Engine`: the project, commands (every action by name, with JSON Schemas; the MCP tools are generated from them), the job runner, the geometry operation descriptors, store wiring, and the registry of compiled-in physics (cargo features `dfs sms ems`). The window and `nyx-mcp` are not rewired to it yet (phase 7) |
 | `crates/app` | the egui application (package and binary `nyx`) |
 | `crates/nyx-session`, `nyx-mcp`, `nyx-connect` | the AI interface (stdio MCP server, one-click host connection); formerly the separate `ai/` workspace |
 | `docs/` | design notes and per-project status files |

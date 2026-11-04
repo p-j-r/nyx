@@ -1,8 +1,8 @@
 //! Editing the geometry of a project: every edit of a `geom` feature list the window or a host can make, as a function that either does it
-//! or leaves the list untouched and says why. The operations and their arguments come from `geom::describe`, so a new operation in geom
+//! or leaves the list untouched and says why. The operations and their arguments come from `geomdesc`, so a new operation in geom
 //! is available here (and as a tool) without a change in this file. Features are named by name, never by id, in this interface.
 
-use geom::describe::{args_of, build_op, find, kind_of};
+use crate::geomdesc::{args_of, build_op, find, kind_of};
 use geom::expr::Expr;
 use geom::model::{check_name, Feature, FeatureList, Origin, Param};
 use nyx_physics::Error;
@@ -40,7 +40,7 @@ fn auto_name(list: &FeatureList, kind: &str) -> String {
     (1..).map(|n| format!("{base}{n}")).find(|c| list.feature_by_name(c).is_none()).expect("a free name exists")
 }
 
-/// Adds the feature `kind` built from `args` (see `geom::describe`); returns the name it was given.
+/// Adds the feature `kind` built from `args` (see `geomdesc`); returns the name it was given.
 pub fn add_feature(list: &mut FeatureList, kind: &str, name: Option<&str>, args: &Value) -> Result<String, Error> {
     if find(kind).is_none() {
         return Err(Error::invalid(format!("there is no operation '{kind}'")));
@@ -54,7 +54,7 @@ pub fn add_feature(list: &mut FeatureList, kind: &str, name: Option<&str>, args:
         if l.feature_by_name(&name).is_some() {
             return Err(Error::invalid(format!("a feature named '{name}' exists; names must be unique")));
         }
-        let op = build_op(l, kind, args).map_err(bad)?;
+        let op = build_op(l, kind, args)?;
         let id = next_id(l);
         l.features.push(Feature { id, name: name.clone(), op, suppressed: false, origin: Origin::Code, tags: vec![] });
         Ok(name)
@@ -63,7 +63,8 @@ pub fn add_feature(list: &mut FeatureList, kind: &str, name: Option<&str>, args:
 
 /// Changes some fields of a feature; `fields` holds only the fields to change, in the same form `add_feature` takes.
 pub fn update_feature(list: &mut FeatureList, name: &str, fields: &Value) -> Result<(), Error> {
-    let changes = fields.as_object().ok_or_else(|| Error::invalid("`fields` must be an object of the fields to change"))?;
+    let changes =
+        fields.as_object().ok_or_else(|| Error::invalid("`fields` must be an object of the fields to change"))?;
     transact(list, |l| {
         let i = index_of(l, name)?;
         let kind = kind_of(&l.features[i].op);
@@ -74,7 +75,7 @@ pub fn update_feature(list: &mut FeatureList, name: &str, fields: &Value) -> Res
         // a feature may refer only to earlier ones: build against the part of the list before it
         let mut before = l.clone();
         before.features.truncate(i);
-        l.features[i].op = build_op(&before, kind, &args).map_err(bad)?;
+        l.features[i].op = build_op(&before, kind, &args)?;
         Ok(())
     })
 }
@@ -84,9 +85,13 @@ pub fn remove_feature(list: &mut FeatureList, name: &str) -> Result<(), Error> {
     transact(list, |l| {
         let i = index_of(l, name)?;
         let id = l.features[i].id;
-        let users: Vec<&str> = l.features.iter().filter(|f| f.op.inputs().contains(&id)).map(|f| f.name.as_str()).collect();
+        let users: Vec<&str> =
+            l.features.iter().filter(|f| f.op.inputs().contains(&id)).map(|f| f.name.as_str()).collect();
         if !users.is_empty() {
-            return Err(Error::invalid(format!("'{name}' is used by {}; remove or change those first", users.join(", "))));
+            return Err(Error::invalid(format!(
+                "'{name}' is used by {}; remove or change those first",
+                users.join(", ")
+            )));
         }
         l.features.remove(i);
         Ok(())

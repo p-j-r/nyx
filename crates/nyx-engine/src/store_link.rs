@@ -23,7 +23,9 @@ pub fn card_of(v: &serde_json::Value) -> Card {
         .features
         .iter()
         .filter_map(|f| match &f.op {
-            geom::model::Op::Overlay { regions, .. } => Some(regions.iter().map(|r| r.name.clone()).collect::<Vec<_>>()),
+            geom::model::Op::Overlay { regions, .. } => {
+                Some(regions.iter().map(|r| r.name.clone()).collect::<Vec<_>>())
+            }
             _ => None,
         })
         .flatten()
@@ -53,7 +55,7 @@ pub fn card_of(v: &serde_json::Value) -> Card {
     let mut keywords: Vec<String> = p.physics.iter().map(|s| s.physics.clone()).collect();
     keywords.extend(p.physics.iter().map(|s| s.study.kind.clone()));
     keywords.extend(regions.iter().map(|r| r.to_lowercase()));
-    keywords.extend(p.geometry.features.iter().map(|f| geom::describe::kind_of(&f.op).to_lowercase()));
+    keywords.extend(p.geometry.features.iter().map(|f| crate::geomdesc::kind_of(&f.op).to_lowercase()));
     keywords.sort();
     keywords.dedup();
     let wl = wavelength_m.map(|w| format!(", {:.0} nm", w * 1e9)).unwrap_or_default();
@@ -101,7 +103,10 @@ pub fn metrics_of(res: &SolveResult) -> BTreeMap<String, f64> {
     for (name, s) in &res.scalars {
         if let Scalar::Num(x) = s {
             if x.is_finite() {
-                let key: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
+                let key: String = name
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+                    .collect();
                 let key = key.split('_').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("_");
                 if !key.is_empty() {
                     m.entry(key).or_insert(*x);
@@ -127,7 +132,8 @@ pub struct StoreLink {
 impl StoreLink {
     /// Makes a new workflow folder in `workspace` holding `project` as its first experiment.
     pub fn create(workspace: &Path, project: &Project, origin: &str) -> Result<StoreLink, Error> {
-        let dir = WorkflowDir::create_with(workspace, None, &project.title, origin, &project.to_json(), card_of).map_err(store_err)?;
+        let dir = WorkflowDir::create_with(workspace, None, &project.title, origin, &project.to_json(), card_of)
+            .map_err(store_err)?;
         let experiment = dir.wf.experiments[0].id.clone();
         Ok(StoreLink { dir, experiment })
     }
@@ -136,8 +142,17 @@ impl StoreLink {
     pub fn open(root: &Path, experiment: Option<&str>) -> Result<(StoreLink, Project), Error> {
         let dir = WorkflowDir::open_with(root, card_of).map_err(store_err)?;
         let experiment = match experiment {
-            Some(e) => dir.wf.experiment(e).map(|e| e.id.clone()).ok_or_else(|| Error::invalid(format!("no experiment {e}")))?,
-            None => dir.wf.experiments.first().map(|e| e.id.clone()).ok_or_else(|| Error::invalid("the workflow has no experiment"))?,
+            Some(e) => dir
+                .wf
+                .experiment(e)
+                .map(|e| e.id.clone())
+                .ok_or_else(|| Error::invalid(format!("no experiment {e}")))?,
+            None => dir
+                .wf
+                .experiments
+                .first()
+                .map(|e| e.id.clone())
+                .ok_or_else(|| Error::invalid("the workflow has no experiment"))?,
         };
         let text = dir.read_spec(&experiment).map_err(store_err)?;
         let project = Project::from_json(&text)?;
@@ -151,11 +166,22 @@ impl StoreLink {
 
     /// Adds a run to the table: the project as it was solved (frozen), the metrics of the results and the stage log. The heavy files
     /// (`result_<physics>.json`, `log.txt`) go in the run's folder, which can be deleted without losing the record.
-    pub fn record(&mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String]) -> Result<RunRecord, Error> {
+    pub fn record(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+    ) -> Result<RunRecord, Error> {
         self.commit(project)?;
         let (existing, _) = self.dir.runs(&self.experiment);
         let id = runs::next_id(&existing);
-        let mut rec = RunRecord { id: id.clone(), sec: seconds, femcore: format!("nyx-engine {}", env!("CARGO_PKG_VERSION")), ..Default::default() };
+        let mut rec = RunRecord {
+            id: id.clone(),
+            sec: seconds,
+            femcore: format!("nyx-engine {}", env!("CARGO_PKG_VERSION")),
+            ..Default::default()
+        };
         for p in project.geometry.params.iter().filter_map(|p| match p.value {
             geom::expr::Expr::Num(v) => Some((p.name.clone(), v)),
             _ => None,
@@ -167,8 +193,13 @@ impl StoreLink {
         let mut write = |name: &str, kind: &str, bytes: Vec<u8>| -> Result<(), Error> {
             std::fs::create_dir_all(&run_dir).map_err(|e| Error::invalid(format!("{}: {e}", run_dir.display())))?;
             let path = run_dir.join(name);
-            nyx_store::util::write_atomic(&path, &bytes).map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?;
-            artifacts.push(Artifact { kind: kind.into(), path: format!("runs/{id}/{name}"), bytes: bytes.len() as u64 });
+            nyx_store::util::write_atomic(&path, &bytes)
+                .map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?;
+            artifacts.push(Artifact {
+                kind: kind.into(),
+                path: format!("runs/{id}/{name}"),
+                bytes: bytes.len() as u64,
+            });
             Ok(())
         };
         match outcome {

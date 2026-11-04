@@ -90,7 +90,9 @@ impl LabelResolver for MeshedModel {
             ("ymin", Some((a, _))) => return Ok(vec![a]),
             ("ymax", Some((_, b))) => return Ok(vec![b]),
             ("ymin" | "ymax", None) => {
-                return Err(Error::invalid("ymin and ymax are the ends of a model swept along y; this model is not swept"))
+                return Err(Error::invalid(
+                    "ymin and ymax are the ends of a model swept along y; this model is not swept",
+                ))
             }
             _ => {}
         }
@@ -137,7 +139,8 @@ impl Mesher for FemcoreMesher {
         }
         if s.physics_sizing {
             return Err(Error::Unsupported(
-                "physics-sized meshes wait for restructure phase 2 (the neutral Sizing); switch physics_sizing off".into(),
+                "physics-sized meshes wait for restructure phase 2 (the neutral Sizing); switch physics_sizing off"
+                    .into(),
             ));
         }
         let plan = match s.adapt_scale {

@@ -1,7 +1,7 @@
-//! Contract of `geom::describe` (ADR 38): every operation has a descriptor, the descriptor's fields are exactly the serde fields of the
+//! Contract of `geomdesc` (ADR 38): every operation has a descriptor, the descriptor's fields are exactly the serde fields of the
 //! operation, `build_op` accepts the friendly form (names, selector text) and round-trips through `args_of`, and refusals name what is wrong.
-use geom::describe::*;
 use geom::model::{FeatureList, Model, Op};
+use nyx_engine::geomdesc::*;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
@@ -52,7 +52,8 @@ fn every_kind_is_described_once_with_its_serde_fields() {
         assert_eq!(got, want, "{}: the descriptor fields differ from the serde fields", d.kind);
         // the schema lists the required fields and no other
         let s = schema(d);
-        let req: BTreeSet<String> = s["required"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+        let req: BTreeSet<String> =
+            s["required"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
         let want_req: BTreeSet<String> = d.fields.iter().filter(|f| f.required).map(|f| f.name.to_string()).collect();
         assert_eq!(req, want_req);
     }
@@ -116,7 +117,14 @@ fn a_strip_a_rib_and_a_ring_can_be_rebuilt_from_descriptors_alone() {
     let add = |list: &mut FeatureList, name: &str, kind: &str, args: Value| {
         let op = build_op(list, kind, &args).unwrap();
         let id = list.features.iter().map(|f| f.id).max().map_or(1, |m| m + 1);
-        list.features.push(geom::model::Feature { id, name: name.into(), op, suppressed: false, origin: geom::model::Origin::Code, tags: vec![] });
+        list.features.push(geom::model::Feature {
+            id,
+            name: name.into(),
+            op,
+            suppressed: false,
+            origin: geom::model::Origin::Code,
+            tags: vec![],
+        });
     };
     add(&mut list, "box", "Rect", json!({ "min": [-3e-6, -3e-6], "max": [3e-6, 0.0] }));
     add(&mut list, "slab", "Rect", json!({ "min": [-3e-6, 0.0], "max": [3e-6, 1e-7] }));
@@ -124,8 +132,58 @@ fn a_strip_a_rib_and_a_ring_can_be_rebuilt_from_descriptors_alone() {
     add(&mut list, "ring_out", "Circle", json!({ "center": [0.0, 0.0], "r": 5e-6 }));
     add(&mut list, "ring_in", "Circle", json!({ "center": [0.0, 0.0], "r": 4.5e-6 }));
     add(&mut list, "ring", "Difference", json!({ "a": "ring_out", "b": ["ring_in"] }));
-    add(&mut list, "regions", "Overlay", json!({ "regions": [
-        { "name": "BOX", "input": "box" }, { "name": "slab", "input": "slab" }, { "name": "rib", "input": "rib" } ] }));
+    add(
+        &mut list,
+        "regions",
+        "Overlay",
+        json!({ "regions": [
+        { "name": "BOX", "input": "box" }, { "name": "slab", "input": "slab" }, { "name": "rib", "input": "rib" } ] }),
+    );
     list.validate().unwrap();
     geom::eval::Evaluator::new().eval(&list, geom::eval::Tier::Complex).unwrap();
+}
+
+/// The exemplar `docs/architecture/contracts/geom_operations.v1.json` pins the descriptors (ADR 38, ADR 19). Rewrite it with
+/// `NYX_WRITE_CONTRACT=1` together with a line in `contracts/VERSIONS.md`.
+#[test]
+fn the_descriptors_match_their_contract_exemplar() {
+    fn sorted(v: &Value) -> Value {
+        match v {
+            Value::Object(m) => {
+                let mut keys: Vec<_> = m.keys().collect();
+                keys.sort();
+                Value::Object(keys.into_iter().map(|k| (k.clone(), sorted(&m[k]))).collect())
+            }
+            Value::Array(a) => Value::Array(a.iter().map(sorted).collect()),
+            o => o.clone(),
+        }
+    }
+    let snapshot = Value::Array(
+        all()
+            .iter()
+            .map(|d| {
+                json!({
+                    "kind": d.kind, "tool": tool_name(d.kind), "title": d.title, "doc": d.doc, "group": d.group.name(), "dims": d.dims,
+                    "fields": d.fields.iter().map(|f| json!({ "name": f.name, "type": format!("{:?}", f.ty), "required": f.required, "default": f.default, "doc": f.doc })).collect::<Vec<_>>(),
+                    "schema": schema(d),
+                })
+            })
+            .collect(),
+    );
+    let got = sorted(&snapshot);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/architecture/contracts/geom_operations.v1.json");
+    if std::env::var("NYX_WRITE_CONTRACT").is_ok_and(|v| v == "1" || v == "geom_operations") {
+        std::fs::write(&path, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
+        return;
+    }
+    let want: Value = serde_json::from_str(
+        &std::fs::read_to_string(&path).expect("exemplar missing; write it with NYX_WRITE_CONTRACT=1"),
+    )
+    .unwrap();
+    assert_eq!(
+        sorted(&want),
+        got,
+        "the descriptors changed; if on purpose, rewrite the exemplar and add a VERSIONS.md line (ADR 19)"
+    );
 }

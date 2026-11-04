@@ -20,5 +20,8 @@ One line per contract. Bump the version here in the same commit that changes the
 | physics_sms | `physics_sms.v1.json` | 1.1 | 2026-11-04 | first descriptors of `sms`; 1.1: the `kz` study parameter removed with the out-of-plane model |
 | physics_ems | `physics_ems.v1.json` | 1.0 | 2026-11-04 | same, `ems` |
 | physics_api | (tests only) the `Physics` trait surface, registry rules, error codes | 1.0 | 2026-11-04 | `crates/nyx-physics/tests/contracts.rs`; changing a method is a bump |
+| engine_commands | `engine_commands.v1.json` | 1.0 | 2026-11-04 | the catalog of `nyx-engine` commands: name, title, description, access, JSON Schema of the arguments (what the MCP server turns into tools); includes one `add_*` command per geometry operation |
+| geom_operations | `geom_operations.v1.json` | 1.0 | 2026-11-04 | descriptors of the 23 geom operations (`nyx_engine::geomdesc`): fields, types, defaults, generated schema (ADR 38) |
+| engine_project | `engine_project.v1.json` | 0.1 | 2026-11-04 | an example project written by commands alone. **Provisional**: the final layout is derived in phase 8 (gate G6); no `format` key yet |
 
 The file name carries the major version (`.v1.`). A breaking change adds `.v2.` next to `.v1.`, keeps the old file for the reader of the previous major, and updates the test.
