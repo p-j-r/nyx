@@ -142,12 +142,16 @@ That file lives uncommitted in the old checkout (`nyx/docs/ports/meshers/FEATURE
 ## Gate answers from paul (2026-11-03 evening, in the thread)
 
 * **G1**: keep the axisymmetric kernels (`ems_axisym`, `sms_axisym`) **with a note that their implementation must be checked**, paul is not sure of it. Action for the phase 3 and 4 owners: before moving them, review them against closed forms (the earlier checks quoted in the pre-restructure README: whispering-gallery modes, breathing and flexural modes of a ring) and say in this file what was verified. About `sms_kz`, paul does not know why it exists after the axis changes: it is the solid-mechanics kernel for a 2D cross-section with an out-of-plane wave number k (three displacement components, `u(x, z) exp(-j k y)`, wafer axes since the kernel port), i.e. the phonon waveguide dispersion, not Brillouin-specific. **Update 2026-11-04: paul said to remove it** (the axis is along y now, so the code is obsolete): done on bookmark `restructure-1b-remove-sms-kz` (ADR 24 amendment). What went: `ProblemSpec::out_of_plane`, `solve_solid_kz*`, `assemble_stiffness_kz`, the 4 `solid_kz_*` goldens, `tests/solid_kz.rs` (its Floquet-vs-cross-section test too), the app checkbox, the example's `out_of_plane`. What stays: the shared cross-section machinery in `sms_kz.rs`, because `sms_axisym` is built on it; phase 4 renames and moves it into `nyx-sms`.
+* **G2** (2026-11-04): loose tolerances everywhere, no reference platform (option B); recorded by the g2 session.
+* **G5** (2026-11-04): the MCP may manipulate **every tool geom offers** (the whole feature-list editing surface), not a minimal set. The plan's "first set (strip, rib, ring)" is only a build order and the acceptance test: those three must be rebuildable through MCP; the tool set is generated from geom's feature descriptors so nothing is left out. Phase 7 owner: derive the tools from geom, do not hand-pick.
+* **G6** (2026-11-04): the JSON layout of the project file is **not fixed**; it is derived from the `ProblemSpec` envelope, `Project` and `FeatureList` in phase 8 (the plan's default stands). No layout decision is needed before then.
+* **Structurizr** (2026-11-04): paul allows downloading the Structurizr CLI (session `dsl`, bookmark `restructure-9a-structurizr`, optional and low priority).
 * **G3**: "sure": crate names as in the plan (`nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis`, `nyx-engine`).
 * **G4**: "sure": TOML for materials.
 
 ## Open questions for paul
 
-Gates of the plan not yet answered: **G2** (tolerance and reference platform; needed before phase 3 ends), **G5**, **G6**. New: the session list above (engine core early? Docker for Structurizr?), and whether to free `nyx-jj/target`.
+Gates of the plan not yet answered: none of the plan's gates is open now (G1 to G6 answered, see above). Still open: the mesh session's three defaults, the materials session's three defaults, engine core early, mesher-feature decisions D1 and D2. New: the session list above (engine core early? Docker for Structurizr?), and whether to free `nyx-jj/target`.
 
 ## Log
 

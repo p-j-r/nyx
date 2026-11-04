@@ -258,3 +258,4 @@ After phase 1, phases 2, 3 and 6 touch different files and can be done by separa
 * Section 5 item 1: counts are taken for the whole root workspace; JSON key order is never compared (ADR 26).
 * Phase 2 should land a pure file-move commit first (no logic change) so the mesher feature work can branch from it (status file, "Mesher features").
 * Gate answers (paul, 2026-11-03): G1 keep `ems_axisym`/`sms_axisym` but check their implementation (phase 3 and 4 owners); `sms_kz` out-of-plane model removed by paul's instruction on 2026-11-04 (bookmark `restructure-1b-remove-sms-kz`); G3 crate names as written; G4 TOML.
+* Gate answers (paul, 2026-11-04): G5 the MCP exposes all of geom's tools, the strip, rib and ring rebuild is the acceptance test not the limit; G6 the project JSON layout is derived in phase 8, not fixed beforehand; G2 loose tolerances, no reference platform; the Structurizr CLI may be downloaded.
