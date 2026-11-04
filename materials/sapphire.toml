@@ -1,0 +1,43 @@
+# Sapphire (alpha-Al2O3), trigonal 3m class, optic axis = crystal z. Orientation is set in the project.
+format = 1
+name = "sapphire"
+description = "Synthetic sapphire, room temperature"
+source = [
+  "Refractive index: I. H. Malitson and M. J. Dodge, J. Opt. Soc. Am. 62, 1405 (1972); formula as in M. J. Dodge, Handbook of Laser Science and Technology IV (1986), via the refractiveindex.info database (CC0)",
+  "Stiffness, thermal, expansion, permittivity: typical room-temperature crystal data (rounded; the nyx test suite uses these)",
+]
+density = "3980 kg/m^3"
+
+[elastic]
+class = "trigonal"
+unit = "GPa"
+c11 = 496.8
+c12 = 163.6
+c13 = 110.9
+c14 = -23.5
+c33 = 498.1
+c44 = 147.4
+
+[thermal]
+conductivity = { perp = 23.0, par = 25.2 }
+conductivity_unit = "W/(m*K)"
+specific_heat = "760 J/(kg*K)"
+expansion = { perp = 5.0e-6, par = 5.3e-6 }
+expansion_unit = "1/K"
+
+[electrical]
+permittivity = { perp = 9.4, par = 11.6 }
+
+[optical]
+wavelength_unit = "um"
+range = [0.2, 5.0]
+
+[optical.ordinary]
+model = "sellmeier"
+B = [1.4313493, 0.65054713, 5.3414021]
+lambda0 = [0.0726631, 0.1193242, 18.028251]
+
+[optical.extraordinary]
+model = "sellmeier"
+B = [1.5039759, 0.55069141, 6.5927379]
+lambda0 = [0.0740288, 0.1216529, 20.072248]

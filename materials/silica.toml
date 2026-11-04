@@ -1,0 +1,31 @@
+# Fused silica (amorphous SiO2): isotropic.
+format = 1
+name = "silica"
+description = "Fused silica, 293 K"
+source = [
+  "Refractive index: I. H. Malitson, J. Opt. Soc. Am. 55, 1205 (1965); validity to 6.7 um from C. Z. Tan, J. Non-Cryst. Solids 223, 158 (1998)",
+  "Mechanical, thermal and electrical values: typical handbook values (rounded)",
+]
+density = "2203 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 73.1
+nu = 0.17
+
+[thermal]
+conductivity = 1.38
+conductivity_unit = "W/(m*K)"
+specific_heat = "703 J/(kg*K)"
+expansion = 0.55e-6
+expansion_unit = "1/K"
+
+[electrical]
+permittivity = 3.75
+
+[optical]
+wavelength_unit = "um"
+range = [0.21, 6.7]
+model = "sellmeier"
+B = [0.6961663, 0.4079426, 0.8974794]
+lambda0 = [0.0684043, 0.1162414, 9.896161]   # resonance wavelengths in um (C = lambda0^2)

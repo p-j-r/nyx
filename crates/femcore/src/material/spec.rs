@@ -51,7 +51,7 @@ pub struct MaterialSpec {
     pub optical: Option<Optical>,
 }
 
-const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "density", "elastic", "thermal", "electrical", "optical"];
+const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "density", "density_unit", "elastic", "thermal", "electrical", "optical"];
 const ELASTIC_KEYS: &[&str] = &["unit", "compliance_unit", "class", "unique_axis", "matrix", "compliance", "E", "nu", "lambda", "mu", "K", "G", "c11", "c12", "c44"];
 const THERMAL_KEYS: &[&str] = &["conductivity", "conductivity_unit", "specific_heat", "specific_heat_unit", "expansion", "expansion_unit"];
 const ELECTRICAL_KEYS: &[&str] = &["permittivity", "permeability", "conductivity", "conductivity_unit"];
@@ -144,7 +144,12 @@ impl MaterialSpec {
     pub fn load(path: &Path) -> Result<MaterialSpec, MaterialError> {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("unnamed").to_string();
         let text = std::fs::read_to_string(path).map_err(|e| MaterialError { material: stem.clone(), path: String::new(), message: format!("cannot read {}: {e}", path.display()) })?;
-        Self::from_toml_named(&text, &stem)
+        Self::from_toml_named(&text, &stem).map_err(|mut e| {
+            if e.material != stem {
+                e.material = format!("{} (file {stem}.toml)", e.material);
+            }
+            e
+        })
     }
 
     /// The material as TOML text, in the same format (comments of an original file are not kept).
@@ -309,4 +314,18 @@ impl Library {
     pub fn is_empty(&self) -> bool {
         self.materials.is_empty()
     }
+}
+
+/// The keys each table of a material file accepts (the contract test compares them with the JSON Schema).
+pub struct Keys {
+    pub top: &'static [&'static str],
+    pub elastic: &'static [&'static str],
+    pub thermal: &'static [&'static str],
+    pub electrical: &'static [&'static str],
+    pub optical: &'static [&'static str],
+    pub model: &'static [&'static str],
+}
+
+pub fn keys() -> Keys {
+    Keys { top: TOP_KEYS, elastic: ELASTIC_KEYS, thermal: THERMAL_KEYS, electrical: ELECTRICAL_KEYS, optical: optics::OPTICAL_KEYS, model: optics::MODEL_KEYS }
 }

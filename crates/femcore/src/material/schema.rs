@@ -45,7 +45,8 @@ fn model() -> Value {
             "data": { "type": "array", "items": { "type": "array", "minItems": 2, "maxItems": 3, "items": { "type": "number" } }, "minItems": 2, "description": "tabulated: rows [wavelength, n] or [wavelength, n, k], wavelength increasing" },
             "interpolation": { "enum": ["pchip", "linear"], "default": "pchip" },
             "extrapolate": { "enum": ["error", "linear"], "default": "error" },
-            "dn_dT": quantity("thermo-optic coefficient, 1/K")
+            "dn_dT": quantity("thermo-optic coefficient, 1/K"),
+            "dn_dT_unit": { "type": "string" }
         }
     })
 }
@@ -94,6 +95,7 @@ pub fn material_schema() -> Value {
             "source": { "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "references the numbers come from" },
             "notes": { "type": "string" },
             "density": quantity("mass density, kg/m^3"),
+            "density_unit": { "type": "string" },
             "elastic": { "type": "object", "additionalProperties": false, "properties": elastic_props, "description": "stiffness in the crystal frame; give it in exactly one way: class + constants, matrix, compliance, or isotropic constants" },
             "thermal": {
                 "type": "object",

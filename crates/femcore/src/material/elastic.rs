@@ -659,7 +659,8 @@ fn matrix_from_tree(s: &Section, key: &str, tree: &Tree, symmetric_required: boo
         return Err(s.err(key, format!("must have 6 rows (found {}); give all 6 x 6 entries or the upper triangle with rows of 6, 5, 4, 3, 2, 1 entries", rows.len())));
     }
     let mut m = [[f64::NAN; 6]; 6];
-    let mut full = true;
+    let triangle = rows.iter().enumerate().any(|(i, r)| i > 0 && matches!(r, Tree::List(l) if l.len() == 6 - i));
+    let full = !triangle;
     for (i, row) in rows.iter().enumerate() {
         let Tree::List(r) = row else { return Err(s.err(key, format!("row {} must be a list of numbers", i + 1))) };
         let nums: Vec<f64> = r
@@ -669,12 +670,11 @@ fn matrix_from_tree(s: &Section, key: &str, tree: &Tree, symmetric_required: boo
                 _ => Err(s.err(key, format!("row {} holds something that is not a number", i + 1))),
             })
             .collect::<Result<_, _>>()?;
-        if nums.len() == 6 {
+        if full && nums.len() == 6 {
             for (j, v) in nums.iter().enumerate() {
                 m[i][j] = *v;
             }
-        } else if nums.len() == 6 - i {
-            full = false;
+        } else if !full && nums.len() == 6 - i {
             for (k, v) in nums.iter().enumerate() {
                 m[i][i + k] = *v;
             }
@@ -683,13 +683,6 @@ fn matrix_from_tree(s: &Section, key: &str, tree: &Tree, symmetric_required: boo
         }
     }
     if !full {
-        for (i, row) in rows.iter().enumerate() {
-            if let Tree::List(r) = row {
-                if r.len() == 6 {
-                    return Err(s.err(key, format!("row {} has 6 entries but the rows before it are triangular; use either all full rows or the triangle", i + 1)));
-                }
-            }
-        }
         for i in 0..6 {
             for j in 0..i {
                 m[i][j] = m[j][i];

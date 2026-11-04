@@ -1,0 +1,18 @@
+# Air treated as vacuum for photonics (the real index at 1 atm is about 1.0003). No elastic stiffness: a fluid.
+format = 1
+name = "air"
+description = "Air (optically vacuum)"
+density = "1.2 kg/m^3"
+
+[thermal]
+conductivity = 0.026
+conductivity_unit = "W/(m*K)"
+specific_heat = "1005 J/(kg*K)"
+
+[electrical]
+permittivity = 1.0
+permeability = 1.0
+
+[optical]
+model = "constant"
+n = 1.0

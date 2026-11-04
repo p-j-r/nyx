@@ -1,0 +1,1778 @@
+{
+  "$defs": {
+    "model": {
+      "properties": {
+        "A": {
+          "description": "sellmeier: n^2 = A + sum B x^2/(x^2 - C), default 1",
+          "type": "number"
+        },
+        "B": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "C": {
+          "description": "sellmeier: squared resonance wavelengths in wavelength_unit^2",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "coefficients": {
+          "description": "cauchy: n = c0 + c1/x^2 + c2/x^4 + ...",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "data": {
+          "description": "tabulated: rows [wavelength, n] or [wavelength, n, k], wavelength increasing",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 2,
+            "type": "array"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        "dn_dT": {
+          "description": "thermo-optic coefficient, 1/K",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "dn_dT_unit": {
+          "type": "string"
+        },
+        "eps": {
+          "description": "constant model: relative permittivity (alternative to n)",
+          "type": "number"
+        },
+        "extrapolate": {
+          "default": "error",
+          "enum": [
+            "error",
+            "linear"
+          ]
+        },
+        "interpolation": {
+          "default": "pchip",
+          "enum": [
+            "pchip",
+            "linear"
+          ]
+        },
+        "k": {
+          "description": "constant model: extinction coefficient; the complex index is n - j k",
+          "minimum": 0,
+          "type": "number"
+        },
+        "lambda0": {
+          "description": "sellmeier: resonance wavelengths in wavelength_unit (instead of C)",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "model": {
+          "enum": [
+            "constant",
+            "sellmeier",
+            "cauchy",
+            "tabulated"
+          ]
+        },
+        "n": {
+          "description": "constant model: refractive index",
+          "type": "number"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://nyx.local/schemas/material.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A TOML material file read as data. Units are never assumed: write a quantity with its unit.",
+  "properties": {
+    "density": {
+      "description": "mass density, kg/m^3",
+      "oneOf": [
+        {
+          "description": "a number with its unit, for example \"496.8 GPa\"",
+          "type": "string"
+        },
+        {
+          "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+          "type": "number"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "unit": {
+              "type": "string"
+            },
+            "value": {}
+          },
+          "required": [
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "density_unit": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "elastic": {
+      "additionalProperties": false,
+      "description": "stiffness in the crystal frame; give it in exactly one way: class + constants, matrix, compliance, or isotropic constants",
+      "properties": {
+        "E": {
+          "description": "isotropic constant",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "G": {
+          "description": "isotropic constant",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "K": {
+          "description": "isotropic constant",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c11": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c12": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c13": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c14": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c15": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c16": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c22": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c23": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c24": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c25": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c26": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c33": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c34": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c35": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c36": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c44": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c45": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c46": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c55": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c56": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "c66": {
+          "description": "independent stiffness constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "class": {
+          "enum": [
+            "isotropic",
+            "cubic",
+            "hexagonal",
+            "trigonal",
+            "tetragonal",
+            "orthotropic",
+            "orthorhombic",
+            "monoclinic",
+            "triclinic"
+          ]
+        },
+        "compliance": {
+          "description": "compliance matrix, same shapes as matrix (Voigt, engineering shear: the matrix inverse of the stiffness)",
+          "type": "array"
+        },
+        "compliance_unit": {
+          "description": "unit of compliance values, for example \"1/GPa\"",
+          "type": "string"
+        },
+        "lambda": {
+          "description": "isotropic constant",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "matrix": {
+          "description": "stiffness in Voigt order 1=xx 2=yy 3=zz 4=yz 5=xz 6=xy (engineering shear): 6 rows of 6, or the upper triangle as rows of 6, 5, 4, 3, 2, 1 entries",
+          "type": "array"
+        },
+        "mu": {
+          "description": "isotropic constant",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "nu": {
+          "description": "Poisson's ratio",
+          "exclusiveMaximum": 0.5,
+          "exclusiveMinimum": -1,
+          "type": "number"
+        },
+        "s11": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s12": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s13": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s14": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s15": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s16": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s22": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s23": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s24": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s25": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s26": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s33": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s34": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s35": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s36": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s44": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s45": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s46": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s55": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s56": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "s66": {
+          "description": "independent compliance constant of the class",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "unique_axis": {
+          "default": "y",
+          "description": "two-fold axis of a monoclinic crystal",
+          "enum": [
+            "y",
+            "z"
+          ]
+        },
+        "unit": {
+          "description": "unit of the stiffness values written as bare numbers, for example \"GPa\"",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "electrical": {
+      "additionalProperties": false,
+      "properties": {
+        "conductivity": {
+          "description": "electrical conductivity, S/m. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
+          "oneOf": [
+            {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "par": {},
+                "perp": {},
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "conductivity_unit": {
+          "type": "string"
+        },
+        "permeability": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "permittivity": {
+          "description": "relative permittivity at low frequency. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
+          "oneOf": [
+            {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "par": {},
+                "perp": {},
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "format": {
+      "const": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "optical": {
+      "additionalProperties": false,
+      "description": "wavelength-dependent index; time convention e^{j omega t}, complex index n - j k. Put the model keys here (isotropic) or in per-axis tables",
+      "properties": {
+        "A": {
+          "description": "sellmeier: n^2 = A + sum B x^2/(x^2 - C), default 1",
+          "type": "number"
+        },
+        "B": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "C": {
+          "description": "sellmeier: squared resonance wavelengths in wavelength_unit^2",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "coefficients": {
+          "description": "cauchy: n = c0 + c1/x^2 + c2/x^4 + ...",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "data": {
+          "description": "tabulated: rows [wavelength, n] or [wavelength, n, k], wavelength increasing",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 2,
+            "type": "array"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        "dn_dT": {
+          "description": "thermo-optic coefficient, 1/K",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "dn_dT_unit": {
+          "type": "string"
+        },
+        "eps": {
+          "description": "constant model: relative permittivity (alternative to n)",
+          "type": "number"
+        },
+        "extraordinary": {
+          "$ref": "#/$defs/model",
+          "description": "model along this crystal axis (ordinary/extraordinary: uniaxial about z; x/y/z: biaxial)"
+        },
+        "extrapolate": {
+          "default": "error",
+          "enum": [
+            "error",
+            "linear"
+          ]
+        },
+        "interpolation": {
+          "default": "pchip",
+          "enum": [
+            "pchip",
+            "linear"
+          ]
+        },
+        "k": {
+          "description": "constant model: extinction coefficient; the complex index is n - j k",
+          "minimum": 0,
+          "type": "number"
+        },
+        "lambda0": {
+          "description": "sellmeier: resonance wavelengths in wavelength_unit (instead of C)",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "model": {
+          "enum": [
+            "constant",
+            "sellmeier",
+            "cauchy",
+            "tabulated"
+          ]
+        },
+        "n": {
+          "description": "constant model: refractive index",
+          "type": "number"
+        },
+        "ordinary": {
+          "$ref": "#/$defs/model",
+          "description": "model along this crystal axis (ordinary/extraordinary: uniaxial about z; x/y/z: biaxial)"
+        },
+        "range": {
+          "description": "validity range [min, max] in wavelength_unit; required for formula models; a wavelength outside it is an error",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "reference_temperature": {
+          "description": "temperature the models hold at, default 293.15 K; with dn_dT the index shifts by dn_dT (T - reference)",
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "wavelength_unit": {
+          "description": "unit of every wavelength, range and coefficient of this section, for example \"um\"; required unless all models are constant",
+          "type": "string"
+        },
+        "x": {
+          "$ref": "#/$defs/model",
+          "description": "model along this crystal axis (ordinary/extraordinary: uniaxial about z; x/y/z: biaxial)"
+        },
+        "y": {
+          "$ref": "#/$defs/model",
+          "description": "model along this crystal axis (ordinary/extraordinary: uniaxial about z; x/y/z: biaxial)"
+        },
+        "z": {
+          "$ref": "#/$defs/model",
+          "description": "model along this crystal axis (ordinary/extraordinary: uniaxial about z; x/y/z: biaxial)"
+        }
+      },
+      "type": "object"
+    },
+    "source": {
+      "description": "references the numbers come from",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ]
+    },
+    "thermal": {
+      "additionalProperties": false,
+      "properties": {
+        "conductivity": {
+          "description": "thermal conductivity, W/(m K). One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
+          "oneOf": [
+            {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "par": {},
+                "perp": {},
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "conductivity_unit": {
+          "type": "string"
+        },
+        "expansion": {
+          "description": "thermal expansion, 1/K. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
+          "oneOf": [
+            {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "par": {},
+                "perp": {},
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "expansion_unit": {
+          "type": "string"
+        },
+        "specific_heat": {
+          "description": "specific heat, J/(kg K)",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "specific_heat_unit": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "format"
+  ],
+  "title": "nyx material file",
+  "type": "object",
+  "x-file-format": 1,
+  "x-schema-version": "1.0"
+}

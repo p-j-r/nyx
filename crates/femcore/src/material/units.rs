@@ -137,14 +137,18 @@ pub fn split_quantity(s: &str) -> Result<(f64, String), String> {
             return Ok((v, rest.trim().to_string()));
         }
     }
-    for end in (1..=t.len()).rev().filter(|&i| t.is_char_boundary(i)) {
+    if let Ok(v) = t.parse::<f64>() {
+        return Ok((v, String::new()));
+    }
+    for end in (1..t.len()).rev().filter(|&i| t.is_char_boundary(i)) {
         if let Ok(v) = t[..end].parse::<f64>() {
-            if end < t.len() && !t[end..].starts_with(['e', 'E']) {
+            let next = t[end..].chars().next().unwrap_or(' ');
+            if !(next.is_ascii_digit() || next == '.' || next == 'e' || next == 'E') {
                 return Ok((v, t[end..].trim().to_string()));
             }
         }
     }
-    t.parse::<f64>().map(|v| (v, String::new())).map_err(|_| format!("'{s}' is not a number with a unit; write it like \"496.8 GPa\""))
+    Err(format!("'{s}' is not a number with a unit; write it like \"496.8 GPa\""))
 }
 
 #[cfg(test)]
@@ -157,7 +161,7 @@ mod tests {
         assert_eq!(to_si(2.2, "g/cm^3", Dim::Density).unwrap(), 2200.0);
         assert_eq!(to_si(1.55, "um", Dim::Length).unwrap(), 1.55e-6);
         assert_eq!(to_si(1.55, "\u{b5}m", Dim::Length).unwrap(), 1.55e-6);
-        assert_eq!(to_si(5.0, "ppm/K", Dim::PerKelvin).unwrap(), 5.0e-6);
+        assert!((to_si(5.0, "ppm/K", Dim::PerKelvin).unwrap() - 5.0e-6).abs() < 1e-18);
         assert!((to_si(20.0, "degC", Dim::Temperature).unwrap() - 293.15).abs() < 1e-12);
         assert_eq!(to_si(1.0, "1/GPa", Dim::Compliance).unwrap(), 1e-9);
         assert_eq!(to_si(3.0, "W/(m*K)", Dim::ThermalConductivity).unwrap(), 3.0);
