@@ -569,7 +569,9 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         }
         cut_list.extend(p.cuts.iter().copied());
     }
-    cut_list.sort_unstable_by_key(|c| c.0);
+    // the same cut point made by two blocks may differ in the last bits (bisected from either end): keep the smallest, so that the choice does
+    // not depend on how the lattice was divided into blocks, that is on the number of threads (ADR 11)
+    cut_list.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1[0].total_cmp(&b.1[0]).then_with(|| a.1[1].total_cmp(&b.1[1])).then_with(|| a.1[2].total_cmp(&b.1[2]))));
     cut_list.dedup_by_key(|c| c.0);
     let n_cuts = cut_list.len();
     let mut remap = vec![u32::MAX; nv];
@@ -601,10 +603,14 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
 
     // 5. cells (oriented) with their regions
     let mut raw: Vec<([u32; 4], i32)> = Vec::with_capacity(parts.iter().map(|p| p.inner.len() + p.surf.len()).sum());
+    // all whole tetrahedra, then all cut ones, each in lattice order: the order must not depend on how the lattice was divided into blocks
+    // (that is, on the number of threads), or the numbering of cells would (ADR 11)
     for p in &parts {
         for (t, r) in &p.inner {
             raw.push(([remap[t[0] as usize], remap[t[1] as usize], remap[t[2] as usize], remap[t[3] as usize]], *r));
         }
+    }
+    for p in &parts {
         for (t, r) in &p.surf {
             raw.push(([vid(t[0]), vid(t[1]), vid(t[2]), vid(t[3])], *r));
         }
@@ -628,8 +634,59 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         }
         out
     });
-    let cells: Vec<([u32; 4], i32)> = blocks.into_iter().flatten().collect();
+    let mut cells: Vec<([u32; 4], i32)> = blocks.into_iter().flatten().collect();
     drop(raw);
+
+    // 5b. weld vertices that coincide to rounding. A surface of the model that lies on a lattice plane (a layer interface, a face of
+    // the window of an absorbing layer) warps the lattice vertices onto it and also cuts the edges next to them, so a cut point can be
+    // a few ulp away from a warped vertex; the cells between the two are slivers of zero volume. Welding the ends of every edge that is
+    // shorter than `eps` removes them without touching a cell of ordinary size (ADR 52).
+    let eps2 = (1e-8 * hmin).powi(2);
+    let close: Vec<Vec<(u32, u32)>> = par_blocks(cells.len(), 20_000, |r| {
+        let mut out = vec![];
+        for c in r {
+            let t = cells[c].0;
+            for i in 0..4 {
+                for j in i + 1..4 {
+                    let (a, b) = (points[t[i] as usize], points[t[j] as usize]);
+                    if (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2) < eps2 {
+                        out.push((t[i].min(t[j]), t[i].max(t[j])));
+                    }
+                }
+            }
+        }
+        out
+    });
+    if close.iter().any(|b| !b.is_empty()) {
+        let mut rep: Vec<u32> = (0..points.len() as u32).collect();
+        let find = |rep: &mut Vec<u32>, mut x: u32| {
+            while rep[x as usize] != x {
+                rep[x as usize] = rep[rep[x as usize] as usize];
+                x = rep[x as usize];
+            }
+            x
+        };
+        for (a, b) in close.into_iter().flatten() {
+            let (ra, rb) = (find(&mut rep, a), find(&mut rep, b));
+            if ra != rb {
+                rep[ra.max(rb) as usize] = ra.min(rb);
+            }
+        }
+        for v in 0..points.len() as u32 {
+            let r = find(&mut rep, v);
+            if r != v && vflag[v as usize] {
+                vflag[r as usize] = true;
+            }
+        }
+        let mut kept = Vec::with_capacity(cells.len());
+        for (t, r) in &cells {
+            let t = t.map(|v| find(&mut rep, v));
+            if (0..4).all(|i| (i + 1..4).all(|j| t[i] != t[j])) {
+                kept.push((t, *r));
+            }
+        }
+        cells = kept;
+    }
 
     // 6. boundary facets: faces of cells with the void on the other side, and faces between cells of different regions. Such a face has
     // all three vertices on a surface.

@@ -434,3 +434,239 @@ fn mesh_geom3d_numbers_cells_and_facets_with_the_model_label_map() {
     assert_eq!(faces.iter().next(), Some(&1), "boundary numbers start at 1");
     assert_eq!(g.boundary("air|ball").len(), 1);
 }
+
+// ---------------------------------------------------------------------------------------------------------------- 3D features (ADR 50 to 54)
+
+/// A small validator for the subset of JSON Schema the mesh schemas use: type (also a list), const, enum, oneOf, required, properties,
+/// additionalProperties, items, minItems, maxItems, minimum, exclusiveMinimum.
+fn validate(schema: &Value, v: &Value, at: &str) -> Result<(), String> {
+    let kind = |v: &Value| match v {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(n) if n.is_i64() || n.is_u64() => "integer",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    };
+    if let Some(c) = schema.get("const") {
+        if c != v {
+            return Err(format!("{at}: expected {c}, got {v}"));
+        }
+    }
+    if let Some(e) = schema.get("enum") {
+        if !e.as_array().unwrap().contains(v) {
+            return Err(format!("{at}: {v} is not one of {e}"));
+        }
+    }
+    if let Some(t) = schema.get("type") {
+        let allowed: Vec<&str> = match t {
+            Value::String(s) => vec![s.as_str()],
+            Value::Array(a) => a.iter().map(|x| x.as_str().unwrap()).collect(),
+            _ => vec![],
+        };
+        let k = kind(v);
+        if !allowed.iter().any(|a| *a == k || (*a == "number" && k == "integer")) {
+            return Err(format!("{at}: type {k}, expected {allowed:?}"));
+        }
+    }
+    if let (Some(x), Some(m)) = (v.as_f64(), schema.get("minimum").and_then(Value::as_f64)) {
+        if x < m {
+            return Err(format!("{at}: {x} below {m}"));
+        }
+    }
+    if let (Some(x), Some(m)) = (v.as_f64(), schema.get("exclusiveMinimum").and_then(Value::as_f64)) {
+        if x <= m {
+            return Err(format!("{at}: {x} not above {m}"));
+        }
+    }
+    if let Some(one) = schema.get("oneOf") {
+        let ok = one.as_array().unwrap().iter().filter(|s| validate(s, v, at).is_ok()).count();
+        if ok != 1 {
+            return Err(format!("{at}: matches {ok} of the alternatives, expected exactly one"));
+        }
+    }
+    if let Value::Object(o) = v {
+        for r in schema.get("required").and_then(Value::as_array).into_iter().flatten() {
+            if !o.contains_key(r.as_str().unwrap()) {
+                return Err(format!("{at}: missing '{}'", r.as_str().unwrap()));
+            }
+        }
+        let props = schema.get("properties").and_then(Value::as_object);
+        for (k, x) in o {
+            match props.and_then(|p| p.get(k)) {
+                Some(s) => validate(s, x, &format!("{at}.{k}"))?,
+                None => match schema.get("additionalProperties") {
+                    Some(Value::Bool(false)) => return Err(format!("{at}: unexpected '{k}'")),
+                    Some(s @ Value::Object(_)) => validate(s, x, &format!("{at}.{k}"))?,
+                    _ => {}
+                },
+            }
+        }
+    }
+    if let Value::Array(a) = v {
+        if let Some(n) = schema.get("minItems").and_then(Value::as_u64) {
+            if (a.len() as u64) < n {
+                return Err(format!("{at}: fewer than {n} items"));
+            }
+        }
+        if let Some(n) = schema.get("maxItems").and_then(Value::as_u64) {
+            if (a.len() as u64) > n {
+                return Err(format!("{at}: more than {n} items"));
+            }
+        }
+        if let Some(s) = schema.get("items") {
+            for (i, x) in a.iter().enumerate() {
+                validate(s, x, &format!("{at}[{i}]"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The structure of a JSON value without its numbers: object keys and the kind of every leaf.
+fn shape(v: &Value) -> Value {
+    match v {
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), shape(x))).collect()),
+        Value::Array(a) => Value::Array(a.first().map(shape).into_iter().collect()),
+        Value::Number(n) => json!(if n.is_i64() || n.is_u64() { "integer" } else { "number" }),
+        Value::String(_) => json!("string"),
+        Value::Bool(_) => json!("boolean"),
+        Value::Null => json!("null"),
+    }
+}
+
+fn ball_in_box_with_pml() -> geom::model::Model {
+    let mut m = geom::model::Model::new_3d();
+    let air = m.box_("air", (-2.0, -2.0, -2.0), (2.0, 2.0, 2.0));
+    let ball = m.sphere("ball", (0.0, 0.0, 0.0), 0.7);
+    let win = m.box_("window", (-1.5, -1.5, -1.5), (1.5, 1.5, 1.5));
+    m.overlay(&[("air", air), ("ball", ball)]);
+    m.pml("pml", win, &[], 0.5, 2.0, 2.0);
+    m
+}
+
+#[test]
+fn mesh_geom3d_adaptive_and_structured_meshes_keep_the_label_map() {
+    // ADR 51 and 52: whichever way a 3D model is meshed (simple, adaptive, structured layers), domain numbers are the model's, boundary numbers
+    // are the model's, and the faces between regions are facets with the number of the geom face between them (ADR 40).
+    let m = ball_in_box_with_pml();
+    let simple = femcore::meshing::mesh_model(&m.list, &femcore::meshing::MeshPlan::simple(0.5)).unwrap();
+    let plans = [
+        femcore::meshing::MeshPlan::adaptive(0.6, 0.7),
+        femcore::meshing::MeshPlan { pml: femcore::meshing::PmlMode::Structured, ..femcore::meshing::MeshPlan::simple(0.5) },
+        femcore::meshing::MeshPlan { pml: femcore::meshing::PmlMode::Structured, ..femcore::meshing::MeshPlan::adaptive(0.6, 0.7) },
+    ];
+    for plan in plans {
+        let g = femcore::meshing::mesh_model(&m.list, &plan).unwrap();
+        assert_eq!(g.labels, simple.labels, "{plan:?}");
+        let domains: std::collections::BTreeSet<i32> = g.mesh.cell_labels.iter().copied().collect();
+        assert_eq!(domains, g.labels.domains.iter().map(|d| d.id).collect(), "every region has cells: {plan:?}");
+        let faces: std::collections::BTreeSet<i32> = g.mesh.facet_labels.iter().copied().collect();
+        let sphere = g.boundary("air|ball");
+        assert_eq!(sphere.len(), 1);
+        assert!(faces.contains(&sphere[0]), "the sphere carries its own facets: {plan:?}");
+        assert!(faces.iter().all(|f| g.labels.boundaries.iter().any(|b| b.id == *f)), "no other number appears: {plan:?}");
+        assert_eq!(g.mesh.dim, 3);
+    }
+}
+
+#[test]
+fn mesh_geom3d_structured_pml_keeps_the_physical_vertex_and_cell_numbers() {
+    // The 3D counterpart of `mesh_pml_generator_keeps_the_physical_vertex_and_cell_numbers` for a geom model (ADR 52): the physical window
+    // is meshed alone, the layers are appended, and the uncut mesh and its tetrahedral cut both start with the physical vertices and cells.
+    use femcore::meshing::geomdrive::{evaluate, GeomMeshOpts};
+    use femcore::meshing::geomdrive3::{mesh_geom_3d_with, Sizes3};
+    use femcore::meshing::pml_geom3::{structured_pml_3d, structured_pml_3d_native, Native3};
+    let m = ball_in_box_with_pml();
+    let ev = evaluate(&m.list).unwrap();
+    let mut skip = vec![false; ev.regions().len()];
+    for p in ev.pml_regions() {
+        skip[p.region as usize] = true;
+    }
+    let (phys, _, _) = mesh_geom_3d_with(ev, &GeomMeshOpts::new(0.5), &Sizes3 { region_h: vec![], skip }).unwrap();
+    let (np, nc) = (phys.mesh.n_points(), phys.mesh.n_cells());
+    let Native3::Cells(cells, report) = structured_pml_3d_native(phys.clone()).unwrap() else { panic!("the model has a Pml") };
+    assert_eq!((report.physical_cells, report.dropped_cells), (nc, 0));
+    assert_eq!(&cells.points[..np].iter().flatten().copied().collect::<Vec<f64>>()[..], &phys.mesh.points[..], "physical coordinates by id");
+    for c in 0..nc {
+        assert_eq!(cells.cell(c), phys.mesh.cell(c), "cell {c}");
+        assert_eq!(cells.label[c], phys.mesh.cell_labels[c], "label of cell {c}");
+    }
+    assert!(cells.n_cells() > nc && cells.n_points() > np);
+    let (split, _) = structured_pml_3d(phys.clone()).unwrap();
+    assert_eq!(&split.mesh.points[..3 * np], &phys.mesh.points[..], "the solver view keeps the physical vertices");
+    assert_eq!(&split.mesh.cells[..4 * nc], &phys.mesh.cells[..], "and the physical cells, first and unchanged");
+}
+
+#[test]
+fn mesh_request_and_report_match_their_exemplars_and_schemas() {
+    // ADR 54: the serialisable request and report of a mesh job, in 2D and 3D. The request exemplar is compared as a value; the report
+    // exemplar by structure (the counts depend on the mesher); both validate against the checked-in schemas, which are the generated ones.
+    use femcore::meshing::request::{mesh_request, report_schema, request_schema, MeshReport, MeshRequest, MesherRequest, WavesRequest};
+    use femcore::meshing::Sizing;
+    check_exemplar_value("mesh_request.schema.v1.json", &request_schema());
+    check_exemplar_value("mesh_report.schema.v1.json", &report_schema());
+    let req = MeshRequest {
+        h: 0.6,
+        max_dev: None,
+        mesher: MesherRequest::Adaptive { scale: 0.7, grade: 0.4, max_cells: Some(200_000) },
+        structured_pml: true,
+        waves: Some(WavesRequest {
+            sizing: Sizing { order: 2, headroom: 1.0, wavelengths: [("air".to_string(), 4.0), ("ball".to_string(), 1.2)].into_iter().collect() },
+            points_per_wavelength: None,
+            pml_relax: 1.5,
+            eigen_headroom: 1.5,
+        }),
+    };
+    let rv = serde_json::to_value(&req).unwrap();
+    check_exemplar_value("mesh_request.v1.json", &rv);
+    validate(&request_schema(), &rv, "request").unwrap();
+    assert_eq!(serde_json::from_value::<MeshRequest>(rv).unwrap(), req, "the request round-trips");
+    let minimal: MeshRequest = serde_json::from_value(json!({ "h": 0.1, "mesher": { "kind": "simple" } })).unwrap();
+    assert!(!minimal.structured_pml && minimal.waves.is_none() && matches!(minimal.mesher, MesherRequest::Simple));
+    let (_, report) = mesh_request(&ball_in_box_with_pml().list, &req).unwrap();
+    let pv = serde_json::to_value(&report).unwrap();
+    validate(&report_schema(), &pv, "report").unwrap();
+    check_exemplar_value("mesh_report.v1.json", &shape(&pv));
+    assert_eq!(serde_json::from_value::<MeshReport>(pv).unwrap(), report);
+    assert_eq!(report.dim, 3);
+    assert_eq!(report.structured_layers, Some(vec![[2, 2], [2, 2], [2, 2]]));
+    assert!(report.adaptation.is_some() && report.domains.iter().any(|d| d.wave_size.is_some()));
+    // the schema refuses what the request type refuses
+    assert!(validate(&request_schema(), &json!({ "h": -1.0, "mesher": { "kind": "simple" } }), "r").is_err());
+    assert!(validate(&request_schema(), &json!({ "h": 1.0, "mesher": { "kind": "other" } }), "r").is_err());
+    assert!(validate(&request_schema(), &json!({ "h": 1.0, "mesher": { "kind": "simple" }, "extra": 1 }), "r").is_err());
+}
+
+#[test]
+fn adapt_maxwell_estimator_contract() {
+    // ADR 53: `CurlField` is all the estimator knows of a solution; the four parts add up to the indicators, boundary conditions decide which
+    // faces count, and a skipped cell has no indicator.
+    use femcore::adapt::maxwell::{maxwell_indicators, CurlField, MaxwellOptions};
+    use femcore::linalg::csr::C;
+    struct Linear;
+    impl CurlField for Linear {
+        fn sample(&self, _cell: usize, lam: [f64; 4]) -> ([C; 3], [C; 3]) {
+            // E = lam_1 e_x: a field with a jump of its normal component across the faces, as every cell has its own lam_1
+            ([C::new(lam[1], 0.0), C::new(0.0, 0.0), C::new(0.0, 0.0)], [C::new(0.0, 0.0), C::new(1.0, 0.0), C::new(0.0, 0.0)])
+        }
+    }
+    let m = femcore::testkit::block(1.0, 1.0, 1.0, 2, 2, 2);
+    let (eps, mu) = (vec![1.0; m.n_cells()], vec![1.0; m.n_cells()]);
+    let opt = |natural: &'static (dyn Fn(i32) -> bool + Sync), skip: &'static (dyn Fn(i32) -> bool + Sync)| MaxwellOptions { k0_sq: 1.0, eps_r: &eps, mu_r: &mu, skip, natural };
+    let ind = maxwell_indicators(&m, &Linear, &opt(&|_| false, &|_| false)).unwrap();
+    let sum: f64 = ind.eta2.iter().sum();
+    assert!((ind.parts.iter().sum::<f64>() - sum).abs() <= 1e-12 * sum);
+    assert!((ind.total * ind.total - sum).abs() <= 1e-12 * sum);
+    // natural boundaries add a term, perfect conductors none
+    let nat = maxwell_indicators(&m, &Linear, &opt(&|_| true, &|_| false)).unwrap();
+    assert!(nat.parts[2] > ind.parts[2]);
+    // a skipped domain has no indicator
+    let label = m.cell_labels[0];
+    let all = |l: i32| l == label;
+    let skipped = maxwell_indicators(&m, &Linear, &MaxwellOptions { k0_sq: 1.0, eps_r: &eps, mu_r: &mu, skip: &all, natural: &|_| false }).unwrap();
+    assert!(skipped.eta2.iter().all(|&e| e == 0.0));
+    // wrong sizes are refused
+    assert!(maxwell_indicators(&m, &Linear, &MaxwellOptions { k0_sq: 1.0, eps_r: &eps[1..], mu_r: &mu, skip: &|_| false, natural: &|_| false }).is_err());
+}

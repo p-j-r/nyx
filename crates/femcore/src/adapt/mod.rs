@@ -6,6 +6,7 @@ pub mod field;
 pub mod field3;
 pub mod geom;
 pub mod geom3;
+pub mod maxwell;
 pub mod metric;
 pub mod ops;
 pub mod ops3;

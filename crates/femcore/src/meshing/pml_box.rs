@@ -218,9 +218,11 @@ impl<'a, const D: usize> Builder<'a, D> {
 
 /// Reorder the nodes of a cell in place so that its scaled Jacobian at node 0 is positive.
 fn orient<const D: usize>(t: CellType, v: &mut [u32], pts: &[[f64; D]]) {
+    // a mesh of the cell alone: copying all the points for every cell made the generator quadratic in the size of the mesh
     let mut probe = CellMesh::<D>::new();
-    probe.points = pts.to_vec();
-    probe.push_cell(t, v, 0);
+    probe.points = v.iter().map(|&i| pts[i as usize]).collect();
+    let local: Vec<u32> = (0..v.len() as u32).collect();
+    probe.push_cell(t, &local, 0);
     if crate::mesh::quality::cell_scaled_jacobian_min(&probe, 0) < 0.0 {
         let swaps: &[(usize, usize)] = match t {
             CellType::Tri => &[(1, 2)],

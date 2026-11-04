@@ -72,21 +72,26 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/mesh/exchange.rs` | 32, 41 | the mesh a physics is given (native cell mesh, 2D or 3D) and its numbering of unknowns |
 | `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
-| `crates/femcore/src/meshing/mod.rs` | 6, 7, 18 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
+| `crates/femcore/src/meshing/mod.rs` | 6, 7, 18, 50, 51, 52 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
 | `crates/femcore/src/meshing/geomdrive.rs` | 2, 6 | |
 | `crates/femcore/src/meshing/mesher.rs` | 6, 2 | 2D triangulation core |
-| `crates/femcore/src/meshing/mesher3d.rs` | 40 | lattice (isosurface stuffing) tetrahedral mesher on the trait `Domain3`; was the R05 fixture |
+| `crates/femcore/src/meshing/mesher3d.rs` | 40, 55 | lattice (isosurface stuffing) tetrahedral mesher on the trait `Domain3`; was the R05 fixture |
 | `crates/femcore/src/meshing/refine3d.rs` | 40 | Rivara longest-edge refinement of a `CellMesh<3>` |
-| `crates/femcore/src/meshing/geomdrive3.rs` | 40, 2 | adapter: a 3D geom model as `Domain3` (classify, facet_project, LabelMap), `mesh_geom_3d`, `sphere_cavity` |
+| `crates/femcore/src/meshing/geomdrive3.rs` | 40, 2, 50, 52 | adapter: a 3D geom model as `Domain3` (classify, facet_project, LabelMap), `mesh_geom_3d`, `sphere_cavity` |
 | `crates/femcore/src/meshing/pml3.rs` | 5, 7 | |
-| `crates/femcore/src/meshing/pml_geom.rs` | 5, 7 | structured PML for a meshed geom model, an adapter over `pml_box` (was `meshing_pml.rs`, then `meshing/pml.rs`) |
+| `crates/femcore/src/meshing/pml_geom3.rs` | 52, 5 | structured absorbing layers for a meshed 3D geom model: the physical window, `build_pml`, geom labels, the tetrahedral cut |
+| `crates/femcore/src/meshing/adapt3d.rs` | 51, 40 | adaptive meshing of a 3D geom model: the exact faces as the oracle of `adapt3`, interface facets, vertex sizes |
+| `crates/femcore/src/meshing/request.rs` | 54 | the serialisable mesh request and report, their JSON Schemas |
+| `crates/femcore/src/meshing/pml_geom.rs` | 5, 7, 52 | structured PML for a meshed geom model, an adapter over `pml_box` (was `meshing_pml.rs`, then `meshing/pml.rs`) |
 | `crates/femcore/src/meshing/pml_box.rs` | 7, 5 | structured PML generator (was `meshers/adapt/pml.rs`) |
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
 | `crates/femcore/src/meshing/sizing.rs` | 17, 25 | the neutral Sizing a physics reports to the mesher (re-exported by nyx-physics) |
 | `crates/femcore/src/meshing/validate/*` | 7 | |
 | `crates/femcore/src/par.rs` | 11 | R03; the fixed-chunk reductions of the adaptation live here too (was `adapt/par.rs`) |
-| `crates/femcore/src/adapt/estimate*.rs` | 7, 17 | |
+| `crates/femcore/src/adapt/estimate*.rs` | 7, 17, 53 | |
 | `crates/femcore/src/adapt/work.rs` | 5, 4, 7 | the adaptation's private simplex working mesh and its conversion from and to the solver mesh (was `mesh/native.rs`, `mesh/interop.rs`) |
+| `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
+| `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
 | `crates/femcore/src/problem.rs` | 1, 9, 19 | |
 | `crates/femcore/src/material.rs` | 1 | |
@@ -111,7 +116,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
 | `crates/femcore/tests/axisym_closed_form.rs` | 33, 1 | the axisymmetric solid kernel against closed forms (the ems half is in `nyx-ems/tests/axisym.rs`) |
-| `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16 | |
+| `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/stages.rs` | 9 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
@@ -121,6 +126,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/linalg/main.rs` | 8 | |
 | `crates/femcore/tests/meshers.rs` | 7, 5 | |
 | `crates/femcore/tests/adapt3d.rs` | 7 | |
+| `crates/femcore/tests/mesh3d_features.rs` | 50, 51, 52, 55 | wavelength sizing, adaptive meshing, structured layers and thread-count independence for 3D geom models |
+| `crates/nyx-ems/tests/maxwell_estimator.rs` | 53 | the Maxwell estimator and loop on a PEC cavity and on a sphere from geom |
 | `crates/femcore/tests/meshing.rs` | 6 | |
 | `crates/femcore/tests/geom_meshes.rs` | 2, 6 | |
 | `crates/femcore/tests/split.rs` | 4, 5 | |

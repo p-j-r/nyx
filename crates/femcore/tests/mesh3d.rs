@@ -212,12 +212,18 @@ fn a_size_rule_on_a_region_refines_it_and_keeps_the_surface_exact() {
 }
 
 #[test]
-fn the_adaptive_mesher_and_structured_pml_are_refused_in_3d() {
+fn the_adaptive_mesher_and_structured_pml_work_in_3d_and_the_2d_only_options_are_still_refused() {
+    // ADR 51 and 52 lifted the refusals of ADR 40; the features themselves are in `mesh3d_features.rs`
     let mut m = Model::new_3d();
     let host = m.box_("air", (0.0, 0.0, 0.0), (1.0, 1.0, 1.0));
     m.overlay(&[("air", host)]);
-    assert!(mesh_model(&m.list, &MeshPlan::adaptive(0.3, 0.5)).err().unwrap().contains("2D"));
+    let g = mesh_model(&m.list, &MeshPlan::adaptive(0.4, 0.7)).unwrap();
+    assert_eq!(g.mesh.dim, 3);
+    let v = volumes(&g);
+    assert!(rel(v[&1], 1.0) < 1e-9);
+    // a model without a Pml comes back unchanged from the structured mode
     let mut plan = MeshPlan::simple(0.3);
     plan.pml = femcore::meshing::PmlMode::Structured;
-    assert!(mesh_model(&m.list, &plan).err().unwrap().contains("2D"));
+    let plain = mesh_model(&m.list, &MeshPlan::simple(0.3)).unwrap();
+    assert_eq!(mesh_model(&m.list, &plan).unwrap().mesh.n_cells(), plain.mesh.n_cells());
 }

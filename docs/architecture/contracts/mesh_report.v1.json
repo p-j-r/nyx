@@ -1,0 +1,27 @@
+{
+  "adaptation": {
+    "capped": "boolean",
+    "cells_end": "integer",
+    "cells_start": "integer",
+    "converged": "boolean",
+    "iterations": "integer",
+    "q_min": "number"
+  },
+  "cells": "integer",
+  "dim": "integer",
+  "domains": [
+    {
+      "cells": "integer",
+      "id": "integer",
+      "name": "string",
+      "wave_size": "number"
+    }
+  ],
+  "facets": "integer",
+  "structured_layers": [
+    [
+      "integer"
+    ]
+  ],
+  "vertices": "integer"
+}

@@ -223,14 +223,17 @@ pub struct LoopResult3<R = SolveResult> {
     pub converged: bool,
 }
 
-/// Solve on `start`, adapt to the solution, solve again, until the quantity of interest settles. `solve` gets a mesh and returns the
-/// result and the number being tracked. `floor` gives, for a mesh, a metric per vertex that adaptation must always satisfy (physics or
-/// geometry sizes); `None` for no floor.
-pub fn solve_adaptively3<R: PlotFields>(
+/// The loop of `solve_adaptively3` with the two choices left to the caller: what the solution asks of the mesh (`metrics`: the mesh, the
+/// result, the number of cells wanted and the floor, to a metric per vertex) and how a mesh is adapted to a metric (`adapt`; for a `geom`
+/// model that is `meshing::adapt3d::adapt_to_metrics3`, which keeps the exact faces and the labels). The Hessian estimator and the Maxwell
+/// residual estimator (`adapt::maxwell`) are two choices of `metrics`.
+pub fn adapt_loop3<R>(
     start: &SimplexMesh,
     s: &LoopSettings3,
     floor: Option<&dyn Fn(&SimplexMesh) -> Result<Vec<Sym<3>>, String>>,
     solve: &mut dyn FnMut(&SimplexMesh) -> Result<(R, f64), String>,
+    metrics: &mut dyn FnMut(&SimplexMesh, &R, f64, Option<&[Sym<3>]>) -> Result<Vec<Sym<3>>, String>,
+    adapt: &mut dyn FnMut(&SimplexMesh, &[Sym<3>], f64) -> Result<SimplexMesh, String>,
 ) -> Result<LoopResult3<R>, String> {
     let mut mesh = start.clone();
     let cells0 = mesh.n_cells() as f64;
@@ -253,15 +256,36 @@ pub fn solve_adaptively3<R: PlotFields>(
             Some(f) => Some(f(&mesh)?),
             None => None,
         };
-        let metrics = estimator_metrics(&mesh, &result, &s.estimator, s.h, requested, fl.as_deref())?;
+        let m = metrics(&mesh, &result, requested, fl.as_deref())?;
         let t = Instant::now();
-        let old = simplex_to_adapt::<3>(&mesh)?;
-        let field = BackgroundMetric3::new_graded(&old, &metrics, s.grade);
-        let out = adapt3(&old, &field, &TopoOptions3::default(), &s.adapt)?;
-        mesh = simplex_from_adapt(&out.mesh);
+        mesh = adapt(&mesh, &m, s.grade)?;
         mesh_seconds = t.elapsed().as_secs_f64();
         calib = mesh.n_cells() as f64 / requested;
     }
+}
+
+/// Solve on `start`, adapt to the solution, solve again, until the quantity of interest settles. `solve` gets a mesh and returns the
+/// result and the number being tracked. `floor` gives, for a mesh, a metric per vertex that adaptation must always satisfy (physics or
+/// geometry sizes); `None` for no floor.
+pub fn solve_adaptively3<R: PlotFields>(
+    start: &SimplexMesh,
+    s: &LoopSettings3,
+    floor: Option<&dyn Fn(&SimplexMesh) -> Result<Vec<Sym<3>>, String>>,
+    solve: &mut dyn FnMut(&SimplexMesh) -> Result<(R, f64), String>,
+) -> Result<LoopResult3<R>, String> {
+    adapt_loop3(
+        start,
+        s,
+        floor,
+        solve,
+        &mut |mesh, result, requested, fl| estimator_metrics(mesh, result, &s.estimator, s.h, requested, fl),
+        &mut |mesh, metrics, grade| {
+            let old = simplex_to_adapt::<3>(mesh)?;
+            let field = BackgroundMetric3::new_graded(&old, metrics, grade);
+            let out = adapt3(&old, &field, &TopoOptions3::default(), &s.adapt)?;
+            Ok(simplex_from_adapt(&out.mesh))
+        },
+    )
 }
 
 #[cfg(test)]

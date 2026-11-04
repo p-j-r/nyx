@@ -68,3 +68,11 @@ Items are ordered by how much they matter to the solvers; "depends on" names wha
   third-party code read. No separate provenance entry was added for them.
 * `FEMMESH_CHECK=1` validates the 3D working mesh after every pass, but the validation is not run in the default test run.
 * The shared `nyx-jj` working copy was switched by another thread mid-session; further mesher work should use its own jj workspace.
+
+## Update 2026-11-05 (bookmark `restructure-4m-mesh3d-features`, ADR 50 to 55)
+
+* Section 2, **lowest-order edge elements**: done. The Maxwell residual estimator (`adapt::maxwell`) with the equidistributing metric reaches 5.2e-4 on 333 tetrahedra where uniform blocks give 5.3e-3 on 696 (order 1) and 8.0e-6 on 1402 where they give 6.7e-5 on 1470 (order 2). Goal-oriented adaptivity, field transfer and the calibration items remain.
+* Section 3, **3D adaptation**: a 3D geom model is adapted with the exact faces as the oracle (ADR 51). Smooth analytic surfaces in the loop: tested end to end (sphere in a box, PEC sphere cavity). Still open: surface flips on curved patches, curved-surface collapse, boundary edge removal, threading, the bounding-volume tree; `adapt3` repeats a full incidence rebuild per sweep, which makes 17 000 strongly graded tetrahedra take about 30 s.
+* Section 4, **PML**: structured layers around a box-shaped 3D window of a geom model (ADR 52), with the physical numbering kept; the adapt-then-sweep flow (P3) works. Round windows, non-box bodies and reflection studies remain.
+* Section 5, **app**: `mesh_for_problem` is 2D by design; `mesh_for_sizing` and `request::mesh_request` (ADR 50, 54) are the 2D and 3D door for the engine. Not wired.
+* The lattice mesher no longer makes zero-volume cells where a model plane lies on a lattice plane, and does not depend on the thread count (ADR 55).

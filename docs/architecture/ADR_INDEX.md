@@ -45,3 +45,9 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 45 | [The EM kernels move into `nyx-ems`; what they share stays in `femcore`](adr/0045-ems-moves-into-nyx-ems.md) | `nyx-ems`, `femcore::{edge, pml, optical}` |
 | 46 | [The axisymmetric EM kernel is checked against closed forms and gets a study](adr/0046-axisymmetric-ems-checked-and-given-a-study.md) | `nyx-ems::axisym` |
 | 47 | [`ems` in the legacy bridge; the use cases take their solver as an argument](adr/0047-ems-in-the-legacy-bridge-and-the-use-cases.md) | `nyx-engine::legacy::ems`, `femcore::usecases` |
+| 50 | [Wavelength sizing in 3D: one element size per region](adr/0050-wavelength-sizing-in-3d.md) | `femcore::meshing::mesh_for_sizing` |
+| 51 | [Adaptive meshing of 3D geom models: `adapt3` with the exact faces as the oracle](adr/0051-adaptive-meshing-of-3d-geom-models.md) | `femcore::meshing::adapt3d`, `adapt::{ops3,topo3,drive3}` |
+| 52 | [Structured absorbing layers in 3D for geom models](adr/0052-structured-absorbing-layers-in-3d.md) | `femcore::meshing::pml_geom3` |
+| 53 | [A Maxwell residual estimator, and an adaptation loop that takes any estimator](adr/0053-maxwell-residual-estimator-and-the-generic-adaptation-loop.md) | `femcore::adapt::{maxwell,estimate3}` |
+| 54 | [A mesh is asked for and reported in data](adr/0054-mesh-request-and-report-as-data.md) | `femcore::meshing::request` |
+| 55 | [The lattice mesher welds slivers and does not depend on the thread count](adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md) | `femcore::meshing::mesher3d` |

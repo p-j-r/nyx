@@ -1,0 +1,130 @@
+{
+  "$id": "nyx:mesh_request.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "h": {
+      "description": "global element size (m)",
+      "exclusiveMinimum": 0,
+      "type": "number"
+    },
+    "max_dev": {
+      "description": "largest distance of a chord from a curved edge or face (m); default h / 50",
+      "exclusiveMinimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "mesher": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "simple"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "grade": {
+              "default": 0.4,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "kind": {
+              "const": "adaptive"
+            },
+            "max_cells": {
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "scale": {
+              "default": 1.0,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "structured_pml": {
+      "default": false,
+      "type": "boolean"
+    },
+    "waves": {
+      "additionalProperties": false,
+      "properties": {
+        "eigen_headroom": {
+          "default": 1.5,
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "pml_relax": {
+          "default": 1.5,
+          "minimum": 1,
+          "type": "number"
+        },
+        "points_per_wavelength": {
+          "exclusiveMinimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sizing": {
+          "additionalProperties": false,
+          "properties": {
+            "headroom": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "order": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "wavelengths": {
+              "additionalProperties": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "order",
+            "headroom",
+            "wavelengths"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "sizing"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "h",
+    "mesher"
+  ],
+  "title": "MeshRequest",
+  "type": "object"
+}

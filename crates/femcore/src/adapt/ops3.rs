@@ -44,6 +44,10 @@ pub struct AdaptOptions3 {
     pub converge_frac: f64,
     /// Also try edge removal and surface flips after the 3-2 / 2-3 flips.
     pub edge_removal: bool,
+    /// The collapse and flip sweeps of an iteration repeat until one changes at most this fraction of the tetrahedra (0: until one changes
+    /// nothing). Every sweep rebuilds the incidence of the whole mesh, so on a large mesh the last sweeps that change a handful of
+    /// tetrahedra cost as much as the first.
+    pub sweep_frac: f64,
 }
 
 impl Default for AdaptOptions3 {
@@ -60,6 +64,7 @@ impl Default for AdaptOptions3 {
             max_cells: None,
             converge_frac: 0.005,
             edge_removal: true,
+            sweep_frac: 0.0,
         }
     }
 }
@@ -482,7 +487,20 @@ pub fn flip_pass(w: &mut Work3) -> usize {
     let snap = snapshot(w);
     let mut lock = vec![false; w.tets.len()];
     let mut n = 0;
-    // 3-2: an interior edge with three tetrahedra around it
+    // edges and faces that tetrahedra made earlier in this pass have: the snapshot does not know them, and a flip that made one a second
+    // time would leave a face with four tetrahedra
+    let mut new_edges: std::collections::HashSet<Edge> = Default::default();
+    let mut new_faces: std::collections::HashSet<[u32; 3]> = Default::default();
+    let note = |t: &[u32; 4], edges: &mut std::collections::HashSet<Edge>, faces: &mut std::collections::HashSet<[u32; 3]>| {
+        for i in 0..4 {
+            for j in i + 1..4 {
+                edges.insert(ekey(t[i], t[j]));
+            }
+        }
+        for (f, _) in tet_faces(t) {
+            faces.insert(f);
+        }
+    };    // 3-2: an interior edge with three tetrahedra around it
     for e in all_edges(&snap) {
         let ts = &snap.edge_tets[&e];
         if ts.len() != 3 || locked(&lock, ts) || w.curve_of.contains_key(&e) {
@@ -510,6 +528,9 @@ pub fn flip_pass(w: &mut Work3) -> usize {
         if snap.vert_tets[ring[0] as usize].iter().any(|&t| ring.iter().all(|r| w.tets[t as usize].contains(r))) {
             continue;
         }
+        if new_faces.contains(&fkey(ring[0], ring[1], ring[2])) {
+            continue;
+        }
         let new: Vec<[u32; 4]> = [e[0], e[1]].iter().map(|&apex| orient(w, [ring[0], ring[1], ring[2], apex])).collect();
         let old_min = ts.iter().map(|&t| tet_q(w, &w.tets[t as usize])).fold(f64::INFINITY, f64::min);
         let new_min = new.iter().map(|t| tet_q(w, t)).fold(f64::INFINITY, f64::min);
@@ -521,6 +542,7 @@ pub fn flip_pass(w: &mut Work3) -> usize {
             lock[t as usize] = true;
         }
         for t in new {
+            note(&t, &mut new_edges, &mut new_faces);
             w.tets.push(t);
             w.tlabel.push(label);
             w.talive.push(true);
@@ -552,7 +574,7 @@ pub fn flip_pass(w: &mut Work3) -> usize {
         }
         let opp = |t: u32| *w.tets[t as usize].iter().find(|x| !f.contains(x)).unwrap();
         let (p, q) = (opp(t1), opp(t2));
-        if snap.edge_tets.contains_key(&ekey(p, q)) {
+        if snap.edge_tets.contains_key(&ekey(p, q)) || new_edges.contains(&ekey(p, q)) {
             continue;
         }
         let raw = [[p, q, f[0], f[1]], [p, q, f[1], f[2]], [p, q, f[2], f[0]]];
@@ -573,6 +595,7 @@ pub fn flip_pass(w: &mut Work3) -> usize {
             lock[t as usize] = true;
         }
         for t in new {
+            note(&t, &mut new_edges, &mut new_faces);
             w.tets.push(t);
             w.tlabel.push(label);
             w.talive.push(true);
@@ -719,6 +742,7 @@ pub fn edge_removal_pass(w: &mut Work3) -> usize {
     let snap = snapshot(w);
     let mut lock = vec![false; w.tets.len()];
     let mut n_done = 0;
+    let mut new_edges: std::collections::HashSet<Edge> = Default::default();
     for e in all_edges(&snap) {
         let ts = &snap.edge_tets[&e];
         let n = ts.len();
@@ -776,6 +800,18 @@ pub fn edge_removal_pass(w: &mut Work3) -> usize {
             stack.push((i, k));
             stack.push((k, j));
         }
+        // the triangles of the ring must all face the same way as the ring does, or the new tetrahedra overlap (a triangle of a non-convex
+        // ring can be turned inside out and still have the ends of the edge on its two sides)
+        let fan: f64 = (1..n - 1).map(|m| tet_volume(&w.pts, &[ring[0], ring[m], ring[m + 1], e[0]])).sum();
+        if tris.iter().any(|&(i, k, j)| tet_volume(&w.pts, &[ring[i], ring[k], ring[j], e[0]]) * fan <= 0.0) {
+            continue;
+        }
+        // a diagonal of the ring that is already an edge of the mesh elsewhere would be doubled: the new tetrahedra around it would
+        // share a face with the ones that are already there (a face with four tetrahedra)
+        let adjacent = |a: usize, b: usize| b == a + 1 || (a == 0 && b == n - 1);
+        if tris.iter().any(|&(i, k, j)| [(i, k), (k, j), (i, j)].iter().any(|&(a, b)| !adjacent(a, b) && (snap.edge_tets.contains_key(&ekey(ring[a], ring[b])) || new_edges.contains(&ekey(ring[a], ring[b]))))) {
+            continue;
+        }
         for &t in ts.iter() {
             w.talive[t as usize] = false;
             lock[t as usize] = true;
@@ -783,6 +819,9 @@ pub fn edge_removal_pass(w: &mut Work3) -> usize {
         for (i, k, j) in tris {
             for apex in [e[0], e[1]] {
                 let t = orient(w, [ring[i], ring[k], ring[j], apex]);
+                for (a, b) in [(i, k), (k, j), (i, j)] {
+                    new_edges.insert(ekey(ring[a], ring[b]));
+                }
                 w.tets.push(t);
                 w.tlabel.push(label);
                 w.talive.push(true);

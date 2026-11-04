@@ -293,6 +293,24 @@ impl Work3 {
         Ok(w)
     }
 
+    /// Drops the dead tetrahedra from the arrays. Operators append the tetrahedra they make and only mark the old ones dead, so without
+    /// this every pass would walk an array several times the size of the mesh. Only the order of the surviving tetrahedra is kept, which is
+    /// all the passes depend on.
+    pub fn compact_tets(&mut self) {
+        let mut k = 0;
+        for t in 0..self.tets.len() {
+            if self.talive[t] {
+                self.tets[k] = self.tets[t];
+                self.tlabel[k] = self.tlabel[t];
+                k += 1;
+            }
+        }
+        self.tets.truncate(k);
+        self.tlabel.truncate(k);
+        self.talive.clear();
+        self.talive.resize(k, true);
+    }
+
     pub fn n_alive(&self) -> usize {
         self.talive.iter().filter(|&&a| a).count()
     }
@@ -315,6 +333,15 @@ impl Work3 {
         for (f, ts) in &on_face {
             if ts.len() > 2 {
                 return Err(format!("face {f:?} shared by {} tetrahedra", ts.len()));
+            }
+            // the two tetrahedra of an interior face lie on opposite sides of it (otherwise they overlap)
+            if ts.len() == 2 {
+                let opp = |t: usize| *self.tets[t].iter().find(|x| !f.contains(x)).unwrap();
+                let side = |t: usize| tet_volume(&self.pts, &[f[0], f[1], f[2], opp(t)]);
+                let (s0, s1) = (side(ts[0]), side(ts[1]));
+                if s0 * s1 > 0.0 {
+                    return Err(format!("tetrahedra {} and {} overlap across face {f:?}", ts[0], ts[1]));
+                }
             }
             let surface = ts.len() == 1 || self.tlabel[ts[0]] != self.tlabel[ts[1]];
             if surface != self.patch_of.contains_key(f) {

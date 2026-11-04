@@ -1,0 +1,118 @@
+{
+  "$id": "nyx:mesh_report.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "adaptation": {
+      "additionalProperties": false,
+      "properties": {
+        "capped": {
+          "type": "boolean"
+        },
+        "cells_end": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cells_start": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "converged": {
+          "type": "boolean"
+        },
+        "iterations": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "q_min": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "iterations",
+        "converged",
+        "capped",
+        "q_min",
+        "cells_start",
+        "cells_end"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "cells": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "dim": {
+      "enum": [
+        2,
+        3
+      ]
+    },
+    "domains": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "cells": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "wave_size": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "facets": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "structured_layers": {
+      "items": {
+        "items": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": "array"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "vertices": {
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "dim",
+    "vertices",
+    "cells",
+    "facets",
+    "domains"
+  ],
+  "title": "MeshReport",
+  "type": "object"
+}

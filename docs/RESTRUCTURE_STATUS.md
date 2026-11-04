@@ -397,3 +397,43 @@ Updated 2026-11-04. **State: `sms` is moved into `nyx-sms`; goldens unchanged.**
 
   Everything is inside the 10 % rule. The one visible difference is electrostatics 2D, 0.08 to 0.09 s: the window bridge now converts the solver mesh to the exchange mesh and each solve builds its numbering again (`Mesh::from_solver_mesh`, `discretise`), a fixed cost of about 10 ms on a 77,000-cell mesh that does not grow with the solve. Raw logs: `C:\Users\robin-adm\Documents\opomech\nyx2-bench` (outside the repository; delete when accepted). The control workspace `nyx2-phase4-ctl` was forgotten and its folder removed; its build products are in the shared `nyx2-target`.
 * **Plan definition of done** (section 3, phase 4): the kernels of `dfs`, `sms`, `ems` are in their crates with typed problems decoded from the envelope (R10: the EM study is named in the study; R12: property names are validated against the descriptors by `validate_spec`; R19: the explicit `Ctx` replaces the thread-local); `registry.get(id).solve(...)` solves (engine test `dfs_solves_the_strip_through_the_engine`, the coupled chain, the use-case tests); nothing outside the physics crates and `nyx-engine` names a physics (layering test). Not done, on purpose: the old window problem (`femcore::problem`) and the bridge stay until phase 7; `problem_spec.v1.json` stays until then, `problem_spec.v2` and the `physics_*` exemplars are the envelope contracts; `physics_size::spec_sizing` and `mesh_for_problem` (adapters of the old problem) stay until the window is rewired; native quadrilateral/prism/hexahedron elements (golden-changing) are a later step.
+
+## Phase 4m: adaptive meshing, wavelength sizing and structured PML in 3D (workspace `nyx2-mesh3d-adapt`, bookmark `restructure-4m-mesh3d-features`)
+
+State 2026-11-05: **done on the bookmark, not merged.** Started from `restructure-4-physics` at `a5ba6825`, rebased onto the closed phase 4 (`45d172f7`; the only conflicts were the shared doc tables, resolved by keeping both sides). Paul: all three are essential in 3D. Stayed inside `femcore::{meshing, adapt}`; no physics crate was edited (one test file is new in `nyx-ems`). ADRs 50 to 55 (50 is the first free number above the sms/ems ones).
+
+**What works now** (3D geom models, any dimension through `meshing::request::mesh_request`; `MeshPlan` as before):
+* **Wavelength sizing** (ADR 50): `meshing::mesh_for_sizing(list, plan, &Sizing, &PhysicsSizing)`. The simple mesher gets one element size per region (a ball with short waves is refined, the air around it is not); the adaptive mesher intersects the wave metric with the geometry metric. `mesh_for_problem` stays 2D.
+* **Adaptive meshing** (ADR 51): `Mesher::Adaptive` in 3D = lattice start mesh + `adapt3` with the exact geom faces as the oracle (`meshing::adapt3d`); every vertex of a refined sphere is on the sphere, the box faces stay exact, labels and interface facets are kept.
+* **Structured PML** (ADR 52): `PmlMode::Structured` in 3D (`meshing::pml_geom3`): the physical window is meshed alone, `build_pml` appends prisms and hexahedra, layer cells carry geom's piece numbers, outer faces geom's face numbers; physical vertex and cell ids are kept (contract test); native `CellMesh<3>` and the tetrahedral cut are both available.
+* **Maxwell residual estimator** (ADR 53): `adapt::maxwell` (`CurlField` trait, `maxwell_indicators`, `indicator_metrics`) and `estimate3::adapt_loop3` (the loop with the estimator and the adaptation as arguments; `solve_adaptively3` is a call of it). PEC box cavity, lowest mode: order 1 reaches 5.2e-4 on 333 tetrahedra (uniform blocks 5.3e-3 on 696; the Hessian loop was worse than uniform), order 2 reaches 8.0e-6 on 1402 (uniform 6.7e-5 on 1470). Test in `crates/nyx-ems/tests/maxwell_estimator.rs` because it needs the cavity kernel.
+* **Data** (ADR 54): `MeshRequest` / `MeshReport` with JSON Schemas, exemplars in `docs/architecture/contracts/` (`mesh_request*.json`, `mesh_report*.json`), versions in `VERSIONS.md` (mesh 1.3, mesh_request 1.0, mesh_report 1.0, adapt_maxwell 1.0).
+
+**Faults found in code that was already there, and fixed** (they were in the way, details in ADR 51 and 55):
+* the lattice mesher made zero-volume slivers wherever a model plane lies on a lattice plane (3300 cells of a layer stack: 140 slivers; they turned the PML prisms inside out): vertices a few ulp apart are welded;
+* its meshes depended on the thread count (cell order by block; unstable dedup of equal cut ids): now identical for 1, 3 and 8 threads (test with child processes);
+* `adapt3` could fold the mesh over itself: `edge_removal_pass` turned ring triangles inside out and duplicated edges, `flip_pass` did not know the faces and edges made earlier in its own pass. `Work3::check` (`FEMMESH_CHECK=1`) now finds overlaps; before, a box of volume 64 came out with 65.95;
+* `adapt3` never removed dead tetrahedra from its arrays and repeated sweeps that changed a handful of cells (`Work3::compact_tets`, `AdaptOptions3::sweep_frac`; default behaviour unchanged);
+* `pml_box::build_pml`'s `orient` copied all the points of the mesh for every layer cell (quadratic): 34 s to 0.9 s for 600 000 cells.
+
+**Checks.** `cargo test --release --workspace --no-fail-fast` on the rebased tree: **811 passed, 0 failed, 11 ignored** (phase 4 closed at 790 / 0 / 9; the difference is the new tests, 2 more ignored studies). New tests: `femcore` `mesh3d_features` (12), `contracts` (+4), `adapt::maxwell` unit tests (2), `nyx-ems` `maxwell_estimator` (3 + 2 studies, ignored). `check_code_to_adr.sh` passes.
+
+**Benchmarks** (`crates/femcore/examples/mesh3d_bench.rs`, run best of three, interleaved with a control run of the parent commit `a5ba6825` in a second workspace with its own target directory, nothing else compiling; wall seconds; the solver benchmarks of `tools/baseline.sh` do not touch changed code except `cavity_bench`, measured here):
+
+| Case | control (parent) | this bookmark | Note |
+|---|---|---|---|
+| lattice, sphere in a box, h 0.1 (794 016 cells) | 0.219 | 0.205 | noise |
+| lattice, layer stack, h 0.05 | 1.164 | 1.222 | +5 %, inside the spread of the runs (1.16 to 1.38 / 1.22 to 1.27); 3 816 slivers fewer (6 250 216 to 6 246 400 cells) |
+| sphere cavity 0.05 / 0.004 (105 120 cells) | 0.045 | 0.041 | same mesh cell for cell |
+| `add_pml_3d`, block 40 layers, 605 820 cells | 34.3 | 0.86 | the quadratic copy in `orient` |
+| `adapt3` on a block, graded (17 425 / 17 419 cells, qmin 0.588 both) | 9.40 | 8.48 | -10 % |
+| `cavity_bench 0.012 2` (whole example) | 3.204 | 3.170 | |
+
+Features that the parent refuses (no control), best of three: wavelength sizing with the simple mesher 0.050 s for 10 608 cells; adaptive sphere 0.6 x 0.5 5.1 s for 40 500 cells; adaptive plus waves 0.68 s for 3 399 cells; structured PML on a 479 232-cell mesh 4.2 s (inline layers of the same model: 6.1 s for 831 408 cells); Maxwell indicators on 105 120 cells 0.18 s. A strongly graded adaptation (waves 0.15 in a ball, start 0.8, 17 000 tetrahedra) takes about 30 s: `adapt3` is serial and rebuilds its incidence per sweep.
+
+**Not done / for others**
+* The engine and the window do not call `mesh_request`/`mesh_for_sizing` yet (`FemcoreMesher::mesh` still answers Unsupported for physics sizing); that is a one-function change in `nyx-engine`.
+* Physics crates should implement `CurlField` for their edge-element solutions (`nyx-ems`'s `cavity::{Ned3, basis3}` is what the test adapter uses) and report `Sizing`; the estimator skips absorbing layers and works for real isotropic media only.
+* `adapt3` speed (threads, incidence per sweep), surface flips on curved patches, curved creases from the exact edges (polylines of the start mesh are used), goal-oriented adaptivity: `docs/ports/meshers/FEATURE_DEPENDENCIES.md` (copied into this repository, annotated) lists them.
+* Structured layers need a box-shaped physical window; round windows and non-box bodies stay open (P6).
+* Practical: cargo derives the same artifact hash for the same crate in every jj workspace, so workspaces that share `../nyx2-target` overwrite each other's `libfemcore` (my first test run linked another session's library and failed on missing symbols). I used private target directories `nyx2-target-adapt` (about 4 GB) and `nyx2-target-adapt-ctl`; both can be deleted, and so can the workspace `nyx2-mesh3d-adapt-ctl` (`jj workspace forget nyx2-mesh3d-adapt-ctl`).

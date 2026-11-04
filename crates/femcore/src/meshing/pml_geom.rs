@@ -42,11 +42,16 @@ pub struct PmlReport {
     pub dropped_cells: usize,
     /// layers per side, `[axis][side]` for the mesh axes x and z (0 = no layer)
     pub layers: [[usize; 2]; 2],
+    /// layers per side, `[axis][side]` for the axes x, y, z of a 3D model (all zero for a 2D one)
+    pub layers3: [[usize; 2]; 3],
 }
 
 /// Replaces the absorbing layers of a meshed 2D model by structured ones, cut into triangles for the simplex solvers. A model without a
 /// `Pml` comes back unchanged.
 pub fn structured_pml(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String> {
+    if g.mesh.dim == 3 {
+        return crate::meshing::pml_geom3::structured_pml_3d(g);
+    }
     let ev = g.eval.clone();
     let labels = g.labels.clone();
     match structured_pml_native(g)? {
@@ -75,7 +80,7 @@ pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String> {
     let pieces = ev.pml_regions();
     if pieces.is_empty() {
         let n = g.mesh.n_cells();
-        return Ok(Native::Unchanged(g, PmlReport { physical_cells: n, layer_quads: 0, dropped_cells: 0, layers: [[0; 2]; 2] }));
+        return Ok(Native::Unchanged(g, PmlReport { physical_cells: n, layer_quads: 0, dropped_cells: 0, layers: [[0; 2]; 2], layers3: [[0; 2]; 3] }));
     }
     if g.mesh.dim != 2 {
         return Err("structured absorbing layers are only built for 2D meshes".into());
@@ -209,7 +214,7 @@ pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String> {
         built.mesh.push_facet(&f, label);
     }
 
-    let report = PmlReport { physical_cells: n_phys_cells, layer_quads, dropped_cells, layers: spec.layers };
+    let report = PmlReport { physical_cells: n_phys_cells, layer_quads, dropped_cells, layers: spec.layers, layers3: [[0; 2]; 3] };
     Ok(Native::Cells(built.mesh, report))
 }
 

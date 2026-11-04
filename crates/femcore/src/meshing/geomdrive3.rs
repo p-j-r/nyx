@@ -35,6 +35,12 @@ pub struct GeomDomain3<'a> {
 
 impl<'a> GeomDomain3<'a> {
     pub fn new(ev: &'a Evaluated, labels: &'a LabelMap, h: f64) -> Result<Self, String> {
+        Self::new_with(ev, labels, h, &Sizes3::default())
+    }
+
+    /// Like `new`, with the extra requests of `sizes`: a finer element size per region (the wavelength of a study, ADR 50) and regions that
+    /// are left out of the mesh (the absorbing pieces when the layers are built structured, ADR 52).
+    pub fn new_with(ev: &'a Evaluated, labels: &'a LabelMap, h: f64, sizes: &Sizes3) -> Result<Self, String> {
         if ev.list.dim != 3 {
             return Err("the 3D mesher needs a 3D model".into());
         }
@@ -51,15 +57,48 @@ impl<'a> GeomDomain3<'a> {
                 }
             }
         }
-        let meshable: Vec<bool> = (0..nr).map(|r| !matches!(labels.domains[r].kind, RegionKind::Hole | RegionKind::Void)).collect();
+        // the wave sizes of a study ask for finer elements only; a region that is not meshed needs none
+        for (r, &want) in sizes.region_h.iter().enumerate().take(nr) {
+            if want.is_finite() && want > 0.0 {
+                region_h[r] = region_h[r].min(want);
+            }
+        }
+        let skipped = |r: usize| sizes.skip.get(r).copied().unwrap_or(false);
+        let meshable: Vec<bool> = (0..nr).map(|r| !skipped(r) && !matches!(labels.domains[r].kind, RegionKind::Hole | RegionKind::Void)).collect();
         let cx = ev.complex();
         let nf = cx.facet_count();
-        let sides = (0..nf as u32).map(|i| cx.facet_sides(i)).collect();
+        // a face between a meshed region and a skipped one is a boundary of the mesh like a face to the void
+        let eff = |s: Option<u32>| s.filter(|&r| meshable[r as usize]);
+        let sides = (0..nf as u32)
+            .map(|i| {
+                let (a, b) = cx.facet_sides(i);
+                if sizes.skip.iter().any(|&s| s) {
+                    (eff(a), eff(b))
+                } else {
+                    (a, b)
+                }
+            })
+            .collect();
         let boxes = (0..nf as u32).map(|i| cx.facet_bbox(i)).collect();
         let face_label = (0..nf as u32)
             .map(|i| labels.label_of_edge(i).ok_or_else(|| format!("face '{}' has no boundary label", cx.facet_name(i))))
             .collect::<Result<Vec<i32>, String>>()?;
         Ok(GeomDomain3 { ev, labels, region_h, meshable, sides, boxes, face_label })
+    }
+
+    /// The element size of each geom region (global size lowered by `Size` rules, absorbing layers and requested sizes).
+    pub fn region_sizes(&self) -> &[f64] {
+        &self.region_h
+    }
+
+    /// Whether a region contributes cells.
+    pub fn is_meshed(&self, r: u32) -> bool {
+        self.meshable[r as usize]
+    }
+
+    /// The largest element size any meshed region asks for.
+    pub fn coarsest_meshed_size(&self) -> f64 {
+        (0..self.region_h.len()).filter(|&r| self.meshable[r]).map(|r| self.region_h[r]).fold(0.0, f64::max)
     }
 
     /// Distance from `p` to face `i`, with a cheap lower bound from its box.
@@ -127,6 +166,18 @@ impl Domain3 for GeomDomain3<'_> {
     }
 }
 
+/// What a caller asks of the 3D mesh beyond the model's own sizes.
+#[derive(Clone, Debug, Default)]
+pub struct Sizes3 {
+    /// element size wanted per geom region (index = region); `f64::INFINITY`, a missing entry or zero: no request. A request only
+    /// makes the region finer than the global size. When any is given the lattice itself is made at the coarsest size any meshed
+    /// region needs (never above the global one) and the finer regions are refined locally, so a study whose waves are short everywhere
+    /// is not meshed at a coarse size and refined afterwards.
+    pub region_h: Vec<f64>,
+    /// regions left out of the mesh (index = region); the lattice is aligned with the box of the regions that are meshed
+    pub skip: Vec<bool>,
+}
+
 /// Meshes a 3D model with tetrahedra at element size `opts.h`: cells labelled by region (domain numbers), boundary facets by geom face.
 pub fn mesh_geom_3d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, String> {
     mesh_geom_3d_report(ev, opts).map(|x| x.0)
@@ -134,6 +185,11 @@ pub fn mesh_geom_3d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
 
 /// Like `mesh_geom_3d`, with the report of the mesher and the native mesh (all tetrahedra) the solver mesh was made from.
 pub fn mesh_geom_3d_report(ev: Evaluated, opts: &GeomMeshOpts) -> Result<(MeshedGeom, Report3d, CellMesh<3>), String> {
+    mesh_geom_3d_with(ev, opts, &Sizes3::default())
+}
+
+/// Like `mesh_geom_3d_report`, with the extra requests of `sizes` (ADR 50, 52).
+pub fn mesh_geom_3d_with(ev: Evaluated, opts: &GeomMeshOpts, sizes: &Sizes3) -> Result<(MeshedGeom, Report3d, CellMesh<3>), String> {
     if ev.list.dim != 3 {
         return Err("mesh_geom_3d needs a 3D model".into());
     }
@@ -142,8 +198,9 @@ pub fn mesh_geom_3d_report(ev: Evaluated, opts: &GeomMeshOpts) -> Result<(Meshed
     }
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let (cells, report) = {
-        let dom = GeomDomain3::new(&ev, &labels, opts.h)?;
-        mesh_3d(&dom, &Spec3d::new(opts.h))?
+        let dom = GeomDomain3::new_with(&ev, &labels, opts.h, sizes)?;
+        let h_lattice = if sizes.region_h.iter().any(|h| h.is_finite() && *h > 0.0) { dom.coarsest_meshed_size().min(opts.h) } else { opts.h };
+        mesh_3d(&dom, &Spec3d::new(h_lattice))?
     };
     let mesh = SimplexMesh::from_cells(&cells)?;
     Ok((MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) }, report, cells))

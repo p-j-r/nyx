@@ -11,6 +11,7 @@
 //! `adapt_to_metrics` is the hook for an error estimator: give it a metric per vertex of an existing meshed model (from a recovered
 //! Hessian, say) and it adapts the same way. Nothing else of the interface changes.
 
+pub mod adapt3d;
 pub mod geomdrive;
 pub mod geomdrive3;
 pub mod mesher;
@@ -18,9 +19,11 @@ pub mod mesher3d;
 pub mod physics_size;
 pub mod sizing;
 pub mod pml_geom;
+pub mod pml_geom3;
 pub mod pml3;
 pub mod pml_box;
 pub mod refine3d;
+pub mod request;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
@@ -30,6 +33,7 @@ use crate::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
 use crate::adapt::field::{BackgroundMetric2, MetricField};
 use crate::adapt::geom::Geometry2;
 use crate::adapt::metric::{intersect, isotropic, Sym};
+use geomdrive3::Sizes3;
 use physics_size::PhysicsSizing;
 pub use sizing::Sizing;
 use crate::problem::ProblemSpec;
@@ -107,14 +111,7 @@ pub fn mesh_evaluated(ev: Evaluated, plan: &MeshPlan) -> Result<MeshedGeom, Stri
 /// Like `mesh_evaluated`, with the report of the adaptation when there was one.
 pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
     if ev.list.dim == 3 {
-        // tetrahedra by the lattice mesher (ADR 40); the adaptation and the structured absorbing layers are 2D
-        if !matches!(plan.mesher, Mesher::Simple) {
-            return Err("the adaptive mesher works on 2D models; a 3D model is meshed with the simple mesher".into());
-        }
-        if !matches!(plan.pml, PmlMode::Inline) {
-            return Err("structured absorbing layers are 2D only; a 3D model keeps its layers inline".into());
-        }
-        return Ok((geomdrive3::mesh_geom_3d(ev, &plan.opts)?, None));
+        return mesh_3d_plan(ev, plan, None);
     }
     let start = mesh_geom_2d(ev, &plan.opts)?;
     let (g, report) = match plan.mesher {
@@ -136,11 +133,48 @@ pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGe
 /// the resolution. The simple mesher cannot vary the size by the wavelength, so it takes the smallest physics size as its global size
 /// when that is below the plan's.
 pub fn mesh_for_problem(list: &FeatureList, plan: &MeshPlan, spec: &ProblemSpec, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    if list.dim == 3 {
+        return Err("mesh_for_problem works on 2D models; use mesh_for_sizing for a 3D model (ADR 50)".into());
+    }
+    mesh_waves_2d(
+        list,
+        plan,
+        &|m: &SimplexMesh| physics_size::vertex_sizes(spec, m, sz),
+        &|m: &SimplexMesh, ceiling: f64| physics_size::metrics(spec, m, sz, ceiling),
+    )
+}
+
+/// Meshes a model of either dimension for the neutral `Sizing` a physics reports (ADR 50): the sizes the model asks for, and in
+/// addition the sizes the waves need. Region names of the sizing are resolved with the model's labels, absorbing pieces are relaxed by
+/// `sz.pml_relax`. In 2D this is [`mesh_for_problem`] without a `ProblemSpec`. In 3D the simple mesher lowers the element size of the
+/// regions that carry short waves (the lattice is made at the coarsest size any region needs, finer regions are refined locally), and
+/// the adaptive mesher adapts the start mesh to the intersection of the geometry metric and the wave metric.
+pub fn mesh_for_sizing(list: &FeatureList, plan: &MeshPlan, sizing: &Sizing, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    let ev = evaluate(list)?;
+    if ev.list.dim == 3 {
+        return mesh_3d_plan(ev, plan, Some((sizing, sz)));
+    }
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let resolve = |n: &str| labels.domain(n);
+    let pml: std::collections::HashSet<i32> = ev.pml_regions().iter().map(|p| labels.domains[p.region as usize].id).collect();
+    let is_pml = |d: i32| pml.contains(&d);
+    mesh_waves_2d(
+        list,
+        plan,
+        &|m: &SimplexMesh| physics_size::vertex_sizes_for(sizing, &resolve, m, &is_pml, sz),
+        &|m: &SimplexMesh, ceiling: f64| physics_size::metrics_for::<2>(sizing, &resolve, m, &is_pml, sz, ceiling),
+    )
+}
+
+type VertexSizesFn<'a> = &'a dyn Fn(&SimplexMesh) -> Result<Vec<f64>, String>;
+type MetricsFn<'a> = &'a dyn Fn(&SimplexMesh, f64) -> Result<Vec<Sym<2>>, String>;
+
+fn mesh_waves_2d(list: &FeatureList, plan: &MeshPlan, vertex_sizes: VertexSizesFn, wave_metrics: MetricsFn) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
     let mut opts = plan.opts;
     let (g, report) = match plan.mesher {
         Mesher::Simple => {
             let probe = mesh_geom_2d(evaluate(list)?, &opts)?;
-            let hmin = physics_size::vertex_sizes(spec, &probe.mesh, sz)?.into_iter().fold(f64::INFINITY, f64::min);
+            let hmin = vertex_sizes(&probe.mesh)?.into_iter().fold(f64::INFINITY, f64::min);
             if hmin < opts.h {
                 opts.h = hmin;
                 (mesh_geom_2d(evaluate(list)?, &opts)?, None)
@@ -151,7 +185,7 @@ pub fn mesh_for_problem(list: &FeatureList, plan: &MeshPlan, spec: &ProblemSpec,
         Mesher::Adaptive(a) => {
             let start = mesh_geom_2d(evaluate(list)?, &opts)?;
             let geo = a_priori_metrics(&start, &opts, &a)?;
-            let phys = physics_size::metrics(spec, &start.mesh, sz, opts.h)?;
+            let phys = wave_metrics(&start.mesh, opts.h)?;
             let metrics: Vec<Sym<2>> = geo
                 .iter()
                 .zip(&phys)
@@ -168,6 +202,69 @@ pub fn mesh_for_problem(list: &FeatureList, plan: &MeshPlan, spec: &ProblemSpec,
     match plan.pml {
         PmlMode::Inline => Ok((g, report)),
         PmlMode::Structured => Ok((structured_pml(g)?.0, report)),
+    }
+}
+
+/// The element size the waves of `sizing` need in every region of a 3D model, by region index; `f64::INFINITY` where a region carries no
+/// wave. Absorbing pieces are relaxed by `sz.pml_relax`.
+pub fn wave_sizes_by_region(ev: &Evaluated, labels: &LabelMap, sizing: &Sizing, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
+    let pml: std::collections::HashSet<i32> = ev.pml_regions().iter().map(|p| labels.domains[p.region as usize].id).collect();
+    let ids: Vec<i32> = labels.domains.iter().map(|d| d.id).collect();
+    physics_size::cell_sizes_for(sizing, &|n| labels.domain(n), &ids, &|d| pml.contains(&d), sz)
+}
+
+/// Meshes a 3D model (ADR 40, 50, 51, 52): the lattice mesher with the sizes of the model and, when `waves` is given, of the study; then
+/// the metric adaptation of `adapt3` for `Mesher::Adaptive`; then the structured absorbing layers for `PmlMode::Structured`.
+fn mesh_3d_plan(ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let nr = ev.regions().len();
+    let want = match waves {
+        Some((sizing, sz)) => wave_sizes_by_region(&ev, &labels, sizing, sz)?,
+        None => vec![f64::INFINITY; nr],
+    };
+    // structured layers are built around the physical window, which is meshed alone
+    let skip: Vec<bool> = if matches!(plan.pml, PmlMode::Structured) {
+        let mut s = vec![false; nr];
+        for p in ev.pml_regions() {
+            s[p.region as usize] = true;
+        }
+        s
+    } else {
+        vec![]
+    };
+    // the simple mesher takes the wave sizes at once; the adaptive one starts from the model's own sizes and adapts towards them
+    let start_sizes = match plan.mesher {
+        Mesher::Simple => Sizes3 { region_h: want.clone(), skip },
+        Mesher::Adaptive(_) => Sizes3 { region_h: vec![], skip },
+    };
+    let (g, _, _) = geomdrive3::mesh_geom_3d_with(ev, &plan.opts, &start_sizes)?;
+    let (g, report) = match plan.mesher {
+        Mesher::Simple => (g, None),
+        Mesher::Adaptive(a) => {
+            let geo = adapt3d::vertex_sizes3(&g, &plan.opts, &a, false)?;
+            let mut size = geo;
+            if waves.is_some() {
+                // the wave size is scaled like the geometry sizes, so `Adaptive::scale` stays one knob for the whole mesh
+                let region_of: HashMap<i32, usize> = g.labels.domains.iter().map(|d| (d.id, d.region as usize)).collect();
+                let mut vw = vec![f64::INFINITY; g.mesh.n_points()];
+                for c in 0..g.mesh.n_cells() {
+                    let h = region_of.get(&g.mesh.cell_labels[c]).map_or(f64::INFINITY, |&r| want[r]);
+                    for &v in g.mesh.cell(c) {
+                        vw[v as usize] = vw[v as usize].min(h);
+                    }
+                }
+                for (s, w) in size.iter_mut().zip(&vw) {
+                    *s = s.min(w * a.scale);
+                }
+            }
+            let metrics: Vec<Sym<3>> = size.iter().map(|&h| isotropic::<3>(h.max(1e-300))).collect();
+            let (g, r) = adapt3d::adapt_to_metrics3(g, &metrics, &a)?;
+            (g, Some(r))
+        }
+    };
+    match plan.pml {
+        PmlMode::Inline => Ok((g, report)),
+        PmlMode::Structured => Ok((pml_geom3::structured_pml_3d(g)?.0, report)),
     }
 }
 
@@ -301,7 +398,7 @@ pub fn adapt_to_field(g: MeshedGeom, field: &dyn MetricField<2>, a: &Adaptive) -
 
 /// Boundary labels of the edges that take part in a periodic pair of the model. Their chains stay exactly as the start mesh has them, so
 /// the two sides of a pair keep matching vertex for vertex (the start mesh cuts congruent edges identically).
-fn periodic_labels(g: &MeshedGeom) -> Vec<i32> {
+pub(crate) fn periodic_labels(g: &MeshedGeom) -> Vec<i32> {
     let mut v: Vec<i32> = vec![];
     for p in g.eval.periodic_pairs() {
         for set in [&p.a, &p.b] {

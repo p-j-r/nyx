@@ -1,0 +1,24 @@
+{
+  "h": 0.6,
+  "max_dev": null,
+  "mesher": {
+    "grade": 0.4,
+    "kind": "adaptive",
+    "max_cells": 200000,
+    "scale": 0.7
+  },
+  "structured_pml": true,
+  "waves": {
+    "eigen_headroom": 1.5,
+    "pml_relax": 1.5,
+    "points_per_wavelength": null,
+    "sizing": {
+      "headroom": 1.0,
+      "order": 2,
+      "wavelengths": {
+        "air": 4.0,
+        "ball": 1.2
+      }
+    }
+  }
+}
