@@ -376,6 +376,44 @@ fn mesh_pml_generator_keeps_the_physical_vertex_and_cell_numbers() {
 }
 
 #[test]
+fn mesh_cell_model_matches_the_exemplar() {
+    // The one mesh model (ADR 32): node order per cell type, face lists, label base, solver view. Exemplar `mesh_cells.v1.json`.
+    use femcore::mesh::cells::CellType;
+    let shapes = [CellType::Tri, CellType::Quad, CellType::Tet, CellType::Prism, CellType::Hex];
+    let cell_types: Vec<Value> = shapes
+        .iter()
+        .map(|t| {
+            let order = match t {
+                CellType::Tri | CellType::Quad => "counter-clockwise",
+                CellType::Tet => "(v1 - v0, v2 - v0, v3 - v0) right-handed",
+                CellType::Prism => "base triangle 0..2, top triangle 3..5 above it, (0,1,2,3) right-handed",
+                CellType::Hex => "bottom quadrilateral 0..3 counter-clockwise seen from the top, top quadrilateral 4..7 above it",
+            };
+            json!({ "name": format!("{t:?}").to_lowercase(), "code": t.code(), "nodes": t.nv(), "dim": t.dim(), "node_order": order, "faces": t.faces().iter().map(|f| f.to_vec()).collect::<Vec<_>>() })
+        })
+        .collect();
+    let got = json!({
+        "model": "femcore::mesh::cells::CellMesh<D>, D = 2 or 3",
+        "arrays": ["points [D]", "types", "offsets", "conn", "label", "facet_offsets", "facet_conn", "facet_label"],
+        "label_base": { "domains": 1, "boundaries": 1, "exterior": 0 },
+        "boundary_facets": { "2d": "2 nodes", "3d": "3 nodes (triangle) or 4 nodes (quadrilateral, counter-clockwise)" },
+        "curved_nodes": "not stored (ADR 18)",
+        "cell_types": cell_types,
+        "file": { "format": ".fmsh", "version": 2 },
+        "solver_view": {
+            "type": "femcore::mesh::SimplexMesh (triangles or tetrahedra, edges, unknown numbering)",
+            "from": "SimplexMesh::from_cells_split(&CellMesh<D>)",
+            "quadrilateral_2d": "two triangles along the shorter diagonal",
+            "quadrilateral_facet_3d": "two triangles along the diagonal from the lowest-numbered vertex",
+            "hexahedron_prism_3d": "cone from the lowest-numbered vertex (SplitMode::Minimal) or centre vertices (SplitMode::Star)",
+            "vertices": "original ids unchanged, new vertices appended",
+            "labels": "copied"
+        }
+    });
+    check_exemplar("mesh_cells.v1.json", &serde_json::to_string_pretty(&got).unwrap());
+}
+
+#[test]
 fn mesh_fmsh_round_trip_and_version() {
     use femcore::mesh::cells::CellMesh;
     use femcore::mesh::io::fmsh;
