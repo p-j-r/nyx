@@ -227,7 +227,7 @@ fn a_real_stretch_layer_on_an_adapted_cavity_equals_the_longer_cavity() {
     pspec.layers[2][1] = 3;
     pspec.outer_label = Some(4);
     let pb = add_pml_3d(&phys, &pspec, 0.0, 0.0, 2.0).unwrap();
-    assert!(pb.cells.ty("prism").is_some() && pb.split.prisms > 0, "the face layer is prisms");
+    assert!(pb.layout.mesh.types.contains(&femcore::mesh::cells::CellType::Prism) && pb.split.prisms > 0, "the face layer is prisms");
     apply_materials(&pb, &mut spec.materials);
     // PML cells of the face region carry a z stretch only
     assert!(pb.pml.values().all(|p| p.z != femcore::problem::PmlDir::Off && p.x == femcore::problem::PmlDir::Off));

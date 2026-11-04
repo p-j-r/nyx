@@ -1,4 +1,4 @@
-//! Bridges between the nyx mesh types (`crate::mesh::SimplexMesh`, `crate::mesh::cellmesh::CellMesh`) and the dimension-generic
+//! Bridges between the nyx mesh types (`crate::mesh::SimplexMesh`, `mesh::cells::CellMesh`) and the dimension-generic
 //! types the ported mesher works on (`mesh::native::SimplexMesh<D>`, `mesh::cells::CellMesh<D>`).
 //!
 //! The mesher was written against stand-ins for the nyx types (see `docs/ports/meshers/HANDOFF.md`); rather than rewrite
@@ -7,13 +7,10 @@
 //!
 //! * `simplex_to_adapt` / `simplex_from_adapt`: triangles and tetrahedra with their domain and boundary numbers. The
 //!   numbers are the same 1-based labels on both sides.
-//! * `cells_to_nyx`: a mixed-cell mesh (for example the PML mesh of `build_pml`) as a nyx `CellMesh`, with the quadrilateral and
-//!   hexahedron vertices put in nyx's tensor-product order, ready for `SimplexMesh::from_cells_split`.
 //! * `pml_domains`: the nyx `Pml` description (`ProblemSpec::optical_pml`) of every PML domain label a `PmlMesh` uses. nyx
 //!   stretches along the bounding box of a domain's cells, which is exactly how the mesher cuts its regions, so the
 //!   direction of the stretch is the sign of the region code.
 
-use crate::mesh::cellmesh::{CellMesh as NyxCells, ElementType};
 use crate::mesh::SimplexMesh as NyxMesh;
 use crate::meshing::pml_box::PmlMesh;
 use crate::mesh::cells::{CellMesh, CellType};
@@ -43,60 +40,6 @@ pub fn simplex_to_adapt<const D: usize>(m: &NyxMesh) -> Result<SimplexMesh<D>, S
 pub fn simplex_from_adapt<const D: usize>(m: &SimplexMesh<D>) -> NyxMesh {
     let points = m.points.iter().flat_map(|p| p.iter().copied()).collect();
     NyxMesh::new(D, points, m.cells.clone(), m.cell_label.clone(), m.facets.clone(), m.facet_label.clone())
-}
-
-/// Position of each mesher node (counter-clockwise quadrilateral, bottom quadrilateral then top for the hexahedron) in
-/// nyx's tensor-product order `i + 2 j (+ 4 k)`. The prism and the simplices need no change.
-fn nyx_order(t: CellType) -> &'static [usize] {
-    match t {
-        CellType::Tri => &[0, 1, 2],
-        CellType::Quad => &[0, 1, 3, 2],
-        CellType::Tet => &[0, 1, 2, 3],
-        CellType::Prism => &[0, 1, 2, 3, 4, 5],
-        CellType::Hex => &[0, 1, 3, 2, 4, 5, 7, 6],
-    }
-}
-
-fn nyx_name(t: CellType) -> &'static str {
-    match t {
-        CellType::Tri => "tri",
-        CellType::Quad => "quad",
-        CellType::Tet => "tet",
-        CellType::Prism => "prism",
-        CellType::Hex => "hex",
-    }
-}
-
-/// A mixed-cell mesh as a nyx `CellMesh`. Boundary facets become the elements of one dimension lower (`edg` in 2D,
-/// `tri` and `quad` in 3D) with their 1-based boundary numbers.
-pub fn cells_to_nyx<const D: usize>(m: &CellMesh<D>) -> NyxCells {
-    let mut types: Vec<ElementType> = vec![];
-    fn slot(types: &mut Vec<ElementType>, name: &str, nep: usize) -> usize {
-        if let Some(i) = types.iter().position(|t| t.name == name) {
-            return i;
-        }
-        types.push(ElementType { name: name.to_string(), nep, ..Default::default() });
-        types.len() - 1
-    }
-    for c in 0..m.n_cells() {
-        let t = m.types[c];
-        let i = slot(&mut types, nyx_name(t), t.nv());
-        let v = m.cell(c);
-        types[i].elem.extend(nyx_order(t).iter().map(|&k| v[k]));
-        types[i].dom.push(m.label[c]);
-    }
-    for f in 0..m.n_facets() {
-        let v = m.facet(f);
-        let (name, order): (&str, &[usize]) = match v.len() {
-            2 => ("edg", &[0, 1]),
-            3 => ("tri", &[0, 1, 2]),
-            _ => ("quad", &[0, 1, 3, 2]),
-        };
-        let i = slot(&mut types, name, v.len());
-        types[i].elem.extend(order.iter().map(|&k| v[k]));
-        types[i].dom.push(m.facet_label[f]);
-    }
-    NyxCells { sdim: D, points: m.points.iter().flat_map(|p| p.iter().copied()).collect(), types }
 }
 
 /// The `Pml` of every domain label of a PML mesh, keyed by label, to merge into `ProblemSpec::optical_pml`.
@@ -180,9 +123,9 @@ mod tests {
         let phys = simplex_to_adapt::<2>(&nyx).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 3) };
         let pml = build_pml(&phys, &spec).unwrap();
-        let cells = cells_to_nyx(&pml.mesh);
-        assert!(cells.ty("quad").is_some() && cells.ty("tri").is_some() && cells.ty("edg").is_some());
-        let (mesh, report) = NyxMesh::from_cells_split(&cells).unwrap();
+        let cells = &pml.mesh;
+        assert!(cells.types.contains(&CellType::Quad) && cells.types.contains(&CellType::Tri) && cells.n_facets() > 0);
+        let (mesh, report) = NyxMesh::from_cells_split(cells).unwrap();
         // four sides of 8 edges x 3 layers, four corners of 3 x 3
         assert_eq!(report.quads, 4 * 8 * 3 + 4 * 3 * 3);
         // the full box is 1.5 x 1.5 and every cell has positive area
@@ -205,9 +148,9 @@ mod tests {
         let phys = simplex_to_adapt::<3>(&nyx).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<3>::uniform(0.5, 1) };
         let pml = build_pml(&phys, &spec).unwrap();
-        let cells = cells_to_nyx(&pml.mesh);
-        assert!(cells.ty("hex").is_some() && cells.ty("prism").is_some());
-        let (mesh, report) = NyxMesh::from_cells_split(&cells).unwrap();
+        let cells = &pml.mesh;
+        assert!(cells.types.contains(&CellType::Hex) && cells.types.contains(&CellType::Prism));
+        let (mesh, report) = NyxMesh::from_cells_split(cells).unwrap();
         assert!(report.hexes > 0 && report.prisms > 0);
         assert!((volume(&mesh) - 8.0).abs() < 1e-9, "volume {}", volume(&mesh));
         let doms = pml_domains(&pml, 3.0, 2.0, 1.0);

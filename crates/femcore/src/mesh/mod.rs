@@ -8,7 +8,6 @@
 //! 6 x=lx. Meshes given as lists of cells may contain quadrilaterals, hexahedra and prisms; `from_cells_split` cuts
 //! them into simplices without new vertices (`SplitMode::Minimal`).
 
-pub mod cellmesh;
 pub mod cells;
 pub mod fixtures;
 pub mod interop;
@@ -17,7 +16,7 @@ pub mod native;
 pub mod quality;
 pub mod view;
 
-use crate::mesh::cellmesh::CellMesh;
+use crate::mesh::cells::CellMesh as NativeCells;
 use std::collections::BTreeSet;
 
 /// How hexahedra, prisms and boundary quadrilaterals are cut into simplices in 3D.
@@ -392,191 +391,188 @@ impl SimplexMesh {
         c
     }
 
-    /// Mesh from a list of cells. Domain and boundary numbers are 1-based in the list and stay as they are; domain
-    /// number 0 is the exterior.
+    /// Mesh from a mixed-cell mesh (`mesh::cells::CellMesh`). Domain and boundary numbers are 1-based in both and stay as they are.
     ///
     /// Cells that are not simplices are split into simplices so the solvers can use them:
     /// quadrilaterals into two triangles (along the shorter diagonal), and in 3D hexahedra and
-    /// prisms into tetrahedra around their centroid with a vertex at the centre of every
-    /// quadrilateral face (so neighbouring cells always agree on the split of a shared face).
-    /// The original vertices keep their indices; new vertices are appended. Straight-sided cells
-    /// are reproduced exactly.
-    pub fn from_cells(nm: &CellMesh) -> Result<Self, String> {
+    /// prisms into tetrahedra (`SplitMode`). The original vertices keep their indices; new vertices are appended.
+    /// Straight-sided cells are reproduced exactly. Cells come out grouped by shape in the order of first appearance
+    /// (cells, then boundary facets), each group in the order of the input.
+    pub fn from_cells<const D: usize>(nm: &NativeCells<D>) -> Result<Self, String> {
         Self::from_cells_split(nm).map(|(m, _)| m)
     }
 
-    pub fn from_cells_split(nm: &CellMesh) -> Result<(Self, SplitReport), String> {
+    pub fn from_cells_split<const D: usize>(nm: &NativeCells<D>) -> Result<(Self, SplitReport), String> {
         Self::from_cells_split_with(nm, SplitMode::default())
     }
 
-    pub fn from_cells_split_with(nm: &CellMesh, mode: SplitMode) -> Result<(Self, SplitReport), String> {
-        let d = nm.sdim;
+    pub fn from_cells_split_with<const D: usize>(nm: &NativeCells<D>, mode: SplitMode) -> Result<(Self, SplitReport), String> {
+        use crate::mesh::cells::CellType;
+        let d = D;
         if d != 2 && d != 3 {
             return Err(format!("mesh dimension {d} is not supported"));
         }
         let mut report = SplitReport::default();
-        let mut points = nm.points.clone();
+        let mut points: Vec<f64> = nm.points.iter().flat_map(|p| p.iter().copied()).collect();
         let (mut cells, mut cell_labels) = (vec![], vec![]);
         let (mut facets, mut facet_labels) = (vec![], vec![]);
         let dist2 = |pts: &[f64], a: u32, b: u32| -> f64 { (0..d).map(|k| (pts[a as usize * d + k] - pts[b as usize * d + k]).powi(2)).sum() };
-        if d == 2 {
-            for t in &nm.types {
-                match t.name.as_str() {
-                    "tri" => {
-                        for i in 0..t.len() {
-                            cells.extend_from_slice(t.row(i));
-                            cell_labels.push(t.dom[i]);
-                        }
-                    }
-                    "quad" => {
-                        for i in 0..t.len() {
-                            // tensor-product vertex order: (0,0), (1,0), (0,1), (1,1)
-                            let r = t.row(i);
-                            let (a, b, c, e) = (r[0], r[1], r[2], r[3]);
-                            let tris = if dist2(&points, a, e) <= dist2(&points, b, c) { [[a, b, e], [a, e, c]] } else { [[a, b, c], [b, e, c]] };
-                            for tr in tris {
-                                cells.extend_from_slice(&tr);
-                                cell_labels.push(t.dom[i]);
-                            }
-                            report.quads += 1;
-                        }
-                    }
-                    "edg" => {
-                        for i in 0..t.len() {
-                            facets.extend_from_slice(t.row(i));
-                            facet_labels.push(t.dom[i]);
-                        }
-                    }
-                    "vtx" => {}
-                    other => return Err(format!("unsupported 2D element type '{other}'")),
+        let cell_kind = |c: usize| match nm.types[c] {
+            CellType::Tri => "tri",
+            CellType::Quad => "quad",
+            CellType::Tet => "tet",
+            CellType::Prism => "prism",
+            CellType::Hex => "hex",
+        };
+        let facet_kind = |f: usize| match nm.facet(f).len() {
+            2 => "edg",
+            3 => "tri",
+            _ => "quad",
+        };
+        // shapes in the order of first appearance, cells first
+        let mut kinds: Vec<&str> = vec![];
+        for k in (0..nm.n_cells()).map(cell_kind).chain((0..nm.n_facets()).map(facet_kind)) {
+            if !kinds.contains(&k) {
+                kinds.push(k);
+            }
+        }
+        // the quadrilateral and hexahedron vertices in tensor-product order (i + 2 j + 4 k), which the cuts below use
+        let tensor_quad = |v: &[u32]| [v[0], v[1], v[3], v[2]];
+        let tensor_hex = |v: &[u32]| [v[0], v[1], v[3], v[2], v[4], v[5], v[7], v[6]];
+        let mut centers: std::collections::HashMap<[u32; 4], u32> = std::collections::HashMap::new();
+        let mut center_of = |points: &mut Vec<f64>, q: [u32; 4]| -> u32 {
+            let mut key = q;
+            key.sort_unstable();
+            if let Some(&c) = centers.get(&key) {
+                return c;
+            }
+            let id = (points.len() / 3) as u32;
+            let mut c = [0.0; 3];
+            for &v in &q {
+                for k in 0..3 {
+                    c[k] += points[v as usize * 3 + k] / 4.0;
                 }
             }
-        } else {
-            use std::collections::HashMap;
-            let mut centers: HashMap<[u32; 4], u32> = HashMap::new();
-            let mut center_of = |points: &mut Vec<f64>, q: [u32; 4]| -> u32 {
-                let mut key = q;
-                key.sort_unstable();
-                if let Some(&c) = centers.get(&key) {
-                    return c;
-                }
-                let id = (points.len() / 3) as u32;
-                let mut c = [0.0; 3];
-                for &v in &q {
-                    for k in 0..3 {
-                        c[k] += points[v as usize * 3 + k] / 4.0;
+            points.extend_from_slice(&c);
+            centers.insert(key, id);
+            id
+        };
+        // faces of the reference cells in tensor-product vertex order [p00, p10, p01, p11]
+        const HEX_FACES: [[usize; 4]; 6] = [[0, 2, 4, 6], [1, 3, 5, 7], [0, 1, 4, 5], [2, 3, 6, 7], [0, 1, 2, 3], [4, 5, 6, 7]];
+        const PRISM_QUADS: [[usize; 4]; 3] = [[0, 1, 3, 4], [1, 2, 4, 5], [0, 2, 3, 5]];
+        for kind in kinds {
+            match (d, kind) {
+                (2, "tri") | (3, "tet") => {
+                    for c in (0..nm.n_cells()).filter(|&c| cell_kind(c) == kind) {
+                        cells.extend_from_slice(nm.cell(c));
+                        cell_labels.push(nm.label[c]);
                     }
                 }
-                points.extend_from_slice(&c);
-                centers.insert(key, id);
-                id
-            };
-            // faces of the reference cells in tensor-product vertex order [p00, p10, p01, p11]
-            const HEX_FACES: [[usize; 4]; 6] = [[0, 2, 4, 6], [1, 3, 5, 7], [0, 1, 4, 5], [2, 3, 6, 7], [0, 1, 2, 3], [4, 5, 6, 7]];
-            const PRISM_QUADS: [[usize; 4]; 3] = [[0, 1, 3, 4], [1, 2, 4, 5], [0, 2, 3, 5]];
-            for t in &nm.types {
-                match t.name.as_str() {
-                    "tet" => {
-                        for i in 0..t.len() {
-                            cells.extend_from_slice(t.row(i));
-                            cell_labels.push(t.dom[i]);
+                (2, "quad") => {
+                    for c in (0..nm.n_cells()).filter(|&c| cell_kind(c) == kind) {
+                        let [a, b, cc, e] = tensor_quad(nm.cell(c));
+                        let tris = if dist2(&points, a, e) <= dist2(&points, b, cc) { [[a, b, e], [a, e, cc]] } else { [[a, b, cc], [b, e, cc]] };
+                        for tr in tris {
+                            cells.extend_from_slice(&tr);
+                            cell_labels.push(nm.label[c]);
                         }
+                        report.quads += 1;
                     }
-                    "tri" => {
-                        for i in 0..t.len() {
-                            facets.extend_from_slice(t.row(i));
-                            facet_labels.push(t.dom[i]);
+                }
+                (2, "edg") | (3, "tri") => {
+                    for f in (0..nm.n_facets()).filter(|&f| facet_kind(f) == kind) {
+                        facets.extend_from_slice(nm.facet(f));
+                        facet_labels.push(nm.facet_label[f]);
+                    }
+                }
+                (3, "quad") => {
+                    for f in (0..nm.n_facets()).filter(|&f| facet_kind(f) == kind) {
+                        let q = tensor_quad(nm.facet(f));
+                        let cyc = [q[0], q[1], q[3], q[2]];
+                        if mode == SplitMode::Minimal {
+                            for tr in quad_tris(cyc) {
+                                facets.extend_from_slice(&tr);
+                                facet_labels.push(nm.facet_label[f]);
+                            }
+                        } else {
+                            let c = center_of(&mut points, q);
+                            for k in 0..4 {
+                                facets.extend_from_slice(&[c, cyc[k], cyc[(k + 1) % 4]]);
+                                facet_labels.push(nm.facet_label[f]);
+                            }
                         }
+                        report.boundary_quads += 1;
                     }
-                    "quad" => {
-                        for i in 0..t.len() {
-                            let r = t.row(i);
-                            let q = [r[0], r[1], r[2], r[3]];
-                            let cyc = [q[0], q[1], q[3], q[2]];
-                            if mode == SplitMode::Minimal {
-                                for tr in quad_tris(cyc) {
-                                    facets.extend_from_slice(&tr);
-                                    facet_labels.push(t.dom[i]);
-                                }
-                            } else {
-                                let c = center_of(&mut points, q);
-                                for k in 0..4 {
-                                    facets.extend_from_slice(&[c, cyc[k], cyc[(k + 1) % 4]]);
-                                    facet_labels.push(t.dom[i]);
-                                }
-                            }
-                            report.boundary_quads += 1;
-                        }
-                    }
-                    "hex" | "prism" => {
-                        let hex = t.name == "hex";
-                        for i in 0..t.len() {
-                            let r = t.row(i);
-                            if mode == SplitMode::Minimal {
-                                // cone from the lowest-numbered vertex over the faces that do not contain it
-                                let v0 = (0..r.len()).min_by_key(|&k| r[k]).unwrap();
-                                let mut far: Vec<[u32; 3]> = vec![];
-                                let quad_faces: Vec<[usize; 4]> = if hex { HEX_FACES.to_vec() } else { PRISM_QUADS.to_vec() };
-                                for f in &quad_faces {
-                                    if !f.contains(&v0) {
-                                        far.extend(quad_tris([r[f[0]], r[f[1]], r[f[3]], r[f[2]]]));
-                                    }
-                                }
-                                if !hex {
-                                    for tri in [[0usize, 1, 2], [3, 4, 5]] {
-                                        if !tri.contains(&v0) {
-                                            far.push([r[tri[0]], r[tri[1]], r[tri[2]]]);
-                                        }
-                                    }
-                                }
-                                for tr in far {
-                                    cells.extend_from_slice(&[r[v0], tr[0], tr[1], tr[2]]);
-                                    cell_labels.push(t.dom[i]);
-                                }
-                                if hex {
-                                    report.hexes += 1;
-                                } else {
-                                    report.prisms += 1;
-                                }
-                                continue;
-                            }
-                            let nv = r.len();
-                            let mut cc = [0.0; 3];
-                            for &v in r {
-                                for k in 0..3 {
-                                    cc[k] += points[v as usize * 3 + k] / nv as f64;
-                                }
-                            }
-                            let cid = (points.len() / 3) as u32;
-                            points.extend_from_slice(&cc);
-                            let mut tris: Vec<[u32; 3]> = vec![];
+                }
+                (3, "hex") | (3, "prism") => {
+                    let hex = kind == "hex";
+                    for c in (0..nm.n_cells()).filter(|&c| cell_kind(c) == kind) {
+                        let rv: Vec<u32> = if hex { tensor_hex(nm.cell(c)).to_vec() } else { nm.cell(c).to_vec() };
+                        let r = &rv[..];
+                        let label = nm.label[c];
+                        if mode == SplitMode::Minimal {
+                            // cone from the lowest-numbered vertex over the faces that do not contain it
+                            let v0 = (0..r.len()).min_by_key(|&k| r[k]).unwrap();
+                            let mut far: Vec<[u32; 3]> = vec![];
                             let quad_faces: Vec<[usize; 4]> = if hex { HEX_FACES.to_vec() } else { PRISM_QUADS.to_vec() };
                             for f in &quad_faces {
-                                let q = [r[f[0]], r[f[1]], r[f[2]], r[f[3]]];
-                                let c = center_of(&mut points, q);
-                                let cyc = [q[0], q[1], q[3], q[2]];
-                                for k in 0..4 {
-                                    tris.push([c, cyc[k], cyc[(k + 1) % 4]]);
+                                if !f.contains(&v0) {
+                                    far.extend(quad_tris([r[f[0]], r[f[1]], r[f[3]], r[f[2]]]));
                                 }
                             }
                             if !hex {
-                                tris.push([r[0], r[1], r[2]]);
-                                tris.push([r[3], r[4], r[5]]);
+                                for tri in [[0usize, 1, 2], [3, 4, 5]] {
+                                    if !tri.contains(&v0) {
+                                        far.push([r[tri[0]], r[tri[1]], r[tri[2]]]);
+                                    }
+                                }
                             }
-                            for tr in tris {
-                                cells.extend_from_slice(&[cid, tr[0], tr[1], tr[2]]);
-                                cell_labels.push(t.dom[i]);
+                            for tr in far {
+                                cells.extend_from_slice(&[r[v0], tr[0], tr[1], tr[2]]);
+                                cell_labels.push(label);
                             }
                             if hex {
                                 report.hexes += 1;
                             } else {
                                 report.prisms += 1;
                             }
+                            continue;
+                        }
+                        let nv = r.len();
+                        let mut cc = [0.0; 3];
+                        for &v in r {
+                            for k in 0..3 {
+                                cc[k] += points[v as usize * 3 + k] / nv as f64;
+                            }
+                        }
+                        let cid = (points.len() / 3) as u32;
+                        points.extend_from_slice(&cc);
+                        let mut tris: Vec<[u32; 3]> = vec![];
+                        let quad_faces: Vec<[usize; 4]> = if hex { HEX_FACES.to_vec() } else { PRISM_QUADS.to_vec() };
+                        for f in &quad_faces {
+                            let q = [r[f[0]], r[f[1]], r[f[2]], r[f[3]]];
+                            let c = center_of(&mut points, q);
+                            let cyc = [q[0], q[1], q[3], q[2]];
+                            for k in 0..4 {
+                                tris.push([c, cyc[k], cyc[(k + 1) % 4]]);
+                            }
+                        }
+                        if !hex {
+                            tris.push([r[0], r[1], r[2]]);
+                            tris.push([r[3], r[4], r[5]]);
+                        }
+                        for tr in tris {
+                            cells.extend_from_slice(&[cid, tr[0], tr[1], tr[2]]);
+                            cell_labels.push(label);
+                        }
+                        if hex {
+                            report.hexes += 1;
+                        } else {
+                            report.prisms += 1;
                         }
                     }
-                    "vtx" | "edg" => {}
-                    other => return Err(format!("unsupported 3D element type '{other}' (pyramids are not supported)")),
                 }
+                (_, other) => return Err(format!("unsupported element shape '{other}' in a {d}D mesh")),
             }
         }
         if cells.is_empty() || facets.is_empty() {

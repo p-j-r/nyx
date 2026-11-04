@@ -68,7 +68,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/solvers/*` | 8, 11 | ported solver library |
 | `crates/femcore/src/mesh/mod.rs` | 4 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
 | `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
-| `crates/femcore/src/mesh/cellmesh.rs` | 5, 4 | the nyx `CellMesh`, to be deleted in phase 2 |
 | `crates/femcore/src/mesh/native.rs` | 5, 4 | dimension-generic native mesh (was `meshers/mesh.rs`) |
 | `crates/femcore/src/mesh/cells.rs` | 5 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
 | `crates/femcore/src/mesh/interop.rs` | 5, 4 | border between the two mesh families, to be deleted in phase 2 |

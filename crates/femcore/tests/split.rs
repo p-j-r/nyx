@@ -2,10 +2,68 @@
 //! conforming, fill the same volume and solve exactly for linear fields.
 mod common;
 use femcore::mesh::{SimplexMesh, SplitMode};
-use femcore::mesh::cellmesh::{ElementType, CellMesh};
 use femcore::problem::*;
 use femcore::sms::solve_solid;
+use femcore::mesh::cells::{CellMesh as NativeCells, CellType};
 use std::collections::HashMap;
+
+// The fixtures below are written in tensor-product vertex order (i + 2 j + 4 k), the way structured generators number the corners of
+// a cell. `native` turns them into the counter-clockwise order of `mesh::cells::CellMesh`.
+#[derive(Clone, Debug, Default)]
+struct ElementType {
+    name: String,
+    nep: usize,
+    elem: Vec<u32>,
+    dom: Vec<i32>,
+}
+
+impl ElementType {
+    fn len(&self) -> usize {
+        self.elem.len().checked_div(self.nep).unwrap_or(0)
+    }
+    fn row(&self, i: usize) -> &[u32] {
+        &self.elem[i * self.nep..(i + 1) * self.nep]
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct CellMesh {
+    sdim: usize,
+    points: Vec<f64>,
+    types: Vec<ElementType>,
+}
+
+impl CellMesh {
+    fn n_points(&self) -> usize {
+        self.points.len().checked_div(self.sdim).unwrap_or(0)
+    }
+    fn ty(&self, name: &str) -> Option<&ElementType> {
+        self.types.iter().find(|t| t.name == name)
+    }
+}
+
+fn native<const D: usize>(nm: &CellMesh) -> NativeCells<D> {
+    assert_eq!(nm.sdim, D);
+    let mut out = NativeCells::<D>::new();
+    out.points = nm.points.chunks(D).map(|p| std::array::from_fn(|k| p[k])).collect();
+    for t in &nm.types {
+        for i in 0..t.len() {
+            let r = t.row(i);
+            let lab = t.dom[i];
+            match (D, t.name.as_str()) {
+                (2, "tri") => out.push_cell(CellType::Tri, r, lab),
+                (2, "quad") => out.push_cell(CellType::Quad, &[r[0], r[1], r[3], r[2]], lab),
+                (2, "edg") | (3, "tri") => out.push_facet(r, lab),
+                (3, "quad") => out.push_facet(&[r[0], r[1], r[3], r[2]], lab),
+                (3, "tet") => out.push_cell(CellType::Tet, r, lab),
+                (3, "hex") => out.push_cell(CellType::Hex, &[r[0], r[1], r[3], r[2], r[4], r[5], r[7], r[6]], lab),
+                (3, "prism") => out.push_cell(CellType::Prism, r, lab),
+                _ => panic!("unexpected element type {}", t.name),
+            }
+        }
+    }
+    out
+}
 
 fn grid_points(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Vec<f64> {
     let mut p = vec![];
@@ -169,7 +227,7 @@ fn quads_become_triangles_and_solve_exactly() {
     }
     let nq = nx * ny;
     let nm = CellMesh { sdim: 2, points, types: vec![et("quad", 4, quad, vec![1; nq]), et("edg", 2, edg, ed)] };
-    let (m, rep) = SimplexMesh::from_cells_split(&nm).unwrap();
+    let (m, rep) = SimplexMesh::from_cells_split(&native::<2>(&nm)).unwrap();
     assert_eq!((rep.quads, m.n_cells()), (nq, 2 * nq));
     assert!((volume(&m) - 0.2).abs() < 1e-14);
     assert_eq!(m.boundary_labels(), vec![1, 2, 3, 4]);
@@ -213,12 +271,12 @@ fn uniaxial_3d(m: &SimplexMesh, volume_expected: f64) {
 fn hexahedra_are_split_conformingly() {
     let nm = hex_block(3, 2, 2, 1.0, 0.4, 0.3);
     // star split: vertices at face and cell centres, 24 tetrahedra per hexahedron
-    let (m, rep) = SimplexMesh::from_cells_split_with(&nm, SplitMode::Star).unwrap();
+    let (m, rep) = SimplexMesh::from_cells_split_with(&native::<3>(&nm), SplitMode::Star).unwrap();
     assert_eq!((rep.hexes, rep.boundary_quads, m.n_cells()), (12, 2 * (2 * 2 + 3 * 2 + 3 * 2), 12 * 24));
     uniaxial_3d(&m, 1.0 * 0.4 * 0.3);
     assert_eq!(m.boundary_labels(), vec![1, 2, 3, 4, 5, 6]);
     // minimal split: no new vertices, 6 tetrahedra per hexahedron, 2 triangles per boundary quad
-    let (m, rep) = SimplexMesh::from_cells_split_with(&nm, SplitMode::Minimal).unwrap();
+    let (m, rep) = SimplexMesh::from_cells_split_with(&native::<3>(&nm), SplitMode::Minimal).unwrap();
     assert_eq!((rep.hexes, m.n_cells(), m.n_facets(), m.n_points()), (12, 12 * 6, 2 * 32, nm.n_points()));
     uniaxial_3d(&m, 1.0 * 0.4 * 0.3);
     assert_eq!(m.boundary_labels(), vec![1, 2, 3, 4, 5, 6]);
@@ -227,10 +285,10 @@ fn hexahedra_are_split_conformingly() {
 #[test]
 fn prisms_are_split_conformingly() {
     let nm = prism_block(2, 2, 2, 1.0, 0.4, 0.3);
-    let (m, rep) = SimplexMesh::from_cells_split_with(&nm, SplitMode::Star).unwrap();
+    let (m, rep) = SimplexMesh::from_cells_split_with(&native::<3>(&nm), SplitMode::Star).unwrap();
     assert_eq!((rep.prisms, m.n_cells()), (16, 16 * 14));
     uniaxial_3d(&m, 1.0 * 0.4 * 0.3);
-    let (m, rep) = SimplexMesh::from_cells_split_with(&nm, SplitMode::Minimal).unwrap();
+    let (m, rep) = SimplexMesh::from_cells_split_with(&native::<3>(&nm), SplitMode::Minimal).unwrap();
     assert_eq!((rep.prisms, m.n_cells(), m.n_points()), (16, 16 * 3, nm.n_points()));
     uniaxial_3d(&m, 1.0 * 0.4 * 0.3);
 }
@@ -254,7 +312,7 @@ fn minimal_split_conforms_for_any_vertex_numbering() {
         }
         let types = nm.types.iter().map(|t| et(&t.name, t.nep, t.elem.iter().map(|&v| perm[v as usize]).collect(), t.dom.clone())).collect();
         let sc = CellMesh { sdim: 3, points, types };
-        let (m, _) = SimplexMesh::from_cells_split_with(&sc, SplitMode::Minimal).unwrap();
+        let (m, _) = SimplexMesh::from_cells_split_with(&native::<3>(&sc), SplitMode::Minimal).unwrap();
         assert_eq!(m.n_cells(), 18 * 6);
         assert!((volume(&m) - 0.6).abs() < 1e-12, "seed {seed}");
         assert_conforming(&m);
@@ -314,7 +372,7 @@ fn hexahedra_and_prisms_sharing_quad_faces_conform() {
     let pp = p.ty("prism").unwrap();
     types.push(et("prism", 6, pp.elem.iter().map(|v| map[v]).collect(), vec![2; pp.len()]));
     let nm = CellMesh { sdim: 3, points, types };
-    let (m, rep) = SimplexMesh::from_cells_split(&nm).unwrap();
+    let (m, rep) = SimplexMesh::from_cells_split(&native::<3>(&nm)).unwrap();
     assert_eq!((rep.hexes, rep.prisms), (8, 16));
     assert!((volume(&m) - 2.0 * 0.4 * 0.3).abs() < 1e-12);
     assert_conforming(&m);

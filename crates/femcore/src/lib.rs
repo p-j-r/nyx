@@ -3,7 +3,7 @@
 //!
 //! * entry and plumbing: `solve` (one entry point for every physics), `problem` (what is solved: the problem and result
 //!   types), `validate` (refuses NaN/infinity), `progress` (stage log, cancel), `par` (the shared thread pools)
-//! * meshes: `mesh` (the meshes: `SimplexMesh` and its numbering of unknowns, the native per-cell-type mesh `native` and `cells`, `view`, `cellmesh` (legacy), `io` for `.fmsh`, `quality`, `fixtures`)
+//! * meshes: `mesh` (the meshes: `SimplexMesh` and its numbering of unknowns, the native per-cell-type mesh `native` and `cells`, `view`, `io` for `.fmsh`, `quality`, `fixtures`)
 //! * meshing: `meshing` (geom models to meshes: `MeshPlan`, `geomdrive`, `mesher` 2D shapes to triangles, `mesher3d` and `refine3d` 3D solids to tetrahedra, structured PML `pml`, `pml3`, `pml_box`, `physics_size`, `validate`)
 //! * adaptation: `adapt` (metric adaptation 2D and 3D, error estimators `estimate`, `estimate3`)
 //! * finite-element basics: `fem` (quadrature, shape functions, scalar matrices, constraints), `fields` (gradients, node

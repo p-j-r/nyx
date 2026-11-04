@@ -14,10 +14,10 @@
 //! Needs a window that is a box and a physical mesh whose boundary lies on it (`build_pml` says so when it does not).
 
 use crate::meshing::geomdrive::MeshedGeom;
-use crate::mesh::cellmesh::CellMesh;
+use crate::mesh::cells::CellMesh;
 use crate::mesh::SimplexMesh;
 use crate::meshing::pml_box::{build_pml, PmlSpec};
-use crate::mesh::interop::{cells_to_nyx, simplex_to_adapt};
+use crate::mesh::interop::simplex_to_adapt;
 use geom::model::RegionKind;
 use std::collections::{HashMap, HashSet};
 
@@ -63,9 +63,9 @@ pub fn structured_pml(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String> 
 pub enum Native {
     /// the model has no absorbing layer: the meshed model as it was
     Unchanged(MeshedGeom, PmlReport),
-    /// the physical triangles and the quadrilateral layers, uncut, with the labels of `structured_pml` (boundary facets are 0-based
-    /// entities of the lower dimension, as `CellMesh` has them)
-    Cells(CellMesh, PmlReport),
+    /// the physical triangles and the quadrilateral layers, uncut, with the labels of `structured_pml` (boundary facets are the 1-based
+    /// edges of the lower dimension)
+    Cells(CellMesh<2>, PmlReport),
 }
 
 /// The structured layers without the final cut: a mixed triangle/quadrilateral `CellMesh`, for solvers that take quadrilaterals natively.
@@ -210,7 +210,7 @@ pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String> {
     }
 
     let report = PmlReport { physical_cells: n_phys_cells, layer_quads, dropped_cells, layers: spec.layers };
-    Ok(Native::Cells(cells_to_nyx(&built.mesh), report))
+    Ok(Native::Cells(built.mesh, report))
 }
 
 fn sorted_pair(a: u32, b: u32) -> (u32, u32) {

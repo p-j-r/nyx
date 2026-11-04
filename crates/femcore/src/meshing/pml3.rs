@@ -5,8 +5,8 @@
 //! adapted by `physics_size::adapt_tets`, which keeps the box faces, edges and corners exactly) and sweeps the layers outward from it
 //! (`meshing::pml_box::build_pml`). The result has
 //!
-//! * `cells`: the mixed mesh as a nyx `CellMesh` (tetrahedra, prisms, hexahedra, boundary triangles and quadrilaterals), for solvers that
-//!   take those cells natively;
+//! * `layout.mesh`: the mixed mesh as a `mesh::cells::CellMesh` (tetrahedra, prisms, hexahedra, boundary triangles and quadrilaterals), for
+//!   solvers that take those cells natively;
 //! * `mesh`: the same mesh cut into tetrahedra without new vertices (`SimplexMesh::from_cells_split`), what the solvers of today run on;
 //! * `pml`: the `Pml` stretch of every layer domain, keyed by its label, one domain per region (a face has one stretched direction, an
 //!   edge two, a corner three) because `emw_pml::cell_stretches` takes the bounding box of a domain's cells.
@@ -14,16 +14,13 @@
 //! A material that crosses the interface continues into a PML copy of itself; `apply_materials` copies the material data of the physical
 //! domains to the layer labels and registers the `Pml` entries, so a `ProblemSpec` for the physical mesh becomes one for the full mesh.
 
-use crate::mesh::cellmesh::CellMesh as NyxCells;
 use crate::mesh::{SimplexMesh, SplitReport};
 use crate::meshing::pml_box::{build_pml, PmlMesh, PmlSpec};
-use crate::mesh::interop::{cells_to_nyx, pml_domains, simplex_to_adapt};
+use crate::mesh::interop::{pml_domains, simplex_to_adapt};
 use crate::problem::{Materials, Pml};
 use std::collections::BTreeMap;
 
 pub struct PmlBox {
-    /// the mixed mesh, uncut
-    pub cells: NyxCells,
     /// the same mesh cut into tetrahedra
     pub mesh: SimplexMesh,
     pub split: SplitReport,
@@ -46,10 +43,9 @@ pub fn add_pml_3d(phys: &SimplexMesh, spec: &PmlSpec<3>, strength: f64, order: f
         return Err(format!("a physical domain label is not below the PML label base {}", spec.label_base));
     }
     let layout = build_pml(&a, spec)?;
-    let cells = cells_to_nyx(&layout.mesh);
-    let (mesh, split) = SimplexMesh::from_cells_split(&cells)?;
+    let (mesh, split) = SimplexMesh::from_cells_split(&layout.mesh)?;
     let pml = pml_domains(&layout, strength, order, re);
-    Ok(PmlBox { cells, mesh, split, pml, layout })
+    Ok(PmlBox { mesh, split, pml, layout })
 }
 
 /// Gives every layer domain the material data of the physical domain it continues and its `Pml` entry. Domains of `materials` that are not

@@ -283,58 +283,56 @@ fn mesh_cells_are_positively_oriented_in_2d() {
 }
 
 mod mixed {
-    use femcore::mesh::cellmesh::CellMesh as NyxCells;
+    use femcore::mesh::cells::CellMesh;
+    use femcore::mesh::interop::simplex_to_adapt;
     use femcore::mesh::SimplexMesh;
     use femcore::meshing::pml_box::{build_pml, PmlSpec};
-    use femcore::mesh::interop::{cells_to_nyx, simplex_to_adapt};
 
-    pub fn pml_cells() -> NyxCells {
+    pub fn pml_cells() -> CellMesh<2> {
         let plate = femcore::meshing::geomdrive::plate(1.0, 1.0, 0.125).unwrap().mesh;
         let phys = simplex_to_adapt::<2>(&plate).unwrap();
         let spec = PmlSpec { outer_label: Some(1), ..PmlSpec::<2>::uniform(0.25, 3) };
-        cells_to_nyx(&build_pml(&phys, &spec).unwrap().mesh)
+        build_pml(&phys, &spec).unwrap().mesh
     }
 
-    pub fn split(cells: &NyxCells) -> SimplexMesh {
+    pub fn split(cells: &CellMesh<2>) -> SimplexMesh {
         SimplexMesh::from_cells_split(cells).unwrap().0
     }
 }
 
 #[test]
-fn mesh_nyx_cellmesh_label_bases_differ_between_domains_and_boundaries() {
-    // ADR 5 / ROUGH_SPOTS R09: in the nyx `CellMesh`, domain numbers are 1-based and boundary-element numbers 0-based;
-    // `SimplexMesh` numbers both from 1. `from_cells_split` is the place where the two meet.
+fn mesh_domain_and_boundary_numbers_are_one_based_in_the_cell_mesh_and_the_split_mesh() {
+    // ADR 5 / ROUGH_SPOTS R09, resolved in phase 2 (ADR 32): one mesh type, domain and boundary numbers both from 1;
+    // `from_cells_split` copies them.
+    use femcore::mesh::cells::CellType;
     let cells = mixed::pml_cells();
-    let edg = cells.ty("edg").expect("boundary edges of a 2D mixed mesh are named `edg`");
-    let quad = cells.ty("quad").expect("the PML layers are quadrilaterals");
-    let tri = cells.ty("tri").expect("the physical mesh is triangles");
-    assert_eq!(edg.nep, 2);
-    assert_eq!(quad.nep, 4);
-    assert_eq!(tri.nep, 3);
-    assert!(edg.dom.iter().all(|&d| d >= 1) && edg.dom.contains(&1), "boundary entity numbers start at 1");
-    assert!(tri.dom.iter().chain(&quad.dom).all(|&d| d >= 1), "domain numbers start at 1 (0 is the exterior)");
+    assert!(cells.types.contains(&CellType::Tri) && cells.types.contains(&CellType::Quad), "physical triangles and PML quadrilaterals");
+    assert!(cells.facet_label.iter().all(|&d| d >= 1) && cells.facet_label.contains(&1), "boundary numbers start at 1");
+    assert!(cells.label.iter().all(|&d| d >= 1), "domain numbers start at 1 (0 is the exterior)");
     let mesh = mixed::split(&cells);
-    let mut want: Vec<i32> = edg.dom.clone();
+    let mut want: Vec<i32> = cells.facet_label.clone();
     want.sort_unstable();
     want.dedup();
     let mut got = mesh.boundary_labels();
     got.sort_unstable();
     got.dedup();
-    assert_eq!(got, want, "the split mesh numbers boundaries from 1");
+    assert_eq!(got, want, "the split mesh keeps the boundary numbers");
 }
 
 #[test]
-fn mesh_quadrilaterals_are_stored_in_tensor_product_order_and_split_exactly() {
-    // nyx quad order is `i + 2 j`: the polygon (0, 1, 3, 2) is counter-clockwise (ADR 5)
+fn mesh_quadrilaterals_are_counter_clockwise_and_split_exactly() {
+    // the native quad order is the polygon (0, 1, 2, 3), counter-clockwise (ADR 5)
+    use femcore::mesh::cells::CellType;
     let cells = mixed::pml_cells();
-    let quad = cells.ty("quad").unwrap();
-    for q in 0..quad.len() {
-        let v = quad.row(q);
-        let p = |i: usize| (cells.points[v[i] as usize * 2], cells.points[v[i] as usize * 2 + 1]);
-        let ring = [p(0), p(1), p(3), p(2)];
-        let area2: f64 = (0..4).map(|i| ring[i].0 * ring[(i + 1) % 4].1 - ring[(i + 1) % 4].0 * ring[i].1).sum();
-        assert!(area2 > 0.0, "quad {q} is not counter-clockwise in tensor-product order");
+    let mut n_quads = 0;
+    for c in (0..cells.n_cells()).filter(|&c| cells.types[c] == CellType::Quad) {
+        n_quads += 1;
+        let v = cells.cell(c);
+        let ring: Vec<[f64; 2]> = (0..4).map(|i| cells.points[v[i] as usize]).collect();
+        let area2: f64 = (0..4).map(|i| ring[i][0] * ring[(i + 1) % 4][1] - ring[(i + 1) % 4][0] * ring[i][1]).sum();
+        assert!(area2 > 0.0, "quad {c} is not counter-clockwise");
     }
+    assert!(n_quads > 0);
     // the split into triangles adds no vertex and fills the same area: the 1 x 1 plate with a 0.25 layer is 1.5 x 1.5
     let mesh = mixed::split(&cells);
     assert_eq!(mesh.n_points(), cells.n_points());

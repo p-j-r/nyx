@@ -555,20 +555,19 @@ fn native_structured_layers_keep_their_quadrilaterals_and_split_to_the_simplex_m
     let (split, report) = structured_pml(start.clone()).unwrap();
     let Native::Cells(cells, rep2) = structured_pml_native(start).unwrap() else { panic!("the model has a Pml") };
     assert_eq!(report, rep2);
-    let quad = cells.ty("quad").expect("the layers are quadrilaterals");
-    assert_eq!(quad.len(), report.layer_quads);
-    let tri = cells.ty("tri").expect("the window stays triangles");
-    assert_eq!(tri.len(), report.physical_cells);
+    use femcore::mesh::cells::CellType;
+    let quads: Vec<usize> = (0..cells.n_cells()).filter(|&c| cells.types[c] == CellType::Quad).collect();
+    let tris: Vec<usize> = (0..cells.n_cells()).filter(|&c| cells.types[c] == CellType::Tri).collect();
+    assert_eq!(quads.len(), report.layer_quads, "the layers are quadrilaterals");
+    assert_eq!(tris.len(), report.physical_cells, "the window stays triangles");
     // the cut mesh is the native one with each quadrilateral in two
-    assert_eq!(split.mesh.n_cells(), tri.len() + 2 * quad.len());
-    // the layer quadrilaterals have positive area and the labels geom gave the pieces
-    let p = |i: u32| (cells.points[2 * i as usize], cells.points[2 * i as usize + 1]);
-    for q in 0..quad.len() {
-        let v = quad.row(q);
-        // CellMesh quadrilaterals are in tensor-product order (i + 2j), so the cycle around the cell is 0, 1, 3, 2
-        let (a, b, c, d) = (p(v[0]), p(v[1]), p(v[3]), p(v[2]));
-        let area = 0.5 * ((a.0 * b.1 - b.0 * a.1) + (b.0 * c.1 - c.0 * b.1) + (c.0 * d.1 - d.0 * c.1) + (d.0 * a.1 - a.0 * d.1));
+    assert_eq!(split.mesh.n_cells(), tris.len() + 2 * quads.len());
+    // the layer quadrilaterals have positive area (native order is counter-clockwise: 0, 1, 2, 3) and the labels geom gave the pieces
+    for &q in &quads {
+        let v = cells.cell(q);
+        let (a, b, c, d) = (cells.points[v[0] as usize], cells.points[v[1] as usize], cells.points[v[2] as usize], cells.points[v[3] as usize]);
+        let area = 0.5 * ((a[0] * b[1] - b[0] * a[1]) + (b[0] * c[1] - c[0] * b[1]) + (c[0] * d[1] - d[0] * c[1]) + (d[0] * a[1] - a[0] * d[1]));
         assert!(area > 0.0, "quadrilateral {q} has area {area} (counter-clockwise)");
-        assert!(split.mesh.cell_labels.contains(&quad.dom[q]));
+        assert!(split.mesh.cell_labels.contains(&cells.label[q]));
     }
 }
