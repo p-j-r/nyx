@@ -2851,11 +2851,15 @@ dependencies = [
 name = "nyx-engine"
 version = "0.1.0"
 dependencies = [
+ "femcore",
+ "geom",
  "nyx-analysis",
  "nyx-dfs",
  "nyx-ems",
  "nyx-physics",
  "nyx-sms",
+ "nyx-store",
+ "serde",
  "serde_json",
 ]
 
