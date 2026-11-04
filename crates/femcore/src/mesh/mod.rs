@@ -392,8 +392,8 @@ impl SimplexMesh {
         c
     }
 
-    /// Mesh from a list of cells. Boundary numbers are shifted to 1-based (cell lists number them from 0); domain
-    /// numbers are already 1-based.
+    /// Mesh from a list of cells. Domain and boundary numbers are 1-based in the list and stay as they are; domain
+    /// number 0 is the exterior.
     ///
     /// Cells that are not simplices are split into simplices so the solvers can use them:
     /// quadrilaterals into two triangles (along the shorter diagonal), and in 3D hexahedra and
@@ -444,7 +444,7 @@ impl SimplexMesh {
                     "edg" => {
                         for i in 0..t.len() {
                             facets.extend_from_slice(t.row(i));
-                            facet_labels.push(t.dom[i] + 1);
+                            facet_labels.push(t.dom[i]);
                         }
                     }
                     "vtx" => {}
@@ -485,7 +485,7 @@ impl SimplexMesh {
                     "tri" => {
                         for i in 0..t.len() {
                             facets.extend_from_slice(t.row(i));
-                            facet_labels.push(t.dom[i] + 1);
+                            facet_labels.push(t.dom[i]);
                         }
                     }
                     "quad" => {
@@ -496,13 +496,13 @@ impl SimplexMesh {
                             if mode == SplitMode::Minimal {
                                 for tr in quad_tris(cyc) {
                                     facets.extend_from_slice(&tr);
-                                    facet_labels.push(t.dom[i] + 1);
+                                    facet_labels.push(t.dom[i]);
                                 }
                             } else {
                                 let c = center_of(&mut points, q);
                                 for k in 0..4 {
                                     facets.extend_from_slice(&[c, cyc[k], cyc[(k + 1) % 4]]);
-                                    facet_labels.push(t.dom[i] + 1);
+                                    facet_labels.push(t.dom[i]);
                                 }
                             }
                             report.boundary_quads += 1;

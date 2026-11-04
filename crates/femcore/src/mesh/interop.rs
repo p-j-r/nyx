@@ -68,7 +68,7 @@ fn nyx_name(t: CellType) -> &'static str {
 }
 
 /// A mixed-cell mesh as a nyx `CellMesh`. Boundary facets become the elements of one dimension lower (`edg` in 2D,
-/// `tri` and `quad` in 3D) with 0-based numbers, as nyx expects.
+/// `tri` and `quad` in 3D) with their 1-based boundary numbers.
 pub fn cells_to_nyx<const D: usize>(m: &CellMesh<D>) -> NyxCells {
     let mut types: Vec<ElementType> = vec![];
     fn slot(types: &mut Vec<ElementType>, name: &str, nep: usize) -> usize {
@@ -94,7 +94,7 @@ pub fn cells_to_nyx<const D: usize>(m: &CellMesh<D>) -> NyxCells {
         };
         let i = slot(&mut types, name, v.len());
         types[i].elem.extend(order.iter().map(|&k| v[k]));
-        types[i].dom.push(m.facet_label[f] - 1);
+        types[i].dom.push(m.facet_label[f]);
     }
     NyxCells { sdim: D, points: m.points.iter().flat_map(|p| p.iter().copied()).collect(), types }
 }

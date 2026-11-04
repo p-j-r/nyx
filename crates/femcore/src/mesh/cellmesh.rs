@@ -9,7 +9,7 @@ pub struct ElementType {
     pub nep: usize,
     /// flat vertex indices, `nep` per element
     pub elem: Vec<u32>,
-    /// geometric entity index of each element (0-based for boundaries, 1-based for domains:
+    /// geometric entity index of each element (1-based for domains and boundaries:
     /// entity 0 of the highest dimension is the exterior)
     pub dom: Vec<i32>,
 }

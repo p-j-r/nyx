@@ -45,18 +45,18 @@ fn hex_block(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Cell
     };
     for k in 0..nz {
         for j in 0..ny {
-            q(vid(0, j, k), vid(0, j + 1, k), vid(0, j, k + 1), vid(0, j + 1, k + 1), 0);
-            q(vid(nx, j, k), vid(nx, j + 1, k), vid(nx, j, k + 1), vid(nx, j + 1, k + 1), 1);
+            q(vid(0, j, k), vid(0, j + 1, k), vid(0, j, k + 1), vid(0, j + 1, k + 1), 1);
+            q(vid(nx, j, k), vid(nx, j + 1, k), vid(nx, j, k + 1), vid(nx, j + 1, k + 1), 2);
         }
         for i in 0..nx {
-            q(vid(i, 0, k), vid(i + 1, 0, k), vid(i, 0, k + 1), vid(i + 1, 0, k + 1), 2);
-            q(vid(i, ny, k), vid(i + 1, ny, k), vid(i, ny, k + 1), vid(i + 1, ny, k + 1), 3);
+            q(vid(i, 0, k), vid(i + 1, 0, k), vid(i, 0, k + 1), vid(i + 1, 0, k + 1), 3);
+            q(vid(i, ny, k), vid(i + 1, ny, k), vid(i, ny, k + 1), vid(i + 1, ny, k + 1), 4);
         }
     }
     for j in 0..ny {
         for i in 0..nx {
-            q(vid(i, j, 0), vid(i + 1, j, 0), vid(i, j + 1, 0), vid(i + 1, j + 1, 0), 4);
-            q(vid(i, j, nz), vid(i + 1, j, nz), vid(i, j + 1, nz), vid(i + 1, j + 1, nz), 5);
+            q(vid(i, j, 0), vid(i + 1, j, 0), vid(i, j + 1, 0), vid(i + 1, j + 1, 0), 5);
+            q(vid(i, j, nz), vid(i + 1, j, nz), vid(i, j + 1, nz), vid(i + 1, j + 1, nz), 6);
         }
     }
     CellMesh { sdim: 3, points: grid_points(nx, ny, nz, lx, ly, lz), types: vec![et("quad", 4, quad, qdom), et("hex", 8, hex, vec![1; nh])] }
@@ -86,9 +86,9 @@ fn prism_block(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Ce
         for i in 0..nx {
             for t in [[(i, j), (i + 1, j), (i + 1, j + 1)], [(i, j), (i + 1, j + 1), (i, j + 1)]] {
                 tri.extend(t.iter().map(|&(a, b)| vid(a, b, 0)));
-                td.push(4);
-                tri.extend(t.iter().map(|&(a, b)| vid(a, b, nz)));
                 td.push(5);
+                tri.extend(t.iter().map(|&(a, b)| vid(a, b, nz)));
+                td.push(6);
             }
         }
     }
@@ -96,15 +96,15 @@ fn prism_block(nx: usize, ny: usize, nz: usize, lx: f64, ly: f64, lz: f64) -> Ce
     for k in 0..nz {
         for j in 0..ny {
             quad.extend_from_slice(&[vid(0, j, k), vid(0, j + 1, k), vid(0, j, k + 1), vid(0, j + 1, k + 1)]);
-            qd.push(0);
-            quad.extend_from_slice(&[vid(nx, j, k), vid(nx, j + 1, k), vid(nx, j, k + 1), vid(nx, j + 1, k + 1)]);
             qd.push(1);
+            quad.extend_from_slice(&[vid(nx, j, k), vid(nx, j + 1, k), vid(nx, j, k + 1), vid(nx, j + 1, k + 1)]);
+            qd.push(2);
         }
         for i in 0..nx {
             quad.extend_from_slice(&[vid(i, 0, k), vid(i + 1, 0, k), vid(i, 0, k + 1), vid(i + 1, 0, k + 1)]);
-            qd.push(2);
-            quad.extend_from_slice(&[vid(i, ny, k), vid(i + 1, ny, k), vid(i, ny, k + 1), vid(i + 1, ny, k + 1)]);
             qd.push(3);
+            quad.extend_from_slice(&[vid(i, ny, k), vid(i + 1, ny, k), vid(i, ny, k + 1), vid(i + 1, ny, k + 1)]);
+            qd.push(4);
         }
     }
     let np = pd.len();
@@ -157,15 +157,15 @@ fn quads_become_triangles_and_solve_exactly() {
             quad.extend_from_slice(&[vid(i, j), vid(i + 1, j), vid(i, j + 1), vid(i + 1, j + 1)]);
         }
         edg.extend_from_slice(&[vid(0, j), vid(0, j + 1)]);
-        ed.push(0);
+        ed.push(1);
         edg.extend_from_slice(&[vid(nx, j), vid(nx, j + 1)]);
-        ed.push(3);
+        ed.push(4);
     }
     for i in 0..nx {
         edg.extend_from_slice(&[vid(i, 0), vid(i + 1, 0)]);
-        ed.push(1);
-        edg.extend_from_slice(&[vid(i, ny), vid(i + 1, ny)]);
         ed.push(2);
+        edg.extend_from_slice(&[vid(i, ny), vid(i + 1, ny)]);
+        ed.push(3);
     }
     let nq = nx * ny;
     let nm = CellMesh { sdim: 2, points, types: vec![et("quad", 4, quad, vec![1; nq]), et("edg", 2, edg, ed)] };
@@ -293,7 +293,7 @@ fn hexahedra_and_prisms_sharing_quad_faces_conform() {
     let hq = h.ty("quad").unwrap();
     let (mut quad, mut qd) = (vec![], vec![]);
     for i in 0..hq.len() {
-        if hq.dom[i] != 1 {
+        if hq.dom[i] != 2 {
             quad.extend_from_slice(hq.row(i));
             qd.push(hq.dom[i]);
         }
@@ -301,7 +301,7 @@ fn hexahedra_and_prisms_sharing_quad_faces_conform() {
     // prism side/boundary quads and triangles (excluding the x = 0 side, interior now)
     let pq = p.ty("quad").unwrap();
     for i in 0..pq.len() {
-        if pq.dom[i] != 0 {
+        if pq.dom[i] != 1 {
             quad.extend(pq.row(i).iter().map(|v| map[v]));
             qd.push(pq.dom[i]);
         }

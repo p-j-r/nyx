@@ -311,10 +311,10 @@ fn mesh_nyx_cellmesh_label_bases_differ_between_domains_and_boundaries() {
     assert_eq!(edg.nep, 2);
     assert_eq!(quad.nep, 4);
     assert_eq!(tri.nep, 3);
-    assert!(edg.dom.iter().all(|&d| d >= 0) && edg.dom.contains(&0), "boundary entity numbers start at 0");
+    assert!(edg.dom.iter().all(|&d| d >= 1) && edg.dom.contains(&1), "boundary entity numbers start at 1");
     assert!(tri.dom.iter().chain(&quad.dom).all(|&d| d >= 1), "domain numbers start at 1 (0 is the exterior)");
     let mesh = mixed::split(&cells);
-    let mut want: Vec<i32> = edg.dom.iter().map(|d| d + 1).collect();
+    let mut want: Vec<i32> = edg.dom.clone();
     want.sort_unstable();
     want.dedup();
     let mut got = mesh.boundary_labels();
