@@ -189,9 +189,38 @@ impl Physics for Sms {
         Ok(())
     }
 
-    fn sizing(&self, spec: &ProblemSpec) -> Sizing {
-        // phase 4 fills `wavelengths` from the slowest plane wave of each region and the search frequency
-        Sizing { order: spec.order, headroom: 1.5, wavelengths: Default::default() }
+    fn sizing(&self, spec: &ProblemSpec, library: Option<&std::sync::Arc<femcore::material::Library>>) -> Sizing {
+        use femcore::material::{isotropic_stiffness, stiffness_global};
+        use femcore::meshing::physics_size::elastic_wavelength;
+        let empty = Sizing { order: spec.order, headroom: 1.5, wavelengths: Default::default() };
+        // only an eigenfrequency study with a search frequency has a wave to resolve
+        let studies = self.studies();
+        let Some(sd) = studies.iter().find(|s| s.kind == "eigenfrequency" && spec.study.kind == s.kind) else { return empty };
+        let f = nyx_physics::decode::Params::new(&spec.study.params, &sd.params).number("f_search");
+        if !(f > 0.0 && f.is_finite()) {
+            return empty;
+        }
+        let Ok((names, m)) = nyx_physics::decode::materials_by_region(spec, library, None, &self.properties()) else {
+            return empty;
+        };
+        let inactive: Vec<String> = nyx_physics::decode::Params::new(&spec.params, &self.params()).names("inactive");
+        let mut wavelengths = std::collections::BTreeMap::new();
+        for (i, region) in names.iter().enumerate() {
+            let label = i as i32 + 1;
+            if inactive.iter().any(|n| n == region) {
+                continue;
+            }
+            let Some(rho) = m.get(label, "rho").filter(|r| *r > 0.0) else { continue };
+            let c = match m.aniso.get(&label).and_then(|a| a.stiffness.as_ref().map(|s| stiffness_global(s, m.aniso[&label].euler_deg))) {
+                Some(c) => c,
+                None => match (m.get(label, "E"), m.get(label, "nu")) {
+                    (Some(e), Some(nu)) if e > 0.0 && nu > -1.0 && nu < 0.5 => isotropic_stiffness(e, nu),
+                    _ => continue,
+                },
+            };
+            wavelengths.insert(region.clone(), elastic_wavelength(&c, rho, f));
+        }
+        Sizing { order: spec.order, headroom: 1.5, wavelengths }
     }
 
     fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {

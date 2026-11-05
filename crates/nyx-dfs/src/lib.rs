@@ -175,7 +175,7 @@ impl Physics for Dfs {
         Ok(())
     }
 
-    fn sizing(&self, spec: &ProblemSpec) -> Sizing {
+    fn sizing(&self, spec: &ProblemSpec, _library: Option<&std::sync::Arc<femcore::material::Library>>) -> Sizing {
         // diffusion has no wavelength to resolve; geometry rules size the mesh
         Sizing { order: spec.order, headroom: 1.0, wavelengths: Default::default() }
     }

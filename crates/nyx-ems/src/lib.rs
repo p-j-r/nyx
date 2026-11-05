@@ -198,9 +198,39 @@ impl Physics for Ems {
         Ok(())
     }
 
-    fn sizing(&self, spec: &ProblemSpec) -> Sizing {
-        // phase 4 fills `wavelengths` as lambda0 / n per region, n^2 = mu_r * largest eigenvalue of the permittivity
-        Sizing { order: spec.order, headroom: 1.0, wavelengths: Default::default() }
+    fn sizing(&self, spec: &ProblemSpec, library: Option<&std::sync::Arc<femcore::material::Library>>) -> Sizing {
+        use femcore::material::tensor_global;
+        use femcore::meshing::physics_size::{optical_wavelength, speed_of_light};
+        let empty = Sizing { order: spec.order, headroom: 1.0, wavelengths: Default::default() };
+        let studies = self.studies();
+        let Some(sd) = studies.iter().find(|s| s.kind == spec.study.kind) else { return empty };
+        let sp = nyx_physics::decode::Params::new(&spec.study.params, &sd.params);
+        // a mode study resolves the wave at its frequency; the eigenfrequency studies find modes above the one they search around
+        let (freq, headroom) = match spec.study.kind.as_str() {
+            "modes" => (sp.number("freq"), 1.0),
+            "cavity" | "axisymmetric_modes" => (sp.number("f_search"), 1.5),
+            _ => return empty,
+        };
+        if !(freq > 0.0 && freq.is_finite()) {
+            return empty;
+        }
+        let lam0 = speed_of_light() / freq;
+        let Ok((names, m)) = nyx_physics::decode::materials_by_region(spec, library, Some(lam0), &self.properties()) else {
+            return empty;
+        };
+        let mut wavelengths = std::collections::BTreeMap::new();
+        for (i, region) in names.iter().enumerate() {
+            let label = i as i32 + 1;
+            let eps = match m.aniso.get(&label).and_then(|a| a.permittivity.as_ref().map(|t| tensor_global(t, a.euler_deg))) {
+                Some(t) => t,
+                None => {
+                    let e = m.get(label, "eps_r").unwrap_or(1.0);
+                    [[e, 0.0, 0.0], [0.0, e, 0.0], [0.0, 0.0, e]]
+                }
+            };
+            wavelengths.insert(region.clone(), optical_wavelength(&eps, m.get(label, "mu_r").unwrap_or(1.0), lam0));
+        }
+        Sizing { order: spec.order, headroom, wavelengths }
     }
 
     fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {

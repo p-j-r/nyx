@@ -12,9 +12,11 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MaterialAssign {
-    /// the name of a material of the project or of a library (a TOML file, phase 6)
+    /// the name of a material of the project or of a library (a TOML file, ADR 29)
     Named(String),
-    /// scalar properties given inline by descriptor name (`E`, `nu`, `rho`, ...): the form used until the material files exist
+    /// a material of the project or of the library placed in the wafer frame: the Bunge angles (degrees) of its crystal axes
+    Oriented { material: String, euler_deg: [f64; 3] },
+    /// scalar properties given inline by descriptor name (`E`, `nu`, `rho`, ...)
     Props(BTreeMap<String, f64>),
 }
 

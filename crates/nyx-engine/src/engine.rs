@@ -9,7 +9,7 @@ use crate::jobs::{JobId, JobOutput, JobRunner};
 use crate::meshing::{FemcoreMesher, MeshedModel, Mesher};
 use crate::project::Project;
 use crate::store_link::{RunOutcome, StoreLink};
-use nyx_physics::{Error, Registry, SolveResult};
+use nyx_physics::{Error, Registry, Sizing, SolveResult};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -36,6 +36,12 @@ pub struct Engine {
     pending: BTreeMap<JobId, Pending>,
     pub(crate) link: Option<StoreLink>,
     pub(crate) workspace: Option<PathBuf>,
+    /// bind the project to a workflow of `workspace` at the first solve, so what a host does shows in the dashboard (the MCP server turns it on)
+    pub(crate) auto_store: bool,
+    /// the material files of the program (`materials/`), before the project's own
+    pub(crate) base_library: Arc<femcore::material::Library>,
+    /// why the library is empty or partial, in words
+    pub library_notes: Vec<String>,
 }
 
 fn hash_of(text: &str) -> String {
@@ -45,7 +51,11 @@ fn hash_of(text: &str) -> String {
 impl Engine {
     /// An engine with the physics compiled into this build and an empty 2D project.
     pub fn new() -> Engine {
-        Engine::with(crate::registry(), Arc::new(FemcoreMesher))
+        let mut e = Engine::with(crate::registry(), Arc::new(FemcoreMesher));
+        let (lib, notes) = crate::materials::load_library(&crate::materials::default_dirs());
+        e.base_library = Arc::new(lib);
+        e.library_notes = notes;
+        e
     }
 
     pub fn with(registry: Registry, mesher: Arc<dyn Mesher>) -> Engine {
@@ -59,6 +69,9 @@ impl Engine {
             pending: BTreeMap::new(),
             link: None,
             workspace: None,
+            auto_store: false,
+            base_library: Arc::new(femcore::material::Library::default()),
+            library_notes: vec![],
         }
     }
 
@@ -74,9 +87,37 @@ impl Engine {
         &self.jobs
     }
 
-    /// The hash of the geometry and the mesh settings: what a mesh depends on.
+    /// Names the workspace folder workflows are stored in. With `auto_store` the project is bound to a new workflow there at the first solve and
+    /// every solve is recorded in its run table (origin `ai`).
+    pub fn set_workspace(&mut self, root: PathBuf, auto_store: bool) {
+        self.workspace = Some(root);
+        self.auto_store = auto_store;
+    }
+
+    /// What the physics of the project want the mesh to resolve, merged: the shortest wavelength of each region, the highest order and the
+    /// largest headroom. `None` when the mesh is not sized from the physics (`physics_sizing` off) or no physics states a wave.
+    pub fn sizing(&self) -> Option<Sizing> {
+        if !self.project.mesh.physics_sizing {
+            return None;
+        }
+        let lib = self.library().ok();
+        let mut out = Sizing { order: 1, headroom: 1.0, wavelengths: BTreeMap::new() };
+        for spec in &self.project.physics {
+            let Some(p) = self.registry.get(&spec.physics) else { continue };
+            let s = p.sizing(spec, lib.as_ref());
+            out.order = out.order.max(s.order);
+            out.headroom = out.headroom.max(s.headroom);
+            for (region, lam) in s.wavelengths {
+                let e = out.wavelengths.entry(region).or_insert(lam);
+                *e = e.min(lam);
+            }
+        }
+        (!out.wavelengths.is_empty()).then_some(out)
+    }
+
+    /// The hash of the geometry, the mesh settings and the sizing: what a mesh depends on.
     pub fn mesh_key(&self) -> String {
-        let v = json!({ "geometry": self.project.geometry, "mesh": self.project.mesh });
+        let v = json!({ "geometry": self.project.geometry, "mesh": self.project.mesh, "sizing": self.sizing() });
         hash_of(&nyx_physics::canonical_json(&v).to_string())
     }
 
@@ -110,13 +151,13 @@ impl Engine {
     pub fn start_mesh(&mut self) -> Result<JobId, Error> {
         self.project.geometry.validate().map_err(|e| Error::invalid(format!("geometry: {e}")))?;
         let key = self.mesh_key();
-        let (mesher, geometry, settings) =
-            (self.mesher.clone(), self.project.geometry.clone(), self.project.mesh.clone());
+        let (mesher, geometry, settings, sizing) =
+            (self.mesher.clone(), self.project.geometry.clone(), self.project.mesh.clone(), self.sizing());
         let id = self.jobs.start("mesh", move |progress| {
             if progress.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            Ok(JobOutput::Mesh(Arc::new(mesher.mesh(&geometry, &settings)?)))
+            Ok(JobOutput::Mesh(Arc::new(mesher.mesh(&geometry, &settings, sizing.as_ref())?)))
         });
         self.pending.insert(id, Pending::Mesh { key });
         Ok(id)
@@ -128,6 +169,9 @@ impl Engine {
             return Err(Error::invalid("the project has no physics; add one first (add_physics)"));
         }
         self.project.check(&self.registry)?;
+        if self.auto_store && self.link.is_none() && self.workspace.is_some() {
+            self.save_to_workspace(None)?;
+        }
         let targets = targets.unwrap_or_else(|| self.project.default_targets());
         for t in &targets {
             if self.project.spec(t).is_none() {
@@ -135,7 +179,8 @@ impl Engine {
             }
         }
         let (key, stamp) = (self.mesh_key(), self.stamp());
-        let (registry, mesher, project) = (self.registry.clone(), self.mesher.clone(), self.project.clone());
+        let (registry, mesher, project, sizing) = (self.registry.clone(), self.mesher.clone(), self.project.clone(), self.sizing());
+        let library = self.library()?;
         let cached = self.model().cloned();
         let id = self.jobs.start(&format!("solve {}", targets.join(", ")), {
             let project = project.clone();
@@ -144,10 +189,10 @@ impl Engine {
                     Some(m) => m,
                     None => {
                         let _stage = femcore::progress::install(&progress);
-                        Arc::new(mesher.mesh(&project.geometry, &project.mesh)?)
+                        Arc::new(mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?)
                     }
                 };
-                let results = crate::solve::run_chain(&registry, &project, &model, &targets, progress)?;
+                let results = crate::solve::run_chain(&registry, &project, &model, &targets, &library, progress)?;
                 Ok(JobOutput::Solved { model, results })
             }
         });

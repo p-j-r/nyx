@@ -22,23 +22,20 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("nyx-store", &[]),
     ("nyx-engine", &["nyx-physics", "nyx-dfs", "nyx-sms", "nyx-ems", "nyx-analysis", "nyx-store", "femcore", "geom"]),
     ("nyx-connect", &[]),
-    ("nyx-mcp", &["nyx-engine", "nyx-connect"]),
+    ("nyx-mcp", &["nyx-engine"]),
     ("nyx", &["nyx-engine", "nyx-connect"]), // crates/app
 ];
 
 /// edges that exist today and the phase that removes each
 const TEMPORARY: &[(&str, &str, &str)] = &[
     ("nyx-store", "femcore", "phase 7: metrics_of and the concept card move to the engine (R21, R25)"),
-    ("nyx-session", "femcore", "phase 7: nyx-session is dissolved into the engine"),
-    ("nyx-session", "nyx-engine", "phase 7: the legacy solve bridge (`nyx_engine::legacy`) goes with nyx-session"),
-    ("nyx-mcp", "nyx-session", "phase 7: every tool becomes an engine command"),
     ("nyx", "femcore", "phase 7: the window calls engine commands only"),
     ("nyx", "geom", "phase 7: the window calls engine commands only"),
     ("nyx", "nyx-store", "phase 7: persistence goes through the engine"),
 ];
 
 /// a crate that is not in `ALLOWED` may not exist (it must be put in the table)
-const ONLY_TEMPORARY_CRATES: &[&str] = &["nyx-session"];
+const ONLY_TEMPORARY_CRATES: &[&str] = &[];
 
 fn workspace_graph() -> BTreeMap<String, BTreeSet<String>> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());

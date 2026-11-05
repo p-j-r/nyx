@@ -347,6 +347,33 @@ impl Library {
     /// Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder,
     /// for example one embedded in a project).
     pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError> {
+        self.read_table(text, fallback_name).map(|(m, _)| m)
+    }
+
+    /// A copy of the library with more materials given as TOML text by name (the materials a project carries). A text may extend a material
+    /// of the library or one given before it (in name order). All texts with problems are reported together.
+    pub fn with_texts(&self, texts: &BTreeMap<String, String>) -> Result<Library, Vec<MaterialError>> {
+        let mut lib = self.clone();
+        let mut errors = Vec::new();
+        for (name, text) in texts {
+            match lib.read_table(text, name) {
+                Ok((m, t)) => {
+                    let key = name.to_ascii_lowercase();
+                    lib.materials.insert(key.clone(), m);
+                    lib.tables.insert(key, t);
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+        if errors.is_empty() {
+            Ok(lib)
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// `read`, with the table after `extends` was resolved.
+    pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError> {
         let table: toml::Table = text.parse().map_err(|e: toml::de::Error| MaterialError {
             material: fallback_name.to_string(),
             path: String::new(),
@@ -360,7 +387,8 @@ impl Library {
                 merge_over(bt, &table)
             }
         };
-        MaterialSpec::from_table(&merged, fallback_name)
+        let spec = MaterialSpec::from_table(&merged, fallback_name)?;
+        Ok((spec, merged))
     }
 
     pub fn get(&self, name: &str) -> Option<&MaterialSpec> {

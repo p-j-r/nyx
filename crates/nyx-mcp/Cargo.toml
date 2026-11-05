@@ -3,12 +3,12 @@ name = "nyx-mcp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Model Context Protocol server (stdio) for nyx: lets an AI host run geometry, mesh, solve and analysis steps"
+description = "Model Context Protocol server (stdio) for nyx: every tool is one command of the nyx engine, so a host can do everything the window does"
 
 [[bin]]
 name = "nyx-mcp"
 path = "src/main.rs"
 
 [dependencies]
-nyx-session = { path = "../nyx-session" }
+nyx-engine = { path = "../nyx-engine" }
 serde_json = { version = "1", features = ["float_roundtrip"] }

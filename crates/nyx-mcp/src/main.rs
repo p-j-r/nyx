@@ -1,11 +1,14 @@
 //! nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr.
-//! No async runtime and no SDK: the protocol surface nyx needs is five methods. All behaviour lives in `nyx-session`.
+//! No async runtime and no SDK: the protocol surface nyx needs is five methods. The server holds one `nyx_engine::Engine` and nothing else:
+//! the tool list is the engine's command catalog (the geometry tools among them are generated from the descriptors of the geom
+//! operations) and a tool call is `Engine::call`. What a host does is stored as a workflow of the workspace folder (origin `ai`), so the
+//! person sees it in the window's dashboard.
 use std::io::{BufRead, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
-use nyx_session::guide::SERVER_INSTRUCTIONS;
-use nyx_session::{call, render, Outcome, Workspace, TOOLS};
+use nyx_engine::guide::SERVER_INSTRUCTIONS;
+use nyx_engine::{Access, Engine};
 use serde_json::{json, Value};
 
 const NAME: &str = "nyx-mcp";
@@ -21,10 +24,27 @@ fn default_dir() -> PathBuf {
     }
 }
 
-fn tool_list() -> Value {
-    let tools: Vec<Value> = TOOLS
+/// Commands that discard the project or a part of it: a host may ask the person first.
+fn destructive(name: &str) -> bool {
+    matches!(name, "project_new" | "project_load" | "project_open" | "store_open") || name.starts_with("remove_")
+}
+
+fn tool_list(engine: &Engine) -> Value {
+    let tools: Vec<Value> = engine
+        .catalog()
         .iter()
-        .map(|t| json!({ "name": t.name, "title": t.title, "description": t.description, "inputSchema": t.input_schema(), "annotations": t.annotations() }))
+        .map(|c| {
+            json!({
+                "name": c.name, "title": c.title, "description": c.description, "inputSchema": c.schema,
+                "annotations": {
+                    "title": c.title,
+                    "readOnlyHint": c.access == Access::Read,
+                    "destructiveHint": destructive(&c.name),
+                    "idempotentHint": c.access == Access::Read,
+                    "openWorldHint": false
+                }
+            })
+        })
         .collect();
     json!(tools)
 }
@@ -34,12 +54,32 @@ fn at_least(proto: &str, min: &str) -> bool {
     proto >= min
 }
 
+/// A short id for this process: the session a result belongs to.
+fn session_id() -> String {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("s_{:08x}", (t ^ ((std::process::id() as u128) << 20)) as u32)
+}
+
 struct Server {
-    ws: Workspace,
+    engine: Engine,
     proto: &'static str,
+    session: String,
+    /// counts the calls that changed the project, so a host can tell that something moved
+    revision: u64,
 }
 
 impl Server {
+    fn new(dir: PathBuf) -> Server {
+        let mut engine = Engine::new();
+        engine.set_workspace(dir, true);
+        Server { engine, proto: PROTOCOLS[0], session: session_id(), revision: 0 }
+    }
+
+    fn header(&self) -> Value {
+        let hash = self.engine.stamp();
+        json!({ "session": self.session, "revision": self.revision, "project_hash": hash.get(..16).unwrap_or(&hash) })
+    }
+
     fn initialize(&mut self, params: &Value) -> Value {
         let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
         self.proto = PROTOCOLS.iter().copied().find(|p| *p == asked).unwrap_or(PROTOCOLS[0]);
@@ -51,18 +91,38 @@ impl Server {
         })
     }
 
+    /// Runs one command: its JSON with the session header, or the error as JSON. `None` when there is no such tool.
+    fn run(&mut self, name: &str, args: &Value) -> Option<(Value, bool)> {
+        let access = self.engine.catalog().into_iter().find(|c| c.name == name)?.access;
+        let out = catch_unwind(AssertUnwindSafe(|| self.engine.call(name, args)));
+        Some(match out {
+            Ok(Ok(v)) => {
+                if access != Access::Read {
+                    self.revision += 1;
+                }
+                let mut v = match v {
+                    Value::Object(_) => v,
+                    other => json!({ "result": other }),
+                };
+                v["nyx"] = self.header();
+                (v, false)
+            }
+            Ok(Err(e)) => (json!({ "error": e.code(), "message": e.to_string(), "nyx": self.header() }), true),
+            Err(_) => (
+                json!({ "error": "internal", "message": "nyx hit an internal fault on this call; the session is still usable", "nyx": self.header() }),
+                true,
+            ),
+        })
+    }
+
     fn tools_call(&mut self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params.get("name").and_then(Value::as_str).ok_or((-32602, "tools/call needs a string 'name'".to_string()))?.to_string();
         let args = match params.get("arguments") {
             None | Some(Value::Null) => json!({}),
             Some(a) => a.clone(),
         };
-        let out = catch_unwind(AssertUnwindSafe(|| call(&mut self.ws, &name, &args)));
-        let (value, is_error) = match out {
-            Ok(Outcome::Ok(v)) | Ok(Outcome::NeedsInput(v)) => (v, false),
-            Ok(Outcome::Err(e)) => (e.to_json(), true),
-            Ok(Outcome::UnknownTool) => return Err((-32602, format!("unknown tool '{name}'"))),
-            Err(_) => (json!({ "error": "internal", "message": "nyx hit an internal fault on this call; the session is still usable" }), true),
+        let Some((value, is_error)) = self.run(&name, &args) else {
+            return Err((-32602, format!("unknown tool '{name}'")));
         };
         let mut result = json!({ "content": [{ "type": "text", "text": render(&name, &value) }], "isError": is_error });
         if at_least(self.proto, "2025-06-18") && !is_error && name != "get_guide" {
@@ -84,7 +144,7 @@ impl Server {
         let r = match method {
             "initialize" => Ok(self.initialize(&params)),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": tool_list() })),
+            "tools/list" => Ok(json!({ "tools": tool_list(&self.engine) })),
             "tools/call" => self.tools_call(&params),
             m => Err((-32601, format!("method not found: {m}"))),
         };
@@ -95,8 +155,18 @@ impl Server {
     }
 }
 
+/// Text for the host: a guide is plain text, everything else compact JSON.
+fn render(tool: &str, v: &Value) -> String {
+    if tool == "get_guide" {
+        if let Some(t) = v.get("text").and_then(Value::as_str) {
+            return t.to_string();
+        }
+    }
+    v.to_string()
+}
+
 fn serve(dir: PathBuf) {
-    let mut s = Server { ws: Workspace::new(dir), proto: PROTOCOLS[0] };
+    let mut s = Server::new(dir);
     eprintln!("{NAME} {VERSION} ready");
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -125,7 +195,7 @@ fn serve(dir: PathBuf) {
 }
 
 fn usage() {
-    println!("nyx-mcp {VERSION}\n\nUSAGE\n  nyx-mcp [--dir PATH]                 serve MCP on stdio\n  nyx-mcp --list                       print the tool names\n  nyx-mcp [--dir PATH] --call TOOL JSON  run one tool and print its result\n\nSession files go to PATH (default {}).", default_dir().display());
+    println!("nyx-mcp {VERSION}\n\nUSAGE\n  nyx-mcp [--dir PATH]                 serve MCP on stdio\n  nyx-mcp --list                       print the tool names\n  nyx-mcp [--dir PATH] --call TOOL JSON  run one tool and print its result\n\nWorkflows go to PATH (default {}).", default_dir().display());
 }
 
 fn main() {
@@ -144,8 +214,8 @@ fn main() {
         Some("--version") => println!("{NAME} {VERSION}"),
         Some("--help") | Some("-h") => usage(),
         Some("--list") => {
-            for t in TOOLS {
-                println!("{:16} {}", t.name, t.title);
+            for c in Engine::new().catalog() {
+                println!("{:22} {}", c.name, c.title);
             }
         }
         Some("--call") => {
@@ -160,14 +230,14 @@ fn main() {
                     std::process::exit(2);
                 }
             };
-            let mut ws = Workspace::new(dir);
-            match call(&mut ws, tool, &a) {
-                Outcome::Ok(v) | Outcome::NeedsInput(v) => println!("{}", render(tool, &v)),
-                Outcome::Err(e) => {
-                    println!("{}", e.to_json());
+            let mut s = Server::new(dir);
+            match s.run(tool, &a) {
+                Some((v, false)) => println!("{}", render(tool, &v)),
+                Some((v, true)) => {
+                    println!("{v}");
                     std::process::exit(1);
                 }
-                Outcome::UnknownTool => {
+                None => {
                     eprintln!("unknown tool '{tool}' (see --list)");
                     std::process::exit(2);
                 }

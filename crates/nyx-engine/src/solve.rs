@@ -22,6 +22,7 @@ pub fn run_chain(
     project: &Project,
     model: &MeshedModel,
     targets: &[String],
+    library: &Arc<femcore::material::Library>,
     progress: Arc<Progress>,
 ) -> Result<Vec<SolveResult>, Error> {
     let ids: Vec<&str> = targets.iter().map(String::as_str).collect();
@@ -39,6 +40,8 @@ pub fn run_chain(
         p.validate(spec, model.mesh())?;
         let mut ctx = Ctx::new(model);
         ctx.progress = progress.clone();
+        ctx.library = Some(library.clone());
+        ctx.wavelength = crate::materials::study_wavelength(p, spec);
         for imp in p.imports() {
             if let Some(values) = done.iter().find_map(|(o, r)| exported(registry, o, r, &imp.role)) {
                 ctx.inputs.insert(imp.role.clone(), values);

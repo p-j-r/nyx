@@ -149,7 +149,7 @@ fn the_physics_trait_is_object_safe_and_has_these_methods() {
         p.imports(),
     );
     let spec = ProblemSpec::new("tst", 2, "modes");
-    let _ = p.sizing(&spec);
+    let _ = p.sizing(&spec, None);
     let sig: fn(&dyn Physics, &Mesh, &ProblemSpec) -> Result<(), Error> = |p, m, s| p.validate(s, m);
     let _ = sig;
     let solve: fn(&dyn Physics, &Mesh, &ProblemSpec, &mut Ctx) -> Result<SolveResult, Error> =

@@ -1,6 +1,6 @@
-//! Interface contract of nyx-mcp (docs/architecture/adr/0015 and 0019): what an AI host that has registered `nyx` can rely on.
+//! Interface contract of nyx-mcp (docs/architecture/adr/0015, 0019 and 0057): what an AI host that has registered `nyx` can rely on.
 //!
-//! The snapshot `docs/architecture/contracts/mcp_tools.v1.json` lists, for every tool, its name, its annotations, its required
+//! The snapshot `docs/architecture/contracts/mcp_tools.v2.json` lists, for every tool, its name, its annotations, its required
 //! arguments and every argument with its JSON type (and enum values). Descriptions and defaults are free text and are not pinned.
 //! Adding a tool or an optional argument changes the snapshot (additive: bump the minor in `VERSIONS.md`); removing or renaming a tool or an
 //! argument, or making an argument required, is breaking (bump the major and tell hosts).
@@ -70,7 +70,7 @@ fn tools_snapshot() -> Value {
 #[test]
 fn mcp_tool_list_matches_the_contract_snapshot() {
     let got = serde_json::to_string_pretty(&tools_snapshot()).unwrap();
-    let path = contract_file("mcp_tools.v1.json");
+    let path = contract_file("mcp_tools.v2.json");
     if std::env::var_os("NYX_WRITE_CONTRACT").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, format!("{got}\n")).unwrap();
@@ -100,18 +100,3 @@ fn mcp_handshake_contract() {
     assert_eq!(r[1]["error"]["code"], json!(-32601));
 }
 
-#[test]
-fn mcp_handles_are_content_hashes_with_a_kind_letter() {
-    // `g_`, `m_`, `p_`, `r_` + hex digits of FNV-1a over the inputs (ADR 15): the same request gives the same handle in another process
-    let call = |id: u64| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "geom_template", "arguments": { "thickness": 3e-7, "width": 5e-7, "cladding": "oxide", "box": 2e-6 } } });
-    let a = session(&[init("2025-06-18"), call(2)]);
-    let b = session(&[init("2025-06-18"), call(2)]);
-    let handle = |r: &Value| -> String {
-        let text = r["result"]["content"][0]["text"].as_str().unwrap().to_string();
-        let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        v.get("geometry").or(v.get("handle")).and_then(|h| h.as_str()).map(String::from).unwrap_or(text)
-    };
-    let (ha, hb) = (handle(&a[1]), handle(&b[1]));
-    assert_eq!(ha, hb, "same arguments, same handle across processes");
-    assert!(ha.contains("g_"), "a geometry handle starts with g_: {ha}");
-}

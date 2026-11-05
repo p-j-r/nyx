@@ -147,7 +147,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/app/*` | 23 | |
 | `crates/nyx-mcp/tests/contracts.rs` | 19, 15 | |
 | `crates/nyx-mcp/*` | 15 | moved from `ai/` into the root workspace (ADR 26) |
-| `crates/nyx-session/*` | 15 | dissolved in phase 7 |
 | `crates/nyx-connect/*` | 15, 28, 19 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27 | shared target directory |

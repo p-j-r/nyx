@@ -135,7 +135,7 @@ impl Engine {
                 schema(vec![("physics", phys()), ("study", text("study kind (see describe_physics)")), ("study_params", object("study parameters")), ("order", int("element order, default 1"))], &["physics"])),
             cmd("set_study", "Set the study of a physics", "", Edit,
                 schema(vec![("physics", phys()), ("kind", text("study kind")), ("params", object("study parameters")), ("order", int("element order"))], &["physics", "kind"])),
-            cmd("set_material", "Assign a material to a region", "A material by name, or scalar properties by descriptor name (`{\"E\": 1.7e11, \"nu\": 0.28}`).", Edit,
+            cmd("set_material", "Assign a material to a region", "A material by name (library or project: list_materials), a named material placed at an angle (`{\"material\": \"sapphire\", \"euler_deg\": [0, 57.6, 0]}`, Bunge angles in degrees), or scalar properties by descriptor name (`{\"E\": 1.7e11, \"nu\": 0.28}`).", Edit,
                 schema(vec![("physics", phys()), ("region", text("region name")), ("material", json!({ "oneOf": [{ "type": "string" }, { "type": "object" }], "description": "material name or properties" }))], &["physics", "region", "material"])),
             cmd("add_condition", "Add a boundary or domain condition", "`on` is a selector over the geometry (`outer & plane(x = 0)`), a boundary name or a region name.", Edit,
                 schema(vec![("physics", phys()), ("on", text("selector, boundary or region")), ("kind", text("condition kind (see describe_physics)")), ("params", object("condition parameters"))], &["physics", "on", "kind"])),
@@ -145,7 +145,7 @@ impl Engine {
             cmd("set_active", "Set the active physics", "The one solved by default.", Edit, schema(vec![("physics", phys())], &["physics"])),
             cmd("check_project", "Check the project", "Checks the geometry, the element size and every problem against the descriptors of its physics, without meshing.", Read, schema(vec![], &[])),
             cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale` or `sweep` set to null return to the simple mesher / a 2D mesh.", Edit,
-                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"] })), ("physics_sizing", boolean("size from the physics (waits for restructure phase 2)")),
+                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"] })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"] })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge, metres" })),
                     ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number" }, "n": { "type": "integer" }, "domain_offset": { "type": "integer" } }, "required": ["thickness", "n"] }, "description": "layers to sweep the 2D mesh along y" }))], &[])),
             cmd("mesh_build", "Mesh the geometry", "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.", Expensive, schema(vec![("wait", boolean("wait for the mesh, default true"))], &[])),
             cmd("solve_run", "Solve", "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.", Expensive,
@@ -158,6 +158,16 @@ impl Engine {
             cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields and scalars, and whether the project changed since.", Read, schema(vec![("physics", phys())], &[])),
             cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`).", Read,
                 schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("field", text("field name")), ("max_values", int("default 2000"))], &["physics", "field"])),
+            cmd("get_guide", "Read a nyx guide", "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).", Read,
+                schema(vec![("topic", json!({ "type": "string", "enum": crate::guide::TOPICS, "description": "which card; omit for nyx-instructions" }))], &[])),
+            cmd("list_materials", "List the materials", "The materials a problem can name: those of the library (material files) and those the project carries.", Read, schema(vec![], &[])),
+            cmd("describe_material", "Describe a material", "What a material gives (elastic class, optical model, thermal, electrical) and its TOML text.", Read, schema(vec![("name", text("material name"))], &["name"])),
+            cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
+                schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
+            cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
+            cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes) and which solved physics each applies to.", Read, schema(vec![], &[])),
+            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups.", Read,
+                schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys())], &["analysis", "physics"])),
             cmd("store_save", "Save into a workspace", "Binds the project to a workflow folder (created in `workspace` the first time) or stores a new version of it. Later solves are recorded in the run table.", Expensive,
                 schema(vec![("workspace", text("workspace folder, needed the first time"))], &[])),
             cmd("store_open", "Open a workflow", "Opens a workflow folder and makes its experiment the project.", Edit, schema(vec![("folder", text("workflow folder")), ("experiment", text("experiment id, default the first"))], &["folder"])),
@@ -365,6 +375,22 @@ impl Engine {
                 .collect::<Vec<_>>())),
             "result_info" => self.result_info(opt_str(args, "physics")),
             "result_field" => self.result_field(args),
+            "get_guide" => {
+                let topic = opt_str(args, "topic").unwrap_or("nyx-instructions");
+                let text = crate::guide::card(topic).ok_or_else(|| {
+                    Error::invalid(format!("there is no guide '{topic}' (they are: {})", crate::guide::TOPICS.join(", ")))
+                })?;
+                Ok(json!({ "topic": topic, "text": text }))
+            }
+            "list_materials" => self.list_materials(),
+            "describe_material" => self.describe_material(get_str(args, "name")?),
+            "add_material" => self.add_material(get_str(args, "name")?, get_str(args, "toml")?),
+            "remove_material" => {
+                self.remove_material(get_str(args, "name")?)?;
+                ok()
+            }
+            "list_analyses" => Ok(self.list_analyses()),
+            "analyse" => self.analyse(get_str(args, "analysis")?, get_str(args, "physics")?),
             "store_save" => self.save_to_workspace(opt_str(args, "workspace").map(Into::into)),
             "store_open" => {
                 let folder = get_str(args, "folder")?.to_string();

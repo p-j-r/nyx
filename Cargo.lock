@@ -2875,7 +2875,7 @@ dependencies = [
 name = "nyx-mcp"
 version = "0.1.0"
 dependencies = [
- "nyx-session",
+ "nyx-engine",
  "serde_json",
 ]
 
@@ -2884,16 +2884,6 @@ name = "nyx-physics"
 version = "0.1.0"
 dependencies = [
  "femcore",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "nyx-session"
-version = "0.1.0"
-dependencies = [
- "femcore",
- "nyx-engine",
  "serde",
  "serde_json",
 ]

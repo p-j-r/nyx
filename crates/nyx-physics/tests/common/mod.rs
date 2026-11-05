@@ -71,7 +71,7 @@ impl Physics for Mock {
     fn validate(&self, _spec: &ProblemSpec, _mesh: &Mesh) -> Result<(), Error> {
         Ok(())
     }
-    fn sizing(&self, spec: &ProblemSpec) -> Sizing {
+    fn sizing(&self, spec: &ProblemSpec, _library: Option<&std::sync::Arc<femcore::material::Library>>) -> Sizing {
         Sizing { order: spec.order, headroom: 1.0, wavelengths: Default::default() }
     }
     fn solve(&self, _mesh: &Mesh, _spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {

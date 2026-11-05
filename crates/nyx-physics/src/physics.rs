@@ -28,13 +28,17 @@ pub trait LabelResolver {
 pub struct Ctx<'a> {
     pub resolver: &'a dyn LabelResolver,
     pub progress: Arc<Progress>,
+    /// the material files a problem can name (`MaterialAssign::Named`); `None` where there are none (a unit test)
+    pub library: Option<Arc<femcore::material::Library>>,
+    /// the free-space wavelength (m) of the study, for materials given as optical models (the engine derives it from the frequency of the study)
+    pub wavelength: Option<f64>,
     /// imported fields by role (`temperature`), values per dof, from physics that ran before this one
     pub inputs: BTreeMap<String, Vec<f64>>,
 }
 
 impl<'a> Ctx<'a> {
     pub fn new(resolver: &'a dyn LabelResolver) -> Ctx<'a> {
-        Ctx { resolver, progress: Progress::new(), inputs: BTreeMap::new() }
+        Ctx { resolver, progress: Progress::new(), library: None, wavelength: None, inputs: BTreeMap::new() }
     }
 
     /// `Err(Cancelled)` when the run was cancelled; kernels call it between stages.
@@ -70,7 +74,7 @@ pub trait Physics: Send + Sync {
     /// Checks the physics-specific part of a problem against `mesh`; the structural checks against the descriptors are `validate_spec`.
     fn validate(&self, spec: &ProblemSpec, mesh: &Mesh) -> Result<(), Error>;
     /// What the mesher needs to size the elements before any solution exists.
-    fn sizing(&self, spec: &ProblemSpec) -> Sizing;
+    fn sizing(&self, spec: &ProblemSpec, library: Option<&Arc<femcore::material::Library>>) -> Sizing;
     /// Solves the problem on `mesh`.
     fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error>;
 }

@@ -27,14 +27,32 @@ pub struct MeshSettings {
     /// adaptive meshing: the factor on the sizes the model asks for (smaller is finer); `None` is the simple mesher
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapt_scale: Option<f64>,
-    /// size the mesh from the physics (points per wavelength); waits for the neutral `Sizing` of restructure phase 2
+    /// size the mesh from the physics (points per wavelength by element order, shorter in high-index or slow-wave regions): the engine asks
+    /// every physics of the project for its `Sizing` and the mesher resolves the waves (`femcore::meshing::request`, ADR 50, 54)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub physics_sizing: bool,
+    /// points per shortest wavelength when `physics_sizing` is on; absent: 12 for order 1, 6 for order 2
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points_per_wavelength: Option<f64>,
+    /// rebuild the absorbing layers of the model as structured layers (quadrilaterals, prisms, hexahedra, cut into simplices)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub structured_pml: bool,
+    /// largest distance of a chord from a curved edge or face in metres; absent: h / 50
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_dev: Option<f64>,
 }
 
 impl Default for MeshSettings {
     fn default() -> Self {
-        MeshSettings { h: 1e-7, sweep: None, adapt_scale: None, physics_sizing: false }
+        MeshSettings {
+            h: 1e-7,
+            sweep: None,
+            adapt_scale: None,
+            physics_sizing: false,
+            points_per_wavelength: None,
+            structured_pml: false,
+            max_dev: None,
+        }
     }
 }
 
@@ -49,6 +67,9 @@ pub struct Project {
     /// the code of the physics shown first and solved by default
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active: Option<String>,
+    /// materials the project carries, by name, as TOML text (ADR 29); a problem names these or the library's. They may `extends` a library material
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub materials: std::collections::BTreeMap<String, String>,
 }
 
 impl Project {
@@ -60,6 +81,7 @@ impl Project {
             mesh: MeshSettings::default(),
             physics: vec![],
             active: None,
+            materials: Default::default(),
         }
     }
 

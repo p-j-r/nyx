@@ -13,11 +13,14 @@
 
 /// The analyses of results (restructure phase 5); the window draws the polarization from here until it calls engine commands.
 pub use nyx_analysis as analysis;
+pub mod analyse;
 pub mod commands;
 pub mod engine;
 pub mod geomdesc;
 pub mod geometry;
+pub mod guide;
 pub mod jobs;
+pub mod materials;
 pub mod legacy;
 pub mod meshing;
 pub mod project;

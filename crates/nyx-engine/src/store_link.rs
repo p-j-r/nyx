@@ -39,6 +39,7 @@ pub fn card_of(v: &serde_json::Value) -> Card {
         for (region, m) in &s.materials {
             materials.push(match m {
                 nyx_physics::MaterialAssign::Named(n) => format!("{region}: {n}"),
+                nyx_physics::MaterialAssign::Oriented { material, euler_deg } => format!("{region}: {material} at {euler_deg:?} deg"),
                 nyx_physics::MaterialAssign::Props(_) => format!("{region}: inline properties"),
             });
         }

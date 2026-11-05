@@ -140,7 +140,7 @@ fn the_envelope_solves_through_the_trait_and_agrees_with_the_typed_problem() {
     let back: SolveResult = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
     assert_eq!(back.solutions[0].field("u").unwrap().values, r.solutions[0].field("u").unwrap().values);
     // and the sizing hint carries the order
-    assert_eq!(Sms.sizing(&spec).order, spec.order);
+    assert_eq!(Sms.sizing(&spec, None).order, spec.order);
 }
 
 #[test]

@@ -10,7 +10,6 @@ members = [
     "crates/nyx-analysis",
     "crates/nyx-store",
     "crates/nyx-engine",
-    "crates/nyx-session",
     "crates/nyx-mcp",
     "crates/nyx-connect",
     "crates/app",

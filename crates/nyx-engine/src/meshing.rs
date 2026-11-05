@@ -8,7 +8,7 @@ use geom::eval::Evaluated;
 use geom::labels::LabelMap;
 use geom::model::FeatureList;
 use geom::select::{EntityKind, Selector};
-use nyx_physics::{Error, LabelResolver, Mesh};
+use nyx_physics::{Error, LabelResolver, Mesh, Sizing};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -18,6 +18,10 @@ pub struct MeshedModel {
     labels: LabelMap,
     /// the boundary labels of the two end faces of a model swept along y (`ymin`, `ymax`)
     ends: Option<(i32, i32)>,
+    /// what the mesher reports (domains, cells per domain, the element size the waves asked for, the adaptation); absent for a swept mesh
+    report: Option<femcore::meshing::request::MeshReport>,
+    /// the solver view of the mesh (edges, P2 numbering), made on first use: what the plots read
+    solver: std::sync::OnceLock<Arc<femcore::mesh::SimplexMesh>>,
 }
 
 impl MeshedModel {
@@ -30,12 +34,47 @@ impl MeshedModel {
     ) -> Result<MeshedModel, Error> {
         let top = mesh.facet_labels.iter().copied().max().unwrap_or(0);
         let ends = swept.then_some((top - 1, top));
-        let mesh = Mesh::from_solver_mesh(&mesh).map_err(Error::Invalid)?;
-        Ok(MeshedModel { mesh: Arc::new(mesh), eval, labels, ends })
+        let exchange = Mesh::from_solver_mesh(&mesh).map_err(Error::Invalid)?;
+        let solver = std::sync::OnceLock::new();
+        let _ = solver.set(Arc::new(mesh));
+        Ok(MeshedModel { mesh: Arc::new(exchange), eval, labels, ends, report: None, solver })
+    }
+
+    /// The same, with the report the mesher made of it.
+    pub(crate) fn with_report(mut self, report: femcore::meshing::request::MeshReport) -> MeshedModel {
+        self.report = Some(report);
+        self
     }
 
     pub fn mesh(&self) -> &Arc<Mesh> {
         &self.mesh
+    }
+
+    /// The mesh in the numbering the plots read (vertices, edges, P2 dofs): the exchange mesh cut into simplices, as every solve sees it.
+    /// What a front-end draws results on.
+    pub fn solver_mesh(&self) -> Arc<femcore::mesh::SimplexMesh> {
+        self.solver
+            .get_or_init(|| Arc::new(self.mesh.discretise().expect("a mesh the mesher made can be discretised")))
+            .clone()
+    }
+
+    /// The geometry the mesh was made from, evaluated: what a front-end needs to name an entity it points at (selector suggestions).
+    pub fn evaluated(&self) -> &Arc<Evaluated> {
+        &self.eval
+    }
+
+    /// The names of the model: region and boundary numbers.
+    pub fn labels(&self) -> &LabelMap {
+        &self.labels
+    }
+
+    /// The boundary labels of the two end faces of a model swept along y.
+    pub fn swept_ends(&self) -> Option<(i32, i32)> {
+        self.ends
+    }
+
+    pub fn report(&self) -> Option<&femcore::meshing::request::MeshReport> {
+        self.report.as_ref()
     }
 
     /// Region labels with their names.
@@ -55,6 +94,7 @@ impl MeshedModel {
             "boundaries": boundaries,
             "groups": self.labels.groups.iter().map(|g| json!({ "name": g.name, "rule": g.rule })).collect::<Vec<_>>(),
             "swept_ends": self.ends.map(|_| json!(["ymin", "ymax"])),
+            "report": self.report,
         })
     }
 }
@@ -126,47 +166,51 @@ impl LabelResolver for MeshedModel {
     }
 }
 
-/// Builds the mesh of a model.
+/// Builds the mesh of a model. `sizing` is what the physics of the project want resolved (`MeshSettings::physics_sizing`); the engine
+/// passes it only when that flag is on.
 pub trait Mesher: Send + Sync {
-    fn mesh(&self, geometry: &FeatureList, settings: &MeshSettings) -> Result<MeshedModel, Error>;
+    fn mesh(&self, geometry: &FeatureList, settings: &MeshSettings, sizing: Option<&Sizing>) -> Result<MeshedModel, Error>;
 }
 
-/// The mesher of `femcore` as it is before restructure phase 2.
+/// The mesher of `femcore`, driven by a `MeshRequest` (ADR 54): 2D and 3D models, simple or adaptive, inline or structured absorbing
+/// layers, element sizes from the waves of the study. A 2D model with `sweep` layers is extruded along y into a 3D mesh afterwards.
 pub struct FemcoreMesher;
 
 impl Mesher for FemcoreMesher {
-    fn mesh(&self, geometry: &FeatureList, s: &MeshSettings) -> Result<MeshedModel, Error> {
-        if geometry.dim != 2 {
-            return Err(Error::Unsupported(
-                "a 3D model cannot be meshed yet: model the x-z cross-section in 2D and sweep it along y with `sweep` layers".into(),
-            ));
-        }
+    fn mesh(&self, geometry: &FeatureList, s: &MeshSettings, sizing: Option<&Sizing>) -> Result<MeshedModel, Error> {
+        use femcore::meshing::request::{mesh_request, MeshRequest, MesherRequest, WavesRequest};
         if !(s.h > 0.0 && s.h.is_finite()) {
             return Err(Error::invalid("the element size must be a positive finite number"));
         }
-        if s.physics_sizing {
-            return Err(Error::Unsupported(
-                "physics-sized meshes wait for restructure phase 2 (the neutral Sizing); switch physics_sizing off"
-                    .into(),
-            ));
+        if s.sweep.is_some() && geometry.dim != 2 {
+            return Err(Error::invalid("`sweep` extrudes a 2D cross-section; this model is 3D, mesh it directly"));
         }
-        let plan = match s.adapt_scale {
-            Some(scale) => femcore::meshing::MeshPlan::adaptive(s.h, scale),
-            None => femcore::meshing::MeshPlan::simple(s.h),
+        let waves = match (s.physics_sizing, sizing) {
+            (true, Some(sz)) => Some(WavesRequest {
+                sizing: sz.clone(),
+                points_per_wavelength: s.points_per_wavelength,
+                pml_relax: 1.5,
+                eigen_headroom: sz.headroom.max(1.0),
+            }),
+            _ => None,
         };
-        let g = femcore::meshing::mesh_model(geometry, &plan).map_err(Error::Invalid)?;
+        // wave sizing adapts the mesh to the waves; an explicit `adapt_scale` sets the factor on every size
+        let mesher = match (s.adapt_scale, waves.is_some()) {
+            (Some(scale), _) => MesherRequest::Adaptive { scale, grade: 0.4, max_cells: Some(2_000_000) },
+            (None, true) => MesherRequest::Adaptive { scale: 1.0, grade: 0.4, max_cells: Some(2_000_000) },
+            (None, false) => MesherRequest::Simple,
+        };
+        let req = MeshRequest { h: s.h, max_dev: s.max_dev, mesher, structured_pml: s.structured_pml, waves };
+        let (g, report) = mesh_request(geometry, &req).map_err(Error::Invalid)?;
         let (mut mesh, eval, labels) = (g.mesh, g.eval, g.labels);
         if let Some(layers) = &s.sweep {
             let layers: Vec<femcore::meshing::mesher::Layer> = layers
                 .iter()
-                .map(|l| femcore::meshing::mesher::Layer {
-                    thickness: l.thickness,
-                    n: l.n,
-                    domain_offset: l.domain_offset,
-                })
+                .map(|l| femcore::meshing::mesher::Layer { thickness: l.thickness, n: l.n, domain_offset: l.domain_offset })
                 .collect();
             mesh = femcore::meshing::mesher::extrude_y(&mesh, &layers, 0.0).map_err(Error::Invalid)?;
+            return MeshedModel::new(mesh, eval, labels, true);
         }
-        MeshedModel::new(mesh, eval, labels, s.sweep.is_some())
+        Ok(MeshedModel::new(mesh, eval, labels, false)?.with_report(report))
     }
 }

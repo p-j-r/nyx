@@ -54,7 +54,7 @@ impl Physics for Tst {
     fn validate(&self, _s: &ProblemSpec, _m: &Mesh) -> Result<(), Error> {
         Ok(())
     }
-    fn sizing(&self, _s: &ProblemSpec) -> Sizing {
+    fn sizing(&self, _s: &ProblemSpec, _library: Option<&std::sync::Arc<femcore::material::Library>>) -> Sizing {
         Sizing::default()
     }
     fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {
@@ -122,7 +122,7 @@ impl Physics for Use {
     fn validate(&self, _s: &ProblemSpec, _m: &Mesh) -> Result<(), Error> {
         Ok(())
     }
-    fn sizing(&self, _s: &ProblemSpec) -> Sizing {
+    fn sizing(&self, _s: &ProblemSpec, _library: Option<&std::sync::Arc<femcore::material::Library>>) -> Sizing {
         Sizing::default()
     }
     fn solve(&self, _mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {
@@ -170,7 +170,7 @@ impl Physics for Slo {
     fn validate(&self, _s: &ProblemSpec, _m: &Mesh) -> Result<(), Error> {
         Ok(())
     }
-    fn sizing(&self, _s: &ProblemSpec) -> Sizing {
+    fn sizing(&self, _s: &ProblemSpec, _library: Option<&std::sync::Arc<femcore::material::Library>>) -> Sizing {
         Sizing::default()
     }
     fn solve(&self, _mesh: &Mesh, _spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {
