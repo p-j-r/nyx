@@ -3,7 +3,7 @@
 mod common;
 use common::*;
 use femcore::material::*;
-use femcore::problem::*;
+use femcore::props::*;
 
 #[test]
 fn shear_components_of_a_rotated_stiffness_are_in_the_solver_order() {

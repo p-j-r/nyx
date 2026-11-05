@@ -342,7 +342,7 @@ mod bridge_tests {
     use super::*;
     use crate::mesh::cells::CellType;
     use crate::meshing::pml_box::pml_domains;
-    use crate::problem::PmlDir;
+    use crate::props::PmlDir;
     use crate::adapt::drive::{AdaptOptions, adapt2};
     use crate::adapt::field::UniformSize;
     use crate::meshing::pml_box::{PmlSpec, build_pml};

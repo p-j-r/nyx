@@ -57,3 +57,7 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 54 | [A mesh is asked for and reported in data](adr/0054-mesh-request-and-report-as-data.md) | `femcore::meshing::request` |
 | 55 | [The lattice mesher welds slivers and does not depend on the thread count](adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md) | `femcore::meshing::mesher3d` |
 | 56 | [The polarization analysis is a function of a result](adr/0056-polarization-analysis-is-a-function-of-a-result.md) | `nyx-analysis`, `nyx_physics::frame` |
+| 57 | [The window and the MCP server are thin front-ends: every tool is an engine command](adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md) | `nyx-mcp`, `nyx-engine`, `app` |
+| 58 | [The engine resolves named materials from the library and the project](adr/0058-the-engine-resolves-materials-from-the-library-and-the-project.md) | `nyx-physics::decode`, `nyx-engine::materials` |
+| 59 | [The store knows nothing of a project](adr/0059-the-store-knows-nothing-of-a-project.md) | `nyx-store` |
+| 60 | [The examples are project files; the use cases are gone](adr/0060-examples-are-project-files-and-use-cases-are-gone.md) | `examples/`, `app/examples.rs` |

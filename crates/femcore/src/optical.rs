@@ -10,7 +10,7 @@ use crate::edge::{cell_data, edge_basis, tri_g, CellData};
 use crate::pml::stretch;
 use crate::fem::*;
 use crate::mesh::SimplexMesh;
-use crate::problem::*;
+use crate::props::*;
 use std::collections::BTreeSet;
 
 pub const EPS0: f64 = 8.854_187_812_8e-12;

@@ -518,7 +518,7 @@ impl App {
     fn card_line(&mut self, w: &mut OpenWf) -> String {
         let hash = nyx_engine::facade::store::util::hash_bytes(self.spec_json().unwrap_or_default().as_bytes());
         if w.card_for != hash {
-            w.card_summary = self.spec_json().ok().and_then(|x| nyx_engine::facade::store::card::from_xml(&x).ok()).map(|c| format!("{}  ·  {}", c.summary, c.materials.join("  ·  "))).unwrap_or_default();
+            w.card_summary = self.spec_json().ok().and_then(|x| serde_json::from_str::<serde_json::Value>(&x).ok().map(|v| nyx_engine::store_link::card_of(&v))).map(|c| format!("{}  ·  {}", c.summary, c.materials.join("  ·  "))).unwrap_or_default();
             w.card_for = hash;
         }
         w.card_summary.clone()

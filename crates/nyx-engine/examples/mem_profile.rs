@@ -4,8 +4,10 @@
 //!   cargo run --release -p nyx-engine --example mem_profile -- NX NY NZ [p1|p2] [static|eigen] [auto|direct|iter]
 #[path = "../../femcore/examples/benchmesh/mod.rs"]
 mod benchmesh;
-use femcore::problem::*;
-use femcore::progress::Progress;
+mod common;
+use common::*;
+use serde_json::Value;
+use nyx_engine::facade::Progress;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -51,27 +53,22 @@ fn gb(b: usize) -> f64 {
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let n: Vec<usize> = a.iter().take(3).map(|x| x.parse().unwrap()).collect();
-    let order = if a.get(3).map(|x| x.as_str()) == Some("p1") { 1 } else { 2 };
+    let order: u8 = if a.get(3).map(|x| x.as_str()) == Some("p1") { 1 } else { 2 };
     let eigen = a.get(4).map(|x| x.as_str()) == Some("eigen");
-    let solver = match a.get(5).map(|x| x.as_str()) {
-        Some("direct") => LinearSolver::Direct,
-        Some("iter") => LinearSolver::Iterative,
-        _ => LinearSolver::Auto,
+    let linear = match a.get(5).map(|x| x.as_str()) {
+        Some("direct") => "direct",
+        Some("iter") => "iterative",
+        _ => "auto",
     };
     let mesh = benchmesh::block(n[0] as f64, n[1] as f64, n[2] as f64, n[0], n[1], n[2]);
     println!("mesh: {} cells, {:.2} GB in use after meshing", mesh.n_cells(), gb(CURRENT.load(Ordering::Relaxed)));
-    let mut s = ProblemSpec::new(Physics::Solid);
-    for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
-        s.materials.default.insert(k.into(), v);
-    }
-    s.order = order;
-    s.solver = solver;
-    s.bcs = vec![
-        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
-        Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) },
-    ];
+    let mut s = spec("sms", order, "static", Value::Null);
+    steel(&mut s);
+    solver(&mut s, linear);
+    fixed(&mut s, "xmin");
+    load(&mut s, "xmax", [0.0, 0.0, -1e5]);
     if eigen {
-        s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
+        study(&mut s, "eigenfrequency", serde_json::json!({ "n_modes": 6, "f_search": 0.0 }));
     }
     let base = CURRENT.load(Ordering::Relaxed);
     PEAK.store(base, Ordering::Relaxed);
@@ -79,7 +76,7 @@ fn main() {
     let p2 = p.clone();
     let t0 = Instant::now();
     let h = std::thread::spawn(move || {
-        nyx_engine::legacy::solve_with(&mesh, &s, &mut SolveState::default(), &p2).map(|r| (r.dofs, r.log))
+        solve(&mesh, &s, Some(p2)).map(|r| (r.dofs, r.log))
     });
     // largest heap use seen per stage, in order of appearance
     let mut stages: Vec<(String, usize)> = vec![];

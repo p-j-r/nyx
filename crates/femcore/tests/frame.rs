@@ -1,7 +1,7 @@
 //! The wafer frame: x-y plane of the wafer, z the surface normal, a 2D cross-section is the x-z plane.
 mod common;
 use femcore::material::*;
-use femcore::problem::*;
+use femcore::props::*;
 
 #[test]
 fn the_absorbing_pieces_of_a_geom_model_come_out_in_wafer_names() {

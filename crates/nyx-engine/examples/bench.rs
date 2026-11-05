@@ -1,24 +1,17 @@
 //! Timings on larger generated models: cargo run --release -p nyx-engine --example bench
 #[path = "../../femcore/examples/benchmesh/mod.rs"]
 mod benchmesh;
-use femcore::mesh::SimplexMesh;
-use femcore::problem::*;
-use nyx_engine::legacy::solve;
+mod common;
+use common::*;
+use nyx_engine::facade::physics::ProblemSpec;
+use nyx_engine::facade::SimplexMesh;
+use serde_json::{json, Value};
 use std::time::Instant;
-
-fn fixed() -> BcKind {
-    BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] }
-}
 
 fn run(name: &str, mesh: &SimplexMesh, spec: &ProblemSpec) {
     let t = Instant::now();
-    match solve(mesh, spec, &mut SolveState::default()) {
-        Ok(r) => println!(
-            "{name:<44} {:>8} dofs  {:>7.2} s {}",
-            r.dofs,
-            t.elapsed().as_secs_f64(),
-            r.log.first().cloned().unwrap_or_default()
-        ),
+    match solve(mesh, spec, None) {
+        Ok(r) => println!("{name:<44} {:>8} dofs  {:>7.2} s {}", r.dofs, t.elapsed().as_secs_f64(), r.log.first().cloned().unwrap_or_default()),
         Err(e) => println!("{name:<44} FAILED: {e}"),
     }
 }
@@ -26,52 +19,46 @@ fn run(name: &str, mesh: &SimplexMesh, spec: &ProblemSpec) {
 fn main() {
     let m2 = benchmesh::rect(1.0, 0.5, 300, 150);
     println!("2D mesh: {} cells", m2.n_cells());
-    let mut es = ProblemSpec::new(Physics::Electrostatics);
-    es.bcs = vec![
-        Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) },
-        Bc { on: None, labels: vec![4], kind: BcKind::Ground },
-    ];
+    let mut es = spec("dfs", 2, "electrostatic", Value::Null);
+    condition(&mut es, "left", "potential", json!({ "value": 1.0 }));
+    condition(&mut es, "right", "ground", Value::Null);
     run("electrostatics 2D", &m2, &es);
-    let mut so = ProblemSpec::new(Physics::Solid);
-    for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
-        so.materials.default.insert(k.into(), v);
-    }
-    so.bcs = vec![
-        Bc { on: None, labels: vec![1], kind: fixed() },
-        Bc { on: None, labels: vec![4], kind: BcKind::Load([0.0, -1e5, 0.0]) },
-    ];
+    let mut so = spec("sms", 2, "static", Value::Null);
+    steel(&mut so);
+    fixed(&mut so, "left");
+    load(&mut so, "right", [0.0, -1e5, 0.0]);
     run("solid static 2D", &m2, &so);
-    so.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
-    run("solid 6 eigenfrequencies 2D", &m2, &so);
+    // a boundary load belongs to the static study; the eigenfrequency study has the clamp only
+    let mut eig = so.clone();
+    eig.bcs.truncate(1);
+    study(&mut eig, "eigenfrequency", json!({ "n_modes": 6, "f_search": 0.0 }));
+    run("solid 6 eigenfrequencies 2D", &m2, &eig);
 
     let m3 = benchmesh::block(1.0, 0.1, 0.1, 40, 8, 8);
     println!("3D mesh: {} cells", m3.n_cells());
-    let mut s3 = ProblemSpec::new(Physics::Solid);
-    for (k, v) in [("E", 200e9), ("nu", 0.3), ("rho", 7850.0)] {
-        s3.materials.default.insert(k.into(), v);
-    }
-    s3.bcs = vec![
-        Bc { on: None, labels: vec![1], kind: fixed() },
-        Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) },
-    ];
+    let mut s3 = spec("sms", 2, "static", Value::Null);
+    steel(&mut s3);
+    fixed(&mut s3, "xmin");
+    load(&mut s3, "xmax", [0.0, 0.0, -1e5]);
     run("solid static 3D", &m3, &s3);
-    s3.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
-    run("solid 6 eigenfrequencies 3D", &m3, &s3);
+    let mut eig3 = s3.clone();
+    eig3.bcs.truncate(1);
+    study(&mut eig3, "eigenfrequency", json!({ "n_modes": 6, "f_search": 0.0 }));
+    run("solid 6 eigenfrequencies 3D", &m3, &eig3);
 
     for (nx, ny, nz) in [(40usize, 8usize, 8usize)] {
         let big = benchmesh::block(1.0, 0.1, 0.1, nx, ny, nz);
         let mut sb = s3.clone();
-        sb.study = Study::Static;
-        for (name, solver) in [("direct", LinearSolver::Direct), ("AMG-CG", LinearSolver::Iterative)] {
-            sb.solver = solver;
-            if nx == 80 && matches!(solver, LinearSolver::Direct) {
+        for (name, s) in [("direct", "direct"), ("AMG-CG", "iterative")] {
+            solver(&mut sb, s);
+            if nx == 80 && s == "direct" {
                 continue;
             }
             run(&format!("solid static 3D {nx}x{ny}x{nz} {name}"), &big, &sb);
         }
     }
     let mw = benchmesh::rect(22.86e-3, 10.16e-3, 80, 36);
-    let mut em = ProblemSpec::new(Physics::Emw);
-    em.study = Study::Modes { freq: 20e9, n_target: 0.9, evanescent: false, n_modes: 6 };
+    let mut em = spec("ems", 2, "modes", json!({ "freq": 20e9, "n_target": 0.9, "evanescent": false, "n_modes": 6 }));
+    props(&mut em, &[("eps_r", 1.0), ("mu_r", 1.0)]);
     run("EM modes 2D (Nedelec 2)", &mw, &em);
 }

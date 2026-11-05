@@ -499,6 +499,32 @@
         "idempotentHint": false,
         "openWorldHint": false,
         "readOnlyHint": false,
+        "title": "Add the absorbing-layer conditions"
+      },
+      "arguments": {
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "strength": {
+          "type": "number"
+        }
+      },
+      "name": "add_pml_conditions",
+      "required": [
+        "physics"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
         "title": "Polygon"
       },
       "arguments": {
@@ -1345,6 +1371,24 @@
         "idempotentHint": false,
         "openWorldHint": false,
         "readOnlyHint": false,
+        "title": "Replace the geometry"
+      },
+      "arguments": {
+        "geometry": {
+          "type": "object"
+        }
+      },
+      "name": "set_geometry",
+      "required": [
+        "geometry"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
         "title": "Assign a material to a region"
       },
       "arguments": {
@@ -1463,6 +1507,33 @@
       "required": [
         "params",
         "physics"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Replace the problem of a physics"
+      },
+      "arguments": {
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "problem": {
+          "type": "object"
+        }
+      },
+      "name": "set_problem",
+      "required": [
+        "physics",
+        "problem"
       ]
     },
     {

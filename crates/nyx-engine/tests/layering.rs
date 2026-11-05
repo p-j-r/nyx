@@ -1,5 +1,6 @@
 //! The layering of the workspace (ADR 26; ROUGH_SPOTS R18, R15, R16): which crate may depend on which. The table below is the target
-//! structure of `docs/architecture/RESTRUCTURE_PLAN.md` section 2, plus a short list of edges that exist today and that a named phase removes.
+//! structure of `docs/architecture/RESTRUCTURE_PLAN.md` section 2, plus a list of edges that exist for the time being and that a named phase removes
+//! (empty since restructure phase 7).
 //!
 //! * a dependency between workspace crates that is in neither list fails the test: change the structure on purpose, in the same commit as
 //!   this table, and say why in the commit message;
@@ -27,12 +28,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
 ];
 
 /// edges that exist today and the phase that removes each
-const TEMPORARY: &[(&str, &str, &str)] = &[
-    ("nyx-store", "femcore", "phase 7: metrics_of and the concept card move to the engine (R21, R25)"),
-    ("nyx", "femcore", "phase 7: the window calls engine commands only"),
-    ("nyx", "geom", "phase 7: the window calls engine commands only"),
-    ("nyx", "nyx-store", "phase 7: persistence goes through the engine"),
-];
+const TEMPORARY: &[(&str, &str, &str)] = &[];
 
 /// a crate that is not in `ALLOWED` may not exist (it must be put in the table)
 const ONLY_TEMPORARY_CRATES: &[&str] = &[];

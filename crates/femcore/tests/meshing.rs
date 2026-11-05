@@ -235,7 +235,7 @@ fn extruding_through_other_layers_reuses_the_section() {
 #[test]
 #[ignore]
 fn cache_sweep_timing() {
-    use femcore::usecases::soi::SoiWire;
+    use femcore::testkit::soi::SoiWire;
     let widths: Vec<f64> = (0..20).map(|i| 400e-9 + 10e-9 * i as f64).collect();
     let lists: Vec<_> = widths.iter().map(|&w| SoiWire { width: w, ..SoiWire::default() }.model().list).collect();
     let plan = MeshPlan::simple(0.3e-6);

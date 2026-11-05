@@ -18,7 +18,7 @@ use crate::mesh::{SimplexMesh, SplitReport};
 use crate::meshing::pml_box::{build_pml, PmlMesh, PmlSpec};
 use crate::adapt::work::simplex_to_adapt;
 use crate::meshing::pml_box::pml_domains;
-use crate::problem::{Materials, Pml};
+use crate::props::{Materials, Pml};
 use std::collections::BTreeMap;
 
 pub struct PmlBox {

@@ -36,7 +36,6 @@ use crate::adapt::metric::{intersect, isotropic, Sym};
 use geomdrive3::Sizes3;
 use physics_size::PhysicsSizing;
 pub use sizing::Sizing;
-use crate::problem::ProblemSpec;
 use crate::adapt::topo::{Sig, Work2};
 use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
 use geom::diff::{diff, ChangeKind};
@@ -128,25 +127,9 @@ pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGe
     }
 }
 
-/// Meshes a model for a study: the sizes the model asks for, and in addition the sizes the waves of `spec` need
-/// (`physics_size`: points per wavelength by element order). The adaptive mesher intersects the two metrics, so each is a floor on
-/// the resolution. The simple mesher cannot vary the size by the wavelength, so it takes the smallest physics size as its global size
-/// when that is below the plan's.
-pub fn mesh_for_problem(list: &FeatureList, plan: &MeshPlan, spec: &ProblemSpec, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
-    if list.dim == 3 {
-        return Err("mesh_for_problem works on 2D models; use mesh_for_sizing for a 3D model (ADR 50)".into());
-    }
-    mesh_waves_2d(
-        list,
-        plan,
-        &|m: &SimplexMesh| physics_size::vertex_sizes(spec, m, sz),
-        &|m: &SimplexMesh, ceiling: f64| physics_size::metrics(spec, m, sz, ceiling),
-    )
-}
-
 /// Meshes a model of either dimension for the neutral `Sizing` a physics reports (ADR 50): the sizes the model asks for, and in
 /// addition the sizes the waves need. Region names of the sizing are resolved with the model's labels, absorbing pieces are relaxed by
-/// `sz.pml_relax`. In 2D this is [`mesh_for_problem`] without a `ProblemSpec`. In 3D the simple mesher lowers the element size of the
+/// `sz.pml_relax`. In 3D the simple mesher lowers the element size of the
 /// regions that carry short waves (the lattice is made at the coarsest size any region needs, finer regions are refined locally), and
 /// the adaptive mesher adapts the start mesh to the intersection of the geometry metric and the wave metric.
 pub fn mesh_for_sizing(list: &FeatureList, plan: &MeshPlan, sizing: &Sizing, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {

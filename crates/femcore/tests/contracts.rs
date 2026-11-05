@@ -1,8 +1,6 @@
 //! Interface contracts of femcore (docs/architecture/adr/0019): what other crates, saved files and external hosts rely on, written down
 //! as tests that do not depend on frozen floating-point values (the golden files of `golden_frames.rs` do, see ADR 10).
 //!
-//! * `problem_spec` / `solve_result`: the serde shape of `ProblemSpec` (exemplar `docs/architecture/contracts/problem_spec.v1.json`) and the
-//!   structure of a `SolveResult`.
 //! * `frames`: the constants and name tables of `section` (ADR 1).
 //! * `mesh`: label bases, node orders, no curved-node storage, the `.fmsh` version (ADRs 4, 5, 16, 18).
 //! * `kernel_stages`: the public stage functions (ADR 9).
@@ -12,7 +10,7 @@
 mod common;
 
 use femcore::material::M3;
-use femcore::problem::*;
+use femcore::props::*;
 use femcore::section;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -44,98 +42,6 @@ fn check_exemplar_value(name: &str, got: &Value) {
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let want: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     assert_eq!(&want, got, "{name} no longer matches the contract exemplar; this is an interface change (ADR 19)");
-}
-
-// ---------------------------------------------------------------------------------------------------------------- problem_spec
-
-/// One spec per physics, each touching the fields of that physics that saved projects, nyx-store's concept card and the mesher's physics
-/// sizing read. Built field by field so that a changed default also changes the exemplar.
-fn exemplar_specs() -> Vec<ProblemSpec> {
-    let mut es = ProblemSpec::new(Physics::Electrostatics);
-    es.materials.set(1, "eps_r", 2.0);
-    es.materials.set(2, "eps_r", 8.0);
-    es.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Potential(1.0) }, Bc { on: None, labels: vec![4], kind: BcKind::Ground }];
-
-    let mut heat = ProblemSpec::new(Physics::Heat);
-    heat.materials.default.insert("k".into(), 3.0);
-    heat.study = Study::Transient { t_end: 1.0, n_out: 5, t0: "293.15 + 50*exp(-((x-0.5)^2)/0.01)".into() };
-    heat.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(300.0) }];
-
-    let mut solid = ProblemSpec::new(Physics::Solid);
-    solid.study = Study::Eigenfrequency { n_modes: 6, f_search: 5e9 };
-    solid.inactive = vec![3];
-    solid.materials.set(1, "E", 169e9);
-    solid.materials.set(1, "nu", 0.28);
-    solid.materials.set(1, "rho", 2329.0);
-    solid.materials.pml.insert(2, Pml { x: PmlDir::Plus, z: PmlDir::Minus, ..Pml::default() });
-    solid.bcs = vec![Bc { on: None, labels: vec![2], kind: BcKind::LowReflecting }];
-    solid.periodic = vec![Periodic { source: vec![1], dest: vec![4], phase: 0.5 }];
-
-    let mut emw = ProblemSpec::new(Physics::Emw);
-    emw.study = Study::Modes { freq: 1.934e14, n_target: 2.4, evanescent: false, n_modes: 4 };
-    emw.materials.set(1, "eps_r", 12.08);
-    emw.materials.set(2, "eps_r", 2.085);
-
-    vec![es, heat, solid, emw]
-}
-
-#[test]
-fn problem_spec_exemplar_is_stable() {
-    let specs = exemplar_specs();
-    let got = serde_json::to_string_pretty(&specs).unwrap();
-    check_exemplar("problem_spec.v1.json", &got);
-    // and the checked-in text reads back to the same values
-    let text = std::fs::read_to_string(contract_file("problem_spec.v1.json")).unwrap();
-    let back: Vec<ProblemSpec> = serde_json::from_str(&text).unwrap();
-    assert_eq!(back, specs);
-}
-
-#[test]
-fn problem_spec_survives_the_xml_encoding_of_project_files() {
-    // projects are saved as XML through `xmlio`; nyx-store reads the same XML back into a JSON value
-    for spec in exemplar_specs() {
-        let v = serde_json::to_value(&spec).unwrap();
-        let xml = femcore::xmlio::value_to_xml("nyx_spec", &v).unwrap();
-        let (root, back) = femcore::xmlio::xml_to_value(&xml).unwrap();
-        assert_eq!(root, "nyx_spec");
-        let spec2: ProblemSpec = serde_json::from_value(back).unwrap();
-        assert_eq!(spec2, spec, "{:?}", spec.physics);
-    }
-}
-
-#[test]
-fn problem_spec_json_shape_that_other_crates_read_without_types() {
-    // `nyx-store::card` reads saved specs as untyped values: the names below are an implicit contract (ROUGH_SPOTS R25)
-    let specs = exemplar_specs();
-    let emw = serde_json::to_value(&specs[3]).unwrap();
-    assert_eq!(emw["physics"], json!("Emw"));
-    assert_eq!(emw["study"], json!({ "Modes": { "freq": 1.934e14, "n_target": 2.4, "evanescent": false, "n_modes": 4 } }));
-    assert!(emw["materials"]["domains"]["1"]["eps_r"].is_number(), "materials.domains.<label>.<property>");
-    // keys of the top level, in the order of the declaration (the exemplar pins the rest)
-    let keys: Vec<&str> = emw.as_object().unwrap().keys().map(|s| s.as_str()).collect();
-    for k in ["physics", "order", "materials", "bcs", "study", "plane", "thickness", "thermal", "solver", "output", "inactive", "periodic"] {
-        assert!(keys.contains(&k), "ProblemSpec lost the key {k}");
-    }
-}
-
-#[test]
-fn problem_spec_reading_is_lenient_in_both_directions() {
-    // Documented, not endorsed (R20): an unknown key is ignored and a missing `#[serde(default)]` key takes its default.
-    // A rename therefore does not fail when an old file is read; it silently drops the setting. The exemplar test above is what catches it.
-    let specs = exemplar_specs();
-    let mut v = serde_json::to_value(&specs[3]).unwrap();
-    v.as_object_mut().unwrap().insert("a_key_from_the_future".into(), json!(1));
-    assert_eq!(serde_json::from_value::<ProblemSpec>(v.clone()).unwrap(), specs[3]);
-    v.as_object_mut().unwrap().remove("inactive");
-    v.as_object_mut().unwrap().remove("periodic");
-    assert_eq!(serde_json::from_value::<ProblemSpec>(v).unwrap(), specs[3]);
-}
-
-#[test]
-fn physics_enum_has_four_members_in_this_order() {
-    // the order is the order of the tabs and of `Physics::ALL`; names are the serde tags in saved files
-    let names: Vec<Value> = Physics::ALL.iter().map(|p| serde_json::to_value(p).unwrap()).collect();
-    assert_eq!(names, vec![json!("Electrostatics"), json!("Heat"), json!("Solid"), json!("Emw")]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------- solve_result
@@ -197,12 +103,6 @@ fn frames_pml_directions_use_x_and_z_on_a_cross_section() {
     let p = Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Minus, ..Pml::default() };
     assert_eq!(section::mesh_pml_dirs(&p, 2), [PmlDir::Plus, PmlDir::Minus, PmlDir::Off]);
     assert_eq!(section::mesh_pml_dirs(&p, 3), [PmlDir::Plus, PmlDir::Off, PmlDir::Minus]);
-    // a y layer on a 2D mesh is refused rather than aliased to z (ADR 1)
-    let mesh = common::rect(1.0, 1.0, 4, 4);
-    let mut spec = ProblemSpec::new(Physics::Emw);
-    spec.study = Study::Modes { freq: 1.934e14, n_target: 1.5, evanescent: false, n_modes: 1 };
-    spec.materials.pml.insert(1, Pml { y: PmlDir::Plus, ..Pml::default() });
-    assert!(section::check_wafer_input(&mesh, &spec).is_err());
 }
 
 // ---------------------------------------------------------------------------------------------------------------- mesh
@@ -400,15 +300,6 @@ fn mesh_fmsh_round_trip_and_version() {
 #[test]
 fn kernel_stage_api_is_public() {
     // ADR 9. Naming the functions makes removing or renaming one a compile error here. The kernels not in this list
-}
-
-#[test]
-fn physics_dispatch_covers_every_physics_and_the_emw_split_by_mesh_dimension() {
-    // ROUGH_SPOTS R10: `Physics::Emw` means waveguide modes on a 2D mesh and cavity eigenfrequencies on a 3D mesh. A 3D mesh given a
-    // `Modes` study is the caller's mistake; the contract is only that the dispatch does not panic and that 2D `Emw` is the mode solver.
-    let names: Vec<&str> = Physics::ALL.iter().map(|p| p.name()).collect();
-    assert_eq!(names.len(), 4);
-    assert!(Physics::Emw.name().contains("mode analysis"));
 }
 
 // ---------------------------------------------------------------------------------------------------------------- mesh, 3D geom models (ADR 40)

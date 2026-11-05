@@ -21,7 +21,7 @@ pub mod geometry;
 pub mod guide;
 pub mod jobs;
 pub mod materials;
-pub mod legacy;
+
 pub mod meshing;
 pub mod pml;
 pub mod project;

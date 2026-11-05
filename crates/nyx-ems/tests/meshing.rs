@@ -13,12 +13,12 @@ fn labels(mesh: &femcore::mesh::SimplexMesh) -> (BTreeSet<i32>, BTreeSet<i32>) {
 /// reference on a mesh with every size halved. Prints the table; asserts only what must hold (same labels, close to the reference).
 #[test]
 fn soi_wire_modes_on_the_simple_and_the_adaptive_mesh() {
-    use femcore::usecases::soi::SoiWire;
+    use femcore::testkit::soi::SoiWire;
     let wire = SoiWire::default();
     let te = |plan: &MeshPlan, w: &SoiWire| {
         let g = mesh_model(&w.model().list, plan).unwrap();
-        let spec = w.spec(&g);
-        let res = common::solve_old(&g.mesh, &spec).unwrap();
+        let spec = common::wire_problem(w, &g);
+        let res = common::solve(&g.mesh, &spec).unwrap();
         let neff = res.solutions.iter().filter_map(|s| s.eigenvalue.map(|n| n[0])).fold(0.0, f64::max);
         (neff, g.mesh.n_cells(), labels(&g.mesh))
     };
@@ -39,14 +39,14 @@ fn soi_wire_modes_on_the_simple_and_the_adaptive_mesh() {
 
 #[test]
 fn the_loop_on_the_soi_wire_converges_n_eff() {
-    use femcore::usecases::soi::SoiWire;
+    use femcore::testkit::soi::SoiWire;
     let wire = SoiWire::default();
     let mut st = LoopSettings::new(wire.h_far);
     st.estimator = Estimator { fields: vec!["|E|".into()], ..Estimator::default() };
     st.max_cycles = 4;
     st.rel_tol = 2e-6;
     let mut solve = |g: &femcore::meshing::geomdrive::MeshedGeom| {
-        let res = common::solve_old(&g.mesh, &wire.spec(g))?;
+        let res = common::solve(&g.mesh, &common::wire_problem(&wire, g))?;
         let n = res.solutions.iter().filter_map(|s| s.eigenvalue.map(|n| n[0])).fold(0.0, f64::max);
         Ok((res, n))
     };
@@ -55,7 +55,7 @@ fn the_loop_on_the_soi_wire_converges_n_eff() {
     let fine =
         SoiWire { h_core: wire.h_core * 0.22, h_near: wire.h_near * 0.22, h_far: wire.h_far * 0.22, ..wire.clone() };
     let gref = mesh_model(&fine.model().list, &MeshPlan::simple(fine.h_far)).unwrap();
-    let rr = common::solve_old(&gref.mesh, &fine.spec(&gref)).unwrap();
+    let rr = common::solve(&gref.mesh, &common::wire_problem(&fine, &gref)).unwrap();
     let nref = rr.solutions.iter().filter_map(|s| s.eigenvalue.map(|n| n[0])).fold(0.0, f64::max);
     eprintln!("SOI loop, reference n_eff {nref:.6} on {} cells", gref.mesh.n_cells());
     for c in &out.cycles {
@@ -78,13 +78,13 @@ fn the_loop_on_the_soi_wire_converges_n_eff() {
 #[test]
 #[ignore]
 fn soi_uniform_convergence_table() {
-    use femcore::usecases::soi::SoiWire;
+    use femcore::testkit::soi::SoiWire;
     let wire = SoiWire::default();
     for f in [1.0, 0.6, 0.4, 0.3, 0.22, 0.16] {
         let w = SoiWire { h_core: wire.h_core * f, h_near: wire.h_near * f, h_far: wire.h_far * f, ..wire.clone() };
         let g = mesh_model(&w.model().list, &MeshPlan::simple(w.h_far)).unwrap();
         let t = std::time::Instant::now();
-        let r = common::solve_old(&g.mesh, &w.spec(&g)).unwrap();
+        let r = common::solve(&g.mesh, &common::wire_problem(&w, &g)).unwrap();
         let n = r.solutions.iter().filter_map(|s| s.eigenvalue.map(|n| n[0])).fold(0.0, f64::max);
         eprintln!(
             "uniform x{f:<5} cells {:6}  n_eff {n:.7}  solve {:.1}s",
@@ -98,7 +98,7 @@ fn soi_uniform_convergence_table() {
 #[test]
 #[ignore]
 fn warm_start_study() {
-    use femcore::usecases::soi::SoiWire;
+    use femcore::testkit::soi::SoiWire;
     let run = |w: f64, warm: Option<femcore::adapt::estimate::WarmStart>| {
         let wire = SoiWire { width: w, ..SoiWire::default() };
         let mut st = LoopSettings::new(wire.h_far);
@@ -109,7 +109,7 @@ fn warm_start_study() {
         let mut solves = 0;
         let mut solve = |g: &femcore::meshing::geomdrive::MeshedGeom| {
             solves += 1;
-            let res = common::solve_old(&g.mesh, &wire.spec(g))?;
+            let res = common::solve(&g.mesh, &common::wire_problem(&wire, g))?;
             let n = res.solutions.iter().filter_map(|s| s.eigenvalue.map(|n| n[0])).fold(0.0, f64::max);
             Ok((res, n))
         };

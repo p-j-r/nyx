@@ -8,7 +8,7 @@
 
 use crate::linalg::csr::{c, CCoo, CCsr, C};
 use crate::mesh::SimplexMesh;
-use crate::problem::Periodic;
+use crate::props::Periodic;
 use std::collections::{BTreeSet, HashMap};
 
 /// The Floquet factor `exp(-i phase)`.

@@ -2,11 +2,8 @@
 //!
 //! * `store_workflow` / `store_run`: exemplar `workflow.json` and `runs.jsonl` line (docs/architecture/contracts/store_*.v1.json).
 //! * `store_format_gate`: a manifest from a newer nyx is refused, not misread.
-//! * `store_metrics`: the names under which a `SolveResult` appears in the runs table.
-//! * `store_card`: the concept card is read from the *current* saved project. One test is `#[ignore]`d until ROUGH_SPOTS R25 is fixed.
 //!
 //! `NYX_WRITE_CONTRACT=1 cargo test --release -p nyx-store --test contracts` rewrites the exemplars (only with a version bump, ADR 19).
-use femcore::problem::{Field, Scalar, Solution, SolveResult};
 use nyx_store::model::{Card, Digest, Experiment, Status, Workflow, FORMAT};
 use nyx_store::runs::{Artifact, RunRecord, RunStatus};
 use nyx_store::WorkflowDir;
@@ -105,8 +102,7 @@ fn store_run_record_exemplar_is_stable_and_old_lines_still_read() {
 #[test]
 fn store_format_gate_refuses_a_newer_manifest() {
     let ws = tmp("gate");
-    let xml = femcore::xmlio::value_to_xml("nyx_project", &current_project()).unwrap();
-    let d = WorkflowDir::create(&ws, "gate", "gui", &xml).unwrap();
+    let d = WorkflowDir::create(&ws, "gate", "gui", &current_project().to_string()).unwrap();
     let text = std::fs::read_to_string(d.manifest_path()).unwrap();
     assert!(text.contains(&format!("\"nyx\": {FORMAT}")), "the manifest carries its format under the key `nyx`");
     std::fs::write(d.manifest_path(), text.replace(&format!("\"nyx\": {FORMAT}"), "\"nyx\": 99")).unwrap();
@@ -116,30 +112,3 @@ fn store_format_gate_refuses_a_newer_manifest() {
     let _ = std::fs::remove_dir_all(&ws);
 }
 
-#[test]
-fn store_metrics_are_named_from_the_solve_result() {
-    let mut r = SolveResult { dofs: 1234, ..Default::default() };
-    r.solutions.push(Solution { neff: Some((2.4, 1e-9)), value: Some(5.0), fields: vec![Field { name: "Ex".into(), unit: String::new(), values: vec![0.0] }], ..Default::default() });
-    r.scalars.push(("Gain G (1/W/m)".into(), Scalar::Num(1.5)));
-    let m = nyx_store::runs::metrics_of(&r);
-    let keys: Vec<&str> = m.keys().map(|s| s.as_str()).collect();
-    assert_eq!(keys, vec!["dofs", "gain_g_1_w_m", "n_solutions", "neff_im", "neff_re", "value_1"]);
-    assert_eq!(m["dofs"], 1234.0);
-}
-
-#[test]
-fn store_card_still_gets_physics_study_and_wavelength_from_the_current_project() {
-    let card = nyx_store::card::from_value(&current_project());
-    assert_eq!(card.dim, 2);
-    let w = card.wavelength_m.expect("wavelength is C0 / freq of the Modes study");
-    assert!((w - 299_792_458.0 / 1.9341e14).abs() < 1e-12, "{w}");
-    assert!(card.summary.contains("1550 nm") || card.summary.contains("1551 nm"), "{}", card.summary);
-}
-
-#[test]
-#[ignore = "ROUGH_SPOTS R25: card::geometry reads the removed layout geometry.geometry.{Rectangle,Block,Shapes,Solids}; a current project has geometry.list"]
-fn store_card_reads_current_project() {
-    let card = nyx_store::card::from_value(&current_project());
-    assert_ne!(card.geometry.family, "unknown", "the geometry of a current project (a geom FeatureList) must be recognised");
-    assert_ne!(card.geometry.summary, "geometry not recognised");
-}

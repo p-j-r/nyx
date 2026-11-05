@@ -156,37 +156,6 @@ pub fn next_id(runs: &[RunRecord]) -> String {
     format!("r{n:04}_{}", crate::util::run_suffix())
 }
 
-/// Typed scalars of a solve: `neff_re`, `neff_im` and `te_fraction` of the first mode, `value_1` (frequency or time), the number of
-/// solutions, the degrees of freedom and every numeric scalar the solver reported (name made into `snake_case`). Formatted text
-/// scalars are never parsed.
-pub fn metrics_of(res: &femcore::problem::SolveResult) -> BTreeMap<String, f64> {
-    let mut m = BTreeMap::new();
-    if let Some((re, im)) = res.solutions.iter().find_map(|s| s.neff) {
-        m.insert("neff_re".into(), re);
-        m.insert("neff_im".into(), im);
-    }
-    if let Some(v) = res.solutions.first().and_then(|s| s.value) {
-        m.insert("value_1".into(), v);
-    }
-    if let Some(t) = res.solutions.iter().find_map(|s| s.te_fraction) {
-        m.insert("te_fraction".into(), t);
-    }
-    m.insert("n_solutions".into(), res.solutions.len() as f64);
-    m.insert("dofs".into(), res.dofs as f64);
-    for (name, s) in &res.scalars {
-        if let femcore::problem::Scalar::Num(x) = s {
-            if x.is_finite() {
-                let key: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
-                let key = key.split('_').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("_");
-                if !key.is_empty() {
-                    m.entry(key).or_insert(*x);
-                }
-            }
-        }
-    }
-    m
-}
-
 // ------------------------------------------------------------------------------------------------------ the filter language
 
 /// A number with an optional unit suffix, in SI: `450 nm`, `1.55um`, `193 THz`, `2e-7`.

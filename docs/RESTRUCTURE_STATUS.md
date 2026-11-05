@@ -19,7 +19,7 @@ Last updated: 2026-11-04, by the foundation session.
 | 4 | nyx-physics content, kernels into the physics crates | **done** (awaiting acceptance) | `restructure-4-physics` | the interface exists (F); gate G3 answered |
 | 5 | nyx-analysis | waits for 4 | | |
 | 6 | Materials | **implemented** (+ extends, more models, provenance, checked library), awaiting paul's answers (defaults in its section) | `restructure-6-materials` | ADR 29, 30, 34, 35; `docs/MATERIALS.md` |
-| 7 | nyx-engine, MCP parity, thin app | waits for 4, 5, 6 | | gate G5; 7a (connect merge) is ready now |
+| 7 | nyx-engine, MCP parity, thin app | **implemented**, awaiting acceptance (see its section at the end) | `restructure-7-engine-frontends` (on the merge of 5, 6, 7a) | ADR 57 to 60; 7a (connect merge) is merged into it |
 | 8 | File format | waits for 7 | | gate G6 |
 | 9 | Close-out | waits for 8 | | |
 
@@ -510,3 +510,28 @@ Test run of this session (`cargo test --release --workspace --no-fail-fast`, Win
 * **Flagged as approximate or unverified in the files**: silicon thermal conductivity, specific heat and permittivity; silica permittivity (3.6 to 3.9 range, midpoint used); sapphire thermal, expansion and permittivity; air (all values; air is treated as vacuum, n = 1). Silicon nitride is a film (the index depends on deposition). dn/dT of sapphire and lithium niobate is not in the library.
 * ioffe.ru (the usual source for semiconductor data) has an invalid TLS certificate; I did not bypass the check (the tool refused it) and used other sources for silicon. If paul wants Ioffe values, they can be added by hand.
 * The legacy `silicon()` and `sapphire()` in `material/mod.rs` keep the earlier rounded numbers (tests of other sessions and goldens use them); the pin test in `tests/materials.rs` allows the small differences and documents them. The ADR numbers 34 and 35 were chosen after 31 to 33 were taken by the mesh and linalg sessions; renumber if another session took them in the meantime.
+
+## Phase 7: engine, thin front-ends, MCP parity (workspace `nyx2-phase7`, bookmark `restructure-7-engine-frontends`, 2026-11-05)
+
+Started from the merge of `restructure-5-analysis`, `restructure-6-materials` and `restructure-7a-connect` (conflicts were in the docs tables, `Cargo.lock` and the Connect-menu hunk of `app.rs`; line endings of the old app files were CRLF, new files are LF). State: **implemented, awaiting acceptance.** ADR 57 to 60.
+
+**Done.**
+* **Engine.** The mesher takes a `MeshRequest` (2D and 3D, adaptive, structured PML, element sizes from the waves; `ems` and `sms` state their own `Sizing`, `Physics::sizing` takes the library). Named, oriented and project materials resolve in the engine (`Ctx.library`, `Ctx.wavelength`, `MaterialAssign::Oriented`, `Project.materials`, `Library::with_texts`). New commands: `get_guide`, `list_analyses`, `analyse`, `list_materials`, `describe_material`, `add_material`, `remove_material`, `add_pml_conditions`, `set_geometry`, `set_problem`. The default solve includes the physics the active one imports from. `facade` re-exports what a front-end draws with. `auto_store`: the MCP server binds the project to a workflow at the first solve.
+* **MCP.** `nyx-mcp` is a loop over `Engine::catalog()`/`call()`; all 23 geometry operations are tools from the descriptors; `nyx-session` is deleted. Contract `mcp_tools.v2.json` (breaking), `engine_commands.v1.json` 1.1. An end-to-end stdio test builds a wire from tools, solves, analyses and finds the run in the stored workflow.
+* **Window.** On `Engine`; Study, Physics and Materials tabs drawn from descriptors (`forms.rs`); examples are files (`examples/*.nyx.json`, 16, written through commands by `tests/make_examples.rs`); the app depends on `nyx-engine` and `nyx-connect` only. App tests include a headless frame of every tab on five examples.
+* **Deleted.** `nyx_engine::legacy`, `femcore::{problem, usecases, xmlio, h5io}` (and the `hdf5`/`phdf5`/`quick-xml` dependencies), the XML project format, `worker.rs`, built-in material presets, `nyx-store`'s dependency on `femcore` (ADR 59), `complex_bench`, `soi_modes`, `bragg_gratings`, `usecases.rs`, `legacy_*` tests. The layering table has no temporary edge. The benchmark programs now call `Physics::solve` on the generated meshes.
+
+**Checks.** Merge point before any change: 901 pass, 0 fail, 11 ignored. After the phase: see the line at the end of this section. Benchmarks (best of 3, control built fresh from `restructure-5-analysis` in `nyx2-phase7-ctl`, same machine, alternating): `bench` 33.2 s against 34.0 s (after a first rewrite of `bench` that skipped the two eigenfrequency runs was corrected to do the same work as the control); `profile3d 16 16 16 p2` 1.60 s against 1.60 s; `mem_profile 12 12 12 p2 static auto` 0.72 s against 0.74 s; `cavity_bench 0.012 2` 3.19 s against 3.17 s. No difference beyond noise.
+
+**Decisions to confirm (paul).**
+1. The one-call `recipe_run` (SOI strip) and `check_run` are gone; the guide shows the command sequence. A generic `mesh_convergence` command is not written. Say if you want one.
+2. The Bragg grating examples are dropped (swept layers with `domain_offset` have unnamed domains, so materials cannot be assigned by name); naming them is a mesh follow-up.
+3. HDF5 output is not ported (optional engine export, later).
+4. Examples use the library materials, so their numbers differ slightly from the old window's rounded ones.
+5. Physics-sized meshes in the SOS example are slow (the `13_silicon_on_sapphire` test takes about 60 s); not compared with the old window.
+
+**For phase 8.** Spec files are still named `experiment.nyx.xml` / `specs/*.nyx.xml` and hold JSON; the project JSON has no `format` key; `docs/architecture/workspace.dsl`, `diagrams.md` and `README.md` of the repository still describe the old structure (phase 9). `xmlio` is gone, so there is no XML left to delete.
+
+**Not touched.** The window itself was not seen on screen in this session (the scripted run exited cleanly but produced no screenshot); please look at it once.
+
+**Phase 7 result:** `cargo test --release --workspace --no-fail-fast`: 887 pass, 0 fail, 10 ignored (merge point 901 / 0 / 11; the difference is the deleted use-case, legacy and old-contract tests, the new engine, example, MCP, app and store tests). `check_code_to_adr.sh` and the contract and layering suites pass.

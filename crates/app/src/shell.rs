@@ -306,7 +306,7 @@ impl App {
         for e in &self.shell.entries {
             if let Some(x) = e.wf.experiments.last() {
                 if x.runs.count > 1 {
-                    if let Ok(d) = WorkflowDir::open(&e.dir) {
+                    if let Ok(d) = WorkflowDir::open_with(&e.dir, nyx_engine::store_link::card_of) {
                         spark.insert(e.wf.id.clone(), d.sparkline(&x.id));
                     }
                 }
@@ -381,7 +381,7 @@ impl App {
         let title = if w.draft_title.trim().is_empty() { "Untitled workflow".to_string() } else { w.draft_title.trim().to_string() };
         // the very first version is the spec the draft started from; this change is then committed on top of it
         let first = if w.spec0.is_empty() { xml.to_string() } else { w.spec0.clone() };
-        match WorkflowDir::create_as(&root, Some(wid), &title, "gui", &first) {
+        match WorkflowDir::create_with(&root, Some(wid), &title, "gui", &first, nyx_engine::store_link::card_of) {
             Ok(mut d) => {
                 if !w.tags.is_empty() {
                     let _ = d.set_tags(w.tags.clone());
@@ -430,7 +430,7 @@ impl App {
     pub fn open_tab(&mut self, id: &str, show: bool) {
         if !self.shell.open.contains_key(id) {
             let Some(entry) = self.shell.ws.as_ref().and_then(|w| w.find(id)) else { return };
-            match WorkflowDir::open(&entry.dir) {
+            match WorkflowDir::open_with(&entry.dir, nyx_engine::store_link::card_of) {
                 Ok(mut d) => {
                     if d.digest_is_stale() {
                         for eid in d.wf.experiments.iter().map(|e| e.id.clone()).collect::<Vec<_>>() {

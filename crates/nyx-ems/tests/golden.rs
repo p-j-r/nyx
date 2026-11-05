@@ -6,7 +6,7 @@
 mod common;
 use femcore::material::*;
 use femcore::props::{Pml, PmlDir};
-use femcore::usecases::soi::SoiWire;
+use femcore::testkit::soi::SoiWire;
 use nyx_ems::{Problem, Study};
 use nyx_physics::testkit::{cell_fields_reproduce_the_plot_fields, golden};
 use nyx_physics::{Discretisation, SolveResult};
@@ -70,7 +70,7 @@ fn golden_g2(name: &str, mesh: &Discretisation, r: &SolveResult) {
 fn golden_soi_wire_modes() {
     let wire = SoiWire { n_modes: 2, ..Default::default() };
     let g = wire.mesh().unwrap();
-    let r = common::solve(&g.mesh, &common::from_old(&wire.spec(&g))).unwrap();
+    let r = common::solve(&g.mesh, &common::wire_problem(&wire, &g)).unwrap();
     golden_g2("emw_soi_wire", &g.mesh, &r);
 }
 
@@ -78,7 +78,7 @@ fn golden_soi_wire_modes() {
 fn golden_soi_wire_with_sloped_wall_hybrid_modes() {
     let wire = SoiWire { width: 300e-9, sidewall_left_deg: Some(75.0), n_modes: 2, ..Default::default() };
     let g = wire.mesh().unwrap();
-    let r = common::solve(&g.mesh, &common::from_old(&wire.spec(&g))).unwrap();
+    let r = common::solve(&g.mesh, &common::wire_problem(&wire, &g)).unwrap();
     golden_g2("emw_soi_hybrid", &g.mesh, &r);
 }
 

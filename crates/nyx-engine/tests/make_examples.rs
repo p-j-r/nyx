@@ -306,7 +306,7 @@ fn box_cavity() -> B {
 }
 
 /// A silicon wire in oxide on a silicon-on-insulator film at 1550 nm; geometry from the old use case, written once as data.
-fn soi(title: &str, wire: femcore::usecases::soi::SoiWire) -> B {
+fn soi(title: &str, wire: femcore::testkit::soi::SoiWire) -> B {
     let mut b = B { e: Engine::new() };
     let mut p = Project::new(title, 2);
     p.geometry = wire.model().list;
@@ -323,13 +323,13 @@ fn soi(title: &str, wire: femcore::usecases::soi::SoiWire) -> B {
 }
 
 fn soi_wire() -> B {
-    soi("Silicon wire on 300 nm SOI at 1550 nm: TE0 and TM0 modes with Stokes parameters and Poincare sphere (EM waves, 2D cross-section)", femcore::usecases::soi::SoiWire::default())
+    soi("Silicon wire on 300 nm SOI at 1550 nm: TE0 and TM0 modes with Stokes parameters and Poincare sphere (EM waves, 2D cross-section)", femcore::testkit::soi::SoiWire::default())
 }
 
 fn soi_hybrid_wire() -> B {
     soi(
         "300 nm SOI wire with a sloped left wall: hybrid modes tilted on the Poincare sphere (EM waves, 2D cross-section)",
-        femcore::usecases::soi::SoiWire { width: 300e-9, sidewall_left_deg: Some(75.0), ..Default::default() },
+        femcore::testkit::soi::SoiWire { width: 300e-9, sidewall_left_deg: Some(75.0), ..Default::default() },
     )
 }
 

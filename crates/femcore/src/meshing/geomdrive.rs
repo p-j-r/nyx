@@ -16,7 +16,7 @@
 
 use crate::mesh::SimplexMesh;
 use crate::meshing::mesher::{mesh_chains, Chain, Fill, MeshParams};
-use crate::problem::{Pml, PmlDir, ProblemSpec};
+use crate::props::{Pml, PmlDir};
 use geom::eval::{Evaluated, Tier};
 use geom::labels::LabelMap;
 use geom::model::{FeatureList, RegionKind};
@@ -84,13 +84,6 @@ impl MeshedGeom {
     /// Boundary labels of whatever a selector text picks (`"outer & plane(z = -3e-6)"`).
     pub fn select(&self, selector: &str) -> Result<Vec<i32>, String> {
         select_labels(&self.eval, &self.labels, selector)
-    }
-
-    /// Sets a material property on a region or family (see `domains`).
-    pub fn set_material(&self, spec: &mut ProblemSpec, regions: &str, property: &str, value: f64) {
-        for d in self.domains(regions) {
-            spec.materials.set(d, property, value);
-        }
     }
 
     /// The absorbing layers of the model as solver stretching, keyed by domain: `strength` is the imaginary stretch at the outer edge, the

@@ -756,19 +756,19 @@ mod tests {
 // ---- the nyx Pml description of a PML mesh (was mesh::interop) ----
 /// The `Pml` of every domain label of a PML mesh, keyed by label, to merge into `ProblemSpec::optical_pml`.
 /// `strength`, `order` and `re` are the stretch parameters of `Pml`.
-pub fn pml_domains<const D: usize>(pml: &PmlMesh<D>, strength: f64, order: f64, re: f64) -> std::collections::BTreeMap<i32, crate::problem::Pml> {
+pub fn pml_domains<const D: usize>(pml: &PmlMesh<D>, strength: f64, order: f64, re: f64) -> std::collections::BTreeMap<i32, crate::props::Pml> {
     let dir = |c: i8| match c {
-        0 => crate::problem::PmlDir::Off,
-        c if c > 0 => crate::problem::PmlDir::Plus,
-        _ => crate::problem::PmlDir::Minus,
+        0 => crate::props::PmlDir::Off,
+        c if c > 0 => crate::props::PmlDir::Plus,
+        _ => crate::props::PmlDir::Minus,
     };
     let mut out = std::collections::BTreeMap::new();
     for r in &pml.regions {
-        let axis = |a: usize| if a < D { dir(r.code[a]) } else { crate::problem::PmlDir::Off };
+        let axis = |a: usize| if a < D { dir(r.code[a]) } else { crate::props::PmlDir::Off };
         for &(_, label) in &r.labels {
             // a 2D mesh is the x-z cross-section: its second axis is z
-            let (y, z) = if D == 2 { (crate::problem::PmlDir::Off, axis(1)) } else { (axis(1), axis(2)) };
-            out.insert(label, crate::problem::Pml { x: axis(0), y, z, strength, order, re });
+            let (y, z) = if D == 2 { (crate::props::PmlDir::Off, axis(1)) } else { (axis(1), axis(2)) };
+            out.insert(label, crate::props::Pml { x: axis(0), y, z, strength, order, re });
         }
     }
     out

@@ -27,7 +27,7 @@ impl App {
         let res = if let Some(d) = self.shell.open.get_mut(id).and_then(|w| w.dir.as_mut()) {
             f(d)
         } else if let Some(e) = self.shell.entries.iter().find(|e| e.wf.id == id) {
-            WorkflowDir::open(&e.dir).and_then(|mut d| f(&mut d))
+            WorkflowDir::open_with(&e.dir, nyx_engine::store_link::card_of).and_then(|mut d| f(&mut d))
         } else {
             Ok(())
         };

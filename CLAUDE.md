@@ -7,27 +7,28 @@ Desktop finite-element application for photonics and phononics, in pure Rust. No
 | Path | What |
 |---|---|
 | `crates/geom` | geometry kernel (parametric wafer-frame models, selectors, golden files) |
-| `crates/femcore` | the FEM core: meshes (`mesh`, with `Mesh`, the exchange mesh the physics take), meshing, adaptation, the linear algebra (`linalg`), the finite-element basics (`fem`, `edge`, `pml`, `periodic`, `props` for materials per domain), the old window problem types (`problem`, deleted in phase 7), use cases. The physics kernels are gone from it |
+| `crates/femcore` | the FEM core: meshes (`mesh`, with `Mesh`, the exchange mesh the physics take), meshing, adaptation, the linear algebra (`linalg`), the finite-element basics (`fem`, `edge`, `pml`, `periodic`, `props` for materials per domain), the material specification and library (`material`, TOML files in `materials/`), `props` (materials per domain), and fixtures for tests (`testkit`, `testkit::soi`). The physics kernels, the old window problem types and the use cases are gone from it |
 | `crates/nyx-physics` | the `Physics` trait, the problem envelope (`ProblemSpec`), descriptors, `SolveResult`, `Registry`, validation, JSON Schemas (ADR 25) |
-| `crates/nyx-dfs`, `nyx-sms`, `nyx-ems` | one physics each since phase 4 (ADR 41 to 47): its typed `Problem` and `decode` of the envelope, the kernels in three stages, `run`, `Physics::solve`, descriptors, its goldens and tests. `nyx_engine::legacy` is the temporary bridge from the old window problem (deleted in phase 7) |
+| `crates/nyx-dfs`, `nyx-sms`, `nyx-ems` | one physics each since phase 4 (ADR 41 to 47): its typed `Problem` and `decode` of the envelope, the kernels in three stages, `run`, `Physics::solve`, descriptors, its goldens and tests. |
 | `crates/nyx-analysis` | analyses of results: the polarization (Stokes parameters, Poincare sphere, classes, degenerate groups) as a function of a `SolveResult` and its mesh (phase 5, ADR 56). A mode study states its frame in the scalar `field frame` (`nyx_physics::FieldFrame`) and carries the complex field in its cell fields; results carry no analysis |
-| `crates/nyx-store` | workspace, workflow, experiment and run storage |
-| `crates/nyx-engine` | `Engine`: the project, commands (every action by name, with JSON Schemas; the MCP tools are generated from them), the job runner, the geometry operation descriptors, store wiring, and the registry of compiled-in physics (cargo features `dfs sms ems`). It also holds `legacy`, the bridge the window and `nyx-session` use to reach the physics until phase 7, and the examples that drive every physics (`bench`, `stage_log`, `profile3d`, `mem_profile`, `cavity_bench`). The window and `nyx-mcp` are not rewired to the commands yet (phase 7) |
-| `crates/app` | the egui application (package and binary `nyx`) |
-| `crates/nyx-session`, `nyx-mcp`, `nyx-connect` | the AI interface (stdio MCP server, one-click host connection); formerly the separate `ai/` workspace |
+| `crates/nyx-store` | workspace, workflow, experiment and run storage (JSON specs; no dependency on another crate of the workspace, ADR 59) |
+| `crates/nyx-engine` | `Engine`: the project, commands (every action by name, with JSON Schemas; the MCP tools are exactly the catalog, the window uses the same commands), the job runner, the geometry operation descriptors, the materials of a session (library plus the project's own, ADR 58), analyses, the guide cards, store wiring, and the registry of compiled-in physics (cargo features `dfs sms ems`). `facade` re-exports what a front-end draws with. Examples (`examples/`) are the benchmark programs `bench`, `profile3d`, `mem_profile`, `cavity_bench`, `stage_log`, `eig_beam` |
+| `crates/app` | the egui application (package and binary `nyx`): a front-end of `nyx-engine`; the Study, Physics and Materials tabs are drawn from the physics descriptors (`forms.rs`) |
+| `crates/nyx-mcp`, `nyx-connect` | the AI interface (stdio MCP server whose tools are the engine commands, ADR 57; one-click host connection) |
+| `examples/`, `materials/` | example projects (`*.nyx.json`, written by `crates/nyx-engine/tests/make_examples.rs`) and the material library (`*.toml`), both found next to the program or in a parent folder |
 | `docs/` | design notes and per-project status files |
 | `docs/architecture/` | C4 model (`workspace.dsl`), ADRs (`adr/`, index `ADR_INDEX.md`), `ROUGH_SPOTS.md`, `CODE_TO_ADR.md`, interface `contracts/`, the restructure plan. Read `README.md` there first |
 | `tools/` | `baseline.sh` (tests and benchmark timings recorded per phase) |
 | `runs/`, `dist/` | local outputs, git-ignored; never commit results |
 
-Dependency rules are in `crates/nyx-engine/tests/layering.rs` (a table plus the list of temporary edges and the phase that removes each). Nothing outside the physics crates names a physics.
+Dependency rules are in `crates/nyx-engine/tests/layering.rs` (a table; the list of temporary edges is empty since phase 7). Nothing outside the physics crates names a physics. The window and the MCP server depend on `nyx-engine` only (`nyx-connect` for the Connect menu).
 
 ## Build and test
 
 ```
 cargo run --release -p nyx                                  # the application
 cargo test --release --workspace                            # everything; a few minutes
-cargo test --release --workspace -- --ignored               # slow tests (Bragg ~1.5 min, solver library)
+cargo test --release --workspace -- --ignored               # slow tests (solver library); `-p nyx-engine --test make_examples -- --ignored` rewrites examples/*.nyx.json
 cargo clippy --release -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine --all-targets --no-deps -- -D warnings   # the new crates are clean
 cargo fmt -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine   # the new crates are rustfmt-formatted (settings as geom)
 cargo test --release -p femcore -p geom -p nyx-store -p nyx-mcp -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-engine --test contracts --test layering   # interface contracts (ADR 19)
@@ -35,7 +36,7 @@ bash docs/architecture/check_code_to_adr.sh                 # every file has an 
 bash tools/baseline.sh <dir>                                # test counts and the five benchmark timings (BENCH_ONLY=1 for timings only)
 ```
 
-Always use `--release`: the solvers are unusably slow unoptimised. The toolchain is pinned in `rust-toolchain.toml`. All jj workspaces of this repository share the build directory `../nyx2-target` (`.cargo/config.toml`); cargo serialises builds in it, so the first build in a new workspace waits for the lock but does not recompile egui, wgpu or faer. If a long build or test is needed, run it in the background.
+Always use `--release`: the solvers are unusably slow unoptimised. The toolchain is pinned in `rust-toolchain.toml`. Each jj workspace should build in its own target directory (`CARGO_TARGET_DIR`), several sessions share a machine. If a long build or test is needed, run it in the background.
 
 ## Conventions
 
@@ -49,9 +50,9 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 * `*.py` is git-ignored on purpose: nothing Python ships. Any GDS layout is built with gdsfactory, never raw gdstk.
 * Determinism: the same input gives the same numbers for any thread count. `NYX_THREADS=N` sets the rayon pool, `NYX_PROFILE=1` echoes the solver log.
 
-## Known state of the checks (phase 5, 2026-11-05, Windows, Rust 1.99.1)
+## Known state of the checks (phase 7, 2026-11-05, Windows, Rust 1.99.1)
 
-* `cargo test --release --workspace --no-fail-fast`: 815 pass, 11 ignored, 0 fail (phase 5, `restructure-5-analysis`; phase 4 closed at 790 / 9 / 0 and the mesher features line at 811 / 11 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
+* `cargo test --release --workspace --no-fail-fast`: 887 pass, 10 ignored, 0 fail (phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
 * `cargo clippy -D warnings` is clean for `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis` and `nyx-engine`; the old `femcore` code has a few warnings left. `cargo fmt --check` fails for the old code (R23, decided in phase 9).
 * The numbers and timings of the pre-restructure state and of each phase are in `docs/RESTRUCTURE_STATUS.md`.
 

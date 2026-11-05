@@ -1,6 +1,6 @@
 //! Element sizes from the physics: how fine a mesh must be for the waves the study looks for, before any solution exists. The core takes the
-//! neutral `meshing::Sizing` a physics reports (`cell_sizes_for`, `vertex_sizes_for`, `metrics_for`, `adapt_tets_for`); the functions that take a
-//! `ProblemSpec` are the adapter for the old kernels (`spec_sizing`) and go when the physics crates report their own `Sizing` (phase 4).
+//! neutral `meshing::Sizing` a physics reports (`cell_sizes_for`, `vertex_sizes_for`, `metrics_for`, `adapt_tets_for`); the
+//! physics crates state their `Sizing` themselves (`Physics::sizing`); `optical_wavelength` and `elastic_wavelength` are the closed forms they use.
 //!
 //! Every wave problem has a shortest wavelength per domain, and a mesh resolves it with a number of points per wavelength that depends on the
 //! element order. This module finds that wavelength from the materials and the study, divides it by the points per wavelength, and hands back
@@ -19,10 +19,8 @@
 
 use crate::material::M6;
 use crate::mesh::SimplexMesh;
-use super::sizing::{label_names, Sizing};
+use super::sizing::Sizing;
 use crate::adapt::metric::{isotropic, sym_eig, Sym};
-use crate::problem::{Physics, ProblemSpec, Study, TensorKind};
-use std::collections::BTreeMap;
 
 /// Vacuum speed of light (m/s).
 const C0: f64 = 299_792_458.0;
@@ -50,78 +48,6 @@ impl PhysicsSizing {
     pub fn ppw(&self, order: usize) -> f64 {
         self.points_per_wavelength.unwrap_or(if order >= 2 { 6.0 } else { 12.0 })
     }
-}
-
-/// Shortest wavelength (m) of the study in every domain of the mesh, by domain label. Domains that carry no wave of this study are absent.
-pub fn wavelengths(spec: &ProblemSpec, mesh: &SimplexMesh) -> Result<BTreeMap<i32, f64>, String> {
-    wavelengths_with(spec, mesh, 1.0)
-}
-
-/// Like [`wavelengths`], with the search frequency of an eigenfrequency study multiplied by `headroom`.
-pub fn wavelengths_with(spec: &ProblemSpec, mesh: &SimplexMesh, headroom: f64) -> Result<BTreeMap<i32, f64>, String> {
-    let first = first_cell_of_each_domain(mesh);
-    match spec.physics {
-        Physics::Emw => {
-            let freq = match spec.study {
-                Study::Modes { freq, .. } => freq,
-                Study::Eigenfrequency { f_search, .. } if f_search > 0.0 => f_search * headroom,
-                _ => return Err("the wavelength of an electromagnetic study needs a Modes study or an eigenfrequency study with a search frequency".into()),
-            };
-            optical_wavelengths(spec, mesh, &first, C0 / freq)
-        }
-        Physics::Solid => {
-            let f = elastic_frequency(spec)?.ok_or("the wavelength of a solid-mechanics study needs an eigenfrequency study with a search frequency")? * headroom;
-            elastic_wavelengths(spec, mesh, &first, f)
-        }
-        p => Err(format!("{} has no wavelength to resolve", p.name())),
-    }
-}
-
-fn first_cell_of_each_domain(mesh: &SimplexMesh) -> BTreeMap<i32, usize> {
-    let mut m = BTreeMap::new();
-    for (c, &l) in mesh.cell_labels.iter().enumerate() {
-        m.entry(l).or_insert(c);
-    }
-    m
-}
-
-fn elastic_frequency(spec: &ProblemSpec) -> Result<Option<f64>, String> {
-    match spec.study {
-        Study::Eigenfrequency { f_search, .. } if f_search > 0.0 => Ok(Some(f_search)),
-        _ => Ok(None),
-    }
-}
-
-/// Vacuum wavelength `lam0` shortened by the largest refractive index of each domain.
-fn optical_wavelengths(spec: &ProblemSpec, mesh: &SimplexMesh, first: &BTreeMap<i32, usize>, lam0: f64) -> Result<BTreeMap<i32, f64>, String> {
-    let mut out = BTreeMap::new();
-    let eps = spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
-    let mu = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    for (&d, &c) in first {
-        let m: Sym<3> = [[eps[c][0][0], eps[c][0][1], eps[c][0][2]], [eps[c][1][0], eps[c][1][1], eps[c][1][2]], [eps[c][2][0], eps[c][2][1], eps[c][2][2]]];
-        let (ev, _) = sym_eig::<3>(&m);
-        let n2 = (ev[0] * mu[c]).max(1e-12);
-        out.insert(d, lam0 / n2.sqrt());
-    }
-    Ok(out)
-}
-
-/// `(slowest, fastest)` plane-wave speed of every active domain, by label.
-fn elastic_speeds(spec: &ProblemSpec, mesh: &SimplexMesh, first: &BTreeMap<i32, usize>) -> Result<BTreeMap<i32, (f64, f64)>, String> {
-    let stiff = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?;
-    let rho = spec.materials.cell_values(mesh, "rho", None)?;
-    let mut out = BTreeMap::new();
-    for (&d, &c) in first {
-        if spec.inactive.contains(&d) || rho[c] <= 0.0 {
-            continue;
-        }
-        out.insert(d, wave_speed_range(&stiff[c], rho[c]));
-    }
-    Ok(out)
-}
-
-fn elastic_wavelengths(spec: &ProblemSpec, mesh: &SimplexMesh, first: &BTreeMap<i32, usize>, f: f64) -> Result<BTreeMap<i32, f64>, String> {
-    Ok(elastic_speeds(spec, mesh, first)?.into_iter().map(|(d, (vmin, _))| (d, vmin / f)).collect())
 }
 
 /// Slowest and fastest plane-wave speed of a medium with stiffness `c` (solver Voigt order xx, yy, zz, xy, yz, xz; engineering shear) and
@@ -243,55 +169,6 @@ pub fn adapt_tets_for(
     Ok((simplex_from_adapt(&out.mesh), out.report))
 }
 
-// ---- the adapter from `ProblemSpec` (until the physics crates report their own `Sizing`, phase 4) ----
-
-/// The `Sizing` of a problem as the old kernels define it: element order, the headroom of an eigenfrequency study, and the shortest
-/// wavelength of every domain (keys are the decimal labels, see `sizing::label_names`).
-pub fn spec_sizing(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Sizing, String> {
-    let eigen = matches!(spec.study, Study::Eigenfrequency { f_search, .. } if f_search > 0.0);
-    let lam = wavelengths_with(spec, mesh, 1.0)?;
-    Ok(Sizing::by_label(spec.order as u8, if eigen { sz.eigen_headroom } else { 1.0 }, &lam))
-}
-
-fn pml_of(spec: &ProblemSpec) -> impl Fn(i32) -> bool + '_ {
-    move |d| spec.materials.pml.contains_key(&d)
-}
-
-/// Target element size of every cell of `mesh` for the problem `spec` (see [`cell_sizes_for`]).
-pub fn cell_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
-    cell_sizes_for(&spec_sizing(spec, mesh, sz)?, &label_names, &mesh.cell_labels, &pml_of(spec), sz)
-}
-
-/// Target element size at every vertex for the problem `spec` (see [`vertex_sizes_for`]).
-pub fn vertex_sizes(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
-    vertex_sizes_for(&spec_sizing(spec, mesh, sz)?, &label_names, mesh, &pml_of(spec), sz)
-}
-
-/// Isotropic metric of the physics size at every vertex of a 2D mesh. Vertices without a wave get `ceiling`.
-pub fn metrics(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing, ceiling: f64) -> Result<Vec<Sym<2>>, String> {
-    if mesh.dim != 2 {
-        return Err("physics metrics are for 2D meshes".into());
-    }
-    metrics_d::<2>(spec, mesh, sz, ceiling)
-}
-
-/// Isotropic metric of the physics size at every vertex of a mesh of any dimension (`D` = 2 or 3) for the problem `spec`.
-pub fn metrics_d<const D: usize>(spec: &ProblemSpec, mesh: &SimplexMesh, sz: &PhysicsSizing, ceiling: f64) -> Result<Vec<Sym<D>>, String> {
-    metrics_for::<D>(&spec_sizing(spec, mesh, sz)?, &label_names, mesh, &pml_of(spec), sz, ceiling)
-}
-
-/// Adapts a tetrahedral mesh to the physics of `spec` (see [`adapt_tets_for`]).
-pub fn adapt_tets(
-    mesh: &SimplexMesh,
-    spec: &ProblemSpec,
-    sz: &PhysicsSizing,
-    ceiling: f64,
-    grade: f64,
-    opt: &crate::adapt::ops3::AdaptOptions3,
-) -> Result<(SimplexMesh, crate::adapt::drive::AdaptReport), String> {
-    adapt_tets_for(mesh, &spec_sizing(spec, mesh, sz)?, &label_names, &pml_of(spec), sz, ceiling, grade, opt)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,33 +186,16 @@ mod tests {
 
     #[test]
     fn optical_wavelength_is_shortened_by_the_index() {
-        let m = crate::meshing::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
-        let mut s = ProblemSpec::new(Physics::Emw);
-        s.materials.default.insert("eps_r".into(), 4.0);
-        s.study = Study::Modes { freq: 10e9, n_target: 1.5, evanescent: false, n_modes: 1 };
-        let l = wavelengths(&s, &m).unwrap();
-        assert!((l[&1] - C0 / 10e9 / 2.0).abs() < 1e-12);
-        let h = cell_sizes(&s, &m, &PhysicsSizing::default()).unwrap();
-        assert!((h[0] - l[&1] / 6.0).abs() < 1e-15, "order 2 takes 6 points per wavelength");
+        let eps = [[4.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        assert!((optical_wavelength(&eps, 1.0, 1.0) - 0.5).abs() < 1e-12, "the largest eigenvalue of the permittivity sets the index");
+        assert!((optical_wavelength(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 4.0, speed_of_light() / 10e9) - speed_of_light() / 10e9 / 2.0).abs() < 1e-12);
     }
 
     #[test]
-    fn pml_domains_are_coarser_and_inactive_domains_have_no_elastic_wave() {
-        let mut m = crate::meshing::geomdrive::plate(1.0, 1.0, 0.5).unwrap().mesh;
-        let half = m.n_cells() / 2;
-        for l in m.cell_labels.iter_mut().skip(half) {
-            *l = 2;
-        }
-        let mut s = ProblemSpec::new(Physics::Solid);
-        s.study = Study::Eigenfrequency { n_modes: 5, f_search: 1e9 };
-        s.materials.default.insert("E".into(), 169e9);
-        s.materials.default.insert("nu".into(), 0.28);
-        s.materials.default.insert("rho".into(), 2330.0);
-        s.inactive = vec![2];
-        let l = wavelengths(&s, &m).unwrap();
-        assert!(l.contains_key(&1) && !l.contains_key(&2));
-        let h = cell_sizes(&s, &m, &PhysicsSizing::default()).unwrap();
-        assert!(h[0].is_finite() && h[half].is_infinite());
+    fn the_slowest_wave_sets_the_elastic_wavelength() {
+        let c = isotropic_stiffness(169e9, 0.28);
+        let (vs, _) = wave_speed_range(&c, 2330.0);
+        assert!((elastic_wavelength(&c, 2330.0, 1e9) - vs / 1e9).abs() < 1e-18);
     }
 }
 

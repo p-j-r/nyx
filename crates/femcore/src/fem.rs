@@ -833,8 +833,8 @@ impl AmgSystem {
 /// and a note about the method used when the iterative solver ran. With `LinearSolver::Auto` a
 /// multigrid run that does not converge falls back to the direct solver.
 #[allow(clippy::too_many_arguments)]
-pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::problem::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String> {
-    use crate::problem::LinearSolver;
+pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String> {
+    use crate::props::LinearSolver;
     let n_free = k.nrows() - fixed.len();
     let iterative = match solver {
         LinearSolver::Direct => false,

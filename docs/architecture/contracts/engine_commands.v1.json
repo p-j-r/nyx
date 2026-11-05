@@ -143,6 +143,54 @@
   },
   {
     "access": "edit",
+    "description": "Replaces the whole feature list by one given as JSON (what the window's geometry editor writes); it is checked first.",
+    "name": "set_geometry",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "geometry": {
+          "description": "a feature list: { dim, params, features }",
+          "type": "object"
+        }
+      },
+      "required": [
+        "geometry"
+      ],
+      "type": "object"
+    },
+    "title": "Replace the geometry"
+  },
+  {
+    "access": "edit",
+    "description": "Replaces the whole problem (study, order, materials, conditions, options) of a physics by one given as JSON, after checking it against the descriptors. Adds the physics if the project has no problem for it yet.",
+    "name": "set_problem",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "problem": {
+          "description": "a problem: { physics, order, study, materials, bcs, params }",
+          "type": "object"
+        }
+      },
+      "required": [
+        "physics",
+        "problem"
+      ],
+      "type": "object"
+    },
+    "title": "Replace the problem of a physics"
+  },
+  {
+    "access": "edit",
     "description": "Changes some fields of a feature; give only the fields to change, in the form the add command takes.",
     "name": "update_feature",
     "schema": {
@@ -431,7 +479,7 @@
   },
   {
     "access": "edit",
-    "description": "A material by name, or scalar properties by descriptor name (`{\"E\": 1.7e11, \"nu\": 0.28}`).",
+    "description": "A material by name (library or project: list_materials), a named material placed at an angle (`{\"material\": \"sapphire\", \"euler_deg\": [0, 57.6, 0]}`, Bunge angles in degrees), or scalar properties by descriptor name (`{\"E\": 1.7e11, \"nu\": 0.28}`).",
     "name": "set_material",
     "schema": {
       "additionalProperties": false,
@@ -643,8 +691,25 @@
           "description": "global element size in metres",
           "type": "number"
         },
+        "max_dev": {
+          "description": "largest chord deviation from a curved edge, metres",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "physics_sizing": {
-          "description": "size from the physics (waits for restructure phase 2)",
+          "description": "size the elements from the waves of the physics (points per wavelength)",
+          "type": "boolean"
+        },
+        "points_per_wavelength": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "structured_pml": {
+          "description": "rebuild the absorbing layers as structured layers",
           "type": "boolean"
         },
         "sweep": {
@@ -865,6 +930,172 @@
       "type": "object"
     },
     "title": "Read a field"
+  },
+  {
+    "access": "read",
+    "description": "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).",
+    "name": "get_guide",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "topic": {
+          "description": "which card; omit for nyx-instructions",
+          "enum": [
+            "nyx-instructions",
+            "geometry",
+            "optical-modes",
+            "troubleshooting"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Read a nyx guide"
+  },
+  {
+    "access": "edit",
+    "description": "Adds a `pml` condition for every absorbing piece the geometry made with add_pml (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. `strength` is the imaginary stretch at the outer edge (default 3).",
+    "name": "add_pml_conditions",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "strength": {
+          "description": "imaginary stretch at the outer edge, default 3",
+          "type": "number"
+        }
+      },
+      "required": [
+        "physics"
+      ],
+      "type": "object"
+    },
+    "title": "Add the absorbing-layer conditions"
+  },
+  {
+    "access": "read",
+    "description": "The materials a problem can name: those of the library (material files) and those the project carries.",
+    "name": "list_materials",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the materials"
+  },
+  {
+    "access": "read",
+    "description": "What a material gives (elastic class, optical model, thermal, electrical) and its TOML text.",
+    "name": "describe_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "material name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Describe a material"
+  },
+  {
+    "access": "edit",
+    "description": "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.",
+    "name": "add_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "material name",
+          "type": "string"
+        },
+        "toml": {
+          "description": "the material file text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "toml"
+      ],
+      "type": "object"
+    },
+    "title": "Add a material to the project"
+  },
+  {
+    "access": "edit",
+    "description": "",
+    "name": "remove_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "material name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Remove a project material"
+  },
+  {
+    "access": "read",
+    "description": "The analyses of results (polarization of the modes) and which solved physics each applies to.",
+    "name": "list_analyses",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the analyses"
+  },
+  {
+    "access": "read",
+    "description": "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups.",
+    "name": "analyse",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "analysis": {
+          "description": "analysis id (list_analyses)",
+          "type": "string"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "analysis",
+        "physics"
+      ],
+      "type": "object"
+    },
+    "title": "Analyse a result"
   },
   {
     "access": "expensive",

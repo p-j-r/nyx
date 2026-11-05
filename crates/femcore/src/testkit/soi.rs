@@ -1,4 +1,4 @@
-//! Use case: the optical modes of a silicon wire on 300 nm silicon-on-insulator at 1550 nm.
+//! Test fixture: the cross-section of a silicon wire on 300 nm silicon-on-insulator at 1550 nm (it was the SOI use case of the window until phase 7).
 //!
 //! A silicon core of thickness `thickness` (300 nm by default) and `width` on a buried oxide (BOX), under an oxide or air
 //! cladding. The cross-section is a geom model (exact lines, named regions) meshed by `geomdrive`, the modes come from the full-vector solver of `nyx-ems` (Nedelec
@@ -15,7 +15,7 @@
 //! symmetric slab and the quasi-TM mode to its TM0 mode (`slab_neff`).
 
 use crate::meshing::geomdrive::MeshedGeom;
-use crate::problem::*;
+
 use geom::model::Model;
 use geom::select::Selector;
 
@@ -173,29 +173,6 @@ impl SoiWire {
     pub fn mesh(&self) -> Result<MeshedGeom, String> {
         let ev = crate::meshing::geomdrive::evaluate(&self.model().list)?;
         crate::meshing::mesh_evaluated(ev, &crate::meshing::MeshPlan::simple(self.h_far))
-    }
-
-    /// Optical problem: wafer axes, permittivity per region (by name), `n_modes` modes near the index of the silicon.
-    pub fn spec(&self, g: &MeshedGeom) -> ProblemSpec {
-        let mut s = ProblemSpec::new(Physics::Emw);
-        s.order = 2;
-        let n_top = match self.cladding {
-            Cladding::Oxide => self.n_sio2,
-            Cladding::Air => 1.0,
-        };
-        for (regions, n) in [("BOX, BOX_near", self.n_sio2), ("Si, Si_slab", self.n_si), ("clad, clad_near", n_top)] {
-            g.set_material(&mut s, regions, "eps_r", n * n);
-            g.set_material(&mut s, regions, "mu_r", 1.0);
-        }
-        s.study = Study::Modes { freq: C0 / self.wavelength, n_target: self.n_target, evanescent: false, n_modes: self.n_modes };
-        s
-    }
-
-    /// Meshes and solves with `solver` (the kernels live in `nyx-ems`; the window and the tests pass `nyx_engine::legacy::solve`); the result
-    /// has `Solution::te_fraction` set; the full polarization analysis is `nyx_engine::legacy::analyse`.
-    pub fn solve(&self, solver: super::Solver) -> Result<SolveResult, String> {
-        let g = self.mesh()?;
-        solver(&g.mesh, &self.spec(&g))
     }
 
     /// The same silicon thickness as an infinite slab: reference for very wide wires.

@@ -1,17 +1,19 @@
-//! Meshes sized by the physics of the study (`physics_size`, `meshing::mesh_for_problem`): the wavelength per domain sets the element
+//! Meshes sized by the physics of the study (`physics_size`, `meshing::mesh_for_sizing`, the sizing stated from the problem): the wavelength per domain sets the element
 //! size, and the mode index the solver then finds agrees with the closed form of a PEC guide.
 use femcore::meshing::geomdrive::evaluate;
 use femcore::meshing::physics_size::PhysicsSizing;
-use femcore::meshing::{mesh_for_problem, Adaptive, MeshPlan, Mesher};
-use femcore::problem::*;
+use common::{adapt_tets, mesh_for_problem};
+use femcore::meshing::{Adaptive, MeshPlan, Mesher};
+use nyx_ems::Study;
+use femcore::props::*;
 use geom::model::{Model, RegionKind};
 use nyx_ems::C0;
 use nyx_physics::SolveResult;
 
 const WR90: (f64, f64) = (22.86e-3, 10.16e-3);
 
-fn guide(eps: f64, freq: f64, order: usize, n_target: f64) -> ProblemSpec {
-    let mut s = ProblemSpec::new(Physics::Emw);
+fn guide(eps: f64, freq: f64, order: usize, n_target: f64) -> common::Spec {
+    let mut s = common::Spec::emw();
     s.order = order;
     s.materials.default.insert("eps_r".into(), eps);
     s.study = Study::Modes { freq, n_target, evanescent: false, n_modes: 3 };
@@ -42,7 +44,7 @@ fn neff_error(order: usize, ppw: Option<f64>) -> (f64, usize) {
     };
     let sz = PhysicsSizing { points_per_wavelength: ppw, ..PhysicsSizing::default() };
     let (g, _) = mesh_for_problem(&plate_model().list, &plan, &spec, &sz).unwrap();
-    let r = common::solve_old(&g.mesh, &spec).unwrap();
+    let r = common::solve_spec(&g.mesh, &spec).unwrap();
     let best = r.solutions.iter().map(|s| (common::neff(s).0 - exact).abs()).fold(f64::MAX, f64::min);
     (best, g.mesh.n_cells())
 }
@@ -72,7 +74,7 @@ fn a_higher_index_domain_gets_a_finer_mesh() {
     let core = m.rect("core", (-0.3e-3, -0.3e-3), (0.3e-3, 0.3e-3));
     m.overlay_full(&[("clad", clad, RegionKind::Material, None), ("core", core, RegionKind::Material, None)], &[]);
     let ev = evaluate(&m.list).unwrap();
-    let mut spec = ProblemSpec::new(Physics::Emw);
+    let mut spec = common::Spec::emw();
     spec.order = 1;
     spec.study = Study::Modes { freq: 100e9, n_target: 2.0, evanescent: false, n_modes: 2 };
     let g0 =
@@ -122,8 +124,8 @@ fn loaded_box() -> Model {
     m
 }
 
-fn loaded_spec(g: &MeshedGeom) -> ProblemSpec {
-    let mut s = ProblemSpec::new(Physics::Emw);
+fn loaded_spec(g: &MeshedGeom) -> common::Spec {
+    let mut s = common::Spec::emw();
     s.order = 2;
     s.materials.set(g.domain("clad").unwrap(), "eps_r", 1.0);
     s.materials.set(g.domain("core").unwrap(), "eps_r", 9.0);
@@ -132,7 +134,7 @@ fn loaded_spec(g: &MeshedGeom) -> ProblemSpec {
 }
 
 fn first_neff(g: &MeshedGeom) -> (SolveResult, f64) {
-    let r = common::solve_old(&g.mesh, &loaded_spec(g)).unwrap();
+    let r = common::solve_spec(&g.mesh, &loaded_spec(g)).unwrap();
     let n = common::neff(&r.solutions[0]).0;
     (r, n)
 }
@@ -184,7 +186,6 @@ fn e_field_components_as_one_vector_need_fewer_cells_than_intersected_components
 
 mod common;
 use femcore::adapt::ops3::AdaptOptions3;
-use femcore::meshing::physics_size::adapt_tets;
 
 fn cavity_modes(a: f64, b: f64, d: f64, fmax: f64) -> Vec<f64> {
     let mut out = vec![];
@@ -215,13 +216,13 @@ fn a_cavity_meshed_from_its_physics_reproduces_the_first_modes() {
     let exact = cavity_modes(a, b, d, 20e9);
     for order in [1usize, 2] {
         let start = common::block(a, b, d, 2, 2, 2);
-        let mut spec = ProblemSpec::new(Physics::Emw);
+        let mut spec = common::Spec::emw();
         spec.order = order;
         spec.materials.default.insert("eps_r".into(), 1.0);
-        spec.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * exact[0] };
+        spec.study = Study::Cavity { n_modes: 4, f_search: 0.9 * exact[0] };
         let (mesh, report) =
             adapt_tets(&start, &spec, &PhysicsSizing::default(), a, 0.4, &AdaptOptions3::default()).unwrap();
-        let r = common::solve_old(&mesh, &spec).unwrap();
+        let r = common::solve_spec(&mesh, &spec).unwrap();
         let got: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
         let worst = got.iter().zip(&exact).map(|(g, e)| (g / e - 1.0).abs()).fold(0.0, f64::max);
         eprintln!(
@@ -244,10 +245,10 @@ fn a_real_stretch_layer_on_an_adapted_cavity_equals_the_longer_cavity() {
     let (a, b, d) = (0.04, 0.03, 0.02);
     let exact = cavity_modes(a, b, 2.0 * d, 20e9);
     let start = common::block(a, b, d, 2, 2, 2);
-    let mut spec = ProblemSpec::new(Physics::Emw);
+    let mut spec = common::Spec::emw();
     spec.order = 2;
     spec.materials.default.insert("eps_r".into(), 1.0);
-    spec.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * exact[0] };
+    spec.study = Study::Cavity { n_modes: 4, f_search: 0.9 * exact[0] };
     let (phys, _) = adapt_tets(&start, &spec, &PhysicsSizing::default(), a, 0.4, &AdaptOptions3::default()).unwrap();
     let mut pspec = PmlSpec::<3>::uniform(0.0, 0);
     pspec.thickness[2][1] = 0.5 * d;
@@ -260,8 +261,8 @@ fn a_real_stretch_layer_on_an_adapted_cavity_equals_the_longer_cavity() {
     );
     apply_materials(&pb, &mut spec.materials);
     // PML cells of the face region carry a z stretch only
-    assert!(pb.pml.values().all(|p| p.z != femcore::problem::PmlDir::Off && p.x == femcore::problem::PmlDir::Off));
-    let r = common::solve_old(&pb.mesh, &spec).unwrap();
+    assert!(pb.pml.values().all(|p| p.z != femcore::props::PmlDir::Off && p.x == femcore::props::PmlDir::Off));
+    let r = common::solve_spec(&pb.mesh, &spec).unwrap();
     let got: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
     let worst = got.iter().zip(&exact).map(|(g, e)| (g / e - 1.0).abs()).fold(0.0, f64::max);
     eprintln!(
@@ -281,17 +282,17 @@ fn layers_on_all_six_sides_with_a_unit_stretch_equal_the_bigger_cavity() {
     let (a, b, d, t) = (0.04, 0.03, 0.02, 0.01);
     let exact = cavity_modes(a + 2.0 * t, b + 2.0 * t, d + 2.0 * t, 20e9);
     let phys = common::block(a, b, d, 4, 3, 2);
-    let mut spec = ProblemSpec::new(Physics::Emw);
+    let mut spec = common::Spec::emw();
     spec.order = 2;
     spec.materials.default.insert("eps_r".into(), 1.0);
-    spec.study = Study::Eigenfrequency { n_modes: 4, f_search: 0.9 * exact[0] };
+    spec.study = Study::Cavity { n_modes: 4, f_search: 0.9 * exact[0] };
     let mut pspec = PmlSpec::<3>::uniform(t, 2);
     pspec.outer_label = Some(1);
     let pb = add_pml_3d(&phys, &pspec, 0.0, 0.0, 1.0).unwrap();
     assert_eq!(pb.pml.len(), 26);
     assert!(pb.split.hexes > 0 && pb.split.prisms > 0);
     apply_materials(&pb, &mut spec.materials);
-    let r = common::solve_old(&pb.mesh, &spec).unwrap();
+    let r = common::solve_spec(&pb.mesh, &spec).unwrap();
     let got: Vec<f64> = r.solutions.iter().map(|s| s.value.unwrap()).collect();
     let worst = got.iter().zip(&exact).map(|(g, e)| (g / e - 1.0).abs()).fold(0.0, f64::max);
     eprintln!(
@@ -310,18 +311,18 @@ fn pml_end_modes(n: usize, layers: usize, strength: f64, t: f64) -> Vec<(f64, f6
     use femcore::meshing::pml_box::PmlSpec;
     let (a, b, d) = (0.04, 0.03, 0.02);
     let phys = common::block(a, b, d, n, n * 3 / 4, n * 3 / 4);
-    let mut spec = ProblemSpec::new(Physics::Emw);
+    let mut spec = common::Spec::emw();
     spec.order = 2;
     spec.materials.default.insert("eps_r".into(), 1.0);
     let f101 = 0.5 * C0 * ((1.0 / a).powi(2) + (1.0 / (2.0 * d)).powi(2)).sqrt();
-    spec.study = Study::Eigenfrequency { n_modes: 3, f_search: f101 };
+    spec.study = Study::Cavity { n_modes: 3, f_search: f101 };
     let mut pspec = PmlSpec::<3>::uniform(0.0, 0);
     pspec.thickness[2][1] = t;
     pspec.layers[2][1] = layers;
     pspec.outer_label = Some(4);
     let pb = add_pml_3d(&phys, &pspec, strength, 2.0, 1.0).unwrap();
     apply_materials(&pb, &mut spec.materials);
-    let r = common::solve_old(&pb.mesh, &spec).unwrap();
+    let r = common::solve_spec(&pb.mesh, &spec).unwrap();
     (1..=r.solutions.len())
         .map(|j| {
             let f = r.solutions[j - 1].value.unwrap();
@@ -363,10 +364,10 @@ fn the_3d_loop_beats_uniform_meshes_for_a_cavity_mode_at_order_two() {
     use femcore::adapt::estimate3::{solve_adaptively3, LoopSettings3};
     let (a, b, d) = (0.04, 0.03, 0.02);
     let exact = cavity_modes(a, b, d, 20e9)[0];
-    let mut spec = ProblemSpec::new(Physics::Emw);
+    let mut spec = common::Spec::emw();
     spec.order = 2;
     spec.materials.default.insert("eps_r".into(), 1.0);
-    spec.study = Study::Eigenfrequency { n_modes: 1, f_search: 0.9 * exact };
+    spec.study = Study::Cavity { n_modes: 1, f_search: 0.9 * exact };
     let start = common::block(a, b, d, 2, 2, 2);
     let mut st = LoopSettings3::new(a / 2.0);
     st.estimator = Estimator {
@@ -377,7 +378,7 @@ fn the_3d_loop_beats_uniform_meshes_for_a_cavity_mode_at_order_two() {
     st.max_cycles = 3;
     st.rel_tol = 1e-5;
     let mut solve = |m: &femcore::mesh::SimplexMesh| {
-        let r = common::solve_old(m, &spec)?;
+        let r = common::solve_spec(m, &spec)?;
         let f = r.solutions[0].value.ok_or("no frequency")?;
         Ok((r, f))
     };
@@ -400,11 +401,11 @@ fn the_3d_loop_against_uniform_blocks() {
     let (a, b, d) = (0.04, 0.03, 0.02);
     let exact = cavity_modes(a, b, d, 20e9)[0];
     for order in [1usize, 2] {
-        let mut spec = ProblemSpec::new(Physics::Emw);
+        let mut spec = common::Spec::emw();
         spec.order = order;
         spec.materials.default.insert("eps_r".into(), 1.0);
-        spec.study = Study::Eigenfrequency { n_modes: 1, f_search: 0.9 * exact };
-        let f = |m: &femcore::mesh::SimplexMesh| common::solve_old(m, &spec).unwrap().solutions[0].value.unwrap();
+        spec.study = Study::Cavity { n_modes: 1, f_search: 0.9 * exact };
+        let f = |m: &femcore::mesh::SimplexMesh| common::solve_spec(m, &spec).unwrap().solutions[0].value.unwrap();
         for (nx, ny, nz) in [(2, 2, 2), (3, 2, 2), (4, 3, 2), (5, 4, 3), (7, 5, 4)] {
             let m = common::block(a, b, d, nx, ny, nz);
             eprintln!("order {order} uniform {:5} tets error {:.2e}", m.n_cells(), (f(&m) / exact - 1.0).abs());
@@ -417,7 +418,7 @@ fn the_3d_loop_against_uniform_blocks() {
         };
         st.max_cycles = 4;
         let mut solve = |m: &femcore::mesh::SimplexMesh| {
-            let r = common::solve_old(m, &spec)?;
+            let r = common::solve_spec(m, &spec)?;
             let q = r.solutions[0].value.ok_or("no frequency")?;
             Ok((r, q))
         };

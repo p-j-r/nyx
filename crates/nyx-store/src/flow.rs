@@ -29,7 +29,7 @@ pub const MERGE_SECS: i64 = 300;
 pub struct WorkflowDir {
     pub root: PathBuf,
     pub wf: Workflow,
-    /// Makes the search card of an experiment from its spec value. The default reads the old `Project` shape; the engine sets its own
+    /// Makes the search card of an experiment from its spec value. The default reads only the title; the engine sets its own
     /// (`create_with`, `open_with`), because the store does not know what a project looks like (R21, R25).
     pub card_of: CardFn,
 }
@@ -37,16 +37,9 @@ pub struct WorkflowDir {
 /// A function from the value of a spec to its card.
 pub type CardFn = fn(&serde_json::Value) -> Card;
 
-/// The value of a spec text: JSON when it starts with `{` (the engine's projects), the old `nyx_project` XML otherwise.
-fn parse_spec(xml: &str) -> Result<serde_json::Value, String> {
-    if xml.trim_start().starts_with('{') {
-        return serde_json::from_str(xml).map_err(|e| format!("not a nyx project: {e}"));
-    }
-    let (root, v) = femcore::xmlio::xml_to_value(xml)?;
-    if root != "nyx_project" {
-        return Err(format!("not a nyx project: root element is <{root}>"));
-    }
-    Ok(v)
+/// The value of a spec text: the project as JSON.
+fn parse_spec(text: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(text).map_err(|e| format!("not a nyx project: {e}"))
 }
 
 impl WorkflowDir {
@@ -83,7 +76,7 @@ impl WorkflowDir {
 
     /// Like `create` with a chosen id (a draft that has lived in a tab keeps the id it was shown under).
     pub fn create_as(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_xml: &str) -> Result<WorkflowDir, String> {
-        Self::create_with(workspace, id, title, origin, spec_xml, crate::card::from_value)
+        Self::create_with(workspace, id, title, origin, spec_xml, crate::card::plain)
     }
 
     /// Like `create_as` with the function that makes cards from specs.
@@ -102,7 +95,7 @@ impl WorkflowDir {
     }
 
     pub fn open(root: &Path) -> Result<WorkflowDir, String> {
-        Self::open_with(root, crate::card::from_value)
+        Self::open_with(root, crate::card::plain)
     }
 
     /// Like `open` with the function that makes cards from specs.
@@ -391,18 +384,9 @@ pub(crate) mod tests {
     use super::*;
     use serde_json::json;
 
-    /// A minimal project XML (what the app would save) with a rectangle of width `w`.
+    /// A minimal project (JSON) with a title, for tests that need a spec: `w` and `n_modes` make two specs differ.
     pub fn spec_xml(w: f64, n_modes: usize) -> String {
-        let v = json!({
-            "version": 1,
-            "geometry": {"geometry": {"Shapes": {"spec": {"parts": [{"shape": {"Rect": {"x0": 0.0, "y0": 0.0, "x1": w, "y1": 2.2e-7}}, "domain": 1, "h": null}], "h": 5e-8, "min_angle_deg": 25.0}, "extrude": null}}, "domains": [], "boundaries": []},
-            "source": "Generated",
-            "active": "Emw",
-            "specs": [{"physics": "Emw", "order": 2, "materials": {"default": {"eps_r": 1.0}, "domains": {"1": {"eps_r": 12.08}}},
-                       "study": {"Modes": {"freq": 1.9341e14, "n_target": 2.4, "evanescent": false, "n_modes": n_modes}}}],
-            "colormap": "Viridis"
-        });
-        femcore::xmlio::value_to_xml("nyx_project", &v).unwrap()
+        json!({ "title": format!("rectangle {w:e} m, {n_modes} modes"), "width": w, "n_modes": n_modes }).to_string()
     }
 
     pub fn tmp(tag: &str) -> PathBuf {
@@ -419,7 +403,7 @@ pub(crate) mod tests {
         assert_eq!(d.wf.version, 1);
         assert_eq!(d.history().len(), 1);
         let e1 = d.wf.experiments[0].id.clone();
-        assert!(d.wf.experiments[0].card.summary.contains("1550 nm"), "{}", d.wf.experiments[0].card.summary);
+        assert!(d.wf.experiments[0].card.summary.contains("rectangle"), "{}", d.wf.experiments[0].card.summary);
 
         // an unchanged spec is not a new version; a changed one is, and a quick second change merges into it
         assert_eq!(d.commit_spec(&e1, &spec_xml(5e-7, 4)).unwrap(), None);
@@ -427,7 +411,7 @@ pub(crate) mod tests {
         assert_eq!(d.commit_spec(&e1, &spec_xml(5.5e-7, 6)).unwrap(), Some(2), "merged");
         let h = d.history();
         assert_eq!(h.len(), 2);
-        assert!(h[1].changes.iter().any(|c| c.path.ends_with("x1")) && h[1].changes.iter().any(|c| c.path.ends_with("n_modes")), "{:?}", h[1].changes);
+        assert!(h[1].changes.iter().any(|c| c.path.ends_with("width")) && h[1].changes.iter().any(|c| c.path.ends_with("n_modes")), "{:?}", h[1].changes);
 
         // a run on v2 stops later edits merging into it
         let rec = RunRecord { sec: 0.11, params: [("w".to_string(), 5.5e-7)].into(), metrics: [("neff_re".to_string(), 2.44)].into(), ..Default::default() };

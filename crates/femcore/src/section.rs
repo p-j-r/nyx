@@ -19,7 +19,7 @@
 
 use crate::material::{M3, M6};
 use crate::mesh::SimplexMesh;
-use crate::problem::*;
+use crate::props::*;
 
 /// Wafer axis (0 = x, 1 = y, 2 = z) of each axis of a mesh of dimension `dim`.
 pub fn wafer_axes(dim: usize) -> &'static [usize] {
@@ -127,32 +127,11 @@ pub fn local_component(i: usize) -> (&'static str, f64) {
     (["x", "z", "y"][i], LOCAL_AXES[i].1)
 }
 
-/// Refuses what a wafer-frame 2D problem cannot say: there is no y axis in the plane of a cross-section.
-pub fn check_wafer_input(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<(), String> {
-    if mesh.dim == 2 {
-        let bad = spec
-            .materials
-            .pml
-            .iter()
-            .map(|(d, p)| ("domain", *d, p))
-            .find(|(_, _, p)| p.y != PmlDir::Off);
-        if let Some((what, d, _)) = bad {
-            return Err(format!("the perfectly matched layer of {what} {d} absorbs along y, which is out of the plane of a 2D cross-section (x-z): use z for the direction of the surface normal"));
-        }
-    }
-    Ok(())
-}
-
 /// The three axes of a 3D problem that play the roles of the cross-section: `(lateral, normal, propagation)` as indices of x, y, z,
 /// and whether that triple is left-handed (then the sense of rotation of the field must be read the other way round).
 ///
 /// The propagation axis is the axis a Floquet pair of the problem is periodic along (the first one found); without periodic
 /// conditions it is `y`. The surface normal is `z` unless the problem is periodic along z, then `y`.
-pub fn axes_of_3d_problem(spec: &ProblemSpec, mesh: &SimplexMesh) -> ([usize; 3], bool) {
-    axes_of_3d_periodic(&spec.periodic, mesh)
-}
-
-/// `axes_of_3d_problem` from the Floquet pairs alone (what a physics crate has).
 pub fn axes_of_3d_periodic(periodic: &[Periodic], mesh: &SimplexMesh) -> ([usize; 3], bool) {
     let mut long = 1;
     // a Floquet pair maps the facets of `source` onto those of `dest`: the periodic axis is the one the two groups differ in

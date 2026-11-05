@@ -103,7 +103,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/solve.rs` | 9, 1 | |
 | `crates/femcore/src/section.rs` | 1 | |
 | `crates/femcore/src/props.rs` | 41, 25 | shared per-domain data (materials, PML, periodic pairs, linear solver); replaced by material files in phase 6 |
-| `crates/femcore/src/testkit.rs` | 41, 10 | mesh fixtures of the tests of every physics crate |
+| `crates/femcore/src/testkit/*` | 41, 10, 60 | mesh fixtures of the tests of every physics crate; `soi.rs`, the cross-section of the SOI wire |
+| `examples/*` | 60 | the example projects, written by `nyx-engine/tests/make_examples.rs` |
 | `crates/femcore/src/periodic.rs` | 12, 9 | Floquet pairs; belongs to no single physics |
 | `crates/femcore/src/edge.rs` | 45, 9 | the 2D edge-element basis shared by the ems kernels and the field sampler (split out of `ems.rs`) |
 | `crates/femcore/src/pml.rs` | 45, 7 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`) |

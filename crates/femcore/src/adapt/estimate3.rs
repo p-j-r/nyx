@@ -15,7 +15,7 @@ use crate::adapt::ops3::AdaptOptions3;
 use crate::adapt::topo3::TopoOptions3;
 use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
 use crate::adapt::PlotFields;
-use crate::problem::SolveResult;
+
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -216,7 +216,7 @@ pub struct Cycle3 {
     pub solve_seconds: f64,
 }
 
-pub struct LoopResult3<R = SolveResult> {
+pub struct LoopResult3<R> {
     pub mesh: SimplexMesh,
     pub result: R,
     pub cycles: Vec<Cycle3>,

@@ -20,7 +20,7 @@ use crate::adapt::work::simplex_to_adapt;
 use crate::adapt::field::BackgroundMetric2;
 use crate::meshing::{adapt_to_field, adapt_to_metrics, geometry_floor, Adaptive};
 use crate::adapt::PlotFields;
-use crate::problem::SolveResult;
+
 use geom::model::FeatureList;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -277,7 +277,7 @@ pub struct Cycle {
     pub solve_seconds: f64,
 }
 
-pub struct LoopResult<R = SolveResult> {
+pub struct LoopResult<R> {
     /// the last mesh and its solution
     pub geom: MeshedGeom,
     pub result: R,
