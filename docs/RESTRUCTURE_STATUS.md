@@ -16,7 +16,7 @@ Last updated: 2026-11-04, by the foundation session.
 | 2 | femcore: one mesh model, all meshing | ready | `restructure-2-mesh` | see "Parallel work" |
 | 3 | femcore: one linear algebra | ready (gate G2 before it ends) | `restructure-3-linalg` | |
 | 3x | G2 experiment (read-only) | ready | `restructure-3x-g2-experiment` | |
-| 4 | nyx-physics content, kernels into the physics crates | waits for 2 and 3 | | the interface exists (F); gate G3 answered |
+| 4 | nyx-physics content, kernels into the physics crates | **done** (awaiting acceptance) | `restructure-4-physics` | the interface exists (F); gate G3 answered |
 | 5 | nyx-analysis | waits for 4 | | |
 | 6 | Materials | ready (G4 answered: TOML) | `restructure-6-materials` | |
 | 7 | nyx-engine, MCP parity, thin app | waits for 4, 5, 6 | | gate G5; 7a (connect merge) is ready now |
@@ -372,3 +372,28 @@ Updated 2026-11-04. **State: `sms` is moved into `nyx-sms`; goldens unchanged.**
 3. Anisotropic stiffness cannot be given through the envelope until the material files (phase 6).
 4. Descriptor `fields` for the eigenfrequency study lists `u`; a lossy mode has `Re ux`, `Re uz` (ADR 42 point 4).
 5. Benchmarks of the solid examples not re-timed (shared machine).
+
+### Phase 4 close (physics session, 2026-11-05): merge of sms and ems, checks, benchmarks
+
+* **Merge** of `restructure-4-sms` (e13f322f) and `restructure-4-ems` (10baedf0) into `restructure-4-physics`. Conflicts were the ones ADR 44 and the ems notes predicted: `cell_stretches` is `femcore::pml::cell_stretches` (the ems thread made it; `nyx-sms` imports it from there); the `lap` change touched `ems3d.rs`, which moved into `nyx-ems`; each thread had left the other physics' half in the shared femcore test files (`anisotropic`, `axisym_closed_form`, `contracts`, `frame_roundtrip`, `golden_frames`, `stages`): both halves had moved into their crates, so they were dropped and the emptied files deleted. `femcore::solve` had no live arm left and is deleted; `nyx_engine::legacy` runs all three physics. `femcore/src` no longer holds a physics kernel (`ems3d`, `sms_kz`, `sms_pml` deleted). `tools/baseline.sh` runs `bench`, `profile3d`, `mem_profile` and `cavity_bench` from `nyx-engine` (the examples that drive every physics).
+* **Checks on the tip**: `cargo test --release --workspace --no-fail-fast`: **790 passed, 0 failed, 9 ignored**. The two SOI-wire goldens pass at the G2 tolerances (the ems thread's work: 5e-5 relative on n_eff, 1e-3 on field maxima), every other golden is the original file at its original tolerance. `cargo clippy -D warnings` clean for the six new crates, layering test passes, `check_code_to_adr.sh` passes.
+* **Benchmarks** (plan section 5 item 4: best of three, control run of the parent commit `718cd218` = the merge of phases 2 and 3 with the rename, interleaved control/new, `BENCH_ONLY=1 tools/baseline.sh`; the machine is about 1.8x slower than at the phase 0 baseline and was not otherwise idle, so single values vary, e.g. 3D eigensolve 41 to 66 s). Best of three, control against phase 4 tip, wall seconds:
+
+| Case | control | phase 4 | change |
+|---|---|---|---|
+| `bench` total | 63.0 | 62.3 | -1 % |
+| electrostatics 2D (38,697 dofs) | 0.08 | 0.09 | +0.01 s (see below) |
+| solid static 2D | 0.23 | 0.22 | -4 % |
+| solid 6 eigenfrequencies 2D | 0.83 | 0.81 | -2 % |
+| solid static 3D | 2.29 | 2.29 | 0 |
+| solid 6 eigenfrequencies 3D | 41.91 | 40.99 | -2 % |
+| solid static 3D direct | 11.26 | 11.23 | 0 |
+| solid static 3D AMG-CG | 3.56 | 3.62 | +2 % |
+| EM modes 2D (Nedelec 2) | 1.94 | 1.98 | +2 % |
+| `profile3d 16 16 16 p2` | 2.15 | 2.15 | 0 |
+| `mem_profile 12 12 12 p2 static auto` | 1.26 | 1.33 | +5 % (a 1.3 s process, start-up dominated) |
+| `cavity_bench 0.012 2` | 4.03 | 4.12 | +2 % |
+| `solve_scaling` | 18.1 | 18.2 | +1 % |
+
+  Everything is inside the 10 % rule. The one visible difference is electrostatics 2D, 0.08 to 0.09 s: the window bridge now converts the solver mesh to the exchange mesh and each solve builds its numbering again (`Mesh::from_solver_mesh`, `discretise`), a fixed cost of about 10 ms on a 77,000-cell mesh that does not grow with the solve. Raw logs: `C:\Users\robin-adm\Documents\opomech\nyx2-bench` (outside the repository; delete when accepted). The control workspace `nyx2-phase4-ctl` was forgotten and its folder removed; its build products are in the shared `nyx2-target`.
+* **Plan definition of done** (section 3, phase 4): the kernels of `dfs`, `sms`, `ems` are in their crates with typed problems decoded from the envelope (R10: the EM study is named in the study; R12: property names are validated against the descriptors by `validate_spec`; R19: the explicit `Ctx` replaces the thread-local); `registry.get(id).solve(...)` solves (engine test `dfs_solves_the_strip_through_the_engine`, the coupled chain, the use-case tests); nothing outside the physics crates and `nyx-engine` names a physics (layering test). Not done, on purpose: the old window problem (`femcore::problem`) and the bridge stay until phase 7; `problem_spec.v1.json` stays until then, `problem_spec.v2` and the `physics_*` exemplars are the envelope contracts; `physics_size::spec_sizing` and `mesh_for_problem` (adapters of the old problem) stay until the window is rewired; native quadrilateral/prism/hexahedron elements (golden-changing) are a later step.
