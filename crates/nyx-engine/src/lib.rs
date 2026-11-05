@@ -20,11 +20,16 @@ pub mod engine;
 pub mod geomdesc;
 pub mod geometry;
 pub mod guide;
+#[cfg(feature = "hdf5")]
+pub mod h5io;
+#[cfg(feature = "hdf5")]
+pub mod xdmf;
 pub mod jobs;
 pub mod materials;
 
 pub mod meshing;
 pub mod pml;
+pub mod results_file;
 pub mod project;
 pub mod solve;
 pub mod store_link;

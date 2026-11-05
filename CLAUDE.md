@@ -33,6 +33,7 @@ cargo clippy --release -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-an
 cargo fmt -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine   # the new crates are rustfmt-formatted (settings as geom)
 cargo test --release -p femcore -p geom -p nyx-store -p nyx-mcp -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-engine --test contracts --test layering   # interface contracts (ADR 19)
 bash docs/architecture/check_code_to_adr.sh                 # every file has an ADR row
+HDF5_DIR=<prefix of the HDF5 library> cargo test --release -p nyx-engine --features hdf5 --test h5   # results files (needs the library, its bin folder on PATH)
 bash tools/baseline.sh <dir>                                # test counts and the five benchmark timings (BENCH_ONLY=1 for timings only)
 ```
 
@@ -52,7 +53,7 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 
 ## Known state of the checks (phase 7, 2026-11-05, Windows, Rust 1.99.1)
 
-* `cargo test --release --workspace --no-fail-fast`: 887 pass, 10 ignored, 0 fail (phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
+* `cargo test --release --workspace --no-fail-fast`: 889 pass, 10 ignored, 0 fail (phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
 * `cargo clippy -D warnings` is clean for `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis` and `nyx-engine`; the old `femcore` code has a few warnings left. `cargo fmt --check` fails for the old code (R23, decided in phase 9).
 * The numbers and timings of the pre-restructure state and of each phase are in `docs/RESTRUCTURE_STATUS.md`.
 

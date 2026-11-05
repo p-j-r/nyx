@@ -18,3 +18,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 [dev-dependencies]
 # fixtures of the drawing tests (a meshed plate and block); normal dependencies are only the engine and the connect crate (layering table)
 femcore = { path = "../femcore" }
+
+[features]
+# the results of every run in HDF5 files (needs the HDF5 library; set HDF5_DIR to its install prefix)
+hdf5 = ["nyx-engine/hdf5"]

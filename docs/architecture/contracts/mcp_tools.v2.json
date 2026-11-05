@@ -894,6 +894,24 @@
     {
       "annotations": {
         "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Write the results to an HDF5 file"
+      },
+      "arguments": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "name": "export_results",
+      "required": [
+        "path"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": true,
@@ -1370,6 +1388,24 @@
       },
       "name": "result_info",
       "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Describe an HDF5 results file"
+      },
+      "arguments": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "name": "results_file_info",
+      "required": [
+        "path"
+      ]
     },
     {
       "annotations": {

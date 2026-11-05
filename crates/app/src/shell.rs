@@ -572,6 +572,8 @@ impl App {
         let w = self.shell.open.get_mut(&rc.wf_id)?;
         if log.is_some() {
             rec.artifacts.push(nyx_engine::facade::store::runs::Artifact { kind: "log".into(), path: "log.txt".into(), bytes: 0 });
+            #[cfg(feature = "hdf5")]
+            rec.artifacts.push(nyx_engine::facade::store::runs::Artifact { kind: "result".into(), path: "results.h5".into(), bytes: 0 });
         }
         let res = w.dir.as_mut()?.record_run(&rc.exp, rec, &rc.spec_json);
         match res {
@@ -581,6 +583,10 @@ impl App {
                     let dir = d.run_dir(&rc.exp, &r.id);
                     let _ = std::fs::create_dir_all(&dir);
                     let _ = std::fs::write(dir.join("log.txt"), text);
+                    #[cfg(feature = "hdf5")]
+                    if let Err(e) = self.engine.export_results(&dir.join("results.h5").to_string_lossy()) {
+                        self.error = Some(format!("Results file: {e}"));
+                    }
                 }
                 if let Some(ws) = &self.shell.ws {
                     // housekeeping after each run, by the person's own settings (the defaults delete nothing)

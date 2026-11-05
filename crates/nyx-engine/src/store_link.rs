@@ -166,13 +166,14 @@ impl StoreLink {
     }
 
     /// Adds a run to the table: the project as it was solved (frozen), the metrics of the results and the stage log. The heavy files
-    /// (`result_<physics>.json`, `log.txt`) go in the run's folder, which can be deleted without losing the record.
+    /// (`results.h5` with the project, the mesh and all fields in a build with HDF5, else `result_<physics>.json`; `log.txt`) go in the run's folder, which can be deleted without losing the record.
     pub fn record(
         &mut self,
         project: &Project,
         outcome: RunOutcome,
         seconds: f64,
         log: &[String],
+        mesh: Option<&femcore::mesh::SimplexMesh>,
     ) -> Result<RunRecord, Error> {
         self.commit(project)?;
         let (existing, _) = self.dir.runs(&self.experiment);
@@ -191,6 +192,8 @@ impl StoreLink {
         }
         let run_dir = self.dir.run_dir(&self.experiment, &id);
         let mut artifacts = vec![];
+        #[allow(unused_mut)]
+        let mut extra: Vec<Artifact> = vec![];
         let mut write = |name: &str, kind: &str, bytes: Vec<u8>| -> Result<(), Error> {
             std::fs::create_dir_all(&run_dir).map_err(|e| Error::invalid(format!("{}: {e}", run_dir.display())))?;
             let path = run_dir.join(name);
@@ -211,9 +214,24 @@ impl StoreLink {
                     for (k, v) in metrics_of(r) {
                         rec.metrics.insert(format!("{prefix}{k}"), v);
                     }
-                    let text = serde_json::to_vec(r).map_err(|e| Error::invalid(e.to_string()))?;
-                    write(&format!("result_{}.json", r.physics), "result", text)?;
+                    #[cfg(not(feature = "hdf5"))]
+                    {
+                        let text = serde_json::to_vec(r).map_err(|e| Error::invalid(e.to_string()))?;
+                        write(&format!("result_{}.json", r.physics), "result", text)?;
+                    }
                 }
+                #[cfg(feature = "hdf5")]
+                if let Some(mesh) = mesh {
+                    std::fs::create_dir_all(&run_dir).map_err(|e| Error::invalid(format!("{}: {e}", run_dir.display())))?;
+                    let path = run_dir.join("results.h5");
+                    let refs: Vec<(String, &SolveResult)> = results.iter().map(|r| (r.physics.clone(), r)).collect();
+                    crate::h5io::write_results(&path, project, mesh, &refs).map_err(Error::invalid)?;
+                    let x = crate::xdmf::write_xdmf(&path, mesh, &refs).map_err(Error::invalid)?;
+                    extra.push(Artifact { kind: "result".into(), path: format!("runs/{id}/results.xdmf"), bytes: std::fs::metadata(&x).map(|m| m.len()).unwrap_or(0) });
+                    extra.push(Artifact { kind: "result".into(), path: format!("runs/{id}/results.h5"), bytes: crate::h5io::file_bytes(&path) });
+                }
+                #[cfg(not(feature = "hdf5"))]
+                let _ = mesh;
             }
             RunOutcome::Failed(e) => {
                 rec.status = if matches!(e, Error::Cancelled) { RunStatus::Cancelled } else { RunStatus::Failed };
@@ -223,6 +241,7 @@ impl StoreLink {
         if !log.is_empty() {
             write("log.txt", "log", format!("{}\n", log.join("\n")).into_bytes())?;
         }
+        artifacts.extend(extra);
         rec.artifacts = artifacts;
         let spec = project.to_json();
         self.dir.record_run(&self.experiment, rec, &spec).map_err(store_err)

@@ -263,9 +263,10 @@ impl Engine {
     }
 
     fn record(&mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String]) -> Value {
+        let mesh = self.model.as_ref().map(|(_, m)| m.solver_mesh());
         match self.link.as_mut() {
             None => Value::Null,
-            Some(l) => match l.record(project, outcome, seconds, log) {
+            Some(l) => match l.record(project, outcome, seconds, log, mesh.as_deref()) {
                 Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
                 Err(e) => json!({ "error": e.to_string() }),
             },

@@ -1089,6 +1089,44 @@
     "title": "Check mesh convergence"
   },
   {
+    "access": "expensive",
+    "description": "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support.",
+    "name": "export_results",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "file path, .h5",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "title": "Write the results to an HDF5 file"
+  },
+  {
+    "access": "read",
+    "description": "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.",
+    "name": "results_file_info",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "file path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "title": "Describe an HDF5 results file"
+  },
+  {
     "access": "read",
     "description": "The analyses of results (polarization of the modes) and which solved physics each applies to.",
     "name": "list_analyses",

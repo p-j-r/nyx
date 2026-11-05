@@ -16,6 +16,9 @@ femcore = { path = "../femcore" }
 geom = { path = "../geom" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# results files (ADR 62); needs the HDF5 library at build time (set HDF5_DIR to its install prefix)
+hdf5-metno = { version = "0.15", optional = true }
+quick-xml = { version = "0.41", optional = true }
 
 [features]
 # the physics compiled into a build (plan: physics are compiled in, run-time plug-ins are out of scope)
@@ -23,4 +26,6 @@ default = ["dfs", "sms", "ems"]
 dfs = ["dep:nyx-dfs"]
 sms = ["dep:nyx-sms"]
 ems = ["dep:nyx-ems"]
+# results in HDF5 files (export_results, results_file_info, results.h5 in every recorded run)
+hdf5 = ["dep:hdf5-metno", "dep:quick-xml"]
 

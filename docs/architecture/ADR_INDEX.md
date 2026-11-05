@@ -62,3 +62,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 59 | [The store knows nothing of a project](adr/0059-the-store-knows-nothing-of-a-project.md) | `nyx-store` |
 | 60 | [The examples are project files; the use cases are gone](adr/0060-examples-are-project-files-and-use-cases-are-gone.md) | `examples/`, `app/examples.rs` |
 | 61 | [Mesh convergence is an engine command](adr/0061-convergence-is-an-engine-command.md) | `nyx-engine::convergence` |
+| 62 | [Results and meshes are stored in HDF5; JSON is for small things](adr/0062-results-are-stored-in-hdf5.md) | `nyx-engine::h5io` |
