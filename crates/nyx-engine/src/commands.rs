@@ -171,6 +171,8 @@ impl Engine {
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
                 schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
             cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
+            cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged.", Expensive,
+                schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report"))], &["physics"])),
             cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes) and which solved physics each applies to.", Read, schema(vec![], &[])),
             cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups.", Read,
                 schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys())], &["analysis", "physics"])),
@@ -422,6 +424,11 @@ impl Engine {
                 self.remove_material(get_str(args, "name")?)?;
                 ok()
             }
+            "convergence_check" => self.convergence_check(
+                get_str(args, "physics")?,
+                args.get("factor").and_then(Value::as_f64).unwrap_or(0.6),
+                args.get("tolerance").and_then(Value::as_f64),
+            ),
             "list_analyses" => Ok(self.list_analyses()),
             "analyse" => self.analyse(get_str(args, "analysis")?, get_str(args, "physics")?),
             "store_save" => self.save_to_workspace(opt_str(args, "workspace").map(Into::into)),

@@ -602,6 +602,42 @@ impl App {
             spec.order = o;
         });
         ui.weak("Options of the physics (plane stress or strain, solver, ...) are in the Physics tab.");
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(RichText::new("Mesh convergence").strong());
+        ui.weak("Solves again on a finer mesh and compares every eigenvalue and scalar. Do this before you trust a number.");
+        let mut start = false;
+        ui.horizontal(|ui| {
+            ui.label("finer by");
+            num(ui, &mut self.conv_factor);
+            ui.label("tolerance");
+            num(ui, &mut self.conv_tol);
+            start = ui.add_enabled(!self.convergence_running && self.busy.is_none(), egui::Button::new("Check convergence")).clicked();
+        });
+        self.conv_factor = self.conv_factor.clamp(0.1, 0.95);
+        if start {
+            self.check_convergence();
+        }
+        if self.convergence_running {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("two solves are running...");
+            });
+        }
+        if let Some(c) = &self.convergence {
+            let ok = c["converged"] == true;
+            ui.colored_label(if ok { Color32::from_rgb(40, 150, 70) } else { Color32::from_rgb(200, 120, 20) }, format!("{} (worst relative difference {:.2e}; {} to {} cells, {:.1} s)", if ok { "converged" } else { "NOT converged" }, c["worst_relative"].as_f64().unwrap_or(f64::NAN), c["cells"]["coarse"], c["cells"]["refined"], c["seconds"].as_f64().unwrap_or(0.0)));
+            egui::Grid::new("conv_rows").num_columns(4).striped(true).show(ui, |ui| {
+                for r in c["rows"].as_array().into_iter().flatten().take(40) {
+                    ui.label(r["quantity"].as_str().unwrap_or(""));
+                    ui.monospace(format!("{:.6e}", r["coarse"].as_f64().unwrap_or(f64::NAN)));
+                    ui.monospace(format!("{:.6e}", r["refined"].as_f64().unwrap_or(f64::NAN)));
+                    let pass = r["converged"] == true;
+                    ui.colored_label(if pass { Color32::from_rgb(40, 150, 70) } else { Color32::from_rgb(200, 120, 20) }, format!("{:.1e}", r["relative"].as_f64().unwrap_or(f64::NAN)));
+                    ui.end_row();
+                }
+            });
+        }
         if spec != spec0 {
             self.set_problem(&active, &spec);
         }

@@ -15,6 +15,7 @@
 pub use nyx_analysis as analysis;
 pub mod analyse;
 pub mod commands;
+pub mod convergence;
 pub mod engine;
 pub mod geomdesc;
 pub mod geometry;

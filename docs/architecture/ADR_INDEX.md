@@ -61,3 +61,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 58 | [The engine resolves named materials from the library and the project](adr/0058-the-engine-resolves-materials-from-the-library-and-the-project.md) | `nyx-physics::decode`, `nyx-engine::materials` |
 | 59 | [The store knows nothing of a project](adr/0059-the-store-knows-nothing-of-a-project.md) | `nyx-store` |
 | 60 | [The examples are project files; the use cases are gone](adr/0060-examples-are-project-files-and-use-cases-are-gone.md) | `examples/`, `app/examples.rs` |
+| 61 | [Mesh convergence is an engine command](adr/0061-convergence-is-an-engine-command.md) | `nyx-engine::convergence` |

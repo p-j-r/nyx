@@ -824,6 +824,35 @@
     {
       "annotations": {
         "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Check mesh convergence"
+      },
+      "arguments": {
+        "factor": {
+          "type": "number"
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "tolerance": {
+          "type": "number"
+        }
+      },
+      "name": "convergence_check",
+      "required": [
+        "physics"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": true,

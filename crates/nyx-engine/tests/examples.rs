@@ -123,3 +123,21 @@ solves! {
     silicon_on_sapphire_solves: "13_silicon_on_sapphire",
     soi_hybrid_wire_solves: "16_soi_hybrid_wire",
 }
+
+#[test]
+fn a_finer_mesh_confirms_or_refutes_a_number_through_convergence_check() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": file("06_wr90_waveguide").to_str().unwrap() })).unwrap();
+    e.call("solve_run", &json!({})).unwrap();
+    let before = e.project().to_json();
+    let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.6, "tolerance": 5e-3 })).unwrap();
+    assert_eq!(r["converged"], true, "{r}");
+    assert!(r["cells"]["refined"].as_u64().unwrap() > r["cells"]["coarse"].as_u64().unwrap(), "{r}");
+    assert!(r["rows"].as_array().unwrap().iter().any(|x| x["quantity"] == "eigenvalue[0].re"), "{r}");
+    assert_eq!(e.project().to_json(), before, "the project is not changed");
+    // a mesh far too coarse is refuted
+    e.call("set_mesh", &json!({ "h": 8e-3 })).unwrap();
+    let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.5, "tolerance": 1e-6 })).unwrap();
+    assert_eq!(r["converged"], false, "{r}");
+    assert!(e.call("convergence_check", &json!({ "physics": "ems", "factor": 1.5 })).is_err());
+}

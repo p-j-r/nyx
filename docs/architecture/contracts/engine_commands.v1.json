@@ -1057,6 +1057,38 @@
     "title": "Remove a project material"
   },
   {
+    "access": "expensive",
+    "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged.",
+    "name": "convergence_check",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "factor": {
+          "description": "finer/present element size, between 0 and 1, default 0.6",
+          "type": "number"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "tolerance": {
+          "description": "largest accepted relative difference, e.g. 1e-3; omit to only report",
+          "type": "number"
+        }
+      },
+      "required": [
+        "physics"
+      ],
+      "type": "object"
+    },
+    "title": "Check mesh convergence"
+  },
+  {
     "access": "read",
     "description": "The analyses of results (polarization of the modes) and which solved physics each applies to.",
     "name": "list_analyses",

@@ -46,6 +46,8 @@ pub enum JobKind {
 /// A message from a helper thread (the optional Python script) to the window.
 pub enum Msg {
     Script(Result<String, String>),
+    /// the answer of a convergence check run on its own thread
+    Convergence(Result<Value, String>),
 }
 
 pub struct App {
@@ -99,6 +101,11 @@ pub struct App {
     pub shot_pending: Arc<AtomicBool>,
     pub shell: crate::shell::Shell,
     pub colormap: Colormap,
+    /// the last convergence check: its answer, whether one is running, and the settings of the next
+    pub convergence: Option<Value>,
+    pub convergence_running: bool,
+    pub conv_factor: f64,
+    pub conv_tol: f64,
     /// the `nyx-mcp` program the Connect menu registers with Claude (found at start, or picked by the user)
     pub mcp_server: Option<PathBuf>,
     /// the Connect menu: what each AI app's config says about nyx (installed apps only) and the last thing done
@@ -164,6 +171,10 @@ impl App {
             shot_pending: Arc::new(AtomicBool::new(false)),
             shell: crate::shell::Shell::detached(),
             colormap: Colormap::Viridis,
+            convergence: None,
+            convergence_running: false,
+            conv_factor: 0.6,
+            conv_tol: 1e-3,
             mcp_server: nyx_connect::find_server(),
             connect_status: vec![],
             connect_note: None,
@@ -255,6 +266,23 @@ impl App {
     }
 
     /// Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first).
+    /// Solves the active physics again on a finer mesh on its own thread and compares (the engine command `convergence_check`); the answer
+    /// arrives as a message and is shown in the Study tab.
+    pub fn check_convergence(&mut self) {
+        let Some(active) = self.active() else { return };
+        if self.convergence_running || !self.push_edits() {
+            return;
+        }
+        let (job, factor, tol, tx, ctx) = (self.engine.convergence_job(), self.conv_factor, self.conv_tol, self.tx.clone(), self.ctx.clone());
+        self.convergence_running = true;
+        self.convergence = None;
+        std::thread::spawn(move || {
+            let r = job.run(&active, factor, Some(tol)).map_err(|e| e.to_string());
+            let _ = tx.send((0, Msg::Convergence(r)));
+            ctx.request_repaint();
+        });
+    }
+
     pub fn cancel_job(&mut self) {
         if let Some((id, _, true)) = &self.job {
             self.engine.jobs().cancel(*id);
@@ -325,6 +353,13 @@ impl App {
             match msg {
                 Msg::Script(Ok(t)) => self.script_output = Some(t),
                 Msg::Script(Err(e)) => self.set_error(e),
+                Msg::Convergence(r) => {
+                    self.convergence_running = false;
+                    match r {
+                        Ok(v) => self.convergence = Some(v),
+                        Err(e) => self.set_error(format!("convergence: {e}")),
+                    }
+                }
             }
         }
         let finished = self.engine.poll();
@@ -1215,6 +1250,26 @@ mod tests {
                 a.viewport_ui(ui);
             });
         }
+    }
+
+    #[test]
+    fn the_window_checks_convergence_on_its_own_thread() {
+        let mut a = app();
+        a.load_example(example("06_wr90"));
+        wait_idle(&mut a, 30);
+        a.conv_tol = 5e-3;
+        a.check_convergence();
+        assert!(a.convergence_running);
+        let t0 = Instant::now();
+        while a.convergence_running {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(60), "no answer");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(a.convergence.as_ref().map(|c| c["converged"].clone()), Some(json!(true)), "{:?} {:?}", a.convergence, a.error);
+        a.tab = Tab::Study;
+        let ctx = a.ctx.clone();
+        ctx.run_ui(Default::default(), |ui| a.inspector(ui));
     }
 
     #[test]
