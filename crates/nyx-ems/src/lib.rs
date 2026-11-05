@@ -3,12 +3,12 @@
 //!
 //! The crate holds the typed problem (`problem`, decoded from the envelope by `problem::decode`), the kernels in the three stages of ADR 9
 //! (`modes`: real waveguide modes, `modes_complex`: complex modes with PML or a tilted crystal, `axisym`: bodies of revolution,
-//! `cavity`: 3D eigenfrequencies; `optical`: the modes as the field-evaluable set of the polarization analysis) and the `Physics`
+//! `cavity`: 3D eigenfrequencies; `optical`: the modes as a field-evaluable set, for tests of the fields) and the `Physics`
 //! implementation below. Moved here from `femcore::{ems, ems_pml, ems_axisym, ems3d}` in restructure phase 4 (ADR 41, 45). The study is named
 //! in the problem (waveguide `modes` versus `cavity`), not guessed from the mesh dimension (ROUGH_SPOTS R10).
 //!
-//! The polarization of 2D modes and cavity modes is still computed here by `femcore::analysis` (it moves to `nyx-analysis` in phase 5) and
-//! appears as the scalars `polarization N` and in the log, as before; `run_analysed` also returns the `Analysis` itself for the window.
+//! The polarization of the modes is not computed here (phase 5, ADR 56): a mode study puts the complex field of every mode in its cell fields
+//! and states its frame in the scalar `field frame` (`nyx_physics::FieldFrame`); `nyx_analysis::polarization` reads that.
 
 // The kernels index several arrays with one loop variable, the form that matches the formulas (as in femcore).
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments, clippy::type_complexity)]
@@ -36,30 +36,10 @@ pub use modes_complex::{
 pub use optical::{solve_optical, solve_optical_wafer};
 pub use problem::{decode, Problem, Study};
 
-use femcore::analysis::Analysis;
 use femcore::progress::{self, Progress};
 use nyx_physics::Mesh;
 use nyx_physics::*;
 use std::sync::Arc;
-
-/// What a study returns: the result, and the polarization analysis of the modes that is in it as scalars and log lines (the window shows
-/// the analysis itself; `None` for the studies that have none).
-pub struct Solved {
-    pub result: SolveResult,
-    pub analysis: Option<Analysis>,
-}
-
-impl Solved {
-    /// Adds the summary of the polarization analysis to the scalars and the log of `result`, as the old kernels did.
-    pub(crate) fn with_analysis(mut result: SolveResult, analysis: Option<Analysis>) -> Solved {
-        if let Some(a) = &analysis {
-            let (scalars, log) = a.summary();
-            result.scalars.extend(scalars.into_iter().map(|(n, t)| (n, Scalar::Text(t))));
-            result.log.extend(log);
-        }
-        Solved { result, analysis }
-    }
-}
 
 pub struct Ems;
 
@@ -234,12 +214,6 @@ impl Physics for Ems {
 /// Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the
 /// stage log to the result. `Physics::solve` is this after `decode`; code that already has mesh numbers calls it directly.
 pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error> {
-    run_analysed(mesh, problem, progress).map(|s| s.result)
-}
-
-/// `run` that also hands out the polarization analysis of the modes (what the window shows; it is in the scalars and the log of the result
-/// in any case).
-pub fn run_analysed(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<Solved, Error> {
     let _installed = progress::install(progress);
     let first_line = progress.log().len();
     if !(1..=2).contains(&problem.order) {
@@ -250,7 +224,7 @@ pub fn run_analysed(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) ->
     }
     check_mesh(mesh)?;
     problem.check_finite().map_err(Error::NonFinite)?;
-    let mut solved = {
+    let mut result = {
         let _s = progress::stage(format!(
             "solving EM waves (mode analysis) on a {}D mesh of {} cells",
             mesh.dim(),
@@ -270,7 +244,7 @@ pub fn run_analysed(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) ->
         }
         .map_err(Error::from_kernel)?
     };
-    check_result_finite(&solved.result)?;
-    solved.result.log.extend(progress.log().into_iter().skip(first_line));
-    Ok(solved)
+    check_result_finite(&result)?;
+    result.log.extend(progress.log().into_iter().skip(first_line));
+    Ok(result)
 }

@@ -11,10 +11,10 @@
 
 use crate::problem::*;
 use crate::solid::{d_matrix, dof_layout, setup};
-use femcore::pml::cell_stretches;
 use femcore::fem::*;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::eigs_complex;
+use femcore::pml::cell_stretches;
 use nyx_physics::{cell_fields_of, Discretisation, Scalar, Solution, SolveResult};
 use std::time::Instant;
 

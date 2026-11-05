@@ -215,6 +215,10 @@ pub struct Solution {
     /// the same derived quantities as `fields` before averaging over the cells at a node (wafer names), when the
     /// kernel's fields stage provides them
     pub cell_fields: Option<crate::fields::CellFields>,
+    /// Legacy summary for the use cases and the run table: the share of the mode's transverse energy in the lateral component (quasi-TE
+    /// when above one half), set by `nyx_engine::legacy` from `nyx-analysis`. The results do not carry an analysis (phase 5); this one
+    /// number stays, with the old result type, until phase 7.
+    pub te_fraction: Option<f64>,
 }
 
 impl Solution {
@@ -238,8 +242,6 @@ pub struct SolveResult {
     pub log: Vec<String>,
     pub seconds: f64,
     pub dofs: usize,
-    /// polarization of the modes of an optical mode study (Stokes parameters, Poincare sphere), see `analysis`
-    pub analysis: Option<crate::analysis::Analysis>,
 }
 
 impl SolveResult {

@@ -36,6 +36,20 @@ pub fn solve_with(
     }
 }
 
+/// `solve_with` that also hands out the polarization analysis of the modes of an EM-wave study (`None` for every other study). The result
+/// does not carry the analysis (phase 5); the window and the MCP session draw it from here.
+pub fn solve_with_analysis(
+    mesh: &SimplexMesh,
+    spec: &old::ProblemSpec,
+    state: &mut SolveState,
+    progress: &Arc<Progress>,
+) -> Result<(old::SolveResult, Option<nyx_analysis::ModeAnalysis>), String> {
+    match spec.physics {
+        OldPhysics::Emw => ems::solve_analysed(mesh, spec, state, progress),
+        _ => solve_with(mesh, spec, state, progress).map(|r| (r, None)),
+    }
+}
+
 /// An `Error` of a physics as the `String` error of the old entry points (`"cancelled"` is the cancel signal there).
 pub(crate) fn error_text(e: Error) -> String {
     e.to_string()
@@ -59,7 +73,6 @@ pub(crate) fn result_back(r: &SolveResult) -> old::SolveResult {
         log: r.log.clone(),
         seconds: r.seconds,
         dofs: r.dofs,
-        analysis: None,
     }
 }
 
@@ -70,6 +83,7 @@ fn solution_back(s: &Solution, order: usize) -> old::Solution {
         disp: None,
         value: s.value,
         neff: s.eigenvalue.map(|e| (e[0], e[1])),
+        te_fraction: None,
         cell_fields: if s.cell_fields.is_empty() {
             None
         } else {

@@ -1,6 +1,6 @@
 //! Optical modes of a 2D cross-section as a field-evaluable set: the modes of the `nyx-ems` mode solvers together with the material data
 //! needed to evaluate their E, D and H on the mesh, the vacuum constants, the 24-point quadrature rule used for field
-//! integrals, and the samplers the polarization analysis (`analysis`, `polarization`) is built on. Everything works on the native
+//! integrals, and the quadrature rule the polarization analysis (`nyx-analysis`) samples the modes with. Everything works on the native
 //! mesh with the finite-element basis functions of the mode solvers. (Split out of `sbs`, which held it next to the Brillouin
 //! coupling integrals; the Brillouin code is gone, see ADR 24.) The solvers that produce a set live in `nyx-ems` since restructure
 //! phase 4 (ADR 45); the complex material tensors they and the field sampler share (`EpsC`, `MuC`, `cell_materials`) stay here.
@@ -208,26 +208,6 @@ pub fn sample_mode_e(mesh: &SimplexMesh, set: &OpticalSet, j: usize, pts: &[[f64
             None
         })
         .collect()
-}
-
-/// The electric field of optical mode `j` at the quadrature points of every cell outside the PML, as the samples of a
-/// polarization analysis (`polarization::Sample`: `(Ex, Ey, Ez)` with `x` lateral, `y` the surface normal, `z` the propagation axis, and
-/// the area each point stands for). The 24-point rule of `fine_rule` is exact for `|E|^2` of the quadratic elements.
-pub fn mode_samples(mesh: &SimplexMesh, set: &OpticalSet, j: usize) -> Vec<crate::polarization::Sample> {
-    let fc = FieldCtx::new(mesh, set.order, set.freq);
-    let (pts, wts) = fine_rule();
-    let mut out = Vec::with_capacity(mesh.n_cells() * pts.len());
-    for ci in 0..mesh.n_cells() {
-        if set.in_pml[ci] {
-            continue;
-        }
-        for (l, w) in pts.iter().zip(&wts) {
-            let f = fc.at(&set.modes[j], ci, l);
-            let cx = |z: C| [z.re, z.im];
-            out.push(crate::polarization::Sample { ex: cx(f.e[0]), ey: cx(f.e[1]), ez: cx(f.e[2]), w: w * fc.geo.vol[ci] });
-        }
-    }
-    out
 }
 
 /// The 4 x 6-point rule on the four sub-triangles of a triangle (24 points, degree 4 on each part).

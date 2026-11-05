@@ -13,3 +13,4 @@ rayon = "1"
 
 [dev-dependencies]
 geom = { path = "../geom" }
+nyx-analysis = { path = "../nyx-analysis" }

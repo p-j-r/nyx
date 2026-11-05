@@ -27,6 +27,8 @@ pub struct Solved {
     pub state: SolveState,
     /// outcome of writing the results file, when one was requested
     pub output: Option<Result<String, String>>,
+    /// the polarization analysis of the modes of an EM-wave study (a function of the result, not part of it)
+    pub analysis: Option<nyx_engine::analysis::ModeAnalysis>,
 }
 
 pub enum Msg {
@@ -148,9 +150,9 @@ fn autosave_run(auto: &AutoSave, mesh: &SimplexMesh, spec: &ProblemSpec, result:
 pub fn spawn_solve(mesh: Arc<SimplexMesh>, spec: ProblemSpec, mut state: SolveState, auto: Option<AutoSave>, job: Job) {
     std::thread::spawn(move || {
         let physics = spec.physics;
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| nyx_engine::legacy::solve_with(&mesh, &spec, &mut state, &job.progress)));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| nyx_engine::legacy::solve_with_analysis(&mesh, &spec, &mut state, &job.progress)));
         let res = match r {
-            Ok(Ok(result)) => {
+            Ok(Ok((result, analysis))) => {
                 let display = Display::new(&mesh, result.order);
                 let mut output = write_output(&mesh, &spec, &result);
                 if let Some(a) = &auto {
@@ -162,7 +164,7 @@ pub fn spawn_solve(mesh: Arc<SimplexMesh>, spec: ProblemSpec, mut state: SolveSt
                         (Some(Ok(_)), Err(e)) => Some(Err(e)),
                     };
                 }
-                Ok(Solved { result, display, state, output })
+                Ok(Solved { result, display, state, output, analysis })
             }
             Ok(Err(e)) => Err(e),
             Err(_) => Err("the solver stopped unexpectedly (internal error)".into()),
@@ -263,7 +265,7 @@ pub fn spawn_open_h5(path: PathBuf, job: Job) {
     std::thread::spawn(move || {
         let r = open_h5(&path).map(|(mesh, result, _)| {
             let display = Display::new(&mesh, result.order);
-            (Arc::new(mesh), Solved { result, display, state: SolveState::default(), output: None })
+            (Arc::new(mesh), Solved { result, display, state: SolveState::default(), output: None, analysis: None })
         });
         send(&job, Msg::H5(path.display().to_string(), r));
     });

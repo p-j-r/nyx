@@ -11,6 +11,8 @@
 //! phase 4 fills them, and meshing goes through one seam. The rule it enforces: **nothing outside the physics crates names a physics**;
 //! code that needs one asks `registry().get(id)`.
 
+/// The analyses of results (restructure phase 5); the window draws the polarization from here until it calls engine commands.
+pub use nyx_analysis as analysis;
 pub mod commands;
 pub mod engine;
 pub mod geomdesc;

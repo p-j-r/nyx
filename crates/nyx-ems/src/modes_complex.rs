@@ -24,7 +24,6 @@
 
 use crate::modes::C0;
 use crate::problem::{Problem, Study};
-use crate::Solved;
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
@@ -414,7 +413,7 @@ pub fn mode_fields_complex_cells(
 }
 
 /// The modes of a `Modes` study in the complex solver: absorbing layers, lossy or complex materials, a crystal tilted against the guide.
-pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Result<Solved, String> {
+pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let Study::Modes { freq, n_target, evanescent, n_modes } = problem.study.clone() else {
         return Err("mode analysis needs a Modes study".into());
@@ -448,6 +447,7 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
     if !modes.converged {
         log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
     }
+    scalars.push(crate::optical::mode_frame(problem).scalar());
     let result = SolveResult {
         physics: "ems".into(),
         study: "modes".into(),
@@ -459,11 +459,5 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
         seconds: t0.elapsed().as_secs_f64(),
         dofs: mesh.n_dofs(problem.order),
     };
-    let mut analysis = None;
-    if !modes.neff.is_empty() {
-        if let Ok(set) = crate::optical::optical_set_complex(mesh, problem, &modes, freq) {
-            analysis = Some(femcore::analysis::analyze_optical(mesh, &set, &Default::default()));
-        }
-    }
-    Ok(Solved::with_analysis(result, analysis))
+    Ok(result)
 }

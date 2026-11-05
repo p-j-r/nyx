@@ -7,10 +7,10 @@ Desktop finite-element application for photonics and phononics, in pure Rust. No
 | Path | What |
 |---|---|
 | `crates/geom` | geometry kernel (parametric wafer-frame models, selectors, golden files) |
-| `crates/femcore` | the FEM core: meshes (`mesh`, with `Mesh`, the exchange mesh the physics take), meshing, adaptation, the linear algebra (`linalg`), the finite-element basics (`fem`, `edge`, `pml`, `periodic`, `props` for materials per domain), the old window problem types (`problem`, deleted in phase 7), analysis, use cases. The physics kernels are gone from it |
+| `crates/femcore` | the FEM core: meshes (`mesh`, with `Mesh`, the exchange mesh the physics take), meshing, adaptation, the linear algebra (`linalg`), the finite-element basics (`fem`, `edge`, `pml`, `periodic`, `props` for materials per domain), the old window problem types (`problem`, deleted in phase 7), use cases. The physics kernels are gone from it |
 | `crates/nyx-physics` | the `Physics` trait, the problem envelope (`ProblemSpec`), descriptors, `SolveResult`, `Registry`, validation, JSON Schemas (ADR 25) |
 | `crates/nyx-dfs`, `nyx-sms`, `nyx-ems` | one physics each since phase 4 (ADR 41 to 47): its typed `Problem` and `decode` of the envelope, the kernels in three stages, `run`, `Physics::solve`, descriptors, its goldens and tests. `nyx_engine::legacy` is the temporary bridge from the old window problem (deleted in phase 7) |
-| `crates/nyx-analysis` | analyses of results (skeleton; polarization moves in at phase 5) |
+| `crates/nyx-analysis` | analyses of results: the polarization (Stokes parameters, Poincare sphere, classes, degenerate groups) as a function of a `SolveResult` and its mesh (phase 5, ADR 56). A mode study states its frame in the scalar `field frame` (`nyx_physics::FieldFrame`) and carries the complex field in its cell fields; results carry no analysis |
 | `crates/nyx-store` | workspace, workflow, experiment and run storage |
 | `crates/nyx-engine` | `Engine`: the project, commands (every action by name, with JSON Schemas; the MCP tools are generated from them), the job runner, the geometry operation descriptors, store wiring, and the registry of compiled-in physics (cargo features `dfs sms ems`). It also holds `legacy`, the bridge the window and `nyx-session` use to reach the physics until phase 7, and the examples that drive every physics (`bench`, `stage_log`, `profile3d`, `mem_profile`, `cavity_bench`). The window and `nyx-mcp` are not rewired to the commands yet (phase 7) |
 | `crates/app` | the egui application (package and binary `nyx`) |
@@ -49,9 +49,9 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 * `*.py` is git-ignored on purpose: nothing Python ships. Any GDS layout is built with gdsfactory, never raw gdstk.
 * Determinism: the same input gives the same numbers for any thread count. `NYX_THREADS=N` sets the rayon pool, `NYX_PROFILE=1` echoes the solver log.
 
-## Known state of the checks (phase 4, 2026-11-05, Windows, Rust 1.99.1)
+## Known state of the checks (phase 5, 2026-11-05, Windows, Rust 1.99.1)
 
-* `cargo test --release --workspace --no-fail-fast`: 790 pass, 9 ignored, 0 fail (phase 4, `restructure-4-physics`). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
+* `cargo test --release --workspace --no-fail-fast`: 815 pass, 11 ignored, 0 fail (phase 5, `restructure-5-analysis`; phase 4 closed at 790 / 9 / 0 and the mesher features line at 811 / 11 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
 * `cargo clippy -D warnings` is clean for `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis` and `nyx-engine`; the old `femcore` code has a few warnings left. `cargo fmt --check` fails for the old code (R23, decided in phase 9).
 * The numbers and timings of the pre-restructure state and of each phase are in `docs/RESTRUCTURE_STATUS.md`.
 

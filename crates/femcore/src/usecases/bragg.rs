@@ -19,7 +19,7 @@
 //! strength `kappa = pi n_g (f_high - f_low) / c`, with `n_g` the group index of the wire; a coupled-mode estimate
 //! `kappa ~ 2 |n_wide - n_narrow| sin(pi duty) / lambda` from the two effective indices of the unperturbed sections is the check.
 //!
-//! Everything is in the wafer frame: x lateral, y the propagation axis, z the surface normal. The polarization analysis in the result
+//! Everything is in the wafer frame: x lateral, y the propagation axis, z the surface normal. The polarization analysis (`nyx-analysis`)
 //! uses exactly these axes.
 
 use super::soi::{Cladding, SoiWire};
@@ -302,12 +302,11 @@ impl BraggGrating {
 /// Effective index of the fundamental quasi-TE mode of a wire (the mode with the largest x share among the modes found).
 pub fn fundamental_neff(w: &SoiWire, solver: super::Solver) -> Result<f64, String> {
     let r = w.solve(solver)?;
-    let a = r.analysis.as_ref().ok_or("the mode study carries no polarization analysis")?;
-    let best = a
-        .rows
+    let best = r
+        .solutions
         .iter()
         .enumerate()
-        .filter_map(|(i, row)| row.report.as_ref().map(|m| (i, m.te_fraction)))
+        .filter_map(|(i, s)| s.te_fraction.map(|te| (i, te)))
         .filter(|&(_, te)| te > 0.5)
         .max_by(|x, y| r.solutions[x.0].neff.unwrap().0.total_cmp(&r.solutions[y.0].neff.unwrap().0))
         .ok_or("no quasi-TE mode was found")?;

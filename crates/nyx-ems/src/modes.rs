@@ -22,7 +22,6 @@
 //! elements on the same mesh.
 
 use crate::problem::{Problem, Study};
-use crate::Solved;
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
@@ -340,7 +339,7 @@ pub fn mode_fields_cells(
         .flat_map(|c| {
             let mut pd = Vec::new();
             mesh.cell_dofs(c, order, &mut pd);
-            pd.into_iter().take(nloc).map(|d| ez_nodal_signed[d] * s * prop.1).collect::<Vec<_>>()
+            pd.into_iter().take(nloc).map(|d| ez_nodal_signed[d] * s * sg * prop.1).collect::<Vec<_>>()
         })
         .collect();
     cells.push_real(format!("E{}", lat.0), "a.u.", etx.iter().map(|x| x * s * sg * lat.1).collect());
@@ -350,7 +349,7 @@ pub fn mode_fields_cells(
         f("|E|", sc(&tot)),
         f("|Exz|", sc(&etn)),
         f(&format!("|E{}|", prop.0), sc(&ezn)),
-        f(&format!("E{}", prop.0), ez_nodal_signed.iter().map(|x| x * s * prop.1).collect()),
+        f(&format!("E{}", prop.0), ez_nodal_signed.iter().map(|x| x * s * sg * prop.1).collect()),
         f(&format!("E{}", lat.0), etxn.iter().map(|x| x * s * sg * lat.1).collect()),
         f(&format!("E{}", nor.0), etyn.iter().map(|x| x * s * sg * nor.1).collect()),
     ];
@@ -360,7 +359,7 @@ pub fn mode_fields_cells(
 /// The guided modes of a 2D cross-section for a `Modes` study: stages 1 to 3 of the real solver, or the complex solver (`modes_complex`)
 /// when the problem has absorbing layers, a tilted crystal, or a complex pair among the wanted eigenvalues. The result carries the
 /// polarization of the modes (scalars and log, as before the move; the analysis itself is in `Solved::analysis`).
-pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solved, String> {
+pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
     if problem.materials.has_pml() {
         return crate::modes_complex::solve_waveguide_complex(mesh, problem);
     }
@@ -417,6 +416,7 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
     if modes.neff.len() < n_modes {
         log.push(format!("only {} of {} real-valued modes were found near the target", modes.neff.len(), n_modes));
     }
+    scalars.push(crate::optical::mode_frame(problem).scalar());
     let result = SolveResult {
         physics: "ems".into(),
         study: "modes".into(),
@@ -428,13 +428,7 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
         seconds: t0.elapsed().as_secs_f64(),
         dofs: mesh.n_dofs(problem.order),
     };
-    let mut analysis = None;
-    if !modes.neff.is_empty() {
-        if let Ok(set) = crate::optical::optical_set_real(mesh, problem, &modes, freq) {
-            analysis = Some(femcore::analysis::analyze_optical(mesh, &set, &Default::default()));
-        }
-    }
-    Ok(Solved::with_analysis(result, analysis))
+    Ok(result)
 }
 
 /// Number of edge-element dofs plus phi dofs (for reporting).

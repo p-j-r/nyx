@@ -98,15 +98,15 @@ fn silicon_strip_on_sapphire_guided_mode_is_converged() {
 #[test]
 fn the_complex_mode_solver_with_pml_returns_the_polarization_of_the_guided_mode() {
     // the strip is x polarized (quasi-TE): the analysis comes from the complex field and leaves the absorbing layers out
-    let (r, analysis) = {
-        let s = common::try_solve_analysed(&sos_mesh(0.5e-6, 0.12e-6, 40e-9), &optical_spec()).unwrap();
-        (s.result, s.analysis)
-    };
-    let a = analysis.as_ref().expect("a polarization analysis");
+    let (r, a) = common::try_solve_analysed(&sos_mesh(0.5e-6, 0.12e-6, 40e-9), &optical_spec()).unwrap();
+    let a = &a;
     let m = a.rows[0].report.as_ref().unwrap();
     assert!(m.te_fraction > 0.9 && m.dop > 0.9 && m.sphere[0] > 0.8, "{m:?}");
     assert!(m.sphere[2].abs() < 0.05, "a lossless guided mode of a mirror-symmetric strip is not circular: {m:?}");
     assert_eq!(m.class.label(), "quasi-TE (x)");
-    assert!(r.scalars.iter().any(|(n, _)| n == "polarization 1"));
-    assert!(r.log.iter().any(|l| l.contains("Stokes")));
+    // the result states the frame and the absorbing domains the analysis leaves out, and carries no polarization of its own
+    let frame = nyx_physics::FieldFrame::of(&r).expect("the result states its field frame");
+    assert_eq!((frame.lateral, frame.normal, frame.propagation), (0, 2, 1));
+    assert!(!frame.outside.is_empty(), "the absorbing layers are left out of the analysis: {frame:?}");
+    assert!(!r.scalars.iter().any(|(n, _)| n.starts_with("polarization")));
 }

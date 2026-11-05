@@ -6,5 +6,6 @@ rust-version.workspace = true
 description = "Analyses of nyx results (polarization, Stokes parameters; later group index): functions of a SolveResult"
 
 [dependencies]
+femcore = { path = "../femcore" }
 nyx-physics = { path = "../nyx-physics" }
 serde_json = { version = "1", features = ["float_roundtrip"] }

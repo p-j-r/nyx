@@ -1,14 +1,12 @@
 {
   "scalars": {
+    "field frame": "lateral x, normal z, propagation y, left-handed",
     "Q 1 = Re/(2|Im|) of neff": 661926976375742.1,
     "Q 2 = Re/(2|Im|) of neff": 267865165598156.7,
     "Q 3 = Re/(2|Im|) of neff": 56034870097712.11,
     "neff 1": "1.641146 -1.240e-15i",
     "neff 2": "1.641146 -3.063e-15i",
-    "neff 3": "1.444376 -1.289e-14i",
-    "polarization 1": "quasi-TE (x)  TE 0.947  Ey 0.130  P 0.894  s = (+0.894, -0.000, +0.000)",
-    "polarization 2": "quasi-TE (x)  TE 0.947  Ey 0.130  P 0.894  s = (+0.894, -0.000, +0.000)",
-    "polarization 3": "quasi-TM (z)  TE 0.016  Ey 0.603  P 0.969  s = (-0.969, +0.000, +0.000)"
+    "neff 3": "1.444376 -1.289e-14i"
   },
   "solutions": [
     {

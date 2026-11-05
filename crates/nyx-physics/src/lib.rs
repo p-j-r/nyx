@@ -5,6 +5,7 @@
 //! * `spec`: the problem envelope (`ProblemSpec`, `StudySpec`, `BcSpec`, `MaterialAssign`) and `canonical_json` for exemplar files
 //! * `desc`: descriptors of studies, conditions, properties, fields, couplings and the sizing hint
 //! * `result`: `SolveResult`, `Solution`, `Field`, plain serialisable data
+//! * `frame`: the frame (lateral, normal, propagation axes, absorbing domains) a result states for the analyses of its vector fields
 //! * `validate`, `schema`: structural validation against the descriptors and JSON Schemas generated from them
 //! * `decode`: typed parameters with the descriptor defaults, names and selectors resolved to mesh numbers (what every physics does first)
 //! * `registry`: the physics a build contains; solve order of a one-way chain
@@ -17,6 +18,7 @@ pub mod contract;
 pub mod decode;
 pub mod desc;
 pub mod error;
+pub mod frame;
 pub mod physics;
 pub mod registry;
 pub mod result;
@@ -29,6 +31,7 @@ pub use desc::*;
 pub use error::Error;
 /// The mesh a physics is given: the one native cell mesh, 2D or 3D (restructure phase 4, ADR 32 and 41; it was `SimplexMesh`).
 pub use femcore::mesh::Mesh;
+pub use frame::{FieldFrame, FRAME_KEY};
 /// The numbering of unknowns (edges, P2 dofs) a kernel assembles on. Each solve builds its own from the `Mesh` with `discretise`. The type
 /// is still the solver mesh of femcore, which the window uses until phase 7. Kernels name only `Mesh` and `Discretisation`.
 pub type Discretisation = femcore::mesh::SimplexMesh;

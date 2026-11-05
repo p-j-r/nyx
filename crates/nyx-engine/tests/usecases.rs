@@ -4,13 +4,29 @@
 use femcore::usecases::bragg::*;
 use femcore::usecases::soi::*;
 
-/// What the use cases solve with: the bridge to the physics crates.
-fn solver(mesh: &femcore::mesh::SimplexMesh, spec: &femcore::problem::ProblemSpec) -> Result<femcore::problem::SolveResult, String> {
-    nyx_engine::legacy::solve(mesh, spec, &mut Default::default())
+thread_local! {
+    /// the polarization analysis of the last solve: the use cases hand out the result only, and an analysis is not part of it
+    static LAST: std::cell::RefCell<Option<nyx_engine::analysis::ModeAnalysis>> = const { std::cell::RefCell::new(None) };
 }
 
-fn modes(r: &femcore::problem::SolveResult) -> Vec<(f64, femcore::analysis::ModeRow)> {
-    let a = r.analysis.as_ref().expect("the mode solver returns a polarization analysis");
+/// What the use cases solve with: the bridge to the physics crates, keeping the analysis of the solve in `LAST`.
+fn solver(
+    mesh: &femcore::mesh::SimplexMesh,
+    spec: &femcore::problem::ProblemSpec,
+) -> Result<femcore::problem::SolveResult, String> {
+    let p = femcore::progress::current().unwrap_or_else(femcore::progress::Progress::new);
+    let (r, a) = nyx_engine::legacy::solve_with_analysis(mesh, spec, &mut Default::default(), &p)?;
+    LAST.with(|l| *l.borrow_mut() = a);
+    Ok(r)
+}
+
+/// The analysis of the solve that just ran.
+fn last() -> nyx_engine::analysis::ModeAnalysis {
+    LAST.with(|l| l.borrow().clone()).expect("the mode solver returns a polarization analysis")
+}
+
+fn modes(r: &femcore::problem::SolveResult) -> Vec<(f64, nyx_engine::analysis::ModeRow)> {
+    let a = last();
     let mut v: Vec<_> = r.solutions.iter().zip(&a.rows).map(|(s, row)| (s.neff.unwrap().0, row.clone())).collect();
     v.sort_by(|x, y| y.0.total_cmp(&x.0));
     v
@@ -31,16 +47,18 @@ fn a_300_nm_soi_wire_has_quasi_te_and_quasi_tm_modes_between_the_slab_limits() {
     let (rte, rtm) = (te.1.report.as_ref().unwrap(), tm.1.report.as_ref().unwrap());
     assert!(rte.te_fraction > 0.97 && rte.dop > 0.9 && rte.sphere[0] > 0.9, "{rte:?}");
     assert!(rtm.te_fraction < 0.06 && rtm.dop > 0.9 && rtm.sphere[0] < -0.9, "{rtm:?}");
-    assert!(rte.sphere[2].abs() < 1e-6 && rtm.sphere[2].abs() < 1e-6, "lossless modes of a symmetric wire are not circular");
+    assert!(
+        rte.sphere[2].abs() < 1e-6 && rtm.sphere[2].abs() < 1e-6,
+        "lossless modes of a symmetric wire are not circular"
+    );
     assert_eq!(rte.class.label(), "quasi-TE (x)");
     assert_eq!(rtm.class.label(), "quasi-TM (z)");
     // the longitudinal field is a sizeable part of the energy at this index contrast
     assert!(rte.long_fraction > 0.05 && rte.long_fraction < 0.4);
-    // the result carries the summary and the table
-    assert!(r.scalars.iter().any(|(n, _)| n == "polarization 1"));
+    // the table is in the log of the window's result; the exports are the analysis'
     assert!(r.log.iter().any(|l| l.contains("quasi-TE (x)")));
-    // exports
-    let a = r.analysis.as_ref().unwrap();
+    assert!(!r.scalars.iter().any(|(n, _)| n.starts_with("polarization")), "the result carries no analysis");
+    let a = last();
     assert_eq!(a.csv().lines().count(), 3);
     assert!(a.sphere_svg(300.0).starts_with("<svg"));
 }
@@ -62,7 +80,8 @@ fn the_te_mode_of_a_wide_wire_tends_to_the_te_mode_of_the_slab() {
 
 #[test]
 fn the_te_mode_of_the_wire_is_converged_under_mesh_refinement() {
-    let neff = |h: f64| modes(&SoiWire { h_core: h, h_near: 2.0 * h, ..Default::default() }.solve(&solver).unwrap())[0].0;
+    let neff =
+        |h: f64| modes(&SoiWire { h_core: h, h_near: 2.0 * h, ..Default::default() }.solve(&solver).unwrap())[0].0;
     let (a, b) = (neff(50e-9), neff(30e-9));
     assert!((a - b).abs() < 1.5e-3, "{a} against {b}");
 }
@@ -71,22 +90,30 @@ fn the_te_mode_of_the_wire_is_converged_under_mesh_refinement() {
 fn a_sloped_wall_on_one_side_makes_the_modes_hybrid_and_tilts_their_polarization() {
     // a 300 nm square core in oxide has a nearly degenerate TE/TM pair; a mirror-symmetric change keeps the modes x and y polarized,
     // a sloped left wall mixes them into two orthogonal linear states tilted by about 45 degrees
-    let sym = SoiWire { width: 300e-9, ..Default::default() }.solve(&solver).unwrap();
+    SoiWire { width: 300e-9, ..Default::default() }.solve(&solver).unwrap();
     // the pair is degenerate (TE and TM of a square core in uniform oxide), so the eigensolver returns some mixture of the two and the
     // individual points on the sphere mean nothing; the analysis finds the group and resolves it into the x and y polarized states
-    let a = sym.analysis.as_ref().unwrap();
+    let a = last();
     assert_eq!(a.groups.len(), 1, "{}", a.table());
-    assert!(a.groups[0].invariant.as_ref().unwrap().dop < 0.2, "the group Stokes vector of a degenerate pair is unpolarized");
+    assert!(
+        a.groups[0].invariant.as_ref().unwrap().dop < 0.2,
+        "the group Stokes vector of a degenerate pair is unpolarized"
+    );
     let resolved = a.groups[0].resolved.as_ref().expect("a pair is resolved");
     let (r0, r1) = (resolved.reports[0].as_ref().unwrap(), resolved.reports[1].as_ref().unwrap());
-    assert!(r0.sphere[0].abs() > 0.8 && r1.sphere[0].abs() > 0.8 && r0.sphere[0] * r1.sphere[0] < 0.0, "{:?} {:?}", r0.sphere, r1.sphere);
+    assert!(
+        r0.sphere[0].abs() > 0.8 && r1.sphere[0].abs() > 0.8 && r0.sphere[0] * r1.sphere[0] < 0.0,
+        "{:?} {:?}",
+        r0.sphere,
+        r1.sphere
+    );
     let hyb = SoiWire { width: 300e-9, sidewall_left_deg: Some(75.0), ..Default::default() }.solve(&solver).unwrap();
     let m = modes(&hyb);
     let (a, b) = (m[0].1.report.as_ref().unwrap(), m[1].1.report.as_ref().unwrap());
     assert!(a.sphere[1].abs() > 0.3 && b.sphere[1].abs() > 0.3, "tilted: {:?} {:?}", a.sphere, b.sphere);
     // the two states are (nearly) antipodal on the sphere
     assert!(a.sphere[1] * b.sphere[1] < 0.0 && a.sphere[0] * b.sphere[0] < 0.0, "{:?} {:?}", a.sphere, b.sphere);
-    let angle = femcore::polarization::sphere_distance(a.sphere, b.sphere);
+    let angle = nyx_engine::analysis::polarization::sphere_distance(a.sphere, b.sphere);
     assert!(angle > 0.85 * std::f64::consts::PI, "angle on the sphere {angle}");
     // mixed, so each has a TE share between those of the pure modes
     assert!(a.te_fraction > 0.1 && a.te_fraction < 0.9 && b.te_fraction > 0.1 && b.te_fraction < 0.9);
@@ -104,15 +131,16 @@ fn a_uniform_wire_has_no_gap_a_symmetric_grating_has_and_a_one_sided_one_has_les
     let solve = |kind| {
         let g = quick(kind);
         let r = g.solve(&solver).unwrap();
+        let a = last();
         let b = g.band_edges_of(&r, &solver).unwrap();
-        (r, b)
+        (a, b)
     };
-    let (ru, bu) = solve(GratingKind::Uniform);
-    let (rs, bs) = solve(GratingKind::Symmetric);
-    let (ra, ba) = solve(GratingKind::Asymmetric);
+    let (au, bu) = solve(GratingKind::Uniform);
+    let (as_, bs) = solve(GratingKind::Symmetric);
+    let (aa, ba) = solve(GratingKind::Asymmetric);
     // the unperturbed wire has forward and backward waves at the same frequency: a degenerate pair, one group in the analysis
     assert!(bu.gap_fraction < 1e-5, "{bu:?}");
-    assert!(ru.analysis.as_ref().unwrap().groups.iter().any(|g| g.members.len() == 2));
+    assert!(au.groups.iter().any(|g| g.members.len() == 2));
     // the grating splits them; teeth on one side only give a smaller, but not tiny, split (about half as much perturbation)
     assert!(bs.gap_fraction > 0.002 && ba.gap_fraction > 0.001, "{bs:?} {ba:?}");
     let ratio = ba.gap_fraction / bs.gap_fraction;
@@ -123,8 +151,7 @@ fn a_uniform_wire_has_no_gap_a_symmetric_grating_has_and_a_one_sided_one_has_les
     assert!(bs.kappa > 0.0 && bs.kappa < bs.kappa_estimate, "kappa {} against bound {}", bs.kappa, bs.kappa_estimate);
     assert!(bs.stopband > 1e-9 && bs.stopband < 40e-9, "{}", bs.stopband);
     // the band-edge modes are quasi-TE standing waves, with the Poincare points of a quasi-TE mode; the next two are quasi-TM
-    for r in [&rs, &ra] {
-        let a = r.analysis.as_ref().unwrap();
+    for a in [&as_, &aa] {
         for row in a.rows.iter().take(2) {
             let m = row.report.as_ref().unwrap();
             assert!(m.te_fraction > 0.9 && m.sphere[0] > 0.8, "{m:?}");

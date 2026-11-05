@@ -1,12 +1,12 @@
 # Photonic use cases: 300 nm SOI wires, Bragg gratings, and the polarization analysis
 
-Everything here is in `femcore` (`usecases::soi`, `usecases::bragg`, `analysis`, `polarization`) and in the application
+Everything here is in `femcore::usecases::{soi, bragg}`, in `nyx-analysis` (`polarization`, `modes`; they were `femcore::{analysis, polarization}` until phase 5) and in the application
 (Examples 16 to 19, the **Analysis** tab). All numbers below were produced by this code on the machine it was written on; the tests named in each
 section re-check the ones that can be checked against a formula.
 
 ## The polarization analysis (Stokes parameters, Poincare sphere)
 
-Every optical mode solver returns `SolveResult::analysis` next to its fields: the 2D mode solver (real and complex, with PML or a tilted crystal), the 3D
+The analysis is a function of a result (phase 5, ADR 56): `nyx_analysis::polarization(mesh, result)`. The mode studies of `ems` put the complex field of every mode in their cell fields and state their frame in the scalar `field frame`, and the analysis reads that: the 2D mode solver (real and complex, with PML or a tilted crystal), the 3D
 eigenmode solver (cavities and Floquet cells), the Brillouin study of a straight guide (its optical pump and Stokes modes) and the Brillouin study of a ring
 (whispering-gallery modes). It is computed from the **complex fields the solver found** at quadrature points, not from the plotted real fields (those lose
 the phase between Ex and Ey, so they cannot give s2 and s3 for hybrid or leaky modes).

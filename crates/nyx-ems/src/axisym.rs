@@ -19,7 +19,6 @@
 
 use crate::modes::C0;
 use crate::problem::{Problem, Study};
-use crate::Solved;
 use femcore::edge::{cell_data, edge_basis, tri_g, CellData};
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
@@ -361,39 +360,6 @@ pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Resul
     })
 }
 
-/// The electric field of mode `j` at the quadrature points of every cell outside the absorbing layers (`in_pml`), as the samples of a
-/// polarization analysis: `ex` = E_r (the in-plane, "TE-like" direction), `ey` = E_z (normal to the plane of the ring), `ez` = E_theta (the
-/// direction of propagation). Each point carries the weight `r * area` of the volume of revolution it stands for. The triple (r, z, theta)
-/// is left-handed, so the analysis of a ring reads the sense of rotation with `TimeConvention::MinusI`.
-pub fn mode_samples(
-    mesh: &Discretisation,
-    mat: &AxiMaterial,
-    modes: &AxiModes,
-    j: usize,
-    in_pml: &[bool],
-) -> Vec<femcore::polarization::Sample> {
-    let ctx = AxiCtx::new(mesh, modes.order);
-    let (pts, wts) = fine_rule();
-    let omega = 2.0 * std::f64::consts::PI * modes.freqs[j];
-    let mut out = Vec::with_capacity(mesh.n_cells() * pts.len());
-    for ci in 0..mesh.n_cells() {
-        if in_pml.get(ci).copied().unwrap_or(false) {
-            continue;
-        }
-        for (l, w) in pts.iter().zip(&wts) {
-            let f = ctx.fields(&modes.vectors[j], modes.m, omega, mat, ci, l);
-            let cx = |z: C| [z.re, z.im];
-            out.push(femcore::polarization::Sample {
-                ex: cx(f.e[0]),
-                ey: cx(f.e[1]),
-                ez: cx(f.e[2]),
-                w: w * ctx.geo.vol[ci] * ctx.radius(ci, l),
-            });
-        }
-    }
-    out
-}
-
 /// The power `P = 2 Int Re(conj(E_z) H_r - conj(E_r) H_z) dA` of mode `j` along `+theta` (W for the amplitudes of the mode), with the
 /// fields of the time convention `e^{j omega t}` (`H = j curl E / (omega mu)`). With the azimuthal dependence `exp(-i m theta)` it is positive
 /// for `m > 0` and negative for `m < 0`: the wave runs along `+theta`, wafer `+y`.
@@ -454,7 +420,7 @@ pub fn axisym_fields_cells(
 
 /// The modes of a body of revolution for an `AxisymmetricModes` study: the three stages, one solution per mode with its frequency (and Q when
 /// absorbing layers make it complex).
-pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<Solved, String> {
+pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let Study::AxisymmetricModes { f_search, azimuthal_order, n_modes } = problem.study.clone() else {
         return Err("an axisymmetric problem needs an AxisymmetricModes study".into());
@@ -507,5 +473,5 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.n_tot,
     };
-    Ok(Solved::with_analysis(result, None))
+    Ok(result)
 }

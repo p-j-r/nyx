@@ -45,8 +45,7 @@
     "scalars": [
       "f1 (Hz)",
       "f2 (Hz)",
-      "polarization 1",
-      "polarization 2"
+      "field frame"
     ],
     "solutions": [
       {
@@ -77,7 +76,7 @@
             "unit": "a.u."
           }
         ],
-        "has_eigenvalue": false,
+        "has_eigenvalue": true,
         "has_value": true,
         "label_prefix": "mode 1"
       },
@@ -109,7 +108,7 @@
             "unit": "a.u."
           }
         ],
-        "has_eigenvalue": false,
+        "has_eigenvalue": true,
         "has_value": true,
         "label_prefix": "mode 2"
       }
@@ -123,8 +122,7 @@
       "Q 1 = Re/(2|Im|) of neff",
       "neff 2",
       "Q 2 = Re/(2|Im|) of neff",
-      "polarization 1",
-      "polarization 2"
+      "field frame"
     ],
     "solutions": [
       {
@@ -219,8 +217,7 @@
     "scalars": [
       "neff 1",
       "neff 2",
-      "polarization 1",
-      "polarization 2"
+      "field frame"
     ],
     "solutions": [
       {

@@ -2,8 +2,8 @@
 //!
 //! A silicon core of thickness `thickness` (300 nm by default) and `width` on a buried oxide (BOX), under an oxide or air
 //! cladding. The cross-section is a geom model (exact lines, named regions) meshed by `geomdrive`, the modes come from the full-vector solver of `nyx-ems` (Nedelec
-//! degree 2 + P2, perfectly conducting walls far from the core) and every solve carries the Stokes/Poincare analysis of
-//! `analysis`: the quasi-TE and quasi-TM modes sit at the two ends of the equator of the sphere, hybrid modes (sloped
+//! degree 2 + P2, perfectly conducting walls far from the core) and the Stokes/Poincare analysis of every solve (`nyx-analysis`):
+//! the quasi-TE and quasi-TM modes sit at the two ends of the equator of the sphere, hybrid modes (sloped
 //! side walls, rib slab, near the TE-TM crossing) move off the poles of the x/y axis and lose degree of polarization.
 //!
 //! Regions (by name; the integers are the solver's business): `BOX` buried oxide, `Si` core, `Si_slab` rib slab, `clad` upper cladding, and
@@ -192,7 +192,7 @@ impl SoiWire {
     }
 
     /// Meshes and solves with `solver` (the kernels live in `nyx-ems`; the window and the tests pass `nyx_engine::legacy::solve`); the result
-    /// carries the polarization analysis (`SolveResult::analysis`).
+    /// has `Solution::te_fraction` set; the full polarization analysis is `nyx_engine::legacy::analyse`.
     pub fn solve(&self, solver: super::Solver) -> Result<SolveResult, String> {
         let g = self.mesh()?;
         solver(&g.mesh, &self.spec(&g))

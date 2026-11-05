@@ -9,7 +9,7 @@ use crate::params::*;
 use crate::workspace::*;
 use femcore::meshing::geomdrive;
 use femcore::mesh::SimplexMesh;
-use femcore::polarization::PolClass;
+use nyx_engine::analysis::polarization::PolClass;
 use femcore::problem::{ProblemSpec, SolveResult, SolveState};
 use femcore::progress::Progress;
 use femcore::usecases::soi::{slab_neff, Cladding, SlabPol, SoiWire};
@@ -370,8 +370,8 @@ fn family_of(c: &PolClass) -> Family {
     }
 }
 
-fn mode_recs(r: &SolveResult) -> Result<Vec<ModeRec>, ToolError> {
-    let a = r.analysis.as_ref().ok_or_else(|| ToolError::new("solver_error", "the mode solver returned no polarization analysis"))?;
+fn mode_recs(r: &SolveResult, a: Option<&nyx_engine::analysis::ModeAnalysis>) -> Result<Vec<ModeRec>, ToolError> {
+    let a = a.ok_or_else(|| ToolError::new("solver_error", "the mode solver returned no polarization analysis"))?;
     let mut v = vec![];
     for (sol, row) in r.solutions.iter().zip(&a.rows) {
         let (re, im) = sol.neff.ok_or_else(|| ToolError::new("solver_error", "a mode has no effective index"))?;
@@ -406,14 +406,14 @@ struct Solved {
 
 fn run_solve(mesh: &SimplexMesh, spec: &ProblemSpec) -> Result<Solved, ToolError> {
     let progress = Progress::new();
-    let r = nyx_engine::legacy::solve_with(mesh, spec, &mut SolveState::default(), &progress).map_err(|e| {
+    let (r, analysis) = nyx_engine::legacy::solve_with_analysis(mesh, spec, &mut SolveState::default(), &progress).map_err(|e| {
         if e == femcore::progress::CANCELLED {
             ToolError::new("cancelled", "the solve was cancelled")
         } else {
             ToolError::new("solver_error", e)
         }
     })?;
-    Ok(Solved { modes: mode_recs(&r)?, seconds: r.seconds, dofs: r.dofs })
+    Ok(Solved { modes: mode_recs(&r, analysis.as_ref())?, seconds: r.seconds, dofs: r.dofs })
 }
 
 fn solve_run(ws: &mut Workspace, b: &Bound) -> ToolResult {

@@ -16,5 +16,12 @@ fn main() {
     s.study = Study::Eigenfrequency { n_modes: 4, f_search: exact };
     let t = std::time::Instant::now();
     let res = nyx_engine::legacy::solve(&mesh, &s, &mut SolveState::default()).unwrap();
-    println!("{} dofs in {:.1} s: {:?} (exact {:.5e}) | {}", res.dofs, t.elapsed().as_secs_f64(), res.solutions.iter().map(|x| x.value.unwrap() / 1e9).collect::<Vec<_>>(), exact, res.log.join(" | "));
+    println!(
+        "{} dofs in {:.1} s: {:?} (exact {:.5e}) | {}",
+        res.dofs,
+        t.elapsed().as_secs_f64(),
+        res.solutions.iter().map(|x| x.value.unwrap() / 1e9).collect::<Vec<_>>(),
+        exact,
+        res.log.join(" | ")
+    );
 }

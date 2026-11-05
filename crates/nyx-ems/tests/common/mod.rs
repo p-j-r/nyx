@@ -3,7 +3,7 @@
 #![allow(dead_code, unused_imports)]
 use femcore::progress::Progress;
 pub use femcore::testkit::*;
-use nyx_ems::{Problem, Solved, Study};
+use nyx_ems::{Problem, Study};
 use nyx_physics::{Discretisation, Mesh, Solution, SolveResult};
 
 /// An EM-wave problem with the defaults of the old `ProblemSpec::new(Physics::Emw)`: order 2, a `Modes` study at 10 GHz.
@@ -13,13 +13,19 @@ pub fn emw() -> Problem {
 
 /// Solves a typed problem on a fixture mesh (what `Physics::solve` does after `decode`); the stand-in of the old `solve::solve`.
 pub fn solve(mesh: &Discretisation, p: &Problem) -> Result<SolveResult, String> {
-    Ok(try_solve_analysed(mesh, p)?.result)
+    let exchange = Mesh::from_solver_mesh(mesh)?;
+    nyx_ems::run(&exchange, p, &Progress::new()).map_err(|e| e.to_string())
 }
 
-/// `solve` with the polarization analysis next to the result.
-pub fn try_solve_analysed(mesh: &Discretisation, p: &Problem) -> Result<Solved, String> {
+/// `solve` with the polarization analysis (`nyx_analysis::polarization`, a function of the result) next to the result.
+pub fn try_solve_analysed(
+    mesh: &Discretisation,
+    p: &Problem,
+) -> Result<(SolveResult, nyx_analysis::ModeAnalysis), String> {
     let exchange = Mesh::from_solver_mesh(mesh)?;
-    nyx_ems::run_analysed(&exchange, p, &Progress::new()).map_err(|e| e.to_string())
+    let result = nyx_ems::run(&exchange, p, &Progress::new()).map_err(|e| e.to_string())?;
+    let analysis = nyx_analysis::polarization(&exchange, &result).map_err(|e| e.to_string())?;
+    Ok((result, analysis))
 }
 
 /// The effective index (re, im) of a mode solution.

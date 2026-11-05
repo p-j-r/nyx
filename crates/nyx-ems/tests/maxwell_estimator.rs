@@ -4,15 +4,17 @@
 mod common;
 
 use femcore::adapt::estimate3::{adapt_loop3, LoopSettings3};
-use femcore::adapt::maxwell::{indicator_metrics, maxwell_indicators, CurlField, EquidistributeOptions, MaxwellOptions};
+use femcore::adapt::maxwell::{
+    indicator_metrics, maxwell_indicators, CurlField, EquidistributeOptions, MaxwellOptions,
+};
 use femcore::adapt::metric::Sym;
 use femcore::adapt::ops3::AdaptOptions3;
 use femcore::adapt::topo3::TopoOptions3;
 use femcore::adapt::work::{simplex_from_adapt, simplex_to_adapt};
-use nyx_ems::cavity::{assemble_emw_eigen, basis3, solve_emw_modes, Ned3};
-use nyx_ems::{Problem, Study};
 use femcore::linalg::csr::C;
 use femcore::mesh::SimplexMesh;
+use nyx_ems::cavity::{assemble_emw_eigen, basis3, solve_emw_modes, Ned3};
+use nyx_ems::{Problem, Study};
 
 const C0: f64 = 299_792_458.0;
 
@@ -50,9 +52,20 @@ struct Mode<'a> {
 impl CurlField for Mode<'_> {
     fn sample(&self, cell: usize, lam: [f64; 4]) -> ([C; 3], [C; 3]) {
         let v = self.mesh.cell(cell);
-        let p: Vec<[f64; 3]> = v.iter().map(|&i| [self.mesh.points[3 * i as usize], self.mesh.points[3 * i as usize + 1], self.mesh.points[3 * i as usize + 2]]).collect();
+        let p: Vec<[f64; 3]> = v
+            .iter()
+            .map(|&i| {
+                [
+                    self.mesh.points[3 * i as usize],
+                    self.mesh.points[3 * i as usize + 1],
+                    self.mesh.points[3 * i as usize + 2],
+                ]
+            })
+            .collect();
         let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-        let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        };
         let (e1, e2, e3) = (sub(p[1], p[0]), sub(p[2], p[0]), sub(p[3], p[0]));
         let six_v = e1[0] * cross(e2, e3)[0] + e1[1] * cross(e2, e3)[1] + e1[2] * cross(e2, e3)[2];
         let g1 = cross(e2, e3).map(|x| x / six_v);
@@ -82,7 +95,10 @@ fn spec(order: usize, f_exact: f64) -> Problem {
 }
 
 /// Solves the lowest mode on `mesh` and returns its frequency and the Maxwell indicators of it.
-fn solve_and_estimate(mesh: &SimplexMesh, spec: &Problem) -> Result<(f64, femcore::adapt::maxwell::Indicators), String> {
+fn solve_and_estimate(
+    mesh: &SimplexMesh,
+    spec: &Problem,
+) -> Result<(f64, femcore::adapt::maxwell::Indicators), String> {
     let asm = assemble_emw_eigen(mesh, spec)?;
     let solved = solve_emw_modes(&asm)?;
     let (f, idx) = solved.freqs[0];
@@ -103,13 +119,22 @@ fn the_indicators_fall_at_the_rate_of_the_element_order_under_uniform_refinement
         for n in [(2, 2, 2), (4, 3, 2), (8, 6, 4)] {
             let m = common::block(a, b, d, n.0, n.1, n.2);
             let (f, ind) = solve_and_estimate(&m, &s).unwrap();
-            eprintln!("order {order} {:5} tets  f error {:.2e}  eta {:.3e}  parts {:?}", m.n_cells(), (f / exact - 1.0).abs(), ind.total, ind.parts);
+            eprintln!(
+                "order {order} {:5} tets  f error {:.2e}  eta {:.3e}  parts {:?}",
+                m.n_cells(),
+                (f / exact - 1.0).abs(),
+                ind.total,
+                ind.parts
+            );
             totals.push(ind.total);
         }
         // halving h twice must lower the estimate at least as fast as h^order (it is an upper bound of the energy error of the field,
         // which falls like h^order; the first mesh is too coarse to be in the asymptotic range, so compare the last two)
         let rate = (totals[1] / totals[2]).log2() / 1.0;
-        eprintln!("order {order}: eta falls by a factor {:.2} over the last refinement (h halves)", totals[1] / totals[2]);
+        eprintln!(
+            "order {order}: eta falls by a factor {:.2} over the last refinement (h halves)",
+            totals[1] / totals[2]
+        );
         assert!(totals[2] < totals[1] && totals[1] < totals[0], "{totals:?}");
         assert!(rate > 0.6 * order as f64, "order {order}: rate {rate}");
     }
@@ -128,7 +153,10 @@ fn maxwell_loop(order: usize, target_growth: f64, cycles: usize) -> Vec<(usize, 
         let (f, ind) = solve_and_estimate(m, &s)?;
         Ok(((m.clone(), ind), f))
     };
-    let mut metrics = |mesh: &SimplexMesh, r: &(SimplexMesh, femcore::adapt::maxwell::Indicators), target: f64, floor: Option<&[Sym<3>]>| {
+    let mut metrics = |mesh: &SimplexMesh,
+                       r: &(SimplexMesh, femcore::adapt::maxwell::Indicators),
+                       target: f64,
+                       floor: Option<&[Sym<3>]>| {
         let opt = EquidistributeOptions { order, h_max: a / 2.0, h_min_fraction: 0.05, target_cells: target };
         indicator_metrics(mesh, &r.1.eta2, &opt, floor)
     };
@@ -178,14 +206,22 @@ fn the_maxwell_loop_is_below_the_uniform_curve_at_both_orders_also_at_the_lowest
         let uniform = uniform_errors(order);
         let looped = maxwell_loop(order, 2.0, 4);
         let at = |cells: usize| -> f64 {
-            let w = uniform.windows(2).filter(|w| w[0].0 < w[1].0).find(|w| (w[0].0..=w[1].0).contains(&cells)).unwrap_or_else(|| &uniform[uniform.len() - 2..]);
+            let w = uniform
+                .windows(2)
+                .filter(|w| w[0].0 < w[1].0)
+                .find(|w| (w[0].0..=w[1].0).contains(&cells))
+                .unwrap_or_else(|| &uniform[uniform.len() - 2..]);
             let (n0, e0, n1, e1) = (w[0].0 as f64, w[0].1, w[1].0 as f64, w[1].1);
             let t = ((cells as f64).ln() - n0.ln()) / (n1.ln() - n0.ln());
             (e0.ln() + t * (e1.ln() - e0.ln())).exp()
         };
         eprintln!("order {order}: uniform {uniform:?}\n         loop {looped:?}");
         let (cells, err) = *looped.last().unwrap();
-        assert!(err < at(cells), "order {order}: the residual loop is not better than uniform meshes of its size: {err:.2e} against {:.2e}", at(cells));
+        assert!(
+            err < at(cells),
+            "order {order}: the residual loop is not better than uniform meshes of its size: {err:.2e} against {:.2e}",
+            at(cells)
+        );
         // the cell count grows by about the asked factor, not by orders of magnitude
         assert!(cells < 20 * looped[0].0, "{looped:?}");
     }
@@ -219,11 +255,16 @@ fn sphere_loop(order: usize, h0: f64, cycles: usize) -> Vec<(usize, f64)> {
         let (f, ind) = solve_and_estimate(m, &s)?;
         Ok(((m.clone(), ind), f))
     };
-    let mut metrics = |mesh: &SimplexMesh, r: &(SimplexMesh, femcore::adapt::maxwell::Indicators), target: f64, floor: Option<&[Sym<3>]>| {
+    let mut metrics = |mesh: &SimplexMesh,
+                       r: &(SimplexMesh, femcore::adapt::maxwell::Indicators),
+                       target: f64,
+                       floor: Option<&[Sym<3>]>| {
         let opt = EquidistributeOptions { order, h_max: h0, h_min_fraction: 0.1, target_cells: target };
         indicator_metrics(mesh, &r.1.eta2, &opt, floor)
     };
-    let mut adapt = |mesh: &SimplexMesh, metrics: &[Sym<3>], _grade: f64| -> Result<SimplexMesh, String> { Ok(adapt_to_metrics3(wrap(mesh), metrics, &a)?.0.mesh) };
+    let mut adapt = |mesh: &SimplexMesh, metrics: &[Sym<3>], _grade: f64| -> Result<SimplexMesh, String> {
+        Ok(adapt_to_metrics3(wrap(mesh), metrics, &a)?.0.mesh)
+    };
     let floor = |mesh: &SimplexMesh| geometry_floor3(&wrap(mesh), &opts, &a);
     let out = adapt_loop3(&g0.mesh, &st, Some(&floor), &mut solve, &mut metrics, &mut adapt).unwrap();
     out.cycles.iter().map(|c| (c.cells, (c.quantity / exact - 1.0).abs())).collect()

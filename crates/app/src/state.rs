@@ -296,6 +296,8 @@ pub struct ResultView {
     pub auto_warp: f32,
     pub values_cache: Option<(usize, usize, Arc<Vec<f32>>)>,
     pub disp_cache: Option<(usize, Arc<Vec<f32>>)>,
+    /// polarization of the modes (Stokes parameters, Poincare sphere); an analysis is computed from a result, it is not part of it
+    pub analysis: Option<nyx_engine::analysis::ModeAnalysis>,
 }
 
 impl ResultView {
@@ -312,7 +314,7 @@ impl ResultView {
         }
         let field = result.solutions.first().and_then(|s| s.fields.iter().position(|f| f.name == "|u|" || f.name == "T" || f.name == "V" || f.name == "|E|")).unwrap_or(0);
         let has_disp = result.solutions.iter().any(|s| s.disp.is_some());
-        ResultView { name, physics, result, display, sol: 0, field, manual_range: None, warp: if has_disp { auto_warp } else { 0.0 }, auto_warp, values_cache: None, disp_cache: None }
+        ResultView { name, physics, result, display, sol: 0, field, manual_range: None, warp: if has_disp { auto_warp } else { 0.0 }, auto_warp, values_cache: None, disp_cache: None, analysis: None }
     }
 
     pub fn solution(&self) -> &Solution {

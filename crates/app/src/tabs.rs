@@ -1116,12 +1116,12 @@ impl App {
 
     /// Whether the result on show carries a polarization analysis.
     pub fn has_analysis(&self) -> bool {
-        self.current.is_some_and(|i| self.results[i].result.analysis.is_some())
+        self.current.is_some_and(|i| self.results[i].analysis.is_some())
     }
 
-    /// The analysis section: Stokes parameters of every optical mode, the Poincare sphere and the table of `femcore::analysis`.
+    /// The analysis section: Stokes parameters of every optical mode, the Poincare sphere and the table of `nyx-analysis`.
     fn tab_analysis(&mut self, ui: &mut Ui) {
-        use femcore::polarization::{mode_markers, sphere_drawing, SphereState, MODE_COLOURS};
+        use nyx_engine::analysis::polarization::{mode_markers, sphere_drawing, SphereState, MODE_COLOURS};
         let Some(cur) = self.current else {
             ui.weak("No results yet. Press Compute.");
             return;
@@ -1131,7 +1131,7 @@ impl App {
         {
             let rv = &mut self.results[cur];
             let selectable = rv.physics == Some(Physics::Emw);
-            let Some(a) = rv.result.analysis.as_ref() else {
+            let Some(a) = rv.analysis.as_ref() else {
                 ui.weak("This result has no polarization analysis. Mode studies of the electromagnetic waves physics have one.");
                 return;
             };
@@ -1174,7 +1174,7 @@ impl App {
                     painter.text(tip, egui::Align2::CENTER_CENTER, &m.label, egui::FontId::proportional(side * 0.036), Color32::WHITE);
                 }
             };
-            let line = |l: &femcore::polarization::WireLine| -> Vec<egui::Shape> {
+            let line = |l: &nyx_engine::analysis::polarization::WireLine| -> Vec<egui::Shape> {
                 let pts: Vec<egui::Pos2> = l.pts.iter().map(|p| pt(p.0, p.1)).collect();
                 if l.front {
                     vec![egui::Shape::line(pts, egui::Stroke::new(l.width as f32, with_alpha(ink, l.opacity)))]

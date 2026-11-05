@@ -201,7 +201,7 @@ fn kernel_stage_api_is_public() {
         nyx_ems::solve_axisymmetric,
         nyx_ems::solve_cavity,
     );
-    let _ = (nyx_ems::run, nyx_ems::run_analysed, nyx_ems::decode, nyx_ems::solve_optical);
+    let _ = (nyx_ems::run, nyx_ems::decode, nyx_ems::solve_optical);
 }
 
 /// The shape of a result, without numbers: what a front-end, the store and the analyses may rely on (names, units, components, the per-cell

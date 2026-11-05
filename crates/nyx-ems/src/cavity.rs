@@ -13,7 +13,6 @@
 
 use crate::modes::C0;
 use crate::problem::{Problem, Study};
-use crate::Solved;
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::RCsr as Csr;
@@ -384,14 +383,14 @@ fn ned_relations(
     Ok(out)
 }
 
-/// Eigenfrequencies of the cavity for a `Cavity` study: the three stages in order. The result carries the polarization of the modes
-/// (scalars and log, as before the move; the analysis itself is in `Solved::analysis`).
-pub fn solve_cavity(mesh: &Discretisation, problem: &Problem) -> Result<Solved, String> {
+/// Eigenfrequencies of the cavity for a `Cavity` study: the three stages in order. The result carries the complex field of every mode and
+/// its frame, which is what the polarization analysis reads (`nyx-analysis`).
+pub fn solve_cavity(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let asm = assemble_emw_eigen(mesh, problem)?;
     let solved = solve_emw_modes(&asm)?;
     let mut r = emw_eigen_fields(mesh, problem, &asm, &solved)?;
-    r.result.seconds = t0.elapsed().as_secs_f64();
+    r.seconds = t0.elapsed().as_secs_f64();
     Ok(r)
 }
 
@@ -617,14 +616,14 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
     Ok(EmwSolve { freqs, vectors, dim, converged })
 }
 
-/// Stage 3: plot fields and per-cell complex E of every mode at the quadratic nodes, the frequencies and Q, and the
-/// polarization analysis.
+/// Stage 3: plot fields and per-cell complex E of every mode at the quadratic nodes, the frequencies and Q, and the frame of the
+/// fields for the polarization analysis.
 pub fn emw_eigen_fields(
     mesh: &Discretisation,
     problem: &Problem,
     asm: &EmwAssembly,
     solved: &EmwSolve,
-) -> Result<Solved, String> {
+) -> Result<SolveResult, String> {
     let (order, n, nred, f0, f_search) = (asm.order, asm.n, asm.nred, asm.f0, asm.f_search);
     let (ned, red) = (&asm.ned, &asm.red);
     let (freqs, vectors, dim, converged) = (&solved.freqs, &solved.vectors, solved.dim, solved.converged);
@@ -637,7 +636,6 @@ pub fn emw_eigen_fields(
     let mut solutions = vec![];
     let mut scalars = vec![];
     let (axes, left_handed) = femcore::section::axes_of_3d_periodic(&problem.periodic, mesh);
-    let mut pol_modes: Vec<femcore::analysis::ModeInput> = vec![];
     for (j, (f, i)) in freqs.iter().enumerate() {
         let x = red.expand(&vectors[*i]);
         let mut e = vec![[c(0.0, 0.0); 3]; nc * nloc];
@@ -662,25 +660,6 @@ pub fn emw_eigen_fields(
                 e[ci * nloc + a] = val;
             }
         }
-        // polarization: the field at the vertices of every cell, each standing for a quarter of its volume
-        let mut samples = Vec::with_capacity(4 * nc);
-        for ci in 0..nc {
-            for a in 0..4 {
-                let v = e[ci * nloc + a];
-                let cx = |z: C| [z.re, z.im];
-                samples.push(femcore::polarization::Sample {
-                    ex: cx(v[axes[0]]),
-                    ey: cx(v[axes[1]]),
-                    ez: cx(v[axes[2]]),
-                    w: geo.vol[ci] / 4.0,
-                });
-            }
-        }
-        pol_modes.push(femcore::analysis::ModeInput {
-            label: format!("mode {}", j + 1),
-            neff: (f.re / 1e12, f.im / 1e12),
-            samples,
-        });
         let big =
             e.iter().flat_map(|v| v.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
         let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
@@ -706,7 +685,7 @@ pub fn emw_eigen_fields(
                 fields,
                 cell_fields: cell_fields_of(&cells),
                 value: Some(f.re),
-                ..Default::default()
+                eigenvalue: Some([f.re, f.im]),
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
@@ -716,7 +695,7 @@ pub fn emw_eigen_fields(
                 fields,
                 cell_fields: cell_fields_of(&cells),
                 value: Some(f.re),
-                ..Default::default()
+                eigenvalue: Some([f.re, f.im]),
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(f.re)));
         }
@@ -735,7 +714,24 @@ pub fn emw_eigen_fields(
     if f_search <= 0.0 {
         log.push("no search frequency given: modes nearest the fundamental of a box of this size".into());
     }
-    let mut result = SolveResult {
+    // the frame the polarization is read in: the (lateral, normal, propagation) axes of the problem
+    scalars.push(
+        nyx_physics::FieldFrame {
+            lateral: axes[0],
+            normal: axes[1],
+            propagation: axes[2],
+            left_handed,
+            outside: vec![],
+        }
+        .scalar(),
+    );
+    log.push(format!(
+        "polarization axes: lateral {}, normal {}, propagation {}",
+        ["x", "y", "z"][axes[0]],
+        ["x", "y", "z"][axes[1]],
+        ["x", "y", "z"][axes[2]]
+    ));
+    Ok(SolveResult {
         physics: "ems".into(),
         study: "cavity".into(),
         order: 2,
@@ -745,23 +741,5 @@ pub fn emw_eigen_fields(
         log,
         dofs: n,
         seconds: 0.0,
-    };
-    // Stokes parameters of the modes with respect to the (lateral, normal, propagation) axes of the problem
-    let fmax = pol_modes.iter().map(|m| m.neff.0.abs()).fold(0.0, f64::max);
-    let mut opts = femcore::analysis::AnalysisOptions {
-        value_label: "f (THz)".into(),
-        degeneracy_tol: 1e-6 * fmax,
-        ..Default::default()
-    };
-    if left_handed {
-        opts.class.time = femcore::polarization::TimeConvention::MinusI;
-    }
-    result.log.push(format!(
-        "polarization axes: lateral {}, normal {}, propagation {}",
-        ["x", "y", "z"][axes[0]],
-        ["x", "y", "z"][axes[1]],
-        ["x", "y", "z"][axes[2]]
-    ));
-    let analysis = femcore::analysis::analyze_modes(&pol_modes, &opts);
-    Ok(Solved::with_analysis(result, Some(analysis)))
+    })
 }

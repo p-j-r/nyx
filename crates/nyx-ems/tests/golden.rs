@@ -23,9 +23,35 @@ fn checked(mesh: &Discretisation, p: &Problem) -> SolveResult {
     r
 }
 
+/// The polarization analysis (`nyx_analysis::polarization`, a function of the result) against the lines the mode studies recorded in their
+/// scalars `polarization N` before phase 5 (ADR 56): the file `polarization.json` holds those lines unchanged, so this proves the analysis
+/// moved out of the kernels without changing a number. The class is compared as text, the numbers (rounded to three decimals) to `tol`.
+fn polarization_golden(name: &str, mesh: &Discretisation, r: &SolveResult, tol: f64) {
+    let all: Value = serde_json::from_str(&std::fs::read_to_string(dir().join("polarization.json")).unwrap()).unwrap();
+    let want = all[name].as_object().unwrap_or_else(|| panic!("{name}: no polarization lines in polarization.json"));
+    let exchange = nyx_physics::Mesh::from_solver_mesh(mesh).unwrap();
+    let got = nyx_analysis::polarization(&exchange, r).unwrap().summary_lines();
+    assert_eq!(got.len(), want.len(), "{name}: number of modes with an intensity");
+    for (mode, text) in got {
+        let w = want[&mode.to_string()].as_str().unwrap();
+        let (gc, wc) = (text.split("  TE ").next().unwrap(), w.split("  TE ").next().unwrap());
+        assert_eq!(gc, wc, "{name}: class of mode {mode}");
+        let numbers = |t: &str| -> Vec<f64> {
+            t.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+                .filter_map(|s| s.parse::<f64>().ok())
+                .collect()
+        };
+        let (gn, wn) = (numbers(text.split_once("  TE ").unwrap().1), numbers(w.split_once("  TE ").unwrap().1));
+        assert_eq!(gn.len(), wn.len(), "{name}: mode {mode}: {text} against {w}");
+        for (a, b) in gn.iter().zip(&wn) {
+            assert!((a - b).abs() <= tol, "{name}: mode {mode}: {text} against {w}");
+        }
+    }
+}
+
 /// The G2 tolerances for the silicon-wire files: the effective indices to 5e-5 relative, then the rest of the record (fields against their own
-/// maximum, scalars) to 1e-3. The polarization lines are texts of rounded numbers; only the class of the mode is compared.
-fn golden_g2(name: &str, r: &SolveResult) {
+/// maximum, scalars) to 1e-3. The polarization is checked by `polarization_golden` at the same looseness.
+fn golden_g2(name: &str, mesh: &Discretisation, r: &SolveResult) {
     let want: Value =
         serde_json::from_str(&std::fs::read_to_string(dir().join(format!("{name}.json"))).unwrap()).unwrap();
     let sols = want["solutions"].as_array().unwrap();
@@ -36,17 +62,8 @@ fn golden_g2(name: &str, r: &SolveResult) {
         assert!(((wr - gn.0) / wr).abs() < 5e-5, "{name}: n_eff of mode {} is {} against {wr}", i + 1, gn.0);
         assert!((wi - gn.1).abs() < 5e-5 * wr, "{name}: Im n_eff of mode {} is {} against {wi}", i + 1, gn.1);
     }
-    // the polarization lines: compare the class, which opens the text, and leave the rounded numbers to the tolerances above and below
-    let mut r = r.clone();
-    for (k, v) in r.scalars.iter_mut() {
-        if let (true, nyx_physics::Scalar::Text(t)) = (k.starts_with("polarization"), v) {
-            let w = want["scalars"][k.as_str()].as_str().unwrap().to_string();
-            let class = |t: &str| t.split("  TE ").next().unwrap().to_string();
-            assert_eq!(class(t), class(&w), "{name}: {k}");
-            *t = w;
-        }
-    }
-    golden(&dir(), name, &r, 1e-3);
+    polarization_golden(name, mesh, r, 5e-3);
+    golden(&dir(), name, r, 1e-3);
 }
 
 #[test]
@@ -54,7 +71,7 @@ fn golden_soi_wire_modes() {
     let wire = SoiWire { n_modes: 2, ..Default::default() };
     let g = wire.mesh().unwrap();
     let r = common::solve(&g.mesh, &common::from_old(&wire.spec(&g))).unwrap();
-    golden_g2("emw_soi_wire", &r);
+    golden_g2("emw_soi_wire", &g.mesh, &r);
 }
 
 #[test]
@@ -62,7 +79,7 @@ fn golden_soi_wire_with_sloped_wall_hybrid_modes() {
     let wire = SoiWire { width: 300e-9, sidewall_left_deg: Some(75.0), n_modes: 2, ..Default::default() };
     let g = wire.mesh().unwrap();
     let r = common::solve(&g.mesh, &common::from_old(&wire.spec(&g))).unwrap();
-    golden_g2("emw_soi_hybrid", &r);
+    golden_g2("emw_soi_hybrid", &g.mesh, &r);
 }
 
 fn crystal(tilt_deg: f64) -> Anisotropy {
@@ -81,7 +98,9 @@ fn golden_tilted_crystal_in_a_pec_guide() {
         let mut s = common::emw();
         s.materials.aniso.insert(1, crystal(tilt));
         s.study = Study::Modes { freq: 12e9, n_target: 1.6, evanescent: false, n_modes: 3 };
-        golden(&dir(), name, &checked(&mesh, &s), 1e-7);
+        let r = checked(&mesh, &s);
+        polarization_golden(name, &mesh, &r, 1.5e-3);
+        golden(&dir(), name, &r, 1e-7);
     }
 }
 
@@ -94,5 +113,7 @@ fn golden_pec_guide_with_a_pml() {
     // absorbing layer on the right (domain 2) along x
     s.materials.pml.insert(2, Pml { x: PmlDir::Plus, ..Pml::default() });
     s.study = Study::Modes { freq: 12e9, n_target: 1.5, evanescent: false, n_modes: 3 };
-    golden(&dir(), "emw_pml_x", &checked(&mesh, &s), 1e-7);
+    let r = checked(&mesh, &s);
+    polarization_golden("emw_pml_x", &mesh, &r, 1.5e-3);
+    golden(&dir(), "emw_pml_x", &r, 1e-7);
 }

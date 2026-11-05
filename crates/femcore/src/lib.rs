@@ -12,7 +12,7 @@
 //!   `linalg::driver` is the door the kernels use)
 //! * physics: `dfs`, `sms` and `ems` are crates since phase 4 (ADR 41, 42 to 47); what they share stays here: `periodic` (Floquet pairs, used by the solid and the cavity
 //!   kernels), `edge` (the 2D edge-element basis), `pml` (coordinate stretching), `props` (materials per domain), `section` (the wafer axes)
-//! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)
+//! * optical mode sets: `optical` (modes with the data to evaluate their fields; the polarization analysis moved to `nyx-analysis` in phase 5)
 //! * ported libraries: `linalg` (see above; Krylov, eigen, preconditioner, time-stepping and optimisation library for
 //!   real and complex systems) and the mesher port in `mesh`, `meshing` and `adapt`, see docs/ports
 //! * files: `xmlio` (project XML), `h5io` (HDF5/XDMF results, feature `hdf5`)
@@ -23,7 +23,6 @@
 //! the machine code. `too_many_arguments` is allowed on the few assembly/solver entry points that take a full problem
 //! description (each marked where it applies).
 #![allow(clippy::needless_range_loop, clippy::neg_cmp_op_on_partial_ord)]
-pub mod analysis;
 pub mod optical;
 pub mod edge;
 pub mod expr;
@@ -38,7 +37,6 @@ pub mod meshing;
 pub mod par;
 pub mod periodic;
 pub mod pml;
-pub mod polarization;
 pub mod problem;
 pub mod props;
 pub mod progress;

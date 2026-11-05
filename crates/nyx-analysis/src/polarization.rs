@@ -1,15 +1,15 @@
 //! Polarization analysis of optical modes: Stokes parameters, Poincaré sphere and a classification of the mode.
 //!
-//! A mode propagating along z has a transverse field (Ex, Ey) that is complex at every point of the cross-section;
+//! A mode has a field transverse to its direction of propagation, `(E_lat, E_nor)`, that is complex at every point of the cross-section;
 //! in time its tip draws an ellipse. The four Stokes parameters describe that ellipse:
 //!
-//! * `S0 = |Ex|^2 + |Ey|^2` intensity
-//! * `S1 = |Ex|^2 - |Ey|^2` x versus y
-//! * `S2 = 2 Re(conj(Ex) Ey)` +45 degrees versus -45 degrees
-//! * `S3 = -+2 Im(conj(Ex) Ey)` circular part
+//! * `S0 = |E_lat|^2 + |E_nor|^2` intensity
+//! * `S1 = |E_lat|^2 - |E_nor|^2` lateral versus normal
+//! * `S2 = 2 Re(conj(E_lat) E_nor)` +45 degrees versus -45 degrees
+//! * `S3 = -+2 Im(conj(E_lat) E_nor)` circular part
 //!
 //! The sign of S3 depends on the time convention of the field, so it is defined by what can be seen: `S3 > 0` means
-//! that the E-vector turns counter-clockwise in the (x, y) plane as time advances (x to the right, y up). Whether
+//! that the E-vector turns counter-clockwise in the (lateral, normal) plane as time advances (lateral to the right, normal up). Whether
 //! that is called "left" or "right" circular differs between optics and IEEE usage; this module only says
 //! counter-clockwise (CCW) or clockwise (CW). Divided by S0 the parameters give a point (s1, s2, s3) on the unit
 //! Poincaré sphere: the equator is linear polarization, the poles are circular, latitude is twice the ellipticity
@@ -24,9 +24,11 @@
 //! stores its fields. `p1_vertex_weights` makes area weights for fields given at the vertices of a triangle mesh. Only
 //! the transverse components enter the Stokes parameters; the longitudinal part is reported as a fraction.
 //!
-//! Axes: x is the lateral (in-plane) direction, y the normal direction and z the propagation direction, as in the
-//! local frame of the mode solvers (`section::local_tensor`). "Quasi-TE" means x-dominated and "quasi-TM" y-dominated. For a ring (r, z) mesh pass
-//! E_r as `ex` and E_z as `ey` and E_theta as `ez`, and decide how that maps to TE and TM.
+//! Axes (R28): the samples are named for what the component is, not for an axis number. `lat` is the lateral direction, `nor` the
+//! surface normal, `prop` the direction of propagation. In the wafer frame (ADR 1) those are the axes x, z and y: "quasi-TE" means
+//! x-dominated, "quasi-TM" z-dominated, and the longitudinal share is the share along y. (Until phase 5 this module called them x, y and z
+//! after the local frame of the mode solvers, which made `Ey` mean two different things.) For a ring (r, z) mesh pass E_r as `lat`, E_z as
+//! `nor` and E_theta as `prop`, and decide how that maps to TE and TM.
 
 use std::fmt::Write;
 
@@ -71,9 +73,14 @@ pub struct Stokes {
 }
 
 impl Stokes {
-    pub fn from_fields(ex: Cx, ey: Cx, conv: TimeConvention) -> Stokes {
-        let cross = conj_mul(ex, ey);
-        Stokes { s0: abs2(ex) + abs2(ey), s1: abs2(ex) - abs2(ey), s2: 2.0 * cross[0], s3: conv.s3_sign() * 2.0 * cross[1] }
+    pub fn from_fields(lat: Cx, nor: Cx, conv: TimeConvention) -> Stokes {
+        let cross = conj_mul(lat, nor);
+        Stokes {
+            s0: abs2(lat) + abs2(nor),
+            s1: abs2(lat) - abs2(nor),
+            s2: 2.0 * cross[0],
+            s3: conv.s3_sign() * 2.0 * cross[1],
+        }
     }
 
     fn add_scaled(&mut self, o: &Stokes, w: f64) {
@@ -128,10 +135,10 @@ pub fn sphere_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 /// The field of a mode at one point of the cross-section and the area (or volume share) that point stands for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
-    pub ex: Cx,
-    pub ey: Cx,
+    pub lat: Cx,
+    pub nor: Cx,
     /// longitudinal component (zero when not available)
-    pub ez: Cx,
+    pub prop: Cx,
     pub w: f64,
 }
 
@@ -145,8 +152,12 @@ pub enum PolClass {
     LinearPlus45,
     /// linear, along -45 degrees
     LinearMinus45,
-    Elliptical { ccw: bool },
-    Circular { ccw: bool },
+    Elliptical {
+        ccw: bool,
+    },
+    Circular {
+        ccw: bool,
+    },
     /// polarization changes across the mode (degree of polarization below the limit)
     Hybrid,
 }
@@ -194,9 +205,9 @@ pub struct ModeReport {
     pub dop: f64,
     pub chi_deg: f64,
     pub psi_deg: f64,
-    /// `integral |Ex|^2 / integral (|Ex|^2 + |Ey|^2)`; equals `(1 + s1) / 2` of the integrated vector
+    /// `integral |E_lat|^2 / integral (|E_lat|^2 + |E_nor|^2)`; equals `(1 + s1) / 2` of the integrated vector
     pub te_fraction: f64,
-    /// share of the field along the propagation axis (y in the wafer frame): `integral |E_y|^2 / integral |E|^2`
+    /// share of the field along the propagation axis (y in the wafer frame): `integral |E_prop|^2 / integral |E|^2`
     pub long_fraction: f64,
     pub class: PolClass,
 }
@@ -205,14 +216,22 @@ impl ModeReport {
     pub fn summary_line(&self) -> String {
         format!(
             "s = ({:+.3}, {:+.3}, {:+.3})  P = {:.3}  chi = {:+.1} deg  psi = {:+.1} deg  TE = {:.3}  Ey = {:.3}  {}",
-            self.sphere[0], self.sphere[1], self.sphere[2], self.dop, self.chi_deg, self.psi_deg, self.te_fraction, self.long_fraction, self.class.label()
+            self.sphere[0],
+            self.sphere[1],
+            self.sphere[2],
+            self.dop,
+            self.chi_deg,
+            self.psi_deg,
+            self.te_fraction,
+            self.long_fraction,
+            self.class.label()
         )
     }
 }
 
 /// Stokes parameters of every sample, in the order of `samples` (for plots on the sphere and maps of the cross-section).
 pub fn local_stokes(samples: &[Sample], conv: TimeConvention) -> Vec<Stokes> {
-    samples.iter().map(|s| Stokes::from_fields(s.ex, s.ey, conv)).collect()
+    samples.iter().map(|s| Stokes::from_fields(s.lat, s.nor, conv)).collect()
 }
 
 pub fn classify(integrated: &Stokes, opts: &ClassOptions) -> PolClass {
@@ -229,7 +248,11 @@ pub fn classify(integrated: &Stokes, opts: &ClassOptions) -> PolClass {
         return PolClass::Elliptical { ccw: s[2] > 0.0 };
     }
     if s[0].abs() >= s[1].abs() {
-        if s[0] >= 0.0 { PolClass::QuasiTe } else { PolClass::QuasiTm }
+        if s[0] >= 0.0 {
+            PolClass::QuasiTe
+        } else {
+            PolClass::QuasiTm
+        }
     } else if s[1] >= 0.0 {
         PolClass::LinearPlus45
     } else {
@@ -240,14 +263,14 @@ pub fn classify(integrated: &Stokes, opts: &ClassOptions) -> PolClass {
 /// The report of one mode; `None` if the weighted intensity is zero or not finite.
 pub fn analyze(samples: &[Sample], opts: &ClassOptions) -> Option<ModeReport> {
     let mut sum = Stokes::default();
-    let mut ez2 = 0.0;
-    let mut ex2 = 0.0;
-    let mut ey2 = 0.0;
+    let mut prop2 = 0.0;
+    let mut lat2 = 0.0;
+    let mut nor2 = 0.0;
     for s in samples {
-        sum.add_scaled(&Stokes::from_fields(s.ex, s.ey, opts.time), s.w);
-        ex2 += s.w * abs2(s.ex);
-        ey2 += s.w * abs2(s.ey);
-        ez2 += s.w * abs2(s.ez);
+        sum.add_scaled(&Stokes::from_fields(s.lat, s.nor, opts.time), s.w);
+        lat2 += s.w * abs2(s.lat);
+        nor2 += s.w * abs2(s.nor);
+        prop2 += s.w * abs2(s.prop);
     }
     if !sum.s0.is_finite() || sum.s0 <= 0.0 {
         return None;
@@ -258,8 +281,8 @@ pub fn analyze(samples: &[Sample], opts: &ClassOptions) -> Option<ModeReport> {
         dop: sum.dop(),
         chi_deg: sum.chi_deg(),
         psi_deg: sum.psi_deg(),
-        te_fraction: ex2 / (ex2 + ey2),
-        long_fraction: ez2 / (ex2 + ey2 + ez2),
+        te_fraction: lat2 / (lat2 + nor2),
+        long_fraction: prop2 / (lat2 + nor2 + prop2),
         class: classify(&sum, opts),
     })
 }
@@ -272,7 +295,9 @@ pub fn degenerate_groups(neff: &[(f64, f64)], tol: f64) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = vec![];
     let mut cur: Vec<usize> = vec![];
     for &i in &order {
-        let near = cur.last().is_some_and(|&j| ((neff[i].0 - neff[j].0).powi(2) + (neff[i].1 - neff[j].1).powi(2)).sqrt() <= tol);
+        let near = cur
+            .last()
+            .is_some_and(|&j| ((neff[i].0 - neff[j].0).powi(2) + (neff[i].1 - neff[j].1).powi(2)).sqrt() <= tol);
         if near {
             cur.push(i);
         } else {
@@ -347,7 +372,8 @@ fn push_curve(v: &View, pts: &[[f64; 3]], back: &mut String, front: &mut String,
     let flush = |run: &mut Vec<(f64, f64)>, is_front: bool, back: &mut String, front: &mut String| {
         if run.len() > 1 {
             let d: Vec<String> = run.iter().map(|(x, y)| format!("{x:.1},{y:.1}")).collect();
-            let (out, extra, o) = if is_front { (front, "", op) } else { (back, " stroke-dasharray=\"2 3\"", op * 0.6) };
+            let (out, extra, o) =
+                if is_front { (front, "", op) } else { (back, " stroke-dasharray=\"2 3\"", op * 0.6) };
             let _ = write!(out, "<polyline points=\"{}\" fill=\"none\" stroke=\"#3b5b82\" stroke-width=\"{width}\" stroke-opacity=\"{o:.2}\" stroke-linecap=\"round\"{extra}/>", d.join(" "));
         }
         run.clear();
@@ -377,7 +403,9 @@ fn frame_curves() -> Vec<(Vec<[f64; 3]>, f64, f64)> {
         }
     };
     let n = 120;
-    let ring = |f: &dyn Fn(f64) -> [f64; 3]| -> Vec<[f64; 3]> { (0..=n).map(|i| f(std::f64::consts::TAU * i as f64 / n as f64)).collect() };
+    let ring = |f: &dyn Fn(f64) -> [f64; 3]| -> Vec<[f64; 3]> {
+        (0..=n).map(|i| f(std::f64::consts::TAU * i as f64 / n as f64)).collect()
+    };
     let mut out = vec![];
     for m in 0..6 {
         if m % 3 == 0 {
@@ -419,7 +447,14 @@ fn sphere_frame(v: &View) -> (String, String, String, String) {
     }
     // labels
     let mut labels = String::new();
-    for (p, text) in [([1.0, 0.0, 0.0], "x"), ([-1.0, 0.0, 0.0], "y"), ([0.0, 1.0, 0.0], "+45\u{b0}"), ([0.0, -1.0, 0.0], "\u{2212}45\u{b0}"), ([0.0, 0.0, 1.0], "CCW"), ([0.0, 0.0, -1.0], "CW")] {
+    for (p, text) in [
+        ([1.0, 0.0, 0.0], "x"),
+        ([-1.0, 0.0, 0.0], "y"),
+        ([0.0, 1.0, 0.0], "+45\u{b0}"),
+        ([0.0, -1.0, 0.0], "\u{2212}45\u{b0}"),
+        ([0.0, 0.0, 1.0], "CCW"),
+        ([0.0, 0.0, -1.0], "CW"),
+    ] {
         let (x, y, d) = v.proj(p.map(|c| 1.27 * c));
         let op = if d >= 0.0 { 0.9 } else { 0.5 };
         let _ = write!(labels, "<text x=\"{x:.1}\" y=\"{y:.1}\" text-anchor=\"middle\" dominant-baseline=\"central\" fill=\"currentColor\" fill-opacity=\"{op}\">{text}</text>");
@@ -460,7 +495,12 @@ pub fn poincare_svg(points: &[(f64, f64, f64, f64)], size: f64) -> String {
         .collect();
     drawn.sort_by(|a, b| a.2.total_cmp(&b.2));
     let dot = |s: &mut String, x: f64, y: f64, w: f64, k: f64| {
-        let _ = write!(s, "<circle cx=\"{x:.1}\" cy=\"{y:.1}\" r=\"{:.1}\" fill=\"#e8590c\" fill-opacity=\"{:.2}\"/>", size * 0.01, (0.2 + 0.7 * w) * k);
+        let _ = write!(
+            s,
+            "<circle cx=\"{x:.1}\" cy=\"{y:.1}\" r=\"{:.1}\" fill=\"#e8590c\" fill-opacity=\"{:.2}\"/>",
+            size * 0.01,
+            (0.2 + 0.7 * w) * k
+        );
     };
     let (mut back_pts, mut front_pts) = (String::new(), String::new());
     for (x, y, d, w) in drawn {
@@ -574,7 +614,8 @@ pub struct ModeMarker {
 }
 
 /// The colours of the mode markers, in the order of the numbers (as `#rrggbb`).
-pub const MODE_COLOURS: [&str; 8] = ["#d9480f", "#1971c2", "#2f9e44", "#9c36b5", "#e67700", "#0c8599", "#c2255c", "#5f3dc4"];
+pub const MODE_COLOURS: [&str; 8] =
+    ["#d9480f", "#1971c2", "#2f9e44", "#9c36b5", "#e67700", "#0c8599", "#c2255c", "#5f3dc4"];
 
 /// Splits a curve into runs on the near and the far side of the sphere.
 fn curve_runs(v: &View, pts: &[[f64; 3]]) -> Vec<(Vec<(f64, f64)>, bool)> {
@@ -615,11 +656,23 @@ pub fn sphere_drawing(size: f64) -> SphereDrawing {
         dir[a] = 1.0;
         for sign in [1.0, -1.0] {
             let (x, y, d) = v.proj(dir.map(|c| sign * 1.12 * c));
-            lines.push(WireLine { pts: vec![(xc, yc), (x, y)], front: d >= 0.0, width: 0.9, opacity: if d >= 0.0 { 0.7 } else { 0.45 } });
+            lines.push(WireLine {
+                pts: vec![(xc, yc), (x, y)],
+                front: d >= 0.0,
+                width: 0.9,
+                opacity: if d >= 0.0 { 0.7 } else { 0.45 },
+            });
         }
     }
     let mut labels = vec![];
-    for (p, text) in [([1.0, 0.0, 0.0], "x"), ([-1.0, 0.0, 0.0], "y"), ([0.0, 1.0, 0.0], "+45\u{b0}"), ([0.0, -1.0, 0.0], "\u{2212}45\u{b0}"), ([0.0, 0.0, 1.0], "CCW"), ([0.0, 0.0, -1.0], "CW")] {
+    for (p, text) in [
+        ([1.0, 0.0, 0.0], "x"),
+        ([-1.0, 0.0, 0.0], "y"),
+        ([0.0, 1.0, 0.0], "+45\u{b0}"),
+        ([0.0, -1.0, 0.0], "\u{2212}45\u{b0}"),
+        ([0.0, 0.0, 1.0], "CCW"),
+        ([0.0, 0.0, -1.0], "CW"),
+    ] {
         let (x, y, d) = v.proj(p.map(|c| 1.27 * c));
         labels.push(WireLabel { text: text.to_string(), x, y, front: d >= 0.0 });
     }
@@ -638,7 +691,14 @@ pub fn mode_markers(states: &[SphereState], size: f64) -> Vec<ModeMarker> {
             let n = (st.s[0] * st.s[0] + st.s[1] * st.s[1] + st.s[2] * st.s[2]).sqrt();
             let p = if n > 1.0 { st.s.map(|c| c / n) } else { st.s };
             let (x, y, d) = v.proj(p);
-            ModeMarker { label: st.label.clone(), centre: (cx, cy), tip: (x, y), front: d >= 0.0, dashed: st.dashed, colour: i % MODE_COLOURS.len() }
+            ModeMarker {
+                label: st.label.clone(),
+                centre: (cx, cy),
+                tip: (x, y),
+                front: d >= 0.0,
+                dashed: st.dashed,
+                colour: i % MODE_COLOURS.len(),
+            }
         })
         .collect()
 }
@@ -651,8 +711,8 @@ mod tests {
     const ZERO: Cx = [0.0; 2];
     const I: Cx = [0.0, 1.0];
 
-    fn smp(ex: Cx, ey: Cx, w: f64) -> Sample {
-        Sample { ex, ey, ez: ZERO, w }
+    fn smp(lat: Cx, nor: Cx, w: f64) -> Sample {
+        Sample { lat, nor, prop: ZERO, w }
     }
 
     fn close(a: f64, b: f64) -> bool {
@@ -699,7 +759,8 @@ mod tests {
         let m = Stokes::from_fields(ONE, I, TimeConvention::MinusI);
         let p = Stokes::from_fields(ONE, I, TimeConvention::PlusJ);
         assert!(close(m.s3 / m.s0, 1.0) && close(p.s3 / p.s0, -1.0));
-        let r = analyze(&[smp(ONE, I, 1.0)], &ClassOptions { time: TimeConvention::MinusI, ..Default::default() }).unwrap();
+        let r =
+            analyze(&[smp(ONE, I, 1.0)], &ClassOptions { time: TimeConvention::MinusI, ..Default::default() }).unwrap();
         assert_eq!(r.class, PolClass::Circular { ccw: true });
         assert!(close(r.chi_deg, 45.0));
         let r = analyze(&[smp(ONE, I, 1.0)], &ClassOptions::default()).unwrap();
@@ -716,14 +777,14 @@ mod tests {
             ((seed >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
         };
         for _ in 0..50 {
-            let (ex, ey) = ([rnd(), rnd()], [rnd(), rnd()]);
+            let (lat, nor) = ([rnd(), rnd()], [rnd(), rnd()]);
             for (conv, sgn) in [(TimeConvention::PlusJ, 1.0), (TimeConvention::MinusI, -1.0)] {
                 // field(t) = Re(E exp(+i sgn w t)), w t = phase
                 let n = 2000;
                 let pos = |k: usize| {
                     let ph = sgn * std::f64::consts::TAU * k as f64 / n as f64;
                     let f = |e: Cx| e[0] * ph.cos() - e[1] * ph.sin();
-                    (f(ex), f(ey))
+                    (f(lat), f(nor))
                 };
                 // twice the swept area; positive for counter-clockwise rotation in time
                 let mut area = 0.0;
@@ -733,9 +794,9 @@ mod tests {
                 }
                 // time runs with k only when sgn*phase is increasing in time: PlusJ has phase = +w t, MinusI has phase = -w t,
                 // and pos() already includes sgn, so k is time in both cases
-                let s3 = Stokes::from_fields(ex, ey, conv).s3;
+                let s3 = Stokes::from_fields(lat, nor, conv).s3;
                 if s3.abs() > 1e-6 {
-                    assert_eq!(area > 0.0, s3 > 0.0, "ex {ex:?} ey {ey:?} {conv:?}");
+                    assert_eq!(area > 0.0, s3 > 0.0, "lat {lat:?} nor {nor:?} {conv:?}");
                 }
             }
         }
@@ -743,19 +804,19 @@ mod tests {
 
     #[test]
     fn global_phase_does_not_change_the_result() {
-        let ex = [0.7, -0.2];
-        let ey = [-0.3, 0.5];
+        let lat = [0.7, -0.2];
+        let nor = [-0.3, 0.5];
         let ph = [0.3f64.cos(), 0.3f64.sin()];
         let rot = |a: Cx| [a[0] * ph[0] - a[1] * ph[1], a[0] * ph[1] + a[1] * ph[0]];
-        let a = Stokes::from_fields(ex, ey, TimeConvention::PlusJ);
-        let b = Stokes::from_fields(rot(ex), rot(ey), TimeConvention::PlusJ);
+        let a = Stokes::from_fields(lat, nor, TimeConvention::PlusJ);
+        let b = Stokes::from_fields(rot(lat), rot(nor), TimeConvention::PlusJ);
         assert!(close(a.s0, b.s0) && close(a.s1, b.s1) && close(a.s2, b.s2) && close(a.s3, b.s3));
     }
 
     #[test]
     fn a_single_point_is_fully_polarized() {
-        for &(ex, ey) in &[([0.3, 0.9], [-0.5, 0.1]), ([1.0, 0.0], [0.0, 0.0]), ([0.2, -0.4], [0.7, 0.7])] {
-            let s = Stokes::from_fields(ex, ey, TimeConvention::MinusI);
+        for &(lat, nor) in &[([0.3, 0.9], [-0.5, 0.1]), ([1.0, 0.0], [0.0, 0.0]), ([0.2, -0.4], [0.7, 0.7])] {
+            let s = Stokes::from_fields(lat, nor, TimeConvention::MinusI);
             assert!(close(s.dop(), 1.0));
             let n = s.normalized();
             assert!(close((n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt(), 1.0));
@@ -772,7 +833,9 @@ mod tests {
 
     #[test]
     fn weights_scale_the_contributions_and_te_fraction_matches_s1() {
-        let r = analyze(&[smp(ONE, ZERO, 3.0), smp(ZERO, ONE, 1.0)], &ClassOptions { p_min: 0.4, ..Default::default() }).unwrap();
+        let r =
+            analyze(&[smp(ONE, ZERO, 3.0), smp(ZERO, ONE, 1.0)], &ClassOptions { p_min: 0.4, ..Default::default() })
+                .unwrap();
         assert!(close(r.sphere[0], 0.5));
         assert!(close(r.te_fraction, 0.75));
         assert!(close(r.te_fraction, 0.5 * (1.0 + r.sphere[0])));
@@ -782,7 +845,9 @@ mod tests {
     #[test]
     fn elliptical_state() {
         // Ey = 0.5 i Ex: s3 = 2 * 0.5 / 1.25 = 0.8
-        let r = analyze(&[smp(ONE, [0.0, 0.5], 1.0)], &ClassOptions { time: TimeConvention::MinusI, ..Default::default() }).unwrap();
+        let r =
+            analyze(&[smp(ONE, [0.0, 0.5], 1.0)], &ClassOptions { time: TimeConvention::MinusI, ..Default::default() })
+                .unwrap();
         assert!(close(r.sphere[2], 0.8));
         assert_eq!(r.class, PolClass::Elliptical { ccw: true });
         assert!(r.chi_deg > 0.0 && r.chi_deg < 45.0);
@@ -790,7 +855,7 @@ mod tests {
 
     #[test]
     fn longitudinal_fraction() {
-        let s = Sample { ex: ONE, ey: ZERO, ez: [0.0, 1.0], w: 1.0 };
+        let s = Sample { lat: ONE, nor: ZERO, prop: [0.0, 1.0], w: 1.0 };
         let r = analyze(&[s], &ClassOptions::default()).unwrap();
         assert!(close(r.long_fraction, 0.5));
     }
@@ -844,13 +909,26 @@ mod tests {
         let d = sphere_drawing(300.0);
         assert!((d.centre.0 - 150.0).abs() < 1e-9 && d.radius > 100.0);
         // every polyline point lies within the ball or on its outline, the equator is among the bold lines
-        assert!(d.lines.iter().all(|l| l.pts.iter().all(|p| ((p.0 - d.centre.0).powi(2) + (p.1 - d.centre.1).powi(2)).sqrt() <= 1.13 * d.radius)));
+        assert!(d.lines.iter().all(|l| l
+            .pts
+            .iter()
+            .all(|p| ((p.0 - d.centre.0).powi(2) + (p.1 - d.centre.1).powi(2)).sqrt() <= 1.13 * d.radius)));
         assert!(d.lines.iter().any(|l| l.width > 1.3 && l.front));
         assert_eq!(d.labels.len(), 6);
-        let m = mode_markers(&[SphereState { label: "1".into(), s: [1.0, 0.0, 0.0], dashed: false }, SphereState { label: "2".into(), s: [f64::NAN, 0.0, 0.0], dashed: true }], 300.0);
+        let m = mode_markers(
+            &[
+                SphereState { label: "1".into(), s: [1.0, 0.0, 0.0], dashed: false },
+                SphereState { label: "2".into(), s: [f64::NAN, 0.0, 0.0], dashed: true },
+            ],
+            300.0,
+        );
         assert_eq!(m.len(), 1);
         // the x pole is drawn to the left of the centre (view from 35 degrees azimuth), facing the viewer, at radius * sin(35 degrees) from it
-        assert!(m[0].front && (m[0].centre.0 - m[0].tip.0 - d.radius * 35f64.to_radians().sin()).abs() < 1e-9, "{:?}", m[0]);
+        assert!(
+            m[0].front && (m[0].centre.0 - m[0].tip.0 - d.radius * 35f64.to_radians().sin()).abs() < 1e-9,
+            "{:?}",
+            m[0]
+        );
         let svg = poincare_modes_svg(&[SphereState { label: "1".into(), s: [1.0, 0.0, 0.0], dashed: false }], 300.0);
         assert!(svg.contains(&format!("cx=\"{:.1}\" cy=\"{:.1}\"", m[0].tip.0, m[0].tip.1)));
     }

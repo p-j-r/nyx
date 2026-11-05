@@ -2819,6 +2819,7 @@ dependencies = [
 name = "nyx-analysis"
 version = "0.1.0"
 dependencies = [
+ "femcore",
  "nyx-physics",
  "serde_json",
 ]
@@ -2846,6 +2847,7 @@ version = "0.1.0"
 dependencies = [
  "femcore",
  "geom",
+ "nyx-analysis",
  "nyx-physics",
  "rayon",
  "serde_json",

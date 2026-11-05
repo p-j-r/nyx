@@ -168,7 +168,7 @@ pub fn metrics_of(res: &femcore::problem::SolveResult) -> BTreeMap<String, f64> 
     if let Some(v) = res.solutions.first().and_then(|s| s.value) {
         m.insert("value_1".into(), v);
     }
-    if let Some(t) = res.analysis.as_ref().and_then(|a| a.rows.iter().find_map(|r| r.report.as_ref())).map(|r| r.te_fraction) {
+    if let Some(t) = res.solutions.iter().find_map(|s| s.te_fraction) {
         m.insert("te_fraction".into(), t);
     }
     m.insert("n_solutions".into(), res.solutions.len() as f64);

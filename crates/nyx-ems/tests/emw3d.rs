@@ -144,8 +144,8 @@ fn cavity_modes_carry_a_polarization_analysis() {
     let (a, b, d) = (0.04, 0.03, 0.02);
     let mesh = common::block(a, b, d, 5, 4, 3);
     let exact = cavity_modes(a, b, d, 20e9);
-    let solved = common::try_solve_analysed(&mesh, &spec(2, 0.9 * exact[0], 3)).unwrap();
-    let (r, an) = (&solved.result, solved.analysis.as_ref().expect("a polarization analysis"));
+    let (r, an) = common::try_solve_analysed(&mesh, &spec(2, 0.9 * exact[0], 3)).unwrap();
+    let (r, an) = (&r, &an);
     assert_eq!(an.value_label, "f (THz)");
     let zero = an.rows[0].report.as_ref().unwrap();
     assert!(zero.sphere[0] < -0.99 && zero.te_fraction < 0.01 && zero.long_fraction < 0.01, "{zero:?}");

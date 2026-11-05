@@ -288,7 +288,8 @@ impl App {
                     let secs = s.result.seconds;
                     self.shell.live_run = self.record_ok(&s.result);
                     let s_output = s.output;
-                    let rv = ResultView::new(name.clone(), Some(physics), s.result, s.display, dim);
+                    let mut rv = ResultView::new(name.clone(), Some(physics), s.result, s.display, dim);
+                    rv.analysis = s.analysis;
                     self.push_result(rv);
                     self.status = format!("{name}: solved in {secs:.2} s");
                     match s_output {
@@ -478,7 +479,7 @@ impl App {
 
     /// Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere).
     pub fn export_analysis(&mut self, kind: &str) {
-        let Some(a) = self.current.and_then(|i| self.results[i].result.analysis.as_ref()) else {
+        let Some(a) = self.current.and_then(|i| self.results[i].analysis.as_ref()) else {
             self.set_error("This result has no polarization analysis.");
             return;
         };

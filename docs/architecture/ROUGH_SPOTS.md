@@ -73,3 +73,7 @@ Related: ADR numbers refer to `adr/`, contract names to `contracts/`.
 * **R04** three PML mechanisms: `pml_box::build_pml` is the one generator of structured layers; `pml_geom` and `pml3` are adapters; the inline layers are a property of the geom model.
 * **R05** legacy 3D mesher: `mesher3d`/`refine3d` left the library and are kept as the test fixture `crates/femcore/tests/common/solid3d` (paul wants them kept; a geom adapter for general 3D shapes is a separate thread).
 * **R09** label bases: domains and boundaries are numbered from 1 everywhere, no shift code left; contract `mesh_cells.v1.json`.
+
+## Resolved by the restructure (analysis phase, 2026-11-05; details in ADR 56)
+
+* **R28** the polarization analysis named its axes differently from the wafer frame: it is in `nyx-analysis` now, its samples are `lat`, `nor`, `prop` (what the component is), the documentation maps them to the wafer axes x, z and y, and a result states its frame (`field frame`). The labels of the Analysis tab did not change (they were wafer names already).

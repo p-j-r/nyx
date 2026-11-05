@@ -1,12 +1,12 @@
 //! The mode solvers' results as an `OpticalSet` (`femcore::optical`): the modes together with the material data needed to evaluate their
-//! fields, for the polarization analysis (`femcore::analysis`, which moves to `nyx-analysis` in phase 5) and for tests of the fields.
+//! fields, for tests of the fields (the polarization analysis reads the cell fields of the result, `nyx-analysis`, ADR 56).
 //! `solve_optical` solves a `Modes` problem and returns the set (it was in `femcore::optical` before the kernels moved here, ADR 45).
 
 use crate::modes::{solve_modes_tensor, EpsCell, Modes};
 use crate::modes_complex::{solve_modes_complex, ModesC};
 use crate::problem::{Problem, Study};
 use femcore::linalg::csr::c;
-use femcore::optical::{cell_materials, cell_materials_signed, OptMode, OpticalSet};
+use femcore::optical::{cell_materials_signed, OptMode, OpticalSet};
 use femcore::props::{PmlDir, TensorKind};
 use nyx_physics::Discretisation;
 
@@ -78,42 +78,19 @@ pub fn solve_optical_wafer(mesh: &Discretisation, problem: &Problem, prop_sign: 
     })
 }
 
-/// The modes of the real solver as an `OpticalSet`, to evaluate their fields.
-pub(crate) fn optical_set_real(
-    mesh: &Discretisation,
-    problem: &Problem,
-    m: &Modes,
-    freq: f64,
-) -> Result<OpticalSet, String> {
-    let (eps, mu) = cell_materials(mesh, &problem.materials)?;
-    Ok(OpticalSet {
-        freq,
-        order: problem.order,
-        eps,
-        mu,
-        modes: from_real(m),
-        converged: m.converged,
-        in_pml: vec![false; mesh.n_cells()],
-        left_handed: femcore::section::is_left_handed(femcore::section::PROP_SIGN),
-    })
+/// Domains of the problem that are absorbing layers: the polarization analysis leaves their cells out.
+pub(crate) fn absorbing_domains(problem: &Problem) -> Vec<i32> {
+    problem.materials.pml.iter().filter(|(_, p)| p.x != PmlDir::Off || p.z != PmlDir::Off).map(|(d, _)| *d).collect()
 }
 
-/// The modes of the complex solver as an `OpticalSet`.
-pub(crate) fn optical_set_complex(
-    mesh: &Discretisation,
-    problem: &Problem,
-    m: &ModesC,
-    freq: f64,
-) -> Result<OpticalSet, String> {
-    let (eps, mu) = cell_materials(mesh, &problem.materials)?;
-    Ok(OpticalSet {
-        freq,
-        order: problem.order,
-        eps,
-        mu,
-        modes: from_complex(m),
-        converged: m.converged,
-        in_pml: in_pml(mesh, problem),
+/// The frame of the modes of a cross-section study: lateral x, normal z, propagation y (the local triple of the mode solvers, left-handed),
+/// without the absorbing layers. Written to every mode result as the scalar `field frame`.
+pub(crate) fn mode_frame(problem: &Problem) -> nyx_physics::FieldFrame {
+    nyx_physics::FieldFrame {
+        lateral: 0,
+        normal: 2,
+        propagation: 1,
         left_handed: femcore::section::is_left_handed(femcore::section::PROP_SIGN),
-    })
+        outside: absorbing_domains(problem),
+    }
 }

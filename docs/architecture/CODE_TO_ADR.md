@@ -107,8 +107,6 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/pml.rs` | 45, 7 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`) |
 | `crates/femcore/src/optical.rs` | 21, 9, 45 | optical mode sets, field sampling and the complex material tensors (split out of `sbs.rs` in phase 1; the solvers that fill a set are in `nyx-ems`) |
 | `crates/femcore/src/usecases/*` | 22, 2, 47 | the solver is passed in (`usecases::Solver`) |
-| `crates/femcore/src/analysis.rs` | 21 | |
-| `crates/femcore/src/polarization.rs` | 21 | |
 | `crates/femcore/src/fields.rs` | 9 | cell fields |
 | `crates/femcore/src/fem.rs` | 4, 8 | element basics, original stack |
 | `crates/femcore/src/xmlio.rs` | 13, 19 | |
@@ -153,6 +151,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `.cargo/*` | 26, 27 | shared target directory |
 | `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |
 | `crates/nyx-physics/src/testkit.rs` | 41, 10 | the golden-file harness |
+| `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
 | `crates/nyx-physics/*` | 25, 19 | the Physics trait, envelope, descriptors, registry |
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
 | `crates/nyx-dfs/*` | 41, 25, 12, 9 | diffusion: typed problem, electrostatics and heat kernels (moved from femcore::dfs), descriptors |
@@ -164,7 +163,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12 | the ems tests moved from femcore |
 | `crates/nyx-ems/*` | 45, 25, 12, 9, 46 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
 | `crates/nyx-engine/tests/usecases.rs` | 22, 47 | the use cases solved through the bridge |
-| `crates/nyx-analysis/*` | 25, 21 | skeleton: the Analysis trait; content moves in phase 5 |
+| `crates/nyx-analysis/*` | 56, 25, 21 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/src/legacy/*` | 41 | bridge from the old window problem to the physics crates; deleted in phase 7 |
 | `crates/nyx-engine/tests/golden/*` | 10, 42 | `solid_static_thermal_from_heat`, moved unchanged from femcore |

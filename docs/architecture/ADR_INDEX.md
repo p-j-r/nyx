@@ -51,3 +51,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 53 | [A Maxwell residual estimator, and an adaptation loop that takes any estimator](adr/0053-maxwell-residual-estimator-and-the-generic-adaptation-loop.md) | `femcore::adapt::{maxwell,estimate3}` |
 | 54 | [A mesh is asked for and reported in data](adr/0054-mesh-request-and-report-as-data.md) | `femcore::meshing::request` |
 | 55 | [The lattice mesher welds slivers and does not depend on the thread count](adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md) | `femcore::meshing::mesher3d` |
+| 56 | [The polarization analysis is a function of a result](adr/0056-polarization-analysis-is-a-function-of-a-result.md) | `nyx-analysis`, `nyx_physics::frame` |

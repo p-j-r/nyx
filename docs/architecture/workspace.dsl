@@ -104,7 +104,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                 dfs = component "dfs: diffusion" "Electrostatics and heat transfer on P1/P2 simplices." "dfs.rs" "Kernel"
                 sms = component "sms: solid mechanics" "Static, eigenfrequency, kz, PML, low-reflecting, Floquet, axisymmetric." "sms*.rs, periodic.rs" "Kernel"
                 ems = component "ems: EM waves" "2D modes (real, complex/PML/tilted crystal), axisymmetric, 3D cavities." "ems*.rs" "Kernel"
-                analysis = component "Analysis" "Polarization (Stokes, Poincare) and mode classification, in the solvers local axes." "analysis.rs, polarization.rs" {
+                analysis = component "Analysis" "Polarization (Stokes, Poincare) and mode classification, in the solvers local axes. Moved to the crate nyx-analysis in phase 5 (ADR 56); the model is regenerated in phase 9." "analysis.rs, polarization.rs" {
                     properties {
                         "adr" "0021"
                     }

@@ -18,7 +18,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("nyx-dfs", &["nyx-physics", "femcore"]),
     ("nyx-sms", &["nyx-physics", "femcore"]),
     ("nyx-ems", &["nyx-physics", "femcore"]),
-    ("nyx-analysis", &["nyx-physics"]),
+    ("nyx-analysis", &["nyx-physics", "femcore"]), // femcore: the mesh geometry and the quadrature rule the modes are sampled with
     ("nyx-store", &[]),
     ("nyx-engine", &["nyx-physics", "nyx-dfs", "nyx-sms", "nyx-ems", "nyx-analysis", "nyx-store", "femcore", "geom"]),
     ("nyx-connect", &[]),
