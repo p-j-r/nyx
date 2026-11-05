@@ -1,0 +1,324 @@
+{
+  "active": "sms",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "substrate_box",
+        "op": {
+          "Rect": {
+            "max": [
+              1.0,
+              0.5
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "pml_left_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.2,
+              0.5
+            ],
+            "min": [
+              0.0,
+              0.15
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "pml_right_box",
+        "op": {
+          "Rect": {
+            "max": [
+              1.0,
+              0.5
+            ],
+            "min": [
+              0.8,
+              0.15
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "pml_bottom_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.8,
+              0.15
+            ],
+            "min": [
+              0.2,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 5,
+        "name": "pml_bottom_left_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.2,
+              0.15
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 6,
+        "name": "pml_bottom_right_box",
+        "op": {
+          "Rect": {
+            "max": [
+              1.0,
+              0.15
+            ],
+            "min": [
+              0.8,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 7,
+        "name": "beam_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.51,
+              0.8
+            ],
+            "min": [
+              0.49,
+              0.5
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 8,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "substrate",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "pml_left",
+                "pinned_id": null
+              },
+              {
+                "input": 3,
+                "kind": "Material",
+                "name": "pml_right",
+                "pinned_id": null
+              },
+              {
+                "input": 4,
+                "kind": "Material",
+                "name": "pml_bottom",
+                "pinned_id": null
+              },
+              {
+                "input": 5,
+                "kind": "Material",
+                "name": "pml_bottom_left",
+                "pinned_id": null
+              },
+              {
+                "input": 6,
+                "kind": "Material",
+                "name": "pml_bottom_right",
+                "pinned_id": null
+              },
+              {
+                "input": 7,
+                "kind": "Material",
+                "name": "beam",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.03
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "pml",
+          "on": "pml_left",
+          "params": {
+            "order": 2.0,
+            "strength": 3.0,
+            "x": "minus",
+            "z": "off"
+          }
+        },
+        {
+          "kind": "pml",
+          "on": "pml_right",
+          "params": {
+            "order": 2.0,
+            "strength": 3.0,
+            "x": "plus",
+            "z": "off"
+          }
+        },
+        {
+          "kind": "pml",
+          "on": "pml_bottom",
+          "params": {
+            "order": 2.0,
+            "strength": 3.0,
+            "x": "off",
+            "z": "minus"
+          }
+        },
+        {
+          "kind": "pml",
+          "on": "pml_bottom_left",
+          "params": {
+            "order": 2.0,
+            "strength": 3.0,
+            "x": "minus",
+            "z": "minus"
+          }
+        },
+        {
+          "kind": "pml",
+          "on": "pml_bottom_right",
+          "params": {
+            "order": 2.0,
+            "strength": 3.0,
+            "x": "plus",
+            "z": "minus"
+          }
+        },
+        {
+          "kind": "fixed",
+          "on": "(outer & in_box([-1, 0, -1], [2, 0, 0.5000000001], within)) - plane(z = 0.5)",
+          "params": {
+            "ux": 0.0,
+            "uy": 0.0,
+            "uz": 0.0
+          }
+        }
+      ],
+      "materials": {
+        "beam": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        },
+        "pml_bottom": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        },
+        "pml_bottom_left": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        },
+        "pml_bottom_right": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        },
+        "pml_left": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        },
+        "pml_right": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        },
+        "substrate": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        }
+      },
+      "order": 2,
+      "params": {
+        "plane": "strain"
+      },
+      "physics": "sms",
+      "study": {
+        "kind": "eigenfrequency",
+        "params": {
+          "f_search": 0.0,
+          "n_modes": 6
+        }
+      }
+    }
+  ],
+  "title": "Beam on a PML substrate: anchor loss (solid eigenfrequencies, complex frequency and Q)"
+}

@@ -160,6 +160,8 @@ impl Engine {
                 schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("field", text("field name")), ("max_values", int("default 2000"))], &["physics", "field"])),
             cmd("get_guide", "Read a nyx guide", "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).", Read,
                 schema(vec![("topic", json!({ "type": "string", "enum": crate::guide::TOPICS, "description": "which card; omit for nyx-instructions" }))], &[])),
+            cmd("add_pml_conditions", "Add the absorbing-layer conditions", "Adds a `pml` condition for every absorbing piece the geometry made with add_pml (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. `strength` is the imaginary stretch at the outer edge (default 3).", Edit,
+                schema(vec![("physics", phys()), ("strength", number("imaginary stretch at the outer edge, default 3"))], &["physics"])),
             cmd("list_materials", "List the materials", "The materials a problem can name: those of the library (material files) and those the project carries.", Read, schema(vec![], &[])),
             cmd("describe_material", "Describe a material", "What a material gives (elastic class, optical model, thermal, electrical) and its TOML text.", Read, schema(vec![("name", text("material name"))], &["name"])),
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
@@ -382,6 +384,7 @@ impl Engine {
                 })?;
                 Ok(json!({ "topic": topic, "text": text }))
             }
+            "add_pml_conditions" => self.add_pml_conditions(get_str(args, "physics")?, args.get("strength").and_then(Value::as_f64).unwrap_or(3.0)),
             "list_materials" => self.list_materials(),
             "describe_material" => self.describe_material(get_str(args, "name")?),
             "add_material" => self.add_material(get_str(args, "name")?, get_str(args, "toml")?),

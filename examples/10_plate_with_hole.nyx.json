@@ -1,0 +1,148 @@
+{
+  "active": "sms",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "plate_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.4,
+              0.2
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "hole",
+        "op": {
+          "Circle": {
+            "center": [
+              0.2,
+              0.1
+            ],
+            "r": 0.04
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "plate",
+        "op": {
+          "Difference": {
+            "a": 1,
+            "b": [
+              2
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 3,
+                "kind": "Material",
+                "name": "plate",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 5,
+        "name": "size_hole",
+        "op": {
+          "Size": {
+            "h": 0.004,
+            "max_deviation": null,
+            "min_layers": null,
+            "sel": {
+              "Kind": "Circle"
+            }
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.012
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "fixed",
+          "on": "outer & plane(x = 0)",
+          "params": {
+            "ux": 0.0
+          }
+        },
+        {
+          "kind": "fixed",
+          "on": "outer & plane(z = 0)",
+          "params": {
+            "uz": 0.0
+          }
+        },
+        {
+          "kind": "load",
+          "on": "outer & plane(x = 0.4)",
+          "params": {
+            "traction": [
+              1000000.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "materials": {
+        "plate": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        }
+      },
+      "order": 2,
+      "params": {
+        "plane": "stress"
+      },
+      "physics": "sms",
+      "study": {
+        "kind": "static"
+      }
+    }
+  ],
+  "title": "Plate with a hole (solid mechanics, stress concentration)"
+}

@@ -1,0 +1,108 @@
+{
+  "active": "dfs",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "left_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.5,
+              0.5
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "right_box",
+        "op": {
+          "Rect": {
+            "max": [
+              1.0,
+              0.5
+            ],
+            "min": [
+              0.5,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "left",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "right",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.025
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "potential",
+          "on": "outer & plane(x = 0)",
+          "params": {
+            "value": 1.0
+          }
+        },
+        {
+          "kind": "ground",
+          "on": "outer & plane(x = 1)"
+        }
+      ],
+      "materials": {
+        "left": {
+          "eps_r": 2.0
+        },
+        "right": {
+          "eps_r": 8.0
+        }
+      },
+      "order": 2,
+      "physics": "dfs",
+      "study": {
+        "kind": "electrostatic"
+      }
+    }
+  ],
+  "title": "Parallel-plate capacitor with two dielectrics (electrostatics, 2D)"
+}

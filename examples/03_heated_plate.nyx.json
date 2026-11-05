@@ -1,0 +1,91 @@
+{
+  "active": "dfs",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "plate_box",
+        "op": {
+          "Rect": {
+            "max": [
+              1.0,
+              0.2
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "plate",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.025
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "temperature",
+          "on": "outer & plane(x = 0)",
+          "params": {
+            "value": 500.0
+          }
+        },
+        {
+          "kind": "convection",
+          "on": "outer - plane(x = 0)",
+          "params": {
+            "h": 25.0,
+            "t_ext": 293.15
+          }
+        }
+      ],
+      "materials": {
+        "plate": {
+          "Cp": 470.0,
+          "k": 50.0,
+          "rho": 7800.0
+        }
+      },
+      "order": 2,
+      "physics": "dfs",
+      "study": {
+        "kind": "heat_transient",
+        "params": {
+          "n_out": 20,
+          "t0": "293.15",
+          "t_end": 20000.0
+        }
+      }
+    }
+  ],
+  "title": "Heated plate with convective cooling (heat transfer, 2D, transient)"
+}

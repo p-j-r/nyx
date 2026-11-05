@@ -1,0 +1,80 @@
+{
+  "active": "ems",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "plate_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.04,
+              0.02
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "plate",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.005,
+    "sweep": [
+      {
+        "domain_offset": 0,
+        "n": 6,
+        "thickness": 0.03
+      }
+    ]
+  },
+  "physics": [
+    {
+      "bcs": [],
+      "materials": {
+        "plate": {
+          "eps_r": 1.0,
+          "mu_r": 1.0
+        }
+      },
+      "order": 2,
+      "physics": "ems",
+      "study": {
+        "kind": "cavity",
+        "params": {
+          "f_search": 6000000000.0,
+          "n_modes": 6
+        }
+      }
+    }
+  ],
+  "title": "Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)"
+}

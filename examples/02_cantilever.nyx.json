@@ -1,0 +1,95 @@
+{
+  "active": "sms",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "plate_box",
+        "op": {
+          "Rect": {
+            "max": [
+              1.0,
+              0.1
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "plate",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.02
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "fixed",
+          "on": "outer & plane(x = 0)",
+          "params": {
+            "ux": 0.0,
+            "uy": 0.0,
+            "uz": 0.0
+          }
+        },
+        {
+          "kind": "load",
+          "on": "outer & plane(x = 1)",
+          "params": {
+            "traction": [
+              0.0,
+              0.0,
+              -100000.0
+            ]
+          }
+        }
+      ],
+      "materials": {
+        "plate": {
+          "E": 200000000000.0,
+          "alpha": 0.000012,
+          "nu": 0.3,
+          "rho": 7850.0
+        }
+      },
+      "order": 2,
+      "params": {
+        "plane": "stress"
+      },
+      "physics": "sms",
+      "study": {
+        "kind": "static"
+      }
+    }
+  ],
+  "title": "Cantilever beam (solid mechanics, static, 2D plane stress)"
+}

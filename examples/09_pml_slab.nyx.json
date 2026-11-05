@@ -1,0 +1,180 @@
+{
+  "active": "ems",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "air_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.04,
+              0.01
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "slab_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.025,
+              0.01
+            ],
+            "min": [
+              0.015,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "pml_left_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.008,
+              0.01
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "pml_right_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.04,
+              0.01
+            ],
+            "min": [
+              0.032,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 5,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "air",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "slab",
+                "pinned_id": null
+              },
+              {
+                "input": 3,
+                "kind": "Material",
+                "name": "pml_left",
+                "pinned_id": null
+              },
+              {
+                "input": 4,
+                "kind": "Material",
+                "name": "pml_right",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.0008
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "pml",
+          "on": "pml_left",
+          "params": {
+            "order": 2.0,
+            "strength": 4.0,
+            "x": "minus"
+          }
+        },
+        {
+          "kind": "pml",
+          "on": "pml_right",
+          "params": {
+            "order": 2.0,
+            "strength": 4.0,
+            "x": "plus"
+          }
+        }
+      ],
+      "materials": {
+        "air": {
+          "eps_r": 1.0,
+          "mu_r": 1.0
+        },
+        "pml_left": {
+          "eps_r": 1.0,
+          "mu_r": 1.0
+        },
+        "pml_right": {
+          "eps_r": 1.0,
+          "mu_r": 1.0
+        },
+        "slab": {
+          "eps_r": 4.0,
+          "mu_r": 1.0
+        }
+      },
+      "order": 2,
+      "physics": "ems",
+      "study": {
+        "kind": "modes",
+        "params": {
+          "freq": 12000000000.0,
+          "n_modes": 6,
+          "n_target": 1.9
+        }
+      }
+    }
+  ],
+  "title": "Dielectric slab guide with PML ends (EM waves, complex modes)"
+}

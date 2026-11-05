@@ -23,6 +23,7 @@ pub mod jobs;
 pub mod materials;
 pub mod legacy;
 pub mod meshing;
+pub mod pml;
 pub mod project;
 pub mod solve;
 pub mod store_link;

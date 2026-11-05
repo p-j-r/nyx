@@ -1,0 +1,94 @@
+{
+  "active": "sms",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "plate_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.0002,
+              0.0001
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "plate",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": []
+  },
+  "mesh": {
+    "h": 0.00005,
+    "sweep": [
+      {
+        "domain_offset": 0,
+        "n": 20,
+        "thickness": 0.001
+      }
+    ]
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "fixed",
+          "on": "ymin",
+          "params": {
+            "ux": 0.0,
+            "uy": 0.0,
+            "uz": 0.0
+          }
+        }
+      ],
+      "materials": {
+        "plate": {
+          "euler_deg": [
+            0.0,
+            90.0,
+            0.0
+          ],
+          "material": "sapphire"
+        }
+      },
+      "order": 2,
+      "physics": "sms",
+      "study": {
+        "kind": "eigenfrequency",
+        "params": {
+          "f_search": 0.0,
+          "n_modes": 6
+        }
+      }
+    }
+  ],
+  "title": "Sapphire cantilever, anisotropic crystal (solid mechanics, 3D eigenfrequencies)"
+}

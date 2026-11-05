@@ -172,7 +172,7 @@ impl Engine {
         if self.auto_store && self.link.is_none() && self.workspace.is_some() {
             self.save_to_workspace(None)?;
         }
-        let targets = targets.unwrap_or_else(|| self.project.default_targets());
+        let targets = targets.unwrap_or_else(|| self.default_targets());
         for t in &targets {
             if self.project.spec(t).is_none() {
                 return Err(Error::invalid(format!("the project has no problem for '{t}'")));

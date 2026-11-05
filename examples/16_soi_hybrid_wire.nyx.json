@@ -1,0 +1,265 @@
+{
+  "active": "ems",
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "clad",
+        "op": {
+          "Rect": {
+            "max": [
+              "w/2+margin",
+              "t+margin"
+            ],
+            "min": [
+              "-w/2-margin",
+              "-boxt"
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "box",
+        "op": {
+          "Rect": {
+            "max": [
+              "w/2+margin",
+              0.0
+            ],
+            "min": [
+              "-w/2-margin",
+              "-boxt"
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "box_near",
+        "op": {
+          "Rect": {
+            "max": [
+              "zone",
+              0.0
+            ],
+            "min": [
+              "-zone",
+              -4e-7
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "clad_near",
+        "op": {
+          "Rect": {
+            "max": [
+              "zone",
+              "t+0.4e-6"
+            ],
+            "min": [
+              "-zone",
+              "t"
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 5,
+        "name": "core",
+        "op": {
+          "Polygon": {
+            "names": [
+              "bottom",
+              "right",
+              "top",
+              "left"
+            ],
+            "pts": [
+              [
+                "-w/2",
+                "slab"
+              ],
+              [
+                "w/2",
+                "slab"
+              ],
+              [
+                "w/2-0",
+                "t"
+              ],
+              [
+                "-w/2+(t-slab)/tan(al*pi/180)",
+                "t"
+              ]
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 6,
+        "name": "overlay",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "clad",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "BOX",
+                "pinned_id": null
+              },
+              {
+                "input": 3,
+                "kind": "Material",
+                "name": "BOX_near",
+                "pinned_id": null
+              },
+              {
+                "input": 4,
+                "kind": "Material",
+                "name": "clad_near",
+                "pinned_id": null
+              },
+              {
+                "input": 5,
+                "kind": "Material",
+                "name": "Si",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 7,
+        "name": "size_near",
+        "op": {
+          "Size": {
+            "h": 9e-8,
+            "max_deviation": null,
+            "min_layers": null,
+            "sel": {
+              "Union": [
+                {
+                  "Region": "BOX_near"
+                },
+                {
+                  "Region": "clad_near"
+                }
+              ]
+            }
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 8,
+        "name": "size_core",
+        "op": {
+          "Size": {
+            "h": 4e-8,
+            "max_deviation": null,
+            "min_layers": null,
+            "sel": {
+              "Region": "Si"
+            }
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "params": [
+      {
+        "name": "w",
+        "value": 3e-7
+      },
+      {
+        "name": "t",
+        "value": 3e-7
+      },
+      {
+        "name": "slab",
+        "value": 0.0
+      },
+      {
+        "name": "margin",
+        "value": 1e-6
+      },
+      {
+        "name": "boxt",
+        "value": 2e-6
+      },
+      {
+        "name": "zone",
+        "value": 5.5e-7
+      },
+      {
+        "name": "ar",
+        "value": 90.0
+      },
+      {
+        "name": "al",
+        "value": 75.0
+      }
+    ]
+  },
+  "mesh": {
+    "h": 3e-7
+  },
+  "physics": [
+    {
+      "bcs": [],
+      "materials": {
+        "BOX": "silica",
+        "BOX_near": "silica",
+        "Si": "silicon",
+        "clad": "silica",
+        "clad_near": "silica"
+      },
+      "order": 2,
+      "physics": "ems",
+      "study": {
+        "kind": "modes",
+        "params": {
+          "freq": 193414489032258.06,
+          "n_modes": 2,
+          "n_target": 2.75
+        }
+      }
+    }
+  ],
+  "title": "300 nm SOI wire with a sloped left wall: hybrid modes tilted on the Poincare sphere (EM waves, 2D cross-section)"
+}
