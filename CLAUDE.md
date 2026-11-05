@@ -7,12 +7,12 @@ Desktop finite-element application for photonics and phononics, in pure Rust. No
 | Path | What |
 |---|---|
 | `crates/geom` | geometry kernel (parametric wafer-frame models, selectors, golden files) |
-| `crates/femcore` | the FEM core: meshes, meshing, sparse and eigen solvers, the old physics kernels (`dfs`, `sms*`, `ems*`), analysis, use cases. Shrinks as the plan proceeds |
+| `crates/femcore` | the FEM core: meshes (`mesh`, with `Mesh`, the exchange mesh the physics take), meshing, adaptation, the linear algebra (`linalg`), the finite-element basics (`fem`, `edge`, `pml`, `periodic`, `props` for materials per domain), the old window problem types (`problem`, deleted in phase 7), analysis, use cases. The physics kernels are gone from it |
 | `crates/nyx-physics` | the `Physics` trait, the problem envelope (`ProblemSpec`), descriptors, `SolveResult`, `Registry`, validation, JSON Schemas (ADR 25) |
-| `crates/nyx-dfs`, `nyx-sms`, `nyx-ems` | one physics each. **Skeletons**: descriptors and contract tests now, `solve` answers `NotYetMoved` until phase 4 moves the kernels in |
+| `crates/nyx-dfs`, `nyx-sms`, `nyx-ems` | one physics each since phase 4 (ADR 41 to 47): its typed `Problem` and `decode` of the envelope, the kernels in three stages, `run`, `Physics::solve`, descriptors, its goldens and tests. `nyx_engine::legacy` is the temporary bridge from the old window problem (deleted in phase 7) |
 | `crates/nyx-analysis` | analyses of results (skeleton; polarization moves in at phase 5) |
 | `crates/nyx-store` | workspace, workflow, experiment and run storage |
-| `crates/nyx-engine` | `Engine`: the project, commands (every action by name, with JSON Schemas; the MCP tools are generated from them), the job runner, the geometry operation descriptors, store wiring, and the registry of compiled-in physics (cargo features `dfs sms ems`). The window and `nyx-mcp` are not rewired to it yet (phase 7) |
+| `crates/nyx-engine` | `Engine`: the project, commands (every action by name, with JSON Schemas; the MCP tools are generated from them), the job runner, the geometry operation descriptors, store wiring, and the registry of compiled-in physics (cargo features `dfs sms ems`). It also holds `legacy`, the bridge the window and `nyx-session` use to reach the physics until phase 7, and the examples that drive every physics (`bench`, `stage_log`, `profile3d`, `mem_profile`, `cavity_bench`). The window and `nyx-mcp` are not rewired to the commands yet (phase 7) |
 | `crates/app` | the egui application (package and binary `nyx`) |
 | `crates/nyx-session`, `nyx-mcp`, `nyx-connect` | the AI interface (stdio MCP server, one-click host connection); formerly the separate `ai/` workspace |
 | `docs/` | design notes and per-project status files |
@@ -42,17 +42,17 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 * Units are SI (metres) everywhere in the library and the MCP tools.
 * **Wafer frame**: x lateral, z normal to the wafer, waves propagate along **+y** (`exp(-j beta y)`). `femcore::section` is the one place that knows axis numbers (`plane_tensor`, `local_tensor`, `LOCAL_AXES`, `wafer_point`); do not scatter axis permutations elsewhere. Solid kernels use the Voigt order (x, z, y).
 * Physics carry three-letter codes chosen by Paul: `dfs` (diffusion), `sms` (solid mechanics), `ems` (EM waves). Brillouin (`sbs`) is removed (ADR 24). Name new physics the same way; a physics is a crate behind the `Physics` trait (ADR 25).
-* Golden files (`crates/femcore/tests/golden_frames/*.json`, `crates/geom/golden/`) are the numerical oracle. `NYX_WRITE_GOLDEN=1` rewrites them; do it only for a kernel known to be right, and say so in the commit. Never regenerate a golden to hide a difference (ADR 10).
+* Golden files (`crates/nyx-{dfs,sms,ems}/tests/golden/*.json`, `crates/geom/golden/`) are the numerical oracle; the harness is `nyx_physics::testkit`. `NYX_WRITE_GOLDEN=1` rewrites them; do it only for a kernel known to be right, and say so in the commit. Never regenerate a golden to hide a difference (ADR 10).
 * **Tests never compare JSON text or key order** (ADR 26): `serde_json` keeps insertion order when any crate of the build enables `preserve_order` and sorts otherwise, so `--workspace` and `-p` builds differ. Compare `Value`s or `nyx_physics::canonical_json`.
 * Contract exemplars (`docs/architecture/contracts/`) change only with a line in `VERSIONS.md` (ADR 19). `NYX_WRITE_CONTRACT=1` rewrites them.
 * Every source file of `femcore` and of the new crates starts with a short comment saying what it does; keep that when adding files.
 * `*.py` is git-ignored on purpose: nothing Python ships. Any GDS layout is built with gdsfactory, never raw gdstk.
 * Determinism: the same input gives the same numbers for any thread count. `NYX_THREADS=N` sets the rayon pool, `NYX_PROFILE=1` echoes the solver log.
 
-## Known state of the checks (foundation, 2026-11-04, Windows, Rust 1.99.1)
+## Known state of the checks (phase 4, 2026-11-05, Windows, Rust 1.99.1)
 
-* `cargo test --release --workspace --no-fail-fast`: 764 pass, 9 ignored, 2 fail: the 2 tests in `femcore --test golden_frames`: `golden_soi_wire_modes`, `golden_soi_wire_with_sloped_wall_hybrid_modes`. The differences are small (about 1e-6 relative in fields, up to 2e-5 in one effective index), identical with `NYX_THREADS=1`, and present at the commit that wrote the golden (35cceba), so they come from the machine the goldens were frozen on, not from a later change (R22, gate G2). Do not regenerate them to hide it.
-* `cargo clippy --workspace -D warnings` is **not** clean with 1.99.1 for the old crates (8 errors in `femcore`: `ems_pml.rs`, `sms.rs`, `sms_kz.rs`); the new crates are clean. `cargo fmt --check` fails widely for the old crates (R23, decided in phase 9).
+* `cargo test --release --workspace --no-fail-fast`: 790 pass, 9 ignored, 0 fail (phase 4, `restructure-4-physics`). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
+* `cargo clippy -D warnings` is clean for `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis` and `nyx-engine`; the old `femcore` code has a few warnings left. `cargo fmt --check` fails for the old code (R23, decided in phase 9).
 * The numbers and timings of the pre-restructure state and of each phase are in `docs/RESTRUCTURE_STATUS.md`.
 
 ## Version control
