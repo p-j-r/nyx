@@ -400,13 +400,6 @@ fn mesh_fmsh_round_trip_and_version() {
 #[test]
 fn kernel_stage_api_is_public() {
     // ADR 9. Naming the functions makes removing or renaming one a compile error here. The kernels not in this list
-    // (plain `sms` static/eigen, `sms_lrb`) have crate-private stages today (ROUGH_SPOTS R26). The `ems` stages are checked in `nyx-ems/tests/contracts.rs`.
-    let _ = (femcore::sms_kz::assemble_cross_section, femcore::sms_kz::solve_cross_section_modes, femcore::sms_kz::cross_section_fields);
-    let _ = (femcore::sms_pml::assemble_solid_pml, femcore::sms_pml::solve_pml_modes, femcore::sms_pml::pml_fields);
-    let _ = (femcore::sms_floquet::assemble_floquet, femcore::sms_floquet::solve_floquet_modes, femcore::sms_floquet::floquet_fields);
-    // the one-call solvers and the dispatching entry points
-    let _ = (femcore::solve::solve, femcore::solve::solve_with);
-    let _ = femcore::sms::solve_solid;
 }
 
 #[test]

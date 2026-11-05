@@ -478,12 +478,12 @@ impl Amg {
                 (p0, bc, bs)
             } else {
                 let (agg, na) = aggregate(&cur, bs, opts.theta * 0.5f64.powi(levels.len() as i32));
-                crate::sms::lap(&mut tl, "      amg: aggregate");
+                crate::progress::lap_since(&mut tl, "      amg: aggregate");
                 if na * k >= cur.nrows() * 9 / 10 {
                     break; // no useful coarsening
                 }
                 let (pt, bc) = tentative(&agg, na, bs, &b);
-                crate::sms::lap(&mut tl, "      amg: tentative");
+                crate::progress::lap_since(&mut tl, "      amg: tentative");
                 (pt, bc, k)
             };
             let diag: Vec<f64> = cur.diagonal().iter().map(|d| if d.abs() > 1e-300 { *d } else { 1.0 }).collect();
@@ -491,7 +491,7 @@ impl Amg {
             let binv = block_inverses(&cur, blk);
             let lmax = rho_dinv_a(&cur, &binv, blk);
             let omega = 4.0 / 3.0 / lmax;
-            crate::sms::lap(&mut tl, "      amg: block inverses, rho");
+            crate::progress::lap_since(&mut tl, "      amg: block inverses, rho");
             let dinv = binv_csr(&binv, blk);
             // P = (I - omega D^-1 A)^s Pt
             let mut p = pt;
@@ -500,11 +500,11 @@ impl Amg {
                 scaled.values_mut().iter_mut().for_each(|v| *v *= omega);
                 p = p.add_scaled(&scaled, -1.0);
             }
-            crate::sms::lap(&mut tl, "      amg: smooth P");
+            crate::progress::lap_since(&mut tl, "      amg: smooth P");
             let r = p.transpose();
             let ap = spmm(&cur, &p);
             let mut ac = spmm(&r, &ap);
-            crate::sms::lap(&mut tl, "      amg: Galerkin product");
+            crate::progress::lap_since(&mut tl, "      amg: Galerkin product");
             // empty coarse dofs (rank-deficient aggregates) get an identity row
             let empty: Vec<usize> = (0..ac.nrows()).filter(|&i| ac.get(i, i).abs() < 1e-300).collect();
             if !empty.is_empty() {
@@ -515,7 +515,7 @@ impl Amg {
                 ac = ac.add_scaled(&Csr::from_diag(&d), 1.0);
             }
             levels.push(Level { a: Csr32::from_csr(&cur), p: Csr32::from_csr(&p), r: Csr32::from_csr(&r), diag, binv, bs: blk, lmax });
-            crate::sms::lap(&mut tl, "      amg: convert level");
+            crate::progress::lap_since(&mut tl, "      amg: convert level");
             cur = std::borrow::Cow::Owned(ac);
             b = bc;
             bs = next_bs;

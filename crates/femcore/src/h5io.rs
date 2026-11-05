@@ -579,6 +579,32 @@ mod tests {
         }
     }
 
+    /// A result shaped like a static solid solution (the kernel moved to nyx-sms): a displacement along the first axis growing with x, its magnitude
+    /// and components as fields, and the displacement per dof.
+    fn solid_like(mesh: &crate::mesh::SimplexMesh) -> SolveResult {
+        let x = mesh.dof_coordinates(2);
+        let d = mesh.dim;
+        let n = x.len() / d;
+        let mut disp = vec![0.0; n * d];
+        for i in 0..n {
+            disp[i * d] = 1e-6 * x[d * i];
+        }
+        let ux: Vec<f64> = (0..n).map(|i| disp[i * d]).collect();
+        let fields = vec![
+            Field { name: "|u|".into(), unit: "m".into(), values: ux.iter().map(|v| v.abs()).collect() },
+            Field { name: "ux".into(), unit: "m".into(), values: ux },
+            Field { name: "uz".into(), unit: "m".into(), values: vec![0.0; n] },
+        ];
+        SolveResult {
+            order: 2,
+            dim: d,
+            solutions: vec![Solution { label: "static".into(), fields, disp: Some(disp), ..Default::default() }],
+            scalars: vec![("max |u| (m)".into(), Scalar::Num(1e-6))],
+            dofs: n * d,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn round_trip() {
         let mesh = crate::meshing::geomdrive::plate(1.0, 0.5, 0.2).unwrap().mesh;
@@ -612,7 +638,7 @@ mod tests {
                 spec.materials.default.insert("E".into(), 1e9);
                 spec.materials.default.insert("nu".into(), 0.3);
                 spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![4], kind: BcKind::Load([1e5, 0.0, 0.0]) }];
-                crate::sms::solve_solid(&mesh, &spec, &SolveState::default()).unwrap()
+                solid_like(&mesh)
             } else {
                 spec.materials.default.insert("k".into(), 1.0);
                 spec.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Temperature(1.0) }, Bc { on: None, labels: vec![6], kind: BcKind::Temperature(0.0) }];

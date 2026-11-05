@@ -1,7 +1,8 @@
 //! Heap use of a solve, stage by stage: a counting allocator records the bytes in use and a watcher thread notes the
 //! largest value seen in every stage that the solver reports (see `femcore::progress`).
 //!
-//!   cargo run --release -p femcore --example mem_profile -- NX NY NZ [p1|p2] [static|eigen] [auto|direct|iter]
+//!   cargo run --release -p nyx-engine --example mem_profile -- NX NY NZ [p1|p2] [static|eigen] [auto|direct|iter]
+#[path = "../../femcore/examples/benchmesh/mod.rs"]
 mod benchmesh;
 use femcore::problem::*;
 use femcore::progress::Progress;
@@ -65,7 +66,10 @@ fn main() {
     }
     s.order = order;
     s.solver = solver;
-    s.bcs = vec![Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }, Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) }];
+    s.bcs = vec![
+        Bc { on: None, labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } },
+        Bc { on: None, labels: vec![6], kind: BcKind::Load([0.0, 0.0, -1e5]) },
+    ];
     if eigen {
         s.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
     }
@@ -74,12 +78,15 @@ fn main() {
     let p = Progress::new();
     let p2 = p.clone();
     let t0 = Instant::now();
-    let h = std::thread::spawn(move || femcore::solve::solve_with(&mesh, &s, &mut SolveState::default(), &p2).map(|r| (r.dofs, r.log)));
+    let h = std::thread::spawn(move || {
+        nyx_engine::legacy::solve_with(&mesh, &s, &mut SolveState::default(), &p2).map(|r| (r.dofs, r.log))
+    });
     // largest heap use seen per stage, in order of appearance
     let mut stages: Vec<(String, usize)> = vec![];
     while !h.is_finished() {
         let st = p.status();
-        let (cur, peak) = (CURRENT.load(Ordering::Relaxed), PEAK.swap(CURRENT.load(Ordering::Relaxed), Ordering::Relaxed));
+        let (cur, peak) =
+            (CURRENT.load(Ordering::Relaxed), PEAK.swap(CURRENT.load(Ordering::Relaxed), Ordering::Relaxed));
         let hi = cur.max(peak);
         match stages.last_mut() {
             Some((name, m)) if *name == st.stage => *m = (*m).max(hi),
@@ -88,7 +95,11 @@ fn main() {
         std::thread::sleep(Duration::from_millis(20));
     }
     let r = h.join().unwrap();
-    println!("solve: {:.1} s, {}", t0.elapsed().as_secs_f64(), r.as_ref().map(|r| format!("{} dofs", r.0)).unwrap_or_else(|e| e.clone()));
+    println!(
+        "solve: {:.1} s, {}",
+        t0.elapsed().as_secs_f64(),
+        r.as_ref().map(|r| format!("{} dofs", r.0)).unwrap_or_else(|e| e.clone())
+    );
     println!("heap in use before the solve: {:.2} GB (mesh and spec)", gb(base));
     for (name, m) in &stages {
         println!("  peak {:6.2} GB  while: {}", gb(*m), if name.is_empty() { "(between stages)" } else { name });

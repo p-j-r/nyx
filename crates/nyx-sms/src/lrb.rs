@@ -11,24 +11,34 @@
 //! `[0 I; -K -C] z = lambda [I 0; 0 M] z` with `lambda = i omega` and `z = (u, lambda u)` by complex
 //! shift-and-invert Arnoldi; the frequencies are complex and give the quality factor.
 
-use crate::linalg::csr::{c, CCoo, CCsr, C};
-use crate::linalg::driver::eigs_complex;
-use crate::fem::*;
-use crate::material::M6;
-use crate::mesh::SimplexMesh;
-use crate::linalg::csr::{Coo, RCsr as Csr};
+use crate::problem::Problem;
+use femcore::fem::*;
+use femcore::linalg::csr::{c, CCoo, CCsr, C};
+use femcore::linalg::csr::{Coo, RCsr as Csr};
+use femcore::linalg::driver::eigs_complex;
+use femcore::material::M6;
+use nyx_physics::{cell_fields_of, Discretisation, Scalar, Solution, SolveResult};
 use std::collections::HashMap;
 
 /// Pressure and shear speeds of an anisotropic stiffness (Voigt averages) and density.
 pub fn voigt_speeds(c6: &M6, rho: f64) -> (f64, f64) {
     let bulk = (c6[0][0] + c6[1][1] + c6[2][2] + 2.0 * (c6[0][1] + c6[0][2] + c6[1][2])) / 9.0;
-    let shear = (c6[0][0] + c6[1][1] + c6[2][2] - c6[0][1] - c6[0][2] - c6[1][2] + 3.0 * (c6[3][3] + c6[4][4] + c6[5][5])) / 15.0;
+    let shear = (c6[0][0] + c6[1][1] + c6[2][2] - c6[0][1] - c6[0][2] - c6[1][2]
+        + 3.0 * (c6[3][3] + c6[4][4] + c6[5][5]))
+        / 15.0;
     (((bulk + 4.0 * shear / 3.0) / rho).sqrt(), (shear / rho).sqrt())
 }
 
 /// The real symmetric damping matrix `C` over `ncomp` component blocks of the boundaries `labels`.
 /// For a 2D mesh with `ncomp = 3` (out-of-plane wave number) the normal lies in the plane.
-pub fn damping_matrix(mesh: &SimplexMesh, c6: &[M6], rho: &[f64], labels: &[i32], order: usize, ncomp: usize) -> Csr {
+pub fn damping_matrix(
+    mesh: &Discretisation,
+    c6: &[M6],
+    rho: &[f64],
+    labels: &[i32],
+    order: usize,
+    ncomp: usize,
+) -> Csr {
     let d = mesh.dim;
     let n1 = mesh.n_dofs(order);
     let fd = d - 1;
@@ -93,7 +103,8 @@ pub fn damping_matrix(mesh: &SimplexMesh, c6: &[M6], rho: &[f64], labels: &[i32]
                     continue;
                 }
                 let ke: Vec<f64> = me.iter().map(|m| m * area * dij).collect();
-                let (ri, cj): (Vec<usize>, Vec<usize>) = (dofs.iter().map(|&x| x + i * n1).collect(), dofs.iter().map(|&x| x + j * n1).collect());
+                let (ri, cj): (Vec<usize>, Vec<usize>) =
+                    (dofs.iter().map(|&x| x + i * n1).collect(), dofs.iter().map(|&x| x + j * n1).collect());
                 coo.push_block(&ri, &cj, &ke);
             }
         }
@@ -163,11 +174,22 @@ pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize)
 /// Eigenfrequencies with low-reflecting boundaries for the real stiffness and mass matrices of
 /// `sms.rs` (2D plane problems and 3D).
 #[allow(clippy::too_many_arguments)]
-pub fn solve_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant) -> Result<crate::problem::SolveResult, String> {
+pub fn solve_lrb(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &crate::solid::Setup,
+    k: &Csr,
+    m: &Csr,
+    rho_cells: &[f64],
+    labels: &[i32],
+    n_modes: usize,
+    f_search: f64,
+    t0: std::time::Instant,
+) -> Result<SolveResult, String> {
     let asm = assemble_lrb(mesh, spec, st, k, m, rho_cells, labels, n_modes, f_search)?;
     let solved = solve_lrb_modes(&asm)?;
     let r = lrb_fields(mesh, &asm, &solved)?;
-    Ok(crate::problem::SolveResult { seconds: t0.elapsed().as_secs_f64(), ..r })
+    Ok(SolveResult { seconds: t0.elapsed().as_secs_f64(), ..r })
 }
 
 /// Stage 1 of the solid kernel with low-reflecting boundaries: stiffness, mass and the boundary damping on the free dofs
@@ -193,9 +215,21 @@ pub struct LrbSolve {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn assemble_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: &crate::sms::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64) -> Result<LrbAssembly, String> {
+pub fn assemble_lrb(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &crate::solid::Setup,
+    k: &Csr,
+    m: &Csr,
+    rho_cells: &[f64],
+    labels: &[i32],
+    n_modes: usize,
+    f_search: f64,
+) -> Result<LrbAssembly, String> {
     if f_search <= 0.0 {
-        return Err("low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into());
+        return Err(
+            "low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into()
+        );
     }
     if !spec.periodic.is_empty() {
         return Err("low-reflecting boundaries cannot be combined with periodic conditions yet".into());
@@ -215,7 +249,8 @@ pub fn assemble_lrb(mesh: &SimplexMesh, spec: &crate::problem::ProblemSpec, st: 
 
 /// Stage 2: the quadratic eigenpairs nearest the search frequency.
 pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String> {
-    let (omegas, vectors, converged, dim) = quadratic_modes(&asm.kf, &asm.mf, &asm.cf, 2.0 * std::f64::consts::PI * asm.f_search, asm.n_modes)?;
+    let (omegas, vectors, converged, dim) =
+        quadratic_modes(&asm.kf, &asm.mf, &asm.cf, 2.0 * std::f64::consts::PI * asm.f_search, asm.n_modes)?;
     if omegas.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
     }
@@ -223,8 +258,7 @@ pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String> {
 }
 
 /// Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q.
-pub fn lrb_fields(mesh: &SimplexMesh, asm: &LrbAssembly, solved: &LrbSolve) -> Result<crate::problem::SolveResult, String> {
-    use crate::problem::*;
+pub fn lrb_fields(mesh: &Discretisation, asm: &LrbAssembly, solved: &LrbSolve) -> Result<SolveResult, String> {
     let (n, d) = (asm.n, asm.d);
     let (omegas, vecs, free) = (&solved.omegas, &solved.vectors, &asm.free);
     let (converged, dim) = (solved.converged, solved.dim);
@@ -238,14 +272,24 @@ pub fn lrb_fields(mesh: &SimplexMesh, asm: &LrbAssembly, solved: &LrbSolve) -> R
         for (a, &dof) in free.iter().enumerate() {
             u[dof] = vecs[i][a];
         }
-        let (fields, disp, cells) = crate::sms::complex_mode_fields(mesh, asm.order, &u);
+        let (fields, cells) = crate::solid::complex_mode_fields(mesh, asm.order, &u);
         let q = if f.im.abs() > 0.0 { f.re / (2.0 * f.im.abs()) } else { f64::INFINITY };
-        solutions.push(Solution { label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(f.re), ..Default::default() });
+        solutions.push(Solution {
+            label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q),
+            fields,
+            cell_fields: cell_fields_of(&cells),
+            value: Some(f.re),
+            ..Default::default()
+        });
         scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
         if q.is_finite() {
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
         }
     }
-    let log = vec![format!("low-reflecting boundaries: quadratic eigenproblem solved as a pencil of size {}, Krylov dimension {dim}{}", 2 * free.len(), if converged { "" } else { " (not every pair converged; those are omitted)" })];
-    Ok(SolveResult { order: asm.order, dim: d, solutions, scalars, log, dofs: n, ..Default::default() })
+    let log = vec![format!(
+        "low-reflecting boundaries: quadratic eigenproblem solved as a pencil of size {}, Krylov dimension {dim}{}",
+        2 * free.len(),
+        if converged { "" } else { " (not every pair converged; those are omitted)" }
+    )];
+    Ok(SolveResult { order: asm.order as u8, dim: d as u8, solutions, scalars, log, dofs: n, ..Default::default() })
 }

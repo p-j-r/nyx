@@ -2899,7 +2899,9 @@ name = "nyx-sms"
 version = "0.1.0"
 dependencies = [
  "femcore",
+ "geom",
  "nyx-physics",
+ "rayon",
  "serde_json",
 ]
 

@@ -1,0 +1,231 @@
+{
+  "eigenfrequency": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "f2 (Hz)",
+      "f3 (Hz)",
+      "f4 (Hz)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz"
+        ],
+        "fields": [
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "u",
+            "unit": "m"
+          }
+        ],
+        "flat": [
+          "|u|",
+          "ux",
+          "uz"
+        ],
+        "has_value": true,
+        "label": "mode 1: 85.168744 Hz"
+      }
+    ],
+    "study": "eigenfrequency"
+  },
+  "eigenfrequency_floquet": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "f2 (Hz)",
+      "f3 (Hz)",
+      "f4 (Hz)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|u|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re ux",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uz",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "Re ux",
+          "Re uz"
+        ],
+        "has_value": true,
+        "label": "mode 1: 34.918587 Hz"
+      }
+    ],
+    "study": "eigenfrequency"
+  },
+  "eigenfrequency_low_reflecting": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "Q1",
+      "f2 (Hz)",
+      "Q2"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|u|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re ux",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uz",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "Re ux",
+          "Re uz"
+        ],
+        "has_value": true,
+        "label": "mode 1: 1.100631e3 +7.754e1i Hz (Q = 7.097e0)"
+      }
+    ],
+    "study": "eigenfrequency"
+  },
+  "eigenfrequency_pml": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "Q1",
+      "f2 (Hz)",
+      "Q2"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|u|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re ux",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uz",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "Re ux",
+          "Re uz"
+        ],
+        "has_value": true,
+        "label": "mode 1: 8.269663e1 +1.659e1i Hz"
+      }
+    ],
+    "study": "eigenfrequency"
+  },
+  "static": {
+    "physics": "sms",
+    "scalars": [
+      "max |u| (m)",
+      "max von Mises (Pa)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "von Mises",
+          "ux",
+          "uz",
+          "sxx",
+          "szz",
+          "sxz",
+          "syy"
+        ],
+        "fields": [
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "u",
+            "unit": "m"
+          },
+          {
+            "components": [],
+            "name": "von Mises",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "sxx",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "szz",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "sxz",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "syy",
+            "unit": "Pa"
+          }
+        ],
+        "flat": [
+          "|u|",
+          "ux",
+          "uz",
+          "von Mises",
+          "sxx",
+          "szz",
+          "sxz",
+          "syy"
+        ],
+        "has_value": false,
+        "label": "static"
+      }
+    ],
+    "study": "static"
+  }
+}

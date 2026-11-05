@@ -279,9 +279,9 @@ where
             acc.unwrap()
         })
         .collect();
-    crate::sms::lap(&mut tl, "    assembly: element loops and per-thread CSR");
+    crate::progress::lap_since(&mut tl, "    assembly: element loops and per-thread CSR");
     let c = Csr::sum_all(parts);
-    crate::sms::lap(&mut tl, "    assembly: merge");
+    crate::progress::lap_since(&mut tl, "    assembly: merge");
     c
 }
 
@@ -854,7 +854,7 @@ pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::
     let ku = k.matvec(&uvec);
     let rhs: Vec<f64> = (0..n).map(|i| f[i] - ku[i]).collect();
     let sys = AmgSystem::new(mesh, order, ncomp, k, fixed)?;
-    crate::sms::lap(&mut tl, "    spd: system and hierarchy");
+    crate::progress::lap_since(&mut tl, "    spd: system and hierarchy");
     let t_solve = std::time::Instant::now();
     let fv: Vec<(usize, f64)> = fixed.iter().copied().zip(values.iter().copied()).collect();
     let (mut u, its, rel) = sys.solve_with(None, &rhs, &fv, 1e-10, 600);

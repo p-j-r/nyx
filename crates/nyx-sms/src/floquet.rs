@@ -2,13 +2,13 @@
 //! waveguide cells): the stiffness and mass matrices are reduced by the periodic constraints and the
 //! complex Hermitian eigenproblem is solved with the complex shift-and-invert Arnoldi solver.
 
-use crate::linalg::csr::{c, CCsr, C};
-use crate::linalg::driver::eigs_complex;
-use crate::mesh::SimplexMesh;
-use crate::periodic::{congruence, match_vertices, nodal_relations, Reduction};
 use crate::problem::*;
-use crate::sms::Setup;
-use crate::linalg::csr::RCsr as Csr;
+use crate::solid::Setup;
+use femcore::linalg::csr::RCsr as Csr;
+use femcore::linalg::csr::{c, CCsr, C};
+use femcore::linalg::driver::eigs_complex;
+use femcore::periodic::{congruence, match_vertices, nodal_relations, Reduction};
+use nyx_physics::{cell_fields_of, Discretisation, Scalar, Solution, SolveResult};
 use std::time::Instant;
 
 fn to_complex(a: &Csr) -> CCsr {
@@ -16,7 +16,16 @@ fn to_complex(a: &Csr) -> CCsr {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn solve_floquet(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, k: &Csr, m: &Csr, n_modes: usize, f_search: f64, t0: Instant) -> Result<SolveResult, String> {
+pub(crate) fn solve_floquet(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &Setup,
+    k: &Csr,
+    m: &Csr,
+    n_modes: usize,
+    f_search: f64,
+    t0: Instant,
+) -> Result<SolveResult, String> {
     let asm = assemble_floquet(mesh, spec, st, k, m, n_modes, f_search)?;
     let solved = solve_floquet_modes(&asm)?;
     let r = floquet_fields(mesh, &asm, &solved)?;
@@ -45,7 +54,15 @@ pub struct FloquetSolve {
     pub converged: bool,
 }
 
-pub fn assemble_floquet(mesh: &SimplexMesh, spec: &ProblemSpec, st: &Setup, k: &Csr, m: &Csr, n_modes: usize, f_search: f64) -> Result<FloquetAssembly, String> {
+pub fn assemble_floquet(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &Setup,
+    k: &Csr,
+    m: &Csr,
+    n_modes: usize,
+    f_search: f64,
+) -> Result<FloquetAssembly, String> {
     let (d, n1) = (st.d, st.n1);
     let n = d * n1;
     let order = spec.order;
@@ -84,17 +101,27 @@ pub fn solve_floquet_modes(asm: &FloquetAssembly) -> Result<FloquetSolve, String
 }
 
 /// Stage 3: plot fields and per-cell complex displacement of every mode.
-pub fn floquet_fields(mesh: &SimplexMesh, asm: &FloquetAssembly, solved: &FloquetSolve) -> Result<SolveResult, String> {
+pub fn floquet_fields(
+    mesh: &Discretisation,
+    asm: &FloquetAssembly,
+    solved: &FloquetSolve,
+) -> Result<SolveResult, String> {
     let (order, n, nred) = (asm.order, asm.n, asm.nred);
     let d = mesh.dim;
     let mut solutions = vec![];
     let mut scalars = vec![];
     for (j, &(freq, i)) in solved.modes.iter().enumerate() {
         let u: Vec<C> = asm.red.expand(&solved.vectors[i]);
-        let (fields, disp, cells) = crate::sms::complex_mode_fields(mesh, order, &u);
-        solutions.push(Solution { label: format!("mode {}: {:.6} Hz", j + 1, freq), fields, cell_fields: Some(cells), disp: Some(disp), value: Some(freq), ..Default::default() });
+        let (fields, cells) = crate::solid::complex_mode_fields(mesh, order, &u);
+        solutions.push(Solution {
+            label: format!("mode {}: {:.6} Hz", j + 1, freq),
+            fields,
+            cell_fields: cell_fields_of(&cells),
+            value: Some(freq),
+            ..Default::default()
+        });
         scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
     }
     let log = vec![format!("{} Floquet-periodic pair(s): {n} dofs, {nred} after constraints; complex Hermitian eigenproblem, Krylov dimension {}{}", asm.n_pairs, solved.dim, if solved.converged { "" } else { " (not every pair converged; those are omitted)" })];
-    Ok(SolveResult { order, dim: d, solutions, scalars, log, dofs: n, ..Default::default() })
+    Ok(SolveResult { order: order as u8, dim: d as u8, solutions, scalars, log, dofs: n, ..Default::default() })
 }

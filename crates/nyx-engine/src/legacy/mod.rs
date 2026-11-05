@@ -1,9 +1,9 @@
 //! The bridge from the pre-restructure window problem (`femcore::problem::ProblemSpec`, `SolveResult`) to the physics crates, for the
 //! window and the MCP session until restructure phase 7 rewires them to engine commands (ADR 41). One file per physics converts the old
 //! problem to that physics' typed problem (same mesh numbers, no names), runs it, and converts the result back to the old shape.
-//! Physics whose kernels have not moved into their crate yet are still run by `femcore::solve`.
+//! All three physics (`dfs`, `sms`, `ems`) run in their crates; `femcore::solve` is gone.
 //!
-//! Delete this module, `femcore::problem` and `femcore::solve` together in phase 7.
+//! Delete this module and `femcore::problem` together in phase 7.
 
 use femcore::mesh::SimplexMesh;
 use femcore::problem::{self as old, Physics as OldPhysics, SolveState};
@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 pub mod dfs;
 pub mod ems;
+pub mod sms;
 
-/// `femcore::solve::solve` for the window: the kernels of every physics, wherever they live now.
+/// The one entry point of the window: the kernels of every physics, which all live in their crates now.
 pub fn solve(mesh: &SimplexMesh, spec: &old::ProblemSpec, state: &mut SolveState) -> Result<old::SolveResult, String> {
     // inside another solve (a study that solves sub-problems) the outer job's progress and cancel flag are kept
     let p = progress::current().unwrap_or_else(Progress::new);
@@ -30,9 +31,8 @@ pub fn solve_with(
 ) -> Result<old::SolveResult, String> {
     match spec.physics {
         OldPhysics::Electrostatics | OldPhysics::Heat => dfs::solve(mesh, spec, state, progress),
+        OldPhysics::Solid => sms::solve(mesh, spec, state, progress),
         OldPhysics::Emw => ems::solve(mesh, spec, state, progress),
-        // sms moves into its crate in phase 4; until then femcore runs it
-        _ => femcore::solve::solve_with(mesh, spec, state, progress),
     }
 }
 

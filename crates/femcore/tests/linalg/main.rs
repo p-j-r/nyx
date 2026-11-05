@@ -1,4 +1,4 @@
-//! Tests of the ported solver library (`femcore::solvers`), one test binary for all of them.
+//! Tests of the ported solver library (`femcore::linalg`), one test binary for all of them.
 mod common;
 mod ads;
 mod amg;

@@ -1,7 +1,7 @@
 //! femcore: finite elements for the nyx application, in pure Rust. docs/HOW_IT_WORKS.md explains the whole chain in plain
 //! language; this is the map of the modules.
 //!
-//! * entry and plumbing: `solve` (one entry point for every physics), `problem` (what is solved: the problem and result
+//! * entry and plumbing: `problem` (what is solved: the problem and result
 //!   types), `validate` (refuses NaN/infinity), `progress` (stage log, cancel), `par` (the shared thread pools)
 //! * meshes: `mesh` (the meshes: `SimplexMesh` and its numbering of unknowns, the native per-cell-type mesh `native` and `cells`, `view`, `io` for `.fmsh`, `quality`, `fixtures`)
 //! * meshing: `meshing` (geom models to meshes: `MeshPlan`, `geomdrive`, `mesher` 2D shapes to triangles, `mesher3d` and `refine3d` 3D solids to tetrahedra, structured PML `pml`, `pml3`, `pml_box`, `physics_size`, `validate`)
@@ -10,10 +10,8 @@
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
 //! * linear algebra: `linalg` (the one library: `Csr<T>` matrices, direct and Krylov solvers, eigensolvers, multigrid;
 //!   `linalg::driver` is the door the kernels use)
-//! * physics: `dfs` (electrostatics, heat), `sms` and its variants `sms_kz` (the shared cross-section solid kernel, today for rings), `sms_pml`,
-//!   `sms_lrb` (absorbing boundaries), `sms_floquet` and `periodic` (periodic cells), `sms_axisym` (bodies of
-//!   revolution); the electromagnetic kernels are in `nyx-ems` (ADR 45); `edge` (the 2D edge-element basis) and `pml` (coordinate
-//!   stretching) are what they share with `optical` and the solid kernels
+//! * physics: `dfs`, `sms` and `ems` are crates since phase 4 (ADR 41, 42 to 47); what they share stays here: `periodic` (Floquet pairs, used by the solid and the cavity
+//!   kernels), `edge` (the 2D edge-element basis), `pml` (coordinate stretching), `props` (materials per domain), `section` (the wafer axes)
 //! * optical mode sets: `optical` (modes with the data to evaluate their fields; used by `analysis` and `polarization`)
 //! * ported libraries: `linalg` (see above; Krylov, eigen, preconditioner, time-stepping and optimisation library for
 //!   real and complex systems) and the mesher port in `mesh`, `meshing` and `adapt`, see docs/ports
@@ -45,13 +43,6 @@ pub mod problem;
 pub mod props;
 pub mod progress;
 pub mod section;
-pub mod sms;
-pub mod sms_axisym;
-pub mod sms_floquet;
-pub mod sms_kz;
-pub mod sms_lrb;
-pub mod sms_pml;
-pub mod solve;
 pub mod testkit;
 pub mod linalg;
 pub mod validate;
