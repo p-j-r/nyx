@@ -1,0 +1,223 @@
+{
+  "density": 2500.0,
+  "description": "Every section of the format, with invented numbers",
+  "elastic": {
+    "c": [
+      [
+        200000000000.0,
+        60000000000.0,
+        55000000000.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        60000000000.0,
+        180000000000.0,
+        50000000000.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        55000000000.0,
+        50000000000.0,
+        160000000000.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        40000000000.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        45000000000.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        50000000000.0
+      ]
+    ],
+    "class": "Orthotropic",
+    "exact_constants": true,
+    "source": [
+      {
+        "cite": "Invented for the contract test",
+        "doi": null,
+        "url": null,
+        "verified": null
+      }
+    ]
+  },
+  "electrical": {
+    "conductivity": {
+      "Scalar": 1e-12
+    },
+    "permeability": 1.0,
+    "permittivity": {
+      "Symmetric": [
+        4.0,
+        5.0,
+        6.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "source": [
+      {
+        "cite": "Electrical reference",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-04"
+      }
+    ]
+  },
+  "name": "kitchen_sink",
+  "notes": "An orthotropic crystal with a different dispersion model along each axis.",
+  "optical": {
+    "axes": {
+      "Biaxial": [
+        {
+          "dispersion": {
+            "Sellmeier": {
+              "a": 1.1,
+              "b": [
+                1.0,
+                0.5
+              ],
+              "c": [
+                0.01,
+                100.0
+              ]
+            }
+          },
+          "dn_dt": 0.00002,
+          "source": [
+            {
+              "cite": "Axis x reference",
+              "doi": null,
+              "url": null,
+              "verified": null
+            }
+          ]
+        },
+        {
+          "dispersion": {
+            "Cauchy": {
+              "coefficients": [
+                1.5,
+                0.005,
+                0.0001
+              ]
+            }
+          },
+          "dn_dt": 0.0,
+          "source": []
+        },
+        {
+          "dispersion": {
+            "Tabulated": {
+              "extrapolate": "Error",
+              "interpolation": "Linear",
+              "k": [
+                0.0,
+                0.001,
+                0.01
+              ],
+              "lambda": [
+                0.4,
+                1.0,
+                1.7
+              ],
+              "n": [
+                1.6,
+                1.55,
+                1.52
+              ]
+            }
+          },
+          "dn_dt": 0.00001,
+          "source": []
+        }
+      ]
+    },
+    "range": [
+      0.5,
+      1.6
+    ],
+    "reference_temperature": 293.15,
+    "source": [
+      {
+        "cite": "Optical reference shared by the three axes",
+        "doi": null,
+        "url": null,
+        "verified": null
+      }
+    ],
+    "unit_m": 1e-6,
+    "wavelength_unit": "um"
+  },
+  "source": [
+    {
+      "cite": "Invented for the contract test",
+      "doi": null,
+      "url": null,
+      "verified": null
+    },
+    {
+      "cite": "Second reference",
+      "doi": null,
+      "url": null,
+      "verified": null
+    }
+  ],
+  "thermal": {
+    "conductivity": {
+      "Diagonal": [
+        1.0,
+        2.0,
+        3.0
+      ]
+    },
+    "expansion": {
+      "Symmetric": [
+        1e-6,
+        2e-6,
+        3e-6,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "source": [
+      {
+        "cite": "First thermal reference",
+        "doi": null,
+        "url": null,
+        "verified": null
+      },
+      {
+        "cite": "Second thermal reference (APPROXIMATE)",
+        "doi": "10.1000/thermal",
+        "url": "https://example.org/thermal",
+        "verified": "2026-11-04"
+      }
+    ],
+    "specific_heat": 800.0
+  }
+}

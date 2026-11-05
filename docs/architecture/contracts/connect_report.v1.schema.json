@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nyx-connect.report.v1",
+  "title": "nyx-connect report, version 1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/list"
+    },
+    {
+      "$ref": "#/$defs/change"
+    },
+    {
+      "$ref": "#/$defs/test"
+    }
+  ],
+  "$defs": {
+    "status": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "enum": [
+                "not_installed",
+                "not_connected",
+                "connected"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "found"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stale"
+            },
+            "found": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "why"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "unreadable"
+            },
+            "why": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "host": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "config",
+        "after_connect",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "enum": [
+            "claude-code",
+            "claude-desktop",
+            "cursor",
+            "vscode",
+            "windsurf"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "config": {
+          "type": "string"
+        },
+        "after_connect": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        }
+      }
+    },
+    "list": {
+      "type": "object",
+      "required": [
+        "schema",
+        "version",
+        "server",
+        "server_found",
+        "hosts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "nyx-connect.list"
+        },
+        "version": {
+          "const": 1
+        },
+        "server": {
+          "type": "string"
+        },
+        "server_found": {
+          "type": "boolean"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/host"
+          }
+        }
+      }
+    },
+    "row": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "host",
+            "ok",
+            "changed",
+            "config",
+            "backup"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "ok": {
+              "const": true
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "config": {
+              "type": "string"
+            },
+            "backup": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "host",
+            "ok",
+            "error"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "change": {
+      "type": "object",
+      "required": [
+        "schema",
+        "version",
+        "action",
+        "results"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "nyx-connect.change"
+        },
+        "version": {
+          "const": 1
+        },
+        "action": {
+          "enum": [
+            "connect",
+            "disconnect"
+          ]
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/row"
+          }
+        }
+      }
+    },
+    "test": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "schema",
+            "version",
+            "ok",
+            "server"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema": {
+              "const": "nyx-connect.test"
+            },
+            "version": {
+              "const": 1
+            },
+            "ok": {
+              "const": true
+            },
+            "server": {
+              "type": "object",
+              "required": [
+                "name",
+                "version",
+                "protocol",
+                "tools"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "protocol": {
+                  "type": "string"
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "schema",
+            "version",
+            "ok",
+            "error"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema": {
+              "const": "nyx-connect.test"
+            },
+            "version": {
+              "const": 1
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

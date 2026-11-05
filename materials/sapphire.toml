@@ -1,0 +1,44 @@
+# Sapphire (alpha-Al2O3), trigonal 3m class, optic axis = crystal z. Orientation is set in the project.
+format = 1
+name = "sapphire"
+description = "Synthetic sapphire, room temperature"
+source = { cite = "Compiled from the per-table sources below. Density 3980 kg/m^3 (3.98 g/cm^3): Valley Design sapphire properties page, checked 2026-11-04", verified = "2026-11-04" }
+density = "3980 kg/m^3"
+
+[elastic]
+class = "trigonal"
+unit = "GPa"
+c11 = 496.8
+c12 = 163.6
+c13 = 110.9
+c14 = -23.5
+c33 = 498.1
+c44 = 147.4
+source = { cite = "J. B. Wachtman Jr., W. E. Tefft, D. G. Lam Jr., Elastic constants of synthetic single crystal corundum at room temperature, J. Res. Natl. Bur. Stand. 64A, 213-228 (1960): c11 4.968, c33 4.981, c44 1.474, c12 1.636, c13 1.109, c14 -0.235 (x1e12 dyn/cm^2 = 100 GPa)", url = "https://pmc.ncbi.nlm.nih.gov/articles/PMC5287147/", verified = "2026-11-04" }
+
+[thermal]
+conductivity = { perp = 23.0, par = 25.8 }
+conductivity_unit = "W/(m*K)"
+specific_heat = "756 J/(kg*K)"
+expansion = { perp = 5.0e-6, par = 5.6e-6 }
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE supplier data at about 20 to 25 degC: conductivity 23.0 (perpendicular to c) and 25.8 (parallel) W/(m K), specific heat 756 J/(kg K) at 18 degC, expansion about 5.0e-6 and 5.6e-6 1/K (Valley Design sapphire properties). Suppliers disagree (for example CrysTec gives 4.5e-6 and 5.3e-6 1/K for expansion), and conductivity falls steeply with temperature", url = "https://valleydesign.com/sappprop/", verified = "2026-11-04" }
+
+[electrical]
+permittivity = { perp = 9.4, par = 11.5 }
+source = { cite = "APPROXIMATE low-frequency relative permittivity, 9.4 perpendicular and 11.5 parallel to c (Valley Design sapphire properties; supplier tables quote 11.5 to 11.6)", url = "https://valleydesign.com/sappprop/", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.2, 5.0]
+source = { cite = "I. H. Malitson and M. J. Dodge, Refractive index and birefringence of synthetic sapphire, J. Opt. Soc. Am. 62, 1405 (1972) (talk abstract); formula from M. J. Dodge, Handbook of Laser Science and Technology IV (CRC, 1986), 20 degC, 0.20 to 5.0 um, as in the refractiveindex.info database (Al2O3, Malitson-o and Malitson-e, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Al2O3&page=Malitson-o", verified = "2026-11-04" }
+
+[optical.ordinary]
+model = "sellmeier"
+B = [1.4313493, 0.65054713, 5.3414021]
+lambda0 = [0.0726631, 0.1193242, 18.028251]
+
+[optical.extraordinary]
+model = "sellmeier"
+B = [1.5039759, 0.55069141, 6.5927379]
+lambda0 = [0.0740288, 0.1216529, 20.072248]

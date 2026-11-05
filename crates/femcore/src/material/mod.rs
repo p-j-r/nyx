@@ -9,6 +9,22 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod elastic;
+pub mod optics;
+pub mod reader;
+pub mod schema;
+pub mod source;
+pub mod spec;
+pub mod tensor;
+pub mod units;
+
+pub use elastic::{Class, Elastic, Unique};
+pub use optics::{Dispersion, Optical, OpticsError};
+pub use reader::MaterialError;
+pub use source::Source;
+pub use spec::{merge_over, Library, MaterialSpec};
+pub use tensor::TensorProp;
+
 pub type M3 = [[f64; 3]; 3];
 pub type M6 = [[f64; 6]; 6];
 
@@ -20,6 +36,8 @@ pub enum Stiffness {
     /// classes 3m and -3m (sapphire, LiNbO3): c14 = -c24 = c56, c66 = (c11 - c12) / 2
     Trigonal { c11: f64, c12: f64, c13: f64, c14: f64, c33: f64, c44: f64 },
     Orthotropic { c11: f64, c22: f64, c33: f64, c12: f64, c13: f64, c23: f64, c44: f64, c55: f64, c66: f64 },
+    /// any symmetric 6x6 matrix in the textbook Voigt order (xx, yy, zz, yz, xz, xy) and the crystal frame, in Pa (upper triangle is read)
+    General(M6),
 }
 
 impl Stiffness {
@@ -29,6 +47,7 @@ impl Stiffness {
             Stiffness::Hexagonal { .. } => "Hexagonal",
             Stiffness::Trigonal { .. } => "Trigonal",
             Stiffness::Orthotropic { .. } => "Orthotropic",
+            Stiffness::General(_) => "General",
         }
     }
     /// Standard Voigt order (xx, yy, zz, yz, xz, xy) in the crystal frame.
@@ -73,6 +92,13 @@ impl Stiffness {
                 set(4, 4, c44);
                 set(5, 5, 0.5 * (c11 - c12));
             }
+            Stiffness::General(m) => {
+                for i in 0..6 {
+                    for j in i..6 {
+                        set(i, j, m[i][j]);
+                    }
+                }
+            }
             Stiffness::Orthotropic { c11, c22, c33, c12, c13, c23, c44, c55, c66 } => {
                 set(0, 0, c11);
                 set(1, 1, c22);
@@ -94,6 +120,17 @@ impl Stiffness {
             Stiffness::Cubic { c11, c12, c44 } => vec![("c11", c11), ("c12", c12), ("c44", c44)],
             Stiffness::Hexagonal { c11, c12, c13, c33, c44 } => vec![("c11", c11), ("c12", c12), ("c13", c13), ("c33", c33), ("c44", c44)],
             Stiffness::Trigonal { c11, c12, c13, c14, c33, c44 } => vec![("c11", c11), ("c12", c12), ("c13", c13), ("c14", c14), ("c33", c33), ("c44", c44)],
+            Stiffness::General(m) => {
+                let mut v = Vec::new();
+                for (i, row) in m.iter_mut().enumerate() {
+                    for (j, x) in row.iter_mut().enumerate() {
+                        if j >= i {
+                            v.push((elastic::NAMES[i][j], x));
+                        }
+                    }
+                }
+                v
+            }
             Stiffness::Orthotropic { c11, c22, c33, c12, c13, c23, c44, c55, c66 } => {
                 vec![("c11", c11), ("c22", c22), ("c33", c33), ("c12", c12), ("c13", c13), ("c23", c23), ("c44", c44), ("c55", c55), ("c66", c66)]
             }

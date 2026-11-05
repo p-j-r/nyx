@@ -7,7 +7,7 @@
 //! it writes is part of the result. `with_context` builds the state without a window, which is how the tests drive it.
 
 use crate::colormap::Colormap;
-use crate::connect::{self, Client};
+use nyx_connect::{Env, HostInfo, Status};
 use crate::examples;
 use crate::state::*;
 use crate::viewport::{Content, Viewport};
@@ -85,8 +85,8 @@ pub struct App {
     pub shell: crate::shell::Shell,
     /// the `nyx-mcp` program the Connect menu registers with Claude (found at start, or picked by the user)
     pub mcp_server: Option<PathBuf>,
-    /// the Connect menu: what each client's config says (same order as `Client::ALL`) and the last thing done
-    pub connect_status: Vec<connect::Status>,
+    /// the Connect menu: what each AI app's config says about nyx (installed apps only) and the last thing done
+    pub connect_status: Vec<HostInfo>,
     pub connect_note: Option<String>,
     pub ctx: egui::Context,
 }
@@ -149,7 +149,7 @@ impl App {
             settle: 6,
             shot_pending: Arc::new(AtomicBool::new(false)),
             shell: crate::shell::Shell::detached(),
-            mcp_server: connect::find_server(),
+            mcp_server: nyx_connect::find_server(),
             connect_status: vec![],
             connect_note: None,
             ctx,
@@ -581,13 +581,10 @@ impl App {
 
     /// Re-reads what Claude Code's and Claude Desktop's config files say about nyx.
     fn refresh_connect(&mut self) {
-        self.connect_status = Client::ALL
-            .iter()
-            .map(|c| match (c.config_path(), &self.mcp_server) {
-                (Some(p), Some(s)) => connect::status(&p, s),
-                _ => connect::Status::NotConnected,
-            })
-            .collect();
+        self.connect_status = match (Env::detect(), &self.mcp_server) {
+            (Ok(env), Some(server)) => nyx_connect::list(&env, server).into_iter().filter(|h| h.status != Status::NotInstalled).collect(),
+            _ => vec![],
+        };
     }
 
     /// The Connect menu: one row per Claude app with a Connect/Disconnect button, so the AI interface (`nyx-mcp`)
@@ -599,50 +596,55 @@ impl App {
         ui.separator();
         let Some(server) = self.mcp_server.clone() else {
             ui.colored_label(Color32::from_rgb(200, 120, 20), "nyx-mcp was not found next to nyx.");
-            ui.weak("Build it (cd ai; cargo build --release -p nyx-mcp) or point to it:");
+            ui.weak("Build it (cargo build --release -p nyx-mcp) or point to it:");
             if ui.button("Locate nyx-mcp...").clicked() {
                 ui.close();
                 if let Some(p) = rfd::FileDialog::new().set_title("nyx-mcp").pick_file() {
-                    self.mcp_server = Some(connect::plain_path(p));
+                    self.mcp_server = Some(nyx_connect::plain_path(p));
                     self.refresh_connect();
                 }
             }
             return;
         };
-        for (i, client) in Client::ALL.into_iter().enumerate() {
-            let Some(path) = client.config_path() else { continue };
-            let status = self.connect_status.get(i).cloned().unwrap_or(connect::Status::NotConnected);
+        let Ok(env) = Env::detect() else {
+            ui.colored_label(Color32::from_rgb(200, 60, 60), "cannot find the home folder");
+            return;
+        };
+        if self.connect_status.is_empty() {
+            ui.weak("No supported AI app found (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf). Use 'Copy config JSON' below.");
+        }
+        for host in self.connect_status.clone() {
+            let status = host.status.clone();
             ui.horizontal(|ui| {
-                ui.label(RichText::new(client.name()).strong());
+                ui.label(RichText::new(host.name).strong());
                 match &status {
-                    connect::Status::Connected => ui.colored_label(Color32::from_rgb(40, 150, 70), "connected"),
-                    connect::Status::NotConnected => ui.weak("not connected"),
-                    connect::Status::OtherPath(_) => ui.colored_label(Color32::from_rgb(200, 120, 20), "points to another nyx-mcp"),
-                    connect::Status::Unreadable(_) => ui.colored_label(Color32::from_rgb(200, 60, 60), "config unreadable"),
+                    Status::Connected => ui.colored_label(Color32::from_rgb(40, 150, 70), "connected"),
+                    Status::Stale { .. } => ui.colored_label(Color32::from_rgb(200, 120, 20), "points to another nyx-mcp"),
+                    Status::Unreadable { .. } => ui.colored_label(Color32::from_rgb(200, 60, 60), "config unreadable"),
+                    Status::NotConnected | Status::NotInstalled => ui.weak("not connected"),
                 };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let unreadable = matches!(status, connect::Status::Unreadable(_));
-                    let connected = status == connect::Status::Connected;
-                    if connected {
+                    let unreadable = matches!(status, Status::Unreadable { .. });
+                    if status == Status::Connected {
                         if ui.button("Disconnect").clicked() {
-                            self.connect_note = Some(match connect::disconnect(&path) {
-                                Ok(()) => format!("{}: disconnected.", client.name()),
+                            self.connect_note = Some(match nyx_connect::disconnect(&env, host.id) {
+                                Ok(_) => format!("{}: disconnected.", host.name),
                                 Err(e) => e,
                             });
                             self.refresh_connect();
                         }
-                    } else if ui.add_enabled(!unreadable, egui::Button::new(if matches!(status, connect::Status::OtherPath(_)) { "Reconnect" } else { "Connect" })).clicked() {
-                        self.connect_note = Some(match connect::connect(&path, &server) {
-                            Ok(()) => format!("{}: connected. {}", client.name(), client.after_connect()),
+                    } else if ui.add_enabled(!unreadable, egui::Button::new(if matches!(status, Status::Stale { .. }) { "Reconnect" } else { "Connect" })).clicked() {
+                        self.connect_note = Some(match nyx_connect::connect(&env, host.id, &server) {
+                            Ok(_) => format!("{}: connected. {}", host.name, host.after_connect),
                             Err(e) => e,
                         });
                         self.refresh_connect();
                     }
                 });
             });
-            ui.weak(path.display().to_string());
-            if let connect::Status::Unreadable(e) = &status {
-                ui.colored_label(Color32::from_rgb(200, 60, 60), e);
+            ui.weak(host.config.display().to_string());
+            if let Status::Unreadable { why } = &status {
+                ui.colored_label(Color32::from_rgb(200, 60, 60), why);
             }
             ui.add_space(4.0);
         }
@@ -654,12 +656,12 @@ impl App {
         ui.weak(format!("Server: {}", server.display()));
         ui.horizontal(|ui| {
             if ui.button("Copy config JSON").clicked() {
-                ui.ctx().copy_text(connect::snippet(&server));
+                ui.ctx().copy_text(nyx_connect::snippet(&server));
                 self.connect_note = Some("Config JSON copied; paste it into the mcpServers of any MCP client.".into());
             }
             if ui.button("Locate nyx-mcp...").clicked() {
                 if let Some(p) = rfd::FileDialog::new().set_title("nyx-mcp").pick_file() {
-                    self.mcp_server = Some(connect::plain_path(p));
+                    self.mcp_server = Some(nyx_connect::plain_path(p));
                     self.refresh_connect();
                 }
             }

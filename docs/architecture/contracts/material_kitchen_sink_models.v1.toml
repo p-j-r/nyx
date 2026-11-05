@@ -1,0 +1,29 @@
+# Contract exemplar of material file format 1, second file: the remaining dispersion models (Schott, Herzberger, Drude-Lorentz) on
+# three axes, with a table-form source. Invented numbers; read by crates/femcore/tests/material_contract.rs.
+format = 1
+name = "kitchen_sink_models"
+description = "Schott, Herzberger and Drude-Lorentz models on the three axes of a biaxial crystal"
+source = { cite = "Invented for the contract test", url = "https://example.org/models", doi = "10.1000/models", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.5, 2.0]
+source = "Shared optical reference"
+
+[optical.x]
+model = "schott"
+coefficients = [2.27, -0.0100, 0.0109, 0.0002, -0.000003, 0.0000002]
+source = "Axis x reference"
+
+[optical.y]
+model = "herzberger"
+coefficients = [1.45, 0.005, 0.0001, -0.00001, 0.0, 0.0]
+
+[optical.z]
+model = "drude_lorentz"
+frequency_unit = "eV"
+eps_inf = 1.5
+plasma_frequency = 9.0
+damping = 0.05
+drude_weight = 0.8
+oscillators = [[0.1, 3.0, 0.5], [0.4, 6.0, 1.0]]

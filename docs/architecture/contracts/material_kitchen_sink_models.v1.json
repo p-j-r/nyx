@@ -1,0 +1,114 @@
+{
+  "density": null,
+  "description": "Schott, Herzberger and Drude-Lorentz models on the three axes of a biaxial crystal",
+  "elastic": null,
+  "electrical": {
+    "conductivity": null,
+    "permeability": null,
+    "permittivity": null,
+    "source": []
+  },
+  "name": "kitchen_sink_models",
+  "notes": null,
+  "optical": {
+    "axes": {
+      "Biaxial": [
+        {
+          "dispersion": {
+            "Schott": {
+              "coefficients": [
+                2.27,
+                -0.01,
+                0.0109,
+                0.0002,
+                -3e-6,
+                2e-7
+              ]
+            }
+          },
+          "dn_dt": 0.0,
+          "source": [
+            {
+              "cite": "Axis x reference",
+              "doi": null,
+              "url": null,
+              "verified": null
+            }
+          ]
+        },
+        {
+          "dispersion": {
+            "Herzberger": {
+              "coefficients": [
+                1.45,
+                0.005,
+                0.0001,
+                -0.00001,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          "dn_dt": 0.0,
+          "source": []
+        },
+        {
+          "dispersion": {
+            "Oscillators": {
+              "drude": [
+                0.8,
+                75963372440475.53
+              ],
+              "eps_inf": 1.5,
+              "frequency_unit": "eV",
+              "lorentz": [
+                [
+                  0.1,
+                  4557802346428532.0,
+                  759633724404755.2
+                ],
+                [
+                  0.4,
+                  9115604692857064.0,
+                  1519267448809510.5
+                ]
+              ],
+              "plasma": 1.3673407039285594e+16
+            }
+          },
+          "dn_dt": 0.0,
+          "source": []
+        }
+      ]
+    },
+    "range": [
+      0.5,
+      2.0
+    ],
+    "reference_temperature": 293.15,
+    "source": [
+      {
+        "cite": "Shared optical reference",
+        "doi": null,
+        "url": null,
+        "verified": null
+      }
+    ],
+    "unit_m": 1e-6,
+    "wavelength_unit": "um"
+  },
+  "source": [
+    {
+      "cite": "Invented for the contract test",
+      "doi": "10.1000/models",
+      "url": "https://example.org/models",
+      "verified": "2026-11-04"
+    }
+  ],
+  "thermal": {
+    "conductivity": null,
+    "expansion": null,
+    "source": [],
+    "specific_heat": null
+  }
+}

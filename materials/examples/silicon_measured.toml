@@ -1,0 +1,13 @@
+# Example of `extends`: silicon with the optical table replaced by one's own measurement. Everything not listed here
+# (density, stiffness, thermal and electrical data) comes from materials/silicon.toml. Read it with
+# `library.read(text, "silicon_measured")`, or copy it into the library folder.
+# The numbers below are INVENTED for the example; replace them with your measurement.
+format = 1
+extends = "silicon"
+source = "Own ellipsometry measurement, <date>, <sample> (invented example values)"
+
+[optical]
+wavelength_unit = "um"
+range = [1.5, 1.6]
+model = "tabulated"
+data = [[1.50, 3.4799, 0.0], [1.55, 3.4761, 0.0], [1.60, 3.4722, 0.0]]

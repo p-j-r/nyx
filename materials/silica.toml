@@ -1,0 +1,36 @@
+# Fused silica (amorphous SiO2): isotropic. Mechanical and thermal values are those of Corning HPFS 7980.
+format = 1
+name = "silica"
+description = "Fused silica (Corning HPFS 7980 data), 293 K"
+source = { cite = "Compiled from the per-table sources below. Density 2201 kg/m^3: Corning 7980 data sheet as reproduced by Abrisa Technologies (2.201 g/cm^3); Corning HPFS brochure gives 2.20 g/cm^3", verified = "2026-11-04" }
+density = "2201 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 72.7
+nu = 0.16
+source = { cite = "Corning 7980 data sheet (Abrisa Technologies copy): Young's modulus 72.7 GPa, Poisson's ratio 0.16, shear modulus 31.4 GPa; the Corning HPFS brochure (2015) gives 73 GPa and 0.16", url = "https://abrisatechnologies.com/media/Corning-7980.pdf", verified = "2026-11-04" }
+
+[thermal]
+conductivity = 1.38
+conductivity_unit = "W/(m*K)"
+specific_heat = "770 J/(kg*K)"
+expansion = 0.52e-6
+expansion_unit = "1/K"
+source = { cite = "Corning HPFS 7979/7980/8655 brochure (2015): specific heat 0.770 J/(g K), thermal conductivity 1.38 W/(m K), thermal expansion 0.52e-6 1/K (5 to 35 degC)", url = "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf", verified = "2026-11-04" }
+
+[electrical]
+permittivity = 3.75
+source = { cite = "APPROXIMATE low-frequency relative permittivity: the AZoM fused silica data page gives the range 3.6 to 3.9; 3.75 is its midpoint, not a measurement of a particular grade", url = "https://www.azom.com/properties.aspx?ArticleID=1387", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.21, 6.7]
+model = "sellmeier"
+B = [0.6961663, 0.4079426, 0.8974794]
+lambda0 = [0.0684043, 0.1162414, 9.896161]   # resonance wavelengths in um (C = lambda0^2)
+dn_dT = "9.7e-6 1/K"
+source = [
+  { cite = "I. H. Malitson, Interspecimen comparison of the refractive index of fused silica, J. Opt. Soc. Am. 55, 1205-1208 (1965), 0.21 to 3.71 um at 20 degC; validity to 6.7 um from C. Z. Tan, J. Non-Cryst. Solids 223, 158 (1998); as in the refractiveindex.info database (SiO2, Malitson, CC0)", url = "https://refractiveindex.info/?shelf=main&book=SiO2&page=Malitson", doi = "10.1364/JOSA.55.001205", verified = "2026-11-04" },
+  { cite = "dn_dT: 9.7e-6 1/K at 1530 nm (22 degC), Corning HPFS 7979/7980/8655 brochure, Sellmeier table (the coefficient is wavelength dependent: 8.7 to 22 ppm/K between 2.3 um and 185 nm); applied as a constant shift", url = "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf", verified = "2026-11-04" },
+]

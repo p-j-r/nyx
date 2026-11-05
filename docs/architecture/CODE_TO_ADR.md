@@ -94,7 +94,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
 | `crates/femcore/src/problem.rs` | 1, 9, 19 | |
-| `crates/femcore/src/material.rs` | 1 | |
+| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35 | spec, units, elastic, tensor, optics, schema (phase 6) |
+| `materials/*` | 29, 30, 34, 35 | the shipped material library (TOML) |
+| `docs/MATERIALS.md` | 29, 30, 34, 35 | |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/validate.rs` | 9 | |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
@@ -115,6 +117,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
 | `crates/femcore/tests/axisym_closed_form.rs` | 33, 1 | the axisymmetric solid kernel against closed forms (the ems half is in `nyx-ems/tests/axisym.rs`) |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
+| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19 | behaviour and contract tests of the material format |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/stages.rs` | 9 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
@@ -139,14 +142,13 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | features `hdf5-metno`, `phdf5`, `portable-kernels` |
 | `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
-| `crates/app/src/connect.rs` | 15 | duplicate of crates/nyx-connect (R07) |
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |
 | `crates/app/src/*` | 23 | |
 | `crates/app/*` | 23 | |
 | `crates/nyx-mcp/tests/contracts.rs` | 19, 15 | |
 | `crates/nyx-mcp/*` | 15 | moved from `ai/` into the root workspace (ADR 26) |
 | `crates/nyx-session/*` | 15 | dissolved in phase 7 |
-| `crates/nyx-connect/*` | 15 | |
+| `crates/nyx-connect/*` | 15, 28, 19 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27 | shared target directory |
 | `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |

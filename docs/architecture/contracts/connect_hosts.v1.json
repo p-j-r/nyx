@@ -1,0 +1,187 @@
+{
+  "entry_name": "nyx",
+  "server": "/x/nyx-mcp",
+  "config_relative_to": "home",
+  "hosts": {
+    "windows": [
+      {
+        "id": "claude-code",
+        "name": "Claude Code",
+        "config": ".claude.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Start a new Claude Code session to use it.",
+        "entry": {
+          "type": "stdio",
+          "command": "/x/nyx-mcp",
+          "args": [],
+          "env": {}
+        }
+      },
+      {
+        "id": "claude-desktop",
+        "name": "Claude Desktop",
+        "config": "AppData/Roaming/Claude/claude_desktop_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Claude Desktop to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "cursor",
+        "name": "Cursor",
+        "config": ".cursor/mcp.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Cursor to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "vscode",
+        "name": "VS Code",
+        "config": "AppData/Roaming/Code/User/mcp.json",
+        "servers_key": "servers",
+        "after_connect": "Reload the VS Code window to use it.",
+        "entry": {
+          "type": "stdio",
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "windsurf",
+        "name": "Windsurf",
+        "config": ".codeium/windsurf/mcp_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Windsurf to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      }
+    ],
+    "mac": [
+      {
+        "id": "claude-code",
+        "name": "Claude Code",
+        "config": ".claude.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Start a new Claude Code session to use it.",
+        "entry": {
+          "type": "stdio",
+          "command": "/x/nyx-mcp",
+          "args": [],
+          "env": {}
+        }
+      },
+      {
+        "id": "claude-desktop",
+        "name": "Claude Desktop",
+        "config": "Library/Application Support/Claude/claude_desktop_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Claude Desktop to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "cursor",
+        "name": "Cursor",
+        "config": ".cursor/mcp.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Cursor to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "vscode",
+        "name": "VS Code",
+        "config": "Library/Application Support/Code/User/mcp.json",
+        "servers_key": "servers",
+        "after_connect": "Reload the VS Code window to use it.",
+        "entry": {
+          "type": "stdio",
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "windsurf",
+        "name": "Windsurf",
+        "config": ".codeium/windsurf/mcp_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Windsurf to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      }
+    ],
+    "linux": [
+      {
+        "id": "claude-code",
+        "name": "Claude Code",
+        "config": ".claude.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Start a new Claude Code session to use it.",
+        "entry": {
+          "type": "stdio",
+          "command": "/x/nyx-mcp",
+          "args": [],
+          "env": {}
+        }
+      },
+      {
+        "id": "claude-desktop",
+        "name": "Claude Desktop",
+        "config": ".config/Claude/claude_desktop_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Claude Desktop to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "cursor",
+        "name": "Cursor",
+        "config": ".cursor/mcp.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Cursor to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "vscode",
+        "name": "VS Code",
+        "config": ".config/Code/User/mcp.json",
+        "servers_key": "servers",
+        "after_connect": "Reload the VS Code window to use it.",
+        "entry": {
+          "type": "stdio",
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "windsurf",
+        "name": "Windsurf",
+        "config": ".codeium/windsurf/mcp_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Windsurf to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      }
+    ]
+  }
+}

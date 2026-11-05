@@ -1,0 +1,13 @@
+# Silicon nitride (LPCVD Si3N4 film for integrated photonics): optical data only.
+format = 1
+name = "silicon_nitride"
+description = "Silicon nitride film, 340 nm Si3N4 on thermal SiO2 (optical data only)"
+source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.310, 5.504]
+model = "sellmeier"
+B = [3.0249, 40314.0]
+lambda0 = [0.1353406, 1239.842]
+source = { cite = "K. Luke, Y. Okawachi, M. R. E. Lamont, A. L. Gaeta, M. Lipson, Broadband mid-infrared frequency comb generation in a Si3N4 microresonator, Opt. Lett. 40, 4823-4826 (2015): Sellmeier fit of a 340 nm film on 3.1 um thermal SiO2, as in the refractiveindex.info database (Si3N4, Luke, CC0). Film index depends on deposition (stoichiometry): use your own ellipsometry for quantitative work", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Luke", doi = "10.1364/OL.40.004823", verified = "2026-11-04" }

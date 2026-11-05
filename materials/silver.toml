@@ -1,0 +1,22 @@
+# Silver: optical data only (Lorentz-Drude fit of Rakic et al. 1998).
+format = 1
+name = "silver"
+description = "Silver, evaporated film, room temperature (optical data only)"
+source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.2480, 12.398]
+model = "drude_lorentz"
+frequency_unit = "eV"
+plasma_frequency = 9.01
+damping = 0.048
+drude_weight = 0.845
+oscillators = [
+  [0.065, 0.816, 3.886],
+  [0.124, 4.481, 0.452],
+  [0.011, 8.185, 0.065],
+  [0.840, 9.083, 0.916],
+  [5.646, 20.29, 2.419],
+]
+source = { cite = "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them", url = "https://refractiveindex.info/?shelf=main&book=Ag&page=Rakic-LD", doi = "10.1364/AO.37.005271", verified = "2026-11-04" }

@@ -8,6 +8,7 @@ rust-version.workspace = true
 femcore = { path = "../femcore" }
 nyx-engine = { path = "../nyx-engine" }
 geom = { path = "../geom" }
+nyx-connect = { path = "../nyx-connect" }
 nyx-store = { path = "../nyx-store" }
 rayon = "1"
 eframe = "0.37"

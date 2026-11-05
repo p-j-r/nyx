@@ -1,0 +1,103 @@
+{
+  "list": {
+    "schema": "nyx-connect.list",
+    "version": 1,
+    "server": "/x/nyx-mcp",
+    "server_found": false,
+    "hosts": [
+      {
+        "id": "claude-code",
+        "name": "Claude Code",
+        "config": "/h/claude-code.json",
+        "after_connect": "Restart it to use it.",
+        "status": {
+          "state": "connected"
+        }
+      },
+      {
+        "id": "claude-desktop",
+        "name": "Claude Desktop",
+        "config": "/h/claude-desktop.json",
+        "after_connect": "Restart it to use it.",
+        "status": {
+          "state": "stale",
+          "found": "/old/nyx-mcp"
+        }
+      },
+      {
+        "id": "cursor",
+        "name": "Cursor",
+        "config": "/h/cursor.json",
+        "after_connect": "Restart it to use it.",
+        "status": {
+          "state": "not_connected"
+        }
+      },
+      {
+        "id": "vscode",
+        "name": "VS Code",
+        "config": "/h/vscode.json",
+        "after_connect": "Restart it to use it.",
+        "status": {
+          "state": "unreadable",
+          "why": "/h/mcp.json is not plain JSON (expected value at line 2); it may contain comments. Not changed: add the entry by hand (see the snippet)"
+        }
+      },
+      {
+        "id": "windsurf",
+        "name": "Windsurf",
+        "config": "/h/windsurf.json",
+        "after_connect": "Restart it to use it.",
+        "status": {
+          "state": "not_installed"
+        }
+      }
+    ]
+  },
+  "change": {
+    "schema": "nyx-connect.change",
+    "version": 1,
+    "action": "connect",
+    "results": [
+      {
+        "host": "cursor",
+        "ok": true,
+        "changed": true,
+        "config": "/h/.cursor/mcp.json",
+        "backup": "/h/.cursor/mcp.json.nyx-backup"
+      },
+      {
+        "host": "claude-code",
+        "ok": true,
+        "changed": false,
+        "config": "/h/.cursor/mcp.json",
+        "backup": null
+      },
+      {
+        "host": "vscode",
+        "ok": false,
+        "error": "no host 'vscode2'; valid: claude-code, claude-desktop, cursor, vscode, windsurf"
+      }
+    ]
+  },
+  "test_ok": {
+    "schema": "nyx-connect.test",
+    "version": 1,
+    "ok": true,
+    "server": {
+      "name": "nyx-mcp",
+      "version": "0.1.0",
+      "protocol": "2025-06-18",
+      "tools": [
+        "geometry_build",
+        "solve"
+      ]
+    }
+  },
+  "test_failed": {
+    "schema": "nyx-connect.test",
+    "version": 1,
+    "ok": false,
+    "error": "no answer to initialize within 10 s"
+  }
+}

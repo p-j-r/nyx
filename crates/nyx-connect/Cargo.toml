@@ -3,7 +3,7 @@ name = "nyx-connect"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "One-click connection of nyx-mcp to AI hosts (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf): detect, write the config entry with a backup, remove, test"
+description = "One-click connection of nyx-mcp to AI hosts (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf): detect, write the config entry with a backup, remove, test. Used by the app's Connect menu, the nyx-connect command and (later) the engine"
 
 [lib]
 name = "nyx_connect"
@@ -13,5 +13,11 @@ path = "src/lib.rs"
 name = "nyx-connect"
 path = "src/main.rs"
 
+# a stand-in MCP server for the tests of the handshake probe (an example, so `cargo test` builds it; never shipped)
+[[example]]
+name = "fake_mcp"
+path = "examples/fake_mcp.rs"
+
 [dependencies]
+# preserve_order is a requirement of this crate, not an accident: the user's own config files are rewritten with their keys in the order they had
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }

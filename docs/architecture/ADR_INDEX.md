@@ -31,9 +31,14 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 25 | [A physics is a crate behind the `Physics` trait](adr/0025-physics-trait-registry-and-problem-envelope.md) | `nyx-physics`, `nyx-dfs/sms/ems`, `nyx-engine` |
 | 26 | [One workspace and a layering test](adr/0026-one-workspace-and-a-layering-test.md) | `Cargo.toml`, layering |
 | 27 | [`nyx2`: second repository, a jj workspace per session](adr/0027-nyx2-repository-and-jj-workspace-per-working-session.md) | process |
+| 28 | [`nyx-connect` is one crate with versioned reports](adr/0028-nyx-connect-is-one-crate-with-a-versioned-report.md) | `nyx-connect`, app Connect menu |
+| 29 | [Materials are TOML files with explicit units and a checked stiffness](adr/0029-material-files-are-toml-with-explicit-units.md) | `material`, `materials/` |
+| 30 | [Optical properties are dispersion models evaluated at the study wavelength](adr/0030-optical-dispersion-models-evaluated-at-the-study-wavelength.md) | `material::optics` |
 | 31 | [femcore holds meshes, meshing and adaptation in three module trees](adr/0031-mesh-meshing-adapt-module-layout.md) | `femcore::{mesh, meshing, adapt}` |
 | 32 | [One native mesh; `SimplexMesh` as the solver view](adr/0032-one-native-mesh-simplexmesh-as-a-view.md) | `femcore::mesh` (proposed) |
 | 33 | [One linear algebra: the ported library behind one driver](adr/0033-one-linear-algebra-driver-facade.md) | `linalg::driver`, phase 3 |
+| 34 | [A material may extend another and replaces whole tables](adr/0034-a-material-may-extend-another-and-replaces-whole-tables.md) | `material::spec` (`extends`) |
+| 35 | [Provenance, oscillator models and the checked library](adr/0035-material-provenance-oscillator-models-and-the-checked-library.md) | `material::{source,optics}`, `materials/` |
 | 37 | [The engine core is built before the kernels, with two seams](adr/0037-engine-core-before-the-kernels.md) | `nyx-engine` |
 | 38 | [Geometry operations are described once](adr/0038-geometry-operations-are-described-once.md) | `nyx-engine::geomdesc` |
 | 39 | [The store takes spec text and a card function](adr/0039-the-store-takes-spec-text-and-a-card-function.md) | `nyx-store`, `nyx-engine::store_link` |
