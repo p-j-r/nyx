@@ -193,3 +193,10 @@ pub fn names(list: &FeatureList) -> Result<Value, Error> {
         "bounds": { "min": b.lo, "max": b.hi },
     }))
 }
+
+/// Replaces the whole feature list (the window edits it as a whole); it must be a valid list of the same dimension class (2 or 3).
+pub fn set_all(list: &mut FeatureList, new: FeatureList) -> Result<(), Error> {
+    new.validate().map_err(bad)?;
+    *list = new;
+    Ok(())
+}

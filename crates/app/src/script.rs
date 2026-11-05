@@ -1,14 +1,14 @@
 //! Scripted runs for testing and screenshots: `nyx --script "example 1; compute; shot out.png; quit"`.
 //!
-//! Commands (separated by `;`): `example N`, `new es|heat|solid|emw [3d]`, `open PATH`, `physics es|heat|solid|emw`,
+//! Commands (separated by `;`): `example N`, `new es|heat|solid|emw [3d]`, `open PATH`, `physics es|heat|solid|emw|dfs|sms|ems`,
 //! `tab geometry|materials|physics|study|results|analysis`, `compute`, `field NAME`,
 //! `sol N`, `cancel_after SECONDS` (cancels the running solve then), `rotate DYAW DPITCH`, `pan DX DY`, `zoom F`, `view mesh|result`, `pick N`, `study eigen|static|transient|stationary`,
-//! `output serial|parallel FILE`, `save FILE.xml|json`, `shot FILE`, `wait`, `quit`.
+//! `save FILE.nyx.json`, `shot FILE`, `wait`, `quit`.
 
 use crate::app::App;
 use crate::state::*;
 use eframe::egui;
-use femcore::problem::*;
+use serde_json::json;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
@@ -41,23 +41,15 @@ impl App {
             }
             "new" => {
                 let words: Vec<&str> = arg.split_whitespace().collect();
-                let physics = match words.first().copied().unwrap_or("") {
-                    "es" => Physics::Electrostatics,
-                    "heat" => Physics::Heat,
-                    "solid" => Physics::Solid,
-                    _ => Physics::Emw,
-                };
+                let physics = short_code(words.first().copied().unwrap_or(""));
                 let three_d = words.contains(&"3d");
-                self.new_project(crate::examples::blank(physics, three_d), physics.name());
+                let what = self.physics_name(physics);
+                self.new_project(physics, three_d, &what);
             }
             "open" => self.open_path(arg.into()),
             "physics" => {
-                self.proj.active = match arg.as_str() {
-                    "es" => Physics::Electrostatics,
-                    "heat" => Physics::Heat,
-                    "solid" => Physics::Solid,
-                    _ => Physics::Emw,
-                }
+                self.cmd("set_active", json!({ "physics": short_code(&arg) }));
+                self.rules_dirty = true;
             }
             "tab" => {
                 self.tab = match arg.as_str() {
@@ -73,9 +65,9 @@ impl App {
             "compute" => self.shell_compute(),
             // shell layout: `wf example N`, `page dashboard|settings|N`, `section concept|build|analysis`, `sheet new|palette|versions|share`
             "wf" => {
-                if let Some(i) = arg.strip_prefix("example ").and_then(|n| n.trim().parse::<usize>().ok()).filter(|i| *i < crate::examples::NAMES.len()) {
-                    let t = crate::examples::NAMES[i].split('(').next().unwrap_or("Example").trim().to_string();
-                    self.new_draft(&t, crate::examples::by_index(i));
+                if let Some(e) = arg.strip_prefix("example ").and_then(|n| n.trim().parse::<usize>().ok()).and_then(|i| crate::examples::list().into_iter().nth(i)) {
+                    let t = e.title.split('(').next().unwrap_or("Example").trim().to_string();
+                    self.new_draft(&t, crate::shell::Start::Example(e.path));
                 }
             }
             "page" => match arg.as_str() {
@@ -124,21 +116,14 @@ impl App {
             "sol" => {
                 if let (Some(i), Ok(n)) = (self.current, arg.parse::<usize>()) {
                     let rv = &mut self.results[i];
-                    rv.sol = n.min(rv.result.solutions.len() - 1);
+                    rv.sol = n.min(rv.sols.len() - 1);
                 }
             }
-            "output" => {
-                let phys = self.proj.active;
-                let sp = self.proj.spec_mut(phys);
-                sp.output.mode = if arg.starts_with("parallel") { femcore::problem::OutputMode::Hdf5Parallel } else { femcore::problem::OutputMode::Hdf5Serial };
-                sp.output.path = arg.trim_start_matches("parallel ").trim_start_matches("serial ").to_string();
-            }
             "save" => {
-                self.proj.geometry = self.geom_edit.clone();
-                let text = if arg.ends_with(".xml") { self.proj.to_xml() } else { serde_json::to_string_pretty(&self.proj).map_err(|e| e.to_string()) };
-                match text.and_then(|t| std::fs::write(&arg, t).map_err(|e| e.to_string())) {
-                    Ok(()) => self.status = format!("Saved {arg}"),
-                    Err(e) => self.set_error(e),
+                if self.push_edits() {
+                    if self.cmd("project_save", json!({ "path": arg })).is_some() {
+                        self.status = format!("Saved {arg}");
+                    }
                 }
             }
             "view" => self.show_results = arg == "result",
@@ -163,15 +148,19 @@ impl App {
             }
             "pick" => self.picking = arg.parse().ok(),
             "study" => {
-                let phys = self.proj.active;
-                let s = self.proj.spec_mut(phys);
-                s.study = match arg.as_str() {
-                    "eigen" => Study::Eigenfrequency { n_modes: 6, f_search: 0.0 },
-                    "static" => Study::Static,
-                    "stationary" => Study::Stationary,
-                    "transient" => Study::Transient { t_end: 20000.0, n_out: 20, t0: "293.15".into() },
-                    _ => s.study.clone(),
-                };
+                // eigen | static | transient | stationary: the study of that name in the active physics, with its defaults
+                if let Some(active) = self.active() {
+                    let kinds: Vec<String> = self.engine.registry().get(&active).map(|p| p.studies().iter().map(|s| s.kind.clone()).collect()).unwrap_or_default();
+                    let want = match arg.as_str() {
+                        "eigen" => "eigenfrequency",
+                        "transient" => "heat_transient",
+                        "stationary" => "heat_stationary",
+                        other => other,
+                    };
+                    if let Some(k) = kinds.iter().find(|k| k.as_str() == want || k.starts_with(want)).cloned() {
+                        self.cmd("set_study", json!({ "physics": active, "kind": k, "params": if k == "eigenfrequency" { json!({ "n_modes": 6, "f_search": 0.0 }) } else if k == "heat_transient" { json!({ "t_end": 20000.0, "n_out": 20, "t0": "293.15" }) } else { json!(null) } }));
+                    }
+                }
             }
             "shot" => {
                 let path = arg.clone();
@@ -196,5 +185,14 @@ impl App {
             "quit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             _ => {}
         }
+    }
+}
+
+/// The code of a physics from the short names the script has always used (`es`, `heat`, `solid`, `emw`) or from its own code.
+fn short_code(s: &str) -> &'static str {
+    match s {
+        "es" | "heat" | "dfs" => "dfs",
+        "solid" | "sms" => "sms",
+        _ => "ems",
     }
 }

@@ -214,3 +214,33 @@ impl Mesher for FemcoreMesher {
         Ok(MeshedModel::new(mesh, eval, labels, false)?.with_report(report))
     }
 }
+
+impl MeshedModel {
+    /// Selectors, simplest first, that pick exactly the boundaries with these numbers; empty when no selector does. What the window offers
+    /// after a click on the mesh.
+    pub fn suggest(&self, labels: &[i32]) -> Vec<String> {
+        if let Some((a, b)) = self.ends {
+            if labels == [a] {
+                return vec!["ymin".into()];
+            }
+            if labels == [b] {
+                return vec!["ymax".into()];
+            }
+        }
+        let ids: Vec<u32> =
+            self.labels.boundaries.iter().filter(|b| labels.contains(&b.id)).flat_map(|b| b.entities.iter().copied()).collect();
+        if ids.is_empty() {
+            return vec![];
+        }
+        let set = geom::select::EntitySet::new(EntityKind::Edges, ids);
+        let mut out: Vec<String> = self.eval.suggest(&set).iter().map(|s| s.to_string()).collect();
+        out.dedup();
+        out.truncate(6);
+        out
+    }
+
+    /// The names of the boundaries with their numbers (a boundary name may stand for several numbers).
+    pub fn boundary_names(&self) -> Vec<(i32, String)> {
+        self.labels.boundaries.iter().map(|b| (b.id, b.name.clone())).collect()
+    }
+}

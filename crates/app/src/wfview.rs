@@ -11,9 +11,8 @@ use crate::shell::{OpenWf, Page, Part, Sheet, Sub};
 use crate::state::Tab;
 use crate::theme;
 use eframe::egui::{self, Color32, RichText, Sense, Vec2};
-use femcore::problem::Physics;
-use nyx_store::runs::{Filter, RunPatch, RunRecord, RunStatus};
-use nyx_store::util::{ago, now_secs, parse_iso};
+use nyx_engine::facade::store::runs::{Filter, RunPatch, RunRecord, RunStatus};
+use nyx_engine::facade::store::util::{ago, now_secs, parse_iso};
 use std::time::Instant;
 
 pub enum Act {
@@ -103,7 +102,7 @@ impl App {
         if self.shell.open.get(id).is_some_and(|w| w.dir.is_some()) {
             return true;
         }
-        let Ok(xml) = self.spec_xml() else { return false };
+        let Ok(xml) = self.spec_json() else { return false };
         self.persist_draft(id, &xml).is_ok()
     }
 
@@ -127,7 +126,7 @@ impl App {
                     return;
                 }
                 self.flush();
-                let xml = crate::examples::blank(self.proj.active, false).to_xml();
+                let xml = crate::examples::blank_json(&self.active().unwrap_or_else(|| "ems".into()), false);
                 let n = self.shell.open.get(id).and_then(|w| w.dir.as_ref()).map(|d| d.wf.experiments.len() + 1).unwrap_or(2);
                 if let Some(Ok(xml)) = Some(xml) {
                     let res = self.shell.open.get_mut(id).and_then(|w| w.dir.as_mut()).map(|d| d.add_experiment(&format!("Experiment {n}"), &xml, None));
@@ -222,7 +221,7 @@ impl App {
                     return;
                 }
                 let done = matches!(a, Act::Done);
-                let r = self.shell.open.get_mut(id).and_then(|w| w.dir.as_mut()).map(|d| if done { d.set_status(if d.wf.status == nyx_store::Status::Done { nyx_store::Status::Active } else { nyx_store::Status::Done }) } else { d.set_pinned(!d.wf.pinned) });
+                let r = self.shell.open.get_mut(id).and_then(|w| w.dir.as_mut()).map(|d| if done { d.set_status(if d.wf.status == nyx_engine::facade::store::Status::Done { nyx_engine::facade::store::Status::Active } else { nyx_engine::facade::store::Status::Done }) } else { d.set_pinned(!d.wf.pinned) });
                 if let Some(Err(e)) = r {
                     self.set_error(e);
                 }
@@ -251,8 +250,8 @@ impl App {
         let Some(w) = self.shell.open.get(id) else { return };
         let f = Filter::parse(&w.filter_text).unwrap_or_default();
         let rows: Vec<&RunRecord> = w.runs.iter().filter(|r| f.matches(r) && (w.show_failed || r.status == RunStatus::Ok)).collect();
-        let csv = nyx_store::runs::to_csv(&rows);
-        let name = format!("{}-runs.csv", nyx_store::util::slug(&w.title()));
+        let csv = nyx_engine::facade::store::runs::to_csv(&rows);
+        let name = format!("{}-runs.csv", nyx_engine::facade::store::util::slug(&w.title()));
         let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name(name).save_file() else { return };
         match std::fs::write(&path, csv) {
             Ok(()) => self.status = format!("Exported {} runs to {}", rows.len(), path.display()),
@@ -307,7 +306,7 @@ impl App {
                         self.shell.version_sel = None;
                     }
                     ui.menu_button("More", |ui| {
-                        let (pinned, done) = w.dir.as_ref().map(|d| (d.wf.pinned, d.wf.status == nyx_store::Status::Done)).unwrap_or((false, false));
+                        let (pinned, done) = w.dir.as_ref().map(|d| (d.wf.pinned, d.wf.status == nyx_engine::facade::store::Status::Done)).unwrap_or((false, false));
                         if ui.button(if pinned { "Unpin from the dashboard" } else { "Pin to the dashboard" }).clicked() {
                             acts.push(Act::Pin);
                             ui.close();
@@ -380,7 +379,7 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 150.0).show(ui, |ui| {
                 let exps: Vec<(String, String, Option<String>, usize, String, Vec<(String, String)>)> = match &w.dir {
                     Some(d) => d.wf.experiments.iter().map(|e| (e.id.clone(), e.title.clone(), e.parent.clone(), e.runs.count, format!("{} · {}D", physics_label(&e.card.physics), e.card.dim), e.links.iter().map(|l| (l.to.clone(), l.label.clone())).collect())).collect(),
-                    None => vec![("e1".into(), "Experiment 1".into(), None, 0, format!("{} · {}D", physics_label(&format!("{:?}", self.proj.active)), self.doc.mesh.as_ref().map(|m| m.dim).unwrap_or(2)), vec![])],
+                    None => vec![("e1".into(), "Experiment 1".into(), None, 0, format!("{} · {}D", physics_label(&self.active().unwrap_or_default()), self.doc.mesh.as_ref().map(|m| m.dim).unwrap_or(2)), vec![])],
                 };
                 for (eid, title, parent, runs, what, links) in exps {
                     let on = eid == w.exp;
@@ -517,9 +516,9 @@ impl App {
     }
 
     fn card_line(&mut self, w: &mut OpenWf) -> String {
-        let hash = nyx_store::util::hash_bytes(self.spec_xml().unwrap_or_default().as_bytes());
+        let hash = nyx_engine::facade::store::util::hash_bytes(self.spec_json().unwrap_or_default().as_bytes());
         if w.card_for != hash {
-            w.card_summary = self.spec_xml().ok().and_then(|x| nyx_store::card::from_xml(&x).ok()).map(|c| format!("{}  ·  {}", c.summary, c.materials.join("  ·  "))).unwrap_or_default();
+            w.card_summary = self.spec_json().ok().and_then(|x| nyx_engine::facade::store::card::from_xml(&x).ok()).map(|c| format!("{}  ·  {}", c.summary, c.materials.join("  ·  "))).unwrap_or_default();
             w.card_for = hash;
         }
         w.card_summary.clone()
@@ -531,9 +530,12 @@ impl App {
         egui::Panel::right("wf_concept_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.add_enabled_ui(!locked, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    for p in Physics::ALL {
-                        if kit::pill(ui, self.proj.active == p, short_physics(p)).clicked() {
-                            self.proj.active = p;
+                    let active = self.active();
+                    let codes: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
+                    for p in codes {
+                        if kit::pill(ui, active.as_deref() == Some(p.as_str()), short_physics(&p)).clicked() {
+                            self.cmd("set_active", serde_json::json!({ "physics": p }));
+                            self.rules_dirty = true;
                             self.picking = None;
                         }
                     }
@@ -1102,12 +1104,12 @@ impl App {
     }
 }
 
-fn short_physics(p: Physics) -> &'static str {
+fn short_physics(p: &str) -> String {
     match p {
-        Physics::Electrostatics => "Electro",
-        Physics::Heat => "Heat",
-        Physics::Solid => "Solid",
-        Physics::Emw => "EM waves",
+        "dfs" => "Diffusion".into(),
+        "sms" => "Solid".into(),
+        "ems" => "EM waves".into(),
+        other => other.to_string(),
     }
 }
 

@@ -1,91 +1,55 @@
 //! Headless runs without a window, for workstations and clusters:
 //!
 //! ```text
-//! nyx --batch model.nyx.xml [--physics es|heat|solid|emw] [--output serial|parallel FILE.h5]
-//! mpiexec -n 16 nyx --batch model.nyx.xml --output parallel results.h5     (build with --features phdf5)
+//! nyx --batch model.nyx.json [--physics ems,sms]
 //! ```
 //!
-//! The project (geometry or model file, materials, boundary conditions, study) is read, meshed, solved
-//! with the same code as the window, and the results go to the file chosen in the project or on the
-//! command line. In a parallel run every process solves the whole problem and writes its own block
-//! of rows of the results file (the solvers themselves are not distributed).
+//! The project is read, meshed and solved by the engine, the same code as the window and the MCP server, and the summary and the stage log
+//! of every solved physics are printed. Without `--physics` the active physics is solved (with those it takes fields from).
 
-use crate::state::*;
-use femcore::problem::*;
+use nyx_engine::facade::physics::Scalar;
+use nyx_engine::Engine;
+use serde_json::json;
 
 pub fn run(args: &[String]) -> Result<(), String> {
     let mut path = None;
-    let mut physics = None;
-    let mut output: Option<(OutputMode, String)> = None;
+    let mut physics: Option<Vec<String>> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--physics" => {
                 i += 1;
-                physics = Some(match args.get(i).map(|s| s.as_str()) {
-                    Some("es") => Physics::Electrostatics,
-                    Some("heat") => Physics::Heat,
-                    Some("solid") => Physics::Solid,
-                    Some("emw") => Physics::Emw,
-                    other => return Err(format!("--physics needs es, heat, solid or emw, got {other:?}")),
-                });
-            }
-            "--output" => {
-                let mode = match args.get(i + 1).map(|s| s.as_str()) {
-                    Some("serial") => OutputMode::Hdf5Serial,
-                    Some("parallel") => OutputMode::Hdf5Parallel,
-                    other => return Err(format!("--output needs serial or parallel and a file, got {other:?}")),
-                };
-                let file = args.get(i + 2).ok_or("--output needs a file name after the mode")?.clone();
-                output = Some((mode, file));
-                i += 2;
+                let v = args.get(i).ok_or("--physics needs the code of a physics (dfs, sms, ems), or several separated by commas")?;
+                physics = Some(v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
             }
             a if a.starts_with("--") => return Err(format!("unknown option {a}")),
             a => path = Some(a.to_string()),
         }
         i += 1;
     }
-    let path = path.ok_or("usage: nyx --batch PROJECT.nyx.xml [--physics es|heat|solid|emw] [--output serial|parallel FILE.h5]")?;
-    let proj = Project::load(std::path::Path::new(&path))?;
-    let phys = physics.unwrap_or(proj.active);
-    let mut spec = proj.spec(phys).clone();
-    if let Some((m, f)) = output {
-        spec.output.mode = m;
-        spec.output.path = f;
-    }
-    #[cfg(feature = "hdf5")]
-    let (rank, size) = match spec.output.mode {
-        OutputMode::Hdf5Parallel => femcore::h5io::start_runtime(femcore::h5io::H5Mode::Parallel)?,
-        _ => (0, 1),
-    };
-    #[cfg(not(feature = "hdf5"))]
-    let (rank, size) = (0usize, 1usize);
-    let say = |s: String| {
-        if rank == 0 {
-            println!("{s}");
+    let path = path.ok_or("usage: nyx --batch PROJECT.nyx.json [--physics dfs|sms|ems[,...]]")?;
+    let mut engine = Engine::new();
+    engine.call("project_open", &json!({ "path": path })).map_err(|e| e.to_string())?;
+    let mesh = engine.mesh_now().map_err(|e| e.to_string())?;
+    println!("{} cells, {} points", mesh["mesh"]["cells"], engine.model().map(|m| m.mesh().n_points()).unwrap_or(0));
+    engine.solve_now(physics).map_err(|e| e.to_string())?;
+    let mut ids: Vec<String> = engine.project().physics.iter().map(|s| s.physics.clone()).collect();
+    ids.retain(|id| engine.result(id).is_some());
+    for id in ids {
+        let (result, _) = engine.result(&id).expect("listed");
+        println!("{id}: solved in {:.2} s, {} dofs, {} solution(s)", result.seconds, result.dofs, result.solutions.len());
+        for (n, v) in &result.scalars {
+            match v {
+                Scalar::Num(x) => println!("  {n} = {x}"),
+                Scalar::Text(t) => println!("  {n} = {t}"),
+            }
         }
-    };
-    let mesh = std::sync::Arc::new(proj.geometry.build_for(&spec)?);
-    say(format!("{}: {} cells, {} points, {} process(es)", phys.name(), mesh.n_cells(), mesh.n_points(), size));
-    let mut state = SolveState::default();
-    let result = nyx_engine::legacy::solve(&mesh, &spec, &mut state)?;
-    say(format!("solved in {:.2} s, {} dofs, {} solution(s)", result.seconds, result.dofs, result.solutions.len()));
-    for (n, v) in &result.scalars {
-        match v {
-            Scalar::Num(x) => say(format!("  {n} = {x}")),
-            Scalar::Text(t) => say(format!("  {n} = {t}")),
+        if !result.log.is_empty() {
+            println!("what the solver did:");
+            for l in &result.log {
+                println!("  {l}");
+            }
         }
-    }
-    if !result.log.is_empty() {
-        say("what the solver did:".into());
-        for l in &result.log {
-            say(format!("  {l}"));
-        }
-    }
-    match crate::worker::write_output(&mesh, &spec, &result) {
-        Some(Ok(m)) => say(m),
-        Some(Err(e)) => return Err(format!("results file: {e}")),
-        None => say("no results file requested (use --output or set it in the project)".into()),
     }
     Ok(())
 }

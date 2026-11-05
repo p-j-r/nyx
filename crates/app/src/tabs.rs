@@ -1,11 +1,17 @@
-//! Inspector tabs (geometry, materials, physics, study, results) and the results panel.
+//! Inspector tabs (geometry, materials, physics, study, results, analysis) and the results panel. The Materials, Physics and Study tabs are
+//! drawn from the descriptors of the physics (`forms`), so they are the same for every physics; every change is handed to the engine as a
+//! command (`set_problem`, `set_mesh`, `add_condition`, ...).
 
 use crate::app::App;
 use crate::colormap::Colormap;
+use crate::forms;
 use crate::state::*;
 use eframe::egui::{self, Color32, DragValue, RichText, Ui};
-use femcore::material::{self, Anisotropy, Stiffness, Tensor};
-use femcore::problem::*;
+use nyx_engine::facade::geom::model::{FeatureList, Model};
+use nyx_engine::facade::physics::{Applies, MaterialAssign, ProblemSpec};
+use nyx_engine::SweepLayer;
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 // ------------------------------------------------------------------ helpers
 
@@ -27,214 +33,21 @@ pub fn num(ui: &mut Ui, v: &mut f64) -> egui::Response {
     ui.add(DragValue::new(v).speed(speed).custom_formatter(|n, _| fmt_num(n)).custom_parser(|s| s.trim().replace(',', ".").parse::<f64>().ok()))
 }
 
-fn labels_text(l: &[i32]) -> String {
-    l.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")
-}
-
-fn parse_labels(s: &str) -> Option<Vec<i32>> {
-    let mut out = vec![];
-    for part in s.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).filter(|p| !p.is_empty()) {
-        if let Some((a, b)) = part.split_once('-') {
-            let (a, b) = (a.parse::<i32>().ok()?, b.parse::<i32>().ok()?);
-            out.extend(a..=b);
-        } else {
-            out.push(part.parse().ok()?);
-        }
-    }
-    out.sort();
-    out.dedup();
-    Some(out)
-}
-
-struct Material {
-    name: &'static str,
-    props: &'static [(&'static str, f64)],
-}
-
-const MATERIALS: &[Material] = &[
-    Material { name: "Vacuum / air", props: &[("eps_r", 1.0), ("mu_r", 1.0), ("k", 0.026), ("rho", 1.2), ("Cp", 1005.0)] },
-    Material { name: "Silicon", props: &[("eps_r", 11.7), ("mu_r", 1.0), ("E", 170e9), ("nu", 0.28), ("rho", 2329.0), ("k", 130.0), ("Cp", 700.0), ("alpha", 2.6e-6)] },
-    Material { name: "Silicon dioxide (fused silica)", props: &[("eps_r", 3.75), ("mu_r", 1.0), ("E", 73.1e9), ("nu", 0.17), ("rho", 2203.0), ("k", 1.38), ("Cp", 703.0), ("alpha", 0.55e-6)] },
-    Material { name: "Silicon nitride", props: &[("eps_r", 7.5), ("mu_r", 1.0), ("E", 250e9), ("nu", 0.23), ("rho", 3100.0), ("k", 20.0), ("Cp", 700.0), ("alpha", 2.3e-6)] },
-    Material { name: "Sapphire (isotropic approximation)", props: &[("eps_r", 9.4), ("mu_r", 1.0), ("E", 345e9), ("nu", 0.28), ("rho", 3980.0), ("k", 35.0), ("Cp", 760.0), ("alpha", 5.3e-6)] },
-    Material { name: "Aluminium", props: &[("E", 70e9), ("nu", 0.33), ("rho", 2700.0), ("k", 238.0), ("Cp", 900.0), ("alpha", 23e-6)] },
-    Material { name: "Copper", props: &[("E", 110e9), ("nu", 0.35), ("rho", 8960.0), ("k", 400.0), ("Cp", 385.0), ("alpha", 17e-6)] },
-    Material { name: "Structural steel", props: &[("E", 200e9), ("nu", 0.3), ("rho", 7850.0), ("k", 44.5), ("Cp", 475.0), ("alpha", 12.3e-6)] },
-    Material { name: "Water", props: &[("eps_r", 80.0), ("mu_r", 1.0), ("rho", 997.0), ("k", 0.6), ("Cp", 4181.0)] },
-    Material { name: "FR-4", props: &[("eps_r", 4.4), ("mu_r", 1.0), ("E", 22e9), ("nu", 0.15), ("rho", 1850.0), ("k", 0.3), ("Cp", 1100.0), ("alpha", 14e-6)] },
-];
-
-/// (key, label, unit, hint)
-fn props_for(p: Physics) -> &'static [(&'static str, &'static str, &'static str)] {
-    match p {
-        Physics::Electrostatics => &[("eps_r", "relative permittivity ε_r", ""), ("rho_v", "space charge density ρ_v", "C/m³")],
-        Physics::Heat => &[("k", "thermal conductivity k", "W/(m·K)"), ("rho", "density ρ", "kg/m³"), ("Cp", "heat capacity C_p", "J/(kg·K)"), ("Q", "heat source Q", "W/m³")],
-        Physics::Solid => &[("E", "Young's modulus E", "Pa"), ("nu", "Poisson's ratio ν", ""), ("rho", "density ρ", "kg/m³"), ("alpha", "thermal expansion α", "1/K")],
-        Physics::Emw => &[("eps_r", "relative permittivity ε_r", ""), ("mu_r", "relative permeability μ_r", "")],
-    }
-}
-
-fn default_prop(key: &str) -> f64 {
-    match key {
-        "eps_r" | "mu_r" => 1.0,
-        "rho_v" | "Q" | "alpha" => 0.0,
-        "nu" => 0.3,
-        "E" => 200e9,
-        "k" => 1.0,
-        "rho" => 1000.0,
-        "Cp" => 500.0,
-        _ => 0.0,
-    }
-}
-
-struct Crystal {
-    name: &'static str,
-    make: fn() -> (Anisotropy, f64),
-}
-
-const CRYSTALS: &[Crystal] = &[
-    Crystal {
-        name: "Sapphire (anisotropic, c axis = z)",
-        make: || {
-            let (st, eps, k, alpha, rho) = material::sapphire();
-            (Anisotropy { stiffness: Some(st), conductivity: Some(k), permittivity: Some(eps), expansion: Some(alpha), euler_deg: [0.0; 3] }, rho)
-        },
-    },
-    Crystal {
-        name: "Silicon (cubic, [100] along x, y, z)",
-        make: || {
-            (
-                Anisotropy {
-                    stiffness: Some(material::silicon()),
-                    conductivity: Some(Tensor::Diagonal { x: 130.0, y: 130.0, z: 130.0 }),
-                    permittivity: Some(Tensor::Diagonal { x: 11.7, y: 11.7, z: 11.7 }),
-                    expansion: Some(Tensor::Diagonal { x: 2.6e-6, y: 2.6e-6, z: 2.6e-6 }),
-                    euler_deg: [0.0; 3],
-                },
-                2329.0,
-            )
-        },
-    },
-    Crystal {
-        name: "GaAs (cubic)",
-        make: || {
-            (
-                Anisotropy {
-                    stiffness: Some(Stiffness::Cubic { c11: 118.8e9, c12: 53.8e9, c44: 59.4e9 }),
-                    conductivity: Some(Tensor::Diagonal { x: 55.0, y: 55.0, z: 55.0 }),
-                    permittivity: Some(Tensor::Diagonal { x: 12.9, y: 12.9, z: 12.9 }),
-                    expansion: Some(Tensor::Diagonal { x: 5.7e-6, y: 5.7e-6, z: 5.7e-6 }),
-                    euler_deg: [0.0; 3],
-                },
-                5316.0,
-            )
-        },
-    },
-];
-
-fn tensor_combo(ui: &mut Ui, id: &str, label: &str, unit: &str, t: &mut Option<Tensor>, scalar: f64) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.label(label);
-        let cur = t.as_ref().map(|x| x.name()).unwrap_or("Isotropic");
-        egui::ComboBox::from_id_salt(id).selected_text(cur).show_ui(ui, |ui| {
-            if ui.selectable_label(t.is_none(), "Isotropic (use the value above)").clicked() && t.is_some() {
-                *t = None;
-                changed = true;
-            }
-            for (name, make) in [
-                ("Uniaxial", Tensor::Uniaxial { perp: scalar, par: scalar }),
-                ("Diagonal", Tensor::Diagonal { x: scalar, y: scalar, z: scalar }),
-                ("Symmetric", Tensor::Symmetric { xx: scalar, yy: scalar, zz: scalar, xy: 0.0, yz: 0.0, xz: 0.0 }),
-            ] {
-                if ui.selectable_label(t.as_ref().map(|x| x.name()) == Some(name), name).clicked() && t.as_ref().map(|x| x.name()) != Some(name) {
-                    *t = Some(make);
-                    changed = true;
-                }
-            }
-        });
-        ui.weak(unit);
-    });
-    if let Some(tt) = t {
-        ui.horizontal_wrapped(|ui| {
-            for (n, v) in tt.constants_mut() {
-                ui.label(n);
-                changed |= num(ui, v).changed();
-            }
-        });
-    }
-    changed
-}
-
-/// Editor of the anisotropic data of one domain for the active physics. Returns true on change.
-fn aniso_editor(ui: &mut Ui, phys: Physics, d: i32, an: &mut Anisotropy, props: &Materials) -> bool {
-    let mut changed = false;
-    if phys == Physics::Solid {
-        ui.horizontal(|ui| {
-            ui.label("stiffness");
-            let cur = an.stiffness.as_ref().map(|x| x.name()).unwrap_or("Isotropic (E, ν)");
-            egui::ComboBox::from_id_salt(format!("stiff_{d}")).selected_text(cur).show_ui(ui, |ui| {
-                if ui.selectable_label(an.stiffness.is_none(), "Isotropic (E, ν)").clicked() && an.stiffness.is_some() {
-                    an.stiffness = None;
-                    changed = true;
-                }
-                for (name, make) in [
-                    ("Cubic", Stiffness::Cubic { c11: 165.7e9, c12: 63.9e9, c44: 79.6e9 }),
-                    ("Hexagonal", Stiffness::Hexagonal { c11: 160e9, c12: 60e9, c13: 50e9, c33: 180e9, c44: 40e9 }),
-                    ("Trigonal", Stiffness::Trigonal { c11: 496.8e9, c12: 163.6e9, c13: 110.9e9, c14: -23.5e9, c33: 498.1e9, c44: 147.4e9 }),
-                    ("Orthotropic", Stiffness::Orthotropic { c11: 200e9, c22: 180e9, c33: 160e9, c12: 60e9, c13: 55e9, c23: 50e9, c44: 40e9, c55: 45e9, c66: 50e9 }),
-                ] {
-                    if ui.selectable_label(an.stiffness.as_ref().map(|x| x.name()) == Some(name), name).clicked() && an.stiffness.as_ref().map(|x| x.name()) != Some(name) {
-                        an.stiffness = Some(make);
-                        changed = true;
-                    }
-                }
-            });
-            ui.weak("GPa");
-        });
-        if let Some(st) = &mut an.stiffness {
-            ui.horizontal_wrapped(|ui| {
-                for (n, v) in st.constants_mut() {
-                    ui.label(n);
-                    let mut g = *v / 1e9;
-                    if num(ui, &mut g).changed() {
-                        *v = g * 1e9;
-                        changed = true;
-                    }
-                }
-            });
-        }
-        let a0 = props.get(d, "alpha").unwrap_or(0.0);
-        changed |= tensor_combo(ui, &format!("exp_{d}"), "thermal expansion", "1/K", &mut an.expansion, a0);
-    }
-    if phys == Physics::Heat {
-        let k0 = props.get(d, "k").unwrap_or(1.0);
-        changed |= tensor_combo(ui, &format!("cond_{d}"), "conductivity", "W/(m·K)", &mut an.conductivity, k0);
-    }
-    if phys == Physics::Electrostatics || phys == Physics::Emw {
-        let e0 = props.get(d, "eps_r").unwrap_or(1.0);
-        changed |= tensor_combo(ui, &format!("perm_{d}"), "permittivity", "", &mut an.permittivity, e0);
-    }
-    let any = an.stiffness.is_some() || an.conductivity.is_some() || an.permittivity.is_some() || an.expansion.is_some();
-    if any {
-        ui.horizontal(|ui| {
-            ui.label("crystal orientation (Euler Z-X-Z, °)");
-            for a in an.euler_deg.iter_mut() {
-                changed |= ui.add(DragValue::new(a).speed(1.0).range(-360.0..=360.0)).changed();
-            }
-        });
-    }
-    changed
+/// A plate `lx` wide (x) and `lz` high (z), one region `plate`: the geometry a person starts from.
+fn plate(lx: f64, lz: f64) -> FeatureList {
+    let mut m = Model::new_2d();
+    let r = m.rect("plate_box", (0.0, 0.0), (lx, lz));
+    m.overlay(&[("plate", r)]);
+    m.list
 }
 
 /// Layers along y (the propagation axis) of a swept cross-section.
-fn extrude_editor(ui: &mut Ui, extrude: &mut Option<Vec<femcore::meshing::mesher::Layer>>) {
-    use femcore::meshing::mesher::Layer;
-    let mut on = extrude.is_some();
+fn sweep_editor(ui: &mut Ui, sweep: &mut Option<Vec<SweepLayer>>) {
+    let mut on = sweep.is_some();
     if ui.checkbox(&mut on, "Sweep along y into 3D layers").changed() {
-        *extrude = if on { Some(vec![Layer { thickness: 0.1, n: 2, domain_offset: 0 }]) } else { None };
+        *sweep = if on { Some(vec![SweepLayer { thickness: 0.1, n: 2, domain_offset: 0 }]) } else { None };
     }
-    if let Some(layers) = extrude {
+    if let Some(layers) = sweep {
         let mut rm = None;
         for (i, l) in layers.iter_mut().enumerate() {
             ui.horizontal(|ui| {
@@ -256,24 +69,20 @@ fn extrude_editor(ui: &mut Ui, extrude: &mut Option<Vec<femcore::meshing::mesher
             }
         }
         if ui.small_button("+ layer").clicked() {
-            layers.push(Layer { thickness: 0.1, n: 2, domain_offset: 0 });
+            layers.push(SweepLayer { thickness: 0.1, n: 2, domain_offset: 0 });
         }
-        ui.weak("Side boundaries keep the 2D numbers; the end at y = 0 is the next number, the far end the one after.");
+        ui.weak("The ends of the swept model are the boundaries ymin (at y = 0) and ymax.");
     }
 }
 
-/// A `geom` model: element size, sweep along y, and the model editor (parameters, features, names, code).
-fn model_editor(ui: &mut Ui, ed: &mut crate::geomui::State, g: &mut GeometrySpec) {
-    ui.horizontal(|ui| {
-        ui.label("element size h (m)");
-        num(ui, &mut g.h);
-        ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", g.list.dim));
-    });
-    ui.checkbox(&mut g.physics_sizing, "size the mesh from the physics")
-        .on_hover_text("Elements are made fine enough for the wavelength of the study in each material (points per wavelength by element order). Applies to EM waves, solid-mechanics eigenfrequencies and Brillouin studies; the sizes of the model still apply.");
-    extrude_editor(ui, &mut g.extrude);
-    ui.add_space(4.0);
-    crate::geomui::show(ui, ed, &mut g.list);
+/// The key a material is stored under for a region: the name, or `name*` when the geometry cut absorbing pieces `name.pml_*` out of it, so
+/// that one assignment covers the region and its layers.
+fn material_key(base: &str, all: &[(i32, String)]) -> String {
+    if all.iter().any(|(_, n)| n.strip_prefix(base).is_some_and(|r| r.starts_with('.'))) {
+        format!("{base}*")
+    } else {
+        base.to_string()
+    }
 }
 
 impl App {
@@ -284,12 +93,6 @@ impl App {
             v.domain_labels.clone()
         } else {
             vec![1]
-        }
-    }
-
-    fn set_material(&mut self, domain: i32, key: &str, v: f64) {
-        for s in &mut self.proj.specs {
-            s.materials.set(domain, key, v);
         }
     }
 
@@ -323,8 +126,6 @@ impl App {
         });
     }
 
-    // ------------------------------------------------------------------ geometry
-
     /// One inspector tab on its own: the workflow view lays the six tabs out in its three sections.
     pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab) {
         match t {
@@ -337,35 +138,72 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------------------ geometry
+
     fn tab_geometry(&mut self, ui: &mut Ui) {
         ui.heading("Geometry");
-        ui.weak("Axes: x lateral, y the direction of propagation, z the surface normal (right-handed). A 2D cross-section is drawn in x-z with y pointing into the page; crystal orientations, photoelastic tensors, permittivities, constraint and load components and the names of result fields use x, y, z.");
+        ui.weak("Axes: x lateral, y the direction of propagation, z the surface normal (right-handed). A 2D cross-section is drawn in x-z with y pointing into the page; crystal orientations, constraint and load components and the names of result fields use x, y, z.");
         let mut g = self.geom_edit.clone();
+        let mut m = self.mesh_edit.clone();
         ui.horizontal(|ui| {
             ui.label("Start from");
             if ui.button("plate (2D)").clicked() {
-                g = GeometrySpec::plate(1.0, 0.5, 0.05, None);
+                g = plate(1.0, 0.5);
+                m.h = 0.05;
+                m.sweep = None;
             }
             if ui.button("block (plate swept along y)").clicked() {
-                g = GeometrySpec::plate(1.0, 0.5, 0.1, Some(1.0));
+                g = plate(1.0, 0.5);
+                m.h = 0.1;
+                m.sweep = Some(vec![SweepLayer { thickness: 1.0, n: 8, domain_offset: 0 }]);
             }
         });
-        model_editor(ui, &mut self.geom_ui, &mut g);
+        ui.horizontal(|ui| {
+            ui.label("element size h (m)");
+            num(ui, &mut m.h);
+            ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", g.dim));
+        });
+        ui.checkbox(&mut m.physics_sizing, "size the mesh from the physics")
+            .on_hover_text("Elements are made fine enough for the wavelength of the study in each material (points per wavelength by element order). Applies to EM waves and solid-mechanics eigenfrequencies; the sizes of the model still apply.");
+        if m.physics_sizing {
+            let mut ppw = m.points_per_wavelength.unwrap_or(0.0);
+            ui.horizontal(|ui| {
+                ui.label("points per wavelength (0 = by element order)");
+                if num(ui, &mut ppw).changed() {
+                    m.points_per_wavelength = (ppw > 0.0).then_some(ppw);
+                }
+            });
+        }
+        let mut adaptive = m.adapt_scale.is_some();
+        ui.horizontal(|ui| {
+            if ui.checkbox(&mut adaptive, "adaptive mesh").on_hover_text("Metric adaptation towards the sizes of the model: the boundary and interface vertices lie on the exact curves. The factor scales every size (below one is finer).").changed() {
+                m.adapt_scale = adaptive.then_some(1.0);
+            }
+            if let Some(s) = &mut m.adapt_scale {
+                ui.label("size factor");
+                num(ui, s);
+            }
+        });
+        ui.checkbox(&mut m.structured_pml, "structured absorbing layers").on_hover_text("Rebuild the absorbing layers of the model as structured layers (quadrilaterals, prisms, hexahedra) cut into simplices.");
+        sweep_editor(ui, &mut m.sweep);
+        ui.add_space(4.0);
+        crate::geomui::show(ui, &mut self.geom_ui, &mut g);
         ui.add_space(6.0);
-        let changed = g != self.geom_edit;
+        let changed = g != self.geom_edit || m != self.mesh_edit;
         self.geom_edit = g;
+        self.mesh_edit = m;
         if changed {
             self.geometry_dirty = true;
         }
         ui.add_space(6.0);
-        let dirty = self.geometry_dirty || self.geom_edit != self.proj.geometry;
+        let dirty = self.geometry_dirty || self.geom_edit != self.engine.project().geometry || self.mesh_edit != self.engine.project().mesh;
         ui.horizontal(|ui| {
             let b = ui.add_enabled(self.busy.is_none(), egui::Button::new(RichText::new("Build mesh").strong()).fill(if dirty { Color32::from_rgb(40, 90, 150) } else { Color32::from_rgb(52, 56, 66) }));
             if b.clicked() {
                 self.rebuild_mesh();
             }
             if dirty {
-                ui.weak("(geometry changed)");
+                ui.weak("(geometry or mesh settings changed)");
             }
         });
 
@@ -374,9 +212,17 @@ impl App {
         ui.heading("Mesh");
         if let Some(v) = self.doc.view.clone() {
             ui.label(format!("{}D, {} points, {} cells, {} boundary facets/segments", v.dim, v.points.len(), v.n_cells, if v.dim == 2 { v.segs.len() } else { v.tris.len() }));
-            ui.label(format!("domains {:?}", v.domain_labels));
+            if let Some(model) = self.doc.model.clone() {
+                let regions: Vec<String> = model.regions().iter().map(|(i, n)| format!("{n} ({i})")).collect();
+                ui.label(format!("regions: {}", regions.join(", ")));
+            }
             ui.label(format!("boundaries {:?}", v.boundary_labels));
             ui.label(format!("element types: {}", v.types.join(", ")));
+            if let Some(r) = self.doc.model.as_ref().and_then(|m| m.report().cloned()) {
+                if let Some(a) = r.adaptation {
+                    ui.weak(format!("adaptation: {} iterations, {} to {} cells, worst element quality {:.2}", a.iterations, a.cells_start, a.cells_end, a.q_min));
+                }
+            }
             ui.horizontal(|ui| {
                 ui.checkbox(&mut self.show_edges, "edges");
                 ui.checkbox(&mut self.show_numbers, "boundary numbers");
@@ -387,8 +233,8 @@ impl App {
         ui.add_space(8.0);
         ui.separator();
         ui.heading("Examples");
-        for (i, n) in crate::examples::NAMES.iter().enumerate() {
-            if ui.link(*n).clicked() {
+        for (i, e) in crate::examples::list().iter().enumerate() {
+            if ui.link(&e.title).clicked() {
                 self.load_example(i);
             }
         }
@@ -396,577 +242,368 @@ impl App {
 
     // ------------------------------------------------------------------ materials
 
+    /// The regions of the model by base name (the absorbing pieces `name.pml_*` belong to `name`), with the key a material is stored under.
+    fn material_regions(&self) -> Vec<(String, String)> {
+        let all = &self.domain_names;
+        let mut seen: Vec<(String, String)> = vec![];
+        for (_, n) in all {
+            let base = n.split('.').next().unwrap_or(n).to_string();
+            if !seen.iter().any(|(b, _)| *b == base) {
+                let key = material_key(&base, all);
+                seen.push((base, key));
+            }
+        }
+        seen
+    }
+
     fn tab_materials(&mut self, ui: &mut Ui) {
-        let phys = self.proj.active;
+        let Some(active) = self.active() else {
+            ui.heading("Materials");
+            ui.weak("The project has no physics: add one in the Physics tab.");
+            return;
+        };
+        let Some(physics) = self.engine.registry().get(&active) else { return };
+        let props = physics.properties();
+        let pname = physics.name();
+        let Some(spec0) = self.engine.project().spec(&active).cloned() else { return };
+        let mut spec = spec0.clone();
         ui.heading("Materials");
-        ui.label(format!("Properties used by {} for each domain. Values are shared between physics that use the same property.", phys.name()));
-        let props = props_for(phys);
-        let mesh_dim = self.doc.mesh.as_ref().map(|m| m.dim).or_else(|| self.doc.view.as_ref().map(|v| v.dim)).unwrap_or(2);
-        let domains = self.domain_labels();
-        let mut apply_all: Option<usize> = None;
+        ui.label(format!("What each region of the model is made of, for {pname}. A material is a file of the library (units written in it, optical models evaluated at the wavelength of the study) or numbers typed here."));
+        let regions = self.material_regions();
+        if regions.is_empty() {
+            ui.weak("Build the mesh to list the regions.");
+            return;
+        }
+        let lib_names: Vec<String> = self.engine.library().map(|l| l.names()).unwrap_or_default();
+        if lib_names.is_empty() {
+            ui.colored_label(Color32::from_rgb(200, 120, 20), "No material files were found (set NYX_MATERIALS, or keep a `materials` folder next to the program).");
+        }
+        let mut apply_all: Option<String> = None;
         ui.horizontal(|ui| {
-            ui.label("All domains:");
+            ui.label("All regions:");
             egui::ComboBox::from_id_salt("mat_all").selected_text("apply material...").show_ui(ui, |ui| {
-                for (i, m) in MATERIALS.iter().enumerate() {
-                    if ui.selectable_label(false, m.name).clicked() {
-                        apply_all = Some(i);
+                for n in &lib_names {
+                    if ui.selectable_label(false, n).clicked() {
+                        apply_all = Some(n.clone());
                     }
                 }
             });
         });
-        let mut edits: Vec<(i32, &'static str, f64)> = vec![];
-        let mut preset: Vec<(i32, usize)> = vec![];
-        let mut aniso_edits: Vec<(i32, Option<Anisotropy>)> = vec![];
-        let mut pml_edits: Vec<(i32, Option<Pml>)> = vec![];
-        let mut crystal: Vec<(i32, usize)> = vec![];
-        for &d in &domains {
+        if let Some(n) = apply_all {
+            for (_, key) in &regions {
+                spec.materials.insert(key.clone(), MaterialAssign::Named(n.clone()));
+            }
+        }
+        for (base, key) in &regions {
             ui.group(|ui| {
+                let cur = spec.materials.get(key).or_else(|| spec.materials.get(base)).cloned();
                 ui.horizontal(|ui| {
-                    let title = match self.domain_names.iter().find(|(i, _)| *i == d) {
-                        Some((_, n)) => format!("{n}  (domain {d})"),
-                        None => format!("Domain {d}"),
+                    ui.label(RichText::new(if key == base { base.clone() } else { format!("{base}  (and its absorbing layers)") }).strong());
+                    let shown = match &cur {
+                        Some(MaterialAssign::Named(n)) => n.clone(),
+                        Some(MaterialAssign::Oriented { material, .. }) => format!("{material} (rotated)"),
+                        Some(MaterialAssign::Props(_)) => "numbers".into(),
+                        None => "none".into(),
                     };
-                    ui.label(RichText::new(title).strong());
-                    egui::ComboBox::from_id_salt(format!("mat_{d}")).selected_text("material...").show_ui(ui, |ui| {
-                        for (i, m) in MATERIALS.iter().enumerate() {
-                            if ui.selectable_label(false, m.name).clicked() {
-                                preset.push((d, i));
-                            }
+                    egui::ComboBox::from_id_salt(format!("mat_{key}")).selected_text(shown).show_ui(ui, |ui| {
+                        if ui.selectable_label(matches!(cur, Some(MaterialAssign::Props(_))), "numbers").clicked() && !matches!(cur, Some(MaterialAssign::Props(_))) {
+                            let map: BTreeMap<String, f64> = props.iter().map(|p| (p.name.clone(), p.default.unwrap_or_else(|| crate::examples::typical(&p.name)))).collect();
+                            spec.materials.insert(key.clone(), MaterialAssign::Props(map));
                         }
                         ui.separator();
-                        for (i, c) in CRYSTALS.iter().enumerate() {
-                            if ui.selectable_label(false, c.name).clicked() {
-                                crystal.push((d, i));
+                        for n in &lib_names {
+                            if ui.selectable_label(false, n).clicked() {
+                                spec.materials.insert(key.clone(), MaterialAssign::Named(n.clone()));
                             }
                         }
                     });
                 });
-                egui::Grid::new(format!("props_{d}")).num_columns(3).show(ui, |ui| {
-                    for (key, label, unit) in props {
-                        let mut v = self.proj.active_spec().materials.get(d, key).unwrap_or_else(|| default_prop(key));
-                        ui.label(*label);
-                        if num(ui, &mut v).changed() {
-                            edits.push((d, key, v));
-                        }
-                        ui.weak(*unit);
-                        ui.end_row();
-                    }
-                });
-                let mats = self.proj.active_spec().materials.clone();
-                if phys == Physics::Emw || phys == Physics::Solid {
-                    let mut pml = mats.pml.get(&d).cloned().unwrap_or_default();
-                    let active = pml.x != PmlDir::Off || pml.y != PmlDir::Off || pml.z != PmlDir::Off;
-                    let mut edited = false;
-                    egui::CollapsingHeader::new(if active { "Perfectly matched layer (active)" } else { "Perfectly matched layer" }).id_salt(format!("pml_{d}")).default_open(active).show(ui, |ui| {
-                        let axes = if mesh_dim == 3 { vec![("x", &mut pml.x), ("y", &mut pml.y), ("z", &mut pml.z)] } else { vec![("x", &mut pml.x), ("z", &mut pml.z)] };
-                        for (axis, dir) in axes {
-                            ui.horizontal(|ui| {
-                                ui.label(format!("absorb along {axis}"));
-                                for (v, name) in [(PmlDir::Off, "off"), (PmlDir::Plus, "towards +"), (PmlDir::Minus, "towards −")] {
-                                    if ui.selectable_label(*dir == v, name).clicked() && *dir != v {
-                                        *dir = v;
-                                        edited = true;
-                                    }
-                                }
-                            });
-                        }
+                match spec.materials.get(key).cloned().or_else(|| spec.materials.get(base).cloned()) {
+                    Some(MaterialAssign::Named(n)) => {
+                        let mut rotated = false;
                         ui.horizontal(|ui| {
-                            ui.label("strength σ");
-                            edited |= num(ui, &mut pml.strength).changed();
-                            ui.label("order p");
-                            edited |= num(ui, &mut pml.order).changed();
-                            ui.label("real stretch");
-                            edited |= num(ui, &mut pml.re).changed();
+                            if ui.checkbox(&mut rotated, "crystal axes rotated in the wafer").changed() && rotated {
+                                spec.materials.insert(key.clone(), MaterialAssign::Oriented { material: n.clone(), euler_deg: [0.0; 3] });
+                            }
                         });
-                        ui.weak(if phys != Physics::Emw { "Stretch s = re − jσ·t^p, t from 0 at the interface to 1 at the outer edge of this domain. Used by the Eigenfrequency study (complex frequencies, Q); fix the outer edge of the layer." } else { "Stretch s = re − jσ·t^p, t from 0 at the interface to 1 at the outer edge of this domain. The layer covers the whole domain: make it a separate domain region and put the PEC wall at its outer edge." });
-                    });
-                    if edited {
-                        let off = pml.x == PmlDir::Off && pml.y == PmlDir::Off && pml.z == PmlDir::Off;
-                        pml_edits.push((d, if off { None } else { Some(pml) }));
+                        self.material_summary(ui, &n);
+                    }
+                    Some(MaterialAssign::Oriented { material, mut euler_deg }) => {
+                        let mut keep = true;
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut keep, "crystal axes rotated in the wafer");
+                        });
+                        let mut edited = false;
+                        ui.horizontal(|ui| {
+                            ui.label("Bunge angles (degrees)");
+                            for a in euler_deg.iter_mut() {
+                                edited |= num(ui, a).changed();
+                            }
+                        });
+                        if !keep {
+                            spec.materials.insert(key.clone(), MaterialAssign::Named(material.clone()));
+                        } else if edited {
+                            spec.materials.insert(key.clone(), MaterialAssign::Oriented { material: material.clone(), euler_deg });
+                        }
+                        self.material_summary(ui, &material);
+                    }
+                    Some(MaterialAssign::Props(mut map)) => {
+                        let mut edited = false;
+                        egui::Grid::new(format!("props_{key}")).num_columns(3).show(ui, |ui| {
+                            for p in &props {
+                                let mut v = map.get(&p.name).copied().unwrap_or_else(|| p.default.unwrap_or_else(|| crate::examples::typical(&p.name)));
+                                ui.label(&p.label);
+                                if num(ui, &mut v).changed() {
+                                    map.insert(p.name.clone(), v);
+                                    edited = true;
+                                }
+                                ui.weak(&p.unit);
+                                ui.end_row();
+                            }
+                        });
+                        if edited {
+                            spec.materials.insert(key.clone(), MaterialAssign::Props(map));
+                        }
+                    }
+                    None => {
+                        ui.weak("No material: choose one (a problem needs a material for every region it solves in).");
                     }
                 }
-                let mut an = mats.aniso.get(&d).cloned().unwrap_or_default();
-                let has = mats.aniso.contains_key(&d);
-                egui::CollapsingHeader::new(if has { "Anisotropy / crystal data (active)" } else { "Anisotropy / crystal data" }).id_salt(format!("an_{d}")).default_open(has).show(ui, |ui| {
-                    if aniso_editor(ui, phys, d, &mut an, &mats) {
-                        let empty = an.stiffness.is_none() && an.conductivity.is_none() && an.permittivity.is_none() && an.expansion.is_none();
-                        aniso_edits.push((d, if empty { None } else { Some(an.clone()) }));
-                    }
-                });
             });
         }
-        for (d, p) in pml_edits {
-            for sp in &mut self.proj.specs {
-                match &p {
-                    Some(p) => {
-                        sp.materials.pml.insert(d, p.clone());
-                    }
-                    None => {
-                        sp.materials.pml.remove(&d);
-                    }
-                }
-            }
-        }
-        for (d, a) in aniso_edits {
-            for sp in &mut self.proj.specs {
-                match &a {
-                    Some(a) => {
-                        sp.materials.aniso.insert(d, a.clone());
-                    }
-                    None => {
-                        sp.materials.aniso.remove(&d);
-                    }
-                }
-            }
-        }
-        for (d, i) in crystal {
-            let (a, rho) = (CRYSTALS[i].make)();
-            for sp in &mut self.proj.specs {
-                sp.materials.aniso.insert(d, a.clone());
-                sp.materials.set(d, "rho", rho);
-            }
-        }
-        for (d, k, v) in edits {
-            self.set_material(d, k, v);
-        }
-        for (d, i) in preset {
-            for (k, v) in MATERIALS[i].props {
-                self.set_material(d, k, *v);
-            }
-        }
-        if let Some(i) = apply_all {
-            for &d in &domains {
-                for (k, v) in MATERIALS[i].props {
-                    self.set_material(d, k, *v);
-                }
-            }
+        if spec != spec0 {
+            self.set_problem(&active, &spec);
         }
         ui.add_space(6.0);
-        ui.weak("Library values are typical room-temperature numbers; check them for your application. Anisotropic data replaces the scalar value it covers in that domain.");
+        ui.weak("Library values are typical room-temperature numbers with their sources written in the files; check them for your application. Anisotropic crystal data replaces the scalar value it covers in that region.");
+    }
+
+    /// What a library material gives, in one line, and its source file text on request.
+    fn material_summary(&self, ui: &mut Ui, name: &str) {
+        match self.engine.describe_material(name) {
+            Ok(d) => {
+                let mut parts: Vec<String> = vec![];
+                if let Some(c) = d["elastic"]["class"].as_str() {
+                    parts.push(format!("elastic: {c}"));
+                }
+                if d["optical"] == true {
+                    parts.push("optical model".into());
+                }
+                if d["thermal"] == true {
+                    parts.push("thermal".into());
+                }
+                if d["electrical"] == true {
+                    parts.push("electrical".into());
+                }
+                ui.weak(parts.join(", "));
+                if let Some(t) = d["toml"].as_str() {
+                    egui::CollapsingHeader::new("material file").id_salt(format!("toml_{name}")).default_open(false).show(ui, |ui| {
+                        ui.add(egui::TextEdit::multiline(&mut t.to_string().as_str()).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
+                    });
+                }
+            }
+            Err(e) => {
+                ui.colored_label(Color32::from_rgb(200, 60, 60), e.to_string());
+            }
+        }
     }
 
     // ------------------------------------------------------------------ physics
 
     fn tab_physics(&mut self, ui: &mut Ui) {
-        let phys = self.proj.active;
-        let mut spec = self.proj.active_spec().clone();
-        ui.heading(phys.name());
-        ui.horizontal(|ui| {
-            ui.label("Element order");
-            ui.selectable_value(&mut spec.order, 1, "P1 (linear)");
-            ui.selectable_value(&mut spec.order, 2, "P2 (quadratic, default)");
-        });
-        if phys != Physics::Emw {
-            ui.horizontal(|ui| {
-                ui.label("Linear solver");
-                egui::ComboBox::from_id_salt("linsolver").selected_text(spec.solver.name()).show_ui(ui, |ui| {
-                    for sv in [LinearSolver::Auto, LinearSolver::Direct, LinearSolver::Iterative] {
-                        ui.selectable_value(&mut spec.solver, sv, sv.name());
-                    }
-                });
-            });
-            ui.weak("Automatic uses the sparse direct solver for small problems and algebraic multigrid (AMG-CG) for large ones: from about 30 000 free dofs in 3D, 400 000 in 2D. It applies to static solid, stationary and transient heat, electrostatics, and the lowest eigenfrequencies (LOBPCG with a multigrid preconditioner, chosen when multigrid converges fast; otherwise a factorisation). If multigrid fails to converge, the direct solver is used.");
-        }
-        let dim = self.doc.mesh.as_ref().map(|m| m.dim).or_else(|| self.doc.view.as_ref().map(|v| v.dim)).unwrap_or(2);
-        if phys == Physics::Solid {
-            if dim == 2 {
-                ui.horizontal(|ui| {
-                    ui.label("2D approximation");
-                    ui.selectable_value(&mut spec.plane, Plane::Strain, "plane strain (default)");
-                    ui.selectable_value(&mut spec.plane, Plane::Stress, "plane stress");
-                });
-                ui.horizontal(|ui| {
-                    ui.label("thickness (m)");
-                    num(ui, &mut spec.thickness);
-                });
+        let ids: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).collect();
+        let in_project: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
+        ui.heading("Physics");
+        ui.horizontal_wrapped(|ui| {
+            let active = self.active();
+            for id in &in_project {
+                if ui.selectable_label(active.as_deref() == Some(id.as_str()), RichText::new(self.physics_name(id)).strong()).clicked() {
+                    self.cmd("set_active", json!({ "physics": id }));
+                    self.picking = None;
+                    self.rules_dirty = true;
+                }
             }
-            let mut on = spec.thermal.is_some();
-            if ui.checkbox(&mut on, "Thermal expansion").changed() {
-                spec.thermal = if on { Some(ThermalExpansion { source: ThermalSource::Uniform(293.15), t_ref: 293.15 }) } else { None };
-            }
-            if let Some(th) = &mut spec.thermal {
-                let mut from_heat = th.source == ThermalSource::FromHeat;
-                ui.horizontal(|ui| {
-                    ui.label("temperature from");
-                    if ui.selectable_label(!from_heat, "uniform").clicked() {
-                        from_heat = false;
-                        if matches!(th.source, ThermalSource::FromHeat) {
-                            th.source = ThermalSource::Uniform(th.t_ref + 100.0);
+            let free: Vec<&String> = ids.iter().filter(|i| !in_project.contains(i)).collect();
+            if !free.is_empty() && in_project.len() < 3 {
+                egui::ComboBox::from_id_salt("add_physics").selected_text("+ add physics").show_ui(ui, |ui| {
+                    for id in free {
+                        if ui.selectable_label(false, self.physics_name(id)).clicked() {
+                            self.cmd("add_physics", json!({ "physics": id }));
+                            self.cmd("set_active", json!({ "physics": id }));
+                            self.rules_dirty = true;
                         }
                     }
-                    if ui.selectable_label(from_heat, "last heat-transfer result").clicked() {
-                        from_heat = true;
-                        th.source = ThermalSource::FromHeat;
-                    }
-                });
-                if let ThermalSource::Uniform(t) = &mut th.source {
-                    ui.horizontal(|ui| {
-                        ui.label("T (K)");
-                        num(ui, t);
-                    });
-                } else if self.solve_state.heat_t.is_none() {
-                    ui.colored_label(Color32::from_rgb(235, 170, 90), "No heat result yet: switch Physics to Heat transfer and Compute first.");
-                }
-                ui.horizontal(|ui| {
-                    ui.label("strain reference T_ref (K)");
-                    num(ui, &mut th.t_ref);
                 });
             }
-        }
-        ui.add_space(4.0);
-        ui.separator();
-        ui.label(RichText::new("Boundary conditions").strong());
-        let note = match phys {
-            Physics::Electrostatics => "Boundaries without a condition have zero normal D (zero charge).",
-            Physics::Heat => "Boundaries without a condition are thermally insulated.",
-            Physics::Solid => "Boundaries without a condition are free.",
-            Physics::Emw => "All outer boundaries are perfect electric conductors (except periodic ones).",
+        });
+        let Some(active) = self.active() else {
+            ui.weak("The project has no physics: add one above.");
+            return;
         };
-        ui.weak(note);
-        let mut remove = None;
-        for i in 0..spec.bcs.len() {
-            let buf_key = (phys, i);
-            let labels = spec.bcs[i].labels.clone();
-            let entry = self.label_buffers.entry(buf_key).or_insert_with(|| labels_text(&labels));
-            if parse_labels(entry).as_ref() != Some(&labels) && !ui.memory(|m| m.has_focus(ui.make_persistent_id(("bclabels", phys as u8, i)))) {
-                *entry = labels_text(&labels);
+        let Some(physics) = self.engine.registry().get(&active) else { return };
+        let (kinds, opts) = (physics.bc_kinds(), physics.params());
+        let (exports, imports) = (physics.exports(), physics.imports());
+        let Some(spec0) = self.engine.project().spec(&active).cloned() else { return };
+        let mut spec = spec0.clone();
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if ui.small_button("remove this physics from the project").clicked() {
+                self.cmd("remove_physics", json!({ "physics": active }));
+                self.rules_dirty = true;
             }
+        });
+        if !imports.is_empty() {
+            let from: Vec<String> = imports.iter().map(|i| format!("{} ({})", i.role, i.field)).collect();
+            ui.weak(format!("Takes from other physics of the project: {}.", from.join(", ")));
+        }
+        if !exports.is_empty() {
+            ui.weak(format!("Offers to others: {}.", exports.iter().map(|e| e.role.clone()).collect::<Vec<_>>().join(", ")));
+        }
+        if !opts.is_empty() {
+            ui.separator();
+            ui.label(RichText::new("Options").strong());
+            forms::param_form(ui, &format!("opt_{active}"), &opts, &mut spec.params);
+        }
+        ui.separator();
+        ui.label(RichText::new("Boundary and domain conditions").strong());
+        ui.weak("`on` is a selector over the geometry (`outer & plane(x = 0)`), a boundary or region name. 'Pick on mesh' writes the selector for you.");
+        let mut remove = None;
+        let mut pick: Option<Option<usize>> = None;
+        for i in 0..spec.bcs.len() {
+            let kind = kinds.iter().find(|k| k.kind == spec.bcs[i].kind).cloned();
             ui.group(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{}. {}", i + 1, spec.bcs[i].kind.name())).strong().color(crate::colormap::palette(i + 3)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("✕").on_hover_text("remove").clicked() {
-                            remove = Some(i);
-                        }
-                        let picking = self.picking == Some(i);
-                        if ui.selectable_label(picking, "Pick on mesh").on_hover_text("click boundaries in the viewport to add or remove them").clicked() {
-                            self.picking = if picking { None } else { Some(i) };
-                            self.suggestions.clear();
-                            self.show_results = false;
-                        }
-                    });
-                });
-                ui.horizontal(|ui| {
-                    ui.label("boundaries");
-                    let r = ui.add(egui::TextEdit::singleline(entry).id(ui.make_persistent_id(("bclabels", phys as u8, i))).desired_width(120.0).hint_text("e.g. 1, 4 or 2-4"));
-                    if r.changed() {
-                        if let Some(l) = parse_labels(entry) {
-                            spec.bcs[i].labels = l;
-                        }
-                    }
-                    if parse_labels(entry).is_none() {
-                        ui.colored_label(Color32::from_rgb(235, 110, 100), "numbers separated by commas");
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("or by rule");
-                    let mut rule = spec.bcs[i].on.clone().unwrap_or_default();
-                    if ui.add(egui::TextEdit::singleline(&mut rule).desired_width(220.0).font(egui::TextStyle::Monospace).hint_text("outer & plane(x = 0)")).on_hover_text("a selector over the model: names, planes, normals, boxes, interfaces; ymin and ymax are the ends of a swept model. The numbers above follow the rule.").changed() {
-                        spec.bcs[i].on = if rule.trim().is_empty() { None } else { Some(rule) };
-                        self.rules_dirty = true;
-                    }
-                    if let Some(e) = self.rule_errors.get(&(phys, i)) {
-                        ui.colored_label(Color32::from_rgb(235, 110, 100), e);
-                    }
-                });
-                if self.picking == Some(i) && !self.suggestions.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("write the picks as a rule:");
-                        for s in self.suggestions.clone() {
-                            if ui.small_button(RichText::new(&s).monospace()).clicked() {
-                                spec.bcs[i].on = Some(s);
-                                self.rules_dirty = true;
-                                self.suggestions.clear();
+                    ui.label(RichText::new(format!("{}", i + 1)).strong());
+                    let shown = kind.as_ref().map(|k| k.name.clone()).unwrap_or_else(|| spec.bcs[i].kind.clone());
+                    egui::ComboBox::from_id_salt(format!("bc_kind_{active}_{i}")).selected_text(shown).show_ui(ui, |ui| {
+                        for k in &kinds {
+                            if ui.selectable_label(spec.bcs[i].kind == k.kind, &k.name).clicked() && spec.bcs[i].kind != k.kind {
+                                spec.bcs[i].kind = k.kind.clone();
+                                spec.bcs[i].params = Value::Null;
+                                forms::fill_required(&k.params, &mut spec.bcs[i].params);
                             }
                         }
                     });
+                    if ui.small_button("✕").on_hover_text("remove this condition").clicked() {
+                        remove = Some(i);
+                    }
+                });
+                if let Some(k) = &kind {
+                    if !k.doc.is_empty() {
+                        ui.weak(&k.doc);
+                    }
                 }
-                match &mut spec.bcs[i].kind {
-                    BcKind::Potential(v) => {
-                        ui.horizontal(|ui| {
-                            ui.label("V₀ (V)");
-                            num(ui, v);
-                        });
-                    }
-                    BcKind::Ground => {}
-                    BcKind::SurfaceCharge(s) => {
-                        ui.horizontal(|ui| {
-                            ui.label("ρ_s (C/m²)");
-                            num(ui, s);
-                        });
-                    }
-                    BcKind::Temperature(t) => {
-                        ui.horizontal(|ui| {
-                            ui.label("T₀ (K)");
-                            num(ui, t);
-                        });
-                    }
-                    BcKind::Flux(q) => {
-                        ui.horizontal(|ui| {
-                            ui.label("inward flux q₀ (W/m²)");
-                            num(ui, q);
-                        });
-                    }
-                    BcKind::Convection { h, text } => {
-                        ui.horizontal(|ui| {
-                            ui.label("h (W/m²·K)");
-                            num(ui, h);
-                            ui.label("T_ext (K)");
-                            num(ui, text);
-                        });
-                    }
-                    BcKind::Fixed { fixed, values } => {
-                        for k in 0..dim.min(3) {
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut fixed[k], format!("u{} =", ["x", "y", "z"][k]));
-                                ui.add_enabled_ui(fixed[k], |ui| {
-                                    num(ui, &mut values[k]);
-                                });
-                                ui.weak("m");
-                            });
+                ui.horizontal(|ui| {
+                    ui.label("on");
+                    ui.add(egui::TextEdit::singleline(&mut spec.bcs[i].on).desired_width(220.0).hint_text("selector, boundary or region name"));
+                    let is_boundary = kind.as_ref().is_none_or(|k| k.applies == Applies::Boundary);
+                    if is_boundary && self.doc.mesh.is_some() {
+                        let on = self.picking == Some(i);
+                        if ui.selectable_label(on, "Pick on mesh").on_hover_text("Click boundaries in the viewport; the simplest selector that picks them is written here.").clicked() {
+                            pick = Some(if on { None } else { Some(i) });
                         }
                     }
-                    BcKind::Load(f) => {
-                        for k in 0..dim.min(3) {
-                            ui.horizontal(|ui| {
-                                ui.label(format!("f{} (N/m²)", ["x", "y", "z"][k]));
-                                num(ui, &mut f[k]);
-                            });
+                });
+                match self.rule_errors.get(&i) {
+                    Some(e) => {
+                        ui.colored_label(Color32::from_rgb(235, 110, 100), e);
+                    }
+                    None => {
+                        if let Some(l) = self.bc_labels.get(i).filter(|l| !l.is_empty()) {
+                            ui.weak(format!("{} boundary number(s): {:?}", l.len(), l));
                         }
                     }
-                    BcKind::LowReflecting => {
-                        ui.weak("Absorbs outgoing waves (traction −ρc_p(v·n)n − ρc_s v_t with the speeds of the adjacent material). Used by the Eigenfrequency study, which then gives complex frequencies and Q.");
+                }
+                if let Some(k) = &kind {
+                    forms::param_form(ui, &format!("bc_{active}_{i}"), &k.params, &mut spec.bcs[i].params);
+                }
+                if self.picking == Some(i) && !self.suggestions.is_empty() {
+                    ui.weak("These selectors pick exactly what you clicked; choose one:");
+                    for s in self.suggestions.clone() {
+                        if ui.small_button(&s).clicked() {
+                            spec.bcs[i].on = s;
+                        }
                     }
+                } else if self.picking == Some(i) && !self.picked.is_empty() {
+                    ui.weak("No selector picks exactly this set of boundaries; type one, or click fewer.");
                 }
             });
         }
         if let Some(i) = remove {
             spec.bcs.remove(i);
-            self.label_buffers.clear();
             if self.picking == Some(i) {
                 self.picking = None;
             }
         }
-        let avail = BcKind::available(phys);
-        if !avail.is_empty() {
-            ui.menu_button("+ Add boundary condition", |ui| {
-                for k in avail {
-                    if ui.button(k.name()).clicked() {
-                        spec.bcs.push(Bc { on: None, labels: vec![], kind: k });
-                        self.label_buffers.clear();
-                        ui.close();
+        if let Some(p) = pick {
+            self.picking = p;
+            self.picked.clear();
+            self.suggestions.clear();
+        }
+        if !kinds.is_empty() {
+            egui::ComboBox::from_id_salt(format!("bc_add_{active}")).selected_text("+ add condition").show_ui(ui, |ui| {
+                for k in &kinds {
+                    if ui.selectable_label(false, &k.name).clicked() {
+                        let mut params = Value::Null;
+                        forms::fill_required(&k.params, &mut params);
+                        spec.bcs.push(nyx_engine::facade::physics::BcSpec { on: String::new(), kind: k.kind.clone(), params });
                     }
                 }
             });
         }
-        // domains that do not take part, and Floquet-periodic boundary pairs
-        if phys == Physics::Solid || phys == Physics::Emw {
-            ui.add_space(6.0);
-            ui.separator();
-            let text_field = |ui: &mut Ui, bufs: &mut std::collections::HashMap<(Physics, usize), String>, key: (Physics, usize), value: &mut Vec<i32>, id: &str| {
-                let shown = labels_text(value);
-                let entry = bufs.entry(key).or_insert_with(|| shown.clone());
-                let focused = ui.memory(|m| m.has_focus(ui.make_persistent_id((id, key.1))));
-                if parse_labels(entry).as_ref() != Some(&*value) && !focused {
-                    *entry = shown;
-                }
-                let r = ui.add(egui::TextEdit::singleline(entry).id(ui.make_persistent_id((id, key.1))).desired_width(110.0).hint_text("e.g. 1, 4"));
-                if r.changed() {
-                    if let Some(l) = parse_labels(entry) {
-                        *value = l;
-                    }
-                }
-            };
-            if phys == Physics::Solid {
-                ui.horizontal(|ui| {
-                    ui.label("Domains without solid (e.g. air)");
-                    text_field(ui, &mut self.label_buffers, (phys, 9000), &mut spec.inactive, "inactive");
-                });
-            }
-            ui.label(RichText::new("Periodic conditions (Floquet)").strong());
-            ui.weak("The destination boundaries repeat the source boundaries, shifted by the distance between the two groups, times exp(−i·phase). Both must carry identical meshes. Used by the Eigenfrequency study.");
-            let mut remove_p = None;
-            for i in 0..spec.periodic.len() {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{}. source", i + 1));
-                        text_field(ui, &mut self.label_buffers, (phys, 9100 + 2 * i), &mut spec.periodic[i].source, "persrc");
-                        ui.label("→ destination");
-                        text_field(ui, &mut self.label_buffers, (phys, 9101 + 2 * i), &mut spec.periodic[i].dest, "perdst");
-                        if ui.small_button("✕").clicked() {
-                            remove_p = Some(i);
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("phase (degrees)");
-                        let mut deg = spec.periodic[i].phase.to_degrees();
-                        if num(ui, &mut deg).changed() {
-                            spec.periodic[i].phase = deg.to_radians();
-                        }
-                    });
-                });
-            }
-            if let Some(i) = remove_p {
-                spec.periodic.remove(i);
-                self.label_buffers.retain(|k, _| k.1 < 9100);
-            }
-            if ui.button("+ periodic pair").clicked() {
-                spec.periodic.push(Periodic::default());
-            }
-        }
-        if spec != *self.proj.active_spec() {
-            *self.proj.spec_mut(phys) = spec;
-        }
-        if self.picking.is_some() {
-            ui.add_space(4.0);
-            ui.colored_label(Color32::from_rgb(120, 190, 255), "Picking: click boundaries in the viewport to add or remove them from the selected condition.");
+        if spec != spec0 {
+            self.set_problem(&active, &spec);
         }
     }
 
     // ------------------------------------------------------------------ study
 
     fn tab_study(&mut self, ui: &mut Ui) {
-        let phys = self.proj.active;
-        let mut spec = self.proj.active_spec().clone();
-        ui.heading(format!("Study: {}", phys.name()));
-        match phys {
-            Physics::Electrostatics => {
-                ui.label("Stationary: solves −∇·(ε₀ε_r∇V) = ρ_v. Reports energy, maximum field and, with two different potentials, the capacitance.");
-            }
-            Physics::Heat => {
-                let mut transient = matches!(spec.study, Study::Transient { .. });
-                ui.horizontal(|ui| {
-                    if ui.selectable_label(!transient, "Stationary").clicked() {
-                        transient = false;
-                    }
-                    if ui.selectable_label(transient, "Transient").clicked() {
-                        transient = true;
-                    }
-                });
-                if transient && !matches!(spec.study, Study::Transient { .. }) {
-                    spec.study = Study::Transient { t_end: 100.0, n_out: 20, t0: "293.15".into() };
-                } else if !transient {
-                    spec.study = Study::Stationary;
-                }
-                if let Study::Transient { t_end, n_out, t0 } = &mut spec.study {
-                    egui::Grid::new("tr").num_columns(2).show(ui, |ui| {
-                        ui.label("end time (s)");
-                        num(ui, t_end);
-                        ui.end_row();
-                        ui.label("output intervals");
-                        ui.add(DragValue::new(n_out).range(1..=500));
-                        ui.end_row();
-                        ui.label("initial T (K), expression in x, y, z");
-                        ui.text_edit_singleline(t0);
-                        ui.end_row();
-                    });
-                    ui.weak("Examples: 293.15   or   293.15 + 80*exp(-((x-0.5)^2)/0.01). Up to about 2500 free dofs the semi-discrete system is solved exactly (no time-stepping error); larger models use BDF2.");
+        let Some(active) = self.active() else {
+            ui.heading("Study");
+            ui.weak("The project has no physics: add one in the Physics tab.");
+            return;
+        };
+        let Some(physics) = self.engine.registry().get(&active) else { return };
+        let studies = physics.studies();
+        let pname = physics.name();
+        let Some(spec0) = self.engine.project().spec(&active).cloned() else { return };
+        let mut spec: ProblemSpec = spec0.clone();
+        ui.heading(format!("Study: {pname}"));
+        let dim = self.doc.dim();
+        ui.horizontal_wrapped(|ui| {
+            for s in &studies {
+                if ui.selectable_label(spec.study.kind == s.kind, &s.name).on_hover_text(&s.doc).clicked() && spec.study.kind != s.kind {
+                    spec.study.kind = s.kind.clone();
+                    spec.study.params = Value::Null;
+                    forms::fill_required(&s.params, &mut spec.study.params);
                 }
             }
-            Physics::Solid => {
-                let mut eigen = matches!(spec.study, Study::Eigenfrequency { .. });
-                ui.horizontal(|ui| {
-                    if ui.selectable_label(!eigen, "Static").clicked() {
-                        eigen = false;
-                    }
-                    if ui.selectable_label(eigen, "Eigenfrequencies").clicked() {
-                        eigen = true;
-                    }
-                });
-                if eigen && !matches!(spec.study, Study::Eigenfrequency { .. }) {
-                    spec.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
-                } else if !eigen {
-                    spec.study = Study::Static;
-                }
-                if let Study::Eigenfrequency { n_modes, f_search } = &mut spec.study {
-                    egui::Grid::new("eig").num_columns(2).show(ui, |ui| {
-                        ui.label("number of modes");
-                        ui.add(DragValue::new(n_modes).range(1..=60));
-                        ui.end_row();
-                        ui.label("search around (Hz, 0 = lowest)");
-                        num(ui, f_search);
-                        ui.end_row();
-                    });
-                    ui.weak("Boundary loads are ignored; only fixed constraints matter. Without a fixed boundary the first modes are rigid-body motions at 0 Hz.");
-                }
+        });
+        if let Some(s) = studies.iter().find(|s| s.kind == spec.study.kind) {
+            ui.weak(&s.doc);
+            let runs_here = match s.dims {
+                nyx_engine::facade::physics::Dims::Two => dim == 2,
+                nyx_engine::facade::physics::Dims::Three => dim == 3,
+                nyx_engine::facade::physics::Dims::Both => true,
+            };
+            if !runs_here {
+                ui.colored_label(Color32::from_rgb(200, 120, 20), format!("This study runs on a {}D mesh; the model on show is {}D.", if dim == 2 { 3 } else { 2 }, dim));
             }
-            Physics::Emw if self.doc.mesh.as_ref().is_some_and(|m| m.dim == 3) => {
-                if !matches!(spec.study, Study::Eigenfrequency { .. }) {
-                    spec.study = Study::Eigenfrequency { n_modes: 6, f_search: 10e9 };
-                }
-                if let Study::Eigenfrequency { n_modes, f_search } = &mut spec.study {
-                    let mut ghz = *f_search / 1e9;
-                    egui::Grid::new("emeig").num_columns(2).show(ui, |ui| {
-                        ui.label("number of modes");
-                        ui.add(DragValue::new(n_modes).range(1..=40));
-                        ui.end_row();
-                        ui.label("search around (GHz)");
-                        if num(ui, &mut ghz).changed() {
-                            *f_search = ghz * 1e9;
-                        }
-                        ui.end_row();
-                    });
-                    ui.weak("Eigenmodes of the 3D structure with perfect electric conductor on the outer boundary, found with quadratic Nedelec elements (1 for first order in the Physics tab); PML domains give complex frequencies and Q. Modes nearest the search frequency are returned; the shift must lie in the band you want (modes far above it may be missed).");
-                }
-            }
-            Physics::Emw => {
-                if let Study::Modes { freq, n_target, evanescent, n_modes } = &mut spec.study {
-                    let mut ghz = *freq / 1e9;
-                    egui::Grid::new("modes").num_columns(2).show(ui, |ui| {
-                        ui.label("frequency (GHz; 1550 nm = 193414.5)");
-                        if num(ui, &mut ghz).changed() {
-                            *freq = ghz * 1e9;
-                        }
-                        ui.end_row();
-                        ui.label("search near effective index");
-                        num(ui, n_target);
-                        ui.end_row();
-                        ui.label("number of modes");
-                        ui.add(DragValue::new(n_modes).range(1..=40));
-                        ui.end_row();
-                    });
-                    ui.checkbox(evanescent, "target is imaginary (find evanescent modes)");
-                    ui.weak("Finds the modes with n_eff closest to the target. For a guide filled with ε_r, n_eff lies between 0 and √ε_r.");
-                }
-            }
-        }
-        ui.add_space(6.0);
-        ui.separator();
-        ui.label(RichText::new("Run folder").strong());
-        ui.checkbox(&mut self.autosave, "save every run (results .hdf5 + XDMF + project .nyx.xml) as temp_untitled_<date>_<time>");
-        if self.autosave {
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.autosave_dir).desired_width(300.0));
-                if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                        self.autosave_dir = p.display().to_string();
-                    }
-                }
-            });
+            forms::param_form(ui, &format!("study_{active}_{}", s.kind), &s.params, &mut spec.study.params);
         }
         ui.add_space(4.0);
-        ui.label(RichText::new("Results file").strong());
         ui.horizontal(|ui| {
-            ui.label("Write after Compute");
-            egui::ComboBox::from_id_salt("outmode").selected_text(spec.output.mode.name()).show_ui(ui, |ui| {
-                for m in [OutputMode::None, OutputMode::Hdf5Serial, OutputMode::Hdf5Parallel] {
-                    ui.selectable_value(&mut spec.output.mode, m, m.name());
-                }
-            });
+            ui.label("element order");
+            let mut o = spec.order;
+            for v in [1u8, 2] {
+                ui.selectable_value(&mut o, v, format!("P{v}"));
+            }
+            spec.order = o;
         });
-        if spec.output.mode != OutputMode::None {
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut spec.output.path).hint_text("results.h5").desired_width(240.0));
-                if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().add_filter("HDF5", &["h5", "hdf5"]).set_file_name("results.h5").save_file() {
-                        spec.output.path = p.display().to_string();
-                    }
-                }
-            });
-            ui.weak("Mesh, problem description and every solution with all fields. Serial uses the sequential HDF5 driver. Parallel (MPI-IO) is not available in this build.");
-        }
-        if spec != *self.proj.active_spec() {
-            *self.proj.spec_mut(phys) = spec;
+        ui.weak("Options of the physics (plane stress or strain, solver, ...) are in the Physics tab.");
+        if spec != spec0 {
+            self.set_problem(&active, &spec);
         }
         ui.add_space(8.0);
         let ok = self.busy.is_none() && self.doc.mesh.is_some();
@@ -996,11 +633,11 @@ impl App {
         } else {
             ui.label(self.results[cur].name.clone());
         }
-        let mut cmap = self.proj.colormap;
+        let mut cmap = self.colormap;
         let mut fit = false;
         {
             let rv = &mut self.results[cur];
-            let nsol = rv.result.solutions.len();
+            let nsol = rv.sols.len();
             if nsol > 1 {
                 ui.horizontal(|ui| {
                     if ui.small_button("<").clicked() && rv.sol > 0 {
@@ -1012,13 +649,13 @@ impl App {
                     if ui.small_button(">").clicked() && rv.sol + 1 < nsol {
                         rv.sol += 1;
                     }
-                    ui.label(rv.result.solutions[rv.sol].label.clone());
+                    ui.label(rv.sols[rv.sol].label.clone());
                 });
             } else {
-                ui.label(rv.result.solutions[0].label.clone());
+                ui.label(rv.sols[0].label.clone());
             }
             let sol = rv.sol.min(nsol - 1);
-            let names: Vec<String> = rv.result.solutions[sol].fields.iter().map(|f| format!("{} [{}]", f.name, f.unit)).collect();
+            let names: Vec<String> = rv.sols[sol].fields.iter().map(|f| format!("{} [{}]", f.name, f.unit)).collect();
             if rv.field >= names.len() {
                 rv.field = 0;
             }
@@ -1063,7 +700,7 @@ impl App {
                 let r = rv.range();
                 rv.manual_range = Some(r);
             }
-            if rv.result.solutions.iter().any(|s| s.disp.is_some()) {
+            if rv.sols.iter().any(|s| s.disp.is_some()) {
                 ui.horizontal(|ui| {
                     ui.label("deformation scale");
                     let max = (rv.auto_warp * 10.0).max(1.0);
@@ -1084,7 +721,7 @@ impl App {
         if fit {
             self.vp.fit_token += 1;
         }
-        self.proj.colormap = cmap;
+        self.colormap = cmap;
         ui.separator();
         ui.label(RichText::new("Summary").strong());
         let rv = &self.results[cur];
@@ -1092,8 +729,8 @@ impl App {
             for (n, v) in &rv.result.scalars {
                 ui.label(n);
                 match v {
-                    Scalar::Num(x) => ui.monospace(format!("{x:.6e}")),
-                    Scalar::Text(t) => ui.monospace(t.clone()),
+                    nyx_engine::facade::physics::Scalar::Num(x) => ui.monospace(format!("{x:.6e}")),
+                    nyx_engine::facade::physics::Scalar::Text(t) => ui.monospace(t.clone()),
                 };
                 ui.end_row();
             }
@@ -1130,7 +767,7 @@ impl App {
         let mut export: Option<&'static str> = None;
         {
             let rv = &mut self.results[cur];
-            let selectable = rv.physics == Some(Physics::Emw);
+            let selectable = rv.physics.as_deref() == Some("ems");
             let Some(a) = rv.analysis.as_ref() else {
                 ui.weak("This result has no polarization analysis. Mode studies of the electromagnetic waves physics have one.");
                 return;
@@ -1214,7 +851,7 @@ impl App {
                 });
             }
             if let Some(i) = pick {
-                if i < rv.result.solutions.len() {
+                if i < rv.sols.len() {
                     rv.sol = i;
                     rv.values_cache = None;
                 }
@@ -1266,7 +903,7 @@ impl App {
     pub fn results_panel(&mut self, ui: &mut Ui) {
         let Some(cur) = self.current else { return };
         let rv = &self.results[cur];
-        let nsol = rv.result.solutions.len();
+        let nsol = rv.sols.len();
         ui.horizontal(|ui| {
             ui.label(RichText::new(rv.name.clone()).strong());
             ui.weak(format!("{} solution(s)", nsol));
@@ -1275,15 +912,15 @@ impl App {
             ui.weak("Single solution: use the viewport probe (hover) for values.");
             return;
         }
-        let fname = rv.result.solutions[rv.sol.min(nsol - 1)].fields.get(rv.field).map(|f| f.name.clone()).unwrap_or_default();
-        let xs: Vec<f64> = rv.result.solutions.iter().enumerate().map(|(i, s)| s.value.unwrap_or(i as f64 + 1.0)).collect();
-        let is_modes = rv.result.solutions[0].neff.is_some();
+        let fname = rv.sols[rv.sol.min(nsol - 1)].fields.get(rv.field).map(|f| f.name.clone()).unwrap_or_default();
+        let xs: Vec<f64> = rv.sols.iter().enumerate().map(|(i, s)| s.value.unwrap_or(i as f64 + 1.0)).collect();
+        let is_modes = rv.sols[0].neff.is_some();
         // eigenfrequencies: solids and the 3D electromagnetic eigenmodes (frequency, no effective index)
-        let is_eigen_plot = (rv.physics == Some(Physics::Solid) || (rv.physics == Some(Physics::Emw) && rv.result.solutions[0].neff.is_none())) && rv.result.solutions[0].value.is_some();
-        let xlabel = if is_eigen_plot || is_modes { "mode number" } else if rv.result.solutions[0].value.is_some() { "time (s)" } else { "solution" };
+        let is_eigen_plot = (rv.physics.as_deref() == Some("sms") || (rv.physics.as_deref() == Some("ems") && rv.sols[0].neff.is_none())) && rv.sols[0].value.is_some();
+        let xlabel = if is_eigen_plot || is_modes { "mode number" } else if rv.sols[0].value.is_some() { "time (s)" } else { "solution" };
         let mut max_pts = vec![];
         let mut min_pts = vec![];
-        for (i, s) in rv.result.solutions.iter().enumerate() {
+        for (i, s) in rv.sols.iter().enumerate() {
             if let Some(f) = s.fields.iter().find(|f| f.name == fname) {
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &v in &f.values {
@@ -1301,7 +938,7 @@ impl App {
                 p.points(egui_plot::Points::new("f", egui_plot::PlotPoints::from(xs.iter().enumerate().map(|(i, _)| [i as f64 + 1.0, xs[i]]).collect::<Vec<_>>())).radius(4.0));
             } else if is_modes {
                 // neff per mode
-                let pts: Vec<[f64; 2]> = rv.result.solutions.iter().enumerate().map(|(i, s)| [i as f64 + 1.0, s.neff.map(|n| n.0.hypot(n.1)).unwrap_or(0.0)]).collect();
+                let pts: Vec<[f64; 2]> = rv.sols.iter().enumerate().map(|(i, s)| [i as f64 + 1.0, s.neff.map(|n| n.0.hypot(n.1)).unwrap_or(0.0)]).collect();
                 p.points(egui_plot::Points::new("|neff|", egui_plot::PlotPoints::from(pts)).radius(4.0));
             } else {
                 p.line(egui_plot::Line::new(format!("max {fname}"), egui_plot::PlotPoints::from(max_pts.clone())));

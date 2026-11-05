@@ -1,55 +1,67 @@
-//! The application: the state of the window, the background jobs that run in it, and the window layout.
+//! The application: the state of the window around one `nyx_engine::Engine`, and the window layout.
 //!
-//! `App` holds the project (`state::Project`), the mesh in use (`Doc`), the results shown and the viewport. Anything slow
-//! (building a mesh, opening a file, solving) runs as a numbered job on its own thread (`begin_job`, `worker`); only
-//! one job runs at a time, and a message coming back for a job that is no longer the running one cannot end the busy state.
-//! A solve has a `Progress` handle: the toolbar shows its current stage and a Cancel button (Esc too), and the stage log
-//! it writes is part of the result. `with_context` builds the state without a window, which is how the tests drive it.
+//! `App` holds the engine (the project, the mesh it built, the results, the jobs), the mesh and results on show and the viewport. Every action
+//! of the window is an engine command (`Engine::call`) or one of its job methods; the window keeps only what is about drawing. Anything slow
+//! (a mesh build, a solve) is an engine job; only one runs at a time, and the window polls the engine each frame. A solve has a progress
+//! handle: the toolbar shows its current stage and a Cancel button (Esc too), and the stage log it writes is part of the result.
+//! `with_context` builds the state without a window, which is how the tests drive it.
 
 use crate::colormap::Colormap;
-use nyx_connect::{Env, HostInfo, Status};
 use crate::examples;
 use crate::state::*;
 use crate::viewport::{Content, Viewport};
-use crate::worker::{self, Msg};
 use eframe::egui::{self, Color32, RichText};
-use femcore::problem::*;
-use femcore::progress::Progress;
+use nyx_connect::{Env, HostInfo, Status};
+use nyx_engine::facade::geom::model::FeatureList;
+use nyx_engine::facade::physics::SolveResult;
+use nyx_engine::facade::Progress;
+use nyx_engine::{Engine, MeshSettings};
+use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicBool;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Work waiting for the running job to finish (the latest request wins).
 /// Choices of the File > New dialog.
 pub struct NewDialog {
-    pub physics: Physics,
+    pub physics: String,
     pub three_d: bool,
 }
 
+/// Work waiting for the running job to finish (the latest request wins).
 pub enum Queued {
     Open(PathBuf),
     Rebuild,
 }
 
+/// What a running engine job is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobKind {
+    Mesh,
+    Solve,
+}
+
+/// A message from a helper thread (the optional Python script) to the window.
+pub enum Msg {
+    Script(Result<String, String>),
+}
+
 pub struct App {
-    pub proj: Project,
+    pub engine: Engine,
     pub doc: Doc,
     pub tab: Tab,
     pub vp: Viewport,
     pub results: Vec<ResultView>,
     pub current: Option<usize>,
     pub show_results: bool,
-    pub solve_state: SolveState,
     pub tx: Sender<(u64, Msg)>,
     pub rx: Receiver<(u64, Msg)>,
     pub busy: Option<(String, Instant)>,
-    /// number of the last job started
-    pub next_job: u64,
-    /// the running job: its number, its progress/cancel handle and whether it can be cancelled
+    /// the running engine job: its number, its progress/cancel handle and whether it can be cancelled
     pub job: Option<(u64, Arc<Progress>, bool)>,
+    pub job_kind: Option<JobKind>,
     /// scripted runs: cancel the running job at this time (`cancel_after SECONDS`)
     pub cancel_at: Option<Instant>,
     /// a mesh build or file open asked for while another job was running; it starts when that job is done
@@ -58,31 +70,35 @@ pub struct App {
     pub error: Option<String>,
     pub show_edges: bool,
     pub show_numbers: bool,
+    /// the condition (index in the active physics) whose boundaries are being picked on the mesh
     pub picking: Option<usize>,
+    /// the boundary numbers picked so far
+    pub picked: Vec<i32>,
     pub project_path: Option<PathBuf>,
-    pub label_buffers: HashMap<(Physics, usize), String>,
     pub geometry_dirty: bool,
-    pub geom_edit: GeometrySpec,
+    /// the geometry and mesh settings as being edited; they go into the engine when the mesh is built or a solve starts
+    pub geom_edit: FeatureList,
+    pub mesh_edit: MeshSettings,
     pub geom_ui: crate::geomui::State,
-    /// why a boundary rule (physics, index) does not resolve
-    pub rule_errors: HashMap<(Physics, usize), String>,
+    /// why a condition (index in the active physics) does not resolve on the mesh
+    pub rule_errors: HashMap<usize, String>,
+    /// the boundary numbers each condition of the active physics picks on the mesh on show
+    pub bc_labels: Vec<Vec<i32>>,
     /// region numbers with their names, for the Materials tab
     pub domain_names: Vec<(i32, String)>,
-    /// a rule was edited: resolve them again
+    /// the conditions or the mesh changed: resolve them again
     pub rules_dirty: bool,
-    /// rules that pick what was just clicked in the viewport
+    /// selectors that pick what was just clicked in the viewport
     pub suggestions: Vec<String>,
     pub bottom_open: bool,
     /// the File > New dialog while it is open
     pub new_dialog: Option<NewDialog>,
-    /// save every run (results and project) to `autosave_dir`
-    pub autosave: bool,
-    pub autosave_dir: String,
     pub script_output: Option<String>,
     pub script: VecDeque<String>,
     pub settle: u32,
     pub shot_pending: Arc<AtomicBool>,
     pub shell: crate::shell::Shell,
+    pub colormap: Colormap,
     /// the `nyx-mcp` program the Connect menu registers with Claude (found at start, or picked by the user)
     pub mcp_server: Option<PathBuf>,
     /// the Connect menu: what each AI app's config says about nyx (installed apps only) and the last thing done
@@ -100,36 +116,28 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         crate::theme::install_fonts(&cc.egui_ctx);
         let mut app = Self::with_context(cc.egui_ctx.clone());
-        let root = std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_store::workspace::default_root);
+        let root = std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_engine::facade::store::workspace::default_root);
         app.attach_workspace(root);
         app
     }
 
-    /// The application state on an egui context; no window is needed (tests use a default context).
+    /// The application state on an egui context; no window is needed (tests use a default context). It opens with the first example.
     pub fn with_context(ctx: egui::Context) -> Self {
         crate::theme::apply(&ctx);
         let (tx, rx) = channel();
-        let proj = Project::default_project();
         let mut app = App {
-            geom_edit: proj.geometry.clone(),
-            geom_ui: Default::default(),
-            rule_errors: HashMap::new(),
-            domain_names: vec![],
-            rules_dirty: false,
-            suggestions: vec![],
-            proj,
+            engine: Engine::new(),
             doc: Doc::default(),
             tab: Tab::Geometry,
             vp: Viewport::default(),
             results: vec![],
             current: None,
             show_results: false,
-            solve_state: SolveState::default(),
             tx,
             rx,
             busy: None,
-            next_job: 0,
             job: None,
+            job_kind: None,
             cancel_at: None,
             queued: None,
             status: "Ready".into(),
@@ -137,26 +145,97 @@ impl App {
             show_edges: true,
             show_numbers: true,
             picking: None,
+            picked: vec![],
             project_path: None,
-            label_buffers: HashMap::new(),
             geometry_dirty: false,
+            geom_edit: FeatureList::new(2),
+            mesh_edit: MeshSettings::default(),
+            geom_ui: Default::default(),
+            rule_errors: HashMap::new(),
+            bc_labels: vec![],
+            domain_names: vec![],
+            rules_dirty: false,
+            suggestions: vec![],
             bottom_open: true,
             new_dialog: None,
-            autosave: true,
-            autosave_dir: default_runs_dir(),
             script_output: None,
             script: VecDeque::new(),
             settle: 6,
             shot_pending: Arc::new(AtomicBool::new(false)),
             shell: crate::shell::Shell::detached(),
+            colormap: Colormap::Viridis,
             mcp_server: nyx_connect::find_server(),
             connect_status: vec![],
             connect_note: None,
             ctx,
         };
         app.refresh_connect();
+        let first = examples::list().into_iter().next();
+        let started = match first {
+            Some(e) => app.engine.call("project_open", &json!({ "path": e.path.to_str().unwrap_or_default() })).map(|_| ()).map_err(|e| e.to_string()),
+            None => examples::blank(&mut app.engine, "dfs", false),
+        };
+        if let Err(e) = started {
+            app.set_error(e);
+        }
+        app.adopt();
         app.rebuild_mesh();
         app
+    }
+
+    // ------------------------------------------------------------- the engine
+
+    /// Runs an engine command and reports its error in the status bar. `None` after an error.
+    pub fn cmd(&mut self, name: &str, args: Value) -> Option<Value> {
+        match self.engine.call(name, &args) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                self.set_error(format!("{name}: {e}"));
+                None
+            }
+        }
+    }
+
+    /// The code of the active physics, if the project has one.
+    pub fn active(&self) -> Option<String> {
+        let p = self.engine.project();
+        p.active.clone().or_else(|| p.physics.first().map(|s| s.physics.clone()))
+    }
+
+    /// The display name of a physics from its descriptor.
+    pub fn physics_name(&self, id: &str) -> String {
+        self.engine.registry().get(id).map(|p| p.name().to_string()).unwrap_or_else(|| id.to_string())
+    }
+
+    /// The window's copies of what is edited (geometry, mesh settings) are taken from the engine's project: after a project was opened or made.
+    pub fn adopt(&mut self) {
+        self.geom_edit = self.engine.project().geometry.clone();
+        self.mesh_edit = self.engine.project().mesh.clone();
+        self.geometry_dirty = false;
+        self.picking = None;
+        self.picked.clear();
+        self.suggestions.clear();
+    }
+
+    /// Hands the geometry and mesh settings being edited to the engine. False (and an error shown) when the engine refuses them.
+    pub fn push_edits(&mut self) -> bool {
+        if self.geom_edit != self.engine.project().geometry {
+            let g = serde_json::to_value(&self.geom_edit).unwrap_or(Value::Null);
+            if self.cmd("set_geometry", json!({ "geometry": g })).is_none() {
+                return false;
+            }
+        }
+        if self.mesh_edit != self.engine.project().mesh {
+            let m = &self.mesh_edit;
+            let args = json!({
+                "h": m.h, "adapt_scale": m.adapt_scale, "physics_sizing": m.physics_sizing, "points_per_wavelength": m.points_per_wavelength,
+                "structured_pml": m.structured_pml, "max_dev": m.max_dev, "sweep": m.sweep,
+            });
+            if self.cmd("set_mesh", args).is_none() {
+                return false;
+            }
+        }
+        true
     }
 
     // ------------------------------------------------------------- jobs
@@ -167,21 +246,18 @@ impl App {
         self.error = Some(e);
     }
 
-    /// Marks the window busy and returns the handle for a new background job. Only one job runs at a time; the
-    /// caller must have checked `self.busy` first.
-    fn begin_job(&mut self, label: String, cancellable: bool) -> worker::Job {
-        self.next_job += 1;
-        let progress = Progress::new();
+    fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool) {
+        let progress = self.engine.jobs().progress(id).unwrap_or_else(Progress::new);
         self.busy = Some((label, Instant::now()));
-        self.job = Some((self.next_job, progress.clone(), cancellable));
+        self.job = Some((id, progress, cancellable));
+        self.job_kind = Some(kind);
         self.error = None;
-        worker::Job { id: self.next_job, tx: self.tx.clone(), ctx: self.ctx.clone(), progress }
     }
 
     /// Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first).
     pub fn cancel_job(&mut self) {
-        if let Some((_, p, true)) = &self.job {
-            p.cancel();
+        if let Some((id, _, true)) = &self.job {
+            self.engine.jobs().cancel(*id);
             self.status = "Cancelling: the solver stops at its next check (a factorisation in progress has to finish first)".into();
         }
     }
@@ -200,129 +276,133 @@ impl App {
             self.queued = Some(Queued::Rebuild);
             return;
         }
-        self.proj.geometry = self.geom_edit.clone();
-        self.proj.source = Source::Generated;
-        let job = self.begin_job("Building mesh".into(), false);
-        worker::spawn_build(self.proj.geometry.clone(), Some(self.proj.active_spec().clone()), job);
+        if !self.push_edits() {
+            return;
+        }
+        match self.engine.start_mesh() {
+            Ok(id) => self.started(id, JobKind::Mesh, "Building mesh".into(), false),
+            Err(e) => self.set_error(format!("Geometry: {e}")),
+        }
     }
 
     pub fn open_path(&mut self, path: PathBuf) {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-        if ext == "json" || ext == "xml" {
+        if ext == "json" {
             self.load_project(&path);
             return;
         }
-        if self.busy.is_some() {
-            self.queued = Some(Queued::Open(path));
-            return;
-        }
-        if ext == "h5" || ext == "hdf5" {
-            let job = self.begin_job("Reading HDF5 results".into(), false);
-            worker::spawn_open_h5(path, job);
-            return;
-        }
-        self.set_error(format!("Don't know how to open '.{ext}' files (nyx projects .xml and .json, HDF5 results .h5)"));
+        self.set_error(format!("Don't know how to open '.{ext}' files (nyx projects are .nyx.json)"));
     }
 
+    /// Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed.
     pub fn compute(&mut self) {
         if self.refuse_while_busy() {
             return;
         }
         self.sync_rules();
-        if let Some(((_, i), e)) = self.rule_errors.iter().find(|((p, _), _)| *p == self.proj.active) {
-            let msg = format!("Boundary condition {}: {e}", i + 1);
-            self.set_error(msg);
+        if let Some(((i, e), _)) = self.rule_errors.iter().map(|(k, v)| ((*k, v.clone()), ())).min_by_key(|((k, _), _)| *k) {
+            self.set_error(format!("Condition {}: {e}", i + 1));
             return;
         }
-        let Some(mesh) = self.doc.mesh.clone() else {
-            let msg = self.doc.mesh_error.clone().unwrap_or_else(|| "There is no mesh to solve on: build a geometry or open a project first.".into());
-            self.set_error(msg);
+        if !self.push_edits() {
+            return;
+        }
+        let Some(active) = self.active() else {
+            self.set_error("The project has no physics: add one in the Physics tab.");
             return;
         };
-        let mut spec = self.proj.active_spec().clone();
-        if spec.physics == Physics::Emw && mesh.dim == 2 && !matches!(spec.study, Study::Modes { .. }) {
-            self.set_error("On a 2D mesh EM waves runs a mode analysis: open the Study tab to set it up.");
-            return;
+        match self.engine.start_solve(None) {
+            Ok(id) => {
+                let label = format!("Solving {}", self.physics_name(&active));
+                self.started(id, JobKind::Solve, label, true);
+            }
+            Err(e) => self.set_error(e.to_string()),
         }
-        if spec.physics == Physics::Emw && mesh.dim == 3 && !matches!(spec.study, Study::Eigenfrequency { .. }) {
-            spec.study = Study::Eigenfrequency { n_modes: 6, f_search: 10e9 };
-        }
-        spec.order = spec.order.clamp(1, 2);
-        let job = self.begin_job(format!("Solving {}", spec.physics.name()), true);
-        let auto = if self.autosave && !self.autosave_dir.trim().is_empty() {
-            self.proj.geometry = self.geom_edit.clone();
-            Some(worker::AutoSave { dir: PathBuf::from(self.autosave_dir.trim()), project_xml: self.proj.to_xml() })
-        } else {
-            None
-        };
-        worker::spawn_solve(mesh, spec, self.solve_state.clone(), auto, job);
     }
 
     fn poll(&mut self) {
-        while let Ok((job_id, msg)) = self.rx.try_recv() {
-            // only the job that is running clears the busy state (a message of an older job must not)
-            let started = if self.job.as_ref().map(|j| j.0) == Some(job_id) {
+        while let Ok((_, msg)) = self.rx.try_recv() {
+            match msg {
+                Msg::Script(Ok(t)) => self.script_output = Some(t),
+                Msg::Script(Err(e)) => self.set_error(e),
+            }
+        }
+        let finished = self.engine.poll();
+        for (id, outcome) in finished {
+            // only the job that is running clears the busy state
+            let started = if self.job.as_ref().map(|j| j.0) == Some(id) {
                 self.job = None;
                 self.busy.take().map(|b| b.1)
             } else {
                 None
             };
+            let kind = self.job_kind.take();
             let took = started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
-            match msg {
-                Msg::Built(Ok(b)) => {
-                    self.doc.mesh = Some(b.mesh.clone());
-                    self.doc.view = Some(b.view.clone());
-                    self.doc.source = "generated geometry".into();
-                    self.doc.mesh_error = None;
-                    self.after_mesh_change();
-                    self.status = format!("Mesh built: {} cells, {} boundary facets ({took:.2} s)", b.mesh.n_cells(), b.mesh.n_facets());
+            match (kind, outcome) {
+                (Some(JobKind::Mesh), Ok(_)) => {
+                    self.take_model();
+                    let (c, f) = self.doc.mesh.as_ref().map(|m| (m.n_cells(), m.n_facets())).unwrap_or((0, 0));
+                    self.status = format!("Mesh built: {c} cells, {f} boundary facets ({took:.2} s)");
                     self.geometry_dirty = false;
                 }
-                Msg::Built(Err(e)) => self.set_error(format!("Geometry: {e}")),
-                Msg::Solved { physics, res: Ok(s) } => {
-                    if physics == Physics::Heat {
-                        self.solve_state = s.state.clone();
-                    }
-                    let dim = self.doc.mesh.as_ref().map(|m| m.dim).unwrap_or(2);
-                    let name = physics.name().to_string();
-                    let secs = s.result.seconds;
-                    self.shell.live_run = self.record_ok(&s.result);
-                    let s_output = s.output;
-                    let mut rv = ResultView::new(name.clone(), Some(physics), s.result, s.display, dim);
-                    rv.analysis = s.analysis;
-                    self.push_result(rv);
-                    self.status = format!("{name}: solved in {secs:.2} s");
-                    match s_output {
-                        Some(Ok(m)) => self.status += &format!("; {m}"),
-                        Some(Err(e)) => self.error = Some(format!("Results file: {e}")),
-                        None => {}
-                    }
-                    self.tab = Tab::Results;
-                }
-                Msg::Solved { res: Err(e), .. } if e == femcore::progress::CANCELLED => {
+                (Some(JobKind::Mesh), Err(e)) => self.set_error(format!("Geometry: {e}")),
+                (Some(JobKind::Solve), Ok(summary)) => self.take_solved(&summary),
+                (Some(JobKind::Solve), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
                     self.error = None;
-                    self.record_end(nyx_store::runs::RunStatus::Cancelled, None);
+                    self.record_end(nyx_engine::facade::store::runs::RunStatus::Cancelled, None);
                     self.status = format!("Solve cancelled after {took:.1} s; the previous results are unchanged");
                 }
-                Msg::Solved { res: Err(e), .. } => {
-                    self.record_end(nyx_store::runs::RunStatus::Failed, Some(e.clone()));
-                    self.set_error(e)
+                (Some(JobKind::Solve), Err(e)) => {
+                    self.record_end(nyx_engine::facade::store::runs::RunStatus::Failed, Some(e.to_string()));
+                    self.set_error(e.to_string())
                 }
-                Msg::H5(name, Ok((mesh, s))) => {
-                    self.doc.view = Some(Arc::new(femcore::mesh::view::ViewMesh::from_simplex(&mesh)));
-                    self.doc.mesh = Some(mesh.clone());
-                    self.doc.source = name.clone();
-                    self.after_mesh_change();
-                    let rv = ResultView::new(format!("HDF5 {}", std::path::Path::new(&name).file_name().and_then(|n| n.to_str()).unwrap_or("file")), None, s.result, s.display, mesh.dim);
-                    self.push_result(rv);
-                    self.status = format!("Loaded results from {name}");
-                    self.tab = Tab::Results;
-                }
-                Msg::H5(_, Err(e)) => self.set_error(e),
-                Msg::Script(Ok(t)) => self.script_output = Some(t),
-                Msg::Script(Err(e)) => self.set_error(e),
+                (None, _) => {}
             }
         }
+    }
+
+    /// Takes the mesh the engine has now (a new mesh clears the results of the old one).
+    fn take_model(&mut self) {
+        let Some(m) = self.engine.model().cloned() else { return };
+        if self.doc.model.as_ref().is_some_and(|d| Arc::ptr_eq(d, &m)) {
+            return;
+        }
+        self.doc.set_model(m, "generated geometry");
+        self.after_mesh_change();
+    }
+
+    /// A solve came back: the mesh it used, and one result view per physics it solved.
+    fn take_solved(&mut self, summary: &Value) {
+        self.take_model();
+        let Some(mesh) = self.doc.mesh.clone() else { return };
+        let solved: Vec<String> = summary["results"].as_array().into_iter().flatten().filter_map(|r| r["physics"].as_str().map(str::to_string)).collect();
+        let active = self.active();
+        let mut last_secs = 0.0;
+        let mut live: Option<Arc<SolveResult>> = None;
+        for id in &solved {
+            let Some((result, _)) = self.engine.result(id) else { continue };
+            let result = result.clone();
+            let name = self.physics_name(id);
+            last_secs = result.seconds;
+            let mut rv = ResultView::new(name, Some(id.clone()), result.clone(), &mesh);
+            if self.engine.polarization_applies(id) {
+                rv.analysis = self.engine.polarization(id).ok();
+            }
+            if active.as_deref() == Some(id.as_str()) {
+                live = Some(result);
+            }
+            self.push_result(rv);
+        }
+        if let Some(r) = live {
+            self.shell.live_run = self.record_ok(&r);
+        }
+        // the result on show is the active physics' one
+        if let Some(i) = active.and_then(|a| self.results.iter().position(|r| r.physics.as_deref() == Some(a.as_str()))) {
+            self.current = Some(i);
+        }
+        let name = self.current.map(|i| self.results[i].name.clone()).unwrap_or_default();
+        self.status = format!("{name}: solved in {last_secs:.2} s");
+        self.tab = Tab::Results;
     }
 
     /// Starts the work that was asked for while a job was running, once nothing is running.
@@ -353,28 +433,31 @@ impl App {
         self.results.clear();
         self.current = None;
         self.show_results = false;
-        self.solve_state = SolveState::default();
         self.picking = None;
+        self.picked.clear();
         self.vp.fit_token += 1;
         self.sync_rules();
     }
 
-    /// Turns the selector rules of the boundary conditions into the integers of the built mesh, and reads the names of the regions.
+    /// Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to
+    /// report a selector that selects nothing), and reads the names of the regions.
     pub fn sync_rules(&mut self) {
         self.rules_dirty = false;
         self.rule_errors.clear();
-        let Some(mesh) = self.doc.mesh.clone() else { return };
-        let Ok(names) = self.proj.geometry.names(&mesh) else { return };
-        self.domain_names = names.domains();
-        for spec in &mut self.proj.specs {
-            for (i, bc) in spec.bcs.iter_mut().enumerate() {
-                if let Some(rule) = bc.on.clone() {
-                    match names.select(&rule) {
-                        Ok(l) => bc.labels = l,
-                        Err(e) => {
-                            self.rule_errors.insert((spec.physics, i), e);
-                        }
-                    }
+        self.bc_labels.clear();
+        let Some(model) = self.doc.model.clone() else { return };
+        self.domain_names = model.regions();
+        let Some(active) = self.active() else { return };
+        let Some(spec) = self.engine.project().spec(&active).cloned() else { return };
+        use nyx_engine::facade::physics::LabelResolver;
+        for (i, bc) in spec.bcs.iter().enumerate() {
+            let applies_to_domain = self.engine.registry().get(&active).is_some_and(|p| p.bc_kinds().iter().any(|k| k.kind == bc.kind && k.applies == nyx_engine::facade::physics::Applies::Domain));
+            let r = if applies_to_domain { LabelResolver::domains(model.as_ref(), &bc.on) } else { LabelResolver::boundaries(model.as_ref(), &bc.on) };
+            match r {
+                Ok(l) => self.bc_labels.push(if applies_to_domain { vec![] } else { l }),
+                Err(e) => {
+                    self.bc_labels.push(vec![]);
+                    self.rule_errors.insert(i, e.to_string());
                 }
             }
         }
@@ -384,56 +467,45 @@ impl App {
 
     pub fn save_project(&mut self, as_new: bool) {
         let path = if as_new || self.project_path.is_none() {
-            rfd::FileDialog::new().add_filter("nyx project (XML)", &["xml"]).add_filter("nyx project (JSON)", &["json"]).set_file_name("project.nyx.xml").save_file()
+            rfd::FileDialog::new().add_filter("nyx project (JSON)", &["json"]).set_file_name("project.nyx.json").save_file()
         } else {
             self.project_path.clone()
         };
         let Some(path) = path else { return };
-        self.proj.geometry = self.geom_edit.clone();
-        let is_xml = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("xml"));
-        let text = if is_xml { self.proj.to_xml() } else { serde_json::to_string_pretty(&self.proj).map_err(|e| e.to_string()) };
-        match text.and_then(|s| std::fs::write(&path, s).map_err(|e| e.to_string())) {
-            Ok(()) => {
-                self.status = format!("Saved {}", path.display());
-                self.project_path = Some(path);
-            }
-            Err(e) => self.set_error(format!("Could not save the project: {e}")),
+        if !self.push_edits() {
+            return;
+        }
+        if self.cmd("project_save", json!({ "path": path.to_str().unwrap_or_default() })).is_some() {
+            self.status = format!("Saved {}", path.display());
+            self.project_path = Some(path);
         }
     }
 
     pub fn load_project(&mut self, path: &std::path::Path) {
-        let is_xml = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("xml"));
-        let parse = |s: String| if is_xml { Project::from_xml(&s) } else { serde_json::from_str::<Project>(&s).map_err(|e| format!("not a nyx project: {e}")) };
-        match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(parse) {
-            Ok(p) => {
-                let source = p.source.clone();
-                self.geom_edit = p.geometry.clone();
-                self.proj = p;
-                for ph in Physics::ALL {
-                    if !self.proj.specs.iter().any(|s| s.physics == ph) {
-                        self.proj.specs.push(ProblemSpec::new(ph));
-                    }
-                }
-                self.project_path = Some(path.to_path_buf());
-                self.label_buffers.clear();
-                match source {
-                    Source::Generated => self.rebuild_mesh(),
-                }
-                self.status = format!("Loaded {}", path.display());
-            }
-            Err(e) => self.set_error(e),
+        if self.busy.is_some() {
+            self.queued = Some(Queued::Open(path.to_path_buf()));
+            return;
+        }
+        if self.cmd("project_open", json!({ "path": path.to_str().unwrap_or_default() })).is_some() {
+            self.adopt();
+            self.project_path = Some(path.to_path_buf());
+            self.rebuild_mesh();
+            self.status = format!("Loaded {}", path.display());
         }
     }
 
     pub fn load_example(&mut self, i: usize) {
-        let p = examples::by_index(i);
-        self.geom_edit = p.geometry.clone();
-        self.proj = p;
-        self.label_buffers.clear();
-        self.project_path = None;
-        self.rebuild_mesh();
-        self.tab = Tab::Geometry;
-        self.status = format!("Loaded example: {}", examples::NAMES[i]);
+        let Some(e) = examples::list().into_iter().nth(i) else {
+            self.set_error("There are no examples: the `examples` folder was not found next to the program (set NYX_EXAMPLES).");
+            return;
+        };
+        if self.cmd("project_open", json!({ "path": e.path.to_str().unwrap_or_default() })).is_some() {
+            self.adopt();
+            self.project_path = None;
+            self.rebuild_mesh();
+            self.tab = Tab::Geometry;
+            self.status = format!("Loaded example: {}", e.title);
+        }
     }
 
     /// CSV of the current solution: coordinates of every dof and all fields.
@@ -441,7 +513,7 @@ impl App {
         let (i, mesh) = (self.current?, self.doc.mesh.clone()?);
         let rv = &self.results[i];
         let sol = rv.solution();
-        let order = rv.result.order;
+        let order = rv.result.order as usize;
         let co = mesh.dof_coordinates(order);
         let d = mesh.dim;
         let mut s = String::new();
@@ -496,20 +568,37 @@ impl App {
 
     pub fn run_python_script(&mut self) {
         let Some(script) = rfd::FileDialog::new().add_filter("Python script", &["py"]).pick_file() else { return };
-        self.proj.geometry = self.geom_edit.clone();
-        let json = serde_json::to_string_pretty(&self.proj).unwrap_or_default();
+        if !self.push_edits() {
+            return;
+        }
+        let json = self.engine.project().to_json();
         if self.refuse_while_busy() {
             return;
         }
-        let job = self.begin_job(format!("Running {}", script.file_name().and_then(|n| n.to_str()).unwrap_or("script")), false);
-        worker::spawn_script(script, json, self.result_csv(), job);
+        self.status = format!("Running {}", script.file_name().and_then(|n| n.to_str()).unwrap_or("script"));
+        crate::pyscript::spawn(script, json, self.result_csv(), self.tx.clone(), self.ctx.clone());
     }
 
     fn open_dialog(&mut self) {
-        if let Some(p) = rfd::FileDialog::new().add_filter("nyx projects and HDF5 results", &["json", "xml", "h5", "hdf5"]).pick_file() {
+        if let Some(p) = rfd::FileDialog::new().add_filter("nyx projects", &["json"]).pick_file() {
             self.open_path(p);
         }
     }
+
+    /// Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results).
+    pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str) {
+        match examples::blank(&mut self.engine, physics, three_d) {
+            Ok(()) => {
+                self.adopt();
+                self.project_path = None;
+                self.rebuild_mesh();
+                self.tab = Tab::Geometry;
+                self.status = format!("New simulation: {what}. Set the geometry, materials and conditions, then Compute (F5).");
+            }
+            Err(e) => self.set_error(e),
+        }
+    }
+
 
     // ------------------------------------------------------------- layout
 
@@ -518,7 +607,7 @@ impl App {
             ui.menu_button("File", |ui| {
                 if ui.button("New... (Ctrl+N)").clicked() {
                     ui.close();
-                    self.new_dialog = Some(NewDialog { physics: self.proj.active, three_d: false });
+                    self.new_dialog = Some(NewDialog { physics: self.active().unwrap_or_else(|| "dfs".into()), three_d: false });
                 }
                 if ui.button("Open... (Ctrl+O)").clicked() {
                     ui.close();
@@ -543,8 +632,12 @@ impl App {
                 }
             });
             ui.menu_button("Examples", |ui| {
-                for (i, n) in examples::NAMES.iter().enumerate() {
-                    if ui.button(*n).clicked() {
+                let list = examples::list();
+                if list.is_empty() {
+                    ui.weak("No examples folder found (set NYX_EXAMPLES).");
+                }
+                for (i, e) in list.iter().enumerate() {
+                    if ui.button(&e.title).clicked() {
                         ui.close();
                         self.load_example(i);
                     }
@@ -668,27 +761,17 @@ impl App {
         });
     }
 
-    /// Replaces the project by a new one (nothing is kept of the old geometry, conditions or results).
-    pub fn new_project(&mut self, p: Project, what: &str) {
-        self.geom_edit = p.geometry.clone();
-        self.proj = p;
-        self.label_buffers.clear();
-        self.project_path = None;
-        self.rebuild_mesh();
-        self.tab = Tab::Geometry;
-        self.status = format!("New simulation: {what}. Set the geometry, materials and conditions, then Compute (F5).");
-    }
-
-    /// The File > New window: physics, 2D or 3D and how the geometry is made; Create starts an empty project.
+    /// The File > New window: physics, 2D or 3D; Create starts a blank project.
     fn new_dialog_ui(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.new_dialog.take() else { return };
         let (mut open, mut create, mut cancel) = (true, false, false);
+        let ids: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).collect();
         egui::Window::new("New simulation").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
             egui::Grid::new("new_sim").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                 ui.label("Physics");
-                egui::ComboBox::from_id_salt("new_physics").selected_text(d.physics.name()).show_ui(ui, |ui| {
-                    for p in Physics::ALL {
-                        ui.selectable_value(&mut d.physics, p, p.name());
+                egui::ComboBox::from_id_salt("new_physics").selected_text(self.physics_name(&d.physics)).show_ui(ui, |ui| {
+                    for p in &ids {
+                        ui.selectable_value(&mut d.physics, p.clone(), self.physics_name(p));
                     }
                 });
                 ui.end_row();
@@ -700,7 +783,7 @@ impl App {
                 ui.end_row();
             });
             ui.add_space(6.0);
-            ui.weak("The new project has default materials and no boundary conditions; everything can be changed in the tabs on the left.");
+            ui.weak("The new project has typical materials and no boundary conditions; everything can be changed in the tabs on the left.");
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.button(RichText::new("  Create  ").strong()).clicked() {
@@ -712,8 +795,8 @@ impl App {
             });
         });
         if create {
-            let what = format!("{}, {}", d.physics.name(), if d.three_d { "3D" } else { "2D" });
-            self.new_project(examples::blank(d.physics, d.three_d), &what);
+            let what = format!("{}, {}", self.physics_name(&d.physics), if d.three_d { "3D" } else { "2D" });
+            self.new_project(&d.physics, d.three_d, &what);
         } else if open && !cancel {
             self.new_dialog = Some(d);
         }
@@ -722,15 +805,18 @@ impl App {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Physics");
-            let mut active = self.proj.active;
-            egui::ComboBox::from_id_salt("active_physics").selected_text(active.name()).show_ui(ui, |ui| {
-                for p in Physics::ALL {
-                    ui.selectable_value(&mut active, p, p.name());
+            let mut active = self.active().unwrap_or_default();
+            let before = active.clone();
+            let ids: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
+            egui::ComboBox::from_id_salt("active_physics").selected_text(self.physics_name(&active)).show_ui(ui, |ui| {
+                for p in &ids {
+                    ui.selectable_value(&mut active, p.clone(), self.physics_name(p));
                 }
             });
-            if active != self.proj.active {
-                self.proj.active = active;
+            if active != before {
+                self.cmd("set_active", json!({ "physics": active }));
                 self.picking = None;
+                self.rules_dirty = true;
             }
             let busy = self.busy.is_some();
             let has_mesh = self.doc.mesh.is_some();
@@ -776,8 +862,9 @@ impl App {
                 ui.label(&self.status);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let order = self.active().and_then(|a| self.engine.project().spec(&a).map(|s| s.order as usize)).unwrap_or(2);
                 if let Some(m) = &self.doc.mesh {
-                    ui.weak(format!("{}  |  {}D  |  {} points  {} cells  |  P{} dofs: {}", self.doc.source, m.dim, m.n_points(), m.n_cells(), self.proj.active_spec().order, m.n_dofs(self.proj.active_spec().order) * if self.proj.active == Physics::Solid { m.dim } else { 1 }));
+                    ui.weak(format!("{}  |  {}D  |  {} points  {} cells  |  P{} nodes: {}", self.doc.source, m.dim, m.n_points(), m.n_cells(), order, m.n_dofs(order)));
                 } else if let Some(v) = &self.doc.view {
                     ui.weak(format!("{}  |  {}D  |  view only, {} cells", self.doc.source, v.dim, v.n_cells));
                 }
@@ -788,33 +875,29 @@ impl App {
     pub fn viewport_ui(&mut self, ui: &mut egui::Ui) {
         let bg = Color32::from_rgb(24, 26, 30);
         let mut bc_colors: HashMap<i32, Color32> = HashMap::new();
-        let phys = self.proj.active;
-        for (i, bc) in self.proj.spec(phys).bcs.iter().enumerate() {
-            for &l in &bc.labels {
+        for (i, labels) in self.bc_labels.iter().enumerate() {
+            for &l in labels {
                 bc_colors.insert(l, crate::colormap::palette(i + 3));
             }
         }
-        let selected: Vec<i32> = match self.picking {
-            Some(i) => self.proj.spec(phys).bcs.get(i).map(|b| b.labels.clone()).unwrap_or_default(),
-            None => vec![],
-        };
+        let selected: Vec<i32> = if self.picking.is_some() { self.picked.clone() } else { vec![] };
         let picking = self.picking.is_some();
-        let cmap = self.proj.colormap;
+        let cmap = self.colormap;
         let (show_edges, show_numbers, show_results) = (self.show_edges, self.show_numbers, self.show_results);
         // while the geometry is being edited the exact model is drawn, not the mesh of an earlier version
-        let preview = if self.tab == Tab::Geometry && (self.geometry_dirty || self.geom_edit != self.proj.geometry) { self.geom_ui.preview.clone() } else { None };
+        let preview = if self.tab == Tab::Geometry && (self.geometry_dirty || self.geom_edit != self.engine.project().geometry) { self.geom_ui.preview.clone() } else { None };
         let show_results = show_results && preview.is_none();
         let view = preview.or_else(|| self.doc.view.clone());
-        
+
         let out = match (self.current, view) {
             (Some(i), Some(view)) if show_results => {
                 let rv = &mut self.results[i];
                 let values = rv.field_values();
                 let range = rv.range();
                 let warp = rv.displacement().filter(|_| rv.warp != 0.0).map(|d| (d, rv.warp));
-                let sol = rv.sol.min(rv.result.solutions.len() - 1);
-                let nf = rv.result.solutions[sol].fields.len();
-                let f = &rv.result.solutions[sol].fields[rv.field.min(nf - 1)];
+                let sol = rv.sol.min(rv.sols.len() - 1);
+                let nf = rv.sols[sol].fields.len();
+                let f = &rv.sols[sol].fields[rv.field.min(nf - 1)];
                 let (title, unit) = (f.name.clone(), f.unit.clone());
                 let rv = &self.results[i];
                 self.vp.show(
@@ -834,31 +917,39 @@ impl App {
                     bg,
                 )
             }
-            (_, Some(view)) => {
-                self.vp.show(ui, Content::Mesh { view: &view, bc_colors: &bc_colors, selected: &selected, show_edges, show_numbers }, picking, bg)
-            }
-            _ => {
-                self.vp.show(ui, Content::Empty, false, bg)
-            }
+            (_, Some(view)) => self.vp.show(ui, Content::Mesh { view: &view, bc_colors: &bc_colors, selected: &selected, show_edges, show_numbers }, picking, bg),
+            _ => self.vp.show(ui, Content::Empty, false, bg),
         };
         if let (Some(label), Some(i)) = (out.picked, self.picking) {
-            let bcs = &mut self.proj.spec_mut(phys).bcs;
-            let mut now = vec![];
-            if let Some(bc) = bcs.get_mut(i) {
-                if let Some(p) = bc.labels.iter().position(|&l| l == label) {
-                    bc.labels.remove(p);
-                } else {
-                    bc.labels.push(label);
-                    bc.labels.sort();
-                }
-                // a hand-picked set is not a rule any more; the suggestions below write it as one
-                bc.on = None;
-                now = bc.labels.clone();
+            if let Some(p) = self.picked.iter().position(|&l| l == label) {
+                self.picked.remove(p);
+            } else {
+                self.picked.push(label);
+                self.picked.sort();
             }
-            self.suggestions = match self.doc.mesh.clone() {
-                Some(mesh) => self.proj.geometry.names(&mesh).map(|n| n.suggest(&now)).unwrap_or_default(),
-                None => vec![],
-            };
+            self.suggestions = self.doc.model.as_ref().map(|m| m.suggest(&self.picked)).unwrap_or_default();
+            // the simplest selector that picks exactly this set becomes the condition's; otherwise the person chooses
+            if let Some(first) = self.suggestions.first().cloned() {
+                self.set_condition_on(i, &first);
+            }
+        }
+    }
+
+    /// Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`).
+    pub fn set_condition_on(&mut self, i: usize, on: &str) {
+        let Some(active) = self.active() else { return };
+        let Some(mut spec) = self.engine.project().spec(&active).cloned() else { return };
+        if let Some(bc) = spec.bcs.get_mut(i) {
+            bc.on = on.to_string();
+            self.set_problem(&active, &spec);
+        }
+    }
+
+    /// Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here).
+    pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec) {
+        let v = serde_json::to_value(spec).unwrap_or(Value::Null);
+        if self.cmd("set_problem", json!({ "physics": physics, "problem": v })).is_some() {
+            self.rules_dirty = true;
         }
     }
 }
@@ -897,7 +988,7 @@ impl eframe::App for App {
             return;
         }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
-            self.new_dialog = Some(NewDialog { physics: self.proj.active, three_d: false });
+            self.new_dialog = Some(NewDialog { physics: self.active().unwrap_or_else(|| "dfs".into()), three_d: false });
         }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::O)) {
             self.open_dialog();
@@ -913,7 +1004,7 @@ impl eframe::App for App {
         });
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         egui::Panel::left("inspector").default_size(400.0).size_range(320.0..=700.0).resizable(true).show(ui, |ui| self.inspector(ui));
-        if self.bottom_open && self.show_results && self.current.is_some_and(|i| self.results[i].result.solutions.len() > 1) {
+        if self.bottom_open && self.show_results && self.current.is_some_and(|i| self.results[i].sols.len() > 1) {
             egui::Panel::bottom("results_panel").default_size(190.0).resizable(true).show(ui, |ui| self.results_panel(ui));
         }
         self.new_dialog_ui(ui.ctx());
@@ -938,18 +1029,13 @@ impl eframe::App for App {
     }
 }
 
-#[allow(dead_code)]
-fn _unused(_: Arc<()>, _: Colormap) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
 
     fn app() -> App {
-        let mut a = App::with_context(egui::Context::default());
-        a.autosave = false; // tests must not write into the user's Documents
-        a
+        App::with_context(egui::Context::default())
     }
 
     /// Processes finished jobs until nothing runs (or panics after `secs`).
@@ -966,30 +1052,31 @@ mod tests {
         }
     }
 
+    fn example(name_part: &str) -> usize {
+        examples::list().iter().position(|e| e.path.to_string_lossy().contains(name_part)).unwrap_or_else(|| panic!("no example {name_part}"))
+    }
+
     #[test]
     fn a_new_simulation_starts_empty_and_can_be_set_up_and_solved() {
         let mut a = app();
-        a.load_example(0);
         wait_idle(&mut a, 30);
-        for physics in Physics::ALL {
+        for physics in ["dfs", "sms", "ems"] {
             for three_d in [false, true] {
-                {
-                    let p = crate::examples::blank(physics, three_d);
-                    assert_eq!(p.active, physics);
-                    assert!(p.specs.iter().all(|s| s.bcs.is_empty()), "no boundary conditions in a new project");
-                    let mesh = p.geometry.build().unwrap_or_else(|e| panic!("{physics:?} 3d={three_d}: {e}"));
-                    assert_eq!(mesh.dim, if three_d { 3 } else { 2 });
-                }
+                let mut e = Engine::new();
+                examples::blank(&mut e, physics, three_d).unwrap_or_else(|err| panic!("{physics} 3d={three_d}: {err}"));
+                let p = e.project();
+                assert_eq!(p.active.as_deref(), Some(physics));
+                assert!(p.physics.iter().all(|s| s.bcs.is_empty()), "no boundary conditions in a new project");
+                e.call("mesh_build", &json!({})).unwrap_or_else(|err| panic!("{physics} 3d={three_d}: {err}"));
+                assert_eq!(e.model().unwrap().mesh().dim(), if three_d { 3 } else { 2 });
             }
         }
-        a.new_project(crate::examples::blank(Physics::Electrostatics, false), "test");
+        a.new_project("dfs", false, "test");
         wait_idle(&mut a, 30);
         assert!(a.results.is_empty() && a.doc.mesh.is_some() && a.project_path.is_none());
         // set up from scratch: plates on the left and right, then compute
-        let names = a.proj.geometry.build_named().unwrap();
-        let (left, right) = (names.select("outer & plane(x = 0)").unwrap(), names.select("outer & plane(x = 1)").unwrap());
-        let es = a.proj.spec_mut(Physics::Electrostatics);
-        es.bcs = vec![Bc { on: None, labels: left, kind: BcKind::Potential(1.0) }, Bc { on: None, labels: right, kind: BcKind::Ground }];
+        a.cmd("add_condition", json!({ "physics": "dfs", "on": "outer & plane(x = 0)", "kind": "potential", "params": { "value": 1.0 } }));
+        a.cmd("add_condition", json!({ "physics": "dfs", "on": "outer & plane(x = 1)", "kind": "ground" }));
         a.compute();
         wait_idle(&mut a, 60);
         assert!(a.error.is_none(), "{:?}", a.error);
@@ -999,12 +1086,12 @@ mod tests {
     #[test]
     fn an_example_is_built_computed_and_shown() {
         let mut a = app();
-        a.load_example(0);
+        a.load_example(example("01_capacitor"));
         assert!(a.busy.is_some());
         wait_idle(&mut a, 30);
         assert!(a.doc.mesh.is_some(), "{:?}", a.error);
         a.compute();
-        assert!(a.busy.is_some(), "compute started: {}", a.status);
+        assert!(a.busy.is_some(), "compute started: {} / {:?}", a.status, a.error);
         wait_idle(&mut a, 60);
         assert!(a.error.is_none(), "{:?}", a.error);
         assert_eq!(a.results.len(), 1);
@@ -1016,7 +1103,7 @@ mod tests {
     #[test]
     fn a_second_job_is_refused_while_one_runs_and_a_mesh_build_waits_its_turn() {
         let mut a = app();
-        a.load_example(4);
+        a.load_example(example("05_block"));
         assert!(a.busy.is_some());
         a.compute(); // nothing to solve on yet and a job is running: refused with a message, not started
         assert!(a.status.starts_with("Busy"), "{}", a.status);
@@ -1029,14 +1116,14 @@ mod tests {
     }
 
     #[test]
-    fn a_message_of_an_older_job_does_not_clear_the_busy_state() {
+    fn a_message_of_a_script_does_not_clear_the_busy_state() {
         let mut a = app();
-        a.load_example(0);
+        a.load_example(example("01_capacitor"));
         let running = a.job.as_ref().map(|j| j.0).unwrap();
-        a.tx.send((running + 100, Msg::Script(Ok("from an old job".into())))).unwrap();
+        a.tx.send((running + 100, Msg::Script(Ok("from a script".into())))).unwrap();
         a.poll();
-        assert_eq!(a.script_output.as_deref(), Some("from an old job"));
-        assert!(a.busy.is_some() || a.job.is_none(), "only the running job's own message ends it");
+        assert_eq!(a.script_output.as_deref(), Some("from a script"));
+        assert!(a.busy.is_some() || a.job.is_none(), "only the running job's own end clears it");
         wait_idle(&mut a, 30);
         assert!(a.busy.is_none() && a.job.is_none());
     }
@@ -1044,31 +1131,30 @@ mod tests {
     #[test]
     fn a_long_solve_can_be_cancelled_and_earlier_results_stay() {
         let mut a = app();
-        a.load_example(0);
+        a.load_example(example("01_capacitor"));
         wait_idle(&mut a, 30);
         a.compute();
         wait_idle(&mut a, 60);
         assert_eq!(a.results.len(), 1);
         // a big 3D eigenfrequency problem on the same window
-        a.load_example(4);
+        a.load_example(example("05_block"));
         wait_idle(&mut a, 30);
-        a.geom_edit = GeometrySpec::plate(1.2, 1.2, 0.1, Some(6.0));
-        a.rebuild_mesh();
+        a.cmd("set_mesh", json!({ "h": 0.1, "sweep": [{ "thickness": 6.0, "n": 60 }] }));
+        a.cmd("set_physics_params", json!({ "physics": "sms", "params": { "solver": "iterative" } }));
+        a.cmd("set_study", json!({ "physics": "sms", "kind": "eigenfrequency", "params": { "n_modes": 6, "f_search": 0.0 }, "order": 2 }));
+        // a boundary load belongs to the static study: the eigenfrequency study has only the clamp
+        a.cmd("remove_condition", json!({ "physics": "sms", "index": 1 }));
+        a.adopt();
         wait_idle(&mut a, 60);
         let kept = a.results.len();
-        let phys = a.proj.active;
-        let spec = a.proj.spec_mut(phys);
-        spec.study = Study::Eigenfrequency { n_modes: 6, f_search: 0.0 };
-        spec.solver = LinearSolver::Iterative;
-        spec.order = 2;
         a.compute();
         assert!(a.busy.is_some(), "{} / {:?}", a.status, a.error);
         std::thread::sleep(Duration::from_millis(1500));
         let t = Instant::now();
         a.cancel_job();
-        wait_idle(&mut a, 60);
-        assert!(t.elapsed() < Duration::from_secs(40), "cancelled after {:?}", t.elapsed());
-        assert!(a.status.contains("cancelled"), "{}", a.status);
+        wait_idle(&mut a, 90);
+        assert!(t.elapsed() < Duration::from_secs(60), "cancelled after {:?}", t.elapsed());
+        assert!(a.status.contains("cancelled"), "{} / {:?}", a.status, a.error);
         assert!(a.error.is_none());
         assert_eq!(a.results.len(), kept, "a cancelled solve adds no result");
     }
@@ -1076,17 +1162,74 @@ mod tests {
     #[test]
     fn a_project_saves_and_loads_again() {
         let mut a = app();
-        a.load_example(5);
+        a.load_example(example("06_wr90"));
         wait_idle(&mut a, 30);
-        let path = std::env::temp_dir().join(format!("nyx-test-{}.nyx.xml", std::process::id()));
+        let path = std::env::temp_dir().join(format!("nyx-test-{}.nyx.json", std::process::id()));
         a.project_path = Some(path.clone());
         a.save_project(false);
         assert!(path.exists(), "{}", a.status);
         let mut b = app();
         b.load_project(&path);
         wait_idle(&mut b, 30);
-        assert_eq!(a.proj.to_xml().unwrap(), b.proj.to_xml().unwrap());
+        assert_eq!(a.engine.project().to_json(), b.engine.project().to_json());
         assert!(b.doc.mesh.is_some());
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Draws every tab of the inspector, the toolbar and the viewport for several examples on a headless egui context: a panic in a form
+    /// (a descriptor the window cannot draw, a project it cannot show) fails here.
+    #[test]
+    fn every_tab_draws_for_the_examples() {
+        let mut a = app();
+        for name in ["01_capacitor", "04_thermal_bar", "09_pml_slab", "15_soi_wire", "13_silicon_on_sapphire"] {
+            a.load_example(example(name));
+            wait_idle(&mut a, 60);
+            if !name.starts_with("13") {
+                a.compute();
+                wait_idle(&mut a, 120);
+                assert!(a.error.is_none(), "{name}: {:?}", a.error);
+            }
+            for t in Tab::ALL {
+                a.tab = t;
+                if t == Tab::Results && a.results.is_empty() || t == Tab::Analysis && !a.has_analysis() {
+                    continue;
+                }
+                let ctx = a.ctx.clone();
+                ctx.run_ui(Default::default(), |ui| {
+                    a.inspector(ui);
+                    a.toolbar(ui);
+                    a.status_bar(ui);
+                    a.viewport_ui(ui);
+                    if a.show_results {
+                        a.results_panel(ui);
+                    }
+                });
+            }
+            // the mesh view with a condition being picked
+            a.tab = Tab::Physics;
+            a.show_results = false;
+            a.picking = if a.bc_labels.is_empty() { None } else { Some(0) };
+            let ctx = a.ctx.clone();
+            ctx.run_ui(Default::default(), |ui| {
+                a.inspector(ui);
+                a.viewport_ui(ui);
+            });
+        }
+    }
+
+    #[test]
+    fn picking_a_boundary_on_the_mesh_gives_a_selector() {
+        let mut a = app();
+        a.load_example(example("02_cantilever"));
+        wait_idle(&mut a, 30);
+        a.sync_rules();
+        assert_eq!(a.bc_labels.len(), 2, "two conditions resolve on the mesh");
+        assert!(a.rule_errors.is_empty(), "{:?}", a.rule_errors);
+        let left = a.bc_labels[0].clone();
+        let sugg = a.doc.model.as_ref().unwrap().suggest(&left);
+        assert!(!sugg.is_empty(), "no selector for the left edge");
+        for s in &sugg {
+            assert_eq!(nyx_engine::facade::physics::LabelResolver::boundaries(a.doc.model.as_ref().unwrap().as_ref(), s).unwrap(), left, "{s}");
+        }
     }
 }

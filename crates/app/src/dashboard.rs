@@ -1,20 +1,22 @@
 //! The dashboard: running workflows with live status, pinned and recent ones as cards, everything older in a list, and search.
-//! The rules (three days, the card cap, "done", nothing deleted) are `nyx_store::Workspace::sections`.
+//! The rules (three days, the card cap, "done", nothing deleted) are `nyx_engine::facade::store::Workspace::sections`.
 
 use crate::app::App;
 use crate::kit;
 use crate::shell::Sheet;
 use crate::theme;
 use eframe::egui::{self, Color32, RichText, Sense, Vec2};
-use nyx_store::util::{ago, now_secs};
-use nyx_store::{Entry, Status, WorkflowDir};
+use nyx_engine::facade::store::util::{ago, now_secs};
+use nyx_engine::facade::store::{Entry, Status, WorkflowDir};
 
 pub fn physics_label(p: &str) -> &'static str {
     match p {
         "Electrostatics" => "Electrostatics",
         "Heat" => "Heat transfer",
         "Solid" => "Solid mechanics",
-        "Emw" => "EM waves",
+        "Emw" | "ems" => "EM waves",
+        "dfs" => "Diffusion",
+        "sms" => "Solid mechanics",
         _ => "Other",
     }
 }
@@ -105,9 +107,9 @@ impl App {
     }
 
     fn dashboard_results(&mut self, ui: &mut egui::Ui) {
-        let q = nyx_store::search::Query::parse(&self.shell.dash_q);
+        let q = nyx_engine::facade::store::search::Query::parse(&self.shell.dash_q);
         let entries = self.shell.entries.clone();
-        let hits = nyx_store::search::search(&q, &entries);
+        let hits = nyx_engine::facade::store::search::search(&q, &entries);
         ui.label(kit::muted(ui, format!("Understood as: {}", q.understood().join(" · "))));
         ui.add_space(6.0);
         let mut open = None;
@@ -134,7 +136,7 @@ impl App {
         if shown == 0 {
             ui.label(kit::muted(ui, "Nothing matches. Hidden and done workflows are searched too; try fewer words."));
         }
-        let runs = nyx_store::search::run_hits(&q, &entries, &hits, 5);
+        let runs = nyx_engine::facade::store::search::run_hits(&q, &entries, &hits, 5);
         if !runs.is_empty() {
             ui.add_space(8.0);
             kit::label_caps(ui, "Runs", "");

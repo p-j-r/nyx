@@ -4,13 +4,13 @@
 //! typical model); meshing stays behind the Build button.
 
 use eframe::egui::{self, Color32, ComboBox, RichText, TextEdit, Ui};
-use femcore::mesh::view::ViewMesh;
-use geom::eval::Evaluated;
-use geom::expr::{Env, Expr};
-use geom::labels::LabelMap;
+use nyx_engine::facade::ViewMesh;
+use nyx_engine::facade::geom::eval::Evaluated;
+use nyx_engine::facade::geom::expr::{Env, Expr};
+use nyx_engine::facade::geom::labels::LabelMap;
 use std::sync::Arc;
-use geom::model::*;
-use geom::select::Selector;
+use nyx_engine::facade::geom::model::*;
+use nyx_engine::facade::geom::select::Selector;
 
 const RED: Color32 = Color32::from_rgb(220, 100, 100);
 
@@ -61,7 +61,7 @@ impl State {
         }
         self.ev = None;
         self.preview = None;
-        match femcore::meshing::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map(|lm| (ev, lm)).map_err(|e| e.to_string())) {
+        match nyx_engine::facade::geomdrive::evaluate(list).and_then(|ev| ev.label_map().map(|lm| (ev, lm)).map_err(|e| e.to_string())) {
             Ok((ev, lm)) => {
                 self.warnings = ev.warnings.clone();
                 self.preview = preview(&ev, &lm).map(Arc::new);
@@ -883,11 +883,14 @@ mod tests {
     /// The preview of a model carries the same numbers the mesh will: one domain per material region, one boundary label per edge.
     #[test]
     fn the_preview_is_numbered_like_the_mesh_and_selectors_report_their_hits() {
-        let p = crate::examples::soi_wire();
+        let path = crate::examples::list().into_iter().find(|x| x.path.to_string_lossy().contains("15_soi")).expect("the SOI wire example").path;
+        let mut e = nyx_engine::Engine::new();
+        e.call("project_open", &serde_json::json!({ "path": path.to_str().unwrap() })).unwrap();
+        e.call("mesh_build", &serde_json::json!({})).unwrap();
+        let mesh = e.model().unwrap().solver_mesh();
         let mut st = State::default();
-        st.refresh(&p.geometry.list);
+        st.refresh(&e.project().geometry);
         let v = st.preview.clone().expect("a 2D model has a preview");
-        let mesh = p.geometry.build().unwrap();
         assert_eq!(v.domain_labels, mesh.domain_labels());
         // the preview also draws the interfaces between regions, which the mesh has no boundary facets on
         assert!(mesh.boundary_labels().iter().all(|l| v.boundary_labels.contains(l)));

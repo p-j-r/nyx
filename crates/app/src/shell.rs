@@ -8,12 +8,11 @@
 //! switched off and the window behaves as before.
 
 use crate::app::App;
-use crate::state::Project;
 use crate::theme;
 use eframe::egui::{self, Color32, RichText, Sense, Vec2};
-use nyx_store::runs::{RunRecord, RunStatus};
-use nyx_store::util::{hash_bytes, now_secs};
-use nyx_store::{Entry, Settings, Workspace, WorkflowDir};
+use nyx_engine::facade::store::runs::{RunRecord, RunStatus};
+use nyx_engine::facade::store::util::{hash_bytes, now_secs};
+use nyx_engine::facade::store::{Entry, Settings, Workspace, WorkflowDir};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -23,6 +22,12 @@ pub enum Page {
     Dashboard,
     Workflow(String),
     Settings,
+}
+
+/// Where a new workflow starts from: an example (or any project file), or a blank simulation.
+pub enum Start {
+    Example(PathBuf),
+    Blank { physics: String, three_d: bool },
 }
 
 /// The three sections of an experiment.
@@ -149,7 +154,7 @@ impl OpenWf {
 pub struct RunCtx {
     pub wf_id: String,
     pub exp: String,
-    pub spec_xml: String,
+    pub spec_json: String,
     pub params: BTreeMap<String, f64>,
     pub started: Instant,
 }
@@ -157,14 +162,14 @@ pub struct RunCtx {
 pub struct NewState {
     pub title: String,
     pub template: usize,
-    pub physics: femcore::problem::Physics,
+    pub physics: String,
     pub three_d: bool,
     pub all_examples: bool,
 }
 
 impl Default for NewState {
     fn default() -> Self {
-        NewState { title: String::new(), template: 0, physics: femcore::problem::Physics::Emw, three_d: false, all_examples: false }
+        NewState { title: String::new(), template: 0, physics: "ems".into(), three_d: false, all_examples: false }
     }
 }
 
@@ -190,10 +195,10 @@ pub struct Shell {
     pub earlier_open: bool,
     pub version_sel: Option<u32>,
     pub version_name: String,
-    pub share_level: nyx_store::ShareLevel,
+    pub share_level: nyx_engine::facade::store::ShareLevel,
     pub share_only_current: bool,
     pub share_msg: String,
-    pub open_file: Option<(PathBuf, nyx_store::archive::Inspection)>,
+    pub open_file: Option<(PathBuf, nyx_engine::facade::store::archive::Inspection)>,
     pub classic: bool,
     pub dark: bool,
     pub logo: Option<egui::TextureHandle>,
@@ -230,7 +235,7 @@ impl Shell {
             earlier_open: true,
             version_sel: None,
             version_name: String::new(),
-            share_level: nyx_store::ShareLevel::Recipe,
+            share_level: nyx_engine::facade::store::ShareLevel::Recipe,
             share_only_current: false,
             share_msg: String::new(),
             open_file: None,
@@ -280,7 +285,6 @@ impl App {
                 self.shell.dark = ws.settings.theme == "dark";
                 self.shell.ws = Some(ws);
                 self.shell.classic = false;
-                self.autosave = false; // runs are recorded in the workflow instead of the loose `nyx_runs` folder
                 theme::apply_mode(&self.ctx, self.shell.dark);
                 self.refresh_entries();
                 let tabs = self.shell.settings().open_tabs;
@@ -322,16 +326,16 @@ impl App {
     // ------------------------------------------------------------------------------------------------------ the live project
 
     /// The project as it would be saved (the geometry being edited included).
-    pub fn spec_xml(&self) -> Result<String, String> {
-        let mut p = self.proj.clone();
+    pub fn spec_json(&self) -> Result<String, String> {
+        let mut p = self.engine.project().clone();
         p.geometry = self.geom_edit.clone();
-        p.to_xml()
+        p.mesh = self.mesh_edit.clone();
+        Ok(p.to_json())
     }
 
-    fn adopt(&mut self, p: Project) {
-        self.geom_edit = p.geometry.clone();
-        self.proj = p;
-        self.label_buffers.clear();
+    /// The engine has a new project (opened, or made): the window takes over its geometry and settings and meshes it.
+    fn adopt_project(&mut self) {
+        self.adopt();
         self.project_path = None;
         self.rebuild_mesh();
         self.tab = crate::state::Tab::Geometry;
@@ -340,7 +344,7 @@ impl App {
     /// Stores the live project in its workflow when it changed (called about once a second, and before anything that replaces it).
     pub fn flush(&mut self) {
         let Some((wid, eid)) = self.shell.loaded.clone() else { return };
-        let Ok(xml) = self.spec_xml() else { return };
+        let Ok(xml) = self.spec_json() else { return };
         let h = hash_bytes(xml.as_bytes());
         let Some(w) = self.shell.open.get_mut(&wid) else { return };
         if h == w.last_hash {
@@ -407,10 +411,10 @@ impl App {
         w.selected.clear();
         let Some(d) = &w.dir else { return };
         let path = d.spec_path(eid);
-        match Project::load(&path) {
-            Ok(p) => {
-                self.adopt(p);
-                let h = self.spec_xml().map(|x| hash_bytes(x.as_bytes())).unwrap_or_default();
+        match self.engine.call("project_open", &serde_json::json!({ "path": path.to_str().unwrap_or_default() })) {
+            Ok(_) => {
+                self.adopt_project();
+                let h = self.spec_json().map(|x| hash_bytes(x.as_bytes())).unwrap_or_default();
                 if let Some(w) = self.shell.open.get_mut(wid) {
                     w.last_hash = h;
                     w.notes = w.dir.as_ref().map(|d| d.notes()).unwrap_or_default();
@@ -418,7 +422,7 @@ impl App {
                 self.shell.loaded = Some((wid.to_string(), eid.to_string()));
                 self.status = format!("Opened {}", path.display());
             }
-            Err(e) => self.set_error(e),
+            Err(e) => self.set_error(format!("{}: {e}", path.display())),
         }
     }
 
@@ -464,15 +468,28 @@ impl App {
     }
 
     /// A new draft workflow from a project (nothing is written until the first change).
-    pub fn new_draft(&mut self, title: &str, p: Project) {
+    pub fn new_draft(&mut self, title: &str, start: Start) {
         self.flush();
-        let id = nyx_store::util::short_id();
+        let id = nyx_engine::facade::store::util::short_id();
         let mut w = OpenWf::new(id.clone());
         w.draft_title = title.trim().to_string();
         self.shell.open.insert(id.clone(), w);
         self.shell.tabs.push(id.clone());
-        self.adopt(p);
-        let xml = self.spec_xml().unwrap_or_default();
+        match start {
+            Start::Example(path) => {
+                if self.cmd("project_open", serde_json::json!({ "path": path.to_str().unwrap_or_default() })).is_none() {
+                    return;
+                }
+            }
+            Start::Blank { physics, three_d } => {
+                if let Err(e) = crate::examples::blank(&mut self.engine, &physics, three_d) {
+                    self.set_error(e);
+                    return;
+                }
+            }
+        }
+        self.adopt_project();
+        let xml = self.spec_json().unwrap_or_default();
         if let Some(w) = self.shell.open.get_mut(&id) {
             w.spec0 = xml.clone();
             w.last_hash = hash_bytes(xml.as_bytes());
@@ -522,14 +539,14 @@ impl App {
             self.show_workflow(&wid);
         }
         let Some((_, eid)) = self.shell.loaded.clone() else { return };
-        let Ok(xml) = self.spec_xml() else { return };
+        let Ok(xml) = self.spec_json() else { return };
         // a run needs a folder: a draft gets it now (the run is its first change)
         if self.shell.open.get(&wid).is_some_and(|w| w.dir.is_none()) && self.persist_draft(&wid, &xml).is_err() {
             return;
         }
         self.flush();
         let params = params_of(&xml);
-        self.shell.run = Some(RunCtx { wf_id: wid.clone(), exp: eid, spec_xml: xml, params, started: Instant::now() });
+        self.shell.run = Some(RunCtx { wf_id: wid.clone(), exp: eid, spec_json: xml, params, started: Instant::now() });
         self.compute();
         if self.busy.is_none() {
             // refused (nothing to solve on, wrong study): there is no job, so no record
@@ -538,9 +555,9 @@ impl App {
     }
 
     /// A solve finished well: writes its run record and keeps the log with it. Returns the run id.
-    pub fn record_ok(&mut self, res: &femcore::problem::SolveResult) -> Option<String> {
+    pub fn record_ok(&mut self, res: &nyx_engine::facade::physics::SolveResult) -> Option<String> {
         let rc = self.shell.run.take()?;
-        let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: nyx_store::runs::metrics_of(res), ..Default::default() };
+        let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: nyx_engine::store_link::metrics_of(res), ..Default::default() };
         self.write_run(rc, rec, Some(res.log.join("\n")))
     }
 
@@ -554,9 +571,9 @@ impl App {
     fn write_run(&mut self, rc: RunCtx, mut rec: RunRecord, log: Option<String>) -> Option<String> {
         let w = self.shell.open.get_mut(&rc.wf_id)?;
         if log.is_some() {
-            rec.artifacts.push(nyx_store::runs::Artifact { kind: "log".into(), path: "log.txt".into(), bytes: 0 });
+            rec.artifacts.push(nyx_engine::facade::store::runs::Artifact { kind: "log".into(), path: "log.txt".into(), bytes: 0 });
         }
-        let res = w.dir.as_mut()?.record_run(&rc.exp, rec, &rc.spec_xml);
+        let res = w.dir.as_mut()?.record_run(&rc.exp, rec, &rc.spec_json);
         match res {
             Ok(r) => {
                 let d = w.dir.as_mut()?;
@@ -755,25 +772,21 @@ impl App {
     pub fn open_received(&mut self, p: PathBuf) {
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         if ext == "nyx" {
-            let ins = nyx_store::archive::inspect(&p, &nyx_store::archive::Limits::default());
+            let ins = nyx_engine::facade::store::archive::inspect(&p, &nyx_engine::facade::store::archive::Limits::default());
             self.shell.open_file = Some((p, ins));
             self.shell.sheet = Sheet::Open;
         } else {
-            match Project::load(&p) {
-                Ok(proj) => {
-                    let title = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported project").trim_end_matches(".nyx").to_string();
-                    self.new_draft(&title, proj);
-                }
-                Err(e) => self.set_error(e),
-            }
+            let title = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported project").trim_end_matches(".nyx").to_string();
+            self.new_draft(&title, Start::Example(p));
         }
     }
 }
 
 /// Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec.
-pub fn params_of(xml: &str) -> BTreeMap<String, f64> {
+pub fn params_of(json: &str) -> BTreeMap<String, f64> {
     let mut m = BTreeMap::new();
-    if let Ok(c) = nyx_store::card::from_xml(xml) {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+        let c = nyx_engine::store_link::card_of(&v);
         for d in &c.geometry.dims {
             let key: String = format!("{}_{}", d.of, d.name).chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
             m.entry(key).or_insert(d.m);

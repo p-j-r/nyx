@@ -117,6 +117,10 @@ impl Engine {
             cmd("project_save", "Save the project to a file", "Writes the project as a JSON file.", Expensive, schema(vec![("path", text("file path"))], &["path"])),
             cmd("list_operations", "List the geometry operations", "Every geometry operation with its fields, types and defaults (what the add_* commands take).", Read, schema(vec![], &[])),
             cmd("list_features", "List the features", "The feature list: parameters, and each feature with its kind and arguments.", Read, schema(vec![], &[])),
+            cmd("set_geometry", "Replace the geometry", "Replaces the whole feature list by one given as JSON (what the window's geometry editor writes); it is checked first.", Edit,
+                schema(vec![("geometry", object("a feature list: { dim, params, features }"))], &["geometry"])),
+            cmd("set_problem", "Replace the problem of a physics", "Replaces the whole problem (study, order, materials, conditions, options) of a physics by one given as JSON, after checking it against the descriptors. Adds the physics if the project has no problem for it yet.", Edit,
+                schema(vec![("physics", phys()), ("problem", object("a problem: { physics, order, study, materials, bcs, params }"))], &["physics", "problem"])),
             cmd("update_feature", "Change a feature", "Changes some fields of a feature; give only the fields to change, in the form the add command takes.", Edit,
                 schema(vec![("name", text("feature name")), ("fields", object("fields to change"))], &["name", "fields"])),
             cmd("remove_feature", "Remove a feature", "Removes a feature that no later feature uses.", Edit, schema(vec![("name", text("feature name"))], &["name"])),
@@ -240,6 +244,32 @@ impl Engine {
                 "fields": d.fields.iter().map(|f| json!({ "name": f.name, "type": format!("{:?}", f.ty), "required": f.required, "default": f.default, "doc": f.doc })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>())),
             "list_features" => Ok(geometry::describe(&self.project.geometry)),
+            "set_geometry" => {
+                let g: geom::model::FeatureList = serde_json::from_value(args.get("geometry").cloned().unwrap_or(Value::Null))
+                    .map_err(|e| Error::invalid(format!("`geometry` is not a feature list: {e}")))?;
+                geometry::set_all(&mut self.project.geometry, g)?;
+                ok()
+            }
+            "set_problem" => {
+                let id = get_str(args, "physics")?.to_string();
+                let p = crate::physics_for(&self.registry, &id)?;
+                let spec: ProblemSpec = serde_json::from_value(args.get("problem").cloned().unwrap_or(Value::Null))
+                    .map_err(|e| Error::invalid(format!("`problem` is not a problem: {e}")))?;
+                if spec.physics != id {
+                    return Err(Error::invalid(format!("the problem is for '{}', not '{id}'", spec.physics)));
+                }
+                nyx_physics::validate_spec(p, &spec)?;
+                match self.project.spec_mut(&id) {
+                    Some(s) => *s = spec,
+                    None => {
+                        self.project.physics.push(spec);
+                        if self.project.active.is_none() {
+                            self.project.active = Some(id);
+                        }
+                    }
+                }
+                ok()
+            }
             "update_feature" => {
                 geometry::update_feature(&mut self.project.geometry, get_str(args, "name")?, args.get("fields").unwrap_or(&Value::Null))?;
                 ok()

@@ -1,17 +1,19 @@
 //! nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in
-//! the `femcore` crate).
+//! the engine and the physics crates).
 //!
-//! Command line: `nyx [FILE]` opens the window (and a project or HDF5 results file), `--size WxH` sets the window size,
-//! `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.xml` solves
+//! Command line: `nyx [FILE]` opens the window (and a project file), `--size WxH` sets the window size,
+//! `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.json` solves
 //! without a window (see `batch`). Modules: `app` (state and layout), the Connect menu (in `app`, backed by the `nyx-connect` crate), `tabs` (the inspector), `viewport` and `scene` (drawing),
-//! `worker` (background jobs), `state` (the saved project), `examples`, `colormap`, `theme`.
+//! `pyscript` (the optional Python script), `state` (the mesh and result on show), `examples`, `colormap`, `theme`.
 mod app;
 mod batch;
 mod colormap;
 mod dashboard;
 mod examples;
+mod forms;
 mod geomui;
 mod kit;
+mod pyscript;
 mod scene;
 mod script;
 mod sheets;
@@ -21,7 +23,6 @@ mod tabs;
 mod theme;
 mod viewport;
 mod wfview;
-mod worker;
 
 fn main() -> eframe::Result {
     let mut args: Vec<String> = std::env::args().skip(1).collect();

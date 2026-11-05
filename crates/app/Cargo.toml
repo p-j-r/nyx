@@ -5,11 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-femcore = { path = "../femcore" }
 nyx-engine = { path = "../nyx-engine" }
-geom = { path = "../geom" }
 nyx-connect = { path = "../nyx-connect" }
-nyx-store = { path = "../nyx-store" }
 rayon = "1"
 eframe = "0.37"
 rfd = "0.17"
@@ -18,8 +15,6 @@ serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 egui_plot = "0.38"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-[features]
-# HDF5 results files (needs the HDF5 library; set HDF5_DIR to its install prefix)
-hdf5 = ["femcore/hdf5-metno"]
-# parallel HDF5 (MPI-IO) output as well; needs an MPI-enabled HDF5 and an MPI SDK to build
-phdf5 = ["hdf5", "femcore/phdf5"]
+[dev-dependencies]
+# fixtures of the drawing tests (a meshed plate and block); normal dependencies are only the engine and the connect crate (layering table)
+femcore = { path = "../femcore" }

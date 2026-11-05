@@ -57,3 +57,21 @@ pub fn physics_for<'a>(registry: &'a Registry, id: &str) -> Result<&'a dyn nyx_p
         Error::Unsupported(format!("this build has no physics '{id}' (it has: {})", registry.ids().join(", ")))
     })
 }
+
+/// What a front-end needs from the layers below without depending on them: it draws on these types and edits the geometry with them, so
+/// the window and the MCP server name only `nyx-engine` (restructure phase 7; the layering table has no other edge for them).
+pub mod facade {
+    /// The problem envelope, descriptors and results every physics speaks.
+    pub use nyx_physics as physics;
+    /// The mesh as the plots read it (vertices, edges, P2 dofs), the surface that is drawn and the nodal fields drawn on it.
+    pub use femcore::fields::Display;
+    pub use femcore::mesh::view::ViewMesh;
+    pub use femcore::mesh::SimplexMesh;
+    /// Evaluation of a feature list (what the geometry editor previews).
+    pub use femcore::meshing::geomdrive;
+    pub use femcore::progress::Progress;
+    /// The geometry kernel: the feature list the geometry editor changes, evaluation, selectors.
+    pub use geom;
+    /// Workspaces, workflows, experiments, runs, versions, search and `.nyx` files.
+    pub use nyx_store as store;
+}

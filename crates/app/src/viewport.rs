@@ -4,8 +4,8 @@ use crate::colormap::{palette, Colormap};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use crate::scene::{Colors, Scene, SceneData};
 use eframe::egui::epaint::{Mesh, Vertex, WHITE_UV};
-use femcore::fields::Display;
-use femcore::mesh::view::ViewMesh;
+use nyx_engine::facade::Display;
+use nyx_engine::facade::ViewMesh;
 use rayon::prelude::*;
 use std::collections::HashMap;
 

@@ -3,20 +3,19 @@
 use crate::app::App;
 use crate::examples;
 use crate::kit;
-use crate::shell::{Page, Sheet};
+use crate::shell::{Page, Sheet, Start};
 use crate::theme;
 use eframe::egui::{self, Color32, RichText};
-use femcore::problem::Physics;
-use nyx_store::archive::{ExportOptions, Limits};
-use nyx_store::util::{ago, now_secs};
-use nyx_store::versions::{self, VersionKind};
-use nyx_store::ShareLevel;
+use nyx_engine::facade::store::archive::{ExportOptions, Limits};
+use nyx_engine::facade::store::util::{ago, now_secs};
+use nyx_engine::facade::store::versions::{self, VersionKind};
+use nyx_engine::facade::store::ShareLevel;
 
-/// Start-from cards: (title, text, example index in `examples::NAMES`, or `None` when no template exists yet)
+/// Start-from cards: (title, text, index in `examples::list()`, or `None` when it starts blank)
 const TEMPLATES: [(&str, &str, Option<usize>); 8] = [
     ("Optical waveguide", "Strip or rib cross-section, modes and n_eff", Some(14)),
     ("Strip on sapphire", "Optical and acoustic modes of a silicon strip", Some(12)),
-    ("Bragg grating", "Periodic cell, 3D, band-edge modes", Some(16)),
+    ("Rectangular cavity", "3D electromagnetic eigenmodes of a box", Some(13)),
     ("Ring resonator", "Whispering-gallery modes, axisymmetric", None),
     ("Vibrating structure", "Solid mechanics, eigenfrequencies", Some(1)),
     ("Heat transfer", "Stationary or transient temperature", Some(2)),
@@ -84,9 +83,11 @@ impl App {
             let blank = self.shell.new.template == 7;
             ui.add_enabled_ui(blank, |ui| {
                 ui.label("Physics");
-                egui::ComboBox::from_id_salt("new_phys").selected_text(self.shell.new.physics.name()).show_ui(ui, |ui| {
-                    for p in Physics::ALL {
-                        ui.selectable_value(&mut self.shell.new.physics, p, p.name());
+                let ids: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).collect();
+                egui::ComboBox::from_id_salt("new_phys").selected_text(self.physics_name(&self.shell.new.physics)).show_ui(ui, |ui| {
+                    for p in ids {
+                        let name = self.physics_name(&p);
+                        ui.selectable_value(&mut self.shell.new.physics, p, name);
                     }
                 });
                 ui.label("Dimension");
@@ -109,20 +110,20 @@ impl App {
                 self.shell.sheet = Sheet::None;
                 self.pick_nyx_file();
             }
-            if ui.link("Import a .nyx.xml project").clicked() {
+            if ui.link("Import a .nyx.json project").clicked() {
                 self.shell.sheet = Sheet::None;
                 self.pick_nyx_file();
             }
-            if ui.link(format!("Browse all {} examples", examples::NAMES.len())).clicked() {
+            if ui.link(format!("Browse all {} examples", examples::list().len())).clicked() {
                 self.shell.new.all_examples = !self.shell.new.all_examples;
             }
         });
         if self.shell.new.all_examples {
             egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                for (i, n) in examples::NAMES.iter().enumerate() {
-                    if ui.link(*n).clicked() {
-                        let title = if self.shell.new.title.trim().is_empty() { n.split('(').next().unwrap_or(n).trim().to_string() } else { self.shell.new.title.clone() };
-                        self.new_draft(&title, examples::by_index(i));
+                for e in examples::list() {
+                    if ui.link(&e.title).clicked() {
+                        let title = if self.shell.new.title.trim().is_empty() { e.title.split('(').next().unwrap_or(&e.title).trim().to_string() } else { self.shell.new.title.clone() };
+                        self.new_draft(&title, Start::Example(e.path.clone()));
                     }
                 }
             });
@@ -131,12 +132,18 @@ impl App {
 
     fn create_from_template(&mut self) {
         let n = &self.shell.new;
-        let (title, project) = match TEMPLATES[n.template] {
-            (t, _, Some(i)) => (t.to_string(), examples::by_index(i)),
-            (t, _, None) => (t.to_string(), examples::blank(n.physics, n.three_d)),
+        let (title, start) = match TEMPLATES[n.template] {
+            (t, _, Some(i)) => match examples::list().get(i) {
+                Some(e) => (t.to_string(), Start::Example(e.path.clone())),
+                None => {
+                    self.set_error("The example for this card was not found: the `examples` folder is missing (set NYX_EXAMPLES).");
+                    return;
+                }
+            },
+            (t, _, None) => (t.to_string(), Start::Blank { physics: n.physics.clone(), three_d: n.three_d }),
         };
         let name = if n.title.trim().is_empty() { title } else { n.title.trim().to_string() };
-        self.new_draft(&name, project);
+        self.new_draft(&name, start);
         self.shell.new = Default::default();
     }
 
@@ -147,9 +154,9 @@ impl App {
         let r = ui.add(egui::TextEdit::singleline(&mut self.shell.palette_q).font(egui::TextStyle::Heading).hint_text("Search workflows, runs and commands").desired_width(f32::INFINITY).margin(egui::Margin::symmetric(12, 10)));
         r.request_focus();
         ui.add_space(8.0);
-        let q = nyx_store::search::Query::parse(&self.shell.palette_q);
+        let q = nyx_engine::facade::store::search::Query::parse(&self.shell.palette_q);
         let entries = self.shell.entries.clone();
-        let hits = nyx_store::search::search(&q, &entries);
+        let hits = nyx_engine::facade::store::search::search(&q, &entries);
         let mut open: Option<String> = None;
         let mut go: Option<&'static str> = None;
         if !q.is_empty() {
@@ -164,7 +171,7 @@ impl App {
                         ui.label(RichText::new(&e.wf.title).strong());
                         ui.label(kit::muted(ui, format!("matches {} · {} experiments", h.reasons.join(" · "), e.wf.experiments.len())).size(12.5));
                     });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if e.wf.status == nyx_store::Status::Done { "done" } else { "active" }, ago(e.wf.touched_secs(), now_secs())))));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if e.wf.status == nyx_engine::facade::store::Status::Done { "done" } else { "active" }, ago(e.wf.touched_secs(), now_secs())))));
                 });
                 let resp = ui.interact(rect.response.rect, ui.id().with(("ph", &e.wf.id)), egui::Sense::click());
                 if resp.hovered() {
@@ -174,7 +181,7 @@ impl App {
                     open = Some(e.wf.id.clone());
                 }
             }
-            let runs = nyx_store::search::run_hits(&q, &entries, &hits, 5);
+            let runs = nyx_engine::facade::store::search::run_hits(&q, &entries, &hits, 5);
             if !runs.is_empty() {
                 ui.add_space(6.0);
                 kit::label_caps(ui, "Runs", "");
@@ -246,7 +253,7 @@ impl App {
         let Some(d) = &w.dir else { return };
         let hist = d.history();
         let title = d.wf.title.clone();
-        let runs_all: Vec<nyx_store::runs::RunRecord> = d.wf.experiments.iter().flat_map(|e| d.runs(&e.id).0).collect();
+        let runs_all: Vec<nyx_engine::facade::store::runs::RunRecord> = d.wf.experiments.iter().flat_map(|e| d.runs(&e.id).0).collect();
         let root = d.root.clone();
         let sel = self.shell.version_sel.unwrap_or_else(|| hist.last().map(|v| v.n).unwrap_or(0));
         let mut restore = None;
@@ -283,7 +290,7 @@ impl App {
                                 _ => format!("v{}", v.n),
                             };
                             ui.label(RichText::new(head).strong().size(16.0));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if v.kind == VersionKind::Named { "named" } else { "auto" }, ago(nyx_store::util::parse_iso(&v.t).unwrap_or(0), now_secs())))));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if v.kind == VersionKind::Named { "named" } else { "auto" }, ago(nyx_engine::facade::store::util::parse_iso(&v.t).unwrap_or(0), now_secs())))));
                         });
                         ui.label(v.summary.as_str());
                         ui.label(kit::muted(ui, format!("{nruns} run{} recorded on this version", if nruns == 1 { "" } else { "s" })).size(12.5));
@@ -383,13 +390,13 @@ impl App {
         };
         let only = vec![w.exp.clone()];
         let only_opt: Option<&[String]> = if self.shell.share_only_current { Some(&only) } else { None };
-        let sizes = nyx_store::archive::sizes(d, only_opt).unwrap_or([(ShareLevel::Recipe, 0), (ShareLevel::Results, 0), (ShareLevel::Meshes, 0)]);
+        let sizes = nyx_engine::facade::store::archive::sizes(d, only_opt).unwrap_or([(ShareLevel::Recipe, 0), (ShareLevel::Results, 0), (ShareLevel::Meshes, 0)]);
         let n_exp = d.wf.experiments.len();
         let exp_title = d.wf.experiment(&w.exp).map(|e| e.title.clone()).unwrap_or_default();
-        let script_names = nyx_store::archive::scripts_of(d);
+        let script_names = nyx_engine::facade::store::archive::scripts_of(d);
         let scripts = script_names.iter().filter(|s| !self.shell.share_exclude.contains(s)).count();
-        let paths = nyx_store::archive::count_personal_paths(d);
-        let file_name = format!("{}.nyx", nyx_store::util::slug(&d.wf.title));
+        let paths = nyx_engine::facade::store::archive::count_personal_paths(d);
+        let file_name = format!("{}.nyx", nyx_engine::facade::store::util::slug(&d.wf.title));
         let strip = self.shell.settings().strip_paths;
         let exclude = self.shell.share_exclude.clone();
         let mut save = None;
@@ -472,7 +479,7 @@ impl App {
         if let Some((ext, level, strip)) = save {
             let Some(path) = rfd::FileDialog::new().add_filter(ext, &[ext]).set_file_name(if ext == "zip" { file_name.replace(".nyx", ".zip") } else { file_name.clone() }).save_file() else { return };
             let d = self.shell.open.get(&id).and_then(|w| w.dir.as_ref());
-            let r = d.map(|d| nyx_store::archive::export_file(d, &ExportOptions { level, only: only_opt, strip_paths: strip, exclude: &exclude }, &path));
+            let r = d.map(|d| nyx_engine::facade::store::archive::export_file(d, &ExportOptions { level, only: only_opt, strip_paths: strip, exclude: &exclude }, &path));
             match r {
                 Some(Ok(n)) => self.shell.share_msg = format!("Saved {} ({})", path.display(), human(n)),
                 Some(Err(e)) => self.set_error(e),
@@ -554,7 +561,7 @@ impl App {
             if kit::primary(ui, "Open as new workflow").clicked() {
                 let root = self.shell.ws.as_ref().map(|w| w.root.clone());
                 if let Some(root) = root {
-                    match nyx_store::archive::import(&path, &root, &Limits::default()) {
+                    match nyx_engine::facade::store::archive::import(&path, &root, &Limits::default()) {
                         Ok(d) => {
                             let id = d.wf.id.clone();
                             self.shell.sheet = Sheet::None;

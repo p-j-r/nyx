@@ -121,6 +121,11 @@ impl JobRunner {
         })
     }
 
+    /// The progress handle of a job: the stage it is in, the log so far, the cancel flag. A front-end that shows a bar reads it.
+    pub fn progress(&self, id: JobId) -> Option<Arc<Progress>> {
+        self.slot(id).map(|s| s.progress.clone())
+    }
+
     /// All jobs, oldest first.
     pub fn list(&self) -> Vec<JobInfo> {
         let ids: Vec<JobId> = self.slots.lock().expect("job table").keys().copied().collect();
