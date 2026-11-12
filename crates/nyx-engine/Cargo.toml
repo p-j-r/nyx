@@ -18,6 +18,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 # results files (ADR 62); needs the HDF5 library at build time (set HDF5_DIR to its install prefix)
 hdf5-metno = { version = "0.15", optional = true }
+# row blocks of the datasets each process writes (the same ndarray as hdf5-metno uses)
+ndarray = { version = "0.17", optional = true }
+# raw MPI bindings, only for the parallel HDF5 build (feature `phdf5`)
+mpi-sys = { version = "0.2", optional = true }
 quick-xml = { version = "0.41", optional = true }
 
 [features]
@@ -27,5 +31,7 @@ dfs = ["dep:nyx-dfs"]
 sms = ["dep:nyx-sms"]
 ems = ["dep:nyx-ems"]
 # results in HDF5 files (export_results, results_file_info, results.h5 in every recorded run); on by default since phase 8 (ADR 63), needs the HDF5 library at build time (HDF5_DIR) and its DLL at run time; `--no-default-features --features dfs,sms,ems` builds without
-hdf5 = ["dep:hdf5-metno", "dep:quick-xml"]
+hdf5 = ["dep:hdf5-metno", "dep:quick-xml", "dep:ndarray"]
+# the MPI-IO writer (`H5Mode::Parallel`): needs an MPI-enabled HDF5 library and an MPI SDK to build; builds without it contain no MPI code
+phdf5 = ["hdf5", "hdf5-metno/mpio", "dep:mpi-sys"]
 

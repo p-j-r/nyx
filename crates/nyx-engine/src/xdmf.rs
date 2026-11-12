@@ -2,9 +2,8 @@
 //! moved to the new result types. `/viz/<physics>` holds the nodes (dofs) and cells in the node order XDMF reads; an XDMF file (XML, written
 //! with `quick-xml`) next to the `.h5` names those datasets, so ParaView and VisIt open the results without copying the data.
 
-use crate::h5io::{attr_text, e, link_name, put};
+use crate::h5io::{link_name, Io};
 use femcore::mesh::SimplexMesh;
-use hdf5_metno as h5;
 use nyx_physics::SolveResult;
 use std::path::Path;
 
@@ -33,13 +32,13 @@ fn topology(dim: usize, order: usize) -> (&'static str, Vec<usize>) {
 
 /// `/viz/<physics>`: the nodes and cells in the node order XDMF reads, and for each solution the fields it points at: a scalar field is a
 /// hard link to the dataset under `/results`, a vector field gets a three-component copy (`v3_<name>`), since XDMF vectors have three.
-pub(crate) fn write_viz(file: &h5::File, code: &str, mesh: &SimplexMesh, r: &SolveResult) -> Result<(), String> {
+pub(crate) fn write_viz(io: &Io, code: &str, mesh: &SimplexMesh, r: &SolveResult) -> Result<(), String> {
     let order = if r.order == 2 { 2 } else { 1 };
-    let viz = match file.group("viz") {
+    let viz = match io.file.group("viz") {
         Ok(g) => g,
-        Err(_) => file.create_group("viz").map_err(e("group"))?,
+        Err(_) => io.group(&io.file, "viz")?,
     };
-    let g = viz.create_group(&link_name(code)).map_err(e("group"))?;
+    let g = io.group(&viz, &link_name(code))?;
     let (topo, perm) = topology(mesh.dim, order);
     let mut conn: Vec<u32> = Vec::with_capacity(mesh.n_cells() * perm.len());
     let mut dofs = Vec::new();
@@ -47,15 +46,15 @@ pub(crate) fn write_viz(file: &h5::File, code: &str, mesh: &SimplexMesh, r: &Sol
         mesh.cell_dofs(c, order, &mut dofs);
         conn.extend(perm.iter().map(|&i| dofs[i] as u32));
     }
-    put(&g, "points", &mesh.dof_coordinates(order), mesh.dim)?;
-    put(&g, "cells", &conn, perm.len())?;
-    attr_text(&g, "topology", topo)?;
+    io.put(&g, "points", &mesh.dof_coordinates(order), mesh.dim)?;
+    io.put(&g, "cells", &conn, perm.len())?;
+    io.attr_text(&g, "topology", topo)?;
     for (k, s) in r.solutions.iter().enumerate() {
-        let sg = g.create_group(&format!("sol_{k}")).map_err(e("group"))?;
+        let sg = io.group(&g, &format!("sol_{k}"))?;
         for (i, f) in s.fields.iter().enumerate() {
             if f.components.is_empty() {
                 let src = format!("/results/{}/solution_{k}/fields/{i:02}_{}", link_name(code), link_name(&f.name));
-                sg.link_hard(&src, &sanitize(&f.name)).map_err(e("link"))?;
+                io.link(&sg, &src, &sanitize(&f.name))?;
             } else {
                 let m = f.components.len();
                 let n = f.values.len() / m.max(1);
@@ -72,7 +71,7 @@ pub(crate) fn write_viz(file: &h5::File, code: &str, mesh: &SimplexMesh, r: &Sol
                         v3[p * 3 + slot] = f.values[p * m + j];
                     }
                 }
-                put(&sg, &format!("v3_{}", sanitize(&f.name)), &v3, 3)?;
+                io.put(&sg, &format!("v3_{}", sanitize(&f.name)), &v3, 3)?;
             }
         }
     }

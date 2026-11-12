@@ -556,8 +556,8 @@ Started from `main` = `restructure-7-engine-frontends` (74851193, phase 7 merged
 **Open for paul (carried from phase 7, ADR 62/63).**
 1. ~~Make `hdf5` a default feature?~~ Answered yes (2026-11-12) and done; see "Decisions by paul".
 2. ~~The window cannot open a results file yet.~~ Done 2026-11-12 (`open_results`).
-3. The MPI-IO (parallel) writer is not ported.
+3. ~~The MPI-IO writer is not ported.~~ Ported 2026-11-12 behind feature `phdf5`; needs an MPI-enabled HDF5 library and an MPI SDK to build, which this machine lacks: please build `-p nyx-engine --features phdf5` once on a machine that has them.
 4. "Fast xml format": is XDMF what was meant? The project file is JSON by plan; XML for it would be a reversal.
 5. Projects written before this phase (the old examples, a saved workspace of the phase 7 build) do not open; they are regenerated or re-saved by hand.
 
-**Decisions by paul (2026-11-12).** `hdf5` is a default feature of `nyx-engine` (done: `Cargo.toml`, `.cargo/config.toml` sets `HDF5_DIR`; the DLL must be on PATH). The window opens a results file (**done**: `open_results`, Open dialog and drop; 901 pass, 0 fail, 10 ignored). The MPI-IO writer is to be ported (future GPU and multicore use): **to do**. XDMF is as far as XML goes; the project file stays JSON.
+**Decisions by paul (2026-11-12).** `hdf5` is a default feature of `nyx-engine` (done: `Cargo.toml`, `.cargo/config.toml` sets `HDF5_DIR`; the DLL must be on PATH). The window opens a results file (**done**: `open_results`, Open dialog and drop; 901 pass, 0 fail, 10 ignored). The MPI-IO writer is ported (**done, but the MPI part is not compiled or run here**: no MPI SDK or parallel HDF5 on this machine; the partition logic is tested with three emulated processes; 904 pass, 0 fail, 10 ignored). XDMF is as far as XML goes; the project file stays JSON.

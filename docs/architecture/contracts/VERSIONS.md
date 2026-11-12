@@ -57,3 +57,6 @@ The file name carries the major version (`.v1.`). A breaking change adds `.v2.` 
 | results_file | HDF5 layout, version 3 | 3 | 2026-11-12 | unchanged; the JSON copy of the fields in a build without `hdf5` is removed (ADR 63): a run then records metrics and log only |
 | engine_commands | `engine_commands.v1.json` | 1.4 | 2026-11-12 | additive: `open_results` (the project of an HDF5 results file becomes the project, meshed again and checked against the stored mesh, and its stored results become the latest results; ADR 62, 63) |
 | mcp_tools | `mcp_tools.v2.json` | 2.1 | 2026-11-12 | additive: the tool `open_results` (the catalog follows the engine commands) |
+| engine_commands | `engine_commands.v1.json` | 1.5 | 2026-11-12 | additive: `export_results` takes `parallel` (MPI-IO writer, build with `phdf5`) |
+| mcp_tools | `mcp_tools.v2.json` | 2.2 | 2026-11-12 | additive: the `export_results` tool takes `parallel` |
+| results_file | HDF5 layout, version 3 | 3 | 2026-11-12 | additive: root attributes `writer` (`serial` or `parallel`) and `processes`; files written in parallel are the same as serial ones except that their datasets are not chunked or compressed |

@@ -35,16 +35,8 @@ fn text(s: &str) -> Result<VarLenUnicode, String> {
     s.parse::<VarLenUnicode>().map_err(|_| "text could not be stored (it contains a NUL character)".to_string())
 }
 
-fn attr<T: h5::H5Type>(loc: &h5::Location, name: &str, v: &T) -> Result<(), String> {
-    loc.new_attr::<T>().create(name).map_err(e("attribute"))?.write_scalar(v).map_err(e("attribute"))
-}
-
-pub(crate) fn attr_text(loc: &h5::Location, name: &str, s: &str) -> Result<(), String> {
-    attr(loc, name, &text(s)?)
-}
-
 /// A dataset of shape `[rows, cols]` (`[rows]` when `cols` is 0) holding `data` row by row, chunked and compressed when it is large.
-pub(crate) fn put<T: h5::H5Type>(g: &h5::Group, name: &str, data: &[T], cols: usize) -> Result<h5::Dataset, String> {
+fn put_serial<T: h5::H5Type>(g: &h5::Group, name: &str, data: &[T], cols: usize) -> Result<h5::Dataset, String> {
     let rows = if cols == 0 { data.len() } else { data.len() / cols };
     let big = data.len() >= 4096 && rows > 0;
     let ds = if cols == 0 {
@@ -61,39 +53,250 @@ pub(crate) fn put<T: h5::H5Type>(g: &h5::Group, name: &str, data: &[T], cols: us
     Ok(ds)
 }
 
-fn put_text(g: &h5::Group, name: &str, s: &str) -> Result<(), String> {
-    put(g, name, s.as_bytes(), 0).map(|_| ())
-}
-
 /// Name usable as an HDF5 link: `/` is the path separator, everything else is allowed.
 pub(crate) fn link_name(name: &str) -> String {
     let n: String = name.chars().map(|c| if c == '/' { '_' } else { c }).collect();
     if n.is_empty() || n == "." { format!("_{n}") } else { n }
 }
 
-/// Writes `results` (physics code and result) solved on `mesh` for `project` into a new file at `path`.
+/// How a results file is written: with the ordinary sequential HDF5 driver, or with the MPI-IO driver by several processes at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum H5Mode {
+    Serial,
+    Parallel,
+}
+
+/// True if this build can write with the mode: serial always, parallel only when it was built with the `phdf5` feature (an MPI-enabled
+/// HDF5 library and an MPI SDK).
+pub fn mode_available(mode: H5Mode) -> bool {
+    match mode {
+        H5Mode::Serial => true,
+        H5Mode::Parallel => cfg!(feature = "phdf5"),
+    }
+}
+
+#[cfg(not(feature = "phdf5"))]
+const NO_PARALLEL: &str = "parallel HDF5 (MPI-IO) is not available in this build: it was made without the `phdf5` feature (an MPI-enabled HDF5 library and an MPI SDK are needed to build it); use the serial output";
+
+/// Starts what the mode needs before a solve: the MPI runtime for parallel output (a run under `mpiexec` has one process per rank).
+/// Returns this process's rank and the number of processes.
+pub fn start_runtime(mode: H5Mode) -> Result<(usize, usize), String> {
+    match mode {
+        H5Mode::Serial => Ok((0, 1)),
+        #[cfg(feature = "phdf5")]
+        H5Mode::Parallel => {
+            let w = mpi_rt::world(true)?.ok_or("MPI is not available")?;
+            Ok((w.rank, w.size))
+        }
+        #[cfg(not(feature = "phdf5"))]
+        H5Mode::Parallel => Err(NO_PARALLEL.into()),
+    }
+}
+
+/// Process `rank` of `size` that write one results file together. Each process owns a contiguous block of rows of every dataset; a serial
+/// run is the single process 0 of 1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Partition {
+    pub rank: usize,
+    pub size: usize,
+}
+
+impl Partition {
+    pub const SOLO: Partition = Partition { rank: 0, size: 1 };
+
+    /// The rows `[start, end)` of `n` this process writes; the blocks of all processes tile `0..n` exactly, with sizes differing by at most one.
+    pub fn rows(&self, n: usize) -> std::ops::Range<usize> {
+        let size = self.size.max(1);
+        let (base, rem) = (n / size, n % size);
+        let start = self.rank * base + self.rank.min(rem);
+        start..start + base + usize::from(self.rank < rem)
+    }
+}
+
+/// The MPI process group of a parallel build (raw `mpi-sys` calls: initialise, rank, size, barrier).
+#[cfg(feature = "phdf5")]
+mod mpi_rt {
+    use mpi_sys as ffi;
+    use std::os::raw::c_int;
+
+    pub struct World {
+        pub comm: ffi::MPI_Comm,
+        pub rank: usize,
+        pub size: usize,
+    }
+
+    /// MPI_COMM_WORLD. With `init` the library is initialised when this process has not done so (a run under `mpiexec` or on a cluster does it
+    /// here); without it a process that never started MPI gets `None`.
+    pub fn world(init: bool) -> Result<Option<World>, String> {
+        unsafe {
+            let mut flag: c_int = 0;
+            ffi::MPI_Initialized(&mut flag);
+            if flag == 0 {
+                if !init {
+                    return Ok(None);
+                }
+                if ffi::MPI_Init(std::ptr::null_mut(), std::ptr::null_mut()) != ffi::MPI_SUCCESS as c_int {
+                    return Err("MPI_Init failed".into());
+                }
+            }
+            let comm = ffi::RSMPI_COMM_WORLD;
+            let (mut r, mut n): (c_int, c_int) = (0, 1);
+            ffi::MPI_Comm_rank(comm, &mut r);
+            ffi::MPI_Comm_size(comm, &mut n);
+            Ok(Some(World { comm, rank: r as usize, size: n as usize }))
+        }
+    }
+
+    pub fn barrier(w: &World) {
+        unsafe {
+            ffi::MPI_Barrier(w.comm);
+        }
+    }
+}
+
+/// An open results file and the share of it this process writes. Every process runs the same sequence of group, dataset and attribute
+/// creations (HDF5 wants metadata operations to be collective in parallel mode) and writes only its own rows of each dataset. The serial
+/// path is the same code with one process (and then chunks and compresses large datasets; the parallel path writes contiguous datasets).
+pub(crate) struct Io {
+    pub file: h5::File,
+    pub part: Partition,
+    /// tests only: run the writer again for another rank against a file that exists, opening what is there instead of creating it, to
+    /// check that the row blocks tile the data (the MPI-IO driver itself cannot run without an MPI-enabled HDF5 library)
+    pub replay: bool,
+}
+
+impl Io {
+    pub fn group(&self, parent: &h5::Group, name: &str) -> Result<h5::Group, String> {
+        if self.replay {
+            if let Ok(g) = parent.group(name) {
+                return Ok(g);
+            }
+        }
+        parent.create_group(name).map_err(e("group"))
+    }
+
+    pub fn attr<T: h5::H5Type>(&self, loc: &h5::Location, name: &str, v: &T) -> Result<(), String> {
+        if self.replay && loc.attr(name).is_ok() {
+            return Ok(());
+        }
+        loc.new_attr::<T>().create(name).map_err(e("attribute"))?.write_scalar(v).map_err(e("attribute"))
+    }
+
+    pub fn attr_text(&self, loc: &h5::Location, name: &str, s: &str) -> Result<(), String> {
+        self.attr(loc, name, &text(s)?)
+    }
+
+    pub fn link(&self, g: &h5::Group, target: &str, name: &str) -> Result<(), String> {
+        if self.replay && g.link_exists(name) {
+            return Ok(());
+        }
+        g.link_hard(target, name).map_err(e("link"))
+    }
+
+    /// A dataset of shape `[rows, cols]` (`[rows]` when `cols` is 0) holding `data` row by row.
+    pub fn put<T: h5::H5Type>(&self, g: &h5::Group, name: &str, data: &[T], cols: usize) -> Result<h5::Dataset, String> {
+        if self.part == Partition::SOLO && !self.replay {
+            return put_serial(g, name, data, cols);
+        }
+        let rows = if cols == 0 { data.len() } else { data.len() / cols };
+        let existing = if self.replay { g.dataset(name).ok() } else { None };
+        let ds = match existing {
+            Some(d) => d,
+            None if cols == 0 => g.new_dataset::<T>().shape([rows]).create(name).map_err(e(name))?,
+            None => g.new_dataset::<T>().shape([rows, cols]).create(name).map_err(e(name))?,
+        };
+        let r = self.part.rows(rows);
+        if r.is_empty() {
+            return Ok(ds);
+        }
+        if cols == 0 {
+            let v = ndarray::ArrayView1::from(&data[r.clone()]);
+            ds.write_slice(v, ndarray::s![r.start..r.end]).map_err(e(name))?;
+        } else {
+            let v = ndarray::ArrayView2::from_shape((r.len(), cols), &data[r.start * cols..r.end * cols]).map_err(|x| format!("HDF5 {name}: {x}"))?;
+            ds.write_slice(v, ndarray::s![r.start..r.end, ..]).map_err(e(name))?;
+        }
+        Ok(ds)
+    }
+
+    /// Text as UTF-8 bytes in a 1-D `u8` dataset (variable-length strings cannot be written in parallel).
+    pub fn put_text(&self, g: &h5::Group, name: &str, s: &str) -> Result<(), String> {
+        self.put(g, name, s.as_bytes(), 0).map(|_| ())
+    }
+}
+
+/// Opens the results file for writing in the mode. `Ok(None)`: this process has nothing to write (serial output chosen in a multi-process
+/// MPI run: only rank 0 writes).
+fn open_io(path: &Path, mode: H5Mode) -> Result<Option<Io>, String> {
+    match mode {
+        H5Mode::Serial => {
+            #[cfg(feature = "phdf5")]
+            if let Some(w) = mpi_rt::world(false)? {
+                if w.rank != 0 {
+                    return Ok(None);
+                }
+            }
+            Ok(Some(Io { file: h5::File::create(path).map_err(e("create file"))?, part: Partition::SOLO, replay: false }))
+        }
+        #[cfg(feature = "phdf5")]
+        H5Mode::Parallel => {
+            let w = mpi_rt::world(true)?.ok_or("MPI is not available")?;
+            let file = h5::File::with_options().with_fapl(|p| p.mpio(w.comm, None)).create(path).map_err(e("create file (MPI-IO)"))?;
+            Ok(Some(Io { file, part: Partition { rank: w.rank, size: w.size }, replay: false }))
+        }
+        #[cfg(not(feature = "phdf5"))]
+        H5Mode::Parallel => {
+            let _ = path;
+            Err(NO_PARALLEL.into())
+        }
+    }
+}
+
+/// Writes `results` (physics code and result) solved on `mesh` for `project` into a new file at `path`, serially.
 pub fn write_results(path: &Path, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)]) -> Result<(), String> {
-    let file = h5::File::create(path).map_err(e("create file"))?;
-    attr_text(&file, "format", "nyx-results")?;
-    attr(&file, "version", &3i32)?;
-    put_text(&file, "project", &project.to_json())?;
+    write_results_mode(path, H5Mode::Serial, project, mesh, results).map(|_| ())
+}
+
+/// The same in the chosen mode. In a parallel run every process calls this with the same arguments; the file is the same as a serial one.
+/// Returns whether this process is the one that writes the XDMF file (process 0, after every process is done).
+pub fn write_results_mode(path: &Path, mode: H5Mode, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)]) -> Result<bool, String> {
+    let Some(io) = open_io(path, mode)? else { return Ok(false) };
+    let root = io.part.rank == 0;
+    write_into(&io, mode, project, mesh, results)?;
+    drop(io);
+    #[cfg(feature = "phdf5")]
+    if mode == H5Mode::Parallel {
+        if let Some(w) = mpi_rt::world(false)? {
+            mpi_rt::barrier(&w);
+        }
+    }
+    Ok(root)
+}
+
+fn write_into(io: &Io, mode: H5Mode, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)]) -> Result<(), String> {
+    let file = &io.file;
+    io.attr_text(file, "writer", if mode == H5Mode::Serial { "serial" } else { "parallel" })?;
+    io.attr(file, "processes", &(io.part.size as i64))?;
+    io.attr_text(file, "format", "nyx-results")?;
+    io.attr(file, "version", &3i32)?;
+    io.put_text(file, "project", &project.to_json())?;
     let d = mesh.dim;
-    let m = file.create_group("mesh").map_err(e("group"))?;
-    put(&m, "points", &mesh.points, d)?;
-    put(&m, "cells", &mesh.cells, d + 1)?;
-    put(&m, "cell_labels", mesh.cell_labels.as_slice(), 0)?;
-    put(&m, "facets", &mesh.facets, d)?;
-    put(&m, "facet_labels", mesh.facet_labels.as_slice(), 0)?;
-    let root = file.create_group("results").map_err(e("group"))?;
+    let m = io.group(file, "mesh")?;
+    io.put(&m, "points", &mesh.points, d)?;
+    io.put(&m, "cells", &mesh.cells, d + 1)?;
+    io.put(&m, "cell_labels", mesh.cell_labels.as_slice(), 0)?;
+    io.put(&m, "facets", &mesh.facets, d)?;
+    io.put(&m, "facet_labels", mesh.facet_labels.as_slice(), 0)?;
+    let root = io.group(file, "results")?;
     for (code, r) in results {
-        let g = root.create_group(&link_name(code)).map_err(e("group"))?;
-        attr_text(&g, "physics", code)?;
-        attr_text(&g, "study", &r.study)?;
-        attr(&g, "order", &(r.order as i64))?;
-        attr(&g, "dim", &(r.dim as i64))?;
-        attr(&g, "dofs", &(r.dofs as i64))?;
-        attr(&g, "seconds", &r.seconds)?;
-        attr(&g, "n_solutions", &(r.solutions.len() as i64))?;
+        let g = io.group(&root, &link_name(code))?;
+        io.attr_text(&g, "physics", code)?;
+        io.attr_text(&g, "study", &r.study)?;
+        io.attr(&g, "order", &(r.order as i64))?;
+        io.attr(&g, "dim", &(r.dim as i64))?;
+        io.attr(&g, "dofs", &(r.dofs as i64))?;
+        io.attr(&g, "seconds", &r.seconds)?;
+        io.attr(&g, "n_solutions", &(r.solutions.len() as i64))?;
         let scalars: Vec<Value> = r
             .scalars
             .iter()
@@ -102,42 +305,42 @@ pub fn write_results(path: &Path, project: &Project, mesh: &SimplexMesh, results
                 Scalar::Text(t) => json!([n, t]),
             })
             .collect();
-        put_text(&g, "scalars", &Value::Array(scalars).to_string())?;
-        put_text(&g, "log", &serde_json::to_string(&r.log).map_err(|x| x.to_string())?)?;
+        io.put_text(&g, "scalars", &Value::Array(scalars).to_string())?;
+        io.put_text(&g, "log", &serde_json::to_string(&r.log).map_err(|x| x.to_string())?)?;
         for (k, s) in r.solutions.iter().enumerate() {
-            let sg = g.create_group(&format!("solution_{k}")).map_err(e("group"))?;
-            attr_text(&sg, "label", &s.label)?;
+            let sg = io.group(&g, &format!("solution_{k}"))?;
+            io.attr_text(&sg, "label", &s.label)?;
             if let Some(v) = s.value {
-                attr(&sg, "value", &v)?;
+                io.attr(&sg, "value", &v)?;
             }
             if let Some([re, im]) = s.eigenvalue {
-                attr(&sg, "eig_re", &re)?;
-                attr(&sg, "eig_im", &im)?;
+                io.attr(&sg, "eig_re", &re)?;
+                io.attr(&sg, "eig_im", &im)?;
             }
-            let fg = sg.create_group("fields").map_err(e("group"))?;
+            let fg = io.group(&sg, "fields")?;
             let order: Vec<&str> = s.fields.iter().map(|f| f.name.as_str()).collect();
-            attr_text(&fg, "order", &serde_json::to_string(&order).map_err(|x| x.to_string())?)?;
+            io.attr_text(&fg, "order", &serde_json::to_string(&order).map_err(|x| x.to_string())?)?;
             for (i, f) in s.fields.iter().enumerate() {
-                let ds = put(&fg, &format!("{i:02}_{}", link_name(&f.name)), &f.values, 0)?;
-                attr_text(&ds, "name", &f.name)?;
-                attr_text(&ds, "unit", &f.unit)?;
-                attr_text(&ds, "components", &serde_json::to_string(&f.components).map_err(|x| x.to_string())?)?;
+                let ds = io.put(&fg, &format!("{i:02}_{}", link_name(&f.name)), &f.values, 0)?;
+                io.attr_text(&ds, "name", &f.name)?;
+                io.attr_text(&ds, "unit", &f.unit)?;
+                io.attr_text(&ds, "components", &serde_json::to_string(&f.components).map_err(|x| x.to_string())?)?;
             }
             if !s.cell_fields.is_empty() {
-                let cg = sg.create_group("cell_fields").map_err(e("group"))?;
+                let cg = io.group(&sg, "cell_fields")?;
                 for (i, f) in s.cell_fields.iter().enumerate() {
-                    let fgp = cg.create_group(&format!("{i:02}_{}", link_name(&f.name))).map_err(e("group"))?;
-                    attr_text(&fgp, "name", &f.name)?;
-                    attr_text(&fgp, "unit", &f.unit)?;
-                    attr(&fgp, "nloc", &(f.nloc as i64))?;
-                    put(&fgp, "re", &f.re, 0)?;
+                    let fgp = io.group(&cg, &format!("{i:02}_{}", link_name(&f.name)))?;
+                    io.attr_text(&fgp, "name", &f.name)?;
+                    io.attr_text(&fgp, "unit", &f.unit)?;
+                    io.attr(&fgp, "nloc", &(f.nloc as i64))?;
+                    io.put(&fgp, "re", &f.re, 0)?;
                     if !f.im.is_empty() {
-                        put(&fgp, "im", &f.im, 0)?;
+                        io.put(&fgp, "im", &f.im, 0)?;
                     }
                 }
             }
         }
-        crate::xdmf::write_viz(&file, code, mesh, r)?;
+        crate::xdmf::write_viz(io, code, mesh, r)?;
     }
     Ok(())
 }
@@ -260,4 +463,97 @@ pub fn read_results(path: &Path) -> Result<Stored, String> {
 /// The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON.
 pub fn file_bytes(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::Engine;
+    use serde_json::json;
+
+    fn solved(name: &str) -> Engine {
+        let mut e = Engine::new();
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples").join(format!("{name}.nyx.json"));
+        e.call("project_open", &json!({ "path": p.to_str().unwrap() })).unwrap();
+        e.call("solve_run", &json!({})).unwrap();
+        e
+    }
+
+    #[test]
+    fn the_blocks_of_the_processes_tile_the_rows() {
+        for size in [1usize, 2, 3, 4, 7, 16] {
+            for n in [0usize, 1, 5, 16, 17, 1000] {
+                let (mut next, mut lo, mut hi) = (0, usize::MAX, 0);
+                for rank in 0..size {
+                    let r = Partition { rank, size }.rows(n);
+                    assert_eq!(r.start, next, "contiguous (size {size}, n {n})");
+                    next = r.end;
+                    lo = lo.min(r.len());
+                    hi = hi.max(r.len());
+                }
+                assert_eq!(next, n, "all rows covered (size {size}, n {n})");
+                assert!(hi - lo <= 1, "balanced (size {size}, n {n})");
+            }
+        }
+    }
+
+    /// The MPI-IO driver cannot run without an MPI-enabled HDF5 library, but the logic can: three emulated processes each write only
+    /// their own rows into one file, which must read back as what one serial process writes (same mesh, same fields, same project).
+    #[test]
+    fn three_emulated_processes_write_what_one_serial_process_writes() {
+        let e = solved("15_soi_wire");
+        let mesh = e.model().unwrap().solver_mesh();
+        let results: Vec<(String, std::sync::Arc<nyx_physics::SolveResult>)> =
+            e.project().physics.iter().filter_map(|s| e.result(&s.physics).map(|(r, _)| (s.physics.clone(), r.clone()))).collect();
+        let refs: Vec<(String, &nyx_physics::SolveResult)> = results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
+        let tmp = |n: &str| std::env::temp_dir().join(format!("nyx-part-{n}-{}.h5", std::process::id()));
+        let (serial, three) = (tmp("serial"), tmp("three"));
+        write_results(&serial, e.project(), &mesh, &refs).unwrap();
+        {
+            let file = h5::File::create(&three).unwrap();
+            for rank in 0..3 {
+                let io = Io { file: file.clone(), part: Partition { rank, size: 3 }, replay: rank > 0 };
+                write_into(&io, H5Mode::Parallel, e.project(), &mesh, &refs).unwrap();
+            }
+        }
+        let (a, b) = (read_results(&serial).unwrap(), read_results(&three).unwrap());
+        assert_eq!(a.project, b.project);
+        assert_eq!(a.mesh.points, b.mesh.points);
+        assert_eq!(a.mesh.cells, b.mesh.cells);
+        assert_eq!(a.mesh.facets, b.mesh.facets);
+        assert_eq!(a.results.len(), b.results.len());
+        for ((ca, ra), (cb, rb)) in a.results.iter().zip(&b.results) {
+            assert_eq!(ca, cb);
+            assert_eq!(ra, rb, "{ca}: every solution, field and cell field is the same");
+        }
+        // the XDMF side (the /viz datasets) is partitioned too
+        let (fa, fb) = (h5::File::open(&serial).unwrap(), h5::File::open(&three).unwrap());
+        let code = &results[0].0;
+        for leaf in ["points", "cells"] {
+            let p = format!("viz/{}/{leaf}", link_name(code));
+            let (da, db) = (fa.dataset(&p).unwrap(), fb.dataset(&p).unwrap());
+            assert_eq!(da.shape(), db.shape(), "{p}");
+            if leaf == "cells" {
+                assert_eq!(da.read_raw::<u32>().unwrap(), db.read_raw::<u32>().unwrap(), "{p}");
+            } else {
+                assert_eq!(da.read_raw::<f64>().unwrap(), db.read_raw::<f64>().unwrap(), "{p}");
+            }
+        }
+        assert_eq!(fb.attr("writer").unwrap().read_scalar::<VarLenUnicode>().unwrap().as_str(), "parallel");
+        assert_eq!(fb.attr("processes").unwrap().read_scalar::<i64>().unwrap(), 3);
+        let _ = std::fs::remove_file(&serial);
+        let _ = std::fs::remove_file(&three);
+    }
+
+    #[test]
+    fn parallel_mode_says_what_is_missing_when_the_build_has_no_mpi() {
+        if !mode_available(H5Mode::Parallel) {
+            let e = solved("04_thermal_bar");
+            let mesh = e.model().unwrap().solver_mesh();
+            let err = write_results_mode(&std::env::temp_dir().join("never.h5"), H5Mode::Parallel, e.project(), &mesh, &[]).unwrap_err();
+            assert!(err.contains("phdf5") && err.contains("MPI"), "{err}");
+            assert!(start_runtime(H5Mode::Parallel).is_err());
+        }
+        assert_eq!(start_runtime(H5Mode::Serial), Ok((0, 1)));
+    }
 }

@@ -54,7 +54,7 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 
 ## Known state of the checks (phase 7, 2026-11-05, Windows, Rust 1.99.1)
 
-* `cargo test --release --workspace --no-fail-fast`: 901 pass, 10 ignored, 0 fail (phase 8, `restructure-8-format`; 889 / 10 / 0 at phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
+* `cargo test --release --workspace --no-fail-fast`: 904 pass, 10 ignored, 0 fail (phase 8, `restructure-8-format`; 889 / 10 / 0 at phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
 * `cargo clippy -D warnings` is clean for `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis` and `nyx-engine`; the old `femcore` code has a few warnings left. `cargo fmt --check` fails for the old code (R23, decided in phase 9).
 * The numbers and timings of the pre-restructure state and of each phase are in `docs/RESTRUCTURE_STATUS.md`.
 

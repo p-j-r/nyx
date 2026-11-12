@@ -900,6 +900,9 @@
         "title": "Write the results to an HDF5 file"
       },
       "arguments": {
+        "parallel": {
+          "type": "boolean"
+        },
         "path": {
           "type": "string"
         }

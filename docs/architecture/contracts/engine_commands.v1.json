@@ -1090,11 +1090,15 @@
   },
   {
     "access": "expensive",
-    "description": "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support.",
+    "description": "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.",
     "name": "export_results",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "parallel": {
+          "description": "write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)",
+          "type": "boolean"
+        },
         "path": {
           "description": "file path, .h5",
           "type": "string"

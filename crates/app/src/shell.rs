@@ -596,7 +596,7 @@ impl App {
                     let _ = std::fs::create_dir_all(&dir);
                     let _ = std::fs::write(dir.join("log.txt"), text);
                     #[cfg(feature = "hdf5")]
-                    if let Err(e) = self.engine.export_results(&dir.join("results.h5").to_string_lossy()) {
+                    if let Err(e) = self.engine.export_results(&dir.join("results.h5").to_string_lossy(), false) {
                         self.error = Some(format!("Results file: {e}"));
                     }
                 }

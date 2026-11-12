@@ -7,8 +7,10 @@ use nyx_physics::Error;
 use serde_json::{json, Value};
 
 impl Engine {
-    /// Writes the project, the mesh and the latest result of every solved physics into an HDF5 file.
-    pub fn export_results(&self, path: &str) -> Result<Value, Error> {
+    /// Writes the project, the mesh and the latest result of every solved physics into an HDF5 file. With `parallel` the file is written with
+    /// the MPI-IO driver by all the processes of an MPI run, each calling this with the same arguments (each writes its own block of rows; the
+    /// XDMF file is written by process 0); only a build with the `phdf5` feature can, any other answers with what is missing.
+    pub fn export_results(&self, path: &str, parallel: bool) -> Result<Value, Error> {
         #[cfg(feature = "hdf5")]
         {
             let model = self.model().ok_or_else(|| Error::invalid("there is no mesh; solve first"))?;
@@ -24,12 +26,19 @@ impl Engine {
             let refs: Vec<(String, &nyx_physics::SolveResult)> = results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
             let p = std::path::Path::new(path);
             let mesh = model.solver_mesh();
-            crate::h5io::write_results(p, &self.project, &mesh, &refs).map_err(Error::invalid)?;
+            let mode = if parallel { crate::h5io::H5Mode::Parallel } else { crate::h5io::H5Mode::Serial };
+            let root = crate::h5io::write_results_mode(p, mode, &self.project, &mesh, &refs).map_err(Error::invalid)?;
+            let physics = results.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>();
+            if !root {
+                // another process of an MPI run writes the XDMF file and reports
+                return Ok(json!({ "path": path, "writer": "parallel", "written_by_this_process": false, "physics": physics }));
+            }
             let xdmf = crate::xdmf::write_xdmf(p, &mesh, &refs).map_err(Error::invalid)?;
-            Ok(json!({ "path": path, "xdmf": xdmf, "bytes": crate::h5io::file_bytes(p), "physics": results.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>() }))
+            Ok(json!({ "path": path, "xdmf": xdmf, "bytes": crate::h5io::file_bytes(p), "physics": physics, "writer": if parallel { "parallel" } else { "serial" } }))
         }
         #[cfg(not(feature = "hdf5"))]
         {
+            let _ = (path, parallel);
             let _ = path;
             Err(Error::Unsupported("this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature; the HDF5 library must be installed)".into()))
         }
