@@ -33,7 +33,7 @@ cargo clippy --release -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-an
 cargo fmt -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine   # the new crates are rustfmt-formatted (settings as geom)
 cargo test --release -p femcore -p geom -p nyx-store -p nyx-mcp -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-engine --test contracts --test layering   # interface contracts (ADR 19)
 bash docs/architecture/check_code_to_adr.sh                 # every file has an ADR row
-HDF5_DIR=<prefix of the HDF5 library> cargo test --release -p nyx-engine --features hdf5 --test h5   # results files (needs the library, its bin folder on PATH)
+cargo test --release -p nyx-engine --test h5                 # results files (hdf5 is a default feature: needs the HDF5 library, HDF5_DIR from .cargo/config.toml or the environment, its bin folder on PATH)
 bash tools/baseline.sh <dir>                                # test counts and the five benchmark timings (BENCH_ONLY=1 for timings only)
 ```
 

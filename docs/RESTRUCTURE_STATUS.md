@@ -554,8 +554,10 @@ Started from `main` = `restructure-7-engine-frontends` (74851193, phase 7 merged
 **Checks.** `cargo test --release --workspace --no-fail-fast` (default build): 894 pass, 0 fail, 10 ignored (phase 7: 889 / 0 / 10; +5 new tests). With `hdf5` (`HDF5_DIR=C:/Users/robin-adm/anaconda3/Library`, its `bin` on PATH): `nyx-engine`, `nyx-mcp`, `nyx-store` all pass, including `tests/h5.rs`. Contract and layering suites and `check_code_to_adr.sh` pass. No solver code changed, so no benchmark was re-run. `clippy -D warnings` on the new crates stops at an unused import in `nyx-ems/tests/physics_meshing.rs` and `cargo fmt --check` at old formatting in `nyx-engine/examples`; both exist on `main` and were left alone (phase 9, R23).
 
 **Open for paul (carried from phase 7, ADR 62/63).**
-1. Make `hdf5` a default feature? With it, every build needs the HDF5 library (`HDF5_DIR`); without it a run stores no fields at all now that the JSON copy is gone. My recommendation: yes for the app and the MCP server (default feature there, `--no-default-features` to opt out), because storing fields is their normal job; the library crates stay free of it.
+1. ~~Make `hdf5` a default feature?~~ Answered yes (2026-11-12) and done; see "Decisions by paul".
 2. The window cannot open a results file yet (`results_file_info` and `read_results` exist).
 3. The MPI-IO (parallel) writer is not ported.
 4. "Fast xml format": is XDMF what was meant? The project file is JSON by plan; XML for it would be a reversal.
 5. Projects written before this phase (the old examples, a saved workspace of the phase 7 build) do not open; they are regenerated or re-saved by hand.
+
+**Decisions by paul (2026-11-12).** `hdf5` is a default feature of `nyx-engine` (done: `Cargo.toml`, `.cargo/config.toml` sets `HDF5_DIR`; the DLL must be on PATH). The window must be able to open a results file and the MPI-IO writer is to be ported (future GPU and multicore use): both are **to do** (below). XDMF is as far as XML goes; the project file stays JSON.

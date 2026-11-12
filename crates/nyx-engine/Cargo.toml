@@ -22,10 +22,10 @@ quick-xml = { version = "0.41", optional = true }
 
 [features]
 # the physics compiled into a build (plan: physics are compiled in, run-time plug-ins are out of scope)
-default = ["dfs", "sms", "ems"]
+default = ["dfs", "sms", "ems", "hdf5"]
 dfs = ["dep:nyx-dfs"]
 sms = ["dep:nyx-sms"]
 ems = ["dep:nyx-ems"]
-# results in HDF5 files (export_results, results_file_info, results.h5 in every recorded run)
+# results in HDF5 files (export_results, results_file_info, results.h5 in every recorded run); on by default since phase 8 (ADR 63), needs the HDF5 library at build time (HDF5_DIR) and its DLL at run time; `--no-default-features --features dfs,sms,ems` builds without
 hdf5 = ["dep:hdf5-metno", "dep:quick-xml"]
 
