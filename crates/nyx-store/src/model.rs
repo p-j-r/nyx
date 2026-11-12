@@ -115,7 +115,7 @@ pub struct Experiment {
     pub parent: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<Link>,
-    /// hash of `experiment.nyx.xml`
+    /// hash of `experiment.nyx.json`
     pub spec_hash: String,
     pub card: Card,
     pub runs: Digest,

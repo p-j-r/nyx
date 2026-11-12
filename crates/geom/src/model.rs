@@ -389,8 +389,18 @@ pub struct Feature {
     pub tags: Vec<String>,
 }
 
+/// The file format of a feature list (ADR 63). Written in every list; a list of another format is refused, there is no migration.
+pub const FORMAT: u32 = 1;
+
+fn current_format() -> u32 {
+    FORMAT
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FeatureList {
+    /// the file format, `1` (ADR 63)
+    #[serde(default = "current_format")]
+    pub format: u32,
     /// 2 or 3
     pub dim: u8,
     pub params: Vec<Param>,
@@ -414,7 +424,7 @@ pub fn check_name(kind: &str, name: &str) -> GeomResult<()> {
 
 impl FeatureList {
     pub fn new(dim: u8) -> FeatureList {
-        FeatureList { dim, params: vec![], features: vec![] }
+        FeatureList { format: FORMAT, dim, params: vec![], features: vec![] }
     }
 
     pub fn feature(&self, id: FeatureId) -> Option<&Feature> {
@@ -439,6 +449,9 @@ impl FeatureList {
 
     /// Structural checks: unique ids and names, references to earlier features only, one overlay, valid names.
     pub fn validate(&self) -> GeomResult<()> {
+        if self.format != FORMAT {
+            return Err(GeomError(format!("feature list format {} is not supported (this program reads format {FORMAT})", self.format)));
+        }
         if self.dim != 2 && self.dim != 3 {
             return Err(GeomError(format!("dimension must be 2 or 3, not {}", self.dim)));
         }

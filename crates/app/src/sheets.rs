@@ -358,8 +358,8 @@ impl App {
         if let Some(v) = fork {
             let r = self.shell.open.get_mut(&id).and_then(|w| {
                 let d = w.dir.as_mut()?;
-                let xml = d.read_frozen(&v.spec_hash).ok()?;
-                Some(d.add_experiment(&format!("Fork of v{}", v.n), &xml, Some(&v.experiment)))
+                let spec = d.read_frozen(&v.spec_hash).ok()?;
+                Some(d.add_experiment(&format!("Fork of v{}", v.n), &spec, Some(&v.experiment)))
             });
             match r {
                 Some(Ok(eid)) => {

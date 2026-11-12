@@ -384,9 +384,11 @@ fn a_project_is_stored_solved_into_the_run_table_and_reopened() {
     assert!(runs[0]["metrics"]["cells"].as_f64().unwrap() > 50.0);
     assert_eq!(runs[0]["params"]["w"], 5e-7, "numeric model parameters are the run's parameters");
     let run_dir = folder.join("e1").join("runs").join(runs[0]["id"].as_str().unwrap());
-    // the fields of a run: HDF5 in a build with the feature (and no JSON copy), else JSON
-    let result_file = if cfg!(feature = "hdf5") { "results.h5" } else { "result_tst.json" };
-    assert!(run_dir.join(result_file).exists() && run_dir.join("log.txt").exists());
+    // the fields of a run are HDF5 (ADR 62, 63): `results.h5` in a build with the feature; there is never a JSON copy of the fields
+    assert!(run_dir.join("log.txt").exists());
+    assert_eq!(run_dir.join("results.h5").exists(), cfg!(feature = "hdf5"));
+    let any_json_result = std::fs::read_dir(&run_dir).unwrap().filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().starts_with("result_"));
+    assert!(!any_json_result, "no bulk data is stored as JSON");
 
     // an edit and a save is a new version; the card is made by the engine
     call(&mut e, "set_param", json!({ "name": "w", "value": 6e-7 }));

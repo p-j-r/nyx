@@ -2,7 +2,7 @@
 //! `params` and validates them against its descriptors (`validate`); nothing physics-specific lives here.
 //!
 //! Regions and boundaries are named by `geom` names and selectors (ADR 2); the engine compiles them to labels through a
-//! `LabelResolver` when it solves. There is no `format` key yet: it is introduced once, in phase 8 of the restructure plan.
+//! `LabelResolver` when it solves. The `format` key (first value 1) is written in every problem and checked by `validate_spec` (ADR 63).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -37,9 +37,19 @@ pub struct BcSpec {
     pub params: Value,
 }
 
+/// The file format of a problem (ADR 63). Written in every problem; a problem of another format is refused, there is no migration.
+pub const FORMAT: u32 = 1;
+
+fn current_format() -> u32 {
+    FORMAT
+}
+
 /// A problem for one physics.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProblemSpec {
+    /// the file format, `1` (ADR 63)
+    #[serde(default = "current_format")]
+    pub format: u32,
     /// the three-letter code of the physics (`dfs`, `sms`, `ems`)
     pub physics: String,
     /// element order (1 and 2 today; the physics says which it supports)
@@ -58,6 +68,7 @@ pub struct ProblemSpec {
 impl ProblemSpec {
     pub fn new(physics: &str, order: u8, study_kind: &str) -> ProblemSpec {
         ProblemSpec {
+            format: FORMAT,
             physics: physics.into(),
             order,
             study: StudySpec { kind: study_kind.into(), params: Value::Null },

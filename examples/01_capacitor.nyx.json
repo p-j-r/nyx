@@ -1,5 +1,6 @@
 {
   "active": "dfs",
+  "format": 1,
   "geometry": {
     "dim": 2,
     "features": [
@@ -69,6 +70,7 @@
         "tags": []
       }
     ],
+    "format": 1,
     "params": []
   },
   "mesh": {
@@ -89,6 +91,7 @@
           "on": "outer & plane(x = 1)"
         }
       ],
+      "format": 1,
       "materials": {
         "left": {
           "eps_r": 2.0

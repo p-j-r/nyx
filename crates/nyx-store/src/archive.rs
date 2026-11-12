@@ -95,9 +95,9 @@ pub fn allowed(name: &str) -> bool {
     let p: Vec<&str> = name.split('/').collect();
     match p.as_slice() {
         [MANIFEST] | ["workflow.json"] | ["history.jsonl"] | ["notes.md"] | [".gitignore"] => true,
-        ["specs", f] => f.ends_with(".nyx.xml") && f.len() < 100 && f.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_')),
+        ["specs", f] => f.ends_with(".nyx.json") && f.len() < 100 && f.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_')),
         ["analysis", f] => simple_file(f, &["rhai", "py", "md", "txt", "json", "csv"]),
-        [e, "experiment.nyx.xml"] | [e, "runs.jsonl"] => simple(e, 'e'),
+        [e, "experiment.nyx.json"] | [e, "runs.jsonl"] => simple(e, 'e'),
         [e, "runs", r, f] => simple(e, 'e') && simple(r, 'r') && simple_file(f, &["txt", "h5", "hdf5", "json", "csv", "mesh", "png"]),
         _ => false,
     }
@@ -128,7 +128,7 @@ fn plan(w: &WorkflowDir, level: ShareLevel, only: Option<&[String]>) -> Result<V
     }
     let mut hashes: Vec<String> = vec![];
     for e in w.wf.experiments.iter().filter(|e| keep(&e.id)) {
-        files.insert(format!("{}/experiment.nyx.xml", e.id), w.spec_path(&e.id));
+        files.insert(format!("{}/experiment.nyx.json", e.id), w.spec_path(&e.id));
         if w.runs_path(&e.id).is_file() {
             files.insert(format!("{}/runs.jsonl", e.id), w.runs_path(&e.id));
             hashes.extend(w.runs(&e.id).0.into_iter().map(|r| r.spec));
@@ -184,7 +184,7 @@ pub fn sizes(w: &WorkflowDir, only: Option<&[String]>) -> Result<[(ShareLevel, u
 }
 
 /// Absolute paths in string values of a spec reduced to their file names (`C:\Users\me\out\r.h5` becomes `r.h5`).
-pub fn strip_paths_xml(xml: &str) -> Result<(String, usize), String> {
+pub fn strip_paths(xml: &str) -> Result<(String, usize), String> {
     fn walk(v: &mut serde_json::Value, n: &mut usize) {
         match v {
             serde_json::Value::String(s) => {
@@ -211,7 +211,7 @@ pub fn strip_paths_xml(xml: &str) -> Result<(String, usize), String> {
 
 /// How many personal paths an export would strip (for the "check before sending" panel).
 pub fn count_personal_paths(w: &WorkflowDir) -> usize {
-    plan(w, ShareLevel::Recipe, None).map(|p| p.iter().filter(|(n, _)| n.ends_with(".nyx.xml")).filter_map(|(_, f)| std::fs::read_to_string(f).ok()).filter_map(|x| strip_paths_xml(&x).ok()).map(|(_, n)| n).sum()).unwrap_or(0)
+    plan(w, ShareLevel::Recipe, None).map(|p| p.iter().filter(|(n, _)| n.ends_with(".nyx.json")).filter_map(|(_, f)| std::fs::read_to_string(f).ok()).filter_map(|x| strip_paths(&x).ok()).map(|(_, n)| n).sum()).unwrap_or(0)
 }
 
 pub struct ExportOptions<'a> {
@@ -230,8 +230,8 @@ pub fn export<W: Write + Seek>(w: &WorkflowDir, opt: &ExportOptions, out: W) -> 
             continue;
         }
         let mut data = std::fs::read(&path).map_err(|e| io_err(&path, e))?;
-        if opt.strip_paths && name.ends_with(".nyx.xml") {
-            let (x, n) = strip_paths_xml(&String::from_utf8_lossy(&data))?;
+        if opt.strip_paths && name.ends_with(".nyx.json") {
+            let (x, n) = strip_paths(&String::from_utf8_lossy(&data))?;
             if n > 0 {
                 data = x.into_bytes();
             }
@@ -494,11 +494,11 @@ pub fn import(path: &Path, workspace: &Path, lim: &Limits) -> Result<WorkflowDir
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::tests::{spec_xml, tmp};
+    use crate::flow::tests::{spec_json, tmp};
     use crate::runs::RunRecord;
 
     fn workflow(ws: &Path) -> WorkflowDir {
-        let mut d = WorkflowDir::create(ws, "SOI TE modes sweep", "gui", &spec_xml(5e-7, 4)).unwrap();
+        let mut d = WorkflowDir::create(ws, "SOI TE modes sweep", "gui", &spec_json(5e-7, 4)).unwrap();
         d.set_tags(vec!["soi".into(), "te modes".into()]).unwrap();
         d.set_notes("width sweep").unwrap();
         let spec = d.read_spec("e1").unwrap();
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn personal_paths_are_reduced_to_file_names() {
         let mut v = serde_json::json!({"output": {"path": "C:\\Users\\dana\\out\\r.h5"}, "other": "relative/x.h5", "unix": "/home/dana/r.h5"});
-        let (out, n) = strip_paths_xml(&v.to_string()).unwrap();
+        let (out, n) = strip_paths(&v.to_string()).unwrap();
         assert_eq!(n, 2);
         v = serde_json::from_str(&out).unwrap();
         assert_eq!(v["output"]["path"], "r.h5");
@@ -633,7 +633,7 @@ mod tests {
         }
         assert!(check_name("e1/runs/r0001_abc/log.txt").is_ok());
         // names that are fine as paths but not part of a workflow are refused too
-        for odd in ["evil.exe", "e1/evil.dll", "specs/../x.nyx.xml", "e1/runs/r1_a/x.exe", "workflow.json.bak", "analysis/run.bat"] {
+        for odd in ["evil.exe", "e1/evil.dll", "specs/../x.nyx.json", "e1/runs/r1_a/x.exe", "workflow.json.bak", "analysis/run.bat"] {
             assert!(!allowed(odd), "{odd}");
         }
         // case-insensitive duplicates would overwrite each other on Windows
@@ -684,12 +684,12 @@ pub fn scripts_of(w: &WorkflowDir) -> Vec<String> {
 #[cfg(test)]
 mod exclude_tests {
     use super::*;
-    use crate::flow::tests::{spec_xml, tmp};
+    use crate::flow::tests::{spec_json, tmp};
 
     #[test]
     fn a_script_can_be_left_out() {
         let ws = tmp("excl");
-        let d = WorkflowDir::create(&ws, "x", "gui", &spec_xml(5e-7, 4)).unwrap();
+        let d = WorkflowDir::create(&ws, "x", "gui", &spec_json(5e-7, 4)).unwrap();
         std::fs::create_dir_all(d.root.join("analysis")).unwrap();
         std::fs::write(d.root.join("analysis/a.py"), "print(1)").unwrap();
         assert_eq!(scripts_of(&d), ["analysis/a.py"]);

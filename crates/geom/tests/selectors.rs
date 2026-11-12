@@ -1,4 +1,4 @@
-//! Selectors, label map, serde round trips (JSON bit-exact, and the XML value encoding of nyx `xmlio`).
+//! Selectors, label map, serde round trips (JSON bit-exact; the `format` key is written and checked).
 
 mod common;
 use geom::eval::Tier;
@@ -206,42 +206,8 @@ fn size_tag_and_pml_data() {
 
 // ---- serde ------------------------------------------------------------------------------------------------
 
-/// The nyx `xmlio` encoding of a JSON value (objects `t="o"`, arrays `t="a"` with `<item>`, strings, numbers, booleans, null),
-/// reduced to a tree so the round trip can be checked without quick-xml.
-fn to_xml(name: &str, v: &serde_json::Value, out: &mut String) {
-    use serde_json::Value::*;
-    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    let valid = |k: &str| {
-        let mut c = k.chars();
-        matches!(c.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
-            && c.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-            && !k.to_ascii_lowercase().starts_with("xml")
-            && k != "entry"
-            && k != "item"
-    };
-    match v {
-        Object(m) => {
-            out.push_str(&format!("<{name} t=\"o\">"));
-            for (k, x) in m {
-                assert!(valid(k), "key {k} needs an <entry key=..>; geom keys must be plain names");
-                to_xml(k, x, out);
-            }
-            out.push_str(&format!("</{name}>"));
-        }
-        Array(a) => {
-            out.push_str(&format!("<{name} t=\"a\">"));
-            a.iter().for_each(|x| to_xml("item", x, out));
-            out.push_str(&format!("</{name}>"));
-        }
-        String(s) => out.push_str(&format!("<{name} t=\"s\">{}</{name}>", esc(s))),
-        Number(n) => out.push_str(&format!("<{name} t=\"n\">{n}</{name}>")),
-        Bool(b) => out.push_str(&format!("<{name} t=\"b\">{b}</{name}>")),
-        Null => out.push_str(&format!("<{name} t=\"z\"></{name}>")),
-    }
-}
-
 #[test]
-fn serde_round_trips_bit_exactly_and_is_xml_compatible() {
+fn serde_round_trips_bit_exactly_and_carries_the_format_key() {
     for g in common::all_2d() {
         let l = &g.model.list;
         let s = serde_json::to_string(l).unwrap();
@@ -249,9 +215,6 @@ fn serde_round_trips_bit_exactly_and_is_xml_compatible() {
         assert_eq!(&back, l);
         // numbers keep their identity (f64 vs string expressions)
         let v = serde_json::to_value(l).unwrap();
-        let mut xml = String::new();
-        to_xml("model", &v, &mut xml);
-        assert!(xml.contains("t=\"n\"") && xml.contains("t=\"s\""));
         assert_eq!(serde_json::from_value::<FeatureList>(v).unwrap(), *l);
     }
     // awkward floats survive
@@ -306,4 +269,16 @@ fn naming_schemes_are_selectable_and_deterministic() {
     assert!(ev.faces().iter().any(|f| f.name == "clad.1") && !ev.faces().iter().any(|f| f.name.contains("zmin")));
     ev.complex().check().unwrap();
     assert_eq!(common::interp::build(&m.list.to_rust()).list, m.list);
+}
+
+#[test]
+fn the_format_key_is_written_and_a_foreign_format_is_refused() {
+    let l = FeatureList::new(2);
+    let v = serde_json::to_value(&l).unwrap();
+    assert_eq!(v["format"], 1);
+    let mut other = l.clone();
+    other.format = 2;
+    let e = other.validate().unwrap_err().to_string();
+    assert!(e.contains("format 2") && e.contains("reads format 1"), "{e}");
+    assert!(l.validate().is_ok());
 }

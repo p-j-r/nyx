@@ -166,7 +166,7 @@ impl StoreLink {
     }
 
     /// Adds a run to the table: the project as it was solved (frozen), the metrics of the results and the stage log. The heavy files
-    /// (`results.h5` with the project, the mesh and all fields in a build with HDF5, else `result_<physics>.json`; `log.txt`) go in the run's folder, which can be deleted without losing the record.
+    /// (`results.h5` with the project, the mesh and all fields, and `results.xdmf`, in a build with HDF5; `log.txt`) go in the run's folder, which can be deleted without losing the record. The fields are never written as JSON (ADR 62, 63).
     pub fn record(
         &mut self,
         project: &Project,
@@ -190,6 +190,7 @@ impl StoreLink {
         }) {
             rec.params.insert(p.0, p.1);
         }
+        let mut log: Vec<String> = log.to_vec();
         let run_dir = self.dir.run_dir(&self.experiment, &id);
         let mut artifacts = vec![];
         #[allow(unused_mut)]
@@ -214,11 +215,14 @@ impl StoreLink {
                     for (k, v) in metrics_of(r) {
                         rec.metrics.insert(format!("{prefix}{k}"), v);
                     }
-                    #[cfg(not(feature = "hdf5"))]
-                    {
-                        let text = serde_json::to_vec(r).map_err(|e| Error::invalid(e.to_string()))?;
-                        write(&format!("result_{}.json", r.physics), "result", text)?;
-                    }
+                }
+                // the fields are never written as JSON text (ADR 62, 63): without the feature a run keeps its metrics and its log only
+                #[cfg(not(feature = "hdf5"))]
+                let log_note = Some("the fields are not stored: this build has no HDF5 support (cargo feature `hdf5`)".to_string());
+                #[cfg(feature = "hdf5")]
+                let log_note: Option<String> = None;
+                if let Some(n) = log_note {
+                    log.push(n);
                 }
                 #[cfg(feature = "hdf5")]
                 if let Some(mesh) = mesh {

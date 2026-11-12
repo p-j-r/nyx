@@ -20,7 +20,7 @@ Last updated: 2026-11-04, by the foundation session.
 | 5 | nyx-analysis | waits for 4 | | |
 | 6 | Materials | **implemented** (+ extends, more models, provenance, checked library), awaiting paul's answers (defaults in its section) | `restructure-6-materials` | ADR 29, 30, 34, 35; `docs/MATERIALS.md` |
 | 7 | nyx-engine, MCP parity, thin app | **implemented**, awaiting acceptance (see its section at the end) | `restructure-7-engine-frontends` (on the merge of 5, 6, 7a) | ADR 57 to 60; 7a (connect merge) is merged into it |
-| 8 | File format | waits for 7 | | gate G6 |
+| 8 | File format | **implemented**, awaiting acceptance (see its section at the end) | `restructure-8-format` (on `main` = phase 7) | ADR 63; tag `last-old-format` |
 | 9 | Close-out | waits for 8 | | |
 
 Bookmarks stack: `main` (= `arch-model-adrs` tip f74c12ea) <- `restructure-0-baselines` <- `restructure-1-delete-sbs-chips` <- `restructure-foundation`.
@@ -539,3 +539,23 @@ Started from the merge of `restructure-5-analysis`, `restructure-6-materials` an
 **Follow-up after review (2026-11-05, paul).** Decision 1 answered: convergence is essential, written (`convergence_check`, ADR 61: engine command, MCP tool, Study-tab button). Decision 3 answered: HDF5 stays central; the writer is ported to the new types (`nyx-engine::h5io`, feature `hdf5`, ADR 62): project, mesh and all fields of every physics, exact round trip, 2.5 to 2.9 times smaller than JSON, `results.h5` in every recorded run, commands `export_results` and `results_file_info`. XDMF is written too (recovered from the old writer, `nyx-engine::xdmf`; every reference verified by a test). Open: (a) paul's "fast xml format": is XDMF what was meant, or XML for the project file (the plan says JSON, phase 8)? (b) make `hdf5` a default feature (needs the HDF5 library everywhere; here `HDF5_DIR=C:/Users/robin-adm/anaconda3/Library` and its `bin` on PATH build and run it); (c) the window cannot open a results file yet; (d) the MPI-IO writer is not ported. Builds with the feature use a separate target directory in these notes (`nyx2-target-phase7-h5`).
 
 **Result after the follow-up:** default build 889 pass, 0 fail, 10 ignored (workspace); build with `hdf5`: engine, app and MCP tests 75 pass, 0 fail (incl. `tests/h5.rs`: exact round trip, XDMF references, `results.h5` in every run).
+
+## Phase 8: file format (workspace `nyx2-phase8`, bookmark `restructure-8-format`, 2026-11-12)
+
+Started from `main` = `restructure-7-engine-frontends` (74851193, phase 7 merged by paul on 2026-11-05 to 2026-11-12). The commit is tagged `last-old-format`. State: **implemented, awaiting acceptance.** ADR 63.
+
+**Done.**
+* **`format` key (value 1) at three levels:** `Project`, `geom::model::FeatureList`, `nyx_physics::ProblemSpec`. `Project::from_json` is the file boundary and is strict (key required in the project, the geometry and every problem; a different value is refused); a command given a problem or feature list without the key reads it as the current format. No migration code; a pre-phase-8 file fails with a message that says what is missing. The layout itself is the one phase 7 derived from the envelope (G6): no other key was renamed or moved.
+* **No XML left that is not output.** `xmlio` and the XML project format were already gone in phase 7. Now: spec files are `experiment.nyx.json` and `specs/<hash>.nyx.json` (were `.nyx.xml`), `strip_paths_xml` is `strip_paths`, the window's open dialog offers JSON, the XML-compatibility check in the geom tests is gone. The only XML written is the XDMF description next to HDF5 results (ADR 62).
+* **No bulk data as JSON.** The JSON copy of the fields in a build without `hdf5` (`result_<physics>.json`) is removed. A run then records metrics and log only and `log.txt` says why. With `hdf5` every run keeps `results.h5` and `results.xdmf` as before.
+* **Contracts.** `engine_project.v2.json` and `problem_spec.v3.json` (the old files removed; `VERSIONS.md`), the geom golden feature lists and the 16 `examples/*.nyx.json` carry the key. `*.expected.json` and every numeric golden are unchanged. `store_workflow.v1` and `store_run.v1` are unchanged (the store does not know the layout, ADR 59).
+* New tests: `crates/nyx-engine/tests/format.rs` (4), one in `geom/tests/selectors.rs`; the spec contract test and the store test of the run folder check the new rules.
+
+**Checks.** `cargo test --release --workspace --no-fail-fast` (default build): 894 pass, 0 fail, 10 ignored (phase 7: 889 / 0 / 10; +5 new tests). With `hdf5` (`HDF5_DIR=C:/Users/robin-adm/anaconda3/Library`, its `bin` on PATH): `nyx-engine`, `nyx-mcp`, `nyx-store` all pass, including `tests/h5.rs`. Contract and layering suites and `check_code_to_adr.sh` pass. No solver code changed, so no benchmark was re-run. `clippy -D warnings` on the new crates stops at an unused import in `nyx-ems/tests/physics_meshing.rs` and `cargo fmt --check` at old formatting in `nyx-engine/examples`; both exist on `main` and were left alone (phase 9, R23).
+
+**Open for paul (carried from phase 7, ADR 62/63).**
+1. Make `hdf5` a default feature? With it, every build needs the HDF5 library (`HDF5_DIR`); without it a run stores no fields at all now that the JSON copy is gone. My recommendation: yes for the app and the MCP server (default feature there, `--no-default-features` to opt out), because storing fields is their normal job; the library crates stay free of it.
+2. The window cannot open a results file yet (`results_file_info` and `read_results` exist).
+3. The MPI-IO (parallel) writer is not ported.
+4. "Fast xml format": is XDMF what was meant? The project file is JSON by plan; XML for it would be a reversal.
+5. Projects written before this phase (the old examples, a saved workspace of the phase 7 build) do not open; they are regenerated or re-saved by hand.

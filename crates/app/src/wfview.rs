@@ -102,8 +102,8 @@ impl App {
         if self.shell.open.get(id).is_some_and(|w| w.dir.is_some()) {
             return true;
         }
-        let Ok(xml) = self.spec_json() else { return false };
-        self.persist_draft(id, &xml).is_ok()
+        let Ok(spec) = self.spec_json() else { return false };
+        self.persist_draft(id, &spec).is_ok()
     }
 
     fn apply_act(&mut self, id: &str, a: Act) {
@@ -126,10 +126,10 @@ impl App {
                     return;
                 }
                 self.flush();
-                let xml = crate::examples::blank_json(&self.active().unwrap_or_else(|| "ems".into()), false);
+                let spec = crate::examples::blank_json(&self.active().unwrap_or_else(|| "ems".into()), false);
                 let n = self.shell.open.get(id).and_then(|w| w.dir.as_ref()).map(|d| d.wf.experiments.len() + 1).unwrap_or(2);
-                if let Some(Ok(xml)) = Some(xml) {
-                    let res = self.shell.open.get_mut(id).and_then(|w| w.dir.as_mut()).map(|d| d.add_experiment(&format!("Experiment {n}"), &xml, None));
+                if let Some(Ok(spec)) = Some(spec) {
+                    let res = self.shell.open.get_mut(id).and_then(|w| w.dir.as_mut()).map(|d| d.add_experiment(&format!("Experiment {n}"), &spec, None));
                     match res {
                         Some(Ok(e)) => {
                             self.refresh_entries();

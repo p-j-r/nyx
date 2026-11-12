@@ -9,6 +9,13 @@ use crate::spec::{MaterialAssign, ProblemSpec};
 use serde_json::Value;
 
 pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
+    if spec.format != crate::spec::FORMAT {
+        return Err(Error::invalid(format!(
+            "problem format {} is not supported (this program reads format {})",
+            spec.format,
+            crate::spec::FORMAT
+        )));
+    }
     if spec.physics != p.id() {
         return Err(Error::invalid(format!("the problem is for '{}' but was given to '{}'", spec.physics, p.id())));
     }

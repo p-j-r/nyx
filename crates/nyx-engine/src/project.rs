@@ -1,6 +1,7 @@
 //! The project: what is saved. A geometry (a `geom` feature list), the mesh settings, one problem (`ProblemSpec` envelope) per physics the
 //! project loads, and which physics is active. It is plain serde data; `to_json` writes it with sorted keys so the same project is the same
-//! text (and hash) in every build. The JSON layout is provisional until phase 8 derives the final one (gate G6): there is no `format` key yet.
+//! text (and hash) in every build. The project, its feature list and each of its problems carry a `format` key (first value 1, ADR 63); a file
+//! of another format, or without the key, is refused with a plain message (there is no migration code).
 
 use geom::model::FeatureList;
 use nyx_physics::{canonical_json, Error, ProblemSpec, Registry};
@@ -56,8 +57,18 @@ impl Default for MeshSettings {
     }
 }
 
+/// The file format of a project (ADR 63).
+pub const PROJECT_FORMAT: u32 = 1;
+
+fn current_format() -> u32 {
+    PROJECT_FORMAT
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Project {
+    /// the file format, `1` (ADR 63)
+    #[serde(default = "current_format")]
+    pub format: u32,
     pub title: String,
     pub geometry: FeatureList,
     pub mesh: MeshSettings,
@@ -76,6 +87,7 @@ impl Project {
     /// An empty project: no features, no physics.
     pub fn new(title: &str, dim: u8) -> Project {
         Project {
+            format: PROJECT_FORMAT,
             title: title.into(),
             geometry: FeatureList::new(dim),
             mesh: MeshSettings::default(),
@@ -118,8 +130,43 @@ impl Project {
         serde_json::to_string_pretty(&canonical_json(&v)).expect("a Value prints")
     }
 
+    /// Reads a project file. The `format` key must be present (in the project, the feature list and every problem) and supported: a file of
+    /// the layout before the key existed, or of a newer one, is refused (ADR 63), not converted.
     pub fn from_json(text: &str) -> Result<Project, Error> {
-        serde_json::from_str(text).map_err(|e| Error::invalid(format!("not a nyx project: {e}")))
+        let v: serde_json::Value = serde_json::from_str(text).map_err(|e| Error::invalid(format!("not a nyx project: {e}")))?;
+        let need = |what: &str, x: &serde_json::Value| -> Result<(), Error> {
+            if x.get("format").is_none() {
+                return Err(Error::invalid(format!(
+                    "not a nyx project of the current layout: {what} has no \"format\" key (this program reads format {PROJECT_FORMAT}; older files are not converted)"
+                )));
+            }
+            Ok(())
+        };
+        need("the project", &v)?;
+        need("its geometry", &v["geometry"])?;
+        for (i, s) in v["physics"].as_array().into_iter().flatten().enumerate() {
+            need(&format!("problem {}", i + 1), s)?;
+        }
+        let p: Project = serde_json::from_value(v).map_err(|e| Error::invalid(format!("not a nyx project: {e}")))?;
+        p.check_formats()?;
+        Ok(p)
+    }
+
+    /// Refuses a format this program does not read, in the project, its feature list and its problems.
+    pub fn check_formats(&self) -> Result<(), Error> {
+        let bad = |what: &str, f: u32, ok: u32| Err(Error::invalid(format!("{what} has format {f}; this program reads format {ok}")));
+        if self.format != PROJECT_FORMAT {
+            return bad("the project", self.format, PROJECT_FORMAT);
+        }
+        if self.geometry.format != geom::model::FORMAT {
+            return bad("the geometry", self.geometry.format, geom::model::FORMAT);
+        }
+        for s in &self.physics {
+            if s.format != nyx_physics::PROBLEM_FORMAT {
+                return bad(&format!("the '{}' problem", s.physics), s.format, nyx_physics::PROBLEM_FORMAT);
+            }
+        }
+        Ok(())
     }
 
     /// Everything that can be checked without a mesh: the feature list, the element size, the physics against the registry and each problem

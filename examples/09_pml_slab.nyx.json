@@ -1,5 +1,6 @@
 {
   "active": "ems",
+  "format": 1,
   "geometry": {
     "dim": 2,
     "features": [
@@ -119,6 +120,7 @@
         "tags": []
       }
     ],
+    "format": 1,
     "params": []
   },
   "mesh": {
@@ -146,6 +148,7 @@
           }
         }
       ],
+      "format": 1,
       "materials": {
         "air": {
           "eps_r": 1.0,

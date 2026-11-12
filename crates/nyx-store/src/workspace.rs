@@ -183,7 +183,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::tests::{spec_xml, tmp};
+    use crate::flow::tests::{spec_json, tmp};
     use crate::runs::RunRecord;
 
     fn entry(title: &str, age_days: i64, now: i64) -> Entry {
@@ -220,9 +220,9 @@ mod tests {
         let root = tmp("ws");
         let mut ws = Workspace::open(&root).unwrap();
         assert_eq!(ws.settings.hide_after_days, 3);
-        let a = WorkflowDir::create(&root, "First", "gui", &spec_xml(5e-7, 4)).unwrap();
+        let a = WorkflowDir::create(&root, "First", "gui", &spec_json(5e-7, 4)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let b = WorkflowDir::create(&root, "Second", "gui", &spec_xml(6e-7, 4)).unwrap();
+        let b = WorkflowDir::create(&root, "Second", "gui", &spec_json(6e-7, 4)).unwrap();
         std::fs::create_dir_all(root.join("not-a-workflow")).unwrap();
         let l = ws.list();
         assert_eq!(l.len(), 2);
@@ -242,7 +242,7 @@ mod tests {
         let root = tmp("hk");
         let mut ws = Workspace::open(&root).unwrap();
         ws.settings.keep_heavy = Some(1);
-        let mut d = WorkflowDir::create(&root, "hk", "gui", &spec_xml(5e-7, 4)).unwrap();
+        let mut d = WorkflowDir::create(&root, "hk", "gui", &spec_json(5e-7, 4)).unwrap();
         let spec = d.read_spec("e1").unwrap();
         for i in 0..3 {
             let r = d.record_run("e1", RunRecord { sec: 0.1, ..Default::default() }, &spec).unwrap();

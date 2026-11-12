@@ -50,10 +50,11 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 * Every source file of `femcore` and of the new crates starts with a short comment saying what it does; keep that when adding files.
 * `*.py` is git-ignored on purpose: nothing Python ships. Any GDS layout is built with gdsfactory, never raw gdstk.
 * Determinism: the same input gives the same numbers for any thread count. `NYX_THREADS=N` sets the rayon pool, `NYX_PROFILE=1` echoes the solver log.
+* **File format** (ADR 63): `Project`, `FeatureList` and `ProblemSpec` carry `format` (value 1); files without it or of another format are refused, nothing is converted. Project and spec files are JSON (`*.nyx.json`, `experiment.nyx.json`); results and meshes are HDF5 (feature `hdf5`), never JSON.
 
 ## Known state of the checks (phase 7, 2026-11-05, Windows, Rust 1.99.1)
 
-* `cargo test --release --workspace --no-fail-fast`: 889 pass, 10 ignored, 0 fail (phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
+* `cargo test --release --workspace --no-fail-fast`: 894 pass, 10 ignored, 0 fail (phase 8, `restructure-8-format`; 889 / 10 / 0 at phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
 * `cargo clippy -D warnings` is clean for `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis` and `nyx-engine`; the old `femcore` code has a few warnings left. `cargo fmt --check` fails for the old code (R23, decided in phase 9).
 * The numbers and timings of the pre-restructure state and of each phase are in `docs/RESTRUCTURE_STATUS.md`.
 

@@ -5,10 +5,10 @@
 //!   workflow.json               the manifest (KB)
 //!   history.jsonl               versions of the set-up
 //!   notes.md                    free text
-//!   specs/<hash>.nyx.xml        frozen specs, content addressed (versions and runs point here)
+//!   specs/<hash>.nyx.json        frozen specs, content addressed (versions and runs point here)
 //!   analysis/                   scripts (never run until the person approves them)
 //!   <experiment id>/
-//!     experiment.nyx.xml        the current spec (a `nyx_project`, as the app saves it)
+//!     experiment.nyx.json        the current spec (a `nyx_project`, as the app saves it)
 //!     runs.jsonl                append-only run records
 //!     runs/<run id>/            heavy and deletable: log.txt, results.h5, ...
 //! ```
@@ -55,7 +55,7 @@ impl WorkflowDir {
         self.root.join("notes.md")
     }
     pub fn spec_path(&self, eid: &str) -> PathBuf {
-        self.root.join(eid).join("experiment.nyx.xml")
+        self.root.join(eid).join("experiment.nyx.json")
     }
     pub fn runs_path(&self, eid: &str) -> PathBuf {
         self.root.join(eid).join("runs.jsonl")
@@ -64,23 +64,23 @@ impl WorkflowDir {
         self.root.join(eid).join("runs").join(rid)
     }
     pub fn frozen_path(&self, hash: &str) -> PathBuf {
-        self.root.join("specs").join(format!("{}.nyx.xml", hash.replace(':', "-")))
+        self.root.join("specs").join(format!("{}.nyx.json", hash.replace(':', "-")))
     }
 
     // ------------------------------------------------------------------------------------------------------ create, open, save
 
-    /// Creates the folder `<workspace>/<slug>_<id>` with one experiment holding `spec_xml` (the first version).
-    pub fn create(workspace: &Path, title: &str, origin: &str, spec_xml: &str) -> Result<WorkflowDir, String> {
-        Self::create_as(workspace, None, title, origin, spec_xml)
+    /// Creates the folder `<workspace>/<slug>_<id>` with one experiment holding `spec_json` (the first version).
+    pub fn create(workspace: &Path, title: &str, origin: &str, spec_json: &str) -> Result<WorkflowDir, String> {
+        Self::create_as(workspace, None, title, origin, spec_json)
     }
 
     /// Like `create` with a chosen id (a draft that has lived in a tab keeps the id it was shown under).
-    pub fn create_as(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_xml: &str) -> Result<WorkflowDir, String> {
-        Self::create_with(workspace, id, title, origin, spec_xml, crate::card::plain)
+    pub fn create_as(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_json: &str) -> Result<WorkflowDir, String> {
+        Self::create_with(workspace, id, title, origin, spec_json, crate::card::plain)
     }
 
     /// Like `create_as` with the function that makes cards from specs.
-    pub fn create_with(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_xml: &str, card_of: CardFn) -> Result<WorkflowDir, String> {
+    pub fn create_with(workspace: &Path, id: Option<&str>, title: &str, origin: &str, spec_json: &str, card_of: CardFn) -> Result<WorkflowDir, String> {
         let mut wf = Workflow::new(title, origin);
         if let Some(id) = id {
             wf.id = id.to_string();
@@ -89,7 +89,7 @@ impl WorkflowDir {
         std::fs::create_dir_all(&root).map_err(|e| io_err(&root, e))?;
         wf.experiments.clear();
         let mut d = WorkflowDir { root, wf, card_of };
-        d.add_experiment("Experiment 1", spec_xml, None)?;
+        d.add_experiment("Experiment 1", spec_json, None)?;
         d.write_gitignore()?;
         Ok(d)
     }
@@ -130,11 +130,11 @@ impl WorkflowDir {
 
     // ------------------------------------------------------------------------------------------------------ experiments
 
-    fn freeze(&self, xml: &str) -> Result<String, String> {
-        let h = hash_bytes(xml.as_bytes());
+    fn freeze(&self, text: &str) -> Result<String, String> {
+        let h = hash_bytes(text.as_bytes());
         let p = self.frozen_path(&h);
         if !p.exists() {
-            write_atomic(&p, xml.as_bytes()).map_err(|e| io_err(&p, e))?;
+            write_atomic(&p, text.as_bytes()).map_err(|e| io_err(&p, e))?;
         }
         Ok(h)
     }
@@ -150,11 +150,11 @@ impl WorkflowDir {
     }
 
     /// Adds an experiment (a fork when `parent` is given) and records the first version of it.
-    pub fn add_experiment(&mut self, title: &str, spec_xml: &str, parent: Option<&str>) -> Result<String, String> {
-        let value = parse_spec(spec_xml)?;
+    pub fn add_experiment(&mut self, title: &str, spec_json: &str, parent: Option<&str>) -> Result<String, String> {
+        let value = parse_spec(spec_json)?;
         let id = format!("e{}", self.wf.experiments.len() + 1);
-        let hash = self.freeze(spec_xml)?;
-        write_atomic(&self.spec_path(&id), spec_xml.as_bytes()).map_err(|e| io_err(&self.spec_path(&id), e))?;
+        let hash = self.freeze(spec_json)?;
+        write_atomic(&self.spec_path(&id), spec_json.as_bytes()).map_err(|e| io_err(&self.spec_path(&id), e))?;
         self.wf.experiments.push(Experiment {
             id: id.clone(),
             title: title.into(),
@@ -176,8 +176,8 @@ impl WorkflowDir {
 
     /// Copies an experiment's current spec and runs nothing: the fork remembers its parent.
     pub fn fork(&mut self, eid: &str, title: &str) -> Result<String, String> {
-        let xml = self.read_spec(eid)?;
-        self.add_experiment(title, &xml, Some(eid))
+        let text = self.read_spec(eid)?;
+        self.add_experiment(title, &text, Some(eid))
     }
 
     pub fn link(&mut self, from: &str, to: &str, label: &str) -> Result<(), String> {
@@ -233,18 +233,18 @@ impl WorkflowDir {
 
     /// Stores the current spec of `eid` when it differs from the saved one: freezes it, regenerates the card, adds (or merges into) an
     /// automatic version and touches the workflow. Returns the version number, `None` when nothing changed.
-    pub fn commit_spec(&mut self, eid: &str, spec_xml: &str) -> Result<Option<u32>, String> {
-        let new_hash = hash_bytes(spec_xml.as_bytes());
+    pub fn commit_spec(&mut self, eid: &str, spec_json: &str) -> Result<Option<u32>, String> {
+        let new_hash = hash_bytes(spec_json.as_bytes());
         let old_hash = self.wf.experiment(eid).ok_or_else(|| format!("no experiment {eid}"))?.spec_hash.clone();
         if new_hash == old_hash {
             return Ok(None);
         }
-        let new_value = parse_spec(spec_xml)?;
+        let new_value = parse_spec(spec_json)?;
         let old_value = self.read_frozen(&old_hash).ok().and_then(|x| parse_spec(&x).ok());
         let changes = old_value.as_ref().map(|o| versions::diff(o, &new_value)).unwrap_or_default();
         let summary = versions::summarize(&changes);
-        self.freeze(spec_xml)?;
-        write_atomic(&self.spec_path(eid), spec_xml.as_bytes()).map_err(|e| io_err(&self.spec_path(eid), e))?;
+        self.freeze(spec_json)?;
+        write_atomic(&self.spec_path(eid), spec_json.as_bytes()).map_err(|e| io_err(&self.spec_path(eid), e))?;
         let e = self.wf.experiment_mut(eid).unwrap();
         e.spec_hash = new_hash.clone();
         e.card = (self.card_of)(&new_value);
@@ -275,20 +275,20 @@ impl WorkflowDir {
     pub fn restore(&mut self, n: u32) -> Result<(String, String), String> {
         let h = self.history();
         let v = h.iter().find(|v| v.n == n).ok_or("no such version")?.clone();
-        let xml = self.read_frozen(&v.spec_hash)?;
+        let text = self.read_frozen(&v.spec_hash)?;
         let eid = v.experiment.clone();
         let cur = self.wf.experiment(&eid).ok_or("that experiment is gone")?.spec_hash.clone();
         if cur != v.spec_hash {
-            let (old, new) = (parse_spec(&self.read_frozen(&cur)?)?, parse_spec(&xml)?);
+            let (old, new) = (parse_spec(&self.read_frozen(&cur)?)?, parse_spec(&text)?);
             let changes = versions::diff(&old, &new);
-            write_atomic(&self.spec_path(&eid), xml.as_bytes()).map_err(|e| io_err(&self.spec_path(&eid), e))?;
+            write_atomic(&self.spec_path(&eid), text.as_bytes()).map_err(|e| io_err(&self.spec_path(&eid), e))?;
             let e = self.wf.experiment_mut(&eid).unwrap();
             e.spec_hash = v.spec_hash.clone();
             e.card = (self.card_of)(&new);
             self.push_version(&eid, v.spec_hash.clone(), Some(cur), format!("Restored v{n}"), changes, false)?;
             self.touch()?;
         }
-        Ok((eid, xml))
+        Ok((eid, text))
     }
 
     // ------------------------------------------------------------------------------------------------------ runs
@@ -298,8 +298,8 @@ impl WorkflowDir {
     }
 
     /// Adds a run to `eid`: freezes the spec it solved, appends the line and refreshes the digest.
-    pub fn record_run(&mut self, eid: &str, mut r: RunRecord, spec_xml: &str) -> Result<RunRecord, String> {
-        r.spec = self.freeze(spec_xml)?;
+    pub fn record_run(&mut self, eid: &str, mut r: RunRecord, spec_json: &str) -> Result<RunRecord, String> {
+        r.spec = self.freeze(spec_json)?;
         let (existing, _) = self.runs(eid);
         if r.id.is_empty() {
             r.id = runs::next_id(&existing);
@@ -385,7 +385,7 @@ pub(crate) mod tests {
     use serde_json::json;
 
     /// A minimal project (JSON) with a title, for tests that need a spec: `w` and `n_modes` make two specs differ.
-    pub fn spec_xml(w: f64, n_modes: usize) -> String {
+    pub fn spec_json(w: f64, n_modes: usize) -> String {
         json!({ "title": format!("rectangle {w:e} m, {n_modes} modes"), "width": w, "n_modes": n_modes }).to_string()
     }
 
@@ -398,7 +398,7 @@ pub(crate) mod tests {
     #[test]
     fn a_workflow_is_created_edited_run_and_reopened() {
         let ws = tmp("flow");
-        let mut d = WorkflowDir::create(&ws, "SOI TE modes sweep", "gui", &spec_xml(5e-7, 4)).unwrap();
+        let mut d = WorkflowDir::create(&ws, "SOI TE modes sweep", "gui", &spec_json(5e-7, 4)).unwrap();
         assert!(d.root.file_name().unwrap().to_str().unwrap().starts_with("soi-te-modes-sweep_"));
         assert_eq!(d.wf.version, 1);
         assert_eq!(d.history().len(), 1);
@@ -406,9 +406,9 @@ pub(crate) mod tests {
         assert!(d.wf.experiments[0].card.summary.contains("rectangle"), "{}", d.wf.experiments[0].card.summary);
 
         // an unchanged spec is not a new version; a changed one is, and a quick second change merges into it
-        assert_eq!(d.commit_spec(&e1, &spec_xml(5e-7, 4)).unwrap(), None);
-        assert_eq!(d.commit_spec(&e1, &spec_xml(5.5e-7, 4)).unwrap(), Some(2));
-        assert_eq!(d.commit_spec(&e1, &spec_xml(5.5e-7, 6)).unwrap(), Some(2), "merged");
+        assert_eq!(d.commit_spec(&e1, &spec_json(5e-7, 4)).unwrap(), None);
+        assert_eq!(d.commit_spec(&e1, &spec_json(5.5e-7, 4)).unwrap(), Some(2));
+        assert_eq!(d.commit_spec(&e1, &spec_json(5.5e-7, 6)).unwrap(), Some(2), "merged");
         let h = d.history();
         assert_eq!(h.len(), 2);
         assert!(h[1].changes.iter().any(|c| c.path.ends_with("width")) && h[1].changes.iter().any(|c| c.path.ends_with("n_modes")), "{:?}", h[1].changes);
@@ -418,16 +418,16 @@ pub(crate) mod tests {
         let spec_now = d.read_spec(&e1).unwrap();
         let rec = d.record_run(&e1, rec, &spec_now).unwrap();
         assert!(rec.id.starts_with("r0001_") && rec.version == 2 && rec.spec.starts_with("b3:"));
-        assert_eq!(d.commit_spec(&e1, &spec_xml(6e-7, 6)).unwrap(), Some(3));
+        assert_eq!(d.commit_spec(&e1, &spec_json(6e-7, 6)).unwrap(), Some(3));
         assert_eq!(d.history().len(), 3);
         assert_eq!(d.wf.experiments[0].runs.count, 1);
         assert!((d.wf.experiments[0].runs.metrics["neff_re"].max - 2.44).abs() < 1e-12);
 
         // naming, restoring (adds a version), fork and link
         d.name_version(2, "Baseline").unwrap();
-        let (eid, xml) = d.restore(2).unwrap();
+        let (eid, text) = d.restore(2).unwrap();
         assert_eq!(eid, e1);
-        assert_eq!(hash_bytes(xml.as_bytes()), d.wf.experiments[0].spec_hash);
+        assert_eq!(hash_bytes(text.as_bytes()), d.wf.experiments[0].spec_hash);
         assert_eq!(d.history().last().unwrap().summary, "Restored v2");
         let e2 = d.fork(&e1, "TE modes vs thickness").unwrap();
         assert_eq!(d.wf.experiment(&e2).unwrap().parent.as_deref(), Some("e1"));
@@ -463,7 +463,7 @@ pub(crate) mod tests {
         assert!(d.history()[1].changes.iter().any(|c| c.path.ends_with("title")), "{:?}", d.history()[1].changes);
         let reopened = WorkflowDir::open_with(&d.root, json_card).unwrap();
         assert_eq!(reopened.wf, d.wf);
-        let (out, n) = crate::archive::strip_paths_xml(&spec("b")).unwrap();
+        let (out, n) = crate::archive::strip_paths(&spec("b")).unwrap();
         assert_eq!(n, 1);
         assert!(out.contains("r.h5") && !out.contains("Users"));
         assert!(d.commit_spec(&e, "{not json").is_err());
@@ -473,7 +473,7 @@ pub(crate) mod tests {
     #[test]
     fn a_newer_format_is_refused_not_misread() {
         let ws = tmp("newer");
-        let d = WorkflowDir::create(&ws, "x", "gui", &spec_xml(5e-7, 4)).unwrap();
+        let d = WorkflowDir::create(&ws, "x", "gui", &spec_json(5e-7, 4)).unwrap();
         let text = std::fs::read_to_string(d.manifest_path()).unwrap().replace("\"nyx\": 1", "\"nyx\": 99");
         std::fs::write(d.manifest_path(), text).unwrap();
         assert!(WorkflowDir::open(&d.root).unwrap_err().contains("newer nyx"));

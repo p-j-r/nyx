@@ -1,5 +1,6 @@
 {
   "active": "sms",
+  "format": 1,
   "geometry": {
     "dim": 2,
     "features": [
@@ -44,6 +45,7 @@
         "tags": []
       }
     ],
+    "format": 1,
     "params": []
   },
   "mesh": {
@@ -67,6 +69,7 @@
           }
         }
       ],
+      "format": 1,
       "materials": {
         "plate": {
           "k": 160.0
@@ -90,6 +93,7 @@
           }
         }
       ],
+      "format": 1,
       "materials": {
         "plate": {
           "E": 70000000000.0,

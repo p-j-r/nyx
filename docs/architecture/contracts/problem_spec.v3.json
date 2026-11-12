@@ -10,6 +10,7 @@
         }
       }
     ],
+    "format": 1,
     "materials": {},
     "order": 1,
     "physics": "dfs",
@@ -34,6 +35,7 @@
         }
       }
     ],
+    "format": 1,
     "materials": {
       "beam": {
         "E": 169000000000.0,
@@ -68,6 +70,7 @@
         }
       }
     ],
+    "format": 1,
     "materials": {
       "clad": "silica",
       "core": {

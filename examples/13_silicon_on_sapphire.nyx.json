@@ -1,5 +1,6 @@
 {
   "active": "ems",
+  "format": 1,
   "geometry": {
     "dim": 2,
     "features": [
@@ -221,6 +222,7 @@
         "tags": []
       }
     ],
+    "format": 1,
     "params": []
   },
   "mesh": {
@@ -350,6 +352,7 @@
           }
         }
       ],
+      "format": 1,
       "materials": {
         "air*": "air",
         "air_near*": "air",
@@ -514,6 +517,7 @@
           }
         }
       ],
+      "format": 1,
       "materials": {
         "sapphire*": {
           "euler_deg": [

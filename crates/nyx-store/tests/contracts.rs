@@ -108,7 +108,7 @@ fn store_format_gate_refuses_a_newer_manifest() {
     std::fs::write(d.manifest_path(), text.replace(&format!("\"nyx\": {FORMAT}"), "\"nyx\": 99")).unwrap();
     assert!(WorkflowDir::open(&d.root).unwrap_err().contains("newer nyx"));
     // the files a workflow is made of (ADR 14)
-    assert!(d.spec_path("e1").ends_with("e1/experiment.nyx.xml") || d.spec_path("e1").to_string_lossy().replace('\\', "/").ends_with("e1/experiment.nyx.xml"));
+    assert!(d.spec_path("e1").ends_with("e1/experiment.nyx.json") || d.spec_path("e1").to_string_lossy().replace('\\', "/").ends_with("e1/experiment.nyx.json"));
     let _ = std::fs::remove_dir_all(&ws);
 }
 

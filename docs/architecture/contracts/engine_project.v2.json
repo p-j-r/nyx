@@ -1,5 +1,6 @@
 {
   "active": "ems",
+  "format": 1,
   "geometry": {
     "dim": 2,
     "features": [
@@ -94,6 +95,7 @@
         "tags": []
       }
     ],
+    "format": 1,
     "params": [
       {
         "name": "w",
@@ -111,6 +113,7 @@
   "physics": [
     {
       "bcs": [],
+      "format": 1,
       "materials": {
         "silicon": {
           "eps_r": 12.08

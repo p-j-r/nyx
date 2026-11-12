@@ -1,5 +1,6 @@
 {
   "active": "dfs",
+  "format": 1,
   "geometry": {
     "dim": 2,
     "features": [
@@ -44,6 +45,7 @@
         "tags": []
       }
     ],
+    "format": 1,
     "params": []
   },
   "mesh": {
@@ -68,6 +70,7 @@
           }
         }
       ],
+      "format": 1,
       "materials": {
         "plate": {
           "Cp": 470.0,

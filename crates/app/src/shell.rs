@@ -3,7 +3,7 @@
 //!
 //! One project lives in memory at a time (`App::proj`, the mesh and the results). Each open workflow tab remembers which of its experiments
 //! is loaded; switching tabs or experiments first stores the current spec (`autosave_tick`, `flush`) and then loads the other one from its
-//! `experiment.nyx.xml`. Nothing is saved until something changes: a new workflow is a *draft* in memory and gets its folder on the first
+//! `experiment.nyx.spec`. Nothing is saved until something changes: a new workflow is a *draft* in memory and gets its folder on the first
 //! edit, run, title or note. Every Compute becomes a run record (`record_ok`, `record_end`). Without a workspace (tests, `--batch`) the shell is
 //! switched off and the window behaves as before.
 
@@ -344,24 +344,24 @@ impl App {
     /// Stores the live project in its workflow when it changed (called about once a second, and before anything that replaces it).
     pub fn flush(&mut self) {
         let Some((wid, eid)) = self.shell.loaded.clone() else { return };
-        let Ok(xml) = self.spec_json() else { return };
-        let h = hash_bytes(xml.as_bytes());
+        let Ok(spec) = self.spec_json() else { return };
+        let h = hash_bytes(spec.as_bytes());
         let Some(w) = self.shell.open.get_mut(&wid) else { return };
         if h == w.last_hash {
             return;
         }
         if w.dir.is_none() {
-            if xml == w.spec0 {
+            if spec == w.spec0 {
                 w.last_hash = h;
                 return;
             }
-            if self.persist_draft(&wid, &xml).is_err() {
+            if self.persist_draft(&wid, &spec).is_err() {
                 return;
             }
         }
         let Some(w) = self.shell.open.get_mut(&wid) else { return };
         if let Some(d) = &mut w.dir {
-            match d.commit_spec(&eid, &xml) {
+            match d.commit_spec(&eid, &spec) {
                 Ok(_) => {
                     w.last_hash = h;
                     w.saved_at = Some(Instant::now());
@@ -375,12 +375,12 @@ impl App {
         self.refresh_entries();
     }
 
-    pub fn persist_draft(&mut self, wid: &str, xml: &str) -> Result<(), String> {
+    pub fn persist_draft(&mut self, wid: &str, spec: &str) -> Result<(), String> {
         let Some(root) = self.shell.ws.as_ref().map(|w| w.root.clone()) else { return Err("no workspace".into()) };
         let Some(w) = self.shell.open.get_mut(wid) else { return Err("no such workflow".into()) };
         let title = if w.draft_title.trim().is_empty() { "Untitled workflow".to_string() } else { w.draft_title.trim().to_string() };
         // the very first version is the spec the draft started from; this change is then committed on top of it
-        let first = if w.spec0.is_empty() { xml.to_string() } else { w.spec0.clone() };
+        let first = if w.spec0.is_empty() { spec.to_string() } else { w.spec0.clone() };
         match WorkflowDir::create_with(&root, Some(wid), &title, "gui", &first, nyx_engine::store_link::card_of) {
             Ok(mut d) => {
                 if !w.tags.is_empty() {
@@ -489,10 +489,10 @@ impl App {
             }
         }
         self.adopt_project();
-        let xml = self.spec_json().unwrap_or_default();
+        let spec = self.spec_json().unwrap_or_default();
         if let Some(w) = self.shell.open.get_mut(&id) {
-            w.spec0 = xml.clone();
-            w.last_hash = hash_bytes(xml.as_bytes());
+            w.spec0 = spec.clone();
+            w.last_hash = hash_bytes(spec.as_bytes());
         }
         self.shell.loaded = Some((id.clone(), "e1".into()));
         self.shell.page = Page::Workflow(id);
@@ -539,14 +539,14 @@ impl App {
             self.show_workflow(&wid);
         }
         let Some((_, eid)) = self.shell.loaded.clone() else { return };
-        let Ok(xml) = self.spec_json() else { return };
+        let Ok(spec) = self.spec_json() else { return };
         // a run needs a folder: a draft gets it now (the run is its first change)
-        if self.shell.open.get(&wid).is_some_and(|w| w.dir.is_none()) && self.persist_draft(&wid, &xml).is_err() {
+        if self.shell.open.get(&wid).is_some_and(|w| w.dir.is_none()) && self.persist_draft(&wid, &spec).is_err() {
             return;
         }
         self.flush();
-        let params = params_of(&xml);
-        self.shell.run = Some(RunCtx { wf_id: wid.clone(), exp: eid, spec_json: xml, params, started: Instant::now() });
+        let params = params_of(&spec);
+        self.shell.run = Some(RunCtx { wf_id: wid.clone(), exp: eid, spec_json: spec, params, started: Instant::now() });
         self.compute();
         if self.busy.is_none() {
             // refused (nothing to solve on, wrong study): there is no job, so no record
@@ -771,7 +771,7 @@ impl App {
 
     /// File dialog for a `.nyx` file; shows what is inside before anything is saved.
     pub fn pick_nyx_file(&mut self) {
-        let Some(p) = rfd::FileDialog::new().add_filter("nyx workflow", &["nyx"]).add_filter("nyx project (XML)", &["xml"]).pick_file() else { return };
+        let Some(p) = rfd::FileDialog::new().add_filter("nyx workflow", &["nyx"]).add_filter("nyx project (JSON)", &["json"]).pick_file() else { return };
         self.open_received(p);
     }
 

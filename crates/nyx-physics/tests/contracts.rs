@@ -1,5 +1,5 @@
 //! Contracts of `nyx-physics` (ADR 19, ADR 25):
-//! * `problem_spec.v2.json`: the serde shape of the problem envelope, one spec per physics
+//! * `problem_spec.v3.json`: the serde shape of the problem envelope, one spec per physics
 //! * `solve_result.v2.json`: the serde shape of a result (the old `SolveResult` was not serialisable, R27)
 //! * `physics_descriptors.v1.json`: the serde shape of the descriptors, one of each kind
 //! * `physics_api` (tests only): the trait is object safe and has the listed methods; the registry rules; the error codes
@@ -43,37 +43,39 @@ fn exemplar_specs() -> Vec<ProblemSpec> {
 }
 
 #[test]
-fn problem_spec_v2_exemplar_is_stable() {
+fn problem_spec_v3_exemplar_is_stable() {
     let specs = exemplar_specs();
-    check_exemplar("problem_spec.v2.json", &serde_json::to_value(&specs).unwrap());
+    check_exemplar("problem_spec.v3.json", &serde_json::to_value(&specs).unwrap());
     // and the checked-in text reads back to the same values
-    let text = std::fs::read_to_string(contract_file("problem_spec.v2.json")).unwrap();
+    let text = std::fs::read_to_string(contract_file("problem_spec.v3.json")).unwrap();
     let back: Vec<ProblemSpec> = serde_json::from_str(&text).unwrap();
     assert_eq!(back, specs);
 }
 
 #[test]
-fn problem_spec_v2_shape_that_other_crates_read_without_types() {
+fn problem_spec_v3_shape_that_other_crates_read_without_types() {
     // the store, the MCP server and the window read specs as untyped JSON: these names are the contract
     let v = serde_json::to_value(&exemplar_specs()[2]).unwrap();
-    for k in ["physics", "order", "study", "materials", "bcs"] {
+    for k in ["format", "physics", "order", "study", "materials", "bcs"] {
         assert!(v.get(k).is_some(), "ProblemSpec lost the key {k}");
     }
     assert_eq!(v["study"]["kind"], json!("modes"));
     assert_eq!(v["materials"]["clad"], json!("silica"));
     assert_eq!(v["materials"]["core"]["eps_r"], json!(12.08));
     assert_eq!(v["bcs"][0]["on"], json!("clad_pml"));
-    // no `format` key yet: phase 8 adds it once
-    assert!(v.get("format").is_none());
+    // the key is written in every problem (ADR 63)
+    assert_eq!(v["format"], json!(1));
 }
 
 #[test]
-fn problem_spec_v2_reading_is_strict_about_the_physics_and_lenient_about_absent_options() {
+fn problem_spec_v3_reading_is_strict_about_the_physics_and_lenient_about_absent_options() {
     // Documented, not endorsed (R20): unknown top-level keys are ignored by serde; the descriptors (`validate_spec`) are what refuse
     // unknown parameters inside `study.params`, `bcs[].params` and `params`.
     let minimal: ProblemSpec =
         serde_json::from_value(json!({ "physics": "dfs", "order": 1, "study": { "kind": "electrostatic" } })).unwrap();
     assert!(minimal.materials.is_empty() && minimal.bcs.is_empty() && minimal.params.is_null());
+    // a problem given to a command without the key is read as the current format; a project file must carry it (`Project::from_json`)
+    assert_eq!(minimal.format, PROBLEM_FORMAT);
     assert!(serde_json::from_value::<ProblemSpec>(json!({ "order": 1 })).is_err());
 }
 

@@ -5,7 +5,7 @@
 use crate::error::{GeomError, GeomResult};
 use serde::{Deserialize, Serialize};
 
-/// A number or an expression string; serialises as a bare JSON number or string (`untagged`), which `xmlio` writes as `t="n"` / `t="s"`.
+/// A number or an expression string; serialises as a bare JSON number or string (`untagged`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Expr {

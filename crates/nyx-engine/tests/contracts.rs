@@ -37,7 +37,7 @@ fn an_example_project_made_by_commands_is_pinned() {
     call("set_material", json!({ "physics": "ems", "region": "silicon", "material": { "eps_r": 12.08 } }));
     call("check_project", json!({}));
     let v: Value = serde_json::from_str(&e.project().to_json()).unwrap();
-    check_exemplar(env!("CARGO_MANIFEST_DIR"), "engine_project.v1.json", &v);
+    check_exemplar(env!("CARGO_MANIFEST_DIR"), "engine_project.v2.json", &v);
     // and the file reads back to the same project
     assert_eq!(Project::from_json(&e.project().to_json()).unwrap(), *e.project());
 }
