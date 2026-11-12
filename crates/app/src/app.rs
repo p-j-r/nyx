@@ -319,6 +319,14 @@ impl App {
             self.load_project(&path);
             return;
         }
+        if ext == "h5" {
+            if self.busy.is_some() {
+                self.queued = Some(Queued::Open(path));
+                return;
+            }
+            self.new_draft(&path.file_stem().and_then(|s| s.to_str()).unwrap_or("Results").to_string(), crate::shell::Start::Results(path));
+            return;
+        }
         self.set_error(format!("Don't know how to open '.{ext}' files (nyx projects are .nyx.json)"));
     }
 
@@ -407,7 +415,7 @@ impl App {
     }
 
     /// A solve came back: the mesh it used, and one result view per physics it solved.
-    fn take_solved(&mut self, summary: &Value) {
+    pub(crate) fn take_solved(&mut self, summary: &Value) {
         self.take_model();
         let Some(mesh) = self.doc.mesh.clone() else { return };
         let solved: Vec<String> = summary["results"].as_array().into_iter().flatten().filter_map(|r| r["physics"].as_str().map(str::to_string)).collect();
@@ -1209,6 +1217,29 @@ mod tests {
         assert_eq!(a.engine.project().to_json(), b.engine.project().to_json());
         assert!(b.doc.mesh.is_some());
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A results file written by one window opens in another: the project, the mesh and the stored results are on show, with no solve.
+    #[test]
+    fn a_results_file_opens_with_its_results_on_show() {
+        let mut a = app();
+        a.load_example(example("04_thermal_bar"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        let path = std::env::temp_dir().join(format!("nyx-test-{}.h5", std::process::id()));
+        let v = a.cmd("export_results", json!({ "path": path.to_str().unwrap() }));
+        assert!(v.is_some(), "{:?}", a.error);
+        let mut b = app();
+        b.open_path(path.clone());
+        wait_idle(&mut b, 30);
+        assert!(b.error.is_none(), "{:?}", b.error);
+        assert!(b.doc.mesh.is_some() && !b.results.is_empty(), "the results of the file are on show: mesh {} results {} status {}", b.doc.mesh.is_some(), b.results.len(), b.status);
+        assert_eq!(a.engine.project().to_json(), b.engine.project().to_json());
+        assert_eq!(b.tab, Tab::Results);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("xdmf"));
     }
 
     /// Draws every tab of the inspector, the toolbar and the viewport for several examples on a headless egui context: a panic in a form

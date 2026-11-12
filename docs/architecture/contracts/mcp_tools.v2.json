@@ -1100,6 +1100,24 @@
     {
       "annotations": {
         "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Open an HDF5 results file"
+      },
+      "arguments": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "name": "open_results",
+      "required": [
+        "path"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": true,

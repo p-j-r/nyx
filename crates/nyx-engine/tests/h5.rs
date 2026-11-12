@@ -97,3 +97,42 @@ fn the_xdmf_file_names_only_datasets_that_exist_in_the_h5_file() {
         let _ = std::fs::remove_file(path.with_extension("xdmf"));
     }
 }
+
+#[test]
+fn a_results_file_opens_as_the_project_with_its_results_and_analyses_work_on_them() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": example("15_soi_wire")})).unwrap();
+    e.call("solve_run", &json!({})).unwrap();
+    let path = tmp("open.h5");
+    e.call("export_results", &json!({ "path": path.to_str().unwrap() })).unwrap();
+    let want_project = e.project().clone();
+    let active = want_project.active.clone().unwrap_or_else(|| want_project.physics[0].physics.clone());
+    let (solved, _) = e.result(&active).unwrap();
+    let solved = solved.as_ref().clone();
+
+    // a new engine (another program run) opens the file: the same project, the stored mesh, the stored results, none of them stale
+    let mut f = Engine::new();
+    let v = f.call("open_results", &json!({ "path": path.to_str().unwrap() })).unwrap();
+    assert!(v["cells"].as_u64().unwrap() > 0 && !v["results"].as_array().unwrap().is_empty(), "{v}");
+    assert_eq!(f.project(), &want_project);
+    let (opened, stale) = f.result(&active).unwrap();
+    assert!(!stale, "a result of the opened file is current");
+    assert_eq!(opened.as_ref(), &solved, "the stored result is exactly the solved one");
+    assert!(f.model().is_some());
+    // what works on a solve works on the opened file
+    assert!(f.call("result_info", &json!({})).is_ok());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_file_that_cannot_be_opened_leaves_the_project_as_it_was() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": example("04_thermal_bar") })).unwrap();
+    let before = e.project().clone();
+    let other = tmp("notnyx.h5");
+    hdf5_metno::File::create(&other).unwrap();
+    assert!(e.call("open_results", &json!({ "path": other.to_str().unwrap() })).is_err());
+    assert!(e.call("open_results", &json!({ "path": tmp("missing.h5").to_str().unwrap() })).is_err());
+    assert_eq!(e.project(), &before);
+    let _ = std::fs::remove_file(&other);
+}

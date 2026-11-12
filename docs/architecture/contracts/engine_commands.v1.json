@@ -1127,6 +1127,25 @@
     "title": "Describe an HDF5 results file"
   },
   {
+    "access": "edit",
+    "description": "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support.",
+    "name": "open_results",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "file path, .h5",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "title": "Open an HDF5 results file"
+  },
+  {
     "access": "read",
     "description": "The analyses of results (polarization of the modes) and which solved physics each applies to.",
     "name": "list_analyses",

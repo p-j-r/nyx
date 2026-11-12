@@ -27,6 +27,8 @@ pub enum Page {
 /// Where a new workflow starts from: an example (or any project file), or a blank simulation.
 pub enum Start {
     Example(PathBuf),
+    /// an HDF5 results file: the project it holds with its mesh and results on show (ADR 62, 63)
+    Results(PathBuf),
     Blank { physics: String, three_d: bool },
 }
 
@@ -475,11 +477,19 @@ impl App {
         w.draft_title = title.trim().to_string();
         self.shell.open.insert(id.clone(), w);
         self.shell.tabs.push(id.clone());
+        let mut shown = false;
         match start {
             Start::Example(path) => {
                 if self.cmd("project_open", serde_json::json!({ "path": path.to_str().unwrap_or_default() })).is_none() {
                     return;
                 }
+            }
+            Start::Results(path) => {
+                let Some(v) = self.cmd("open_results", serde_json::json!({ "path": path.to_str().unwrap_or_default() })) else { return };
+                self.adopt();
+                self.project_path = None;
+                self.take_solved(&v);
+                shown = true;
             }
             Start::Blank { physics, three_d } => {
                 if let Err(e) = crate::examples::blank(&mut self.engine, &physics, three_d) {
@@ -488,7 +498,9 @@ impl App {
                 }
             }
         }
-        self.adopt_project();
+        if !shown {
+            self.adopt_project();
+        }
         let spec = self.spec_json().unwrap_or_default();
         if let Some(w) = self.shell.open.get_mut(&id) {
             w.spec0 = spec.clone();
@@ -497,7 +509,7 @@ impl App {
         self.shell.loaded = Some((id.clone(), "e1".into()));
         self.shell.page = Page::Workflow(id);
         self.shell.sheet = Sheet::None;
-        self.status = "New workflow. Nothing is saved until you change something.".into();
+        self.status = if shown { format!("Opened {title}: its project, mesh and results. Nothing is saved until you change something.") } else { "New workflow. Nothing is saved until you change something.".into() };
     }
 
     pub fn close_tab(&mut self, id: &str) {
@@ -771,13 +783,16 @@ impl App {
 
     /// File dialog for a `.nyx` file; shows what is inside before anything is saved.
     pub fn pick_nyx_file(&mut self) {
-        let Some(p) = rfd::FileDialog::new().add_filter("nyx workflow", &["nyx"]).add_filter("nyx project (JSON)", &["json"]).pick_file() else { return };
+        let Some(p) = rfd::FileDialog::new().add_filter("nyx workflow", &["nyx"]).add_filter("nyx project (JSON)", &["json"]).add_filter("nyx results (HDF5)", &["h5"]).pick_file() else { return };
         self.open_received(p);
     }
 
     pub fn open_received(&mut self, p: PathBuf) {
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-        if ext == "nyx" {
+        if ext == "h5" {
+            let title = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Results").to_string();
+            self.new_draft(&title, Start::Results(p));
+        } else if ext == "nyx" {
             let ins = nyx_engine::facade::store::archive::inspect(&p, &nyx_engine::facade::store::archive::Limits::default());
             self.shell.open_file = Some((p, ins));
             self.shell.sheet = Sheet::Open;

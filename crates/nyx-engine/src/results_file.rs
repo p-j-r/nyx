@@ -35,6 +35,54 @@ impl Engine {
         }
     }
 
+    /// Opens a results file: its project becomes the project, the project is meshed again and the stored results become the latest results
+    /// (not stale), so plots, analyses and exports work on them as after a solve. Meshing is deterministic (ADR 55), so the mesh made again
+    /// is the stored one; when it is not (a file of another version of nyx) nothing is changed and the message says so.
+    pub fn open_results(&mut self, path: &str) -> Result<Value, Error> {
+        #[cfg(feature = "hdf5")]
+        {
+            let stored = crate::h5io::read_results(std::path::Path::new(path)).map_err(Error::invalid)?;
+            let project = crate::project::Project::from_json(&stored.project)?;
+            project.check(&self.registry)?;
+            let before = (self.project.clone(), self.model.clone(), std::mem::take(&mut self.results), self.link.take());
+            self.set_project(project);
+            let restore = |e: &mut Engine, b: (crate::project::Project, _, _, _)| {
+                e.project = b.0;
+                e.model = b.1;
+                e.results = b.2;
+                e.link = b.3;
+            };
+            if let Err(e) = self.mesh_now() {
+                restore(self, before);
+                return Err(e);
+            }
+            let made = self.model().expect("the mesh was just built").solver_mesh();
+            let s = &stored.mesh;
+            if made.dim != s.dim || made.points != s.points || made.cells != s.cells || made.cell_labels != s.cell_labels || made.facets != s.facets || made.facet_labels != s.facet_labels {
+                restore(self, before);
+                return Err(Error::invalid(format!(
+                    "{path}: the project of this file meshes to something else than the mesh stored in it ({} cells made, {} stored); it was written by another version of nyx, so its results cannot be shown on the geometry",
+                    made.n_cells(),
+                    s.n_cells()
+                )));
+            }
+            let stamp = self.stamp();
+            let mut physics = vec![];
+            for (code, r) in stored.results {
+                physics.push(json!({
+                    "physics": code, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(), "scalars": r.scalars,
+                }));
+                self.results.insert(code, crate::engine::Stored { result: std::sync::Arc::new(r), stamp: stamp.clone() });
+            }
+            Ok(json!({ "title": self.project.title, "path": path, "cells": made.n_cells(), "results": physics }))
+        }
+        #[cfg(not(feature = "hdf5"))]
+        {
+            let _ = path;
+            Err(Error::Unsupported("this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature)".into()))
+        }
+    }
+
     /// What a results file holds: the project title, the mesh size and, per physics, the study, the solutions and the scalars.
     pub fn results_file_info(&self, path: &str) -> Result<Value, Error> {
         #[cfg(feature = "hdf5")]

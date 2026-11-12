@@ -23,7 +23,8 @@ Until phase 8 the saved layout was provisional: no file said which layout it was
 * A later change of layout bumps the number, adds a reader or a refusal in one place and a `.v<n+1>.` exemplar.
 * Project files written before phase 8 (the examples of phase 7, a saved workspace) do not open. They are regenerated (`make_examples`) or re-saved from a window built before; there is no converter.
 * **`hdf5` is a default feature of `nyx-engine`** (paul, 2026-11-12), so the app, the MCP server and every test build have it; `.cargo/config.toml` sets `HDF5_DIR` for the development machine (an environment value wins) and the HDF5 DLL must be on PATH at run time. `--no-default-features --features dfs,sms,ems` builds without it, and a run then stores no fields.
-* Decided by paul on 2026-11-12, to do: the window opens a results file; the MPI-IO writer is ported (for GPU and multicore use); XDMF stays the XML side, the project file stays JSON.
+* **The window opens a results file** (paul, 2026-11-12; done): engine command `open_results` reads the file, makes its project the project, meshes it again (meshing is deterministic, ADR 55) and refuses the file when that mesh is not the stored one, then takes the stored results as the latest results. The window offers it in the Open dialog (`.h5`) and on drop, and shows the results at once.
+* Still to do, decided by paul on 2026-11-12: the MPI-IO writer is ported (for GPU and multicore use). XDMF stays the XML side, the project file stays JSON.
 
 ## Code
 
