@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(iface.len(), 1);
         // 5 vertices per side line on the interface plane, minus the 4 corners of the square, are crease vertices
         let creases_on_plane = (0..w.pts.len()).filter(|&v| matches!(w.vclass[v], VClass3::Crease(_)) && (w.pts[v][2] - 0.5).abs() < 1e-12).count();
-        assert_eq!(creases_on_plane, 4 * 3 + 0);
+        assert_eq!(creases_on_plane, (4 * 3));
         let corners_on_plane = (0..w.pts.len()).filter(|&v| matches!(w.vclass[v], VClass3::Corner) && (w.pts[v][2] - 0.5).abs() < 1e-12).count();
         assert_eq!(corners_on_plane, 4);
     }

@@ -120,10 +120,8 @@ impl App {
                 }
             }
             "save" => {
-                if self.push_edits() {
-                    if self.cmd("project_save", json!({ "path": arg })).is_some() {
-                        self.status = format!("Saved {arg}");
-                    }
+                if self.push_edits() && self.cmd("project_save", json!({ "path": arg })).is_some() {
+                    self.status = format!("Saved {arg}");
                 }
             }
             "view" => self.show_results = arg == "result",

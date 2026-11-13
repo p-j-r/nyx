@@ -1,7 +1,7 @@
 //! Small widgets of the shell: cards, chips, buttons in the brand style, sparklines and modal sheets.
 
 use crate::theme;
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Margin, Response, RichText, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Margin, Response, RichText, Sense, Stroke, Ui, Vec2};
 
 pub fn card<R>(ui: &mut Ui, fill: Color32, stroke: Color32, pad: i8, f: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, stroke)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(pad)).show(ui, |ui| ui.vertical(f).inner).inner
@@ -136,7 +136,7 @@ pub fn bar(ui: &mut Ui, fraction: Option<f32>, width: f32) {
 pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui)) -> bool {
     let screen = ctx.content_rect();
     let mut close = false;
-    egui::Area::new(egui::Id::new((id, "backdrop"))).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique((id, "backdrop"))).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
         let r = ui.allocate_response(screen.size(), Sense::click());
         ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(110));
         if r.clicked() {
@@ -144,7 +144,7 @@ pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui))
         }
     });
     let frame = egui::Frame::new().fill(theme::card(ctx)).stroke(Stroke::new(1.0, theme::line(ctx))).corner_radius(CornerRadius::same(16)).inner_margin(Margin::same(22)).shadow(egui::Shadow { offset: [0, 8], blur: 40, spread: 0, color: Color32::from_black_alpha(70) });
-    egui::Area::new(egui::Id::new((id, "sheet"))).order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique((id, "sheet"))).order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
         frame.show(ui, |ui| {
             ui.set_width(width.min(screen.width() - 60.0));
             egui::ScrollArea::vertical().max_height(screen.height() - 120.0).auto_shrink([false, true]).show(ui, f);
@@ -154,8 +154,4 @@ pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui))
         close = true;
     }
     close
-}
-
-pub fn font(size: f32) -> FontId {
-    FontId::proportional(size)
 }

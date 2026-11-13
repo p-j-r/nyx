@@ -19,18 +19,6 @@ fn contract_file(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/architecture/contracts").join(name)
 }
 
-/// Compares `got` with the checked-in exemplar (line endings normalised), or rewrites it under `NYX_WRITE_CONTRACT=1`.
-fn check_exemplar(name: &str, got: &str) {
-    let path = contract_file(name);
-    if std::env::var_os("NYX_WRITE_CONTRACT").is_some() {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, format!("{got}\n")).unwrap();
-        return;
-    }
-    let want = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    assert_eq!(want.replace("\r\n", "\n").trim_end(), got.trim_end(), "{name} no longer matches the contract exemplar; this is an interface change (ADR 19)");
-}
-
 /// Like `check_exemplar`, but compares the parsed JSON values, never the text or the key order (ADR 26).
 fn check_exemplar_value(name: &str, got: &Value) {
     let path = contract_file(name);

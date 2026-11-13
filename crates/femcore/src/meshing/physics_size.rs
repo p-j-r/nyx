@@ -169,6 +169,26 @@ pub fn adapt_tets_for(
     Ok((simplex_from_adapt(&out.mesh), out.report))
 }
 
+// ---- wavelengths of a medium, for the physics crates that report their own `Sizing` ----
+
+/// Free-space wavelength `lam0` shortened by the largest refractive index of a medium with the relative permittivity tensor `eps` and the
+/// relative permeability `mu`: `n^2 = mu * (largest eigenvalue of eps)`.
+pub fn optical_wavelength(eps: &[[f64; 3]; 3], mu: f64, lam0: f64) -> f64 {
+    let (ev, _) = sym_eig::<3>(eps);
+    lam0 / (ev[0] * mu).max(1e-12).sqrt()
+}
+
+/// Vacuum speed of light (m/s).
+pub fn speed_of_light() -> f64 {
+    C0
+}
+
+/// Shortest wavelength of the elastic waves of a medium with stiffness `c` (solver Voigt order) and density `rho` at frequency `f`: the
+/// slowest plane wave over the frequency.
+pub fn elastic_wavelength(c: &M6, rho: f64, f: f64) -> f64 {
+    wave_speed_range(c, rho).0 / f
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,24 +217,4 @@ mod tests {
         let (vs, _) = wave_speed_range(&c, 2330.0);
         assert!((elastic_wavelength(&c, 2330.0, 1e9) - vs / 1e9).abs() < 1e-18);
     }
-}
-
-// ---- wavelengths of a medium, for the physics crates that report their own `Sizing` ----
-
-/// Free-space wavelength `lam0` shortened by the largest refractive index of a medium with the relative permittivity tensor `eps` and the
-/// relative permeability `mu`: `n^2 = mu * (largest eigenvalue of eps)`.
-pub fn optical_wavelength(eps: &[[f64; 3]; 3], mu: f64, lam0: f64) -> f64 {
-    let (ev, _) = sym_eig::<3>(eps);
-    lam0 / (ev[0] * mu).max(1e-12).sqrt()
-}
-
-/// Vacuum speed of light (m/s).
-pub fn speed_of_light() -> f64 {
-    C0
-}
-
-/// Shortest wavelength of the elastic waves of a medium with stiffness `c` (solver Voigt order) and density `rho` at frequency `f`: the
-/// slowest plane wave over the frequency.
-pub fn elastic_wavelength(c: &M6, rho: f64, f: f64) -> f64 {
-    wave_speed_range(c, rho).0 / f
 }

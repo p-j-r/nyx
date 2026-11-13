@@ -5,7 +5,6 @@ use femcore::meshing::physics_size::PhysicsSizing;
 use common::{adapt_tets, mesh_for_problem};
 use femcore::meshing::{Adaptive, MeshPlan, Mesher};
 use nyx_ems::Study;
-use femcore::props::*;
 use geom::model::{Model, RegionKind};
 use nyx_ems::C0;
 use nyx_physics::SolveResult;

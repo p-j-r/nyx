@@ -6,7 +6,7 @@ use femcore::meshing::geomdrive3::{mesh_geom_3d_with, Sizes3};
 use femcore::meshing::physics_size::PhysicsSizing;
 use femcore::meshing::pml_geom3::{structured_pml_3d_native, Native3};
 use femcore::meshing::{mesh_for_sizing, mesh_model, MeshPlan, PmlMode, Sizing};
-use geom::model::{Model, RegionKind};
+use geom::model::Model;
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 

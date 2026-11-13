@@ -128,7 +128,7 @@ impl App {
                 });
                 ui.label(kit::muted(ui, format!("matches {}", h.reasons.join(" · "))));
             });
-            if ui.interact(r.rect, ui.id().with(("hit", &e.wf.id)), Sense::click()).clicked() {
+            if ui.interact(r.rect, ui.scope_id().with(("hit", &e.wf.id)), Sense::click()).clicked() {
                 open = Some(e.wf.id.clone());
             }
             ui.add_space(4.0);
@@ -278,7 +278,7 @@ impl App {
                 });
                 let rect = r.response.rect;
                 ui.painter().hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1.0, line));
-                let click = ui.interact(rect, ui.id().with(("earlier", &e.wf.id)), Sense::click());
+                let click = ui.interact(rect, ui.scope_id().with(("earlier", &e.wf.id)), Sense::click());
                 if click.hovered() {
                     ui.painter().rect_filled(rect, 4.0, theme::tint(&ctx).gamma_multiply(0.5));
                 }
@@ -363,7 +363,7 @@ fn workflow_card(ui: &mut egui::Ui, e: &Entry, spark: &[f64], width: f32) -> egu
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, ago(e.wf.touched_secs(), now_secs()))));
         });
     }));
-    let resp = ui.interact(r.response.rect, ui.id().with(("card", &e.wf.id)), Sense::click());
+    let resp = ui.interact(r.response.rect, ui.scope_id().with(("card", &e.wf.id)), Sense::click());
     if resp.hovered() {
         ui.painter().rect_stroke(r.response.rect, 12.0, egui::Stroke::new(1.5, theme::accent(&ctx)), egui::StrokeKind::Inside);
     }

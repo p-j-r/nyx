@@ -1,6 +1,6 @@
 //! Shared helpers for the tests of the physics crates and of femcore: small meshes made from geom models with the boundary numbers the
 //! tests have always used, and `maxdiff`. Public so that `nyx-dfs`, `nyx-sms` and `nyx-ems` use the same fixtures.
-#![allow(dead_code)]
+#![allow(dead_code, clippy::type_complexity)]
 
 pub mod soi;
 

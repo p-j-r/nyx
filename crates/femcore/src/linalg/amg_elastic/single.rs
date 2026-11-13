@@ -17,7 +17,6 @@ const PAR_MIN_NNZ32: usize = 40_000;
 #[derive(Clone, Debug, Default)]
 pub struct Csr32 {
     pub nrows: usize,
-    pub ncols: usize,
     pub indptr: Vec<usize>,
     pub indices: Vec<u32>,
     pub data: Vec<f32>,
@@ -26,7 +25,7 @@ pub struct Csr32 {
 
 impl Csr32 {
     pub fn from_csr(a: &RCsr) -> Csr32 {
-        Csr32 { nrows: a.nrows(), ncols: a.ncols(), indptr: a.indptr().to_vec(), indices: a.indices().to_vec(), data: a.values().iter().map(|&v| v as f32).collect() }
+        Csr32 { nrows: a.nrows(), indptr: a.indptr().to_vec(), indices: a.indices().to_vec(), data: a.values().iter().map(|&v| v as f32).collect() }
     }
     pub fn nnz(&self) -> usize {
         self.indices.len()

@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(s.running.len() + s.recent.len() + s.earlier.len(), es.len(), "nothing is dropped");
         // edge: exactly three days is still recent, a second more is not
         let e3 = entry("edge", 3, now);
-        assert_eq!(ws.sections(&[e3.clone()], &[], now).recent.len(), 1);
+        assert_eq!(ws.sections(std::slice::from_ref(&e3), &[], now).recent.len(), 1);
         assert_eq!(ws.sections(&[e3], &[], now + 1).earlier.len(), 1);
     }
 

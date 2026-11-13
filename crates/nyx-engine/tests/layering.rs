@@ -114,3 +114,27 @@ fn no_physics_depends_on_another_physics_and_only_the_engine_names_them() {
     }
     assert!(g["femcore"].iter().all(|d| !d.starts_with("nyx-")), "femcore must not depend on a nyx crate");
 }
+
+/// `geom` is a lean kernel (ADR 3; ROUGH_SPOTS R18): besides no workspace crate (the table above) it has no external dependency but `serde`
+/// and the optional `rayon`. A new dependency is a decision: change this list in the same commit and say why.
+#[test]
+fn geom_depends_on_serde_and_optional_rayon_only() {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = std::process::Command::new(cargo)
+        .args(["metadata", "--format-version", "1", "--no-deps", "--offline"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run cargo metadata");
+    assert!(out.status.success(), "cargo metadata failed: {}", String::from_utf8_lossy(&out.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let geom = v["packages"].as_array().unwrap().iter().find(|p| p["name"] == "geom").expect("the geom package");
+    let mut deps: Vec<(String, bool)> = geom["dependencies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["kind"].is_null())
+        .map(|d| (d["name"].as_str().unwrap().to_string(), d["optional"].as_bool().unwrap_or(false)))
+        .collect();
+    deps.sort();
+    assert_eq!(deps, vec![("rayon".to_string(), true), ("serde".to_string(), false)], "the normal dependencies of geom");
+}

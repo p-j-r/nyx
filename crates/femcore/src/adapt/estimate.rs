@@ -12,6 +12,7 @@
 //!
 //! `solve_adaptively` runs the loop: solve on the simple mesh, build a metric from the result, adapt, solve again, until the quantity of
 //! interest (n_eff, a frequency, a peak value) changes by less than a tolerance between two cycles.
+#![allow(clippy::type_complexity)] // tuples of per-cell arrays read better inline than as one-use aliases
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts, MeshedGeom};
 use crate::mesh::SimplexMesh;

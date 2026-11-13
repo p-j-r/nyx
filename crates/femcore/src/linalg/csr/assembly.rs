@@ -140,7 +140,7 @@ impl<T: Scalar> Csr<T> {
     }
     pub fn scaled(&self, a: T) -> Csr<T> {
         let mut m = self.clone();
-        m.values.iter_mut().for_each(|v| *v = *v * a);
+        m.values.iter_mut().for_each(|v| *v *= a);
         m
     }
     /// The stored values, mutable (same pattern): the row and column scaling of a generalised problem.

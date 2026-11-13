@@ -1,5 +1,6 @@
 //! The shipped material library: provenance of every table, the metals against the published Lorentz-Drude tables, the other published
 //! dispersion values, and the Schott, Herzberger and Drude-Lorentz models (derivatives, unit invariance, free-electron limit).
+#![allow(clippy::type_complexity)] // tuples of per-cell arrays read better inline than as one-use aliases
 
 use femcore::material::*;
 use std::path::Path;

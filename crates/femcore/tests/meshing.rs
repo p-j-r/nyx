@@ -156,6 +156,7 @@ fn the_recovered_hessian_of_a_quadratic_is_its_constant_hessian() {
     let h = recovered_hessians(&g.mesh, &u).unwrap();
     let mut worst: f64 = 0.0;
     let mut n = 0;
+    #[allow(clippy::needless_range_loop)]
     for i in 0..g.mesh.n_points() {
         let (x, z) = (g.mesh.points[2 * i], g.mesh.points[2 * i + 1]);
         if x > 0.2 && x < 0.8 && z > 0.2 && z < 0.8 {

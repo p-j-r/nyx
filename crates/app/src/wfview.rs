@@ -265,7 +265,7 @@ impl App {
         let ctx = ui.ctx().clone();
         egui::Panel::top("wf_header").frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::symmetric(18, 10)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.horizontal(|ui| {
-                let eid = egui::Id::new(("title_edit", &w.id));
+                let eid = egui::Id::unique(("title_edit", &w.id));
                 let focused = ctx.memory(|m| m.has_focus(eid));
                 let mut buf = if focused { w.draft_buf.clone() } else { w.title() };
                 let width = buf.chars().count().max(10) as f32 * 14.0;
@@ -377,6 +377,7 @@ impl App {
             });
             ui.add_space(6.0);
             egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 150.0).show(ui, |ui| {
+                #[allow(clippy::type_complexity)]
                 let exps: Vec<(String, String, Option<String>, usize, String, Vec<(String, String)>)> = match &w.dir {
                     Some(d) => d.wf.experiments.iter().map(|e| (e.id.clone(), e.title.clone(), e.parent.clone(), e.runs.count, format!("{} · {}D", physics_label(&e.card.physics), e.card.dim), e.links.iter().map(|l| (l.to.clone(), l.label.clone())).collect())).collect(),
                     None => vec![("e1".into(), "Experiment 1".into(), None, 0, format!("{} · {}D", physics_label(&self.active().unwrap_or_default()), self.doc.mesh.as_ref().map(|m| m.dim).unwrap_or(2)), vec![])],
@@ -398,7 +399,7 @@ impl App {
                                 ui.label(kit::muted(ui, format!("{label} {to}")).size(12.0));
                             }
                         }));
-                        if ui.interact(r.response.rect, ui.id().with(("exp", &eid)), Sense::click()).clicked() && !on && !locked {
+                        if ui.interact(r.response.rect, ui.scope_id().with(("exp", &eid)), Sense::click()).clicked() && !on && !locked {
                             acts.push(Act::LoadExp(eid.clone()));
                         }
                     });

@@ -841,6 +841,13 @@ fn write_model(t: &mut toml::Table, m: &AxisModel) {
     }
 }
 
+/// Keys of the `[optical]` table itself (the model keys of an isotropic material live there too).
+pub const OPTICAL_KEYS: &[&str] = &["wavelength_unit", "range", "reference_temperature", "ordinary", "extraordinary", "x", "y", "z"];
+
+fn freq_scale(unit: &str) -> f64 {
+    units::to_si(1.0, unit, Dim::Frequency).unwrap_or(1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -903,11 +910,4 @@ mod tests {
         }
         assert!(interpolate(&x, &y, Interp::Pchip, 5.1, false).is_none());
     }
-}
-
-/// Keys of the `[optical]` table itself (the model keys of an isotropic material live there too).
-pub const OPTICAL_KEYS: &[&str] = &["wavelength_unit", "range", "reference_temperature", "ordinary", "extraordinary", "x", "y", "z"];
-
-fn freq_scale(unit: &str) -> f64 {
-    units::to_si(1.0, unit, Dim::Frequency).unwrap_or(1.0)
 }

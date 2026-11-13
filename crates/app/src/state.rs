@@ -3,7 +3,7 @@
 //! engine; the window edits it through engine commands.
 
 use nyx_engine::analysis::ModeAnalysis;
-use nyx_engine::facade::physics::{Scalar, SolveResult};
+use nyx_engine::facade::physics::SolveResult;
 use nyx_engine::facade::{Display, SimplexMesh, ViewMesh};
 use nyx_engine::MeshedModel;
 use std::sync::Arc;
@@ -205,11 +205,6 @@ impl ResultView {
             return (lo - d, hi + d);
         }
         (lo, hi)
-    }
-
-    /// The numeric scalars of the result and their text, in order.
-    pub fn scalars(&self) -> &[(String, Scalar)] {
-        &self.result.scalars
     }
 }
 

@@ -38,7 +38,7 @@ fn a_results_file_reads_back_exactly_and_is_smaller_than_json() {
         }
         assert!(bytes < json_bytes as u64, "{name}: {bytes} bytes of HDF5 against {json_bytes} of JSON");
         let d = e.call("results_file_info", &json!({ "path": path.to_str().unwrap() })).unwrap();
-        assert!(d["results"].as_array().unwrap().len() >= 1 && d["cells"].as_u64().unwrap() > 0, "{d}");
+        assert!(!d["results"].as_array().unwrap().is_empty() && d["cells"].as_u64().unwrap() > 0, "{d}");
         eprintln!("{name}: HDF5 {bytes} bytes, JSON {json_bytes} bytes");
         let _ = std::fs::remove_file(&path);
     }

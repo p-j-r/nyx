@@ -5,6 +5,7 @@
 //! to the nodal values on the patch of vertices of that label (never across a material interface), and the absolute Hessians are
 //! combined into a metric for about `target_cells` tetrahedra (`metric::lp_metrics`). `Estimator` is the one of `estimate`
 //! (fields by name, `combine` for the components of a vector field).
+#![allow(clippy::type_complexity)] // tuples of per-cell arrays read better inline than as one-use aliases
 
 use crate::adapt::estimate::Estimator;
 use crate::mesh::SimplexMesh;

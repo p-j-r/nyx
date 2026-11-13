@@ -95,7 +95,7 @@ fn near(a: f64, b: f64) -> bool {
 }
 
 fn haystack(wf: &Workflow) -> String {
-    let mut h = format!("{} {} {}", wf.title, wf.tags.join(" "), format!("{:?}", wf.status));
+    let mut h = format!("{} {} {:?}", wf.title, wf.tags.join(" "), wf.status);
     for e in &wf.experiments {
         h += &format!(" {} {} {} {} {} {}", e.title, e.card.summary, e.card.keywords.join(" "), e.card.materials.join(" "), e.card.physics, e.card.geometry.family);
     }

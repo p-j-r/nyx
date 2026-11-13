@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 pub const AMBER: Color32 = Color32::from_rgb(0xFF, 0xBD, 0x59);
 pub const PLUM: Color32 = Color32::from_rgb(0x82, 0x0C, 0x4F);
-pub const SHADOW: Color32 = Color32::from_rgb(0x53, 0x1F, 0x55);
 pub const INK: Color32 = Color32::from_rgb(0x24, 0x10, 0x2A);
 pub const SURFACE: Color32 = Color32::from_rgb(0xF7, 0xF6, 0xF7);
 pub const LINE: Color32 = Color32::from_rgb(0xE6, 0xE4, 0xE6);

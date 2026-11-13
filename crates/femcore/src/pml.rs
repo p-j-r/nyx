@@ -26,7 +26,7 @@ pub fn stretch(p: &Pml, dirs: [PmlDir; 2], centre: [f64; 2], lo: [f64; 2], hi: [
 /// `pml` (cells of other domains get 1). The profile is evaluated at the cell centre against the
 /// bounding box of its domain.
 pub fn cell_stretches(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C; 3]> {
-    cell_stretches_by(mesh, pml, |p, d| crate::section::mesh_pml_dirs(p, d))
+    cell_stretches_by(mesh, pml, crate::section::mesh_pml_dirs)
 }
 
 fn cell_stretches_by(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>, dirs: impl Fn(&Pml, usize) -> [PmlDir; 3]) -> Vec<[C; 3]> {

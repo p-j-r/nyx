@@ -175,7 +175,7 @@ pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String> {
         }
         let mut m: HashMap<i32, Vec<u32>> = HashMap::new();
         for (i, e) in ev.edges().iter().enumerate() {
-            let outside = |r: Option<u32>| r.map_or(true, |r| nothing[r as usize]);
+            let outside = |r: Option<u32>| r.is_none_or(|r| nothing[r as usize]);
             for (r, other) in [(e.left, e.right), (e.right, e.left)] {
                 if let Some(r) = r {
                     if outside(other) && domain_of_region[r as usize] != i32::MIN {

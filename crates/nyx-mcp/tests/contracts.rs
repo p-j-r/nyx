@@ -32,6 +32,7 @@ fn session(lines: &[Value]) -> Vec<Value> {
         }
     }
     let _ = child.kill();
+    let _ = child.wait();
     out
 }
 

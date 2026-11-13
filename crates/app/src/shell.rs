@@ -261,13 +261,6 @@ impl Shell {
         self.ws.as_ref().map(|w| w.settings.clone()).unwrap_or_default()
     }
 
-    pub fn current(&self) -> Option<&OpenWf> {
-        match &self.page {
-            Page::Workflow(id) => self.open.get(id),
-            _ => None,
-        }
-    }
-
     pub fn current_mut(&mut self) -> Option<&mut OpenWf> {
         match &self.page {
             Page::Workflow(id) => {
@@ -639,7 +632,7 @@ impl App {
         self.sheets_ui(&ctx);
         self.cancel_dialog(&ctx);
         if let Some(n) = self.shell.notice.clone() {
-            egui::Area::new(egui::Id::new("notice")).order(egui::Order::Tooltip).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0]).show(&ctx, |ui| {
+            egui::Area::new(egui::Id::unique("notice")).order(egui::Order::Tooltip).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0]).show(&ctx, |ui| {
                 crate::kit::card(ui, theme::INK, theme::INK, 12, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(n).color(Color32::WHITE));

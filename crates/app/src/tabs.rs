@@ -86,15 +86,6 @@ fn material_key(base: &str, all: &[(i32, String)]) -> String {
 }
 
 impl App {
-    pub fn domain_labels(&self) -> Vec<i32> {
-        if let Some(m) = &self.doc.mesh {
-            m.domain_labels()
-        } else if let Some(v) = &self.doc.view {
-            v.domain_labels.clone()
-        } else {
-            vec![1]
-        }
-    }
 
     // ------------------------------------------------------------------ inspector
 

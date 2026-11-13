@@ -114,11 +114,6 @@ pub struct App {
     pub ctx: egui::Context,
 }
 
-/// `Documents\nyx_runs` of the user (the current folder if there is none).
-pub fn default_runs_dir() -> String {
-    std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).map(|h| PathBuf::from(h).join("Documents").join("nyx_runs").display().to_string()).unwrap_or_else(|_| "nyx_runs".into())
-}
-
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         crate::theme::install_fonts(&cc.egui_ctx);
@@ -324,7 +319,8 @@ impl App {
                 self.queued = Some(Queued::Open(path));
                 return;
             }
-            self.new_draft(&path.file_stem().and_then(|s| s.to_str()).unwrap_or("Results").to_string(), crate::shell::Start::Results(path));
+            let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Results").to_string();
+            self.new_draft(&title, crate::shell::Start::Results(path));
             return;
         }
         self.set_error(format!("Don't know how to open '.{ext}' files (nyx projects are .nyx.json)"));
@@ -1261,7 +1257,7 @@ mod tests {
                     continue;
                 }
                 let ctx = a.ctx.clone();
-                ctx.run_ui(Default::default(), |ui| {
+                let _ = ctx.run_ui(Default::default(), |ui| {
                     a.inspector(ui);
                     a.toolbar(ui);
                     a.status_bar(ui);
@@ -1276,7 +1272,7 @@ mod tests {
             a.show_results = false;
             a.picking = if a.bc_labels.is_empty() { None } else { Some(0) };
             let ctx = a.ctx.clone();
-            ctx.run_ui(Default::default(), |ui| {
+            let _ = ctx.run_ui(Default::default(), |ui| {
                 a.inspector(ui);
                 a.viewport_ui(ui);
             });
@@ -1300,7 +1296,7 @@ mod tests {
         assert_eq!(a.convergence.as_ref().map(|c| c["converged"].clone()), Some(json!(true)), "{:?} {:?}", a.convergence, a.error);
         a.tab = Tab::Study;
         let ctx = a.ctx.clone();
-        ctx.run_ui(Default::default(), |ui| a.inspector(ui));
+        let _ = ctx.run_ui(Default::default(), |ui| a.inspector(ui));
     }
 
     #[test]

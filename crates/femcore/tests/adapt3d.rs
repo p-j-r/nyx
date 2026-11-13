@@ -69,7 +69,7 @@ fn isotropic_refinement_of_a_box_keeps_geometry_and_reaches_the_metric() {
     // the corners are still vertices and every boundary facet lies in a face of the cube
     for c in 0..8 {
         let p = [(c & 1) as f64, ((c >> 1) & 1) as f64, ((c >> 2) & 1) as f64];
-        assert!(a.points.iter().any(|q| *q == p), "corner {p:?} lost");
+        assert!(a.points.contains(&p), "corner {p:?} lost");
     }
     for f in 0..a.n_facets() {
         let v = a.facet(f);
@@ -163,7 +163,7 @@ fn a_fine_box_coarsens_on_its_surface_too() {
     assert!((facet_area(a) - 6.0).abs() < 1e-12, "boundary area {}", facet_area(a));
     for c in 0..8 {
         let p = [(c & 1) as f64, ((c >> 1) & 1) as f64, ((c >> 2) & 1) as f64];
-        assert!(a.points.iter().any(|q| *q == p), "corner {p:?} lost");
+        assert!(a.points.contains(&p), "corner {p:?} lost");
     }
     let met = from_sizes(&[0.5; 3], &[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
     let surface = a.points.iter().filter(|p| p.iter().any(|&x| x == 0.0 || x == 1.0)).count();

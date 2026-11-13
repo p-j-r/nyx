@@ -70,7 +70,7 @@ impl App {
                         ui.label(RichText::new(title).strong().color(if avail { theme::text(&ctx) } else { theme::muted(&ctx) }));
                         ui.label(kit::muted(ui, if avail { text.to_string() } else { format!("{text} (template coming soon)") }).size(12.5));
                     }));
-                    let resp = ui.interact(r.response.rect, ui.id().with(("tpl", i)), egui::Sense::click());
+                    let resp = ui.interact(r.response.rect, ui.scope_id().with(("tpl", i)), egui::Sense::click());
                     if resp.clicked() && avail {
                         self.shell.new.template = i;
                     }
@@ -173,7 +173,7 @@ impl App {
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if e.wf.status == nyx_engine::facade::store::Status::Done { "done" } else { "active" }, ago(e.wf.touched_secs(), now_secs())))));
                 });
-                let resp = ui.interact(rect.response.rect, ui.id().with(("ph", &e.wf.id)), egui::Sense::click());
+                let resp = ui.interact(rect.response.rect, ui.scope_id().with(("ph", &e.wf.id)), egui::Sense::click());
                 if resp.hovered() {
                     ui.painter().rect_filled(rect.response.rect, 6.0, theme::tint(&ctx).gamma_multiply(0.6));
                 }
@@ -295,7 +295,7 @@ impl App {
                         ui.label(v.summary.as_str());
                         ui.label(kit::muted(ui, format!("{nruns} run{} recorded on this version", if nruns == 1 { "" } else { "s" })).size(12.5));
                     });
-                    if ui.interact(r.response.rect, ui.id().with(("ver", v.n)), egui::Sense::click()).clicked() {
+                    if ui.interact(r.response.rect, ui.scope_id().with(("ver", v.n)), egui::Sense::click()).clicked() {
                         self.shell.version_sel = Some(v.n);
                     }
                     ui.add_space(4.0);
@@ -303,7 +303,7 @@ impl App {
             });
             let ui = &mut cols[1];
             if let Some(v) = hist.iter().find(|v| v.n == sel) {
-                let prev = v.n.checked_sub(1).unwrap_or(0);
+                let prev = v.n.saturating_sub(1);
                 kit::label_caps(ui, &format!("What changed in v{}", v.n), &if prev > 0 { format!("from the version before it in this experiment ({})", v.experiment) } else { String::new() });
                 kit::plain_card(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -428,7 +428,7 @@ impl App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::mono(human(size))));
                 });
             });
-            if ui.interact(r.response.rect, ui.id().with(("lvl", lvl.name())), egui::Sense::click()).clicked() {
+            if ui.interact(r.response.rect, ui.scope_id().with(("lvl", lvl.name())), egui::Sense::click()).clicked() {
                 self.shell.share_level = lvl;
             }
             ui.add_space(4.0);

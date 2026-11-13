@@ -37,7 +37,7 @@ fn text(s: &str) -> Result<VarLenUnicode, String> {
 
 /// A dataset of shape `[rows, cols]` (`[rows]` when `cols` is 0) holding `data` row by row, chunked and compressed when it is large.
 fn put_serial<T: h5::H5Type>(g: &h5::Group, name: &str, data: &[T], cols: usize) -> Result<h5::Dataset, String> {
-    let rows = if cols == 0 { data.len() } else { data.len() / cols };
+    let rows = data.len().checked_div(cols).unwrap_or(data.len());
     let big = data.len() >= 4096 && rows > 0;
     let ds = if cols == 0 {
         let b = g.new_dataset::<T>().shape([rows]);
@@ -198,7 +198,7 @@ impl Io {
         if self.part == Partition::SOLO && !self.replay {
             return put_serial(g, name, data, cols);
         }
-        let rows = if cols == 0 { data.len() } else { data.len() / cols };
+        let rows = data.len().checked_div(cols).unwrap_or(data.len());
         let existing = if self.replay { g.dataset(name).ok() } else { None };
         let ds = match existing {
             Some(d) => d,

@@ -1,9 +1,7 @@
 //! Anisotropic materials: tensor permittivity in the waveguide modes and the rotation of a crystal stiffness. The solid mechanics tests (stiffness,
 //! expansion) moved to `nyx-sms` with the kernel.
 mod common;
-use common::*;
 use femcore::material::*;
-use femcore::props::*;
 
 #[test]
 fn shear_components_of_a_rotated_stiffness_are_in_the_solver_order() {
@@ -25,9 +23,9 @@ fn shear_components_of_a_rotated_stiffness_are_in_the_solver_order() {
             }
         }
     }
-    for psi in [0.0, 30.0, 45.0, 90.0] {
+    for psi in [0.0_f64, 30.0, 45.0, 90.0] {
         // a proper rotation about the surface normal followed by a tilt of 57.6 degrees (any rotation tests the tensor transformation)
-        let (cp, sp, ct, st_) = ((psi as f64).to_radians().cos(), (psi as f64).to_radians().sin(), 57.6f64.to_radians().cos(), 57.6f64.to_radians().sin());
+        let (cp, sp, ct, st_) = (psi.to_radians().cos(), psi.to_radians().sin(), 57.6f64.to_radians().cos(), 57.6f64.to_radians().sin());
         let rz = [[cp, -sp, 0.0], [sp, cp, 0.0], [0.0, 0.0, 1.0]];
         let rx = [[1.0, 0.0, 0.0], [0.0, ct, -st_], [0.0, st_, ct]];
         let mut r = [[0.0; 3]; 3];

@@ -263,7 +263,7 @@ pub fn eigs_real_general_near(a: &Csr<f64>, b: &Csr<f64>, sigma: f64, nev: usize
             out.converged = false;
             return if out.values.is_empty() { Err("no real eigenvalue was found near the shift".into()) } else { Ok(out) };
         }
-        ask = 2 * ask;
+        ask *= 2;
     }
 }
 

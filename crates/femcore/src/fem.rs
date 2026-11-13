@@ -874,6 +874,31 @@ pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::
     Ok((u, Some(note)))
 }
 
+/// Refuses boundary numbers that the mesh does not have, naming the ones it has. Every physics checks its conditions with it.
+pub fn check_boundary_labels(mesh: &SimplexMesh, labels: impl IntoIterator<Item = i32>) -> Result<(), String> {
+    let known = mesh.boundary_labels();
+    let mut bad: Vec<i32> = labels.into_iter().filter(|l| !known.contains(l)).collect();
+    bad.sort();
+    bad.dedup();
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("boundary number(s) {bad:?} do not exist in this mesh (it has {known:?})"))
+    }
+}
+
+/// The values of a dof field at the local dofs of every cell: `out[c*nloc + a]`.
+pub fn cell_values_at_nodes(mesh: &SimplexMesh, u: &[f64], order: usize) -> Vec<f64> {
+    let nloc = mesh.nloc(order);
+    let mut out = Vec::with_capacity(mesh.n_cells() * nloc);
+    let mut dofs = Vec::new();
+    for c in 0..mesh.n_cells() {
+        mesh.cell_dofs(c, order, &mut dofs);
+        out.extend(dofs.iter().take(nloc).map(|&d| u[d]));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -929,29 +954,4 @@ mod tests {
         let err = u.iter().zip(&exact).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
         assert!(err < 1e-11, "{err}");
     }
-}
-
-/// Refuses boundary numbers that the mesh does not have, naming the ones it has. Every physics checks its conditions with it.
-pub fn check_boundary_labels(mesh: &SimplexMesh, labels: impl IntoIterator<Item = i32>) -> Result<(), String> {
-    let known = mesh.boundary_labels();
-    let mut bad: Vec<i32> = labels.into_iter().filter(|l| !known.contains(l)).collect();
-    bad.sort();
-    bad.dedup();
-    if bad.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("boundary number(s) {bad:?} do not exist in this mesh (it has {known:?})"))
-    }
-}
-
-/// The values of a dof field at the local dofs of every cell: `out[c*nloc + a]`.
-pub fn cell_values_at_nodes(mesh: &SimplexMesh, u: &[f64], order: usize) -> Vec<f64> {
-    let nloc = mesh.nloc(order);
-    let mut out = Vec::with_capacity(mesh.n_cells() * nloc);
-    let mut dofs = Vec::new();
-    for c in 0..mesh.n_cells() {
-        mesh.cell_dofs(c, order, &mut dofs);
-        out.extend(dofs.iter().take(nloc).map(|&d| u[d]));
-    }
-    out
 }

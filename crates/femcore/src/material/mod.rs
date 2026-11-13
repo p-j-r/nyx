@@ -29,6 +29,7 @@ pub type M3 = [[f64; 3]; 3];
 pub type M6 = [[f64; 6]; 6];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)] // a stiffness is made once per material, not per cell
 pub enum Stiffness {
     Cubic { c11: f64, c12: f64, c44: f64 },
     /// transversely isotropic about the crystal z axis
