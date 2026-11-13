@@ -18,7 +18,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.84"
+rust-version = "1.99"
 
 [profile.dev]
 opt-level = 1            # solvers are unusably slow at opt-level 0

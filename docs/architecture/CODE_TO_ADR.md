@@ -168,6 +168,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-analysis/*` | 56, 25, 21 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |
+| `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |
 | `crates/nyx-engine/src/legacy/*` | 41 | bridge from the old window problem to the physics crates; deleted in phase 7 |
 | `crates/nyx-engine/tests/golden/*` | 10, 42 | `solid_static_thermal_from_heat`, moved unchanged from femcore |
 | `crates/nyx-engine/tests/legacy_thermal.rs` | 41, 42, 10 | heat feeding thermal expansion through the bridge |

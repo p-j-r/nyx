@@ -4,7 +4,7 @@ Date: 2026-10-28
 
 ## Status
 
-Accepted for today; **superseded in direction by ADR 5** (native mixed cells), which is not implemented on the solver side yet.
+**Superseded by ADR 5, 32 and 25 at the interface (see ADR 65).** Accepted for today; **superseded in direction by ADR 5** (native mixed cells), which is not implemented on the solver side yet.
 
 ## Context
 

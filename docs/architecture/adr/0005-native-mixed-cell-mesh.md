@@ -4,7 +4,7 @@ Date: 2026-11-02
 
 ## Status
 
-Accepted as a constraint on the mesher side (paul, 2026-11-02, quoted in `docs/ports/meshers/FEATURE_DEPENDENCIES.md`). The solver side that consumes native cells is being written elsewhere and does not exist in this repository.
+**Implemented end to end by ADR 32 and 52 (see ADR 65).** Accepted as a constraint on the mesher side (paul, 2026-11-02, quoted in `docs/ports/meshers/FEATURE_DEPENDENCIES.md`). The solver side that consumes native cells is being written elsewhere and does not exist in this repository.
 
 ## Context
 

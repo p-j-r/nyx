@@ -4,7 +4,7 @@ Date: 2026-11-01
 
 ## Status
 
-Accepted by implementation (`93321f5` nyx-store, `3dd760f` design and mockups, `37e5871` wired into the app). The open questions of `docs/WORKFLOWS_DESIGN.md` section 11 (should runs of different specs mix in one experiment?) are open.
+**Amended by ADR 39, 59, 63 and 65 (spec file names, no femcore dependency).** Accepted by implementation (`93321f5` nyx-store, `3dd760f` design and mockups, `37e5871` wired into the app). The open questions of `docs/WORKFLOWS_DESIGN.md` section 11 (should runs of different specs mix in one experiment?) are open.
 
 ## Context
 

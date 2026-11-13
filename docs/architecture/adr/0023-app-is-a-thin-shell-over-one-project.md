@@ -4,7 +4,7 @@ Date: 2026-10-28
 
 ## Status
 
-Accepted by practice (`6de7458`, `2b5b66a`, `37e5871`). The plan to move `Project` out of the app (MCP plan, phase 0) was not carried out (R16).
+**Superseded by ADR 57 (see ADR 65).** Accepted by practice (`6de7458`, `2b5b66a`, `37e5871`). The plan to move `Project` out of the app (MCP plan, phase 0) was not carried out (R16).
 
 ## Context
 

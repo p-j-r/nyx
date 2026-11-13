@@ -4,7 +4,7 @@ Date: 2026-10-31
 
 ## Status
 
-Accepted by practice (`e60ad11`, `4107cfa`; the chips predate them, `6de7458`). Re-expressed on geom by `08dd007` and `ffa1bf6`.
+**Superseded by ADR 24 and ADR 60 (see ADR 65).** Accepted by practice (`e60ad11`, `4107cfa`; the chips predate them, `6de7458`). Re-expressed on geom by `08dd007` and `ffa1bf6`.
 
 Superseded in part by ADR 24: the four ring chips (`chips.rs`) are deleted; `usecases/` stays until phase 7.
 

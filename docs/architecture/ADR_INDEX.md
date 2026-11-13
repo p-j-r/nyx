@@ -64,3 +64,5 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 61 | [Mesh convergence is an engine command](adr/0061-convergence-is-an-engine-command.md) | `nyx-engine::convergence` |
 | 62 | [Results and meshes are stored in HDF5; JSON is for small things](adr/0062-results-are-stored-in-hdf5.md) | `nyx-engine::h5io` |
 | 63 | [One `format` key, JSON for small files, HDF5 for bulk data](adr/0063-the-format-key-and-no-json-for-bulk-data.md) | `nyx-engine::project`, `geom::model`, `nyx-physics::spec`, `nyx-store` |
+| 64 | [Identity: one persisted hash, the rest are cache keys](adr/0064-identity-hashes-one-persisted-the-rest-are-caches.md) | `nyx-store::util`, `nyx-engine::engine`, `geom::math` |
+| 65 | [Closing the restructure: what the final structure replaces](adr/0065-closing-the-restructure-what-the-structure-replaced.md) | `docs/architecture`, `Cargo.toml` |
