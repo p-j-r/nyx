@@ -573,7 +573,7 @@ Started from `main` = `restructure-8-format` (0e2a5e12, phase 8 accepted and mer
 * **Model and docs.** `workspace.dsl` and `diagrams.md` rewritten for the final structure (crate layering exactly as the layering test; engine and femcore components; two dynamic views); `CODE_TO_ADR.md` lost the 16 rows of deleted files; `ROUGH_SPOTS.md` has the resolutions; `README.md` of `docs/architecture`, `ADR_INDEX.md` and `CLAUDE.md` are up to date.
 
 **Not done (needs paul).**
-1. **`workspace.dsl` is not validated with Structurizr.** Docker Desktop's daemon is not running and the CLI is not installed. Either start Docker Desktop (then `docker run --rm -v <docs/architecture>:/usr/local/structurizr structurizr/cli validate -workspace workspace.dsl`), or say it is fine to download the Structurizr CLI zip from its GitHub releases (a file of about 100 MB). `diagrams.md` was written by hand, not exported.
+1. ~~`workspace.dsl` is not validated with Structurizr.~~ Done 2026-11-13 (paul agreed to the download): the Structurizr CLI (about 99 MB zip, in `opomech/structurizr-cli`, outside the repository) validates it with exit 0 and exports all six views to Mermaid; a deliberately broken copy is refused with the line number. No slip was found. `diagrams.md` stays hand-written.
 2. The licence check of the BSD-2-Clause ports against nyx's own licence (never done; parked in the plan "until the end"): nothing may be published before it.
 3. Run-time plug-ins, two-way coupling and Brillouin as an optional physics are parked as in the plan.
 4. `-p nyx-engine --features phdf5` (the MPI-IO writer, phase 8 follow-up) has still not been built on a machine with MPI.

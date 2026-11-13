@@ -222,7 +222,7 @@ After phase 1, phases 2, 3 and 6 touch different files and can be done by separa
 ## 7. Recommendations parked until the end (paul: "we'll see at the very end")
 
 * **Numerical reproducibility across machines (R22, G2).** Do the read-only experiment first: run the failing `ems` goldens with the `portable-kernels` feature and with a tighter eigensolver tolerance (residual about 1e-10) to learn which closes the gap. Then adopt the rule: same machine and build, any thread count: identical bits; different machine: agreement to the solver tolerance, with the solver tolerance at least 100 times tighter than the mesh error it resolves. Tests compare at a tolerance justified by that, and every physics with a closed form (slab index, cavity frequencies, analytic plate modes) is tested against it. Fallback: a named reference platform for the strict tests (option C in `DECISIONS_ROUND_2.md`).
-* **Validate `workspace.dsl` with Structurizr.** Not yet done: the CLI download exists in the earlier session's scratchpad but running it was blocked by the permission system; Docker Desktop was started but not used. Do it with a permission rule or a running Docker, then export Mermaid from the DSL.
+* **Validate `workspace.dsl` with Structurizr.** Done 2026-11-13 (phase 9): the CLI release zip run with Java validates it and exports the six views.
 * **Crate cost.** If a benchmark regresses after a split: `#[inline]` on the helper or `lto = "thin"` in the release profile.
 * **Run-time plug-ins** (separate-process route) only when someone outside the core developers needs to add a physics.
 * **Two-way coupling** (piezoelectric, opto-mechanics) after one-way chains work.

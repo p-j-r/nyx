@@ -2,7 +2,7 @@
 
 Written 2026-11-03 against main `a047506`; brought up to date at the end of the restructure (phase 9, 2026-11-13: `workspace.dsl`, `diagrams.md`, ADRs 24 to 65, `CODE_TO_ADR.md`, `ROUGH_SPOTS.md`). The ADRs of the early days describe the structure before the restructure; those that no longer hold say so in their Status line and point to the one that replaced them (ADR 65).
 
-**Not done:** `workspace.dsl` has not been run through the Structurizr CLI (no Docker daemon and no CLI on the machine used); it was written to the syntax of the previous version and checked by reading. Run `structurizr-cli validate -workspace workspace.dsl` before relying on it, then compare `diagrams.md` with the exported Mermaid.
+**Validated** on 2026-11-13 with the Structurizr CLI (the release zip, run with Java: `java -cp "<cli>/lib/*" com.structurizr.cli.StructurizrCliApplication validate -workspace workspace.dsl`; it exits 0 and prints nothing when the DSL is valid, and names the line of an error otherwise). The export to Mermaid (`-format mermaid`) writes the six views. `diagrams.md` stays hand-written, because the export has no colour classes or notes; keep the two in step.
 
 | What | Where |
 |---|---|
