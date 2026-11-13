@@ -17,7 +17,7 @@ Desktop finite-element application for photonics and phononics, in pure Rust. No
 | `crates/nyx-mcp`, `nyx-connect` | the AI interface (stdio MCP server whose tools are the engine commands, ADR 57; one-click host connection) |
 | `examples/`, `materials/` | example projects (`*.nyx.json`, written by `crates/nyx-engine/tests/make_examples.rs`) and the material library (`*.toml`), both found next to the program or in a parent folder |
 | `docs/` | design notes and per-project status files |
-| `docs/architecture/` | C4 model (`workspace.dsl`, matches the crate layering test; validated with the Structurizr CLI on 2026-11-13), ADRs (`adr/`, index `ADR_INDEX.md`, 65 records), `ROUGH_SPOTS.md`, `CODE_TO_ADR.md`, interface `contracts/`, the restructure plan. Read `README.md` there first |
+| `docs/architecture/` | C4 model (`workspace.dsl`, matches the crate layering test; validated with the Structurizr CLI on 2026-11-13) and the full C4 set in `c4/` (components and code pages generated from the source: `bash docs/architecture/c4/tools/build.sh`; rebuild it when files or crates change), ADRs (`adr/`, index `ADR_INDEX.md`, 65 records), `ROUGH_SPOTS.md`, `CODE_TO_ADR.md`, interface `contracts/`, the restructure plan. Read `README.md` there first |
 | `tools/` | `baseline.sh` (tests and benchmark timings recorded per phase) |
 | `runs/`, `dist/` | local outputs, git-ignored; never commit results |
 

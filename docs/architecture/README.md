@@ -6,7 +6,8 @@ Written 2026-11-03 against main `a047506`; brought up to date at the end of the 
 
 | What | Where |
 |---|---|
-| C4 model (context, containers, components, two dynamic views) as Structurizr DSL | [`workspace.dsl`](workspace.dsl) |
+| **Full C4 set**: context, 12 containers, 91 components, code pages per component, exports, a browser viewer, a standalone copy; components and code read from the Rust source ([README](c4/README.md), [memo](c4/MEMO.md)) | [`c4/`](c4/README.md) |
+| Master Structurizr model (people, systems, containers, container relationships, two dynamic views; includes the generated components of `c4/`) as Structurizr DSL | [`workspace.dsl`](workspace.dsl) |
 | Rough spots the model showed (28 items, with evidence, severity and a fix direction; the resolutions are at the end) | [`ROUGH_SPOTS.md`](ROUGH_SPOTS.md) |
 | Decisions found in the history, docs and code (65 ADRs, Nygard format; the first 23 written retrospectively) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
 | Every file of the repository mapped to the ADRs that cover it | [`CODE_TO_ADR.md`](CODE_TO_ADR.md), checked by `check_code_to_adr.sh` |
@@ -18,7 +19,7 @@ Written 2026-11-03 against main `a047506`; brought up to date at the end of the 
 
 ## Viewing the model
 
-Structurizr Lite on this folder (`docker run -it --rm -p 8080:8080 -v <this folder>:/usr/local/structurizr structurizr/lite`) opens `workspace.dsl` and imports `adr/` as decisions. `structurizr-cli export -workspace workspace.dsl -format mermaid` produces diagrams without a server. **The DSL was written by hand and has not been run through Structurizr**: no Structurizr tool is installed on this machine and I did not download one. If it reports a syntax error, that is a defect in the file, not in the model.
+Structurizr Lite on this folder (`docker run -it --rm -p 8080:8080 -v <this folder>:/usr/local/structurizr structurizr/lite`) opens `workspace.dsl` and imports `adr/` as decisions. `structurizr-cli export -workspace workspace.dsl -format mermaid` produces diagrams without a server. The master `workspace.dsl` includes the generated component model of `c4/model/`; see `c4/README.md` to rebuild, view and export it.
 
 Elements carry three properties: `code` (where it lives), `adr` (which decisions explain it) and, where there is one, `contract`. The tag `rough` (red outline, red dashed lines) marks an element or relationship that appears in `ROUGH_SPOTS.md`.
 

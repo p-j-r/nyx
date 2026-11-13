@@ -1,6 +1,6 @@
 # nyx architecture diagrams (Mermaid)
 
-Hand-written from `workspace.dsl` on 2026-11-13, at the end of the restructure (phase 9). They are not exported by Structurizr (the CLI has not been run on this machine, see `README.md`), so when the DSL changes, change these in the same commit. They render in GitHub, VS Code (Markdown preview with a Mermaid extension) and mermaid.live.
+Hand-written from `workspace.dsl` on 2026-11-13, at the end of the restructure (phase 9). They are a hand-drawn summary with colour classes; the complete, exported and code-derived set (all four C4 levels, 91 components) is in [`c4/`](c4/README.md). When the DSL changes, change these in the same commit. They render in GitHub, VS Code (Markdown preview with a Mermaid extension) and mermaid.live.
 
 The container diagram is exactly the layering table of `crates/nyx-engine/tests/layering.rs`: a dependency between crates that is not in the table fails the test. Colours: green = a physics (kernel) crate, blue = a front-end or the engine, grey = external, cylinder = files.
 

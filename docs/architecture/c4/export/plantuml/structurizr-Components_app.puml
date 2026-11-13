@@ -1,0 +1,117 @@
+@startuml
+title <size:24>Component View: nyx - app</size>\n<size:24>The components of app and what they use.</size>
+
+set separator none
+top to bottom direction
+skinparam ranksep 60
+skinparam nodesep 30
+hide stereotype
+
+<style>
+  root {
+    BackgroundColor: #ffffff;
+    FontColor: #444444;
+  }
+  // Element,Component
+  .Element-RWxlbWVudCxDb21wb25lbnQ= {
+    BackgroundColor: #85bbf0;
+    LineColor: #5d82a8;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #000000;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+    MaximumWidth: 450;
+  }
+  // Element,Container,Executable
+  .Element-RWxlbWVudCxDb250YWluZXIsRXhlY3V0YWJsZQ== {
+    BackgroundColor: #438dd5;
+    LineColor: #2e6295;
+    LineStyle: 0;
+    LineThickness: 2;
+    RoundCorner: 20;
+    FontColor: #ffffff;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+    MaximumWidth: 450;
+  }
+  // Element,Container,Library
+  .Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ== {
+    BackgroundColor: #438dd5;
+    LineColor: #2e6295;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #ffffff;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+    MaximumWidth: 450;
+  }
+  // Relationship
+  .Relationship-UmVsYXRpb25zaGlw {
+    LineThickness: 2;
+    LineStyle: 10-10;
+    LineColor: #444444;
+    FontColor: #444444;
+    FontSize: 24;
+  }
+  // app
+  .Boundary-YXBw {
+    BackgroundColor: #ffffff;
+    LineColor: #2e6295;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #ffffff;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+  }
+  // nyx
+  .Boundary-bnl4 {
+    BackgroundColor: #ffffff;
+    LineColor: #0b4884;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #ffffff;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+  }
+</style>
+
+rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
+  rectangle "app\n<size:16>[Container: Rust, eframe/egui]</size>" <<Boundary-YXBw>> {
+    rectangle "==Viewport\n<size:16>[Component: Rust modules]</size>\n\nThe 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, and what is kept between frames." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Viewport
+    rectangle "==Look and widgets\n<size:16>[Component: Rust modules]</size>\n\nThe nyx look (palette, fonts, egui visuals, light and dark) and the small brand widgets (cards, chips, buttons, sparklines, sheets)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Lookandwidgets
+    rectangle "==Scripts and batch\n<size:16>[Component: Rust modules]</size>\n\nRuns without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, and the optional user Python script." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Scriptsandbatch
+    rectangle "==Window\n<size:16>[Component: Rust modules]</size>\n\nThe application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Window
+    rectangle "==Shell and dashboard\n<size:16>[Component: Rust modules]</size>\n\nThe tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Shellanddashboard
+    rectangle "==Inspector tabs\n<size:16>[Component: Rust modules]</size>\n\nThe tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Inspectortabs
+  }
+
+  rectangle "==nyx-connect\n<size:16>[Container: Rust library and binary]</size>\n\nFinds Claude Code and Claude Desktop installs and registers nyx-mcp with them; the Connect menu and its command-line twin." <<Element-RWxlbWVudCxDb250YWluZXIsRXhlY3V0YWJsZQ==>> as nyx.nyxconnect
+  component "==nyx-engine\n<size:16>[Container: Rust library]</size>\n\nThe Engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them, and the binding to a workflow. Every action is a named command with a JSON Schema." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxengine
+}
+
+nyx.app.Scriptsandbatch --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, engine\n<size:16>[Rust paths]</size>"
+nyx.app.Scriptsandbatch --> nyx.app.Shellanddashboard <<Relationship-UmVsYXRpb25zaGlw>> : "uses examples, shell\n<size:16>[Rust paths]</size>"
+nyx.app.Scriptsandbatch --> nyx.app.Window <<Relationship-UmVsYXRpb25zaGlw>> : "uses app, state\n<size:16>[Rust paths]</size>"
+nyx.app.Inspectortabs --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, project\n<size:16>[Rust paths]</size>"
+nyx.app.Inspectortabs --> nyx.app.Shellanddashboard <<Relationship-UmVsYXRpb25zaGlw>> : "uses examples\n<size:16>[Rust paths]</size>"
+nyx.app.Inspectortabs --> nyx.app.Viewport <<Relationship-UmVsYXRpb25zaGlw>> : "uses colormap\n<size:16>[Rust paths]</size>"
+nyx.app.Inspectortabs --> nyx.app.Window <<Relationship-UmVsYXRpb25zaGlw>> : "uses app, state\n<size:16>[Rust paths]</size>"
+nyx.app.Shellanddashboard --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, engine +1\n<size:16>[Rust paths]</size>"
+nyx.app.Shellanddashboard --> nyx.app.Lookandwidgets <<Relationship-UmVsYXRpb25zaGlw>> : "uses kit, theme\n<size:16>[Rust paths]</size>"
+nyx.app.Shellanddashboard --> nyx.app.Window <<Relationship-UmVsYXRpb25zaGlw>> : "uses app, state\n<size:16>[Rust paths]</size>"
+nyx.app.Viewport --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.nyxconnect <<Relationship-UmVsYXRpb25zaGlw>> : "uses connect: config, env +1\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, engine +2\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.app.Scriptsandbatch <<Relationship-UmVsYXRpb25zaGlw>> : "uses pyscript\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.app.Inspectortabs <<Relationship-UmVsYXRpb25zaGlw>> : "uses geomui\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.app.Shellanddashboard <<Relationship-UmVsYXRpb25zaGlw>> : "uses examples, shell\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.app.Lookandwidgets <<Relationship-UmVsYXRpb25zaGlw>> : "uses theme\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.app.Viewport <<Relationship-UmVsYXRpb25zaGlw>> : "uses colormap, viewport\n<size:16>[Rust paths]</size>"
+
+@enduml

@@ -1,13 +1,20 @@
 /*
- * nyx architecture model (Structurizr DSL, C4), as of the end of the restructure (phase 9, 2026-11-13).
+ * nyx architecture model (Structurizr DSL, C4): context, containers (one per crate), components (every container) and two
+ * dynamic views. Code level (C4 level 4) is not a Structurizr view: it is a class-diagram page per component, in c4/4-code/.
+ * As of the end of the restructure (phase 9, 2026-11-13).
  *
- * Source of truth for the picture; the code is the source of truth for the facts. Every element names the code it
- * stands for (property "code") and the ADRs that justify it (property "adr"). docs/architecture/CODE_TO_ADR.md is the
- * same mapping file by file. The crate layering is enforced by crates/nyx-engine/tests/layering.rs: the relationships
- * between containers below are exactly its table.
+ * Hand-written here: people, systems, containers, the container relationships (exactly the layering table of
+ * crates/nyx-engine/tests/layering.rs) and the dynamic views. Generated, by c4/tools/gen.pl from the Rust source and
+ * c4/spec/components.spec: the components of every container (c4/model/<container>.components.dsl), the relationships between
+ * components and from components to containers (c4/model/relationships.dsl: every `use` and path reference of the source) and
+ * the component views (c4/model/views.dsl). Do not edit the generated files; change the spec or the source and run
+ * `bash c4/tools/build.sh`.
  *
- * View: `structurizr-lite` on this folder, or
- * `structurizr-cli export -workspace workspace.dsl -format mermaid|plantuml`.
+ * Every element names the code it stands for (property "code") and the ADRs that justify it (property "adr").
+ * docs/architecture/CODE_TO_ADR.md is the same mapping file by file.
+ *
+ * View: `structurizr-lite` on this folder, `structurizr-cli export -workspace workspace.dsl -format mermaid|plantuml`, or the
+ * pages and the browser viewer in c4/ (see c4/README.md).
  */
 workspace "nyx" "Desktop finite-element application for photonics and phononics, in pure Rust." {
 
@@ -32,6 +39,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "adr" "0057, 0014"
                     "code" "crates/app/src"
                 }
+                !include c4/model/app.components.dsl
             }
 
             mcp = container "nyx-mcp" "The MCP server (stdio, JSON-RPC 2.0): every tool is one engine command, with the JSON Schema the engine generates." "Rust binary" "Executable" {
@@ -40,6 +48,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-mcp/src"
                     "contract" "contracts/mcp_tools.v2.json"
                 }
+                !include c4/model/mcp.components.dsl
             }
 
             connect = container "nyx-connect" "Finds Claude Code and Claude Desktop installs and registers nyx-mcp with them; the Connect menu and its command-line twin." "Rust library and binary" "Executable" {
@@ -48,6 +57,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-connect/src"
                     "contract" "contracts/connect_report.v1.json"
                 }
+                !include c4/model/connect.components.dsl
             }
 
             engine = container "nyx-engine" "The Engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them, and the binding to a workflow. Every action is a named command with a JSON Schema." "Rust library" "Library" {
@@ -56,51 +66,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-engine/src"
                     "contract" "contracts/engine_commands.v1.json, engine_project.v2.json, geom_operations.v1.json"
                 }
-                project = component "Project" "The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key (1) is checked at the file boundary." "project.rs" {
-                    properties {
-                        "adr" "0063"
-                    }
-                }
-                commands = component "Commands" "The catalog (name, access, JSON Schema) and the dispatcher; the window and the MCP server use the same entries." "commands.rs, engine.rs, geometry.rs, geomdesc.rs" {
-                    properties {
-                        "adr" "0057, 0038"
-                    }
-                }
-                jobs = component "Job runner" "Background mesh and solve jobs with progress and cancel; results are applied on poll." "jobs.rs, solve.rs, convergence.rs" {
-                    properties {
-                        "adr" "0061"
-                    }
-                }
-                meshing = component "Meshing seam" "MeshRequest to a MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher." "meshing.rs, pml.rs" {
-                    properties {
-                        "adr" "0054, 0050"
-                    }
-                }
-                materials = component "Materials" "Named, oriented and project materials resolved from the library and the project at the study wavelength." "materials.rs" {
-                    properties {
-                        "adr" "0058"
-                    }
-                }
-                analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest result of a physics." "analyse.rs" {
-                    properties {
-                        "adr" "0056"
-                    }
-                }
-                resultsIO = component "Results files" "HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results." "h5io.rs, xdmf.rs, results_file.rs" {
-                    properties {
-                        "adr" "0062, 0063"
-                    }
-                }
-                storeLink = component "Store link" "Binds the project to a workflow of the workspace, commits versions and records runs (card and metrics made here)." "store_link.rs" {
-                    properties {
-                        "adr" "0039, 0059"
-                    }
-                }
-                registry = component "Registry" "The physics compiled in (cargo features dfs, sms, ems)." "lib.rs" {
-                    properties {
-                        "adr" "0025"
-                    }
-                }
+                !include c4/model/engine.components.dsl
             }
 
             physics = container "nyx-physics" "The Physics trait, the problem envelope (ProblemSpec), descriptors, SolveResult, the registry type, validation, JSON Schemas." "Rust library" "Library" {
@@ -109,6 +75,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-physics/src"
                     "contract" "contracts/problem_spec.v3.json, solve_result.v2.json, physics_descriptors.v1.json"
                 }
+                !include c4/model/physics.components.dsl
             }
             dfs = container "nyx-dfs" "Diffusion physics: heat and electrostatics. Typed problem, three-stage kernels, descriptors, goldens." "Rust library" "Library,Kernel" {
                 properties {
@@ -116,6 +83,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-dfs/src"
                     "contract" "contracts/physics_dfs.v1.json"
                 }
+                !include c4/model/dfs.components.dsl
             }
             sms = container "nyx-sms" "Solid mechanics: static, eigenfrequency, PML, Floquet, low-reflecting boundaries, axisymmetric." "Rust library" "Library,Kernel" {
                 properties {
@@ -123,6 +91,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-sms/src"
                     "contract" "contracts/physics_sms.v1.json"
                 }
+                !include c4/model/sms.components.dsl
             }
             ems = container "nyx-ems" "EM waves: waveguide modes (real and complex), axisymmetric, cavity in 3D." "Rust library" "Library,Kernel" {
                 properties {
@@ -130,12 +99,14 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-ems/src"
                     "contract" "contracts/physics_ems.v1.json"
                 }
+                !include c4/model/ems.components.dsl
             }
             analysis = container "nyx-analysis" "Analyses of results: the polarization (Stokes parameters, Poincare sphere, classes, degenerate groups) as a function of a SolveResult and its mesh." "Rust library" "Library" {
                 properties {
                     "adr" "0056, 0021"
                     "code" "crates/nyx-analysis/src"
                 }
+                !include c4/model/analysis.components.dsl
             }
             store = container "nyx-store" "Workspace, workflow, experiment and run storage: manifests, append-only run log, versions, search, .nyx archives. Knows nothing of a project." "Rust library" "Library" {
                 properties {
@@ -143,6 +114,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/nyx-store/src"
                     "contract" "contracts/store_workflow.v1.json, store_run.v1.json"
                 }
+                !include c4/model/store.components.dsl
             }
 
             femcore = container "femcore" "The FEM core: meshes, meshing and adaptation, linear algebra behind one driver, finite-element basics, the material specification and library, expressions." "Rust library" "Library" {
@@ -150,50 +122,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "adr" "0032, 0033, 0029, 0006"
                     "code" "crates/femcore/src"
                 }
-                mesh = component "Mesh" "The native mesh (cells of one kind each), the exchange mesh Mesh the physics take, and the discretisation (edges, P2 numbering)." "mesh/" {
-                    properties {
-                        "adr" "0005, 0032"
-                        "contract" "contracts/mesh_cells.v1.json"
-                    }
-                }
-                meshing = component "Meshing" "MeshRequest to mesh: the lattice mesher, structured absorbing layers, wavelength sizing, drive by geom." "meshing/" {
-                    properties {
-                        "adr" "0006, 0017, 0052, 0054, 0055"
-                        "contract" "contracts/mesh_request.v1.json, mesh_report.v1.json"
-                    }
-                }
-                adapt = component "Adaptation" "Metric adaptation, residual error estimators, the solve-estimate-adapt loop in 2D and 3D." "adapt/" {
-                    properties {
-                        "adr" "0007, 0053"
-                    }
-                }
-                linalg = component "Linear algebra" "Csr, direct and iterative solvers, shift-invert Krylov-Schur, LOBPCG, AMG, behind one driver." "linalg/" {
-                    properties {
-                        "adr" "0033, 0011"
-                        "contract" "contracts/linalg_options.v1.json"
-                    }
-                }
-                fem = component "Finite-element basics" "Shape functions and quadrature, edge elements, PML coefficients, periodic maps, material properties per domain." "fem.rs, edge.rs, pml.rs, periodic.rs, props.rs" {
-                    properties {
-                        "adr" "0009"
-                    }
-                }
-                material = component "Material specification" "TOML files with explicit units, tensors, dispersion models evaluated at the study wavelength, the library loader." "material/, optical.rs" {
-                    properties {
-                        "adr" "0029, 0030, 0034, 0035"
-                        "contract" "contracts/material_schema.v1.json"
-                    }
-                }
-                section = component "Frame and sections" "The one place that knows the wafer axes (x lateral, z normal, waves along +y)." "section.rs" {
-                    properties {
-                        "adr" "0001"
-                    }
-                }
-                expr = component "Expressions" "The safe expression grammar for initial fields and boundary values; a copy of geom's, kept equal by a corpus test." "expr.rs" {
-                    properties {
-                        "adr" "0065"
-                    }
-                }
+                !include c4/model/femcore.components.dsl
             }
             geom = container "geom" "Lean CSG-over-B-rep geometry kernel: feature lists, named regions and boundaries, selectors, exact projection oracles. Depends on serde and optional rayon only." "Rust library" "Library" {
                 properties {
@@ -201,6 +130,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "code" "crates/geom/src"
                     "contract" "crates/geom/golden (feature lists and expected regions)"
                 }
+                !include c4/model/geom.components.dsl
             }
 
             projectFile = container "Project file" "Everything saved for one model: geometry, materials, boundary conditions, studies. JSON with a format key." "File .nyx.json" "Store" {
@@ -264,36 +194,8 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
         nyx.engine -> nyx.materialLibrary "Loads" "TOML"
         nyx.store -> nyx.workspaceStore "Reads and writes"
 
-        # components of the engine
-        nyx.engine.commands -> nyx.engine.project "Edits"
-        nyx.engine.commands -> nyx.engine.jobs "Starts mesh and solve jobs"
-        nyx.engine.commands -> nyx.engine.analyse "analyse"
-        nyx.engine.commands -> nyx.engine.resultsIO "export_results, open_results"
-        nyx.engine.commands -> nyx.engine.storeLink "store_save, store_open, runs"
-        nyx.engine.jobs -> nyx.engine.meshing "Builds the mesh when none is current"
-        nyx.engine.jobs -> nyx.engine.materials "Resolves materials at the study wavelength"
-        nyx.engine.jobs -> nyx.engine.registry "Finds the physics of a problem"
-        nyx.engine.jobs -> nyx.engine.storeLink "Records a run"
-        nyx.engine.storeLink -> nyx.engine.resultsIO "Writes results.h5 in the run folder"
-        nyx.engine.meshing -> nyx.femcore.meshing "MeshRequest"
-        nyx.engine.meshing -> nyx.geom "Evaluates the feature list"
-        nyx.engine.materials -> nyx.femcore.material "Library and spec"
-        nyx.engine.registry -> nyx.dfs "Registers"
-        nyx.engine.registry -> nyx.sms "Registers"
-        nyx.engine.registry -> nyx.ems "Registers"
-        nyx.engine.analyse -> nyx.analysis "Calls"
-        nyx.engine.storeLink -> nyx.store "Commits specs, records runs"
-
-        # components of femcore
-        nyx.femcore.meshing -> nyx.femcore.mesh "Builds"
-        nyx.femcore.meshing -> nyx.femcore.adapt "Adapts to sizes"
-        nyx.femcore.meshing -> nyx.geom "Drives the geometry"
-        nyx.femcore.adapt -> nyx.femcore.mesh "Reads and rebuilds"
-        nyx.femcore.fem -> nyx.femcore.mesh "Element numbering"
-        nyx.femcore.fem -> nyx.femcore.section "Axis names"
-        nyx.femcore.fem -> nyx.femcore.material "Properties per domain"
-        nyx.femcore.fem -> nyx.femcore.linalg "Assembled matrices"
-        nyx.femcore.material -> nyx.femcore.expr "Expressions in material files"
+        # components: read from the use and path references of the Rust source by c4/tools/gen.pl (from c4/spec/components.spec)
+        !include c4/model/relationships.dsl
     }
 
     views {
@@ -308,15 +210,8 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
             autolayout lr
         }
 
-        component nyx.engine "Engine" "Inside the engine." {
-            include *
-            autolayout tb
-        }
-
-        component nyx.femcore "femcore" "Inside the FEM core." {
-            include *
-            autolayout tb
-        }
+        # one component view per container, generated
+        !include c4/model/views.dsl
 
         dynamic nyx "SolveFromTheWindow" "What happens when the window solves the active physics." {
             nyx.app -> nyx.engine "start_solve(targets)"

@@ -579,3 +579,11 @@ Started from `main` = `restructure-8-format` (0e2a5e12, phase 8 accepted and mer
 4. `-p nyx-engine --features phdf5` (the MPI-IO writer, phase 8 follow-up) has still not been built on a machine with MPI.
 
 **Checks.** `cargo test --release --workspace --no-fail-fast`: 907 pass, 0 fail, 10 ignored (phase 8: 904; the three new tests are the two expression-grammar tests and the geom dependency test). `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean for the seven formatted crates; `check_code_to_adr.sh` passes. No solver numerics changed (lint edits only), so no benchmark was re-run.
+
+## Phase 9c: the full C4 set (workspace `nyx2-c4`, bookmark `restructure-9b-c4`, 2026-11-13)
+
+Started from `main` = `restructure-9a-structurizr` (a6219af1). State: **implemented, awaiting acceptance.** No ADR (documentation and tooling only).
+
+**Done.** `docs/architecture/c4/`: context, containers (one per crate), components (91, every container, a view each; femcore also in three parts) and code pages (one per component: files, uses, used by, class diagram, table of public items), two dynamic views, exports (Mermaid, PlantUML, JSON), a browser viewer, a memo and a README. The master `docs/architecture/workspace.dsl` keeps the hand-written model and includes the generated components, relationships and views. `c4/tools/gen.pl` reads the Rust source and `c4/spec/components.spec`; `build.sh` validates with the Structurizr CLI and exports; `make_standalone.sh` builds the standalone copy `Documents/opomech/nyx-c4/` (outside the repository). Checks: the DSL validates (exit 0); all 110 Mermaid diagrams render in headless Chrome; every `.rs` file of `src/` belongs to one component; the crate-to-crate references found in the source are all in the layering table. Rebuild with `bash docs/architecture/c4/tools/build.sh` when files or crates change.
+
+**Not done.** The worked 1550 nm use case with a dynamic view (next step); a C4 deployment view; tests, examples and benches are outside the model.
