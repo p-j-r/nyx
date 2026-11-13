@@ -21,8 +21,8 @@
 
 use crate::project::Project;
 use femcore::mesh::SimplexMesh;
-use hdf5_metno as h5;
 use h5::types::VarLenUnicode;
+use hdf5_metno as h5;
 use nyx_physics::{CellField, Field, Scalar, Solution, SolveResult};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -41,10 +41,18 @@ fn put_serial<T: h5::H5Type>(g: &h5::Group, name: &str, data: &[T], cols: usize)
     let big = data.len() >= 4096 && rows > 0;
     let ds = if cols == 0 {
         let b = g.new_dataset::<T>().shape([rows]);
-        if big { b.chunk([rows.min(32768)]).deflate(3).create(name) } else { b.create(name) }
+        if big {
+            b.chunk([rows.min(32768)]).deflate(3).create(name)
+        } else {
+            b.create(name)
+        }
     } else {
         let b = g.new_dataset::<T>().shape([rows, cols]);
-        if big { b.chunk([rows.min((32768 / cols).max(1)), cols]).deflate(3).create(name) } else { b.create(name) }
+        if big {
+            b.chunk([rows.min((32768 / cols).max(1)), cols]).deflate(3).create(name)
+        } else {
+            b.create(name)
+        }
     }
     .map_err(e(name))?;
     if !data.is_empty() {
@@ -56,7 +64,11 @@ fn put_serial<T: h5::H5Type>(g: &h5::Group, name: &str, data: &[T], cols: usize)
 /// Name usable as an HDF5 link: `/` is the path separator, everything else is allowed.
 pub(crate) fn link_name(name: &str) -> String {
     let n: String = name.chars().map(|c| if c == '/' { '_' } else { c }).collect();
-    if n.is_empty() || n == "." { format!("_{n}") } else { n }
+    if n.is_empty() || n == "." {
+        format!("_{n}")
+    } else {
+        n
+    }
 }
 
 /// How a results file is written: with the ordinary sequential HDF5 driver, or with the MPI-IO driver by several processes at once.
@@ -194,7 +206,13 @@ impl Io {
     }
 
     /// A dataset of shape `[rows, cols]` (`[rows]` when `cols` is 0) holding `data` row by row.
-    pub fn put<T: h5::H5Type>(&self, g: &h5::Group, name: &str, data: &[T], cols: usize) -> Result<h5::Dataset, String> {
+    pub fn put<T: h5::H5Type>(
+        &self,
+        g: &h5::Group,
+        name: &str,
+        data: &[T],
+        cols: usize,
+    ) -> Result<h5::Dataset, String> {
         if self.part == Partition::SOLO && !self.replay {
             return put_serial(g, name, data, cols);
         }
@@ -213,7 +231,8 @@ impl Io {
             let v = ndarray::ArrayView1::from(&data[r.clone()]);
             ds.write_slice(v, ndarray::s![r.start..r.end]).map_err(e(name))?;
         } else {
-            let v = ndarray::ArrayView2::from_shape((r.len(), cols), &data[r.start * cols..r.end * cols]).map_err(|x| format!("HDF5 {name}: {x}"))?;
+            let v = ndarray::ArrayView2::from_shape((r.len(), cols), &data[r.start * cols..r.end * cols])
+                .map_err(|x| format!("HDF5 {name}: {x}"))?;
             ds.write_slice(v, ndarray::s![r.start..r.end, ..]).map_err(e(name))?;
         }
         Ok(ds)
@@ -236,12 +255,19 @@ fn open_io(path: &Path, mode: H5Mode) -> Result<Option<Io>, String> {
                     return Ok(None);
                 }
             }
-            Ok(Some(Io { file: h5::File::create(path).map_err(e("create file"))?, part: Partition::SOLO, replay: false }))
+            Ok(Some(Io {
+                file: h5::File::create(path).map_err(e("create file"))?,
+                part: Partition::SOLO,
+                replay: false,
+            }))
         }
         #[cfg(feature = "phdf5")]
         H5Mode::Parallel => {
             let w = mpi_rt::world(true)?.ok_or("MPI is not available")?;
-            let file = h5::File::with_options().with_fapl(|p| p.mpio(w.comm, None)).create(path).map_err(e("create file (MPI-IO)"))?;
+            let file = h5::File::with_options()
+                .with_fapl(|p| p.mpio(w.comm, None))
+                .create(path)
+                .map_err(e("create file (MPI-IO)"))?;
             Ok(Some(Io { file, part: Partition { rank: w.rank, size: w.size }, replay: false }))
         }
         #[cfg(not(feature = "phdf5"))]
@@ -253,13 +279,24 @@ fn open_io(path: &Path, mode: H5Mode) -> Result<Option<Io>, String> {
 }
 
 /// Writes `results` (physics code and result) solved on `mesh` for `project` into a new file at `path`, serially.
-pub fn write_results(path: &Path, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)]) -> Result<(), String> {
+pub fn write_results(
+    path: &Path,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+) -> Result<(), String> {
     write_results_mode(path, H5Mode::Serial, project, mesh, results).map(|_| ())
 }
 
 /// The same in the chosen mode. In a parallel run every process calls this with the same arguments; the file is the same as a serial one.
 /// Returns whether this process is the one that writes the XDMF file (process 0, after every process is done).
-pub fn write_results_mode(path: &Path, mode: H5Mode, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)]) -> Result<bool, String> {
+pub fn write_results_mode(
+    path: &Path,
+    mode: H5Mode,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+) -> Result<bool, String> {
     let Some(io) = open_io(path, mode)? else { return Ok(false) };
     let root = io.part.rank == 0;
     write_into(&io, mode, project, mesh, results)?;
@@ -273,7 +310,13 @@ pub fn write_results_mode(path: &Path, mode: H5Mode, project: &Project, mesh: &S
     Ok(root)
 }
 
-fn write_into(io: &Io, mode: H5Mode, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)]) -> Result<(), String> {
+fn write_into(
+    io: &Io,
+    mode: H5Mode,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+) -> Result<(), String> {
     let file = &io.file;
     io.attr_text(file, "writer", if mode == H5Mode::Serial { "serial" } else { "parallel" })?;
     io.attr(file, "processes", &(io.part.size as i64))?;
@@ -410,17 +453,24 @@ pub fn read_results(path: &Path) -> Result<Stored, String> {
         if let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&read_text(&g, "scalars")?) {
             for it in items {
                 if let (Some(n), Some(v)) = (it.get(0).and_then(Value::as_str), it.get(1)) {
-                    r.scalars.push((n.to_string(), match v.as_f64() {
-                        Some(x) => Scalar::Num(x),
-                        None => Scalar::Text(v.as_str().unwrap_or("").to_string()),
-                    }));
+                    r.scalars.push((
+                        n.to_string(),
+                        match v.as_f64() {
+                            Some(x) => Scalar::Num(x),
+                            None => Scalar::Text(v.as_str().unwrap_or("").to_string()),
+                        },
+                    ));
                 }
             }
         }
         r.log = serde_json::from_str(&read_text(&g, "log")?).unwrap_or_default();
         for k in 0..attr_i64(&g, "n_solutions") {
             let sg = g.group(&format!("solution_{k}")).map_err(e("solution"))?;
-            let mut s = Solution { label: attr_str(&sg, "label").unwrap_or_default(), value: attr_f64(&sg, "value"), ..Default::default() };
+            let mut s = Solution {
+                label: attr_str(&sg, "label").unwrap_or_default(),
+                value: attr_f64(&sg, "value"),
+                ..Default::default()
+            };
             if let (Some(re), Some(im)) = (attr_f64(&sg, "eig_re"), attr_f64(&sg, "eig_im")) {
                 s.eigenvalue = Some([re, im]);
             }
@@ -432,7 +482,9 @@ pub fn read_results(path: &Path) -> Result<Stored, String> {
                 s.fields.push(Field {
                     name: attr_str(&ds, "name").unwrap_or_else(|| n.clone()),
                     unit: attr_str(&ds, "unit").unwrap_or_default(),
-                    components: attr_str(&ds, "components").and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default(),
+                    components: attr_str(&ds, "components")
+                        .and_then(|t| serde_json::from_str(&t).ok())
+                        .unwrap_or_default(),
                     values: ds.read_raw::<f64>().map_err(e(&n))?,
                 });
             }
@@ -473,7 +525,9 @@ mod tests {
 
     fn solved(name: &str) -> Engine {
         let mut e = Engine::new();
-        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples").join(format!("{name}.nyx.json"));
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(format!("{name}.nyx.json"));
         e.call("project_open", &json!({ "path": p.to_str().unwrap() })).unwrap();
         e.call("solve_run", &json!({})).unwrap();
         e
@@ -503,9 +557,14 @@ mod tests {
     fn three_emulated_processes_write_what_one_serial_process_writes() {
         let e = solved("15_soi_wire");
         let mesh = e.model().unwrap().solver_mesh();
-        let results: Vec<(String, std::sync::Arc<nyx_physics::SolveResult>)> =
-            e.project().physics.iter().filter_map(|s| e.result(&s.physics).map(|(r, _)| (s.physics.clone(), r.clone()))).collect();
-        let refs: Vec<(String, &nyx_physics::SolveResult)> = results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
+        let results: Vec<(String, std::sync::Arc<nyx_physics::SolveResult>)> = e
+            .project()
+            .physics
+            .iter()
+            .filter_map(|s| e.result(&s.physics).map(|(r, _)| (s.physics.clone(), r.clone())))
+            .collect();
+        let refs: Vec<(String, &nyx_physics::SolveResult)> =
+            results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
         let tmp = |n: &str| std::env::temp_dir().join(format!("nyx-part-{n}-{}.h5", std::process::id()));
         let (serial, three) = (tmp("serial"), tmp("three"));
         write_results(&serial, e.project(), &mesh, &refs).unwrap();
@@ -550,7 +609,9 @@ mod tests {
         if !mode_available(H5Mode::Parallel) {
             let e = solved("04_thermal_bar");
             let mesh = e.model().unwrap().solver_mesh();
-            let err = write_results_mode(&std::env::temp_dir().join("never.h5"), H5Mode::Parallel, e.project(), &mesh, &[]).unwrap_err();
+            let err =
+                write_results_mode(&std::env::temp_dir().join("never.h5"), H5Mode::Parallel, e.project(), &mesh, &[])
+                    .unwrap_err();
             assert!(err.contains("phdf5") && err.contains("MPI"), "{err}");
             assert!(start_runtime(H5Mode::Parallel).is_err());
         }

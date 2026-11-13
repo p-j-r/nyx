@@ -11,7 +11,12 @@ use std::time::Instant;
 fn run(name: &str, mesh: &SimplexMesh, spec: &ProblemSpec) {
     let t = Instant::now();
     match solve(mesh, spec, None) {
-        Ok(r) => println!("{name:<44} {:>8} dofs  {:>7.2} s {}", r.dofs, t.elapsed().as_secs_f64(), r.log.first().cloned().unwrap_or_default()),
+        Ok(r) => println!(
+            "{name:<44} {:>8} dofs  {:>7.2} s {}",
+            r.dofs,
+            t.elapsed().as_secs_f64(),
+            r.log.first().cloned().unwrap_or_default()
+        ),
         Err(e) => println!("{name:<44} FAILED: {e}"),
     }
 }

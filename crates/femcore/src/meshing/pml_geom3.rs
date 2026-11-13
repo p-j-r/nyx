@@ -34,6 +34,7 @@ pub enum Native3 {
 
 /// Replaces the absorbing layers of a meshed 3D model by structured ones, cut into tetrahedra for the simplex solvers. A model without a
 /// `Pml` comes back unchanged.
+#[allow(clippy::chunks_exact_to_as_chunks)] // four vertex indices per tetrahedron
 pub fn structured_pml_3d(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String> {
     let (ev, labels) = (g.eval.clone(), g.labels.clone());
     match structured_pml_3d_native(g)? {

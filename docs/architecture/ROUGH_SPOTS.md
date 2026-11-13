@@ -77,3 +77,15 @@ Related: ADR numbers refer to `adr/`, contract names to `contracts/`.
 ## Resolved by the restructure (analysis phase, 2026-11-05; details in ADR 56)
 
 * **R28** the polarization analysis named its axes differently from the wafer frame: it is in `nyx-analysis` now, its samples are `lat`, `nor`, `prop` (what the component is), the documentation maps them to the wafer axes x, z and y, and a result states its frame (`field frame`). The labels of the Analysis tab did not change (they were wafer names already).
+
+## Resolved at the close-out (phase 9, 2026-11-13; ADR 63, 64, 65)
+
+* **R06** two expression evaluators: kept as two copies (geom must not depend on femcore), and made safe to keep: `crates/femcore/tests/expr_grammar.rs` runs one corpus through both, they accept and refuse the same inputs and agree on every value to the last bit.
+* **R08** three hash functions: the identity rule is written down (ADR 64): `nyx_store::util::hash_bytes` (BLAKE3) is the only persisted hash; every other hash is a cache key and never leaves the process. `nyx-session` and its FNV handles no longer exist.
+* **R14** docs that record states code has moved past: left as records on purpose (ADR 65); `docs/architecture/` and `CLAUDE.md` are the place for what is true now. `docs/CAPABILITIES_MEMO.md` was never added (R24); `FEATURE_DEPENDENCIES.md` is in `docs/ports/meshers/`.
+* **R18** `geom` dependency direction: `crates/nyx-engine/tests/layering.rs` has the crate table (geom depends on no workspace crate) and `geom_depends_on_serde_and_optional_rayon_only`.
+* **R20** no version marker on saved interfaces: the `format` key in `Project`, `FeatureList` and `ProblemSpec` (ADR 63).
+* **R23** lints and formatting: `cargo clippy --workspace --all-targets` is clean; `rustfmt` stays on the crates that already follow it (ADR 65); `rust-version` is 1.99.
+* **R13** stale names: comments fixed (`pml3.rs`, `mesh3d.rs`, `physics_size.rs`, the front-end texts). The public stage functions of the cavity solver keep `emw` in their names (`assemble_emw_eigen`, `solve_emw_modes`, `emw_eigen_fields`, `EmwAssembly`, `nyx-ems/src/cavity.rs`): they are pinned by the `kernel_stages` contract and the golden tests, so renaming them is a contract change nobody asked for. The test files `emw2d.rs` and `emw3d.rs` of `nyx-ems` keep their names for the same reason (goldens refer to them).
+
+Resolved earlier, by the phase named in the plan and recorded in `docs/RESTRUCTURE_STATUS.md` and the ADRs of that phase: R02, R03, R26 (phase 3, ADR 33), R10, R11, R12, R19 (the explicit `Ctx` for the physics; the thread-local progress sink remains inside femcore and is installed per job by the engine), R27 (phase 4, ADR 25, 41 to 47), R07, R15, R16, R17, R21, R25 (phases 4 and 7, ADR 26, 28, 57, 59), R22 (gate G2: tolerances in `nyx-ems/tests/golden`, no reference platform), R24 (phase 0). Not re-audited line by line in phase 9.

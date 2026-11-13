@@ -169,7 +169,12 @@ impl LabelResolver for MeshedModel {
 /// Builds the mesh of a model. `sizing` is what the physics of the project want resolved (`MeshSettings::physics_sizing`); the engine
 /// passes it only when that flag is on.
 pub trait Mesher: Send + Sync {
-    fn mesh(&self, geometry: &FeatureList, settings: &MeshSettings, sizing: Option<&Sizing>) -> Result<MeshedModel, Error>;
+    fn mesh(
+        &self,
+        geometry: &FeatureList,
+        settings: &MeshSettings,
+        sizing: Option<&Sizing>,
+    ) -> Result<MeshedModel, Error>;
 }
 
 /// The mesher of `femcore`, driven by a `MeshRequest` (ADR 54): 2D and 3D models, simple or adaptive, inline or structured absorbing
@@ -206,7 +211,11 @@ impl Mesher for FemcoreMesher {
         if let Some(layers) = &s.sweep {
             let layers: Vec<femcore::meshing::mesher::Layer> = layers
                 .iter()
-                .map(|l| femcore::meshing::mesher::Layer { thickness: l.thickness, n: l.n, domain_offset: l.domain_offset })
+                .map(|l| femcore::meshing::mesher::Layer {
+                    thickness: l.thickness,
+                    n: l.n,
+                    domain_offset: l.domain_offset,
+                })
                 .collect();
             mesh = femcore::meshing::mesher::extrude_y(&mesh, &layers, 0.0).map_err(Error::Invalid)?;
             return MeshedModel::new(mesh, eval, labels, true);
@@ -227,8 +236,13 @@ impl MeshedModel {
                 return vec!["ymax".into()];
             }
         }
-        let ids: Vec<u32> =
-            self.labels.boundaries.iter().filter(|b| labels.contains(&b.id)).flat_map(|b| b.entities.iter().copied()).collect();
+        let ids: Vec<u32> = self
+            .labels
+            .boundaries
+            .iter()
+            .filter(|b| labels.contains(&b.id))
+            .flat_map(|b| b.entities.iter().copied())
+            .collect();
         if ids.is_empty() {
             return vec![];
         }

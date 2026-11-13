@@ -95,7 +95,9 @@ fn coincident_and_t_junction_edges_conform() {
     let cx = ev.complex();
     cx.check().unwrap();
     assert!(
-        close(ev.regions()[0].measure, 2.0) && close(ev.regions()[1].measure, 1.0) && close(ev.regions()[2].measure, 1.0)
+        close(ev.regions()[0].measure, 2.0)
+            && close(ev.regions()[1].measure, 1.0)
+            && close(ev.regions()[2].measure, 1.0)
     );
     assert!(close(cx.interface_length(0, 1), 0.5) && close(cx.interface_length(0, 2), 1.0));
 }

@@ -11,9 +11,15 @@ fn wire(e: &mut Engine) {
         ("add_rect", json!({ "name": "box", "min": [-2.5e-6, -2e-6], "max": [2.5e-6, 0.0] })),
         ("add_rect", json!({ "name": "clad", "min": [-2.5e-6, 0.0], "max": [2.5e-6, 1.5e-6] })),
         ("add_rect", json!({ "name": "core", "min": [-2.5e-7, 0.0], "max": [2.5e-7, 3e-7] })),
-        ("add_overlay", json!({ "name": "regions", "regions": [
-            { "name": "BOX", "input": "box" }, { "name": "clad", "input": "clad" }, { "name": "Si", "input": "core" } ] })),
-        ("add_physics", json!({ "physics": "ems", "study": "modes", "study_params": { "freq": 299792458.0 / 1.55e-6, "n_target": 2.9, "n_modes": 3 }, "order": 2 })),
+        (
+            "add_overlay",
+            json!({ "name": "regions", "regions": [
+            { "name": "BOX", "input": "box" }, { "name": "clad", "input": "clad" }, { "name": "Si", "input": "core" } ] }),
+        ),
+        (
+            "add_physics",
+            json!({ "physics": "ems", "study": "modes", "study_params": { "freq": 299792458.0 / 1.55e-6, "n_target": 2.9, "n_modes": 3 }, "order": 2 }),
+        ),
         ("set_material", json!({ "physics": "ems", "region": "BOX", "material": "silica" })),
         ("set_material", json!({ "physics": "ems", "region": "clad", "material": "silica" })),
         ("set_material", json!({ "physics": "ems", "region": "Si", "material": "silicon" })),
@@ -25,7 +31,11 @@ fn wire(e: &mut Engine) {
 #[test]
 fn a_wire_with_library_materials_solves_and_its_modes_are_analysed() {
     let mut e = Engine::new();
-    assert!(e.library().unwrap().names().contains(&"silicon".to_string()), "the library of the repository is found: {:?}", e.library_notes);
+    assert!(
+        e.library().unwrap().names().contains(&"silicon".to_string()),
+        "the library of the repository is found: {:?}",
+        e.library_notes
+    );
     wire(&mut e);
     e.call("set_mesh", &json!({ "h": 1.2e-7, "adapt_scale": 0.4 })).unwrap();
     let r = e.call("solve_run", &json!({})).unwrap_or_else(|err| panic!("solve: {err}"));

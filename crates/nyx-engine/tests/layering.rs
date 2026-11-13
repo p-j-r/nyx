@@ -136,5 +136,9 @@ fn geom_depends_on_serde_and_optional_rayon_only() {
         .map(|d| (d["name"].as_str().unwrap().to_string(), d["optional"].as_bool().unwrap_or(false)))
         .collect();
     deps.sort();
-    assert_eq!(deps, vec![("rayon".to_string(), true), ("serde".to_string(), false)], "the normal dependencies of geom");
+    assert_eq!(
+        deps,
+        vec![("rayon".to_string(), true), ("serde".to_string(), false)],
+        "the normal dependencies of geom"
+    );
 }

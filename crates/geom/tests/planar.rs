@@ -120,9 +120,7 @@ fn tapered_and_concave_extrusions() {
     assert!(close(ev.volume(0), (4.0 + top * top + 2.0 * top) / 3.0));
     assert_eq!(counts(&ev), (6, 12, 8));
     let names: Vec<&str> = ev.faces().iter().map(|f| f.name.as_str()).collect();
-    assert!(
-        names.contains(&"frustum.side:left") && names.contains(&"frustum.ymax") && names.contains(&"frustum.ymin")
-    );
+    assert!(names.contains(&"frustum.side:left") && names.contains(&"frustum.ymax") && names.contains(&"frustum.ymin"));
     assert_eq!(ev.resolve(&Selector::parse("kind(plane)").unwrap()).unwrap().set.ids.len(), 6);
     // an L-shaped profile, turned about x: eight faces; the triangulation diagonals leave no trace
     let mut m = Model::new_3d();

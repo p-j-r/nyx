@@ -24,6 +24,7 @@ fn best<F: FnMut()>(mut f: F, reps: usize) -> f64 {
         .fold(f64::MAX, f64::min)
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)] // a benchmark of the plain loop
 fn stream_sum(data: &[f64]) -> f64 {
     let mut acc = [0.0f64; 8];
     for c in data.chunks_exact(8) {

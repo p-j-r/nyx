@@ -16,5 +16,11 @@ fn main() {
     load(&mut s, "xmax", [0.0, 0.0, -1e5]);
     let t = std::time::Instant::now();
     let r = solve(&mesh, &s, None).unwrap();
-    println!("{} cells, {} dofs, total {:.2} s | {}", mesh.n_cells(), r.dofs, t.elapsed().as_secs_f64(), r.log.first().cloned().unwrap_or_default());
+    println!(
+        "{} cells, {} dofs, total {:.2} s | {}",
+        mesh.n_cells(),
+        r.dofs,
+        t.elapsed().as_secs_f64(),
+        r.log.first().cloned().unwrap_or_default()
+    );
 }

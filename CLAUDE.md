@@ -17,7 +17,7 @@ Desktop finite-element application for photonics and phononics, in pure Rust. No
 | `crates/nyx-mcp`, `nyx-connect` | the AI interface (stdio MCP server whose tools are the engine commands, ADR 57; one-click host connection) |
 | `examples/`, `materials/` | example projects (`*.nyx.json`, written by `crates/nyx-engine/tests/make_examples.rs`) and the material library (`*.toml`), both found next to the program or in a parent folder |
 | `docs/` | design notes and per-project status files |
-| `docs/architecture/` | C4 model (`workspace.dsl`), ADRs (`adr/`, index `ADR_INDEX.md`), `ROUGH_SPOTS.md`, `CODE_TO_ADR.md`, interface `contracts/`, the restructure plan. Read `README.md` there first |
+| `docs/architecture/` | C4 model (`workspace.dsl`, matches the crate layering test; not yet run through Structurizr), ADRs (`adr/`, index `ADR_INDEX.md`, 65 records), `ROUGH_SPOTS.md`, `CODE_TO_ADR.md`, interface `contracts/`, the restructure plan. Read `README.md` there first |
 | `tools/` | `baseline.sh` (tests and benchmark timings recorded per phase) |
 | `runs/`, `dist/` | local outputs, git-ignored; never commit results |
 
@@ -29,8 +29,8 @@ Dependency rules are in `crates/nyx-engine/tests/layering.rs` (a table; the list
 cargo run --release -p nyx                                  # the application
 cargo test --release --workspace                            # everything; a few minutes
 cargo test --release --workspace -- --ignored               # slow tests (solver library); `-p nyx-engine --test make_examples -- --ignored` rewrites examples/*.nyx.json
-cargo clippy --release -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine --all-targets --no-deps -- -D warnings   # the new crates are clean
-cargo fmt -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine   # the new crates are rustfmt-formatted (settings as geom)
+cargo clippy --release --workspace --all-targets --no-deps -- -D warnings   # the whole workspace is clean (ADR 65)
+cargo fmt -p geom -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine   # only these crates are rustfmt-formatted (settings as geom); the others are left as written (ADR 65)
 cargo test --release -p femcore -p geom -p nyx-store -p nyx-mcp -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-engine --test contracts --test layering   # interface contracts (ADR 19)
 bash docs/architecture/check_code_to_adr.sh                 # every file has an ADR row
 cargo test --release -p nyx-engine --test h5                 # results files (hdf5 is a default feature: needs the HDF5 library, HDF5_DIR from .cargo/config.toml or the environment, its bin folder on PATH)
@@ -52,10 +52,10 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 * Determinism: the same input gives the same numbers for any thread count. `NYX_THREADS=N` sets the rayon pool, `NYX_PROFILE=1` echoes the solver log.
 * **File format** (ADR 63): `Project`, `FeatureList` and `ProblemSpec` carry `format` (value 1); files without it or of another format are refused, nothing is converted. Project and spec files are JSON (`*.nyx.json`, `experiment.nyx.json`); results and meshes are HDF5 (feature `hdf5`), never JSON.
 
-## Known state of the checks (phase 7, 2026-11-05, Windows, Rust 1.99.1)
+## Known state of the checks (phase 9, 2026-11-13, Windows, Rust 1.99.1)
 
-* `cargo test --release --workspace --no-fail-fast`: 904 pass, 10 ignored, 0 fail (phase 8, `restructure-8-format`; 889 / 10 / 0 at phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
-* `cargo clippy -D warnings` is clean for `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis` and `nyx-engine`; the old `femcore` code has a few warnings left. `cargo fmt --check` fails for the old code (R23, decided in phase 9).
+* `cargo test --release --workspace --no-fail-fast`: 907 pass, 10 ignored, 0 fail (phase 9, `restructure-9-closeout`; 904 / 10 / 0 at phase 8, `restructure-8-format`; 889 / 10 / 0 at phase 7, `restructure-7-engine-frontends`; phase 5 closed at 815 / 11 / 0, phase 4 at 790 / 9 / 0). The two SOI-wire goldens that failed before phase 3 pass at the G2 tolerances (5e-5 relative on n_eff, 1e-3 on field maxima; `nyx-ems/tests/golden`); a geom area property test can be flaky. Do not regenerate a golden to hide a difference.
+* `cargo clippy --workspace --all-targets` is clean (phase 9, ADR 65). `cargo fmt --check` passes for the crates that use `geom`'s settings and is not run for the others (ADR 65).
 * The numbers and timings of the pre-restructure state and of each phase are in `docs/RESTRUCTURE_STATUS.md`.
 
 ## Version control

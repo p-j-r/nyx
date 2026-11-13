@@ -32,7 +32,7 @@ impl<T: Scalar> Bsr<T> {
     /// Builds block CSR from CSR; dimensions must be multiples of `b`. Every block with at least one
     /// stored entry is kept (zero-filled where the CSR has no entry).
     pub fn from_csr(a: &Csr<T>, b: usize) -> Result<Self, CsrError> {
-        if b == 0 || a.nrows() % b != 0 || a.ncols() % b != 0 {
+        if b == 0 || !a.nrows().is_multiple_of(b) || !a.ncols().is_multiple_of(b) {
             return Err(CsrError::BadIndptr("dimensions must be multiples of the block size"));
         }
         let (nbrows, nbcols) = (a.nrows() / b, a.ncols() / b);
@@ -116,6 +116,7 @@ impl<T: Scalar> Bsr<T> {
     }
 
     #[inline(always)]
+    #[allow(clippy::chunks_exact_to_as_chunks)] // B is a const generic; the block loop is kept as measured
     fn block_row<const B: usize>(&self, ib: usize, x: &[T], y: &mut [T]) {
         let mut acc = [T::ZERO; B];
         let (lo, hi) = (self.indptr[ib], self.indptr[ib + 1]);

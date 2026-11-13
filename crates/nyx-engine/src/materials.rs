@@ -54,7 +54,9 @@ pub fn load_library(dirs: &[PathBuf]) -> (Library, Vec<String>) {
         }
     }
     if dirs.is_empty() {
-        notes.push("no material folder found (set NYX_MATERIALS, or keep a `materials` folder next to the program)".into());
+        notes.push(
+            "no material folder found (set NYX_MATERIALS, or keep a `materials` folder next to the program)".into(),
+        );
     }
     (Library::default(), notes)
 }
@@ -133,9 +135,10 @@ impl Engine {
         }
         let mut texts = self.project.materials.clone();
         texts.insert(name.to_string(), toml_text.to_string());
-        let lib = self.base_library.with_texts(&texts).map_err(|errs| {
-            Error::invalid(errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; "))
-        })?;
+        let lib = self
+            .base_library
+            .with_texts(&texts)
+            .map_err(|errs| Error::invalid(errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")))?;
         let m = lib.get(name).expect("just added");
         let v = describe(m);
         self.project.materials = texts;

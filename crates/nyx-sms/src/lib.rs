@@ -195,7 +195,9 @@ impl Physics for Sms {
         let empty = Sizing { order: spec.order, headroom: 1.5, wavelengths: Default::default() };
         // only an eigenfrequency study with a search frequency has a wave to resolve
         let studies = self.studies();
-        let Some(sd) = studies.iter().find(|s| s.kind == "eigenfrequency" && spec.study.kind == s.kind) else { return empty };
+        let Some(sd) = studies.iter().find(|s| s.kind == "eigenfrequency" && spec.study.kind == s.kind) else {
+            return empty;
+        };
         let f = nyx_physics::decode::Params::new(&spec.study.params, &sd.params).number("f_search");
         if !(f > 0.0 && f.is_finite()) {
             return empty;
@@ -211,7 +213,11 @@ impl Physics for Sms {
                 continue;
             }
             let Some(rho) = m.get(label, "rho").filter(|r| *r > 0.0) else { continue };
-            let c = match m.aniso.get(&label).and_then(|a| a.stiffness.as_ref().map(|s| stiffness_global(s, m.aniso[&label].euler_deg))) {
+            let c = match m
+                .aniso
+                .get(&label)
+                .and_then(|a| a.stiffness.as_ref().map(|s| stiffness_global(s, m.aniso[&label].euler_deg)))
+            {
                 Some(c) => c,
                 None => match (m.get(label, "E"), m.get(label, "nu")) {
                     (Some(e), Some(nu)) if e > 0.0 && nu > -1.0 && nu < 0.5 => isotropic_stiffness(e, nu),

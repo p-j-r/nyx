@@ -49,7 +49,9 @@ impl Engine {
     /// The physics solved when none is named: the active one and, before it, those of the project that export what it imports (a heat
     /// result feeding thermal expansion).
     pub fn default_targets(&self) -> Vec<String> {
-        let Some(active) = self.project.active.clone().or_else(|| self.project.physics.first().map(|s| s.physics.clone())) else {
+        let Some(active) =
+            self.project.active.clone().or_else(|| self.project.physics.first().map(|s| s.physics.clone()))
+        else {
             return vec![];
         };
         let mut out = vec![active.clone()];

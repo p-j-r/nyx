@@ -133,7 +133,8 @@ impl Project {
     /// Reads a project file. The `format` key must be present (in the project, the feature list and every problem) and supported: a file of
     /// the layout before the key existed, or of a newer one, is refused (ADR 63), not converted.
     pub fn from_json(text: &str) -> Result<Project, Error> {
-        let v: serde_json::Value = serde_json::from_str(text).map_err(|e| Error::invalid(format!("not a nyx project: {e}")))?;
+        let v: serde_json::Value =
+            serde_json::from_str(text).map_err(|e| Error::invalid(format!("not a nyx project: {e}")))?;
         let need = |what: &str, x: &serde_json::Value| -> Result<(), Error> {
             if x.get("format").is_none() {
                 return Err(Error::invalid(format!(
@@ -154,7 +155,9 @@ impl Project {
 
     /// Refuses a format this program does not read, in the project, its feature list and its problems.
     pub fn check_formats(&self) -> Result<(), Error> {
-        let bad = |what: &str, f: u32, ok: u32| Err(Error::invalid(format!("{what} has format {f}; this program reads format {ok}")));
+        let bad = |what: &str, f: u32, ok: u32| {
+            Err(Error::invalid(format!("{what} has format {f}; this program reads format {ok}")))
+        };
         if self.format != PROJECT_FORMAT {
             return bad("the project", self.format, PROJECT_FORMAT);
         }

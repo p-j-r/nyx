@@ -1,15 +1,17 @@
 # nyx architecture
 
-Written 2026-11-03 against main `a047506`, on the jj bookmark `arch-model-adrs`. Nothing in `crates/` or `ai/src` was changed; the additions are documents, exemplar files and tests.
+Written 2026-11-03 against main `a047506`; brought up to date at the end of the restructure (phase 9, 2026-11-13: `workspace.dsl`, `diagrams.md`, ADRs 24 to 65, `CODE_TO_ADR.md`, `ROUGH_SPOTS.md`). The ADRs of the early days describe the structure before the restructure; those that no longer hold say so in their Status line and point to the one that replaced them (ADR 65).
+
+**Not done:** `workspace.dsl` has not been run through the Structurizr CLI (no Docker daemon and no CLI on the machine used); it was written to the syntax of the previous version and checked by reading. Run `structurizr-cli validate -workspace workspace.dsl` before relying on it, then compare `diagrams.md` with the exported Mermaid.
 
 | What | Where |
 |---|---|
 | C4 model (context, containers, components, two dynamic views) as Structurizr DSL | [`workspace.dsl`](workspace.dsl) |
-| Rough spots the model shows (28 items, with evidence, severity and a fix direction) | [`ROUGH_SPOTS.md`](ROUGH_SPOTS.md) |
-| Decisions found in the history, docs and code (23 ADRs, Nygard format) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
+| Rough spots the model showed (28 items, with evidence, severity and a fix direction; the resolutions are at the end) | [`ROUGH_SPOTS.md`](ROUGH_SPOTS.md) |
+| Decisions found in the history, docs and code (65 ADRs, Nygard format; the first 23 written retrospectively) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
 | Every file of the repository mapped to the ADRs that cover it | [`CODE_TO_ADR.md`](CODE_TO_ADR.md), checked by `check_code_to_adr.sh` |
 | Interface contracts: exemplar files and the tests that pin them | [`contracts/`](contracts/README.md) |
-| Mermaid diagrams of the model (hand-written, render on GitHub or mermaid.live) | [`diagrams.md`](diagrams.md) |
+| Mermaid diagrams of the final structure (hand-written, render on GitHub or mermaid.live) | [`diagrams.md`](diagrams.md) |
 | **The restructure plan** (authoritative, self-contained, for the next working session); status in `docs/RESTRUCTURE_STATUS.md` | [`RESTRUCTURE_PLAN.md`](RESTRUCTURE_PLAN.md) |
 | Rationale behind it (earlier proposals and decision rounds, superseded as plans) | [`PROPOSED_STRUCTURE.md`](PROPOSED_STRUCTURE.md), [`PROPOSED_STRUCTURE_2.md`](PROPOSED_STRUCTURE_2.md) |
 | Decision rounds 2 and 3 (explanations: sbs removal, multiphysics, materials, plug-ins, goldens, crate cost, dispersion) | [`DECISIONS_ROUND_2.md`](DECISIONS_ROUND_2.md), [`DECISIONS_ROUND_3.md`](DECISIONS_ROUND_3.md) |

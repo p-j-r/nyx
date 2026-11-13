@@ -33,7 +33,8 @@ fn every_example_file_opens_and_passes_the_checks() {
             continue;
         }
         let mut e = Engine::new();
-        e.call("project_open", &json!({ "path": p.to_str().unwrap() })).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
+        e.call("project_open", &json!({ "path": p.to_str().unwrap() }))
+            .unwrap_or_else(|err| panic!("{}: {err}", p.display()));
         e.call("check_project", &json!({})).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
         e.call("geometry_names", &json!({})).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
         n += 1;
@@ -56,7 +57,9 @@ fn the_cantilever_bends_down_under_its_load() {
     let r = e.result("sms").unwrap().0.clone();
     let u = r.solutions[0].field("u").expect("displacement");
     // the tip moves along -z by the Euler-Bernoulli value (F L^3 / 3 E I) to a few percent for this slender beam
-    let uz_min = (0..u.values.len() / u.components.len()).map(|i| u.values[i * u.components.len() + u.components.iter().position(|c| c == "z").unwrap()]).fold(f64::INFINITY, f64::min);
+    let uz_min = (0..u.values.len() / u.components.len())
+        .map(|i| u.values[i * u.components.len() + u.components.iter().position(|c| c == "z").unwrap()])
+        .fold(f64::INFINITY, f64::min);
     let (e_mod, l, h, q): (f64, f64, f64, f64) = (200e9, 1.0, 0.1, 1e5);
     let analytic = q * h * l.powi(3) / (3.0 * e_mod * h.powi(3) / 12.0);
     assert!(uz_min < 0.0 && (uz_min.abs() / analytic - 1.0).abs() < 0.03, "tip {uz_min} against {analytic}");
@@ -94,7 +97,8 @@ fn the_soi_wire_has_the_documented_te0_index_and_is_quasi_te() {
     let (e, _) = solved("15_soi_wire");
     let a = e.analyse("polarization", "ems").unwrap();
     let rows = a["rows"].as_array().unwrap();
-    let te0 = rows.iter().find(|r| r["report"]["class"].as_str().unwrap_or("").contains("TE")).expect("a quasi-TE mode");
+    let te0 =
+        rows.iter().find(|r| r["report"]["class"].as_str().unwrap_or("").contains("TE")).expect("a quasi-TE mode");
     let neff = te0["value"][0].as_f64().unwrap();
     // 500 x 300 nm wire in oxide on 3 um BOX: the repository documented 2.6718 with fixed indices 3.4757 and 1.444
     assert!((neff - 2.672).abs() < 0.02, "TE0 {neff}");

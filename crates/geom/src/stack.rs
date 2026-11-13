@@ -455,7 +455,11 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
                                 (shown, vec![Prov { feature, instance: inst.to_string(), role: role.to_string() }])
                             }
                             None => (
-                                format!("{}.{}", regions[region as usize].name, crate::scene::cap_role(scene.axis, top)),
+                                format!(
+                                    "{}.{}",
+                                    regions[region as usize].name,
+                                    crate::scene::cap_role(scene.axis, top)
+                                ),
                                 vec![],
                             ),
                         }

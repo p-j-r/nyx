@@ -179,7 +179,8 @@ impl Engine {
             }
         }
         let (key, stamp) = (self.mesh_key(), self.stamp());
-        let (registry, mesher, project, sizing) = (self.registry.clone(), self.mesher.clone(), self.project.clone(), self.sizing());
+        let (registry, mesher, project, sizing) =
+            (self.registry.clone(), self.mesher.clone(), self.project.clone(), self.sizing());
         let library = self.library()?;
         let cached = self.model().cloned();
         let id = self.jobs.start(&format!("solve {}", targets.join(", ")), {

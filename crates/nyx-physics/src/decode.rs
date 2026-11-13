@@ -160,7 +160,9 @@ fn named(
     }
     if wants("eps_r") && mat.optical.is_some() {
         if let Some(lambda) = ctx.wavelength {
-            let eps = mat.optical_permittivity(lambda, None, euler).map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
+            let eps = mat
+                .optical_permittivity(lambda, None, euler)
+                .map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
             let lossy = eps.iter().flatten().any(|z| z.im.abs() > 1e-9 * (1.0 + z.re.abs()));
             if lossy {
                 return Err(Error::Unsupported(format!(
@@ -169,7 +171,9 @@ fn named(
                 )));
             }
             let g = |i: usize, j: usize| eps[i][j].re;
-            let iso = (g(0, 0) - g(1, 1)).abs() + (g(1, 1) - g(2, 2)).abs() + g(0, 1).abs() + g(0, 2).abs() + g(1, 2).abs() < 1e-12;
+            let iso =
+                (g(0, 0) - g(1, 1)).abs() + (g(1, 1) - g(2, 2)).abs() + g(0, 1).abs() + g(0, 2).abs() + g(1, 2).abs()
+                    < 1e-12;
             if iso {
                 for &l in labels {
                     m.set(l, "eps_r", g(0, 0));
@@ -177,7 +181,14 @@ fn named(
                 an.permittivity = None;
             } else {
                 // the optical tensor is already in the wafer frame
-                an.permittivity = Some(Tensor::Symmetric { xx: g(0, 0), yy: g(1, 1), zz: g(2, 2), xy: g(0, 1), yz: g(1, 2), xz: g(0, 2) });
+                an.permittivity = Some(Tensor::Symmetric {
+                    xx: g(0, 0),
+                    yy: g(1, 1),
+                    zz: g(2, 2),
+                    xy: g(0, 1),
+                    yz: g(1, 2),
+                    xz: g(0, 2),
+                });
                 an.euler_deg = [0.0; 3];
             }
         }

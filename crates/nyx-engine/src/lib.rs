@@ -22,15 +22,15 @@ pub mod geometry;
 pub mod guide;
 #[cfg(feature = "hdf5")]
 pub mod h5io;
-#[cfg(feature = "hdf5")]
-pub mod xdmf;
 pub mod jobs;
 pub mod materials;
+#[cfg(feature = "hdf5")]
+pub mod xdmf;
 
 pub mod meshing;
 pub mod pml;
-pub mod results_file;
 pub mod project;
+pub mod results_file;
 pub mod solve;
 pub mod store_link;
 
@@ -67,8 +67,6 @@ pub fn physics_for<'a>(registry: &'a Registry, id: &str) -> Result<&'a dyn nyx_p
 /// What a front-end needs from the layers below without depending on them: it draws on these types and edits the geometry with them, so
 /// the window and the MCP server name only `nyx-engine` (restructure phase 7; the layering table has no other edge for them).
 pub mod facade {
-    /// The problem envelope, descriptors and results every physics speaks.
-    pub use nyx_physics as physics;
     /// The mesh as the plots read it (vertices, edges, P2 dofs), the surface that is drawn and the nodal fields drawn on it.
     pub use femcore::fields::Display;
     pub use femcore::mesh::view::ViewMesh;
@@ -78,6 +76,8 @@ pub mod facade {
     pub use femcore::progress::Progress;
     /// The geometry kernel: the feature list the geometry editor changes, evaluation, selectors.
     pub use geom;
+    /// The problem envelope, descriptors and results every physics speaks.
+    pub use nyx_physics as physics;
     /// Workspaces, workflows, experiments, runs, versions, search and `.nyx` files.
     pub use nyx_store as store;
 }

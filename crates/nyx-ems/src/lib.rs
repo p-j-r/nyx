@@ -215,13 +215,18 @@ impl Physics for Ems {
             return empty;
         }
         let lam0 = speed_of_light() / freq;
-        let Ok((names, m)) = nyx_physics::decode::materials_by_region(spec, library, Some(lam0), &self.properties()) else {
+        let Ok((names, m)) = nyx_physics::decode::materials_by_region(spec, library, Some(lam0), &self.properties())
+        else {
             return empty;
         };
         let mut wavelengths = std::collections::BTreeMap::new();
         for (i, region) in names.iter().enumerate() {
             let label = i as i32 + 1;
-            let eps = match m.aniso.get(&label).and_then(|a| a.permittivity.as_ref().map(|t| tensor_global(t, a.euler_deg))) {
+            let eps = match m
+                .aniso
+                .get(&label)
+                .and_then(|a| a.permittivity.as_ref().map(|t| tensor_global(t, a.euler_deg)))
+            {
                 Some(t) => t,
                 None => {
                     let e = m.get(label, "eps_r").unwrap_or(1.0);

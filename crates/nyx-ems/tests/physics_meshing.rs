@@ -1,11 +1,11 @@
 //! Meshes sized by the physics of the study (`physics_size`, `meshing::mesh_for_sizing`, the sizing stated from the problem): the wavelength per domain sets the element
 //! size, and the mode index the solver then finds agrees with the closed form of a PEC guide.
+use common::{adapt_tets, mesh_for_problem};
 use femcore::meshing::geomdrive::evaluate;
 use femcore::meshing::physics_size::PhysicsSizing;
-use common::{adapt_tets, mesh_for_problem};
 use femcore::meshing::{Adaptive, MeshPlan, Mesher};
-use nyx_ems::Study;
 use geom::model::{Model, RegionKind};
+use nyx_ems::Study;
 use nyx_ems::C0;
 use nyx_physics::SolveResult;
 

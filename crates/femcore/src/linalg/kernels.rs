@@ -58,6 +58,7 @@ fn tile_mult_portable<T: Scalar>(
 }
 
 #[inline(always)]
+#[allow(clippy::chunks_exact_to_as_chunks)] // the lane loop is the measured one (ADR 33); as_chunks would change nothing but the type
 fn dot_generic<T: Scalar>(x: &[T], y: &[T], conj_x: bool) -> T {
     debug_assert_eq!(x.len(), y.len());
     let mut acc = [T::ZERO; LANES];

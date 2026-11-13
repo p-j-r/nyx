@@ -93,14 +93,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
-| `crates/femcore/src/problem.rs` | 1, 9, 19 | |
 | `crates/femcore/src/material/*` | 1, 29, 30, 34, 35 | spec, units, elastic, tensor, optics, schema (phase 6) |
 | `materials/*` | 29, 30, 34, 35 | the shipped material library (TOML) |
 | `docs/MATERIALS.md` | 29, 30, 34, 35 | |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/validate.rs` | 9 | |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
-| `crates/femcore/src/solve.rs` | 9, 1 | |
 | `crates/femcore/src/section.rs` | 1 | |
 | `crates/femcore/src/props.rs` | 41, 25 | shared per-domain data (materials, PML, periodic pairs, linear solver); replaced by material files in phase 6 |
 | `crates/femcore/src/testkit/*` | 41, 10, 60 | mesh fixtures of the tests of every physics crate; `soi.rs`, the cross-section of the SOI wire |
@@ -109,21 +107,15 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/edge.rs` | 45, 9 | the 2D edge-element basis shared by the ems kernels and the field sampler (split out of `ems.rs`) |
 | `crates/femcore/src/pml.rs` | 45, 7 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`) |
 | `crates/femcore/src/optical.rs` | 21, 9, 45 | optical mode sets, field sampling and the complex material tensors (split out of `sbs.rs` in phase 1; the solvers that fill a set are in `nyx-ems`) |
-| `crates/femcore/src/usecases/*` | 22, 2, 47 | the solver is passed in (`usecases::Solver`) |
 | `crates/femcore/src/fields.rs` | 9 | cell fields |
 | `crates/femcore/src/fem.rs` | 4, 8 | element basics, original stack |
-| `crates/femcore/src/xmlio.rs` | 13, 19 | |
-| `crates/femcore/src/h5io.rs` | 13, 16 | |
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
-| `crates/femcore/tests/axisym_closed_form.rs` | 33, 1 | the axisymmetric solid kernel against closed forms (the ems half is in `nyx-ems/tests/axisym.rs`) |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
 | `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19 | behaviour and contract tests of the material format |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
-| `crates/femcore/tests/stages.rs` | 9 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
 | `crates/femcore/tests/ring_frame.rs` | 1 | |
-| `crates/femcore/tests/determinism.rs` | 11 | |
 | `crates/femcore/tests/linalg/*` | 8, 11 | |
 | `crates/femcore/tests/linalg/main.rs` | 8 | |
 | `crates/femcore/tests/meshers.rs` | 7, 5 | |
@@ -132,14 +124,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/tests/maxwell_estimator.rs` | 53 | the Maxwell estimator and loop on a PEC cavity and on a sphere from geom |
 | `crates/femcore/tests/meshing.rs` | 6 | |
 | `crates/femcore/tests/geom_meshes.rs` | 2, 6 | |
-| `crates/femcore/tests/split.rs` | 4, 5 | |
-| `crates/femcore/tests/finite_guard.rs` | 9 | |
-| `crates/femcore/tests/cancel_and_log.rs` | 9 | |
 | `crates/femcore/tests/*` | 9, 12 | physics tests: solid, solid_pml, anisotropic, common |
 | `crates/femcore/examples/fs_*.rs` | 8 | ported CLI tools |
 | `crates/femcore/examples/mesh_*.rs` | 7, 16 | mesher studies |
-| `crates/femcore/examples/chip_*.rs` | 22 | |
-| `crates/femcore/examples/{rib_sweep,rib_shapes,wg800}.rs` | 22 | |
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | features `hdf5-metno`, `phdf5`, `portable-kernels` |
 | `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
@@ -164,14 +151,11 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12 | the ems tests moved from femcore |
 | `crates/nyx-ems/*` | 45, 25, 12, 9, 46 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
-| `crates/nyx-engine/tests/usecases.rs` | 22, 47 | the use cases solved through the bridge |
 | `crates/nyx-analysis/*` | 56, 25, 21 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |
 | `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |
-| `crates/nyx-engine/src/legacy/*` | 41 | bridge from the old window problem to the physics crates; deleted in phase 7 |
 | `crates/nyx-engine/tests/golden/*` | 10, 42 | `solid_static_thermal_from_heat`, moved unchanged from femcore |
-| `crates/nyx-engine/tests/legacy_thermal.rs` | 41, 42, 10 | heat feeding thermal expansion through the bridge |
 | `crates/nyx-engine/examples/*` | 41, 9 | benchmarks and logs that drive every physics |
 | `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
 <!-- map:end -->

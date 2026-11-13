@@ -21,7 +21,7 @@ Last updated: 2026-11-04, by the foundation session.
 | 6 | Materials | **implemented** (+ extends, more models, provenance, checked library), awaiting paul's answers (defaults in its section) | `restructure-6-materials` | ADR 29, 30, 34, 35; `docs/MATERIALS.md` |
 | 7 | nyx-engine, MCP parity, thin app | **implemented**, awaiting acceptance (see its section at the end) | `restructure-7-engine-frontends` (on the merge of 5, 6, 7a) | ADR 57 to 60; 7a (connect merge) is merged into it |
 | 8 | File format | **implemented**, awaiting acceptance (see its section at the end) | `restructure-8-format` (on `main` = phase 7) | ADR 63; tag `last-old-format` |
-| 9 | Close-out | waits for 8 | | |
+| 9 | Close-out | **implemented**, awaiting acceptance (see its section at the end) | `restructure-9-closeout` (on `main` = phase 8) | ADR 64, 65 |
 
 Bookmarks stack: `main` (= `arch-model-adrs` tip f74c12ea) <- `restructure-0-baselines` <- `restructure-1-delete-sbs-chips` <- `restructure-foundation`.
 
@@ -561,3 +561,21 @@ Started from `main` = `restructure-7-engine-frontends` (74851193, phase 7 merged
 5. Projects written before this phase (the old examples, a saved workspace of the phase 7 build) do not open; they are regenerated or re-saved by hand.
 
 **Decisions by paul (2026-11-12).** `hdf5` is a default feature of `nyx-engine` (done: `Cargo.toml`, `.cargo/config.toml` sets `HDF5_DIR`; the DLL must be on PATH). The window opens a results file (**done**: `open_results`, Open dialog and drop; 901 pass, 0 fail, 10 ignored). The MPI-IO writer is ported (**done, but the MPI part is not compiled or run here**: no MPI SDK or parallel HDF5 on this machine; the partition logic is tested with three emulated processes; 904 pass, 0 fail, 10 ignored). XDMF is as far as XML goes; the project file stays JSON.
+
+## Phase 9: close-out (workspace `nyx2-phase9`, bookmark `restructure-9-closeout`, 2026-11-13)
+
+Started from `main` = `restructure-8-format` (0e2a5e12, phase 8 accepted and merged by paul on 2026-11-12). State: **implemented, awaiting acceptance.** ADR 64, 65.
+
+**Done.**
+* **Lints and formatting (R23, ADR 65).** `cargo clippy --workspace --all-targets -- -D warnings` is clean (it was about 75 warnings: renamed egui calls, dead code in the app, auto-fixes, `type_complexity` and `large_enum_variant` allowed with a reason, three new lints of this toolchain). `rustfmt` is applied to `geom`, `nyx-physics`, `nyx-dfs`, `nyx-sms`, `nyx-ems`, `nyx-analysis`, `nyx-engine` (`cargo fmt --check` passes on them) and to no other crate. `rust-version` is 1.99.
+* **Guard tests.** `femcore/tests/expr_grammar.rs` (R06: the two expression grammars accept and refuse the same corpus and agree on every value) and `nyx-engine/tests/layering.rs::geom_depends_on_serde_and_optional_rayon_only` (R18).
+* **ADR 64** (R08): `hash_bytes` (BLAKE3) is the only persisted hash, all other hashes are cache keys. **ADR 65**: ADR 4, 22, 23 superseded; 5, 14, 15 marked as implemented or amended; the formatting and lint rule; the records of the earlier design phase are left as history (R14); the parked items.
+* **Model and docs.** `workspace.dsl` and `diagrams.md` rewritten for the final structure (crate layering exactly as the layering test; engine and femcore components; two dynamic views); `CODE_TO_ADR.md` lost the 16 rows of deleted files; `ROUGH_SPOTS.md` has the resolutions; `README.md` of `docs/architecture`, `ADR_INDEX.md` and `CLAUDE.md` are up to date.
+
+**Not done (needs paul).**
+1. **`workspace.dsl` is not validated with Structurizr.** Docker Desktop's daemon is not running and the CLI is not installed. Either start Docker Desktop (then `docker run --rm -v <docs/architecture>:/usr/local/structurizr structurizr/cli validate -workspace workspace.dsl`), or say it is fine to download the Structurizr CLI zip from its GitHub releases (a file of about 100 MB). `diagrams.md` was written by hand, not exported.
+2. The licence check of the BSD-2-Clause ports against nyx's own licence (never done; parked in the plan "until the end"): nothing may be published before it.
+3. Run-time plug-ins, two-way coupling and Brillouin as an optional physics are parked as in the plan.
+4. `-p nyx-engine --features phdf5` (the MPI-IO writer, phase 8 follow-up) has still not been built on a machine with MPI.
+
+**Checks.** `cargo test --release --workspace --no-fail-fast`: 907 pass, 0 fail, 10 ignored (phase 8: 904; the three new tests are the two expression-grammar tests and the geom dependency test). `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean for the seven formatted crates; `check_code_to_adr.sh` passes. No solver numerics changed (lint edits only), so no benchmark was re-run.

@@ -180,7 +180,12 @@ fn pml_slab() -> B {
     b.rect("slab_box", [15e-3, 0.0], [25e-3, lz]);
     b.rect("pml_left_box", [0.0, 0.0], [8e-3, lz]);
     b.rect("pml_right_box", [32e-3, 0.0], [lx, lz]);
-    b.overlay(&[("air", "air_box"), ("slab", "slab_box"), ("pml_left", "pml_left_box"), ("pml_right", "pml_right_box")]);
+    b.overlay(&[
+        ("air", "air_box"),
+        ("slab", "slab_box"),
+        ("pml_left", "pml_left_box"),
+        ("pml_right", "pml_right_box"),
+    ]);
     b.physics("ems", "modes", json!({ "freq": 12e9, "n_target": 1.9, "n_modes": 6 }), 2);
     for (n, eps) in [("air", 1.0), ("slab", 4.0), ("pml_left", 1.0), ("pml_right", 1.0)] {
         b.material("ems", n, json!({ "eps_r": eps, "mu_r": 1.0 }));
@@ -207,7 +212,8 @@ fn plate_with_hole() -> B {
 }
 
 fn anchor_loss() -> B {
-    let mut b = B::new("Beam on a PML substrate: anchor loss (solid eigenfrequencies, complex frequency and Q)", 2, 0.03);
+    let mut b =
+        B::new("Beam on a PML substrate: anchor loss (solid eigenfrequencies, complex frequency and Q)", 2, 0.03);
     b.rect("substrate_box", [0.0, 0.0], [1.0, 0.5]);
     b.rect("pml_left_box", [0.0, 0.15], [0.2, 0.5]);
     b.rect("pml_right_box", [0.8, 0.15], [1.0, 0.5]);
@@ -244,7 +250,11 @@ fn anchor_loss() -> B {
 }
 
 fn drilled_plate() -> B {
-    let mut b = B::new("Plate with a drilled hole in 3D, the section swept along y (solid mechanics, stress concentration)", 2, 0.02);
+    let mut b = B::new(
+        "Plate with a drilled hole in 3D, the section swept along y (solid mechanics, stress concentration)",
+        2,
+        0.02,
+    );
     b.rect("plate_box", [0.0, 0.0], [0.4, 0.2]);
     b.c("add_circle", json!({ "name": "hole", "center": [0.2, 0.1], "r": 0.04 }));
     b.c("add_difference", json!({ "name": "plate", "a": "plate_box", "b": ["hole"] }));
@@ -271,13 +281,20 @@ fn sos_strip() -> B {
     b.rect("air_near_box", [-zone, 0.0], [zone, zone]);
     b.rect("silicon_box", [-w_si / 2.0, 0.0], [w_si / 2.0, h_si]);
     b.rect("window", [-xin, -hin], [xin, ztop]);
-    b.overlay(&[("air", "air_box"), ("sapphire", "sapphire_box"), ("sapphire_near", "sapphire_near_box"), ("air_near", "air_near_box"), ("silicon", "silicon_box")]);
+    b.overlay(&[
+        ("air", "air_box"),
+        ("sapphire", "sapphire_box"),
+        ("sapphire_near", "sapphire_near_box"),
+        ("air_near", "air_near_box"),
+        ("silicon", "silicon_box"),
+    ]);
     b.c("add_pml", json!({ "name": "pml", "window": "window", "thickness": lp, "layers": 3.0, "grading": 2.0 }));
     b.c("add_size", json!({ "name": "size_near", "sel": "region(sapphire_near) | region(air_near)", "h": 0.08 * um }));
     b.c("add_size", json!({ "name": "size_si", "sel": "region(silicon)", "h": 40e-9 }));
     // r-plane sapphire: the c axis in the y-z plane, 57.6 degrees from the surface normal
     let t = 57.6f64.to_radians();
-    let euler = femcore::material::euler_from_rotation(&[[1.0, 0.0, 0.0], [0.0, t.cos(), -t.sin()], [0.0, t.sin(), t.cos()]]);
+    let euler =
+        femcore::material::euler_from_rotation(&[[1.0, 0.0, 0.0], [0.0, t.cos(), -t.sin()], [0.0, t.sin(), t.cos()]]);
     b.physics("ems", "modes", json!({ "freq": 299792458.0 / 1550e-9, "n_target": 2.4, "n_modes": 4 }), 2);
     b.material("ems", "sapphire*", json!({ "material": "sapphire", "euler_deg": euler }));
     b.material("ems", "sapphire_near*", json!({ "material": "sapphire", "euler_deg": euler }));
@@ -297,7 +314,11 @@ fn sos_strip() -> B {
 }
 
 fn box_cavity() -> B {
-    let mut b = B::new("Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)", 2, 0.005);
+    let mut b = B::new(
+        "Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)",
+        2,
+        0.005,
+    );
     b.plate(0.04, 0.02);
     b.mesh(json!({ "sweep": [{ "thickness": 0.03, "n": 6 }] }));
     b.physics("ems", "cavity", json!({ "n_modes": 6, "f_search": 6.0e9 }), 2);
@@ -312,8 +333,15 @@ fn soi(title: &str, wire: femcore::testkit::soi::SoiWire) -> B {
     p.geometry = wire.model().list;
     p.mesh.h = wire.h_far;
     b.e.set_project(p);
-    b.physics("ems", "modes", json!({ "freq": 299792458.0 / wire.wavelength, "n_target": wire.n_target, "n_modes": wire.n_modes }), 2);
-    for (regions, mat) in [("BOX", "silica"), ("BOX_near", "silica"), ("Si", "silicon"), ("clad", "silica"), ("clad_near", "silica")] {
+    b.physics(
+        "ems",
+        "modes",
+        json!({ "freq": 299792458.0 / wire.wavelength, "n_target": wire.n_target, "n_modes": wire.n_modes }),
+        2,
+    );
+    for (regions, mat) in
+        [("BOX", "silica"), ("BOX_near", "silica"), ("Si", "silicon"), ("clad", "silica"), ("clad_near", "silica")]
+    {
         b.material("ems", regions, json!(mat));
     }
     if wire.slab > 0.0 {

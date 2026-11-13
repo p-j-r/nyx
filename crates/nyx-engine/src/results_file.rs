@@ -23,7 +23,8 @@ impl Engine {
             if results.is_empty() {
                 return Err(Error::invalid("there are no results yet; solve first"));
             }
-            let refs: Vec<(String, &nyx_physics::SolveResult)> = results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
+            let refs: Vec<(String, &nyx_physics::SolveResult)> =
+                results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
             let p = std::path::Path::new(path);
             let mesh = model.solver_mesh();
             let mode = if parallel { crate::h5io::H5Mode::Parallel } else { crate::h5io::H5Mode::Serial };
@@ -31,10 +32,14 @@ impl Engine {
             let physics = results.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>();
             if !root {
                 // another process of an MPI run writes the XDMF file and reports
-                return Ok(json!({ "path": path, "writer": "parallel", "written_by_this_process": false, "physics": physics }));
+                return Ok(
+                    json!({ "path": path, "writer": "parallel", "written_by_this_process": false, "physics": physics }),
+                );
             }
             let xdmf = crate::xdmf::write_xdmf(p, &mesh, &refs).map_err(Error::invalid)?;
-            Ok(json!({ "path": path, "xdmf": xdmf, "bytes": crate::h5io::file_bytes(p), "physics": physics, "writer": if parallel { "parallel" } else { "serial" } }))
+            Ok(
+                json!({ "path": path, "xdmf": xdmf, "bytes": crate::h5io::file_bytes(p), "physics": physics, "writer": if parallel { "parallel" } else { "serial" } }),
+            )
         }
         #[cfg(not(feature = "hdf5"))]
         {
@@ -53,7 +58,8 @@ impl Engine {
             let stored = crate::h5io::read_results(std::path::Path::new(path)).map_err(Error::invalid)?;
             let project = crate::project::Project::from_json(&stored.project)?;
             project.check(&self.registry)?;
-            let before = (self.project.clone(), self.model.clone(), std::mem::take(&mut self.results), self.link.take());
+            let before =
+                (self.project.clone(), self.model.clone(), std::mem::take(&mut self.results), self.link.take());
             self.set_project(project);
             let restore = |e: &mut Engine, b: (crate::project::Project, _, _, _)| {
                 e.project = b.0;
@@ -67,7 +73,13 @@ impl Engine {
             }
             let made = self.model().expect("the mesh was just built").solver_mesh();
             let s = &stored.mesh;
-            if made.dim != s.dim || made.points != s.points || made.cells != s.cells || made.cell_labels != s.cell_labels || made.facets != s.facets || made.facet_labels != s.facet_labels {
+            if made.dim != s.dim
+                || made.points != s.points
+                || made.cells != s.cells
+                || made.cell_labels != s.cell_labels
+                || made.facets != s.facets
+                || made.facet_labels != s.facet_labels
+            {
                 restore(self, before);
                 return Err(Error::invalid(format!(
                     "{path}: the project of this file meshes to something else than the mesh stored in it ({} cells made, {} stored); it was written by another version of nyx, so its results cannot be shown on the geometry",
@@ -81,14 +93,17 @@ impl Engine {
                 physics.push(json!({
                     "physics": code, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(), "scalars": r.scalars,
                 }));
-                self.results.insert(code, crate::engine::Stored { result: std::sync::Arc::new(r), stamp: stamp.clone() });
+                self.results
+                    .insert(code, crate::engine::Stored { result: std::sync::Arc::new(r), stamp: stamp.clone() });
             }
             Ok(json!({ "title": self.project.title, "path": path, "cells": made.n_cells(), "results": physics }))
         }
         #[cfg(not(feature = "hdf5"))]
         {
             let _ = path;
-            Err(Error::Unsupported("this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature)".into()))
+            Err(Error::Unsupported(
+                "this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature)".into(),
+            ))
         }
     }
 
@@ -97,7 +112,10 @@ impl Engine {
         #[cfg(feature = "hdf5")]
         {
             let s = crate::h5io::read_results(std::path::Path::new(path)).map_err(Error::invalid)?;
-            let title = serde_json::from_str::<Value>(&s.project).ok().and_then(|v| v.get("title").cloned()).unwrap_or(Value::Null);
+            let title = serde_json::from_str::<Value>(&s.project)
+                .ok()
+                .and_then(|v| v.get("title").cloned())
+                .unwrap_or(Value::Null);
             Ok(json!({
                 "title": title, "dim": s.mesh.dim, "cells": s.mesh.n_cells(), "points": s.mesh.n_points(),
                 "results": s.results.iter().map(|(c, r)| json!({
@@ -109,7 +127,9 @@ impl Engine {
         #[cfg(not(feature = "hdf5"))]
         {
             let _ = path;
-            Err(Error::Unsupported("this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature)".into()))
+            Err(Error::Unsupported(
+                "this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature)".into(),
+            ))
         }
     }
 }

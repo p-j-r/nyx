@@ -7,7 +7,12 @@ use serde_json::json;
 use std::path::PathBuf;
 
 fn example(name: &str) -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples").join(format!("{name}.nyx.json")).to_str().unwrap().to_string()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(format!("{name}.nyx.json"))
+        .to_str()
+        .unwrap()
+        .to_string()
 }
 
 fn tmp(name: &str) -> PathBuf {
@@ -67,7 +72,10 @@ fn every_recorded_run_keeps_its_results_in_an_h5_file() {
     let runs = e.call("store_runs", &json!({})).unwrap();
     let artifacts = runs[0]["artifacts"].as_array().unwrap();
     assert!(artifacts.iter().any(|a| a["path"].as_str().unwrap().ends_with("results.h5")), "{runs}");
-    assert!(!artifacts.iter().any(|a| a["path"].as_str().unwrap().ends_with(".json")), "no JSON copy of the fields: {runs}");
+    assert!(
+        !artifacts.iter().any(|a| a["path"].as_str().unwrap().ends_with(".json")),
+        "no JSON copy of the fields: {runs}"
+    );
     let _ = std::fs::remove_dir_all(&ws);
 }
 

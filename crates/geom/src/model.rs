@@ -99,7 +99,7 @@ impl Side {
         self as usize / 2
     }
     pub fn sign(self) -> i8 {
-        if self as usize % 2 == 0 {
+        if (self as usize).is_multiple_of(2) {
             -1
         } else {
             1
@@ -450,7 +450,10 @@ impl FeatureList {
     /// Structural checks: unique ids and names, references to earlier features only, one overlay, valid names.
     pub fn validate(&self) -> GeomResult<()> {
         if self.format != FORMAT {
-            return Err(GeomError(format!("feature list format {} is not supported (this program reads format {FORMAT})", self.format)));
+            return Err(GeomError(format!(
+                "feature list format {} is not supported (this program reads format {FORMAT})",
+                self.format
+            )));
         }
         if self.dim != 2 && self.dim != 3 {
             return Err(GeomError(format!("dimension must be 2 or 3, not {}", self.dim)));

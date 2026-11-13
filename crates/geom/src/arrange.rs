@@ -667,7 +667,7 @@ fn finish(
     let mut out: Vec<Vec<(f64, usize)>> = vec![vec![]; nv];
     let origin = |h: usize| -> u32 {
         let k = &kept[h / 2];
-        vmap[&if h % 2 == 0 { k.v0 } else { k.v1 }]
+        vmap[&if h.is_multiple_of(2) { k.v0 } else { k.v1 }]
     };
     for (e, k) in kept.iter().enumerate() {
         let c = &curves[k.cid as usize];
@@ -701,7 +701,7 @@ fn finish(
         let l = &out[v];
         l[(pos[tw] + l.len() - 1) % l.len()].1
     };
-    let side = |h: usize| if h % 2 == 0 { kept[h / 2].left } else { kept[h / 2].right };
+    let side = |h: usize| if h.is_multiple_of(2) { kept[h / 2].left } else { kept[h / 2].right };
 
     // cycles
     let mut seen = vec![false; 2 * ne];

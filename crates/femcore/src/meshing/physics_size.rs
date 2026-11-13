@@ -6,7 +6,7 @@
 //! element order. This module finds that wavelength from the materials and the study, divides it by the points per wavelength, and hands back
 //! a size per cell, per vertex, or an isotropic metric per vertex for `meshing::adapt_to_metrics`.
 //!
-//! * `Emw` mode analysis at `freq`: `lambda = c0 / (f n)` with `n^2 = mu_r * (largest eigenvalue of the permittivity tensor)`.
+//! * `ems` mode analysis at `freq`: `lambda = c0 / (f n)` with `n^2 = mu_r * (largest eigenvalue of the permittivity tensor)`.
 //! * `Solid` eigenfrequency study with `f_search > 0`: `lambda = c_min / f_search`, `c_min` the slowest plane wave of the (possibly
 //!   anisotropic, rotated) stiffness, found from the Christoffel matrix over a sampled sphere of directions.
 //!

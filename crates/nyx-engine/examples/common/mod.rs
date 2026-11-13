@@ -3,7 +3,9 @@
 //! window and the MCP server reach through `Engine`; only the geometry and meshing steps are left out so that the times are solver times.
 #![allow(dead_code)]
 
-use nyx_engine::facade::physics::{BcSpec, Ctx, Error, LabelResolver, MaterialAssign, Mesh, ProblemSpec, SolveResult, StudySpec};
+use nyx_engine::facade::physics::{
+    BcSpec, Ctx, Error, LabelResolver, MaterialAssign, Mesh, ProblemSpec, SolveResult, StudySpec,
+};
 use nyx_engine::facade::{Progress, SimplexMesh};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -16,7 +18,11 @@ impl LabelResolver for Table {
         Ok(vec![1])
     }
     fn boundaries(&self, selector: &str) -> Result<Vec<i32>, Error> {
-        self.0.iter().find(|(n, _)| *n == selector).map(|(_, l)| l.clone()).ok_or_else(|| Error::invalid(format!("no boundary '{selector}'")))
+        self.0
+            .iter()
+            .find(|(n, _)| *n == selector)
+            .map(|(_, l)| l.clone())
+            .ok_or_else(|| Error::invalid(format!("no boundary '{selector}'")))
     }
 }
 

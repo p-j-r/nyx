@@ -58,7 +58,11 @@ pub struct Spec {
 
 impl Spec {
     pub fn emw() -> Spec {
-        Spec { order: 2, materials: Materials::default(), study: Study::Modes { freq: 10e9, n_target: 1.0, evanescent: false, n_modes: 4 } }
+        Spec {
+            order: 2,
+            materials: Materials::default(),
+            study: Study::Modes { freq: 10e9, n_target: 1.0, evanescent: false, n_modes: 4 },
+        }
     }
 
     pub fn problem(&self) -> Problem {
@@ -76,7 +80,8 @@ impl Spec {
         let lam = domains
             .iter()
             .map(|&d| {
-                let (eps, mu) = (self.materials.get(d, "eps_r").unwrap_or(1.0), self.materials.get(d, "mu_r").unwrap_or(1.0));
+                let (eps, mu) =
+                    (self.materials.get(d, "eps_r").unwrap_or(1.0), self.materials.get(d, "mu_r").unwrap_or(1.0));
                 (d, optical_wavelength(&[[eps, 0.0, 0.0], [0.0, eps, 0.0], [0.0, 0.0, eps]], mu, lam0))
             })
             .collect();
@@ -85,7 +90,12 @@ impl Spec {
 }
 
 /// The 2D mesh the physics asks for: the regions of the model named in a `Sizing`, as `Physics::sizing` states it.
-pub fn mesh_for_problem(list: &FeatureList, plan: &MeshPlan, spec: &Spec, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+pub fn mesh_for_problem(
+    list: &FeatureList,
+    plan: &MeshPlan,
+    spec: &Spec,
+    sz: &PhysicsSizing,
+) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
     let ev = femcore::meshing::geomdrive::evaluate(list)?;
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let ids: Vec<i32> = labels.domains.iter().map(|d| d.id).collect();
@@ -131,7 +141,12 @@ pub fn wire_problem(w: &femcore::testkit::soi::SoiWire, g: &MeshedGeom) -> Probl
             }
         }
     }
-    p.study = Study::Modes { freq: speed_of_light() / w.wavelength, n_target: w.n_target, evanescent: false, n_modes: w.n_modes };
+    p.study = Study::Modes {
+        freq: speed_of_light() / w.wavelength,
+        n_target: w.n_target,
+        evanescent: false,
+        n_modes: w.n_modes,
+    };
     p
 }
 

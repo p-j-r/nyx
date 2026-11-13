@@ -39,7 +39,9 @@ pub fn card_of(v: &serde_json::Value) -> Card {
         for (region, m) in &s.materials {
             materials.push(match m {
                 nyx_physics::MaterialAssign::Named(n) => format!("{region}: {n}"),
-                nyx_physics::MaterialAssign::Oriented { material, euler_deg } => format!("{region}: {material} at {euler_deg:?} deg"),
+                nyx_physics::MaterialAssign::Oriented { material, euler_deg } => {
+                    format!("{region}: {material} at {euler_deg:?} deg")
+                }
                 nyx_physics::MaterialAssign::Props(_) => format!("{region}: inline properties"),
             });
         }
@@ -218,7 +220,9 @@ impl StoreLink {
                 }
                 // the fields are never written as JSON text (ADR 62, 63): without the feature a run keeps its metrics and its log only
                 #[cfg(not(feature = "hdf5"))]
-                let log_note = Some("the fields are not stored: this build has no HDF5 support (cargo feature `hdf5`)".to_string());
+                let log_note = Some(
+                    "the fields are not stored: this build has no HDF5 support (cargo feature `hdf5`)".to_string(),
+                );
                 #[cfg(feature = "hdf5")]
                 let log_note: Option<String> = None;
                 if let Some(n) = log_note {
@@ -226,13 +230,22 @@ impl StoreLink {
                 }
                 #[cfg(feature = "hdf5")]
                 if let Some(mesh) = mesh {
-                    std::fs::create_dir_all(&run_dir).map_err(|e| Error::invalid(format!("{}: {e}", run_dir.display())))?;
+                    std::fs::create_dir_all(&run_dir)
+                        .map_err(|e| Error::invalid(format!("{}: {e}", run_dir.display())))?;
                     let path = run_dir.join("results.h5");
                     let refs: Vec<(String, &SolveResult)> = results.iter().map(|r| (r.physics.clone(), r)).collect();
                     crate::h5io::write_results(&path, project, mesh, &refs).map_err(Error::invalid)?;
                     let x = crate::xdmf::write_xdmf(&path, mesh, &refs).map_err(Error::invalid)?;
-                    extra.push(Artifact { kind: "result".into(), path: format!("runs/{id}/results.xdmf"), bytes: std::fs::metadata(&x).map(|m| m.len()).unwrap_or(0) });
-                    extra.push(Artifact { kind: "result".into(), path: format!("runs/{id}/results.h5"), bytes: crate::h5io::file_bytes(&path) });
+                    extra.push(Artifact {
+                        kind: "result".into(),
+                        path: format!("runs/{id}/results.xdmf"),
+                        bytes: std::fs::metadata(&x).map(|m| m.len()).unwrap_or(0),
+                    });
+                    extra.push(Artifact {
+                        kind: "result".into(),
+                        path: format!("runs/{id}/results.h5"),
+                        bytes: crate::h5io::file_bytes(&path),
+                    });
                 }
                 #[cfg(not(feature = "hdf5"))]
                 let _ = mesh;

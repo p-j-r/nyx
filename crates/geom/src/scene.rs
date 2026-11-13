@@ -360,10 +360,8 @@ impl Builder<'_> {
                 match k {
                     2 if three => Xf3 { xy: Xf2::ID, zs: -1.0, zt: 2.0 * at },
                     2 => {
-                        return Err(GeomError(format!(
-                            "Transform '{}' mirrors a 2D profile across a y plane, which is out of the x-z cross-section",
-                            f.name
-                        )))
+                        let msg = format!("Transform '{}' mirrors a 2D profile across a y plane, which is out of the x-z cross-section", f.name);
+                        return Err(GeomError(msg));
                     }
                     k => xy(Xf2::mirror(k, at)),
                 }

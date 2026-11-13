@@ -6,8 +6,8 @@
 mod benchmesh;
 mod common;
 use common::*;
-use serde_json::Value;
 use nyx_engine::facade::Progress;
+use serde_json::Value;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -75,9 +75,7 @@ fn main() {
     let p = Progress::new();
     let p2 = p.clone();
     let t0 = Instant::now();
-    let h = std::thread::spawn(move || {
-        solve(&mesh, &s, Some(p2)).map(|r| (r.dofs, r.log))
-    });
+    let h = std::thread::spawn(move || solve(&mesh, &s, Some(p2)).map(|r| (r.dofs, r.log)));
     // largest heap use seen per stage, in order of appearance
     let mut stages: Vec<(String, usize)> = vec![];
     while !h.is_finished() {

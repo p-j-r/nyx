@@ -30,7 +30,11 @@ fn geom_depends_on_serde_only() {
         }
     }
     deps.sort();
-    assert_eq!(deps, vec!["rayon".to_string(), "serde".to_string()], "geom may depend on serde and (optionally) rayon only; no femcore, faer or GUI (ADR 3)");
+    assert_eq!(
+        deps,
+        vec!["rayon".to_string(), "serde".to_string()],
+        "geom may depend on serde and (optionally) rayon only; no femcore, faer or GUI (ADR 3)"
+    );
     assert!(text.contains("rayon = { version = \"1\", optional = true }"), "rayon must stay optional");
 }
 
@@ -55,7 +59,10 @@ fn golden_feature_lists_round_trip_key_for_key() {
         let original: Value = serde_json::from_str(&text).unwrap();
         let list: FeatureList = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
         let again: Value = serde_json::to_value(&list).unwrap();
-        assert_eq!(original, again, "{name}: a key was dropped, added or defaulted by the round trip; that is a change of the saved format");
+        assert_eq!(
+            original, again,
+            "{name}: a key was dropped, added or defaulted by the round trip; that is a change of the saved format"
+        );
     }
 }
 
@@ -79,7 +86,10 @@ fn every_feature_carries_the_fields_that_nyx_store_and_the_gui_read() {
             for k in ["id", "name", "op", "suppressed", "origin", "tags"] {
                 assert!(f.get(k).is_some(), "{name}: feature without `{k}`");
             }
-            assert!(f["op"].as_object().map(|o| o.len() == 1).unwrap_or(f["op"].is_string()), "{name}: `op` is an externally tagged enum");
+            assert!(
+                f["op"].as_object().map(|o| o.len() == 1).unwrap_or(f["op"].is_string()),
+                "{name}: `op` is an externally tagged enum"
+            );
         }
     }
 }

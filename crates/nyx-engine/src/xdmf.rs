@@ -80,7 +80,11 @@ pub(crate) fn write_viz(io: &Io, code: &str, mesh: &SimplexMesh, r: &SolveResult
 
 /// Writes the XDMF description of the results in `h5_path` next to it (same name, extension `.xdmf`). Every physics is a collection of
 /// grids, one per solution (time step, mode).
-pub fn write_xdmf(h5_path: &Path, mesh: &SimplexMesh, results: &[(String, &SolveResult)]) -> Result<std::path::PathBuf, String> {
+pub fn write_xdmf(
+    h5_path: &Path,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+) -> Result<std::path::PathBuf, String> {
     use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
     use quick_xml::Writer;
     let h5name = h5_path.file_name().and_then(|n| n.to_str()).ok_or("bad file name")?.to_string();
@@ -151,7 +155,13 @@ pub fn write_xdmf(h5_path: &Path, mesh: &SimplexMesh, results: &[(String, &Solve
                 a.push_attribute(("Center", "Node"));
                 w.write_event(Event::Start(a)).map_err(xe)?;
                 if vector {
-                    item(&mut w, &format!("{np} 3"), "Float", "8", &format!("{base}/sol_{k}/v3_{}", sanitize(&f.name)))?;
+                    item(
+                        &mut w,
+                        &format!("{np} 3"),
+                        "Float",
+                        "8",
+                        &format!("{base}/sol_{k}/v3_{}", sanitize(&f.name)),
+                    )?;
                 } else {
                     item(&mut w, &np.to_string(), "Float", "8", &format!("{base}/sol_{k}/{}", sanitize(&f.name)))?;
                 }

@@ -77,9 +77,13 @@ fn a_y_sweep_and_a_z_sweep_answer_alike() {
 
     // faces: the same set (names with the roles of a box exchanged), measures, boxes, normals
     assert_eq!(ey.faces().len(), ez.faces().len());
-    let mut fy: Vec<_> = ey.faces().iter().enumerate().map(|(i, f)| (f.name.clone(), f.area, f.bbox, i as u32)).collect();
-    let mut fz: Vec<_> = ez.faces().iter().enumerate().map(|(i, f)| (swap_name(&f.name), f.area, sw_box(f.bbox), i as u32)).collect();
-    let key = |t: &(String, f64, geom::math::Aabb, u32)| (t.0.clone(), (t.2.lo.map(|x| (x * 1e6).round() as i64), t.2.hi.map(|x| (x * 1e6).round() as i64)));
+    let mut fy: Vec<_> =
+        ey.faces().iter().enumerate().map(|(i, f)| (f.name.clone(), f.area, f.bbox, i as u32)).collect();
+    let mut fz: Vec<_> =
+        ez.faces().iter().enumerate().map(|(i, f)| (swap_name(&f.name), f.area, sw_box(f.bbox), i as u32)).collect();
+    let key = |t: &(String, f64, geom::math::Aabb, u32)| {
+        (t.0.clone(), (t.2.lo.map(|x| (x * 1e6).round() as i64), t.2.hi.map(|x| (x * 1e6).round() as i64)))
+    };
     fy.sort_by_key(key);
     fz.sort_by_key(key);
     for (a, b) in fy.iter().zip(&fz) {
@@ -89,7 +93,11 @@ fn a_y_sweep_and_a_z_sweep_answer_alike() {
         let (na, nb) = (ey.facet_normals(a.3), ez.facet_normals(b.3));
         assert_eq!(na.len(), nb.len(), "{}", a.0);
         let probe = [0.01, 5.0, 0.3];
-        assert!(close3(ey.complex().facet_project(a.3, probe), sw(ez.complex().facet_project(b.3, sw(probe)))), "{}: projection", a.0);
+        assert!(
+            close3(ey.complex().facet_project(a.3, probe), sw(ez.complex().facet_project(b.3, sw(probe)))),
+            "{}: projection",
+            a.0
+        );
         assert!(na.iter().zip(&nb).all(|(p, q)| close3(*p, sw(*q))), "{}: normals", a.0);
         assert_eq!(ey.complex().facet_kind(a.3), ez.complex().facet_kind(b.3));
         assert!(close(ey.complex().facet_measure(a.3), ez.complex().facet_measure(b.3)));
@@ -113,7 +121,16 @@ fn a_y_sweep_and_a_z_sweep_answer_alike() {
     assert_eq!(sorted(&ey, false), sorted(&ez, true));
 
     // classification at world points
-    for p in [[0.0, 5.0, 0.1], [0.0, 0.5, 0.1], [0.0, 5.0, -0.15], [1.2, 5.0, -0.15], [1.8, 5.0, -0.5], [0.0, 0.2, -0.1], [0.0, 9.8, 0.1], [0.0, 5.0, 0.5]] {
+    for p in [
+        [0.0, 5.0, 0.1],
+        [0.0, 0.5, 0.1],
+        [0.0, 5.0, -0.15],
+        [1.2, 5.0, -0.15],
+        [1.8, 5.0, -0.5],
+        [0.0, 0.2, -0.1],
+        [0.0, 9.8, 0.1],
+        [0.0, 5.0, 0.5],
+    ] {
         assert_eq!(ey.classify(p), ez.classify(sw(p)), "classify {p:?}");
     }
 
@@ -139,9 +156,21 @@ fn a_y_sweep_and_a_z_sweep_answer_alike() {
     // the oracle: projection onto a face and onto a crease edge
     for i in 0..ey.faces().len() as u32 {
         let name = &ey.faces()[i as usize].name;
-        let j = ez.faces().iter().position(|f| swap_name(&f.name) == *name && close(f.area, ey.faces()[i as usize].area) && close3(sw(f.bbox.lo), ey.faces()[i as usize].bbox.lo) && close3(sw(f.bbox.hi), ey.faces()[i as usize].bbox.hi)).unwrap() as u32;
+        let j = ez
+            .faces()
+            .iter()
+            .position(|f| {
+                swap_name(&f.name) == *name
+                    && close(f.area, ey.faces()[i as usize].area)
+                    && close3(sw(f.bbox.lo), ey.faces()[i as usize].bbox.lo)
+                    && close3(sw(f.bbox.hi), ey.faces()[i as usize].bbox.hi)
+            })
+            .unwrap() as u32;
         let p = [0.3, 4.0, 0.4];
-        let (a, b) = (ey.oracle().project(p, EntityRef::Face(i)).unwrap(), ez.oracle().project(sw(p), EntityRef::Face(j)).unwrap());
+        let (a, b) = (
+            ey.oracle().project(p, EntityRef::Face(i)).unwrap(),
+            ez.oracle().project(sw(p), EntityRef::Face(j)).unwrap(),
+        );
         assert!(close3(a, sw(b)), "{name}: {a:?} {b:?}");
     }
 

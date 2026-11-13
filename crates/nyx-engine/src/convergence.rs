@@ -81,7 +81,12 @@ impl ConvergenceJob {
 impl Engine {
     /// A snapshot of what `convergence_check` needs.
     pub fn convergence_job(&self) -> ConvergenceJob {
-        ConvergenceJob { registry: self.registry.clone(), mesher: self.mesher.clone(), library: self.base_library.clone(), project: self.project.clone() }
+        ConvergenceJob {
+            registry: self.registry.clone(),
+            mesher: self.mesher.clone(),
+            library: self.base_library.clone(),
+            project: self.project.clone(),
+        }
     }
 
     /// Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results. `tolerance`,
@@ -98,16 +103,24 @@ fn check(job: &ConvergenceJob, physics: &str, factor: f64, tolerance: Option<f64
         if !(factor > 0.0 && factor < 1.0) {
             return Err(Error::invalid("`factor` is the ratio of the finer element size to the present one, between 0 and 1 (0.6 is a good step)"));
         }
-        this.project.spec(physics).ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
+        this.project
+            .spec(physics)
+            .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
         let targets = vec![physics.to_string()];
         let mut coarse_engine = this.scratch(this.project.clone());
         let t0 = std::time::Instant::now();
         let coarse_summary = coarse_engine.solve_now(Some(targets.clone()))?;
-        let coarse: Arc<SolveResult> = coarse_engine.result(physics).map(|(r, _)| r.clone()).ok_or_else(|| Error::invalid("the solve gave no result"))?;
+        let coarse: Arc<SolveResult> = coarse_engine
+            .result(physics)
+            .map(|(r, _)| r.clone())
+            .ok_or_else(|| Error::invalid("the solve gave no result"))?;
         let cells_coarse = coarse_engine.model().map(|m| m.mesh().n_cells());
         let mut fine_engine = this.scratch(refined(&this.project, factor));
         fine_engine.solve_now(Some(targets))?;
-        let fine: Arc<SolveResult> = fine_engine.result(physics).map(|(r, _)| r.clone()).ok_or_else(|| Error::invalid("the refined solve gave no result"))?;
+        let fine: Arc<SolveResult> = fine_engine
+            .result(physics)
+            .map(|(r, _)| r.clone())
+            .ok_or_else(|| Error::invalid("the refined solve gave no result"))?;
         let cells_fine = fine_engine.model().map(|m| m.mesh().n_cells());
 
         let (a, b) = (numbers(&coarse), numbers(&fine));

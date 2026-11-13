@@ -47,7 +47,11 @@ fn main() {
     so.bcs.truncate(1);
     so.bcs[0].on = "xmin".into();
     study(&mut so, "eigenfrequency", json!({ "n_modes": 4, "f_search": 0.0 }));
-    show("solid mechanics, 4 eigenfrequencies, 3D slender beam (multigrid LOBPCG is tried above 80,000 unknowns)", &beam, &so);
+    show(
+        "solid mechanics, 4 eigenfrequencies, 3D slender beam (multigrid LOBPCG is tried above 80,000 unknowns)",
+        &beam,
+        &so,
+    );
     let big = benchmesh::block(1.0, 1.0, 1.0, 14, 14, 14);
     study(&mut so, "eigenfrequency", json!({ "n_modes": 6, "f_search": 0.0 }));
     solver(&mut so, "iterative");

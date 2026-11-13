@@ -28,7 +28,7 @@ fn main() {
         "p", "elems", "dofs", "matfree [ms]", "csr [ms]", "speed-up", "csr bytes/dof", "assemble [s]"
     );
     for p in [1usize, 2, 3, 4, 6, 8, 12] {
-        if axis % p != 0 {
+        if !axis.is_multiple_of(p) {
             continue;
         }
         let nel = axis / p;

@@ -9,7 +9,7 @@
 //!   solvers that take those cells natively;
 //! * `mesh`: the same mesh cut into tetrahedra without new vertices (`SimplexMesh::from_cells_split`), what the solvers of today run on;
 //! * `pml`: the `Pml` stretch of every layer domain, keyed by its label, one domain per region (a face has one stretched direction, an
-//!   edge two, a corner three) because `emw_pml::cell_stretches` takes the bounding box of a domain's cells.
+//!   edge two, a corner three) because `femcore::pml::cell_stretches` takes the bounding box of a domain's cells.
 //!
 //! A material that crosses the interface continues into a PML copy of itself; `apply_materials` copies the material data of the physical
 //! domains to the layer labels and registers the `Pml` entries, so a `ProblemSpec` for the physical mesh becomes one for the full mesh.
