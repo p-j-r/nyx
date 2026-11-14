@@ -53,6 +53,56 @@ fn elastic_cross_section_stages_compose_to_the_one_call_solver() {
     let names: Vec<&str> = cf.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["ux", "uz", "uy"]);
     assert!(cell_field(cf, "uy").unwrap().im.iter().any(|x| x.abs() > 0.0));
+    // node fields say `Re` (the modes are complex); every mode carries its eigenvalue [Re f, Im f] and a layer fraction (0: no layer)
+    let nodes: Vec<&str> = r.solutions[0].fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(nodes, ["|u|", "Re ux", "Re uz", "Re uy", "|uy|"]);
+    for (j, sol) in r.solutions.iter().enumerate() {
+        let f = solved.modes.freqs[j];
+        assert_eq!(sol.eigenvalue, Some([f.re, f.im]));
+        let lf = r.scalars.iter().find(|(k, _)| *k == format!("layer fraction {}", j + 1)).expect("layer fraction");
+        assert!(matches!(lf.1, nyx_physics::Scalar::Num(v) if v == 0.0));
+    }
+}
+
+#[test]
+fn axisymmetric_study_stages_compose_to_the_one_call_solver() {
+    use nyx_sms::cross_section::*;
+    let flat = common::rect(1.0e-3, 0.2e-3, 8, 3);
+    let mut pts = flat.points.clone();
+    for i in 0..flat.n_points() {
+        pts[2 * i] += 5.0e-3;
+    }
+    let mesh = femcore::mesh::SimplexMesh::new(
+        2,
+        pts,
+        flat.cells.clone(),
+        flat.cell_labels.clone(),
+        flat.facets.clone(),
+        flat.facet_labels.clone(),
+    );
+    let mut s = Problem::new(Study::AxisymmetricEigenfrequency { n_modes: 4, f_search: 0.0, azimuthal_order: 2 }, 2);
+    for (k, v) in [("E", 70e9), ("nu", 0.33), ("rho", 2700.0)] {
+        s.materials.default.insert(k.into(), v);
+    }
+    s.bcs.push(Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } });
+    s.materials.pml.insert(1, Pml { x: PmlDir::Plus, strength: 0.1, order: 0.0, ..Pml::default() });
+    let whole = solve_axisymmetric(&mesh, &s).unwrap();
+    assert_eq!((whole.physics.as_str(), whole.study.as_str()), ("sms", "axisymmetric_eigenfrequency"));
+    // the stages: assemble (the study is accepted, m comes from the argument), solve, fields
+    let asm = assemble_cross_section(&mesh, &s, CrossSection::Axisymmetric(2.0)).unwrap();
+    let solved = solve_cross_section_modes(&asm).unwrap();
+    let staged = cross_section_fields(&mesh, &asm, &solved).unwrap();
+    assert_eq!(whole.solutions.len(), staged.solutions.len());
+    for (a, b) in whole.solutions.iter().zip(&staged.solutions) {
+        assert_eq!(a.eigenvalue, b.eigenvalue);
+        assert_eq!(a.value, b.value);
+        for (f, g) in a.fields.iter().zip(&b.fields) {
+            assert_eq!((&f.name, &f.values), (&g.name, &g.values));
+        }
+    }
+    // the whole domain is a layer: every mode lives in it
+    let lf = whole.scalars.iter().find(|(k, _)| k == "layer fraction 1").unwrap();
+    assert!(matches!(lf.1, nyx_physics::Scalar::Num(v) if (v - 1.0).abs() < 1e-9), "{:?}", lf.1);
 }
 
 fn same_solution_fields(a: &SolveResult, b: &SolveResult) {

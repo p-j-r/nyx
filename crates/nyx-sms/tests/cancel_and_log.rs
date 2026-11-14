@@ -79,3 +79,31 @@ fn a_long_eigenfrequency_solve_is_cancelled_within_a_bounded_time() {
     // the solver checks the flag every iteration/level; allow for the longest stage that cannot be interrupted
     assert!(waited < 30.0, "took {waited:.1} s to react to the cancel");
 }
+
+#[test]
+fn an_axisymmetric_study_logs_its_stages_and_a_cancelled_one_says_cancelled() {
+    let flat = common::rect(1.0e-3, 0.2e-3, 8, 3);
+    let mut pts = flat.points.clone();
+    for i in 0..flat.n_points() {
+        pts[2 * i] += 5.0e-3;
+    }
+    let m = SimplexMesh::new(
+        2,
+        pts,
+        flat.cells.clone(),
+        flat.cell_labels.clone(),
+        flat.facets.clone(),
+        flat.facet_labels.clone(),
+    );
+    let mut s = Problem::new(Study::AxisymmetricEigenfrequency { n_modes: 3, f_search: 0.0, azimuthal_order: 0 }, 2);
+    for (k, v) in [("E", 70e9), ("nu", 0.33), ("rho", 2700.0)] {
+        s.materials.default.insert(k.into(), v);
+    }
+    s.bcs = vec![Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
+    let r = solve_with(&m, &s, &Progress::new()).unwrap();
+    assert!(r.log.iter().any(|l| l.contains("axisymmetric, azimuthal order m = 0")), "{:?}", r.log);
+    assert!(r.log.iter().any(|l| l.contains("solving solid mechanics")), "{:?}", r.log);
+    let p = Progress::new();
+    p.cancel();
+    assert_eq!(solve_with(&m, &s, &p).unwrap_err(), CANCELLED);
+}
