@@ -33,7 +33,7 @@ cli       | Command line | main.rs | 28 | The command-line twin of the Connect m
 commands  | Commands | commands.rs engine.rs guide.rs | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries.
 project   | Project | project.rs | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary.
 geometry  | Geometry operations | geometry.rs geomdesc.rs | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only).
-jobs      | Job runner | jobs.rs solve.rs convergence.rs | 61 | Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.
+jobs      | Job runner | jobs.rs solve.rs convergence.rs | 61, 80 | Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed.
 meshing   | Meshing seam | meshing.rs pml.rs | 54, 50 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project.
 materials | Materials | materials.rs | 58 | The material library plus the materials a project carries, resolved at the study wavelength.
 analyse   | Analyses | analyse.rs | 56 | Runs the analyses of nyx-analysis on the latest result of a physics.
@@ -62,8 +62,8 @@ common   | Shared helpers | common.rs | 41 | Per-cell gradients and values share
 adapter       | Physics adapter | lib.rs | 42, 25, 68 | The Physics implementation of sms with three studies (static, eigenfrequency, axisymmetric eigenfrequency): descriptors, validation, solve entry.
 problem       | Typed problem | problem.rs | 42, 68 | The typed sms problem the kernels read, decoded from the envelope.
 solid         | Solid kernel | solid.rs | 42, 9 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies.
-crosssection  | Axisymmetric study kernel | cross_section.rs | 43, 68, 69 | Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages).
-axisym        | Axisymmetric kernel | axisym.rs | 43, 69 | Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions and the cylindrical PML stretch.
+crosssection  | Axisymmetric study kernel | cross_section.rs | 43, 68, 69, 80 | Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages); every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain.
+axisym        | Axisymmetric kernel | axisym.rs | 43, 69, 80 | Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions, the cylindrical PML stretch and the energy weight of a mode per component and class of cells.
 floquet       | Floquet kernel | floquet.rs | 42 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals).
 pml           | Absorbing-layer kernel | pml.rs | 42 | Eigenfrequencies of elastic bodies with perfectly matched layers.
 lrb           | Low-reflecting boundary | lrb.rs | 42 | Low-reflecting boundaries for solid mechanics.

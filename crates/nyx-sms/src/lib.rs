@@ -71,7 +71,7 @@ impl Physics for Sms {
             StudyDesc {
                 kind: "axisymmetric_eigenfrequency".into(),
                 name: "Axisymmetric eigenfrequencies".into(),
-                doc: "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode.".into(),
+                doc: "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.".into(),
                 dims: Dims::Two,
                 params: vec![
                     ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),

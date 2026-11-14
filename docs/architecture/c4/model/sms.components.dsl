@@ -23,19 +23,19 @@ solid = component "Solid kernel" "Linear elastic solid mechanics on P1/P2 triang
         "codeDiagram" "4-code/sms/solid.md"
     }
 }
-crosssection = component "Axisymmetric study kernel" "Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages)." "Rust modules" {
+crosssection = component "Axisymmetric study kernel" "Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages); every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain." "Rust modules" {
     properties {
-        "adr" "43, 68, 69"
+        "adr" "43, 68, 69, 80"
         "code" "crates/nyx-sms/src: cross_section.rs"
-        "lines" "452"
+        "lines" "502"
         "codeDiagram" "4-code/sms/crosssection.md"
     }
 }
-axisym = component "Axisymmetric kernel" "Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions and the cylindrical PML stretch." "Rust modules" {
+axisym = component "Axisymmetric kernel" "Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions, the cylindrical PML stretch and the energy weight of a mode per component and class of cells." "Rust modules" {
     properties {
-        "adr" "43, 69"
+        "adr" "43, 69, 80"
         "code" "crates/nyx-sms/src: axisym.rs"
-        "lines" "334"
+        "lines" "388"
         "codeDiagram" "4-code/sms/axisym.md"
     }
 }

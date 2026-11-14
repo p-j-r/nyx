@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 > The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries.
 
 **Decisions:** [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md)  
-**Size:** 3 files, 987 lines.
+**Size:** 3 files, 990 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/commands.rs` | 628 | The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list... |
+| `crates/nyx-engine/src/commands.rs` | 631 | The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list... |
 | `crates/nyx-engine/src/engine.rs` | 326 | The engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them and the binding to a workflow folder. The window and the MCP server hold an `Engine` and nothing else; every action is a method... |
 | `crates/nyx-engine/src/guide.rs` | 33 | Cards: short texts a host reads on demand through the `get_guide` command, embedded in the binary. They describe the commands, not a physics: how to build a geometry, assign materials, solve and read a result. |
 
@@ -24,7 +24,7 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | contract, crate root, error, registry, result, spec, validate | BcSpec, Error, MaterialAssign, ProblemSpec, Registry, Sizing, SolveResult, StudySpec, canonical_json, validate_spec |
 | [container `store` (nyx-store)](../../3-components/store.md) | util | hash_bytes |
 | [Geometry operations](./geometry.md) | geomdesc, geometry |  |
-| [Job runner](./jobs.md) | jobs, solve | JobId, JobOutput, JobRunner, run_chain |
+| [Job runner](./jobs.md) | convergence, jobs, solve | JobId, JobOutput, JobRunner, Matching, run_chain |
 | [Materials](./materials.md) | materials | default_dirs, load_library |
 | [Meshing seam](./meshing.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
 | [Project](./project.md) | project | MeshSettings, Project |
@@ -114,7 +114,7 @@ classDiagram
 | enum | `Access` | `commands.rs:17` | variants: `Read`, `Edit`, `Expensive` —  How much a command changes or costs; a host may ask the person before an expensive or editing command. |
 | struct | `CommandDesc` | `commands.rs:27` | fields: `name`, `title`, `description`, `access`, `schema` |
 | fn | `Engine::catalog` | `commands.rs:105` | `pub fn catalog(&self) -> Vec<CommandDesc>` —  Every command of this build, with its schema. The geometry `add_*` commands come from `geomdesc`; the choices of physics from |
-| fn | `Engine::call` | `commands.rs:206` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
+| fn | `Engine::call` | `commands.rs:208` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
 | struct | `Stored` | `engine.rs:18` | fields: `result`, `stamp` |
 | struct | `Engine` | `engine.rs:29` | fields: `registry`, `mesher`, `project`, `model`, `results`, `jobs`, `link`, `workspace`, `auto_store`, `base_library`, `library_notes` |
 | fn | `Engine::new` | `engine.rs:53` | `pub fn new() -> Engine` —  An engine with the physics compiled into this build and an empty 2D project. |

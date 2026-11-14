@@ -68,3 +68,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 65 | [Closing the restructure: what the final structure replaces](adr/0065-closing-the-restructure-what-the-structure-replaced.md) | `docs/architecture`, `Cargo.toml` |
 | 68 | [The axisymmetric solid gets a study](adr/0068-the-axisymmetric-solid-gets-a-study.md) | `nyx-sms::{problem,lib,cross_section}` |
 | 69 | [Axis conditions and the cylindrical stretch of the axisymmetric solid kernel](adr/0069-axis-conditions-and-cylindrical-stretch-of-the-axisymmetric-solid.md) | `nyx-sms::axisym`, `femcore::pml` |
+| 80 | [Modes carry what identifies them, and a convergence check follows a mode](adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md) | `nyx-sms::{cross_section,axisym}`, `nyx-engine::{convergence,solve}` |

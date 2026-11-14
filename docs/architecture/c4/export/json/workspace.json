@@ -444,6 +444,13 @@
       "status" : "Accepted",
       "title" : "The ported solver library is merged but not wired into the physics"
     }, {
+      "content" : "# 80. Modes carry what identifies them, and a convergence check follows a mode\n\nDate: 2026-11-15\n\n## Status\n\nProposed (capability R11, bookmark `capability-r11-sms-mode-scalars`, on `capability-r6-sms-axisym`). Amends ADR 68 (the result of the axisymmetric study gains scalars) and ADR 61 (`convergence_check` gains a way to pair solutions). Numbers 70 to 79 are reserved by other capability plans.\n\n## Context\n\nBenchmark A1 (Bindel and Govindjee 2005) was run through the MCP server as a product, and four things in the way were not physics:\n\n1. A lossy mode's frequency was only the text `fN (Hz)` (`\"6.93e8 +2.56e7i\"`), which a host had to parse, while `QN` was a number.\n2. Nothing said which family a mode belongs to. At `m = 0` the torsional modes (azimuthal displacement only) are solved together with the radial and axial ones, a flexural mode sits near the contour mode, and `layer fraction N` only separates the modes of the layers. The benchmark summed squares of node values, which is not the energy and needs every field read back.\n3. `convergence_check` compares solution `i` with solution `i`. The order of the complex modes of an open resonator changes between meshes (a layer mode moves past a resonator mode), so the check reported a relative difference near 1 for a mode that had moved by 1e-4.\n4. The study did not say that `m = 0` holds torsional modes, or that the number of modes returned can differ from `n_modes`.\n\n## Decision\n\n**Scalars per mode of `axisymmetric_eigenfrequency`** (stage `cross_section_fields`), additive:\n\n* `f re N (Hz)` and `f im N (Hz)`: the two parts of the eigenvalue as numbers, for every mode, with or without loss. The scalar `fN (Hz)` keeps its form (a number without loss, text with loss; `physics_sms_result` 1.1), because removing it breaks hosts for no gain.\n* `radial share N`, `axial share N`, `azimuthal share N`: the split of `int rho |u|^2 r dr dz` over the three displacement components, taken over the cells outside the absorbing layers. They sum to 1.\n* `share in domain <label> N` for each domain outside the layers that has mass: the same integral per domain. They sum to 1. The kernel knows domain numbers only; the engine replaces `domain <label>` by the region name after the solve (`solve::name_domains`), so a host sees `share in disk N`. A caller of the kernel without an engine sees the numbers.\n\nThe integrals are computed by `axisym::mode_energy_axisym` in one pass over the cells (the integrand and quadrature of `assemble_mass_axisym`, no stretch), not by one mass matrix per domain. They are mass-weighted, so they are shares of the kinetic energy of the physical displacement. `layer fraction N` is unchanged.\n\n**`convergence_check` pairs solutions** (`convergence::Matching`), additive:\n\n* `match`: `\"index\"` (default: nothing changes for existing callers) or `\"nearest\"`. With `nearest` each solution of the present mesh is paired with the nearest eigenvalue of the finer mesh in the complex plane (distance over the larger modulus), and a pair is kept only when the two are each other's nearest (mutual nearest neighbours). No threshold is asked of the caller.\n* `track: { f }`: only the solution whose eigenvalue has its real part nearest `f` is compared, against the nearest eigenvalue of the finer mesh. It implies `nearest`; with `match: \"index\"` it is refused.\n* With pairing, the rows are the eigenvalue, the value and the per-mode scalars of each pair, named with the index of the mode on the present mesh; `pairs` lists `{ coarse, refined, distance }`, `unpaired` the solutions of each mesh without a partner; `worst_relative` and `converged` cover the paired modes only, and the note says so. Scalars that do not belong to a mode are not compared in this form.\n* A per-mode scalar is recognised by its name: the one-based mode number at the end, before a unit in brackets if there is one (`Q3`, `layer fraction 3`, `f re 3 (Hz)`). This is a naming convention of results, not a field of `SolveResult`.\n\n**Descriptions.** The study doc states the new scalars, that `m = 0` includes torsional modes, and that the modes returned are the converged eigenpairs nearest `f_search` (the block Krylov-Schur run returns the pairs whose residual is below 1e-6: fewer than `n_modes` when some did not converge, more when a block converged past it). This is how the solver behaves, not a defect, so it is described and not changed. The guide card says that Q converges slower than f, to refine at re-entrant corners, and to compare meshes with `match` or `track`.\n\n**`benchmark_a1.rs` is removed** from `crates/nyx-engine/tests`. Benchmarks are not nyx software (paul, 2026-11-14): no benchmark driver and no test asserting a paper's number lives in the repository. The closed-form tests and example 17 remain the regression guards of the study.\n\n## Consequences\n\n* A host picks a mode by numbers: small `layer fraction`, `radial share` and `share in disk` large, nearest a frequency. No field needs to be read.\n* Pairing by eigenvalue alone can pair two different modes that cross between meshes; the mutual rule drops most of these and `distance` shows how far a pair moved. Pairing by field overlap would be stricter and needs both fields on one mesh; not done.\n* The convention for per-mode scalar names is implicit. A scalar of another physics that ends in a number within the range of the solutions is taken as a per-mode scalar when pairing is asked for. Recorded in `ROUGH_SPOTS.md` (R11a).\n* The same scalars are the natural next step for `ems` (`axisymmetric_modes`, `cavity`), and for the 2D and 3D complex eigenfrequency kernels of `sms` (`pml.rs`, `lrb.rs`), which still give only the text frequency. Not done here.\n* Contracts: `physics_sms_result` 1.2, `physics_sms` 1.4, `engine_commands` and `mcp_tools` next minor, `kernel_stages` 1.5 (all additive).\n\n## What was verified\n\n`crates/nyx-sms/tests/axisym_mode_scalars.rs`: `f re` and `f im` equal the eigenvalue for lossless and lossy modes; the shares sum to 1; the torsional mode of a solid cylinder has azimuthal share 1 and the radial plane-strain mode radial share 1 (thresholds in the test); a two-domain body's domain shares sum to 1; a layer has no share. `crates/nyx-engine/tests/examples.rs`: on example 17 the shares appear under the region names and the contour mode is radial and in the disk; `convergence_check` with `nearest` pairs or lists every mode, `track` gives one mode, `index` is unchanged, bad arguments are refused. `crates/nyx-mcp/tests/stdio.rs`: the scalars and the two new arguments over stdio. The A1 reference case rerun on a build of this bookmark gives the numbers of the build before it (recorded with the benchmark, outside the repository).\n\n## What was not verified\n\nPairing on a case where two resonator modes cross between meshes; the shares for `|m| >= 1` against a closed form (the sums are checked, the split is not); the window (it shows the scalars of a result generically).\n\n## Code\n\n`crates/nyx-sms/src/{axisym,cross_section,lib}.rs`, `crates/nyx-sms/tests/axisym_mode_scalars.rs`, `crates/nyx-engine/src/{convergence,commands,solve}.rs`, `crates/nyx-engine/cards/nyx-instructions.md`, `crates/nyx-engine/tests/examples.rs`, `crates/nyx-mcp/tests/stdio.rs`, `docs/architecture/contracts/`.\n\n## Contract\n\n`physics_sms_result` 1.2, `physics_sms` 1.4, `engine_commands` 1.6, `mcp_tools` 2.3, `kernel_stages` 1.5.\n",
+      "date" : "2026-11-14T23:00:00Z",
+      "format" : "Markdown",
+      "id" : "80",
+      "status" : "Proposed",
+      "title" : "Modes carry what identifies them, and a convergence check follows a mode"
+    }, {
       "content" : "# 9. Every kernel is three stages behind one entry point\n\nDate: 2026-11-03\n\n## Status\n\nAccepted (commits `fa6eff2`, `106e7f8`; table in `docs/KERNEL_PORT_STATUS.md`).\n\n## Context\n\nKernels were single functions from mesh and spec to result. Swapping a linear-algebra backend (ADR 8), reusing an assembled system across a sweep, or exposing per-cell fields all required cutting them open.\n\n## Decision\n\n* `solve(mesh, spec, state)` / `solve_with(.., progress)` is the **one entry point for all physics**: it checks the element order and numbers (`validate`), dispatches by `Physics` (and by mesh dimension for EM waves), refuses a result containing NaN or infinity, and appends the plain-language stage log to `SolveResult::log`. A cancelled solve returns `Err(\"cancelled\")`.\n* Every kernel is **assemble -> solve -> fields**, and `solve_*` is their composition:\n  1. *assemble*: matrices on the free dofs, constraints, loads, the material data later stages need;\n  2. *solve*: the raw result (complex eigenpairs, a vector, transient states); the backend is chosen here (`spec.solver`, or the eigensolver the stage calls);\n  3. *fields*: plot fields (node-averaged, as before) and `Solution::cell_fields`, the same quantities per cell and local node, not averaged, with wafer names and complex values where the quantity is complex.\n* The node average of a cell field is the plot field of the same name (checked on every golden case).\n* Splitting changed no number: the golden files are unchanged.\n\n## Consequences\n\n* A `femcore::solvers` adapter replaces one function per kernel.\n* Stage function names are public API (`assemble_modes`, `solve_mode_pairs`, `mode_fields_cells`, ...); they are listed in contract `kernel_stages` because renaming one silently breaks callers outside the repository.\n* The `Physics::Emw` dispatch by mesh dimension is a quiet rule (R10).\n* `progress` is a thread-local, so stage functions called outside `solve_with` run unobserved and uncancellable (R19).\n\n## Code\n\n`crates/femcore/src/solve.rs`, `validate.rs`, `progress.rs`, `fields.rs`, and the kernels `dfs.rs`, `ems.rs`, `ems_pml.rs`, `ems_axisym.rs`, `ems3d.rs`, `sms.rs`, `sms_pml.rs`, `sms_floquet.rs`, `sms_lrb.rs`, `sms_kz.rs`, `sms_axisym.rs`, `sbs.rs`, `sbs_ring.rs`.\n\n## Contract\n\n`contracts/kernel_stages`: `crates/femcore/tests/stages.rs` (composition equals the one-call solver) plus `contracts.rs::kernel_stage_api_is_public`, which names every *public* stage function so removing one fails to compile. The stages of plain `sms`, `sms_lrb` and `ems3d` are `pub(crate)` (R26), so only 7 of 10 kernel families are reachable from outside the crate.\n",
       "date" : "2026-11-02T23:00:00Z",
       "format" : "Markdown",
@@ -1023,7 +1030,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.commands",
             "codeDiagram" : "4-code/engine/commands.md",
             "code" : "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs",
-            "lines" : "987",
+            "lines" : "990",
             "adr" : "57, 38, 15"
           },
           "relationships" : [ {
@@ -1062,7 +1069,7 @@
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
-            "description" : "uses jobs, solve",
+            "description" : "uses convergence, jobs +1",
             "destinationId" : "26",
             "id" : "244",
             "sourceId" : "23",
@@ -1179,7 +1186,7 @@
           "tags" : "Element,Component",
           "technology" : "Rust modules"
         }, {
-          "description" : "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.",
+          "description" : "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed.",
           "documentation" : { },
           "id" : "26",
           "name" : "Job runner",
@@ -1187,8 +1194,8 @@
             "structurizr.dsl.identifier" : "nyx.engine.jobs",
             "codeDiagram" : "4-code/engine/jobs.md",
             "code" : "crates/nyx-engine/src: convergence.rs, jobs.rs, solve.rs",
-            "lines" : "381",
-            "adr" : "61"
+            "lines" : "608",
+            "adr" : "61, 80"
           },
           "relationships" : [ {
             "description" : "uses femcore: material::spec, progress",
@@ -2280,7 +2287,7 @@
           "tags" : "Element,Component",
           "technology" : "Rust modules"
         }, {
-          "description" : "Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages).",
+          "description" : "Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages); every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain.",
           "documentation" : { },
           "id" : "49",
           "name" : "Axisymmetric study kernel",
@@ -2288,8 +2295,8 @@
             "structurizr.dsl.identifier" : "nyx.sms.crosssection",
             "codeDiagram" : "4-code/sms/crosssection.md",
             "code" : "crates/nyx-sms/src: cross_section.rs",
-            "lines" : "452",
-            "adr" : "43, 68, 69"
+            "lines" : "502",
+            "adr" : "43, 68, 69, 80"
           },
           "relationships" : [ {
             "description" : "uses femcore: fem, fields +6",
@@ -2330,7 +2337,7 @@
           "tags" : "Element,Component",
           "technology" : "Rust modules"
         }, {
-          "description" : "Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions and the cylindrical PML stretch.",
+          "description" : "Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions, the cylindrical PML stretch and the energy weight of a mode per component and class of cells.",
           "documentation" : { },
           "id" : "50",
           "name" : "Axisymmetric kernel",
@@ -2338,8 +2345,8 @@
             "structurizr.dsl.identifier" : "nyx.sms.axisym",
             "codeDiagram" : "4-code/sms/axisym.md",
             "code" : "crates/nyx-sms/src: axisym.rs",
-            "lines" : "334",
-            "adr" : "43, 69"
+            "lines" : "388",
+            "adr" : "43, 69, 80"
           },
           "relationships" : [ {
             "description" : "uses femcore: fem, linalg::csr +4",

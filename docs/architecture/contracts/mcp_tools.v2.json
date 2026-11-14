@@ -833,6 +833,13 @@
         "factor": {
           "type": "number"
         },
+        "match": {
+          "enum": [
+            "index",
+            "nearest"
+          ],
+          "type": "string"
+        },
         "physics": {
           "enum": [
             "dfs",
@@ -843,6 +850,9 @@
         },
         "tolerance": {
           "type": "number"
+        },
+        "track": {
+          "type": "object"
         }
       },
       "name": "convergence_check",

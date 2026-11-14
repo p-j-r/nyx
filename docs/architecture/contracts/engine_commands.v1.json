@@ -1058,7 +1058,7 @@
   },
   {
     "access": "expensive",
-    "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged.",
+    "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner.",
     "name": "convergence_check",
     "schema": {
       "additionalProperties": false,
@@ -1066,6 +1066,14 @@
         "factor": {
           "description": "finer/present element size, between 0 and 1, default 0.6",
           "type": "number"
+        },
+        "match": {
+          "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner",
+          "enum": [
+            "index",
+            "nearest"
+          ],
+          "type": "string"
         },
         "physics": {
           "description": "the three-letter code of the physics",
@@ -1079,6 +1087,19 @@
         "tolerance": {
           "description": "largest accepted relative difference, e.g. 1e-3; omit to only report",
           "type": "number"
+        },
+        "track": {
+          "additionalProperties": false,
+          "description": "follow one mode: { f } is a value (Hz for a vibration study); the mode whose eigenvalue is nearest it is compared with the nearest eigenvalue of the finer mesh",
+          "properties": {
+            "f": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "f"
+          ],
+          "type": "object"
         }
       },
       "required": [
