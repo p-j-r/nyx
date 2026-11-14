@@ -719,6 +719,10 @@
               "domain_offset": {
                 "type": "integer"
               },
+              "fill": {
+                "description": "region name: every cell of the layer belongs to it",
+                "type": "string"
+              },
               "n": {
                 "type": "integer"
               },

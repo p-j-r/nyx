@@ -125,6 +125,13 @@ impl Physics for Ems {
                 applies: Applies::Boundary,
                 params: vec![ParamDesc::text("dest", "Destination boundary", "", "a boundary selector").required(), ParamDesc::number("phase", "Phase advance", "rad", 0.0, "k . d over the period")],
             },
+            BcDesc {
+                kind: "pmc".into(),
+                name: "Magnetic wall (mirror plane)".into(),
+                doc: "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane. Cavity study.".into(),
+                applies: Applies::Boundary,
+                params: vec![],
+            },
         ]
     }
 

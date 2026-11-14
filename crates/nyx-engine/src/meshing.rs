@@ -209,15 +209,28 @@ impl Mesher for FemcoreMesher {
         let (g, report) = mesh_request(geometry, &req).map_err(Error::Invalid)?;
         let (mut mesh, eval, labels) = (g.mesh, g.eval, g.labels);
         if let Some(layers) = &s.sweep {
-            let layers: Vec<femcore::meshing::mesher::Layer> = layers
-                .iter()
-                .map(|l| femcore::meshing::mesher::Layer {
+            let mut ls = Vec::with_capacity(layers.len());
+            for l in layers {
+                let fill = match &l.fill {
+                    Some(name) => Some(labels.domain(name).ok_or_else(|| {
+                        Error::invalid(format!(
+                            "sweep layer fill: no region '{name}' (the regions are: {})",
+                            labels.domains.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")
+                        ))
+                    })?),
+                    None => None,
+                };
+                ls.push(femcore::meshing::mesher::Layer {
                     thickness: l.thickness,
                     n: l.n,
                     domain_offset: l.domain_offset,
-                })
-                .collect();
-            mesh = femcore::meshing::mesher::extrude_y(&mesh, &layers, 0.0).map_err(Error::Invalid)?;
+                    fill,
+                });
+            }
+            // numbered in the order of their coordinates, so that opposite side walls of a periodic cell are cut the same way
+            // and a Floquet condition can pair them (`sort_nodes`)
+            mesh = femcore::meshing::geomdrive::sort_nodes(&mesh);
+            mesh = femcore::meshing::mesher::extrude_y(&mesh, &ls, 0.0).map_err(Error::Invalid)?;
             return MeshedModel::new(mesh, eval, labels, true);
         }
         Ok(MeshedModel::new(mesh, eval, labels, false)?.with_report(report))

@@ -126,6 +126,13 @@
           "unit": "rad"
         }
       ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane. Cavity study.",
+      "kind": "pmc",
+      "name": "Magnetic wall (mirror plane)",
+      "params": []
     }
   ],
   "exports": [
@@ -358,6 +365,30 @@
                   "required": [
                     "dest"
                   ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane. Cavity study.",
+              "properties": {
+                "kind": {
+                  "const": "pmc"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
                   "type": "object"
                 }
               },

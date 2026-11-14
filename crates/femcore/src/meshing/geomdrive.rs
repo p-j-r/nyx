@@ -267,7 +267,7 @@ pub struct Block {
 pub fn block(lx: f64, ly: f64, lz: f64, h: f64, ny: usize) -> Result<Block, String> {
     let p = plate(lx, lz, h)?;
     let nb = p.mesh.facet_labels.iter().copied().max().unwrap_or(0);
-    let mesh = crate::meshing::mesher::extrude_y(&sort_nodes(&p.mesh), &[crate::meshing::mesher::Layer { thickness: ly, n: ny, domain_offset: 0 }], 0.0)?;
+    let mesh = crate::meshing::mesher::extrude_y(&sort_nodes(&p.mesh), &[crate::meshing::mesher::Layer { thickness: ly, n: ny, domain_offset: 0, fill: None }], 0.0)?;
     Ok(Block { mesh, domain: p.domain, xmin: p.xmin, xmax: p.xmax, zmin: p.zmin, zmax: p.zmax, ymin: vec![nb + 1], ymax: vec![nb + 2] })
 }
 

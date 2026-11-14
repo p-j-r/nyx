@@ -29,7 +29,7 @@ fn assert_conforming(m: &femcore::mesh::SimplexMesh) {
 #[test]
 fn a_section_swept_along_y_is_conforming() {
     let p = femcore::meshing::geomdrive::plate(1.0, 0.4, 0.1).unwrap();
-    let layers = vec![Layer { thickness: 0.2, n: 2, domain_offset: 0 }, Layer { thickness: 0.1, n: 1, domain_offset: 10 }];
+    let layers = vec![Layer { thickness: 0.2, n: 2, domain_offset: 0, fill: None }, Layer { thickness: 0.1, n: 1, domain_offset: 10, fill: None }];
     let m3 = extrude_y(&p.mesh, &layers, 0.0).unwrap();
     assert_eq!(m3.n_cells(), p.mesh.n_cells() * 3 * 3);
     let vol: f64 = femcore::fem::geometry(&m3).vol.iter().sum();

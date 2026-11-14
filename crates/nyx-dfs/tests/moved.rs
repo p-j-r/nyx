@@ -220,7 +220,7 @@ fn a_section_swept_along_y_solves_exactly() {
     use femcore::meshing::mesher::{extrude_y, Layer};
     let p = femcore::meshing::geomdrive::plate(1.0, 0.4, 0.1).unwrap();
     let layers =
-        vec![Layer { thickness: 0.2, n: 2, domain_offset: 0 }, Layer { thickness: 0.1, n: 1, domain_offset: 10 }];
+        vec![Layer { thickness: 0.2, n: 2, domain_offset: 0, fill: None }, Layer { thickness: 0.1, n: 1, domain_offset: 10, fill: None }];
     let m3 = extrude_y(&p.mesh, &layers, 0.0).unwrap();
     // potential 1 on x = 0, ground on x = 1: V = 1 - x exactly
     let mut s = Problem::new(Study::Electrostatic, 2);

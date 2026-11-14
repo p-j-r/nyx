@@ -74,7 +74,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
 | `crates/femcore/src/meshing/mod.rs` | 6, 7, 18, 50, 51, 52 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
 | `crates/femcore/src/meshing/geomdrive.rs` | 2, 6 | |
-| `crates/femcore/src/meshing/mesher.rs` | 6, 2 | 2D triangulation core |
+| `crates/femcore/src/meshing/mesher.rs` | 6, 2, 66 | 2D triangulation core; `extrude_y` with `Layer::fill` |
 | `crates/femcore/src/meshing/mesher3d.rs` | 40, 55 | lattice (isosurface stuffing) tetrahedral mesher on the trait `Domain3`; was the R05 fixture |
 | `crates/femcore/src/meshing/refine3d.rs` | 40 | Rivara longest-edge refinement of a `CellMesh<3>` |
 | `crates/femcore/src/meshing/geomdrive3.rs` | 40, 2, 50, 52 | adapter: a 3D geom model as `Domain3` (classify, facet_project, LabelMap), `mesh_geom_3d`, `sphere_cavity` |
@@ -122,7 +122,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/adapt3d.rs` | 7 | |
 | `crates/femcore/tests/mesh3d_features.rs` | 50, 51, 52, 55 | wavelength sizing, adaptive meshing, structured layers and thread-count independence for 3D geom models |
 | `crates/nyx-ems/tests/maxwell_estimator.rs` | 53 | the Maxwell estimator and loop on a PEC cavity and on a sphere from geom |
-| `crates/femcore/tests/meshing.rs` | 6 | |
+| `crates/femcore/tests/meshing.rs` | 6, 66 | |
 | `crates/femcore/tests/geom_meshes.rs` | 2, 6 | |
 | `crates/femcore/tests/*` | 9, 12 | physics tests: solid, solid_pml, anisotropic, common |
 | `crates/femcore/examples/fs_*.rs` | 8 | ported CLI tools |
@@ -149,13 +149,14 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-sms/*` | 42, 41, 25, 12, 9 | solid mechanics: typed problem, static, eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
-| `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12 | the ems tests moved from femcore |
-| `crates/nyx-ems/*` | 45, 25, 12, 9, 46 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
+| `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
+| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
 | `crates/nyx-analysis/*` | 56, 25, 21 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |
 | `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |
 | `crates/nyx-engine/tests/golden/*` | 10, 42 | `solid_static_thermal_from_heat`, moved unchanged from femcore |
+| `crates/nyx-engine/tests/swept_cell.rs` | 66 | a periodic swept cell with filled layers: closed form and refusal |
 | `crates/nyx-engine/examples/*` | 41, 9 | benchmarks and logs that drive every physics |
 | `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
 <!-- map:end -->

@@ -156,3 +156,50 @@ fn cavity_modes_carry_a_polarization_analysis() {
     assert!(first.sphere[2].abs() < 1e-6);
     assert!(r.log.iter().any(|l| l.contains("polarization axes: lateral x, normal z, propagation y")));
 }
+
+/// Modes of the PEC box with its upper wall (z = d, boundary 4 of `common::block`) turned into a magnetic wall. The magnetic wall is
+/// the mirror plane of a box of height 2 d: the modes left are those of that box that are even under the reflection, `p` odd in
+/// `sin(p pi z / 2 d)`: TE (m, n not both zero) and TM (m, n >= 1), one each.
+fn half_box_modes(a: f64, b: f64, d: f64, fmax: f64) -> Vec<f64> {
+    let mut out = vec![];
+    for m in 0..5 {
+        for n in 0..5 {
+            for p in [1, 3, 5] {
+                let f = 0.5
+                    * C0
+                    * ((m as f64 / a).powi(2) + (n as f64 / b).powi(2) + (p as f64 / (2.0 * d)).powi(2)).sqrt();
+                if f > fmax || (m == 0 && n == 0) {
+                    continue;
+                }
+                out.push(f);
+                if m > 0 && n > 0 {
+                    out.push(f);
+                }
+            }
+        }
+    }
+    out.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    out
+}
+
+#[test]
+fn a_magnetic_wall_is_the_mirror_plane_of_the_doubled_box() {
+    let (a, b, d) = (0.04, 0.03, 0.02);
+    let mesh = common::block(a, b, d, 6, 5, 3);
+    let exact = half_box_modes(a, b, d, 25e9);
+    let mut s = spec(2, 0.9 * exact[0], 6);
+    s.pmc = vec![4];
+    let r = common::solve(&mesh, &s).unwrap();
+    let got: Vec<f64> = r.solutions.iter().map(|x| x.value.unwrap()).collect();
+    for (g, e) in got.iter().zip(&exact) {
+        assert!((g / e - 1.0).abs() < 3e-3, "{g} vs {e}: all {got:?} vs {exact:?}");
+    }
+    // with the wall electric the lowest mode is the box's own, a different one
+    let plain = common::solve(&mesh, &spec(2, 0.9 * exact[0], 1)).unwrap();
+    assert!(
+        (plain.solutions[0].value.unwrap() / got[0] - 1.0).abs() > 0.02,
+        "the magnetic wall must change the spectrum: {} vs {}",
+        plain.solutions[0].value.unwrap(),
+        got[0]
+    );
+}

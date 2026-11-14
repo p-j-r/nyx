@@ -15,6 +15,10 @@ pub struct SweepLayer {
     /// added to the domain numbers of this layer's cells
     #[serde(default)]
     pub domain_offset: i32,
+    /// name of a region of the 2D model: every cell of this layer belongs to that region (a cladding layer above or below a patterned
+    /// slab); the offset is then not used
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<String>,
 }
 
 /// How the geometry is meshed.

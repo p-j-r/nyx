@@ -60,3 +60,5 @@ The file name carries the major version (`.v1.`). A breaking change adds `.v2.` 
 | engine_commands | `engine_commands.v1.json` | 1.5 | 2026-11-12 | additive: `export_results` takes `parallel` (MPI-IO writer, build with `phdf5`) |
 | mcp_tools | `mcp_tools.v2.json` | 2.2 | 2026-11-12 | additive: the `export_results` tool takes `parallel` |
 | results_file | HDF5 layout, version 3 | 3 | 2026-11-12 | additive: root attributes `writer` (`serial` or `parallel`) and `processes`; files written in parallel are the same as serial ones except that their datasets are not chunked or compressed |
+| engine_commands | `engine_commands.v1.json` | 1.6 | 2026-11-14 | additive: a `set_mesh` sweep layer takes `fill`, a region name every cell of the layer belongs to (ADR 66) |
+| physics_ems | `physics_ems.v1.json` | 1.2 | 2026-11-14 | additive: the boundary condition `pmc`, a magnetic wall or mirror plane for the cavity study (ADR 67) |

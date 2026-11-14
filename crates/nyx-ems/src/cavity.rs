@@ -471,7 +471,7 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     let n = ned.n_dofs();
     let (k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
     lap(&mut tl, "emw3d: numbering and assembly");
-    // perfect electric conductor on the exterior boundary, except the periodic boundaries
+    // perfect electric conductor on the exterior boundary, except the periodic boundaries and the magnetic walls (`Problem::pmc`, natural)
     let exterior = mesh.exterior_facets();
     let periodic_labels: Vec<i32> =
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
@@ -479,7 +479,10 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     let mut pec_vertex = std::collections::BTreeSet::new();
     let mut pec_edge = std::collections::BTreeSet::new();
     for f in 0..mesh.n_facets() {
-        if exterior[f] && !periodic_labels.contains(&mesh.facet_labels[f]) {
+        if exterior[f]
+            && !periodic_labels.contains(&mesh.facet_labels[f])
+            && !problem.pmc.contains(&mesh.facet_labels[f])
+        {
             let fv = mesh.facet(f);
             for d in ned.boundary_dofs(mesh, [fv[0], fv[1], fv[2]]) {
                 fixed_set.insert(d);

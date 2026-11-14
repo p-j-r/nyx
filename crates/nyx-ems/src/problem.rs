@@ -45,11 +45,15 @@ pub struct Problem {
     pub materials: Materials,
     /// Floquet-periodic boundary pairs (cavity study)
     pub periodic: Vec<Periodic>,
+    /// boundary numbers of magnetic walls (cavity study): perfect magnetic conductor, the natural condition of the curl-curl form, so
+    /// the field is left free on them instead of having its tangential part set to zero. A mirror plane that keeps the modes even
+    /// under the reflection (tangential E even, E normal odd) is one of these.
+    pub pmc: Vec<i32>,
 }
 
 impl Problem {
     pub fn new(study: Study, order: usize) -> Problem {
-        Problem { order, study, materials: Materials::default(), periodic: vec![] }
+        Problem { order, study, materials: Materials::default(), periodic: vec![], pmc: vec![] }
     }
 
     /// Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field.
@@ -129,6 +133,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     };
     let mut materials = materials_by_label(spec, ctx, &ems.properties())?;
     let mut periodic = vec![];
+    let mut pmc: Vec<i32> = vec![];
     let kinds = ems.bc_kinds();
     for r in resolve_conditions(&spec.bcs, &kinds, ctx)? {
         let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
@@ -163,8 +168,19 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
                 periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase") });
             }
+            "pmc" => {
+                if !matches!(study, Study::Cavity { .. }) {
+                    return Err(Error::invalid(format!(
+                        "a magnetic wall belongs to the cavity study, not to '{}'",
+                        study.kind()
+                    )));
+                }
+                pmc.extend(r.labels);
+            }
             other => return Err(Error::Unsupported(format!("ems has no condition '{other}'"))),
         }
     }
-    Ok(Problem { order: spec.order as usize, study, materials, periodic })
+    pmc.sort_unstable();
+    pmc.dedup();
+    Ok(Problem { order: spec.order as usize, study, materials, periodic, pmc })
 }

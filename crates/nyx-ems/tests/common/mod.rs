@@ -66,7 +66,13 @@ impl Spec {
     }
 
     pub fn problem(&self) -> Problem {
-        Problem { order: self.order, study: self.study.clone(), materials: self.materials.clone(), periodic: vec![] }
+        Problem {
+            order: self.order,
+            study: self.study.clone(),
+            materials: self.materials.clone(),
+            periodic: vec![],
+            pmc: vec![],
+        }
     }
 
     /// The wavelength of every domain in `domains`, and the headroom of the study.

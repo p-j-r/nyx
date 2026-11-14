@@ -67,7 +67,7 @@ pub fn block_split_z(lx: f64, ly: f64, lz: f64, zc: f64, h: f64, ny: usize) -> S
     assert_eq!((g.domain("lower"), g.domain("upper")), (Some(1), Some(2)));
     let (xmin, xmax, zmin, zmax) = (g.select("plane(x = 0)").unwrap(), g.select(&format!("plane(x = {lx:e})")).unwrap(), g.select("plane(z = 0)").unwrap(), g.select(&format!("plane(z = {lz:e})")).unwrap());
     let nb = g.mesh.facet_labels.iter().copied().max().unwrap();
-    let mut mesh = extrude_y(&crate::meshing::geomdrive::sort_nodes(&g.mesh), &[Layer { thickness: ly, n: ny, domain_offset: 0 }], 0.0).unwrap();
+    let mut mesh = extrude_y(&crate::meshing::geomdrive::sort_nodes(&g.mesh), &[Layer { thickness: ly, n: ny, domain_offset: 0, fill: None }], 0.0).unwrap();
     relabel(&mut mesh, &[(&xmin, 1), (&[nb + 1], 2), (&zmin, 3), (&zmax, 4), (&[nb + 2], 5), (&xmax, 6)]);
     mesh
 }
@@ -78,7 +78,7 @@ pub fn stack_y(a: f64, layers: &[(f64, usize)], h: f64) -> SimplexMesh {
     use crate::meshing::mesher::{extrude_y, Layer};
     let p = crate::meshing::geomdrive::plate(a, a, h).unwrap();
     let nb = p.mesh.facet_labels.iter().copied().max().unwrap();
-    let ls: Vec<Layer> = layers.iter().enumerate().map(|(k, (t, n))| Layer { thickness: *t, n: *n, domain_offset: k as i32 }).collect();
+    let ls: Vec<Layer> = layers.iter().enumerate().map(|(k, (t, n))| Layer { thickness: *t, n: *n, domain_offset: k as i32, fill: None }).collect();
     let mut mesh = extrude_y(&crate::meshing::geomdrive::sort_nodes(&p.mesh), &ls, 0.0).unwrap();
     relabel(&mut mesh, &[(&p.xmin, 1), (&[nb + 1], 2), (&p.zmin, 3), (&p.zmax, 4), (&[nb + 2], 5), (&p.xmax, 6)]);
     mesh

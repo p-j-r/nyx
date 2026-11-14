@@ -58,6 +58,13 @@ Related: ADR numbers refer to `adr/`, contract names to `contracts/`.
 | R23 | M | `cargo clippy -D warnings` fails (8 errors in `ems_pml.rs`, `sms.rs`, `sms_kz.rs`); `cargo fmt --check` fails widely; `rust-version = 1.84` in the manifest vs toolchain 1.99.1 pinned. |
 | R24 | L | `docs/CAPABILITIES_MEMO.md` and `docs/ports/meshers/FEATURE_DEPENDENCIES.md` exist **untracked** in the main checkout (`nyx/`) and are not in this branch. The second is the source of the constraints quoted in ADR 0005 and 0018. |
 
+## F. Found by benchmark A3 (2026-11-14; ADR 66, 67)
+
+* **R29** the 2D mesher gives a boundary edge that is slanted against the axes a chain with degenerate (sub-nanometre, repeated) facets, so the two slanted walls of a rhombic periodic cell (the primitive cell of a hexagonal lattice) have different vertex counts and cannot be paired by a Floquet condition (`the periodic boundaries have different numbers of vertices`). Axis-aligned walls are fine. Benchmark A3 uses the rectangular two-site supercell instead, which folds the bands once and doubles the volume. Open: find why the chain of a slanted `Polygon` edge repeats points (seen at the lattice-point insertion or the Ruppert split of constraint segments in `femcore::meshing::mesher`) and add a test with a rhombus.
+* **R30** the 3D lattice mesher (`mesher3d`) does not pair periodic faces: a 3D model with a `Periodic` pair is refused at solve time (`no vertex on the destination boundary matches ...`) because the faces are cut by the lattice and the warping of boundary vertices differently on the two sides. Periodic 3D cells are therefore swept sections (ADR 66).
+
+* **R31** the sparse factorisation of the shifted system fails on the larger meshes of benchmark A3 with "matrix is singular at this shift" (ems Floquet point K at 23 142 tetrahedra, three shifts; sms at h = 17 nm) or "out of memory" (ems, h = 28 nm), while smaller meshes of the same cell work; the shift does not look like the cause. Open: report the pivot, check the factorisation for the complex Floquet system, and choose an iterative solver above a size.
+
 ## What is in good shape (so the list is not only bad news)
 
 * `section.rs` is a real single point for axis numbers, and the wafer-frame tests (`frame.rs`, `frame_roundtrip.rs`, `wafer_names.rs`, `ring_frame.rs`) exercise it from three sides.

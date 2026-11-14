@@ -13,6 +13,10 @@ pub struct Layer {
     pub n: usize,
     /// added to the domain numbers of this layer's cells
     pub domain_offset: i32,
+    /// when set, every cell of the layer takes this domain number whatever its 2D region (a layer of cladding above and below a patterned
+    /// slab: the pattern's regions are all the cladding there); the offset is then not added
+    #[serde(default)]
+    pub fill: Option<i32>,
 }
 
 /// One closed polyline edge chain: sample points and the boundary label of every segment.
@@ -259,7 +263,8 @@ fn extrude_with(m2: &SimplexMesh, layers: &[Layer], z0: f64, place: impl Fn([f64
             let (t0, t1, t2) = (id(v[0], k + 1), id(v[1], k + 1), id(v[2], k + 1));
             for tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
                 cells.extend_from_slice(&tet);
-                cell_labels.push(m2.cell_labels[c] + layers[layer_of_slab[k]].domain_offset);
+                let l = &layers[layer_of_slab[k]];
+                cell_labels.push(l.fill.unwrap_or(m2.cell_labels[c] + l.domain_offset));
             }
         }
     }

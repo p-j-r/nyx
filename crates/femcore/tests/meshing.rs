@@ -221,7 +221,7 @@ fn extruding_through_other_layers_reuses_the_section() {
     let mut cache = MeshCache::default();
     let plan = MeshPlan::simple(0.2);
     let list = core_in_clad(0.4).list;
-    let layers = |t: f64| vec![Layer { thickness: t, n: 3, domain_offset: 0 }];
+    let layers = |t: f64| vec![Layer { thickness: t, n: 3, domain_offset: 0, fill: None }];
     let (a, r1) = cache.mesh_extruded(&list, &plan, &layers(1.0)).unwrap();
     let (b, r2) = cache.mesh_extruded(&list, &plan, &layers(2.0)).unwrap();
     assert!(matches!(r1, Reuse::Meshed { .. }));
@@ -361,7 +361,7 @@ fn a_model_without_layers_is_left_alone_and_a_round_window_is_refused() {
 #[test]
 fn an_adapted_section_extruded_to_3d_has_the_volume_and_the_labels() {
     use femcore::meshing::mesher::Layer;
-    let layers = vec![Layer { thickness: 0.6, n: 3, domain_offset: 0 }];
+    let layers = vec![Layer { thickness: 0.6, n: 3, domain_offset: 0, fill: None }];
     let vol = |m: &femcore::mesh::SimplexMesh| -> (f64, f64) {
         let (mut total, mut min) = (0.0, f64::INFINITY);
         for c in 0..m.n_cells() {
@@ -392,6 +392,33 @@ fn an_adapted_section_extruded_to_3d_has_the_volume_and_the_labels() {
         assert_eq!(g3.mesh.n_cells(), 3 * 3 * g2.mesh.n_cells(), "{name}: three tets per prism, three layers");
         eprintln!("{name}: {} triangles -> {} tets", g2.mesh.n_cells(), g3.mesh.n_cells());
     }
+}
+
+/// A sweep layer with `fill` takes that one domain number for all its cells (cladding above and below a patterned slab), the other
+/// layers keep the section's domains; the offset is not used with a fill.
+#[test]
+fn a_fill_layer_gives_all_its_cells_one_domain() {
+    use femcore::meshing::mesher::Layer;
+    let list = core_in_clad(0.4).list;
+    let plan = MeshPlan::adaptive(0.2, 0.5);
+    let mut cache = MeshCache::default();
+    let (g2, _) = cache.mesh(&list, &plan).unwrap();
+    let count = |m: &femcore::mesh::SimplexMesh, l: i32| m.cell_labels.iter().filter(|&&x| x == l).count();
+    let ids: Vec<i32> = { let mut v = g2.mesh.cell_labels.clone(); v.sort_unstable(); v.dedup(); v };
+    assert!(ids.len() >= 2, "the section has two domains: {ids:?}");
+    let (a, b) = (ids[0], ids[1]);
+    let layers = vec![
+        Layer { thickness: 0.1, n: 2, domain_offset: 7, fill: Some(a) },
+        Layer { thickness: 0.2, n: 3, domain_offset: 0, fill: None },
+        Layer { thickness: 0.1, n: 1, domain_offset: 0, fill: Some(a) },
+    ];
+    let (g3, _) = cache.mesh_extruded(&list, &plan, &layers).unwrap();
+    let (na, nb) = (count(&g2.mesh, a), count(&g2.mesh, b));
+    let all = na + nb;
+    // three tetrahedra per prism: the two fill layers (2 + 1 slabs) are domain a everywhere, the middle layer (3 slabs) keeps both
+    assert_eq!(count(&g3.mesh, b), 3 * 3 * nb, "domain b only in the unfilled layer");
+    assert_eq!(count(&g3.mesh, a), 3 * 3 * na + 3 * 3 * all, "domain a in the unfilled layer's a part and in both fill layers");
+    assert_eq!(count(&g3.mesh, a + 7), 0, "the offset of a filled layer is not used");
 }
 
 #[test]
