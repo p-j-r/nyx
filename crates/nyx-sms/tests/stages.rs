@@ -53,6 +53,15 @@ fn elastic_cross_section_stages_compose_to_the_one_call_solver() {
     let names: Vec<&str> = cf.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["ux", "uz", "uy"]);
     assert!(cell_field(cf, "uy").unwrap().im.iter().any(|x| x.abs() > 0.0));
+    // node fields say `Re` (the modes are complex); every mode carries its eigenvalue [Re f, Im f] and a layer fraction (0: no layer)
+    let nodes: Vec<&str> = r.solutions[0].fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(nodes, ["|u|", "Re ux", "Re uz", "Re uy", "|uy|"]);
+    for (j, sol) in r.solutions.iter().enumerate() {
+        let f = solved.modes.freqs[j];
+        assert_eq!(sol.eigenvalue, Some([f.re, f.im]));
+        let lf = r.scalars.iter().find(|(k, _)| *k == format!("layer fraction {}", j + 1)).expect("layer fraction");
+        assert!(matches!(lf.1, nyx_physics::Scalar::Num(v) if v == 0.0));
+    }
 }
 
 fn same_solution_fields(a: &SolveResult, b: &SolveResult) {

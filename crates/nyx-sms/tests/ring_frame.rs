@@ -134,11 +134,11 @@ fn a_torsional_ring_mode_is_the_wafer_y_component() {
     let energy = |s: &nyx_physics::Solution, name: &str| {
         s.field(name).map_or(0.0, |f| f.values.iter().map(|v| v * v).sum::<f64>())
     };
-    // the components (u_r, u_z, u_theta) are named ux, uz, uy
+    // the components (u_r, u_z, u_theta) are named Re ux, Re uz, Re uy
     let torsional: Vec<usize> = (0..res.solutions.len())
         .filter(|&i| {
             let s = &res.solutions[i];
-            let (x, y, z) = (energy(s, "ux"), energy(s, "uy"), energy(s, "uz"));
+            let (x, y, z) = (energy(s, "Re ux"), energy(s, "Re uy"), energy(s, "Re uz"));
             y > 0.0 && y > 100.0 * (x + z)
         })
         .collect();

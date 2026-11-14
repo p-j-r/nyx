@@ -10,6 +10,7 @@ use femcore::fem::*;
 use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::csr::{c, CCsr, C};
 use femcore::material::M6;
+use femcore::props::PmlDir;
 use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use std::time::Instant;
 
@@ -98,6 +99,8 @@ pub struct CrossAssembly {
     pub f_search: f64,
     /// a PML or a low-reflecting boundary makes the frequencies complex
     pub has_loss: bool,
+    /// per cell: the cell belongs to a perfectly matched layer (for the `layer fraction` scalar)
+    pub pml_cells: Vec<bool>,
 }
 
 pub fn assemble_cross_section(
@@ -199,7 +202,15 @@ pub fn assemble_cross_section(
         Some(crate::lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free))
     };
     let has_loss = stretch.is_some() || !lrb_labels.is_empty();
-    Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss })
+    let pml_cells: Vec<bool> = (0..mesh.n_cells())
+        .map(|ci| {
+            spec.materials
+                .pml
+                .get(&mesh.cell_labels[ci])
+                .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
+        })
+        .collect();
+    Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss, pml_cells })
 }
 
 /// Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them.
@@ -265,8 +276,23 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
     })
 }
 
-/// Stage 3: the plot fields `|u|`, `ux`, `uz`, `uy`, `|uy|` of every mode (largest component real, unit maximum), the
-/// displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
+/// `u^H M u` of a real-weighted block-diagonal mass matrix (the complex matrix `assemble_mass_axisym` gives without a stretch).
+fn mass_norm(m: &CCsr, u: &[C]) -> f64 {
+    let mut acc = 0.0;
+    for r in 0..m.nrows() {
+        let mut row = c(0.0, 0.0);
+        for k in m.indptr()[r]..m.indptr()[r + 1] {
+            row += m.values()[k] * u[m.indices()[k] as usize];
+        }
+        acc += (u[r].conj() * row).re;
+    }
+    acc
+}
+
+/// Stage 3: the plot fields `|u|`, `Re ux` (radial), `Re uz` (axial), `Re uy` (azimuthal), `|uy|` of every mode (largest component
+/// real, unit maximum), the displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
+/// Every solution carries `eigenvalue = [Re f, Im f]` (Hz); the scalar `layer fraction N` is the share of `int rho |u|^2 r` that lies in
+/// absorbing layers (0 without layers), which tells a resonator mode from a layer mode.
 pub fn cross_section_fields(
     mesh: &Discretisation,
     asm: &CrossAssembly,
@@ -276,6 +302,18 @@ pub fn cross_section_fields(
     let modes = &solved.modes;
     let mut solutions = vec![];
     let mut scalars = vec![];
+    // mass weights `rho r` over all cells and over the cells of the layers only
+    let any_pml = asm.pml_cells.iter().any(|&p| p);
+    let (m_all, m_pml) = if any_pml {
+        let rho_pml: Vec<f64> =
+            asm.rho.iter().zip(&asm.pml_cells).map(|(r, &p)| if p { *r } else { 0.0 }).collect();
+        (
+            Some(crate::axisym::assemble_mass_axisym(mesh, &asm.rho, order, None)),
+            Some(crate::axisym::assemble_mass_axisym(mesh, &rho_pml, order, None)),
+        )
+    } else {
+        (None, None)
+    };
     for (j, &fz) in modes.freqs.iter().enumerate() {
         let freq = fz.re;
         let u = &modes.vectors[j];
@@ -289,13 +327,25 @@ pub fn cross_section_fields(
         let re = |v: &[C]| -> Vec<f64> { v.iter().map(|z| z.re).collect() };
         // the names of the three blocks: wafer (x, z, y); for a ring (r, z, theta) = (x, z, y)
         let names = ["ux", "uz", "uy"];
+        // the node fields say `Re` because the modes are complex; the cell fields below keep the complex values under the plain names
         let fields = vec![
             Field::scalar("|u|", "a.u.", mag),
-            Field::scalar(names[0], "a.u.", re(&ux)),
-            Field::scalar(names[1], "a.u.", re(&uy)),
-            Field::scalar(names[2], "a.u.", re(&uz)),
+            Field::scalar(format!("Re {}", names[0]), "a.u.", re(&ux)),
+            Field::scalar(format!("Re {}", names[1]), "a.u.", re(&uy)),
+            Field::scalar(format!("Re {}", names[2]), "a.u.", re(&uz)),
             Field::scalar(format!("|{}|", names[2]), "a.u.", uz.iter().map(|z| z.norm()).collect()),
         ];
+        let layer_fraction = match (&m_all, &m_pml) {
+            (Some(ma), Some(mp)) => {
+                let (tot, in_layer) = (mass_norm(ma, u), mass_norm(mp, u));
+                if tot > 0.0 {
+                    (in_layer / tot).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        };
         let nloc = mesh.nloc(order);
         let mut cells = femcore::fields::CellFields::new(mesh, order);
         for (k, name) in names.iter().enumerate() {
@@ -319,6 +369,7 @@ pub fn cross_section_fields(
                 fields,
                 cell_fields: cell_fields_of(&cells),
                 value: Some(freq),
+                eigenvalue: Some([fz.re, fz.im]),
                 ..Default::default()
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", fz.re, fz.im))));
@@ -329,10 +380,12 @@ pub fn cross_section_fields(
                 fields,
                 cell_fields: cell_fields_of(&cells),
                 value: Some(freq),
+                eigenvalue: Some([fz.re, fz.im]),
                 ..Default::default()
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
         }
+        scalars.push((format!("layer fraction {}", j + 1), Scalar::Num(layer_fraction)));
     }
     if solutions.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
