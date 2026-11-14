@@ -1,6 +1,6 @@
 # Level 3: components of nyx-sms
 
-Crate `crates/nyx-sms`. Solid mechanics: static, eigenfrequency, PML, Floquet, low-reflecting boundaries, axisymmetric.
+Crate `crates/nyx-sms`. Solid mechanics: static, eigenfrequency, PML, Floquet, low-reflecting boundaries, axisymmetric eigenfrequency study (bodies of revolution, axis conditions, cylindrical layers).
 
 A component is a group of modules with one job; its code page (level 4) has the class diagram and every public item. Arrows to a container are references to that crate's modules (named in the label); arrows between components are `use` and path references in the source. Export: [Mermaid](../export/mermaid/structurizr-Components_sms.mmd) · [PlantUML](../export/plantuml/structurizr-Components_sms.puml)
 
@@ -17,15 +17,15 @@ graph TB
       subgraph 45 ["nyx-sms"]
         style 45 fill:#ffffff,stroke:#205723,color:#205723
 
-        46["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />sms: descriptors, validation,<br />solve entry.</div>"]
+        46["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />sms with three studies<br />(static, eigenfrequency,<br />axisymmetric eigenfrequency):<br />descriptors, validation,<br />solve entry.</div>"]
         style 46 fill:#85bbf0,stroke:#5d82a8,color:#000000
         47["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed sms problem the<br />kernels read, decoded from<br />the envelope.</div>"]
         style 47 fill:#85bbf0,stroke:#5d82a8,color:#000000
         48["<div style='font-weight: bold'>Solid kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Linear elastic solid<br />mechanics on P1/P2 triangles<br />and tetrahedra: static solve<br />and eigenfrequencies.</div>"]
         style 48 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        49["<div style='font-weight: bold'>Cross-section kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Stiffness and mass on a 2D<br />mesh with three displacement<br />components (the shared kernel<br />of the elastic cross-section<br />models).</div>"]
+        49["<div style='font-weight: bold'>Axisymmetric study kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Axisymmetric study kernel:<br />constraints and axis<br />conditions, absorbing layers,<br />complex eigensolve and fields<br />on the (r, z) half plane (the<br />shared cross-section stages).</div>"]
         style 49 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        50["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Elastic modes of a body of<br />revolution on its half-plane<br />cross-section.</div>"]
+        50["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Elastic modes of a body of<br />revolution on its half-plane<br />cross-section, with the axis<br />regularity conditions and the<br />cylindrical PML stretch.</div>"]
         style 50 fill:#85bbf0,stroke:#5d82a8,color:#000000
         51["<div style='font-weight: bold'>Floquet kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Eigenfrequencies of a solid<br />with Floquet-periodic<br />boundaries (phononic<br />crystals).</div>"]
         style 51 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -47,7 +47,7 @@ graph TB
     46-. "<div>uses cross_section</div><div style='font-size: 70%'>[Rust paths]</div>" .->49
     46-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->47
     46-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->48
-    50-. "<div>uses femcore: fem,<br />linalg::csr +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
+    50-. "<div>uses femcore: fem,<br />linalg::csr +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     50-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
     49-. "<div>uses femcore: fem, fields +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     49-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
@@ -71,6 +71,7 @@ graph TB
     47-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
     48-. "<div>uses femcore: fem, fields +9</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     48-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    48-. "<div>uses cross_section</div><div style='font-size: 70%'>[Rust paths]</div>" .->49
     48-. "<div>uses floquet</div><div style='font-size: 70%'>[Rust paths]</div>" .->51
     48-. "<div>uses lrb</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
     48-. "<div>uses pml</div><div style='font-size: 70%'>[Rust paths]</div>" .->52
@@ -80,11 +81,11 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Physics adapter](../4-code/sms/adapter.md) | 1 | 264 | 42, 25 | The Physics implementation of sms: descriptors, validation, solve entry. |
-| [Typed problem](../4-code/sms/problem.md) | 1 | 314 | 42 | The typed sms problem the kernels read, decoded from the envelope. |
-| [Solid kernel](../4-code/sms/solid.md) | 1 | 739 | 42, 9 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies. |
-| [Cross-section kernel](../4-code/sms/crosssection.md) | 1 | 354 | 43 | Stiffness and mass on a 2D mesh with three displacement components (the shared kernel of the elastic cross-section models). |
-| [Axisymmetric kernel](../4-code/sms/axisym.md) | 1 | 232 | 43 | Elastic modes of a body of revolution on its half-plane cross-section. |
+| [Physics adapter](../4-code/sms/adapter.md) | 1 | 305 | 42, 25, 68 | The Physics implementation of sms with three studies (static, eigenfrequency, axisymmetric eigenfrequency): descriptors, validation, solve entry. |
+| [Typed problem](../4-code/sms/problem.md) | 1 | 373 | 42, 68 | The typed sms problem the kernels read, decoded from the envelope. |
+| [Solid kernel](../4-code/sms/solid.md) | 1 | 746 | 42, 9 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies. |
+| [Axisymmetric study kernel](../4-code/sms/crosssection.md) | 1 | 452 | 43, 68, 69 | Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages). |
+| [Axisymmetric kernel](../4-code/sms/axisym.md) | 1 | 334 | 43, 69 | Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions and the cylindrical PML stretch. |
 | [Floquet kernel](../4-code/sms/floquet.md) | 1 | 128 | 42 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals). |
 | [Absorbing-layer kernel](../4-code/sms/pml.md) | 1 | 214 | 42 | Eigenfrequencies of elastic bodies with perfectly matched layers. |
 | [Low-reflecting boundary](../4-code/sms/lrb.md) | 1 | 296 | 42 | Low-reflecting boundaries for solid mechanics. |

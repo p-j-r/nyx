@@ -4,8 +4,8 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 
 > Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain.
 
-**Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 4](../../../adr/0004-simplexmesh-is-the-solver-contract.md), [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md)  
-**Size:** 6 files, 1826 lines.
+**Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 4](../../../adr/0004-simplexmesh-is-the-solver-contract.md), [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 69](../../../adr/0069-axis-conditions-and-cylindrical-stretch-of-the-axisymmetric-solid.md)  
+**Size:** 6 files, 1845 lines.
 
 ## Files
 
@@ -15,7 +15,7 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | `crates/femcore/src/fem.rs` | 958 | Lagrange P1/P2 finite elements on simplices: quadrature, shape functions, scalar matrices, boundary integrals and Dirichlet constraints, and the choice between a sparse factorisation and multigrid for symmetric positive systems. |
 | `crates/femcore/src/fields.rs` | 218 | Derived fields and what is drawn: element gradients at the element's own nodes, the node averaging of nodal data and `Display`, the surface mesh used for plotting. |
 | `crates/femcore/src/periodic.rs` | 288 | Floquet-periodic boundary conditions: the dofs on a `dest` boundary equal the dofs on a `source` boundary (translated by the vector between the two) times `exp(-i phase)`. The two boundaries must carry the same mesh up to the translation. |
-| `crates/femcore/src/pml.rs` | 77 | Perfectly matched layers by complex coordinate stretching, shared by the electromagnetic kernels (`nyx-ems`) and the solid kernels: the stretch factor of a point inside a layer (`stretch`, from a `props::Pml` and the bounding box of its ... |
+| `crates/femcore/src/pml.rs` | 96 | Perfectly matched layers by complex coordinate stretching, shared by the electromagnetic kernels (`nyx-ems`) and the solid kernels: the stretch factor of a point inside a layer (`stretch`, from a `props::Pml` and the bounding box of its ... |
 | `crates/femcore/src/props.rs` | 206 | The shared data of a problem that is not specific to one physics: material properties per domain (scalars, anisotropic tensors with a crystal orientation, perfectly matched layers), Floquet-periodic boundary pairs and the choice of linea... |
 
 ## What it uses
@@ -40,7 +40,7 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [dfs: Heat kernel](../dfs/heat.md) | fem, fields, props | AmgSystem, CellFields, LinearSolver, TensorKind, amg_wanted, node_average |
 | [dfs: Typed problem](../dfs/problem.md) | props | LinearSolver, Materials |
 | [ems: Physics adapter](../ems/adapter.md) | props | PmlDir |
-| [ems: Axisymmetric kernel](../ems/axisym.md) | edge, fem, fields, pml, props | CellData, CellFields, Materials, Pml, PmlDir, cell_data, edge_basis, local_bary +3 |
+| [ems: Axisymmetric kernel](../ems/axisym.md) | edge, fem, fields, pml, props | CellData, CellFields, Materials, Pml, PmlDir, cell_data, edge_basis, local_bary +4 |
 | [ems: 3D cavity kernel](../ems/cavity.md) | fem, fields, periodic, pml, props | CellFields, Match, Reduction, TensorKind, ccsr_adjoint, ccsr_mul, cell_stretches, congruence +5 |
 | [ems: Mode kernel](../ems/modes.md) | edge, fem, fields, props | CellFields, TensorKind, cell_data, edge_basis, local_bary, node_average, tri_g |
 | [ems: Complex-mode kernel](../ems/modescx.md) | edge, fem, fields | CellFields, cell_data, edge_basis, local_bary, node_average, tri_g |
@@ -55,8 +55,8 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [physics: Problem envelope](../physics/envelope.md) | props | Materials |
 | [physics: Result and frame](../physics/result.md) | fields | CellField, CellFields |
 | [physics: Test support](../physics/testsupport.md) | fields | node_average |
-| [sms: Axisymmetric kernel](../sms/axisym.md) | fem |  |
-| [sms: Cross-section kernel](../sms/crosssection.md) | fem, fields, pml | CellFields, cell_stretches, check_boundary_labels |
+| [sms: Axisymmetric kernel](../sms/axisym.md) | fem, pml, props | Pml, PmlDir, cell_stretches, radial_coordinate |
+| [sms: Axisymmetric study kernel](../sms/crosssection.md) | fem, fields, props | CellFields, PmlDir, check_boundary_labels |
 | [sms: Floquet kernel](../sms/floquet.md) | periodic | Reduction, congruence, match_vertices, nodal_relations |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | fem |  |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | fem, pml | cell_stretches |
@@ -204,6 +204,7 @@ classDiagram
     class fns_pml_rs {
         <<module pml.rs>>
         +stretch(p, dirs, centre, lo, hi) tuple
+        +radial_coordinate(p, r, lo, hi) C
         +cell_stretches(mesh, pml) VecC
     }
   }
@@ -340,7 +341,8 @@ classDiagram
 | fn | `Reduction::prolong` | `periodic.rs:227` | `pub fn prolong(&self) -> CCsr` —  The prolongation `P` (`n x n_reduced`). |
 | fn | `Reduction::expand` | `periodic.rs:239` | `pub fn expand(&self, xr: &[C]) -> Vec<C>` |
 | fn | `stretch` | `pml.rs:11` | `pub fn stretch(p: &Pml, dirs: [PmlDir; 2], centre: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> (C, C)` —  Stretch factors along the two axes of the mesh (`dirs`, the layer directions of each) of a cell centre for a PML specification and the |
-| fn | `cell_stretches` | `pml.rs:28` | `pub fn cell_stretches(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C` —  Complex stretch factors `(sx, sy, sz)` of every cell of a 2D or 3D mesh for the PML domains of |
+| fn | `radial_coordinate` | `pml.rs:29` | `pub fn radial_coordinate(p: &Pml, r: f64, lo: f64, hi: f64) -> C` —  The complex radius `r~ = int s_r dr` (from the interface of the layer) of a point at radius `r` for a layer whose `x` direction is the |
+| fn | `cell_stretches` | `pml.rs:47` | `pub fn cell_stretches(mesh: &SimplexMesh, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C` —  Complex stretch factors `(sx, sy, sz)` of every cell of a 2D or 3D mesh for the PML domains of |
 | struct | `Materials` | `props.rs:15` | fields: `domains`, `default`, `aniso`, `pml` —  Material properties per domain; `default` applies to domains without their own value. |
 | enum | `PmlDir` | `props.rs:29` | variants: `Off`, `Plus`, `Minus` —  Which side of a domain a perfectly matched layer absorbs towards, per axis. |
 | struct | `Pml` | `props.rs:41` | fields: `x`, `y`, `z`, `strength`, `order`, `re` —  A perfectly matched layer by coordinate stretching, `s = re - j strength t^order` with `t` |

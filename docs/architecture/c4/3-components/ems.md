@@ -83,6 +83,6 @@ graph TB
 | [Typed problem](../4-code/ems/problem.md) | 1 | 171 | 45 | The typed ems problem the kernels read, decoded from the envelope. |
 | [Mode kernel](../4-code/ems/modes.md) | 1 | 438 | 45, 9 | Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed). |
 | [Complex-mode kernel](../4-code/ems/modescx.md) | 1 | 464 | 45 | Complex-valued mode analysis: lossy media and perfectly matched layers. |
-| [Axisymmetric kernel](../4-code/ems/axisym.md) | 1 | 478 | 46 | Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities). |
+| [Axisymmetric kernel](../4-code/ems/axisym.md) | 1 | 467 | 46 | Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities). |
 | [3D cavity kernel](../4-code/ems/cavity.md) | 1 | 746 | 45 | Electromagnetic eigenmodes of 3D cavities and resonators. |
 | [Optical mode sets](../4-code/ems/optical.md) | 1 | 97 | 45, 21 | The mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields. |

@@ -1,10 +1,10 @@
-# 66. The axisymmetric solid gets a study
+# 68. The axisymmetric solid gets a study
 
 Date: 2026-11-14
 
 ## Status
 
-Proposed (draft by the study slice of capability R6, bookmark `capability-r6-sms-study`; the axis conditions and the cylindrical stretch of the kernel are ADR 67, written by the other slices). Amends ADR 43: the library entry stays, the study is added.
+Proposed (capability R6, the merge of the three workstreams on `capability-r6-sms-axisym`). Amends ADR 43: the library entry stays, the study is added. The axis conditions and the cylindrical stretch of the kernel are ADR 69. Numbered 68 because the A3 branch (`restructure-10-a3-snowflake`) already holds ADR 66 and 67.
 
 ## Context
 
@@ -28,21 +28,21 @@ A study of `sms`, parallel to the `axisymmetric_modes` study of `ems`.
 ## Consequences
 
 * The study is reachable from the envelope, the engine, the window (Study tab) and MCP with no change outside `nyx-sms`; example project and MCP proof are the engine step of the plan.
-* A mesh that touches the axis is accepted by the study's mesh rule (`x >= 0`) but the kernel still refuses a quadrature point at `r <= 0` until the axis conditions of ADR 67 land: studies on a body that touches the axis (A1: post, substrate) need that slice, and the cylindrical stretch of the layers (ADR 67) is what makes a layer perfectly matched in `r`. Until then the study is exact for rings off the axis without a layer and approximate with one (the layer divides the gradients by `s_r` but keeps the real radius). The tests of this ADR use rings off the axis.
+* A body that touches the axis is solved with the regularity conditions of ADR 69 and its layers are the cylindrical stretch of ADR 69, so a disk on a post on a substrate is a model of this study (engine example 17, the MCP proof). The study's own mesh rule stays `x >= 0`.
 * Not covered, and recorded: the low-reflecting boundary with `r` weight (D1), the azimuthal tie at `m = +-1` on the axis, a complex shift (`f_search` stays real, enough for Q of 1e3 to 1e5), the `periodic` Floquet pair.
 * Contracts: `physics_sms` 1.3 (additive: the study and its fields), `physics_sms_result` 1.1 (additive: the shapes `axisymmetric_eigenfrequency` and `axisymmetric_eigenfrequency_pml`), `kernel_stages` 1.4 (additive, with the rename of D2).
 
 ## What was verified
 
-`crates/nyx-sms/tests/axisym_study.rs`: the envelope (`Sms::solve` of a `ProblemSpec`), the typed problem (`nyx_sms::run`) and the library entry (`solve_solid_axisym` with the same `m`) give identical frequencies at `m = 0` and `m = 2`; the refusals above each fail with their own message and a good problem passes; an absorbing layer on the outer part of a ring section gives complex frequencies with `Q = Re f / (2 |Im f|)` and layer fractions between 0 and 1 (0.79 to 0.96 for the four lowest modes of the test ring); descriptors, fields and sizing. `stages.rs` checks that the stages compose to `solve_axisymmetric`, `determinism.rs` that two runs give the same bits (a layer, `m = 1`), `cancel_and_log.rs` the stage log and `cancelled`, `contracts.rs` the descriptors exemplar, the result-shape exemplar (two new entries) and an example spec of the new kind.
+`crates/nyx-sms/tests/axisym_study.rs`: on a solid disk that touches the axis the study gives the contour mode of the closed form to 2.4e-5; the engine example `17_disk_anchor_loss` solves through engine commands (test T10), `convergence_check` compares the complex eigenvalues (T11) and the MCP server over stdio describes the study and returns `Q1` for the same model (T12); the envelope (`Sms::solve` of a `ProblemSpec`), the typed problem (`nyx_sms::run`) and the library entry (`solve_solid_axisym` with the same `m`) give identical frequencies at `m = 0` and `m = 2`; the refusals above each fail with their own message and a good problem passes; an absorbing layer on the outer part of a ring section gives complex frequencies with `Q = Re f / (2 |Im f|)` and layer fractions between 0 and 1 (0.79 to 0.96 for the four lowest modes of the test ring); descriptors, fields and sizing. `stages.rs` checks that the stages compose to `solve_axisymmetric`, `determinism.rs` that two runs give the same bits (a layer, `m = 1`), `cancel_and_log.rs` the stage log and `cancelled`, `contracts.rs` the descriptors exemplar, the result-shape exemplar (two new entries) and an example spec of the new kind.
 
 ## What was not verified
 
-Q of a physically meaningful anchor-loss model (needs the axis conditions and the cylindrical stretch of ADR 67); the engine, window and MCP path with a real model (plan steps 6 and 8); the sign convention of `Im f` is observed, not derived.
+The quality factor of a model that matches a published anchor-loss number (benchmark A1 is a later step: `crates/nyx-engine/tests/benchmark_a1.rs` is an ignored skeleton until paul has agreed the material and the criteria); the sign convention of `Im f` is observed, not derived; the window's Study tab was not looked at (it follows from `forms.rs` being descriptor-driven, ADR 57).
 
 ## Code
 
-`crates/nyx-sms/src/{problem,lib,cross_section,solid}.rs`, `crates/nyx-sms/tests/{axisym_study,stages,contracts,determinism,cancel_and_log}.rs`, `docs/architecture/contracts/{physics_sms,physics_sms_result}.v1.json`, `docs/architecture/contracts/VERSIONS.md`.
+`crates/nyx-sms/src/{problem,lib,cross_section,solid}.rs`, `crates/nyx-sms/tests/{axisym_study,stages,contracts,determinism,cancel_and_log}.rs`, `crates/nyx-engine/tests/{examples,make_examples,benchmark_a1}.rs`, `crates/nyx-mcp/tests/stdio.rs`, `examples/17_disk_anchor_loss.nyx.json`, `docs/architecture/contracts/{physics_sms,physics_sms_result}.v1.json`, `docs/architecture/contracts/VERSIONS.md`.
 
 ## Contract
 

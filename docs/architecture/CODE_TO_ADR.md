@@ -105,7 +105,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `examples/*` | 60 | the example projects, written by `nyx-engine/tests/make_examples.rs` |
 | `crates/femcore/src/periodic.rs` | 12, 9 | Floquet pairs; belongs to no single physics |
 | `crates/femcore/src/edge.rs` | 45, 9 | the 2D edge-element basis shared by the ems kernels and the field sampler (split out of `ems.rs`) |
-| `crates/femcore/src/pml.rs` | 45, 7 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`) |
+| `crates/femcore/src/pml.rs` | 45, 7, 69 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`; `radial_coordinate` is the cylindrical stretch both axisymmetric kernels use) |
 | `crates/femcore/src/optical.rs` | 21, 9, 45 | optical mode sets, field sampling and the complex material tensors (split out of `sbs.rs` in phase 1; the solvers that fill a set are in `nyx-ems`) |
 | `crates/femcore/src/fields.rs` | 9 | cell fields |
 | `crates/femcore/src/fem.rs` | 4, 8 | element basics, original stack |
@@ -145,13 +145,14 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
 | `crates/nyx-dfs/*` | 41, 25, 12, 9 | diffusion: typed problem, electrostatics and heat kernels (moved from femcore::dfs), descriptors |
 | `crates/nyx-sms/tests/golden/*` | 10, 42 | the sms goldens (and `ring_model_axes`), moved unchanged from femcore |
-| `crates/nyx-sms/src/{axisym,cross_section}.rs` | 43, 42 | bodies of revolution on their half-plane (library entry, not in the envelope) |
-| `crates/nyx-sms/*` | 42, 41, 25, 12, 9 | solid mechanics: typed problem, static, eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
+| `crates/nyx-sms/src/{axisym,cross_section}.rs` | 43, 42, 68, 69 | bodies of revolution on their half-plane: the library entry and the axisymmetric eigenfrequency study, axis conditions, cylindrical layers |
+| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12 | the ems tests moved from femcore |
 | `crates/nyx-ems/*` | 45, 25, 12, 9, 46 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
 | `crates/nyx-analysis/*` | 56, 25, 21 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
+| `crates/nyx-engine/tests/benchmark_a1.rs` | 68, 69 | benchmark A1 (disk on a post, anchor loss) as an ignored regression test, built by engine commands; skeleton until the criteria are agreed |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |
 | `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |

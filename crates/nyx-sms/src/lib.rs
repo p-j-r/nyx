@@ -3,7 +3,7 @@
 //!
 //! The crate holds the typed problem (`problem`, decoded from the envelope by `problem::decode`), the kernels in the three stages of
 //! ADR 9 (`solid`: static and real eigenfrequencies; `pml`, `lrb`, `floquet`: the complex-frequency variants; `axisym` and
-//! `cross_section`: bodies of revolution on their half-plane, reached by the study `axisymmetric_eigenfrequency`, ADR 66) and the `Physics`
+//! `cross_section`: bodies of revolution on their half-plane, reached by the study `axisymmetric_eigenfrequency`, ADR 68) and the `Physics`
 //! implementation below. Moved here from
 //! `femcore::{sms, sms_pml, sms_lrb, sms_floquet, sms_axisym, sms_kz}` in restructure phase 4 (ADR 42). `femcore::periodic` (the Floquet
 //! reduction, shared with 3D EM waves) stays in femcore.

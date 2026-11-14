@@ -66,3 +66,5 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 63 | [One `format` key, JSON for small files, HDF5 for bulk data](adr/0063-the-format-key-and-no-json-for-bulk-data.md) | `nyx-engine::project`, `geom::model`, `nyx-physics::spec`, `nyx-store` |
 | 64 | [Identity: one persisted hash, the rest are cache keys](adr/0064-identity-hashes-one-persisted-the-rest-are-caches.md) | `nyx-store::util`, `nyx-engine::engine`, `geom::math` |
 | 65 | [Closing the restructure: what the final structure replaces](adr/0065-closing-the-restructure-what-the-structure-replaced.md) | `docs/architecture`, `Cargo.toml` |
+| 68 | [The axisymmetric solid gets a study](adr/0068-the-axisymmetric-solid-gets-a-study.md) | `nyx-sms::{problem,lib,cross_section}` |
+| 69 | [Axis conditions and the cylindrical stretch of the axisymmetric solid kernel](adr/0069-axis-conditions-and-cylindrical-stretch-of-the-axisymmetric-solid.md) | `nyx-sms::axisym`, `femcore::pml` |

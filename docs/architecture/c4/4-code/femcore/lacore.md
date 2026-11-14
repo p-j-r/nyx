@@ -56,7 +56,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar | C64, Csr, FaerScalar, Preconditioner, RCsr, Scalar |
 | [Optical mode sets](./optical.md) | linalg::csr, linalg::csr::assembly | C, c |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
-| [sms: Cross-section kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
+| [sms: Axisymmetric study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
 | [sms: Floquet kernel](../sms/floquet.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |

@@ -66,7 +66,7 @@ pub fn solve_solid_axisym(mesh: &Discretisation, spec: &Problem, m: f64) -> Resu
     solve_cross_section(mesh, spec, CrossSection::Axisymmetric(m))
 }
 
-/// The axisymmetric eigenfrequency study (ADR 66): the azimuthal order is taken from the study, the result carries `physics` and `study`.
+/// The axisymmetric eigenfrequency study (ADR 68): the azimuthal order is taken from the study, the result carries `physics` and `study`.
 /// Refuses what the study cannot say (`Problem::check_axisymmetric`) and a mesh that leaves the half plane `x >= 0`; with absorbing layers the
 /// frequencies are complex (`Q` and `layer fraction` scalars, `eigenvalue` on every mode).
 pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
@@ -177,7 +177,7 @@ pub fn assemble_cross_section(
             }
         }
     }
-    // the axis of a body of revolution: regularity conditions on the dofs at r = 0 (axisym header, ADR 67)
+    // the axis of a body of revolution: regularity conditions on the dofs at r = 0 (axisym header, ADR 69)
     let CrossSection::Axisymmetric(m_az) = kind;
     let (axis_pairs, axis_dofs) = crate::axisym::axis_constraints(mesh, order, m_az)?;
     fixed_set.extend(axis_pairs.into_iter().map(|(k, dof)| dof + k * n1));
@@ -250,7 +250,24 @@ pub fn assemble_cross_section(
                 .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
         })
         .collect();
-    Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss, axis_dofs, pml_cells })
+    Ok(CrossAssembly {
+        kind,
+        order,
+        n,
+        n1,
+        kf,
+        mf,
+        cf,
+        free,
+        fixed,
+        c6,
+        rho,
+        n_modes,
+        f_search,
+        has_loss,
+        axis_dofs,
+        pml_cells,
+    })
 }
 
 /// Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them.

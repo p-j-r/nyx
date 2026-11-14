@@ -176,7 +176,7 @@ graph TB
 | [Eigensolvers](../4-code/femcore/laeigen.md) | 12 | 4560 | 33, 8, 11 | Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities. |
 | [Preconditioners](../4-code/femcore/laprecond.md) | 8 | 2516 | 33, 8 | Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations. |
 | [Time, nonlinear, sweeps](../4-code/femcore/laother.md) | 10 | 3627 | 33, 8 | Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators. |
-| [Finite-element basics](../4-code/femcore/fem.md) | 6 | 1826 | 9, 4, 45 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
+| [Finite-element basics](../4-code/femcore/fem.md) | 6 | 1845 | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
 | [Material specification](../4-code/femcore/material.md) | 9 | 3519 | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader. |
 | [Optical mode sets](../4-code/femcore/optical.md) | 1 | 231 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
 | [Frame and sections](../4-code/femcore/section.md) | 1 | 221 | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y). |

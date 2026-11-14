@@ -383,7 +383,12 @@ fn disk_anchor_loss() -> B {
         json!({ "name": "pml", "window": "window", "sides": ["XMax", "ZMin"], "thickness": t, "layers": 3.0, "grading": 2.0, "regions": ["substrate"] }),
     );
     b.c("add_size", json!({ "name": "size_disk", "sel": "region(disk) | region(post)", "h": 0.4 * um }));
-    b.physics("sms", "axisymmetric_eigenfrequency", json!({ "n_modes": 8, "f_search": 4.6e8, "azimuthal_order": 0 }), 2);
+    b.physics(
+        "sms",
+        "axisymmetric_eigenfrequency",
+        json!({ "n_modes": 8, "f_search": 4.6e8, "azimuthal_order": 0 }),
+        2,
+    );
     for r in ["substrate*", "post", "disk"] {
         b.material("sms", r, json!({ "E": 160e9, "nu": 0.22, "rho": 2330.0 }));
     }

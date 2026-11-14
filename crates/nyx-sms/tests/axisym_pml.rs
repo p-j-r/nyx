@@ -1,4 +1,4 @@
-//! The cylindrical PML stretch of the axisymmetric solid kernel (K2 of the A1 plan, ADR 67): inside an absorbing layer with a radial (`x`)
+//! The cylindrical PML stretch of the axisymmetric solid kernel (K2 of the A1 plan, ADR 69): inside an absorbing layer with a radial (`x`)
 //! stretch the radius becomes `r~` and `s_theta = r~ / r` enters the `1/r` terms and the weight `r`, as in `nyx-ems` (ADR 46).
 //!
 //! * T4 the large-radius limit against the plane-strain PML kernel, plus two exact consistency checks of the stretch (unit stretch changes
@@ -74,7 +74,7 @@ fn a_unit_stretch_changes_nothing_on_a_ring() {
 }
 
 /// T4b: a real radial stretch `re` maps the layer `[lo, hi]` onto `[lo, lo + re (hi - lo)]`: the model is the longer ring. `s_theta` is the
-/// value at the cell centre, so `r~` is exact only at the centres (error of order `h / r`, ADR 67); the error is printed for two meshes.
+/// value at the cell centre, so `r~` is exact only at the centres (error of order `h / r`, ADR 69); the error is printed for two meshes.
 #[test]
 fn a_real_radial_stretch_is_the_longer_ring() {
     let (r0, w, re) = (1.0, 0.3, 1.5);
@@ -264,7 +264,7 @@ fn the_quality_factor_does_not_depend_on_the_layers() {
 
 /// T6: the same model with the old form (`s_theta` forced to 1, `r` untransformed in the layers, the choice of Bindel and Govindjee). The
 /// difference of the quality factors is printed, for the wheel at `r = 14` and moved towards the axis to `r = 11` where the layers see more
-/// curvature; only finiteness is asserted (the numbers go into ADR 67).
+/// curvature; only finiteness is asserted (the numbers go into ADR 69).
 #[test]
 fn the_untransformed_form_gives_a_finite_quality_factor_and_its_difference_is_printed() {
     for (t, strength, dr) in [(3.0, 3.0, 0.0), (6.0, 3.0, 0.0), (3.0, 3.0, -3.0), (3.0, 6.0, -3.0)] {

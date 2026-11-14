@@ -58,7 +58,7 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [Test support](./testsupport.md) | crate root, physics | Discretisation, Physics |
 | [sms: Physics adapter](../sms/adapter.md) | crate root | Mesh |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | crate root | Discretisation |
-| [sms: Cross-section kernel](../sms/crosssection.md) | crate root | Discretisation |
+| [sms: Axisymmetric study kernel](../sms/crosssection.md) | crate root | Discretisation |
 | [sms: Floquet kernel](../sms/floquet.md) | crate root | Discretisation |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | crate root | Discretisation |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | crate root | Discretisation |

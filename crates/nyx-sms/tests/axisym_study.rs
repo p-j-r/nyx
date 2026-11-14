@@ -1,4 +1,4 @@
-//! The axisymmetric eigenfrequency study (`sms`, ADR 66): the envelope, the typed problem and the library entry give the same modes; the
+//! The axisymmetric eigenfrequency study (`sms`, ADR 68): the envelope, the typed problem and the library entry give the same modes; the
 //! study refuses what it cannot say; with an absorbing layer the modes are complex and carry Q, an eigenvalue and a layer fraction.
 //! The meshes are rings off the axis (the axis conditions are the kernel's K1, tested elsewhere).
 use femcore::mesh::SimplexMesh;
@@ -270,5 +270,9 @@ fn a_solid_disk_touching_the_axis_is_solved_by_the_study_and_matches_the_contour
     let got = frequencies(&env).into_iter().min_by(|a, b| (a - want).abs().total_cmp(&(b - want).abs())).unwrap();
     println!("disk on the axis through the study: {got:.6e} Hz against the contour closed form {want:.6e} Hz");
     assert!((got / want - 1.0).abs() < 1e-3, "{got} against {want}");
-    assert!(env.log.iter().any(|l| l.to_lowercase().contains("axis")), "the log names the axis condition: {:?}", env.log);
+    assert!(
+        env.log.iter().any(|l| l.to_lowercase().contains("axis")),
+        "the log names the axis condition: {:?}",
+        env.log
+    );
 }

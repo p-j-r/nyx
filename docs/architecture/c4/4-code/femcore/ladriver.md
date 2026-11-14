@@ -36,7 +36,7 @@ C4 level 4 (code) of the component **Linear algebra driver** (`femcore.ladriver`
 | [Finite-element basics](./fem.md) | linalg::driver | DirectSolver |
 | [Eigensolvers](./laeigen.md) | linalg::driver | DirectSolver |
 | [Preconditioners](./laprecond.md) | linalg::driver | DirectSolver |
-| [sms: Cross-section kernel](../sms/crosssection.md) | linalg::driver | eigs_complex |
+| [sms: Axisymmetric study kernel](../sms/crosssection.md) | linalg::driver | eigs_complex |
 | [sms: Floquet kernel](../sms/floquet.md) | linalg::driver | eigs_complex |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | linalg::driver | eigs_complex |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | linalg::driver | eigs_complex |

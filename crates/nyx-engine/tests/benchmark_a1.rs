@@ -51,24 +51,42 @@ fn build(e: &mut Engine, m: &Model) {
         e.call(cmd, &args).unwrap_or_else(|err| panic!("{cmd} {args}: {err}"));
     };
     c("project_new", json!({ "title": "A1 disk on a post", "dim": 2, "h": m.h_bulk }));
-    c("add_rect", json!({ "name": "substrate_box", "min": [0.0, -post_h - m.depth - m.layer], "max": [m.half_width + m.layer, -post_h] }));
+    c(
+        "add_rect",
+        json!({ "name": "substrate_box", "min": [0.0, -post_h - m.depth - m.layer], "max": [m.half_width + m.layer, -post_h] }),
+    );
     c("add_rect", json!({ "name": "post_box", "min": [0.0, -post_h], "max": [post_r, 0.0] }));
     c("add_rect", json!({ "name": "disk_box", "min": [0.0, 0.0], "max": [disk_r, disk_t] }));
     c("add_rect", json!({ "name": "window", "min": [0.0, -post_h - m.depth], "max": [m.half_width, 2.0 * disk_t] }));
-    c("add_overlay", json!({ "name": "regions", "regions": [
-        { "name": "substrate", "input": "substrate_box" }, { "name": "post", "input": "post_box" }, { "name": "disk", "input": "disk_box" } ] }));
-    c("add_pml", json!({ "name": "pml", "window": "window", "sides": ["XMax", "ZMin"], "thickness": m.layer, "layers": 3.0, "grading": 2.0, "regions": ["substrate"] }));
+    c(
+        "add_overlay",
+        json!({ "name": "regions", "regions": [
+        { "name": "substrate", "input": "substrate_box" }, { "name": "post", "input": "post_box" }, { "name": "disk", "input": "disk_box" } ] }),
+    );
+    c(
+        "add_pml",
+        json!({ "name": "pml", "window": "window", "sides": ["XMax", "ZMin"], "thickness": m.layer, "layers": 3.0, "grading": 2.0, "regions": ["substrate"] }),
+    );
     c("add_size", json!({ "name": "size_disk", "sel": "region(disk) | region(post)", "h": m.h_disk }));
-    c("add_physics", json!({ "physics": "sms", "study": "axisymmetric_eigenfrequency", "order": 2,
-        "study_params": { "n_modes": 12, "f_search": 715e6, "azimuthal_order": 0 } }));
+    c(
+        "add_physics",
+        json!({ "physics": "sms", "study": "axisymmetric_eigenfrequency", "order": 2,
+        "study_params": { "n_modes": 12, "f_search": 715e6, "azimuthal_order": 0 } }),
+    );
     let (ym, nu, rho) = MATERIAL;
     for r in ["substrate*", "post", "disk"] {
         c("set_material", json!({ "physics": "sms", "region": r, "material": { "E": ym, "nu": nu, "rho": rho } }));
     }
     c("add_pml_conditions", json!({ "physics": "sms", "strength": m.strength }));
     let fixed = json!({ "ux": 0.0, "uy": 0.0, "uz": 0.0 });
-    c("add_condition", json!({ "physics": "sms", "on": format!("outer & plane(x = {})", m.half_width + m.layer), "kind": "fixed", "params": fixed }));
-    c("add_condition", json!({ "physics": "sms", "on": format!("outer & plane(z = {})", -post_h - m.depth - m.layer), "kind": "fixed", "params": fixed }));
+    c(
+        "add_condition",
+        json!({ "physics": "sms", "on": format!("outer & plane(x = {})", m.half_width + m.layer), "kind": "fixed", "params": fixed }),
+    );
+    c(
+        "add_condition",
+        json!({ "physics": "sms", "on": format!("outer & plane(z = {})", -post_h - m.depth - m.layer), "kind": "fixed", "params": fixed }),
+    );
 }
 
 /// `(f, Q, layer fraction)` of the mode nearest `F_PAPER` among those that sit mostly in the resonator (layer fraction below 0.1): the way the
@@ -118,8 +136,14 @@ fn the_second_radial_mode_matches_the_paper_and_is_converged() {
     // nyx's own criteria, which hold whatever the material: finer mesh, thicker layers
     let fine = Model { h_disk: 0.25e-6, h_bulk: 1.0e-6, ..Model::reference() };
     let (_, q_fine, _) = solve(&fine);
-    check(&format!("Q changes by under {TOL_CONVERGED} between the two meshes"), (q_fine / q - 1.0).abs() < TOL_CONVERGED);
+    check(
+        &format!("Q changes by under {TOL_CONVERGED} between the two meshes"),
+        (q_fine / q - 1.0).abs() < TOL_CONVERGED,
+    );
     let thick = Model { layer: 2.0 * base.layer, ..Model::reference() };
     let (_, q_thick, _) = solve(&thick);
-    check(&format!("Q changes by under {TOL_CONVERGED} when the layers are twice as thick"), (q_thick / q - 1.0).abs() < TOL_CONVERGED);
+    check(
+        &format!("Q changes by under {TOL_CONVERGED} when the layers are twice as thick"),
+        (q_thick / q - 1.0).abs() < TOL_CONVERGED,
+    );
 }

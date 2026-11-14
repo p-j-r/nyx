@@ -1,6 +1,6 @@
 # nyx architecture
 
-Written 2026-11-03 against main `a047506`; brought up to date at the end of the restructure (phase 9, 2026-11-13: `workspace.dsl`, `diagrams.md`, ADRs 24 to 65, `CODE_TO_ADR.md`, `ROUGH_SPOTS.md`). The ADRs of the early days describe the structure before the restructure; those that no longer hold say so in their Status line and point to the one that replaced them (ADR 65).
+Written 2026-11-03 against main `a047506`; brought up to date at the end of the restructure (phase 9, 2026-11-13: `workspace.dsl`, `diagrams.md`, ADRs 24 to 65 and 68, 69, `CODE_TO_ADR.md`, `ROUGH_SPOTS.md`). The ADRs of the early days describe the structure before the restructure; those that no longer hold say so in their Status line and point to the one that replaced them (ADR 65).
 
 **Validated** on 2026-11-13 with the Structurizr CLI (the release zip, run with Java: `java -cp "<cli>/lib/*" com.structurizr.cli.StructurizrCliApplication validate -workspace workspace.dsl`; it exits 0 and prints nothing when the DSL is valid, and names the line of an error otherwise). The export to Mermaid (`-format mermaid`) writes the six views. `diagrams.md` stays hand-written, because the export has no colour classes or notes; keep the two in step.
 
@@ -9,7 +9,7 @@ Written 2026-11-03 against main `a047506`; brought up to date at the end of the 
 | **Full C4 set**: context, 12 containers, 91 components, code pages per component, exports, a browser viewer, a standalone copy; components and code read from the Rust source ([README](c4/README.md), [memo](c4/MEMO.md)) | [`c4/`](c4/README.md) |
 | Master Structurizr model (people, systems, containers, container relationships, two dynamic views; includes the generated components of `c4/`) as Structurizr DSL | [`workspace.dsl`](workspace.dsl) |
 | Rough spots the model showed (28 items, with evidence, severity and a fix direction; the resolutions are at the end) | [`ROUGH_SPOTS.md`](ROUGH_SPOTS.md) |
-| Decisions found in the history, docs and code (65 ADRs, Nygard format; the first 23 written retrospectively) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
+| Decisions found in the history, docs and code (67 ADRs here; 66 and 67 are on the A3 branch, Nygard format; the first 23 written retrospectively) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
 | Every file of the repository mapped to the ADRs that cover it | [`CODE_TO_ADR.md`](CODE_TO_ADR.md), checked by `check_code_to_adr.sh` |
 | Interface contracts: exemplar files and the tests that pin them | [`contracts/`](contracts/README.md) |
 | Mermaid diagrams of the final structure (hand-written, render on GitHub or mermaid.live) | [`diagrams.md`](diagrams.md) |

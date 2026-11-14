@@ -59,11 +59,11 @@ electro  | Electrostatics kernel | electro.rs | 41, 9 | Electrostatics on P1/P2 
 common   | Shared helpers | common.rs | 41 | Per-cell gradients and values shared by the heat and electrostatics kernels.
 
 [sms | nyx-sms | nyx_sms]
-adapter       | Physics adapter | lib.rs | 42, 25 | The Physics implementation of sms: descriptors, validation, solve entry.
-problem       | Typed problem | problem.rs | 42 | The typed sms problem the kernels read, decoded from the envelope.
+adapter       | Physics adapter | lib.rs | 42, 25, 68 | The Physics implementation of sms with three studies (static, eigenfrequency, axisymmetric eigenfrequency): descriptors, validation, solve entry.
+problem       | Typed problem | problem.rs | 42, 68 | The typed sms problem the kernels read, decoded from the envelope.
 solid         | Solid kernel | solid.rs | 42, 9 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies.
-crosssection  | Cross-section kernel | cross_section.rs | 43 | Stiffness and mass on a 2D mesh with three displacement components (the shared kernel of the elastic cross-section models).
-axisym        | Axisymmetric kernel | axisym.rs | 43 | Elastic modes of a body of revolution on its half-plane cross-section.
+crosssection  | Axisymmetric study kernel | cross_section.rs | 43, 68, 69 | Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages).
+axisym        | Axisymmetric kernel | axisym.rs | 43, 69 | Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions and the cylindrical PML stretch.
 floquet       | Floquet kernel | floquet.rs | 42 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals).
 pml           | Absorbing-layer kernel | pml.rs | 42 | Eigenfrequencies of elastic bodies with perfectly matched layers.
 lrb           | Low-reflecting boundary | lrb.rs | 42 | Low-reflecting boundaries for solid mechanics.
@@ -123,7 +123,7 @@ laksp       | Krylov solvers | linalg/ksp/ | 33, 8 | CG, MINRES, GMRES, BiCGStab
 laeigen     | Eigensolvers | linalg/eps/ linalg/lobpcg.rs linalg/jd.rs linalg/toar.rs linalg/nep.rs linalg/nleigs.rs linalg/chebfsi.rs linalg/contour.rs linalg/arnoldi_real.rs linalg/sens.rs | 33, 8, 11 | Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities.
 laprecond   | Preconditioners | linalg/amg.rs linalg/amg_elastic/ linalg/ams.rs linalg/ads.rs linalg/schwarz.rs linalg/fieldsplit.rs linalg/ilu.rs | 33, 8 | Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations.
 laother     | Time, nonlinear, sweeps | linalg/ts/ linalg/snes.rs linalg/opt.rs linalg/expm.rs linalg/sweep.rs linalg/matfree.rs | 33, 8 | Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators.
-fem         | Finite-element basics | fem.rs edge.rs fields.rs pml.rs periodic.rs props.rs | 9, 4, 45 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain.
+fem         | Finite-element basics | fem.rs edge.rs fields.rs pml.rs periodic.rs props.rs | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain.
 material    | Material specification | material/ | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader.
 optical     | Optical mode sets | optical.rs | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them.
 section     | Frame and sections | section.rs | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y).

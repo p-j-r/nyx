@@ -13,7 +13,7 @@
 //! with the symmetry of the ring (isotropic, or averaged around the axis with
 //! `average_about_axis`) are exact.
 //!
-//! **The axis `r = 0` (K1, ADR 67).** A mesh may touch the axis (a solid disk, a post, a substrate). The
+//! **The axis `r = 0` (K1, ADR 69).** A mesh may touch the axis (a solid disk, a post, a substrate). The
 //! quadrature rules are interior (`quad_rule` has no point on an edge), so the `1/r` terms are integrated at `r > 0`;
 //! what a body touching the axis needs besides is the regularity of `u(r, z) exp(-i m theta)` there. Finiteness of
 //!
@@ -34,7 +34,7 @@
 //! dofs, not an essential condition; it is not imposed (the energy `1/r` terms act as a penalty on it) and is recorded in
 //! `ROUGH_SPOTS.md`.
 //!
-//! Absorbing layers are the cylindrical coordinate stretch (ADR 67), the one of `nyx-ems` (ADR 46): inside a layer
+//! Absorbing layers are the cylindrical coordinate stretch (ADR 69), the one of `nyx-ems` (ADR 46): inside a layer
 //! `r -> r~ = int s_r dr`, so with `s_theta = r~ / r` every `1/r` above becomes `1/(s_theta r)` and the weight `r dr dz`
 //! becomes `s_theta r s_r s_z dr dz` (`cylindrical_stretches` builds `[s_r, s_z, s_theta]` per cell). The test function carries
 //! the conjugate phase `exp(+i m theta)` only, so the stretch is not conjugated in the test-side strain: the matrices are
@@ -106,7 +106,7 @@ pub fn average_about_axis(c6: &M6, axis: usize, samples: usize) -> M6 {
 /// Per-cell stretch `[s_r, s_z, s_theta]` of the absorbing layers of an axisymmetric model (mesh x = r, mesh y = z). `s_r` and `s_z` are
 /// those of `femcore::pml::cell_stretches`; `s_theta = r~ / r` with the complex radius `r~` of `femcore::pml::radial_coordinate` at the cell
 /// centre, as `AxiMaterial::with_pml` does in `nyx-ems` (ADR 46). A cell outside a layer with a radial (`x`) stretch has `s_theta = 1` exactly,
-/// so a model without such a layer assembles to the same matrices as before (ADR 67).
+/// so a model without such a layer assembles to the same matrices as before (ADR 69).
 pub fn cylindrical_stretches(mesh: &Discretisation, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C; 3]> {
     let mut out = cell_stretches(mesh, pml);
     // radial extent of each layer domain

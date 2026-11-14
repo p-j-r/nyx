@@ -191,7 +191,7 @@ impl Problem {
 }
 
 impl Problem {
-    /// The rules of the axisymmetric study that do not need the mesh (ADR 66): no boundary load, no Floquet pair, no low-reflecting boundary
+    /// The rules of the axisymmetric study that do not need the mesh (ADR 68): no boundary load, no Floquet pair, no low-reflecting boundary
     /// (its damping matrix has no `r` weight, rough spot D1), only zero constraints, and a layer cannot absorb towards the axis. A problem of
     /// another study passes. The mesh rule (the half plane lies in `x >= 0`) is checked by `cross_section::solve_axisymmetric`.
     pub fn check_axisymmetric(&self) -> Result<(), Error> {

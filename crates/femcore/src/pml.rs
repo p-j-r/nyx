@@ -24,7 +24,7 @@ pub fn stretch(p: &Pml, dirs: [PmlDir; 2], centre: [f64; 2], lo: [f64; 2], hi: [
 
 /// The complex radius `r~ = int s_r dr` (from the interface of the layer) of a point at radius `r` for a layer whose `x` direction is the
 /// radial one of an axisymmetric model, `lo` and `hi` being the radial extent of the layer's domain; `r` itself when `p.x` is off.
-/// The cylindrical stretch of the axisymmetric kernels is `s_theta = r~ / r` (ADR 46 for `ems`, ADR 67 for `sms`). Moved here unchanged from
+/// The cylindrical stretch of the axisymmetric kernels is `s_theta = r~ / r` (ADR 46 for `ems`, ADR 69 for `sms`). Moved here unchanged from
 /// `nyx-ems`, which had it inline.
 pub fn radial_coordinate(p: &Pml, r: f64, lo: f64, hi: f64) -> C {
     let len = (hi - lo).max(1e-300);

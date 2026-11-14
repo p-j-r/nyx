@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Solid kernel** (`sms.solid`) in the contain
 > Linear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md)  
-**Size:** 1 file, 739 lines.
+**Size:** 1 file, 746 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/solid.rs` | 739 | Linear elastic solid mechanics on P1/P2 triangles (plane stress or plane strain) and tetrahedra: static solve with boundary loads, prescribed displacements and thermal expansion, eigenfrequencies, stress and von Mises. Moved here from `f... |
+| `crates/nyx-sms/src/solid.rs` | 746 | Linear elastic solid mechanics on P1/P2 triangles (plane stress or plane strain) and tetrahedra: static solve with boundary loads, prescribed displacements and thermal expansion, eigenfrequencies, stress and von Mises. Moved here from `f... |
 
 ## What it uses
 
@@ -19,6 +19,7 @@ C4 level 4 (code) of the component **Solid kernel** (`sms.solid`) in the contain
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fields, linalg::arnoldi_real, linalg::csr, linalg::csr::assembly, linalg::driver, material, par +3 | AMG_THRESHOLD, AmgSystem, C, CellFields, EigOpts, EigPairs, FACTORISE_MAX_FREE, LOBPCG_MAX_FACTOR, LOBPCG_MIN_FREE, LinearSolver +19 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | Discretisation, Field, Scalar, Solution, SolveResult, cell_fields_of |
+| [Axisymmetric study kernel](./crosssection.md) | cross_section | solve_axisymmetric |
 | [Floquet kernel](./floquet.md) | floquet | solve_floquet |
 | [Low-reflecting boundary](./lrb.md) | lrb | solve_lrb |
 | [Absorbing-layer kernel](./pml.md) | pml | solve_solid_pml |
@@ -96,4 +97,4 @@ classDiagram
 | fn | `assemble_static` | `solid.rs:512` | `pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr) -> Result<StaticAssembly, String>` |
 | fn | `solve_static` | `solid.rs:552` | `pub fn solve_static( mesh: &Discretisation, spec: &Problem, st: &Setup, asm: &StaticAssembly, ) -> Result<(Vec<f64>, Option<String>), String>` —  Stage 2: the displacement (component blocks) by the linear solver `spec.solver` names, and its note. |
 | fn | `solve_solid` | `solid.rs:565` | `pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting |
-| fn | `centroid_stress` | `solid.rs:703` | `pub fn centroid_stress(mesh: &Discretisation, u: &[f64], c6: &[M6], plane: Plane, order: usize) -> Vec<Vec<f64>>` —  Element-wise stress at the centroid of every cell, one row per cell: |
+| fn | `centroid_stress` | `solid.rs:710` | `pub fn centroid_stress(mesh: &Discretisation, u: &[f64], c6: &[M6], plane: Plane, order: usize) -> Vec<Vec<f64>>` —  Element-wise stress at the centroid of every cell, one row per cell: |
