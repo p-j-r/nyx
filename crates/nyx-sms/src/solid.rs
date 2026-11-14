@@ -563,6 +563,9 @@ pub(crate) use femcore::progress::lap_since as lap;
 /// Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting
 /// boundaries in their own modules. The result carries `physics`, `study`, `order`, `dim`, the solutions, scalars, log, time and dofs.
 pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+    if matches!(spec.study, Study::AxisymmetricEigenfrequency { .. }) {
+        return crate::cross_section::solve_axisymmetric(mesh, spec);
+    }
     let t0 = Instant::now();
     let mut tl = Instant::now();
     let mut result = solve_variant(mesh, spec, t0, &mut tl)?;
@@ -576,6 +579,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
     if spec.materials.has_pml() {
         return match spec.study {
             Study::Eigenfrequency { .. } => crate::pml::solve_solid_pml(mesh, spec),
+            Study::AxisymmetricEigenfrequency { .. } => crate::cross_section::solve_axisymmetric(mesh, spec),
             _ => Err(
                 "perfectly matched layers are used with the Eigenfrequency study (they give complex frequencies and Q)"
                     .into(),
@@ -590,6 +594,9 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
     let k = assemble_solid(mesh, &st.c6, order, spec.plane, thk);
     lap(tl, "stiffness assembly");
     match &spec.study {
+        Study::AxisymmetricEigenfrequency { .. } => {
+            Err("the axisymmetric study is solved by cross_section::solve_axisymmetric".into())
+        }
         Study::Static => {
             let asm = assemble_static(mesh, spec, &st, k)?;
             lap(tl, "loads");

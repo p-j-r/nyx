@@ -1,4 +1,121 @@
 {
+  "axisymmetric_eigenfrequency": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "layer fraction 1",
+      "f2 (Hz)",
+      "layer fraction 2",
+      "f3 (Hz)",
+      "layer fraction 3"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz",
+          "uy"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|u|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re ux",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uz",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uy",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|uy|",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "Re ux",
+          "Re uz",
+          "Re uy",
+          "|uy|"
+        ],
+        "has_value": true,
+        "label": "mode 1: 78.838574 Hz"
+      }
+    ],
+    "study": "axisymmetric_eigenfrequency"
+  },
+  "axisymmetric_eigenfrequency_pml": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "Q1",
+      "layer fraction 1",
+      "f2 (Hz)",
+      "Q2",
+      "layer fraction 2",
+      "f3 (Hz)",
+      "Q3",
+      "layer fraction 3"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz",
+          "uy"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|u|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re ux",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uz",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uy",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|uy|",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "Re ux",
+          "Re uz",
+          "Re uy",
+          "|uy|"
+        ],
+        "has_value": true,
+        "label": "mode 1: 7.679254e1 +1.396e1i Hz (Q = 2.751e0)"
+      }
+    ],
+    "study": "axisymmetric_eigenfrequency"
+  },
   "eigenfrequency": {
     "physics": "sms",
     "scalars": [

@@ -66,6 +66,35 @@ pub fn solve_solid_axisym(mesh: &Discretisation, spec: &Problem, m: f64) -> Resu
     solve_cross_section(mesh, spec, CrossSection::Axisymmetric(m))
 }
 
+/// The axisymmetric eigenfrequency study (ADR 66): the azimuthal order is taken from the study, the result carries `physics` and `study`.
+/// Refuses what the study cannot say (`Problem::check_axisymmetric`) and a mesh that leaves the half plane `x >= 0`; with absorbing layers the
+/// frequencies are complex (`Q` and `layer fraction` scalars, `eigenvalue` on every mode).
+pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    let Study::AxisymmetricEigenfrequency { azimuthal_order, .. } = problem.study else {
+        return Err("solve_axisymmetric needs the axisymmetric_eigenfrequency study".into());
+    };
+    problem.check_axisymmetric().map_err(|e| e.to_string())?;
+    check_half_plane(mesh)?;
+    let (mut result, _) = solve_cross_section(mesh, problem, CrossSection::Axisymmetric(azimuthal_order as f64))?;
+    result.physics = "sms".into();
+    result.study = problem.study.kind().into();
+    // the study reads neither the plane assumption nor the thickness: say so when one was set
+    if problem.plane != Plane::Strain || problem.thickness != 1.0 {
+        result.log.push("axisymmetric study: the 2D parameters plane and thickness are not used".into());
+    }
+    Ok(result)
+}
+
+/// The (r, z) half plane lies in `x >= 0` (up to 1e-9 of the width of the mesh).
+fn check_half_plane(mesh: &Discretisation) -> Result<(), String> {
+    let xs = (0..mesh.n_points()).map(|i| mesh.point(i)[0]);
+    let (lo, hi) = xs.fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), x| (l.min(x), h.max(x)));
+    if lo < -1e-9 * (hi - lo).abs() {
+        return Err(format!("the (r, z) half plane must lie in x >= 0 (x = r): the mesh reaches x = {lo:.6e}"));
+    }
+    Ok(())
+}
+
 pub fn solve_cross_section(
     mesh: &Discretisation,
     spec: &Problem,
@@ -111,8 +140,10 @@ pub fn assemble_cross_section(
     if mesh.dim != 2 {
         return Err("a cross-section model needs a 2D mesh".into());
     }
-    let Study::Eigenfrequency { n_modes, f_search } = spec.study.clone() else {
-        return Err("the cross-section solid models need an Eigenfrequency study".into());
+    let (Study::Eigenfrequency { n_modes, f_search } | Study::AxisymmetricEigenfrequency { n_modes, f_search, .. }) =
+        spec.study.clone()
+    else {
+        return Err("the cross-section solid models need an eigenfrequency study".into());
     };
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
@@ -305,8 +336,7 @@ pub fn cross_section_fields(
     // mass weights `rho r` over all cells and over the cells of the layers only
     let any_pml = asm.pml_cells.iter().any(|&p| p);
     let (m_all, m_pml) = if any_pml {
-        let rho_pml: Vec<f64> =
-            asm.rho.iter().zip(&asm.pml_cells).map(|(r, &p)| if p { *r } else { 0.0 }).collect();
+        let rho_pml: Vec<f64> = asm.rho.iter().zip(&asm.pml_cells).map(|(r, &p)| if p { *r } else { 0.0 }).collect();
         (
             Some(crate::axisym::assemble_mass_axisym(mesh, &asm.rho, order, None)),
             Some(crate::axisym::assemble_mass_axisym(mesh, &rho_pml, order, None)),
@@ -370,7 +400,6 @@ pub fn cross_section_fields(
                 cell_fields: cell_fields_of(&cells),
                 value: Some(freq),
                 eigenvalue: Some([fz.re, fz.im]),
-                ..Default::default()
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", fz.re, fz.im))));
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
@@ -381,7 +410,6 @@ pub fn cross_section_fields(
                 cell_fields: cell_fields_of(&cells),
                 value: Some(freq),
                 eigenvalue: Some([fz.re, fz.im]),
-                ..Default::default()
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
         }

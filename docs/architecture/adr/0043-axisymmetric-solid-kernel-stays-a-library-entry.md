@@ -4,7 +4,7 @@ Date: 2026-11-04
 
 ## Status
 
-Accepted (restructure phase 4, bookmark `restructure-4-sms`). Follows the gate answer G1 (keep the axisymmetric kernels, with a verification note) and ADR 24 (the out-of-plane wave-number model is removed).
+Amended by ADR 66: the library entry stays, the study `axisymmetric_eigenfrequency` is added. Accepted (restructure phase 4, bookmark `restructure-4-sms`). Follows the gate answer G1 (keep the axisymmetric kernels, with a verification note) and ADR 24 (the out-of-plane wave-number model is removed).
 
 ## Context
 

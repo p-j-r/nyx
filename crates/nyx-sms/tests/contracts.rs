@@ -29,6 +29,34 @@ fn example() -> ProblemSpec {
     s
 }
 
+fn axisymmetric_example() -> ProblemSpec {
+    let mut s = ProblemSpec::new("sms", 2, "axisymmetric_eigenfrequency");
+    s.study.params = json!({ "n_modes": 6, "f_search": 715e6, "azimuthal_order": 0 });
+    s.materials.insert(
+        "disk".into(),
+        MaterialAssign::Props([("E".to_string(), 160e9), ("nu".to_string(), 0.22), ("rho".to_string(), 2330.0)].into()),
+    );
+    s.bcs.push(BcSpec { on: "outer".into(), kind: "fixed".into(), params: json!({ "ux": 0.0, "uz": 0.0, "uy": 0.0 }) });
+    s.bcs.push(BcSpec {
+        on: "substrate_pml".into(),
+        kind: "pml".into(),
+        params: json!({ "x": "plus", "z": "minus", "strength": 40.0, "order": 1.0 }),
+    });
+    s
+}
+
+#[test]
+fn the_axisymmetric_study_example_passes_validation() {
+    validate_spec(&Sms, &axisymmetric_example()).unwrap();
+    // its parameters are checked against the descriptors: a fractional azimuthal order and an unknown parameter are refused
+    let mut bad = axisymmetric_example();
+    bad.study.params = json!({ "n_modes": 6, "f_search": 715e6, "azimuthal_order": 0.5 });
+    assert!(validate_spec(&Sms, &bad).is_err());
+    let mut bad = axisymmetric_example();
+    bad.study.params = json!({ "n_modes": 6, "wave_number": 1.0 });
+    assert!(validate_spec(&Sms, &bad).is_err());
+}
+
 #[test]
 fn descriptors_exemplar_is_stable() {
     let v = contract::descriptor_snapshot(&Sms);
@@ -273,6 +301,7 @@ fn kernel_stage_api_is_public() {
         cross_section::assemble_cross_section,
         cross_section::solve_cross_section_modes,
         cross_section::cross_section_fields,
+        cross_section::solve_axisymmetric,
     );
     let _ = (axisym::assemble_stiffness_axisym, axisym::assemble_mass_axisym, axisym::average_about_axis);
     let _ = (nyx_sms::solve_solid, nyx_sms::solve_solid_axisym, nyx_sms::run, nyx_sms::decode);
@@ -326,12 +355,41 @@ fn result_shape_exemplar_is_stable() {
     floquet.bcs.clear();
     floquet.study = Study::Eigenfrequency { n_modes: 2, f_search: 1.0e3 };
     floquet.periodic = vec![Periodic { source: vec![1], dest: vec![4], phase: 1.2 }];
+    let mut axi = eigen.clone();
+    axi.study = Study::AxisymmetricEigenfrequency { n_modes: 2, f_search: 0.0, azimuthal_order: 0 };
+    axi.bcs = vec![clamp.clone()];
+    let mut axi_pml = axi.clone();
+    axi_pml.materials.pml.insert(1, Pml { x: PmlDir::Plus, strength: 0.1, order: 0.0, ..Pml::default() });
+    // the half plane must lie in x >= 0: the same bar moved to r = 1 .. 2
+    let ring = {
+        let flat = femcore::testkit::rect(1.0, 0.1, 12, 2);
+        let mut pts = flat.points.clone();
+        for i in 0..flat.n_points() {
+            pts[2 * i] += 1.0;
+        }
+        femcore::mesh::SimplexMesh::new(
+            2,
+            pts,
+            flat.cells.clone(),
+            flat.cell_labels.clone(),
+            flat.facets.clone(),
+            flat.facet_labels.clone(),
+        )
+    };
+    let ring_ex = exchange(&ring);
+    let run_ring = |p: &Problem| {
+        let mut r = nyx_sms::run(&ring_ex, p, &femcore::progress::Progress::new()).unwrap();
+        r.solutions.truncate(1);
+        result_shape(&r)
+    };
     let got = json!({
         "static": run(&stat),
         "eigenfrequency": run(&eigen),
         "eigenfrequency_pml": run(&with_pml),
         "eigenfrequency_low_reflecting": run(&with_lrb),
         "eigenfrequency_floquet": run(&floquet),
+        "axisymmetric_eigenfrequency": run_ring(&axi),
+        "axisymmetric_eigenfrequency_pml": run_ring(&axi_pml),
     });
     contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_sms_result.v1.json", &got);
 }
