@@ -195,3 +195,104 @@ fn a_finer_mesh_is_compared_for_the_complex_eigenvalues_of_the_axisymmetric_stud
     assert!(quantities.contains(&"eigenvalue[0].re") && quantities.contains(&"eigenvalue[0].im"), "{quantities:?}");
     assert_eq!(e.project().to_json(), before, "the project is not changed");
 }
+
+/// ADR 80: a mode of the axisymmetric study carries numeric frequency parts and energy shares, the shares per region under the region names.
+#[test]
+fn the_modes_of_the_disk_on_a_post_carry_what_identifies_them() {
+    let (e, _) = solved("17_disk_anchor_loss");
+    let res = e.result("sms").expect("a result").0.clone();
+    let num = |name: &str| match res.scalars.iter().find(|(n, _)| n == name) {
+        Some((_, nyx_physics::Scalar::Num(x))) => *x,
+        other => panic!("scalar '{name}' is not a number: {other:?}"),
+    };
+    assert!(!res.scalars.iter().any(|(n, _)| n.contains("domain")), "the regions are named, not numbered");
+    for (j, s) in res.solutions.iter().enumerate() {
+        let (j1, [re, im]) = (j + 1, s.eigenvalue.unwrap());
+        assert_eq!((num(&format!("f re {j1} (Hz)")), num(&format!("f im {j1} (Hz)"))), (re, im));
+        let parts = num(&format!("radial share {j1}"))
+            + num(&format!("axial share {j1}"))
+            + num(&format!("azimuthal share {j1}"));
+        let regions = num(&format!("share in disk {j1}"))
+            + num(&format!("share in post {j1}"))
+            + num(&format!("share in substrate {j1}"));
+        assert!((parts - 1.0).abs() < 1e-9 && (regions - 1.0).abs() < 1e-9, "mode {j1}: {parts}, {regions}");
+    }
+    // the contour mode (a small layer fraction, nearest the free disk's 4.6e8 Hz) is radial and sits in the disk
+    let best = (1..=res.solutions.len())
+        .filter(|j| num(&format!("layer fraction {j}")) < 0.2 && num(&format!("azimuthal share {j}")) < 0.1)
+        .min_by(|a, b| {
+            (num(&format!("f re {a} (Hz)")) - 4.6e8).abs().total_cmp(&(num(&format!("f re {b} (Hz)")) - 4.6e8).abs())
+        })
+        .expect("a mode outside the layers");
+    let (radial, disk) = (num(&format!("radial share {best}")), num(&format!("share in disk {best}")));
+    println!("contour mode {best}: radial share {radial:.3}, share in disk {disk:.3}");
+    assert!(radial > 0.5 && disk > 0.5, "radial {radial}, disk {disk}");
+}
+
+/// ADR 80: `convergence_check` pairs the modes of the two meshes by their eigenvalues, or follows one mode; by index nothing changes.
+#[test]
+fn a_convergence_check_follows_the_modes_when_their_order_changes() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": file("17_disk_anchor_loss").to_str().unwrap() })).unwrap();
+    e.call("solve_run", &json!({})).unwrap();
+    let before = e.project().to_json();
+    let args = |extra: Value| {
+        let mut a = json!({ "physics": "sms", "factor": 0.7, "tolerance": 0.5 });
+        a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        a
+    };
+    let by_index = e.call("convergence_check", &args(json!({}))).unwrap();
+    assert!(by_index.get("pairs").is_none() && by_index.get("match").is_none(), "{by_index}");
+
+    let near = e.call("convergence_check", &args(json!({ "match": "nearest" }))).unwrap();
+    println!("{}", serde_json::to_string_pretty(&near).unwrap());
+    assert_eq!(near["match"], "nearest");
+    let pairs = near["pairs"].as_array().unwrap();
+    assert!(!pairs.is_empty(), "{near}");
+    let n_coarse = e.result("sms").unwrap().0.solutions.len();
+    assert_eq!(
+        pairs.len() + near["unpaired"]["coarse"].as_array().unwrap().len(),
+        n_coarse,
+        "every mode is paired or listed"
+    );
+    let worst = near["worst_relative"].as_f64().unwrap();
+    assert!(worst.is_finite(), "{near}");
+    for p in pairs {
+        let i = p["coarse"].as_u64().unwrap();
+        let name = format!("eigenvalue[{i}].re");
+        let row = near["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["quantity"] == name.as_str())
+            .unwrap_or_else(|| panic!("{name}"));
+        assert!(
+            row["relative"].as_f64().unwrap().is_finite() && p["distance"].as_f64().unwrap().is_finite(),
+            "{row} {p}"
+        );
+    }
+    // the rows of a paired mode include its own scalars under its index on the present mesh
+    let first = pairs[0]["coarse"].as_u64().unwrap() + 1;
+    let quantity = format!("scalar layer fraction {first}");
+    assert!(near["rows"].as_array().unwrap().iter().any(|r| r["quantity"] == quantity.as_str()), "{quantity}: {near}");
+
+    let track = e.call("convergence_check", &args(json!({ "track": { "f": 4.6e8 } }))).unwrap();
+    assert_eq!(track["match"], "track");
+    assert_eq!(track["pairs"].as_array().unwrap().len(), 1, "{track}");
+    let i = track["pairs"][0]["coarse"].as_u64().unwrap();
+    let rows = track["rows"].as_array().unwrap();
+    assert!(rows.iter().all(|r| {
+        let q = r["quantity"].as_str().unwrap();
+        q.contains(&format!("[{i}]")) || q.starts_with("scalar ")
+    }));
+    assert_eq!(
+        rows.iter().filter(|r| r["quantity"].as_str().unwrap().ends_with(".re")).count(),
+        1,
+        "one mode: {track}"
+    );
+
+    assert!(e.call("convergence_check", &args(json!({ "match": "closest" }))).is_err());
+    assert!(e.call("convergence_check", &args(json!({ "track": { "g": 1.0 } }))).is_err());
+    assert!(e.call("convergence_check", &args(json!({ "match": "index", "track": { "f": 4.6e8 } }))).is_err());
+    assert_eq!(e.project().to_json(), before, "the project is not changed");
+}

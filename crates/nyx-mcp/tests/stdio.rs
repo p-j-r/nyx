@@ -197,8 +197,17 @@ fn a_host_finds_the_axisymmetric_solid_study_and_gets_a_quality_factor_for_a_dis
     let res = &info["result"][0];
     assert_eq!(res["study"], "axisymmetric_eigenfrequency", "{res}");
     let scalars = res["scalars"].to_string();
-    for name in ["Q1", "layer fraction 1", "f1 (Hz)"] {
+    for name in ["Q1", "layer fraction 1", "f1 (Hz)", "f re 1 (Hz)", "f im 1 (Hz)", "radial share 1", "share in disk 1"] {
         assert!(scalars.contains(name), "the result carries {name}: {scalars}");
     }
     assert!(res["solutions"][0]["eigenvalue"].as_array().is_some_and(|e| e.len() == 2), "{res}");
+
+    // the convergence check pairs the modes of the two meshes, or follows one (ADR 80)
+    let near = ok(&h.tool("convergence_check", json!({ "physics": "sms", "factor": 0.7, "match": "nearest" })));
+    assert_eq!(near["match"], "nearest", "{near}");
+    assert!(near["pairs"].as_array().is_some_and(|p| !p.is_empty()) && near["unpaired"]["coarse"].is_array(), "{near}");
+    let track = ok(&h.tool("convergence_check", json!({ "physics": "sms", "factor": 0.7, "track": { "f": 4.6e8 } })));
+    assert_eq!(track["pairs"].as_array().map(Vec::len), Some(1), "{track}");
+    let bad = h.tool("convergence_check", json!({ "physics": "sms", "match": "closest" }));
+    assert_eq!(bad["result"]["isError"], true, "{bad}");
 }
