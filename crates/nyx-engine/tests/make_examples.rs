@@ -361,6 +361,38 @@ fn soi_hybrid_wire() -> B {
     )
 }
 
+/// A polysilicon-like disk on a post on a substrate, a body of revolution (the half plane has x = r): axisymmetric vibration modes with absorbing
+/// layers to the right and below, so the radial contour mode of the disk has a complex frequency and a quality factor set by anchor loss. The
+/// material constants are the usual ones for polysilicon, not those of a particular paper.
+fn disk_anchor_loss() -> B {
+    let um = 1e-6;
+    let (xw, zw, t) = (16.0 * um, 8.0 * um, 5.0 * um);
+    let mut b = B::new(
+        "Disk on a post on a substrate: anchor loss of a body of revolution (axisymmetric solid eigenfrequencies, complex frequency and Q)",
+        2,
+        um,
+    );
+    b.rect("substrate_box", [0.0, -zw - 0.5 * um - t], [xw + t, -0.5 * um]);
+    b.rect("post_box", [0.0, -0.5 * um], [0.8 * um, 0.0]);
+    b.rect("disk_box", [0.0, 0.0], [6.0 * um, um]);
+    b.rect("window", [0.0, -zw - 0.5 * um], [xw, 3.0 * um]);
+    b.overlay(&[("substrate", "substrate_box"), ("post", "post_box"), ("disk", "disk_box")]);
+    // layers to the right and below only: the axis is x = 0 and the top is free
+    b.c(
+        "add_pml",
+        json!({ "name": "pml", "window": "window", "sides": ["XMax", "ZMin"], "thickness": t, "layers": 3.0, "grading": 2.0, "regions": ["substrate"] }),
+    );
+    b.c("add_size", json!({ "name": "size_disk", "sel": "region(disk) | region(post)", "h": 0.4 * um }));
+    b.physics("sms", "axisymmetric_eigenfrequency", json!({ "n_modes": 8, "f_search": 4.6e8, "azimuthal_order": 0 }), 2);
+    for r in ["substrate*", "post", "disk"] {
+        b.material("sms", r, json!({ "E": 160e9, "nu": 0.22, "rho": 2330.0 }));
+    }
+    b.c("add_pml_conditions", json!({ "physics": "sms", "strength": 3.0 }));
+    b.bc("sms", &format!("outer & plane(x = {})", xw + t), "fixed", FIXED());
+    b.bc("sms", &format!("outer & plane(z = {})", -zw - 0.5 * um - t), "fixed", FIXED());
+    b
+}
+
 #[test]
 #[ignore = "writes examples/ at the repository root"]
 fn write_the_examples() {
@@ -380,4 +412,5 @@ fn write_the_examples() {
     box_cavity().save("14_box_cavity");
     soi_wire().save("15_soi_wire");
     soi_hybrid_wire().save("16_soi_hybrid_wire");
+    disk_anchor_loss().save("17_disk_anchor_loss");
 }

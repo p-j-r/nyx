@@ -39,7 +39,7 @@ fn every_example_file_opens_and_passes_the_checks() {
         e.call("geometry_names", &json!({})).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
         n += 1;
     }
-    assert!(n >= 16, "{n} examples");
+    assert!(n >= 17, "{n} examples");
 }
 
 #[test]
@@ -144,4 +144,54 @@ fn a_finer_mesh_confirms_or_refutes_a_number_through_convergence_check() {
     let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.5, "tolerance": 1e-6 })).unwrap();
     assert_eq!(r["converged"], false, "{r}");
     assert!(e.call("convergence_check", &json!({ "physics": "ems", "factor": 1.5 })).is_err());
+}
+
+#[test]
+fn the_disk_on_a_post_has_a_contour_mode_with_a_quality_factor_from_anchor_loss() {
+    let (e, r) = solved("17_disk_anchor_loss");
+    assert!(r["results"].as_array().is_some_and(|a| !a.is_empty()), "{r}");
+    let res = e.result("sms").expect("a result").0.clone();
+    assert_eq!(res.study, "axisymmetric_eigenfrequency");
+    let num = |name: &str| {
+        res.scalars.iter().find(|(n, _)| n == name).and_then(|(_, v)| match v {
+            nyx_physics::Scalar::Num(x) => Some(*x),
+            _ => None,
+        })
+    };
+    // every mode carries [Re f, Im f] and a layer fraction; the lossy ones a Q
+    for (j, s) in res.solutions.iter().enumerate() {
+        let [re, im] = s.eigenvalue.expect("an eigenvalue");
+        let lf = num(&format!("layer fraction {}", j + 1)).expect("layer fraction");
+        let q = num(&format!("Q{}", j + 1));
+        println!("mode {}: f = {re:.5e} {im:+.3e}i Hz, layer fraction {lf:.3}, Q {q:?}", j + 1);
+    }
+    // the radial contour mode of the free disk, lambda = 2.05 of lambda J0 / J1 = 1 - nu: f = lambda c / (2 pi R), c = sqrt(E / (rho (1 - nu^2)))
+    let c = (160e9_f64 / (2330.0 * (1.0 - 0.22 * 0.22))).sqrt();
+    let want = 2.05 * c / (2.0 * std::f64::consts::PI * 6e-6);
+    let best = res
+        .solutions
+        .iter()
+        .enumerate()
+        .filter(|(j, _)| num(&format!("layer fraction {}", j + 1)).unwrap() < 0.2)
+        .min_by(|a, b| (a.1.eigenvalue.unwrap()[0] - want).abs().total_cmp(&(b.1.eigenvalue.unwrap()[0] - want).abs()))
+        .expect("a mode that sits in the disk");
+    let f = best.1.eigenvalue.unwrap()[0];
+    let q = num(&format!("Q{}", best.0 + 1)).expect("a quality factor (the anchor loses energy)");
+    println!("contour mode: {f:.5e} Hz against the free disk {want:.5e} Hz, Q = {q}");
+    assert!((f / want - 1.0).abs() < 0.15, "{f} against {want}");
+    assert!(q.is_finite() && q > 1.0, "Q = {q}");
+}
+
+#[test]
+fn a_finer_mesh_is_compared_for_the_complex_eigenvalues_of_the_axisymmetric_study() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": file("17_disk_anchor_loss").to_str().unwrap() })).unwrap();
+    e.call("solve_run", &json!({})).unwrap();
+    let before = e.project().to_json();
+    let r = e.call("convergence_check", &json!({ "physics": "sms", "factor": 0.7, "tolerance": 0.5 })).unwrap();
+    println!("{}", serde_json::to_string_pretty(&r).unwrap());
+    assert!(r["cells"]["refined"].as_u64().unwrap() > r["cells"]["coarse"].as_u64().unwrap(), "{r}");
+    let quantities: Vec<&str> = r["rows"].as_array().unwrap().iter().filter_map(|x| x["quantity"].as_str()).collect();
+    assert!(quantities.contains(&"eigenvalue[0].re") && quantities.contains(&"eigenvalue[0].im"), "{quantities:?}");
+    assert_eq!(e.project().to_json(), before, "the project is not changed");
 }

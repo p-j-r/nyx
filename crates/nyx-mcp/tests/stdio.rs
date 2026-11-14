@@ -155,3 +155,50 @@ fn a_host_builds_a_wire_solves_it_and_the_work_is_a_stored_workflow() {
     let folder = status["store"]["folder"].as_str().expect("bound to a workflow folder");
     assert!(std::path::Path::new(folder).join("workflow.json").exists(), "{folder}");
 }
+
+#[test]
+fn a_host_finds_the_axisymmetric_solid_study_and_gets_a_quality_factor_for_a_disk_on_a_post() {
+    let mut h = Host::start();
+    h.init("2025-06-18");
+    // the study is in the description of sms with its three parameters
+    let d = ok(&h.tool("describe_physics", json!({ "physics": "sms" })));
+    let study = d["studies"].as_array().unwrap().iter().find(|s| s["kind"] == "axisymmetric_eigenfrequency").unwrap_or_else(|| panic!("{d}"));
+    let params: Vec<&str> = study["params"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert_eq!(params, ["n_modes", "f_search", "azimuthal_order"], "{study}");
+
+    // a disk (r 0 to 6 um) on a post on a substrate, layers to the right and below, as the engine example 17 (x is r)
+    let um = 1e-6;
+    let (xw, zw, t) = (16.0 * um, 8.0 * um, 5.0 * um);
+    let steps: Vec<(&str, Value)> = vec![
+        ("project_new", json!({ "title": "disk on a post", "dim": 2, "h": um })),
+        ("add_rect", json!({ "name": "substrate_box", "min": [0.0, -zw - 0.5 * um - t], "max": [xw + t, -0.5 * um] })),
+        ("add_rect", json!({ "name": "post_box", "min": [0.0, -0.5 * um], "max": [0.8 * um, 0.0] })),
+        ("add_rect", json!({ "name": "disk_box", "min": [0.0, 0.0], "max": [6.0 * um, um] })),
+        ("add_rect", json!({ "name": "window", "min": [0.0, -zw - 0.5 * um], "max": [xw, 3.0 * um] })),
+        ("add_overlay", json!({ "name": "regions", "regions": [
+            { "name": "substrate", "input": "substrate_box" }, { "name": "post", "input": "post_box" }, { "name": "disk", "input": "disk_box" } ] })),
+        ("add_pml", json!({ "name": "pml", "window": "window", "sides": ["XMax", "ZMin"], "thickness": t, "layers": 3.0, "grading": 2.0, "regions": ["substrate"] })),
+        ("add_size", json!({ "name": "size_disk", "sel": "region(disk) | region(post)", "h": 0.4 * um })),
+        ("add_physics", json!({ "physics": "sms", "study": "axisymmetric_eigenfrequency", "order": 2,
+            "study_params": { "n_modes": 8, "f_search": 4.6e8, "azimuthal_order": 0 } })),
+        ("set_material", json!({ "physics": "sms", "region": "substrate*", "material": { "E": 160e9, "nu": 0.22, "rho": 2330.0 } })),
+        ("set_material", json!({ "physics": "sms", "region": "post", "material": { "E": 160e9, "nu": 0.22, "rho": 2330.0 } })),
+        ("set_material", json!({ "physics": "sms", "region": "disk", "material": { "E": 160e9, "nu": 0.22, "rho": 2330.0 } })),
+        ("add_pml_conditions", json!({ "physics": "sms", "strength": 3.0 })),
+        ("add_condition", json!({ "physics": "sms", "on": format!("outer & plane(x = {})", xw + t), "kind": "fixed", "params": { "ux": 0.0, "uy": 0.0, "uz": 0.0 } })),
+        ("add_condition", json!({ "physics": "sms", "on": format!("outer & plane(z = {})", -zw - 0.5 * um - t), "kind": "fixed", "params": { "ux": 0.0, "uy": 0.0, "uz": 0.0 } })),
+    ];
+    for (tool, args) in steps {
+        ok(&h.tool(tool, args));
+    }
+    let solved = ok(&h.tool("solve_run", json!({})));
+    assert_eq!(solved["results"][0]["physics"], "sms", "{solved}");
+    let info = ok(&h.tool("result_info", json!({ "physics": "sms" })));
+    let res = &info["result"][0];
+    assert_eq!(res["study"], "axisymmetric_eigenfrequency", "{res}");
+    let scalars = res["scalars"].to_string();
+    for name in ["Q1", "layer fraction 1", "f1 (Hz)"] {
+        assert!(scalars.contains(name), "the result carries {name}: {scalars}");
+    }
+    assert!(res["solutions"][0]["eigenvalue"].as_array().is_some_and(|e| e.len() == 2), "{res}");
+}

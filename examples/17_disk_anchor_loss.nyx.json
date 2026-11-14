@@ -1,0 +1,258 @@
+{
+  "active": "sms",
+  "format": 1,
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "substrate_box",
+        "op": {
+          "Rect": {
+            "max": [
+              0.000021,
+              -5e-7
+            ],
+            "min": [
+              0.0,
+              -0.0000135
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "post_box",
+        "op": {
+          "Rect": {
+            "max": [
+              8e-7,
+              0.0
+            ],
+            "min": [
+              0.0,
+              -5e-7
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "disk_box",
+        "op": {
+          "Rect": {
+            "max": [
+              6e-6,
+              1e-6
+            ],
+            "min": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "window",
+        "op": {
+          "Rect": {
+            "max": [
+              0.000016,
+              3e-6
+            ],
+            "min": [
+              0.0,
+              -8.5e-6
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 5,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "substrate",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "post",
+                "pinned_id": null
+              },
+              {
+                "input": 3,
+                "kind": "Material",
+                "name": "disk",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 6,
+        "name": "pml",
+        "op": {
+          "Pml": {
+            "grading": 2.0,
+            "layers": 3.0,
+            "regions": [
+              "substrate"
+            ],
+            "sides": [
+              "XMax",
+              "ZMin"
+            ],
+            "thickness": 4.9999999999999996e-6,
+            "window": 4
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 7,
+        "name": "size_disk",
+        "op": {
+          "Size": {
+            "h": 4e-7,
+            "max_deviation": null,
+            "min_layers": null,
+            "sel": {
+              "Union": [
+                {
+                  "Region": "disk"
+                },
+                {
+                  "Region": "post"
+                }
+              ]
+            }
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "format": 1,
+    "params": []
+  },
+  "mesh": {
+    "h": 1e-6
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "pml",
+          "on": "substrate.pml_xmax",
+          "params": {
+            "order": 2.0,
+            "re": 1.0,
+            "strength": 3.0,
+            "x": "plus",
+            "y": "off",
+            "z": "off"
+          }
+        },
+        {
+          "kind": "pml",
+          "on": "substrate.pml_zmin",
+          "params": {
+            "order": 2.0,
+            "re": 1.0,
+            "strength": 3.0,
+            "x": "off",
+            "y": "off",
+            "z": "minus"
+          }
+        },
+        {
+          "kind": "pml",
+          "on": "substrate.pml_xmax_zmin",
+          "params": {
+            "order": 2.0,
+            "re": 1.0,
+            "strength": 3.0,
+            "x": "plus",
+            "y": "off",
+            "z": "minus"
+          }
+        },
+        {
+          "kind": "fixed",
+          "on": "outer & plane(x = 0.000021)",
+          "params": {
+            "ux": 0.0,
+            "uy": 0.0,
+            "uz": 0.0
+          }
+        },
+        {
+          "kind": "fixed",
+          "on": "outer & plane(z = -0.0000135)",
+          "params": {
+            "ux": 0.0,
+            "uy": 0.0,
+            "uz": 0.0
+          }
+        }
+      ],
+      "format": 1,
+      "materials": {
+        "disk": {
+          "E": 160000000000.0,
+          "nu": 0.22,
+          "rho": 2330.0
+        },
+        "post": {
+          "E": 160000000000.0,
+          "nu": 0.22,
+          "rho": 2330.0
+        },
+        "substrate*": {
+          "E": 160000000000.0,
+          "nu": 0.22,
+          "rho": 2330.0
+        }
+      },
+      "order": 2,
+      "physics": "sms",
+      "study": {
+        "kind": "axisymmetric_eigenfrequency",
+        "params": {
+          "azimuthal_order": 0,
+          "f_search": 460000000.0,
+          "n_modes": 8
+        }
+      }
+    }
+  ],
+  "title": "Disk on a post on a substrate: anchor loss of a body of revolution (axisymmetric solid eigenfrequencies, complex frequency and Q)"
+}
