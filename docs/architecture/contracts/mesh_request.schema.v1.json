@@ -3,6 +3,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "curved": {
+      "default": false,
+      "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface",
+      "type": "boolean"
+    },
     "h": {
       "description": "global element size (m)",
       "exclusiveMinimum": 0,

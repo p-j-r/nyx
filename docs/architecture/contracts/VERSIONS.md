@@ -60,3 +60,10 @@ The file name carries the major version (`.v1.`). A breaking change adds `.v2.` 
 | engine_commands | `engine_commands.v1.json` | 1.5 | 2026-11-12 | additive: `export_results` takes `parallel` (MPI-IO writer, build with `phdf5`) |
 | mcp_tools | `mcp_tools.v2.json` | 2.2 | 2026-11-12 | additive: the `export_results` tool takes `parallel` |
 | results_file | HDF5 layout, version 3 | 3 | 2026-11-12 | additive: root attributes `writer` (`serial` or `parallel`) and `processes`; files written in parallel are the same as serial ones except that their datasets are not chunked or compressed |
+| mesh_cells | `mesh_cells.v1.json` | 1.1 | 2026-11-15 | additive (ADR 82, amends ADR 18): the mesh may carry curved edges, `CellMesh::edge_nodes` (sorted vertex pair and mid-edge node position, empty by default; an edge not listed is straight); the statement "vertices only" is replaced by it |
+| mesh_request | `mesh_request.v1.json`, `mesh_request.schema.v1.json` | 1.1 | 2026-11-15 | additive (ADR 82): `curved` (default false, not serialised when false) |
+| mesh_report | `mesh_report.v1.json`, `mesh_report.schema.v1.json` | 1.1 | 2026-11-15 | additive (ADR 82, 83): `curved` (edges, cells, smallest scaled Jacobian) and `warnings` (size rules a 3D mesh cannot honour), both absent when empty |
+| engine_commands | `engine_commands.v1.json` | 1.6 | 2026-11-15 | additive (ADR 82, 83): `set_mesh` takes `curved`; its handler now accepts `max_dev`, `structured_pml` and `points_per_wavelength`, which the schema listed but the handler refused. Renumber with A3 (`engine_commands` 1.6 is also claimed there) |
+| mcp_tools | `mcp_tools.v2.json` | 2.3 | 2026-11-15 | additive: the `set_mesh` tool takes `curved` (the catalog follows the engine commands) |
+| engine_project | `engine_project.v2.json` | 2.0 | 2026-11-15 | unchanged: `mesh.curved` is optional and absent when false |
+| results_file | HDF5 layout, version 3 | 3 | 2026-11-15 | additive (ADR 82): optional datasets `/mesh/edge_node_pairs` [n, 2] u32 and `/mesh/edge_node_points` [n, 3] f64; a file without them is a straight mesh |

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 > MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project.
 
 **Decisions:** [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md)  
-**Size:** 2 files, 334 lines.
+**Size:** 2 files, 341 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/meshing.rs` | 261 | Meshing seam. `MeshedModel` is a mesh together with the names of the model (regions, boundaries) and the label resolver the physics use; `Mesher` builds one from a feature list. `FemcoreMesher` is the **only** code of the engine that cal... |
+| `crates/nyx-engine/src/meshing.rs` | 268 | Meshing seam. `MeshedModel` is a mesh together with the names of the model (regions, boundaries) and the label resolver the physics use; `Mesher` builds one from a feature list. `FemcoreMesher` is the **only** code of the engine that cal... |
 | `crates/nyx-engine/src/pml.rs` | 73 | Absorbing layers across the two halves of a project: the geometry cuts a region into the physical part and one piece per side of the window (`Pml` feature), the physics stretches the coordinates in each piece (`pml` condition). `add_pml_... |
 
 ## What it uses
@@ -89,8 +89,8 @@ classDiagram
 | fn | `MeshedModel::report` | `meshing.rs:76` | `pub fn report(&self) -> Option<&femcore::meshing::request::MeshReport>` |
 | fn | `MeshedModel::regions` | `meshing.rs:81` | `pub fn regions(&self) -> Vec<(i32, String)>` —  Region labels with their names. |
 | fn | `MeshedModel::info` | `meshing.rs:86` | `pub fn info(&self) -> Value` —  What a person or a host needs to choose names: the regions, the boundary names and the size of the mesh. |
-| fn | `MeshedModel::suggest` | `meshing.rs:230` | `pub fn suggest(&self, labels: &[i32]) -> Vec<String>` —  Selectors, simplest first, that pick exactly the boundaries with these numbers; empty when no selector does. What the window offers |
-| fn | `MeshedModel::boundary_names` | `meshing.rs:257` | `pub fn boundary_names(&self) -> Vec<(i32, String)>` —  The names of the boundaries with their numbers (a boundary name may stand for several numbers). |
+| fn | `MeshedModel::suggest` | `meshing.rs:237` | `pub fn suggest(&self, labels: &[i32]) -> Vec<String>` —  Selectors, simplest first, that pick exactly the boundaries with these numbers; empty when no selector does. What the window offers |
+| fn | `MeshedModel::boundary_names` | `meshing.rs:264` | `pub fn boundary_names(&self) -> Vec<(i32, String)>` —  The names of the boundaries with their numbers (a boundary name may stand for several numbers). |
 | fn | `Engine::add_pml_conditions` | `pml.rs:12` | `pub fn add_pml_conditions(&mut self, physics: &str, strength: f64) -> Result<Value, Error>` —  Adds a `pml` condition for every absorbing piece of the geometry to `physics` (replacing the conditions it had on those pieces). |
 | fn | `Engine::default_targets` | `pml.rs:51` | `pub fn default_targets(&self) -> Vec<String>` —  The physics solved when none is named: the active one and, before it, those of the project that export what it imports (a heat |
 

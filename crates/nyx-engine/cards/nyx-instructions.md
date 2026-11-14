@@ -8,7 +8,7 @@ Conventions
 How to work (one project is open; every tool is a command)
 1. Geometry: add_rect / add_circle / add_polygon ... (list_operations shows all with fields), then add_overlay to name the regions in painter order (a later region wins where they overlap). geometry_names lists regions and boundaries. get_guide topic "geometry".
 2. Physics: list_physics, describe_physics, then add_physics (ems = EM waves, sms = solid mechanics, dfs = diffusion) with its study. Materials: list_materials, then set_material per region (a library name, a name placed at an angle, or numbers). add_material writes your own as TOML.
-3. Conditions: add_condition (kind and parameters from describe_physics). Mesh: set_mesh (h, adapt_scale, physics_sizing), mesh_build.
+3. Conditions: add_condition (kind and parameters from describe_physics). Mesh: set_mesh (h, adapt_scale, physics_sizing, max_dev, curved), mesh_build. In 3D, `curved` true gives the cells on a curved surface (a sphere, say) quadratic geometry so the surface error falls as h^3 instead of h^2; only the `ems` `cavity` study uses it, and `add_size` on a face or `max_dev` refines the mesh next to a curved face.
 4. solve_run (a 2D section takes about a second). convergence_check repeats it on a finer mesh and compares: run it before you quote a number. result_info lists solutions, fields and scalars; result_field reads values; analyse gives the polarization of optical modes.
 5. store_save binds the project to a workspace folder; every later solve is a row in its run table, so the person sees your work in the dashboard.
 

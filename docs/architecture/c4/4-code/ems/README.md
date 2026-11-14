@@ -9,5 +9,5 @@ One page per component, C4 level 4. [Component view](../../3-components/ems.md) 
 | [Mode kernel](./modes.md) | 1 | 438 | 11 | 3 |
 | [Complex-mode kernel](./modescx.md) | 1 | 464 | 8 | 2 |
 | [Axisymmetric kernel](./axisym.md) | 1 | 478 | 17 | 5 |
-| [3D cavity kernel](./cavity.md) | 1 | 746 | 15 | 3 |
+| [3D cavity kernel](./cavity.md) | 1 | 786 | 16 | 3 |
 | [Optical mode sets](./optical.md) | 1 | 97 | 4 | 0 |

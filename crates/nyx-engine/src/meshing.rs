@@ -205,7 +205,14 @@ impl Mesher for FemcoreMesher {
             (None, true) => MesherRequest::Adaptive { scale: 1.0, grade: 0.4, max_cells: Some(2_000_000) },
             (None, false) => MesherRequest::Simple,
         };
-        let req = MeshRequest { h: s.h, max_dev: s.max_dev, mesher, structured_pml: s.structured_pml, waves };
+        let req = MeshRequest {
+            h: s.h,
+            max_dev: s.max_dev,
+            mesher,
+            structured_pml: s.structured_pml,
+            waves,
+            curved: s.curved,
+        };
         let (g, report) = mesh_request(geometry, &req).map_err(Error::Invalid)?;
         let (mut mesh, eval, labels) = (g.mesh, g.eval, g.labels);
         if let Some(layers) = &s.sweep {

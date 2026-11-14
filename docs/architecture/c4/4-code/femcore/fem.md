@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 > Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 4](../../../adr/0004-simplexmesh-is-the-solver-contract.md), [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md)  
-**Size:** 6 files, 1826 lines.
+**Size:** 6 files, 1994 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/edge.rs` | 79 | The edge-element basis of the 2D mode solvers and of everything that evaluates their fields: Whitney and degree-2 Nedelec functions on a triangle (`edge_basis`), the per-cell numbering and signs of the edge functions (`cell_data`) and th... |
-| `crates/femcore/src/fem.rs` | 958 | Lagrange P1/P2 finite elements on simplices: quadrature, shape functions, scalar matrices, boundary integrals and Dirichlet constraints, and the choice between a sparse factorisation and multigrid for symmetric positive systems. |
+| `crates/femcore/src/fem.rs` | 1126 | Lagrange P1/P2 finite elements on simplices: quadrature, shape functions, scalar matrices, boundary integrals and Dirichlet constraints, and the choice between a sparse factorisation and multigrid for symmetric positive systems. |
 | `crates/femcore/src/fields.rs` | 218 | Derived fields and what is drawn: element gradients at the element's own nodes, the node averaging of nodal data and `Display`, the surface mesh used for plotting. |
 | `crates/femcore/src/periodic.rs` | 288 | Floquet-periodic boundary conditions: the dofs on a `dest` boundary equal the dofs on a `source` boundary (translated by the vector between the two) times `exp(-i phase)`. The two boundaries must carry the same mesh up to the translation. |
 | `crates/femcore/src/pml.rs` | 77 | Perfectly matched layers by complex coordinate stretching, shared by the electromagnetic kernels (`nyx-ems`) and the solid kernels: the stretch factor of a point inside a layer (`stretch`, from a `props::Pml` and the bounding box of its ... |
@@ -49,6 +49,7 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [engine: Registry and facade](../engine/registry.md) | fields | Display |
 | [Error estimators](./estimators.md) | fem | quad_rule |
 | [Meshing facade](./meshing.md) | props | Pml, PmlDir |
+| [3D meshing](./meshing3d.md) | fem | CurvedTet, quad_rule_collapsed |
 | [Optical mode sets](./optical.md) | edge, fem, pml, props | CellData, cell_data, edge_basis, stretch, tri_g |
 | [Frame and sections](./section.md) | props |  |
 | [Structured absorbing layers](./structpml.md) | props | Materials, Pml, PmlDir |
@@ -104,6 +105,17 @@ classDiagram
         +vol Vec~f64~
         +g Vec~f64~
     }
+    class CurvedTet {
+        <<struct>>
+        +x slice
+        +new(x) Self
+        +straight(v) Self
+        +position(lam) slice
+        +jacobian_matrix(lam) slice
+        +jacobian(lam) tuple
+        +min_det_at_nodes() f64
+        +volume() f64
+    }
     class AmgSystem {
         <<struct>>
         +setup_seconds f64
@@ -121,18 +133,18 @@ classDiagram
         +facet_rule(facet_dim) Quad
         +shape(lam, order) tuple
         +geometry(mesh) Geometry
+        +quad_rule_collapsed(degree) Quad
         +shape_gradients(re, geo, c, q, out)
         +assemble_parallel(nc, nrows, ncols, f) Csr
         +assemble_laplace(mesh, order, coeff) Csr
         +assemble_laplace_tensor(mesh, order, k) Csr
         +assemble_mass(mesh, order, coeff) Csr
-        +assemble_source(mesh, order, coeff) Vec~f64~
-        +more_14_functions()
+        +more_15_functions()
+        +TET_EDGES const
         +AMG_THRESHOLD const
         +AMG_THRESHOLD_3D const
         +LOBPCG_MIN_FREE const
-        +FACTORISE_MAX_FREE const
-        +more_1_items
+        +more_2_items
     }
   }
   namespace fields_rs {
@@ -279,40 +291,50 @@ classDiagram
 | struct | `RefElement` | `fem.rs:127` | fields: `dim`, `order`, `nloc`, `w`, `n`, `dn` —  Quadrature rule with shape functions tabulated at its points. |
 | struct | `Geometry` | `fem.rs:155` | fields: `vol`, `g` —  Per-cell volume and gradients of the barycentric coordinates: `g[c*(d+1)*d + b*d + k]`. |
 | fn | `geometry` | `fem.rs:160` | `pub fn geometry(mesh: &SimplexMesh) -> Geometry` |
-| fn | `shape_gradients` | `fem.rs:227` | `pub fn shape_gradients(re: &RefElement, geo: &Geometry, c: usize, q: usize, out: &mut [f64])` —  Physical gradients of the shape functions at quadrature point `q` of cell `c`: |
-| fn | `assemble_parallel` | `fem.rs:245` | `pub fn assemble_parallel<F>(nc: usize, nrows: usize, ncols: usize, f: F) -> Csr` —  Runs `f(range, &mut coo)` over cell chunks on all available threads and merges the results. |
-| fn | `assemble_laplace` | `fem.rs:291` | `pub fn assemble_laplace(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `K_ij = integral coeff grad(phi_i) . grad(phi_j)`; `coeff` holds one value per cell. |
-| fn | `assemble_laplace_tensor` | `fem.rs:325` | `pub fn assemble_laplace_tensor(mesh: &SimplexMesh, order: usize, k: &[[[f64; 3]; 3]]) -> Csr` —  `K_ij = integral grad(phi_i) . K grad(phi_j)` with a symmetric tensor `K` per cell (only |
-| fn | `assemble_mass` | `fem.rs:365` | `pub fn assemble_mass(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `M_ij = integral coeff phi_i phi_j`. |
-| fn | `assemble_source` | `fem.rs:394` | `pub fn assemble_source(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Vec<f64>` —  Integral of `coeff phi_i` over every cell: the load of a per-cell source density. |
-| fn | `facet_measure` | `fem.rs:401` | `pub fn facet_measure(mesh: &SimplexMesh, f: usize) -> f64` |
-| fn | `facets_with` | `fem.rs:415` | `pub fn facets_with<'a>(mesh: &'a SimplexMesh, labels: &'a [i32]) -> impl Iterator<Item = usize> + 'a` |
-| fn | `assemble_boundary_mass` | `fem.rs:420` | `pub fn assemble_boundary_mass(mesh: &SimplexMesh, labels: &[i32], order: usize, coeff: f64) -> Csr` —  `integral coeff phi_i phi_j` over the facets carrying one of `labels` (convective term). |
-| fn | `assemble_boundary_load` | `fem.rs:446` | `pub fn assemble_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: f64, order: usize) -> Vec<f64>` —  Load `integral value phi_i` over the facets carrying one of `labels`. |
-| fn | `add_boundary_load` | `fem.rs:454` | `pub fn add_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: &dyn Fn(usize) -> f64, order: usize, out: &mut [f64], ncomp: usize, comp: usize)` —  Adds the boundary load of a per-facet value into component `comp` of a vector of `ncomp` |
-| fn | `boundary_dofs` | `fem.rs:477` | `pub fn boundary_dofs(mesh: &SimplexMesh, labels: &[i32], order: usize) -> Vec<usize>` —  Dofs on the boundary facets with any of the given boundary numbers (sorted, unique). |
-| fn | `dirichlet_constraints` | `fem.rs:490` | `pub fn dirichlet_constraints(mesh: &SimplexMesh, values: &BTreeMap<i32, f64>, order: usize) -> (Vec<usize>, Vec<f64>)` —  Fixed dofs and values for `{boundary number: value}`. A dof shared by boundaries with |
-| fn | `solve_dirichlet` | `fem.rs:509` | `pub fn solve_dirichlet(k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<Vec<f64>, String>` —  Solves `K u = f` with `u[fixed] = values` by elimination. |
-| fn | `untouched_dofs` | `fem.rs:536` | `pub fn untouched_dofs(mesh: &SimplexMesh, order: usize, ncomp: usize, inactive: &[i32]) -> Vec<usize>` —  Dofs (of `ncomp` component blocks of `n_dofs(order)`) that no active cell touches: the cells |
-| fn | `free_dofs` | `fem.rs:559` | `pub fn free_dofs(n: usize, fixed: &[usize]) -> Vec<usize>` —  Free dof indices (complement of `fixed`). |
-| const | `AMG_THRESHOLD` | `fem.rs:573` | `usize` —  Free-dof count above which `LinearSolver::Auto` switches to multigrid in 2D. In 3D multigrid |
-| const | `AMG_THRESHOLD_3D` | `fem.rs:574` | `usize` |
-| const | `LOBPCG_MIN_FREE` | `fem.rs:578` | `usize` —  Free dofs above which eigenfrequency studies (Auto) try LOBPCG instead of a factorisation. Measured with the shared |
-| const | `FACTORISE_MAX_FREE` | `fem.rs:580` | `usize` —  Above this many free dofs a factorisation is not attempted for eigenfrequencies. |
-| const | `LOBPCG_MAX_FACTOR` | `fem.rs:582` | `f64` —  Multigrid is used for eigenfrequencies when its convergence factor is at most this. |
-| fn | `amg_wanted` | `fem.rs:585` | `pub fn amg_wanted(dim: usize, n_free: usize) -> bool` —  Whether `LinearSolver::Auto` should use multigrid for a system with `n_free` unknowns. |
-| struct | `AmgSystem` | `fem.rs:650` | fields: `setup_seconds` —  A symmetric positive definite system over all dofs with some dofs constrained, prepared for |
-| fn | `solve_spd` | `fem.rs:836` | `pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String>` —  Solves `K u = f` with `u[fixed] = values` choosing between the sparse direct solver and |
-| fn | `check_boundary_labels` | `fem.rs:878` | `pub fn check_boundary_labels(mesh: &SimplexMesh, labels: impl IntoIterator<Item = i32>) -> Result<(), String>` —  Refuses boundary numbers that the mesh does not have, naming the ones it has. Every physics checks its conditions with it. |
-| fn | `cell_values_at_nodes` | `fem.rs:891` | `pub fn cell_values_at_nodes(mesh: &SimplexMesh, u: &[f64], order: usize) -> Vec<f64>` —  The values of a dof field at the local dofs of every cell: `out[c*nloc + a]`. |
+| fn | `quad_rule_collapsed` | `fem.rs:255` | `pub fn quad_rule_collapsed(degree: usize) -> Quad` —  A quadrature rule on the reference tetrahedron that is exact to at least `degree`, built by collapsing the unit cube (Duffy |
+| const | `TET_EDGES` | `fem.rs:273` | `[(usize, usize)` —  The local vertex pairs of a tetrahedron in the order of its edge numbering (and of the geometry nodes 4 to 9 of [`CurvedTet`]). |
+| struct | `CurvedTet` | `fem.rs:283` | fields: `x` —  A tetrahedron with quadratic (isoparametric) geometry: the map from the reference cell is the quadratic Lagrange interpolation of ten |
+| fn | `shape_gradients` | `fem.rs:395` | `pub fn shape_gradients(re: &RefElement, geo: &Geometry, c: usize, q: usize, out: &mut [f64])` —  Physical gradients of the shape functions at quadrature point `q` of cell `c`: |
+| fn | `assemble_parallel` | `fem.rs:413` | `pub fn assemble_parallel<F>(nc: usize, nrows: usize, ncols: usize, f: F) -> Csr` —  Runs `f(range, &mut coo)` over cell chunks on all available threads and merges the results. |
+| fn | `assemble_laplace` | `fem.rs:459` | `pub fn assemble_laplace(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `K_ij = integral coeff grad(phi_i) . grad(phi_j)`; `coeff` holds one value per cell. |
+| fn | `assemble_laplace_tensor` | `fem.rs:493` | `pub fn assemble_laplace_tensor(mesh: &SimplexMesh, order: usize, k: &[[[f64; 3]; 3]]) -> Csr` —  `K_ij = integral grad(phi_i) . K grad(phi_j)` with a symmetric tensor `K` per cell (only |
+| fn | `assemble_mass` | `fem.rs:533` | `pub fn assemble_mass(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `M_ij = integral coeff phi_i phi_j`. |
+| fn | `assemble_source` | `fem.rs:562` | `pub fn assemble_source(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Vec<f64>` —  Integral of `coeff phi_i` over every cell: the load of a per-cell source density. |
+| fn | `facet_measure` | `fem.rs:569` | `pub fn facet_measure(mesh: &SimplexMesh, f: usize) -> f64` |
+| fn | `facets_with` | `fem.rs:583` | `pub fn facets_with<'a>(mesh: &'a SimplexMesh, labels: &'a [i32]) -> impl Iterator<Item = usize> + 'a` |
+| fn | `assemble_boundary_mass` | `fem.rs:588` | `pub fn assemble_boundary_mass(mesh: &SimplexMesh, labels: &[i32], order: usize, coeff: f64) -> Csr` —  `integral coeff phi_i phi_j` over the facets carrying one of `labels` (convective term). |
+| fn | `assemble_boundary_load` | `fem.rs:614` | `pub fn assemble_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: f64, order: usize) -> Vec<f64>` —  Load `integral value phi_i` over the facets carrying one of `labels`. |
+| fn | `add_boundary_load` | `fem.rs:622` | `pub fn add_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: &dyn Fn(usize) -> f64, order: usize, out: &mut [f64], ncomp: usize, comp: usize)` —  Adds the boundary load of a per-facet value into component `comp` of a vector of `ncomp` |
+| fn | `boundary_dofs` | `fem.rs:645` | `pub fn boundary_dofs(mesh: &SimplexMesh, labels: &[i32], order: usize) -> Vec<usize>` —  Dofs on the boundary facets with any of the given boundary numbers (sorted, unique). |
+| fn | `dirichlet_constraints` | `fem.rs:658` | `pub fn dirichlet_constraints(mesh: &SimplexMesh, values: &BTreeMap<i32, f64>, order: usize) -> (Vec<usize>, Vec<f64>)` —  Fixed dofs and values for `{boundary number: value}`. A dof shared by boundaries with |
+| fn | `solve_dirichlet` | `fem.rs:677` | `pub fn solve_dirichlet(k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<Vec<f64>, String>` —  Solves `K u = f` with `u[fixed] = values` by elimination. |
+| fn | `untouched_dofs` | `fem.rs:704` | `pub fn untouched_dofs(mesh: &SimplexMesh, order: usize, ncomp: usize, inactive: &[i32]) -> Vec<usize>` —  Dofs (of `ncomp` component blocks of `n_dofs(order)`) that no active cell touches: the cells |
+| fn | `free_dofs` | `fem.rs:727` | `pub fn free_dofs(n: usize, fixed: &[usize]) -> Vec<usize>` —  Free dof indices (complement of `fixed`). |
+| const | `AMG_THRESHOLD` | `fem.rs:741` | `usize` —  Free-dof count above which `LinearSolver::Auto` switches to multigrid in 2D. In 3D multigrid |
+| const | `AMG_THRESHOLD_3D` | `fem.rs:742` | `usize` |
+| const | `LOBPCG_MIN_FREE` | `fem.rs:746` | `usize` —  Free dofs above which eigenfrequency studies (Auto) try LOBPCG instead of a factorisation. Measured with the shared |
+| const | `FACTORISE_MAX_FREE` | `fem.rs:748` | `usize` —  Above this many free dofs a factorisation is not attempted for eigenfrequencies. |
+| const | `LOBPCG_MAX_FACTOR` | `fem.rs:750` | `f64` —  Multigrid is used for eigenfrequencies when its convergence factor is at most this. |
+| fn | `amg_wanted` | `fem.rs:753` | `pub fn amg_wanted(dim: usize, n_free: usize) -> bool` —  Whether `LinearSolver::Auto` should use multigrid for a system with `n_free` unknowns. |
+| struct | `AmgSystem` | `fem.rs:818` | fields: `setup_seconds` —  A symmetric positive definite system over all dofs with some dofs constrained, prepared for |
+| fn | `solve_spd` | `fem.rs:1004` | `pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String>` —  Solves `K u = f` with `u[fixed] = values` choosing between the sparse direct solver and |
+| fn | `check_boundary_labels` | `fem.rs:1046` | `pub fn check_boundary_labels(mesh: &SimplexMesh, labels: impl IntoIterator<Item = i32>) -> Result<(), String>` —  Refuses boundary numbers that the mesh does not have, naming the ones it has. Every physics checks its conditions with it. |
+| fn | `cell_values_at_nodes` | `fem.rs:1059` | `pub fn cell_values_at_nodes(mesh: &SimplexMesh, u: &[f64], order: usize) -> Vec<f64>` —  The values of a dof field at the local dofs of every cell: `out[c*nloc + a]`. |
 | fn | `RefElement::new` | `fem.rs:139` | `pub fn new(dim: usize, order: usize, degree: usize) -> Self` |
-| fn | `AmgSystem::new` | `fem.rs:665` | `pub fn new(mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize]) -> Result<AmgSystem, String>` —  `a` is the matrix over all `n = ncomp * n_dofs(order)` dofs (entries in constrained rows and |
-| fn | `AmgSystem::n_levels` | `fem.rs:742` | `pub fn n_levels(&self) -> usize` |
-| fn | `AmgSystem::sizes` | `fem.rs:746` | `pub fn sizes(&self) -> Vec<usize>` |
-| fn | `AmgSystem::solve_with` | `fem.rs:753` | `pub fn solve_with(&self, matrix: Option<&Csr>, b: &[f64], fixed_values: &[(usize, f64)], tol: f64, max_iter: usize) -> (Vec<f64>, usize, f64)` —  Solves `A x = b` for the right-hand side over all dofs (entries at constrained dofs are taken |
-| fn | `AmgSystem::convergence_factor` | `fem.rs:783` | `pub fn convergence_factor(&self) -> f64` —  Average residual reduction per iteration of multigrid-preconditioned CG on a random |
-| fn | `AmgSystem::precondition_free` | `fem.rs:801` | `pub fn precondition_free(&self, r_free: &[f64]) -> Vec<f64>` —  One multigrid cycle applied to a vector over the free dofs: an approximation of the inverse |
-| fn | `AmgSystem::solve_free` | `fem.rs:816` | `pub fn solve_free(&self, matrix: Option<&Csr>, b_free: &[f64], tol: f64) -> Result<Vec<f64>, String>` —  Solves for the unconstrained dofs only: `b` and the result are vectors over the free dofs. |
+| fn | `CurvedTet::new` | `fem.rs:288` | `pub fn new(x: [[f64; 3]; 10]) -> Self` |
+| fn | `CurvedTet::straight` | `fem.rs:293` | `pub fn straight(v: [[f64; 3]; 4]) -> Self` —  The straight cell with vertices `v` (edge nodes at the midpoints). |
+| fn | `CurvedTet::position` | `fem.rs:326` | `pub fn position(&self, lam: &[f64; 4]) -> [f64` —  Position at the barycentric point `lam`. |
+| fn | `CurvedTet::jacobian_matrix` | `fem.rs:344` | `pub fn jacobian_matrix(&self, lam: &[f64; 4]) -> [[f64` —  The Jacobian matrix `J[i][k] = dx_i / dxi_k` with respect to the reference coordinates `(lambda_1, lambda_2, lambda_3)`. |
+| fn | `CurvedTet::jacobian` | `fem.rs:357` | `pub fn jacobian(&self, lam: &[f64; 4]) -> ([[f64` —  Physical gradients of the four barycentric functions at `lam`, and the determinant of the Jacobian (negative for an inverted |
+| fn | `CurvedTet::min_det_at_nodes` | `fem.rs:374` | `pub fn min_det_at_nodes(&self) -> f64` —  The smallest determinant over the ten nodes of the cell (vertices and edge nodes), a cheap validity probe. |
+| fn | `CurvedTet::volume` | `fem.rs:386` | `pub fn volume(&self) -> f64` —  Volume of the curved cell: the integral of `\|det J\|` over the reference tetrahedron, with a rule exact to degree 8. |
+| fn | `AmgSystem::new` | `fem.rs:833` | `pub fn new(mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize]) -> Result<AmgSystem, String>` —  `a` is the matrix over all `n = ncomp * n_dofs(order)` dofs (entries in constrained rows and |
+| fn | `AmgSystem::n_levels` | `fem.rs:910` | `pub fn n_levels(&self) -> usize` |
+| fn | `AmgSystem::sizes` | `fem.rs:914` | `pub fn sizes(&self) -> Vec<usize>` |
+| fn | `AmgSystem::solve_with` | `fem.rs:921` | `pub fn solve_with(&self, matrix: Option<&Csr>, b: &[f64], fixed_values: &[(usize, f64)], tol: f64, max_iter: usize) -> (Vec<f64>, usize, f64)` —  Solves `A x = b` for the right-hand side over all dofs (entries at constrained dofs are taken |
+| fn | `AmgSystem::convergence_factor` | `fem.rs:951` | `pub fn convergence_factor(&self) -> f64` —  Average residual reduction per iteration of multigrid-preconditioned CG on a random |
+| fn | `AmgSystem::precondition_free` | `fem.rs:969` | `pub fn precondition_free(&self, r_free: &[f64]) -> Vec<f64>` —  One multigrid cycle applied to a vector over the free dofs: an approximation of the inverse |
+| fn | `AmgSystem::solve_free` | `fem.rs:984` | `pub fn solve_free(&self, matrix: Option<&Csr>, b_free: &[f64], tol: f64) -> Result<Vec<f64>, String>` —  Solves for the unconstrained dofs only: `b` and the result are vectors over the free dofs. |
 | fn | `local_bary` | `fields.rs:13` | `pub fn local_bary(dim: usize, order: usize) -> Vec<Vec<f64>>` —  Barycentric coordinates of the local dofs (vertices, then edge midpoints). |
 | fn | `gradients_at_nodes` | `fields.rs:28` | `pub fn gradients_at_nodes(mesh: &SimplexMesh, u: &[f64], ncomp: usize, order: usize) -> Vec<f64>` —  Gradients of `ncomp` stacked scalar dof fields (each `n_dofs` long) at the local dofs of |
 | fn | `node_average` | `fields.rs:72` | `pub fn node_average(mesh: &SimplexMesh, vals: &[f64], m: usize, order: usize) -> Vec<f64>` —  Mean over the cells touching each dof of per-cell nodal values `vals[(c*nloc + a)*m + j]`. |

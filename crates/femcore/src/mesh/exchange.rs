@@ -31,6 +31,13 @@ fn cells_of<const D: usize>(m: &SimplexMesh) -> CellMesh<D> {
     for f in 0..m.n_facets() {
         out.push_facet(m.facet(f), m.facet_labels[f]);
     }
+    if D == 3 {
+        out.set_edge_nodes(m.edge_node_list().into_iter().map(|(pr, p)| {
+            let mut q = [0.0; D];
+            q.copy_from_slice(&p[..D]);
+            (pr, q)
+        }));
+    }
     out
 }
 

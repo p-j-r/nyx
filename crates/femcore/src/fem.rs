@@ -221,6 +221,174 @@ fn inv3(m: &[[f64; 3]; 3]) -> (f64, [[f64; 3]; 3]) {
     (det, r)
 }
 
+// ------------------------------------------------------------------ curved tetrahedra (ADR 82)
+
+/// Gauss-Legendre points and weights on [0, 1] (`n` points, exact to degree `2 n - 1`), by Newton iteration on the Legendre polynomial.
+fn gauss_legendre_01(n: usize) -> Vec<(f64, f64)> {
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut x = (std::f64::consts::PI * (i as f64 + 0.75) / (n as f64 + 0.5)).cos();
+        let mut dp = 1.0;
+        for _ in 0..100 {
+            let (mut p0, mut p1) = (1.0, x);
+            for k in 2..=n {
+                let p2 = ((2 * k - 1) as f64 * x * p1 - (k - 1) as f64 * p0) / k as f64;
+                p0 = p1;
+                p1 = p2;
+            }
+            dp = n as f64 * (x * p1 - p0) / (x * x - 1.0);
+            let dx = p1 / dp;
+            x -= dx;
+            if dx.abs() < 1e-16 {
+                break;
+            }
+        }
+        out.push((0.5 * (1.0 - x), 1.0 / ((1.0 - x * x) * dp * dp)));
+    }
+    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    out
+}
+
+/// A quadrature rule on the reference tetrahedron that is exact to at least `degree`, built by collapsing the unit cube (Duffy
+/// transform) with Gauss-Legendre points: `n = (degree + 3) / 2` points per direction, `n^3` points in all, weights summing to 1 like
+/// those of `quad_rule`. Used on curved cells, where the integrand is a rational function and a high degree is wanted.
+pub fn quad_rule_collapsed(degree: usize) -> Quad {
+    let n = (degree + 3).div_ceil(2).max(2);
+    let g = gauss_legendre_01(n);
+    let (mut lam, mut w) = (vec![], vec![]);
+    for &(u, wu) in &g {
+        for &(v, wv) in &g {
+            for &(t, wt) in &g {
+                // x = u, y = v (1 - u), z = t (1 - u)(1 - v); jacobian (1 - u)^2 (1 - v); volume of the reference tetrahedron 1/6
+                let (x, y, z) = (u, v * (1.0 - u), t * (1.0 - u) * (1.0 - v));
+                lam.push(bary(&[x, y, z]));
+                w.push(6.0 * wu * wv * wt * (1.0 - u) * (1.0 - u) * (1.0 - v));
+            }
+        }
+    }
+    Quad { lam, w }
+}
+
+/// The local vertex pairs of a tetrahedron in the order of its edge numbering (and of the geometry nodes 4 to 9 of [`CurvedTet`]).
+pub const TET_EDGES: [(usize, usize); 6] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+
+/// A tetrahedron with quadratic (isoparametric) geometry: the map from the reference cell is the quadratic Lagrange interpolation of ten
+/// nodes, the four vertices and the nodes of the six edges in the order of [`TET_EDGES`]. With every edge node at the midpoint of its
+/// edge the map is affine and the cell is the straight tetrahedron.
+///
+/// `jacobian` returns, at a barycentric point, the physical gradients `J^-T grad_ref lambda_a` of the four barycentric functions and the
+/// determinant of `J`. Used pointwise in place of the constant gradients of a straight cell, the Whitney functions
+/// `lambda_a g_b - lambda_b g_a` are exactly the covariant Piola images of the reference ones, and `2 g_a x g_b` is their curl.
+#[derive(Clone, Copy, Debug)]
+pub struct CurvedTet {
+    pub x: [[f64; 3]; 10],
+}
+
+impl CurvedTet {
+    pub fn new(x: [[f64; 3]; 10]) -> Self {
+        CurvedTet { x }
+    }
+
+    /// The straight cell with vertices `v` (edge nodes at the midpoints).
+    pub fn straight(v: [[f64; 3]; 4]) -> Self {
+        let mut x = [[0.0; 3]; 10];
+        x[..4].copy_from_slice(&v);
+        for (k, &(i, j)) in TET_EDGES.iter().enumerate() {
+            for a in 0..3 {
+                x[4 + k][a] = 0.5 * (v[i][a] + v[j][a]);
+            }
+        }
+        CurvedTet { x }
+    }
+
+    /// Derivatives of the position with respect to each barycentric coordinate treated as independent: `d[b]` is the sum over nodes of
+    /// the node position times the derivative of its shape function with respect to `lambda_b`.
+    fn dx_dlam(&self, lam: &[f64; 4]) -> [[f64; 3]; 4] {
+        let mut d = [[0.0; 3]; 4];
+        for a in 0..4 {
+            // vertex function l_a (2 l_a - 1): derivative (4 l_a - 1) with respect to l_a
+            let s = 4.0 * lam[a] - 1.0;
+            for k in 0..3 {
+                d[a][k] += s * self.x[a][k];
+            }
+        }
+        for (e, &(i, j)) in TET_EDGES.iter().enumerate() {
+            // edge function 4 l_i l_j
+            for k in 0..3 {
+                d[i][k] += 4.0 * lam[j] * self.x[4 + e][k];
+                d[j][k] += 4.0 * lam[i] * self.x[4 + e][k];
+            }
+        }
+        d
+    }
+
+    /// Position at the barycentric point `lam`.
+    pub fn position(&self, lam: &[f64; 4]) -> [f64; 3] {
+        let mut p = [0.0; 3];
+        for a in 0..4 {
+            let n = lam[a] * (2.0 * lam[a] - 1.0);
+            for k in 0..3 {
+                p[k] += n * self.x[a][k];
+            }
+        }
+        for (e, &(i, j)) in TET_EDGES.iter().enumerate() {
+            let n = 4.0 * lam[i] * lam[j];
+            for k in 0..3 {
+                p[k] += n * self.x[4 + e][k];
+            }
+        }
+        p
+    }
+
+    /// The Jacobian matrix `J[i][k] = dx_i / dxi_k` with respect to the reference coordinates `(lambda_1, lambda_2, lambda_3)`.
+    pub fn jacobian_matrix(&self, lam: &[f64; 4]) -> [[f64; 3]; 3] {
+        let d = self.dx_dlam(lam);
+        let mut j = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for k in 0..3 {
+                j[i][k] = d[k + 1][i] - d[0][i];
+            }
+        }
+        j
+    }
+
+    /// Physical gradients of the four barycentric functions at `lam`, and the determinant of the Jacobian (negative for an inverted
+    /// cell).
+    pub fn jacobian(&self, lam: &[f64; 4]) -> ([[f64; 3]; 4], f64) {
+        let j = self.jacobian_matrix(lam);
+        // rows of `m` are the columns of J, so `inv3` of it is the inverse transposed... : grad lambda_k = row k of J^-1 (k = 1..3)
+        let (det, inv) = inv3(&j);
+        let mut g = [[0.0; 3]; 4];
+        for k in 0..3 {
+            for i in 0..3 {
+                g[k + 1][i] = inv[k][i];
+            }
+        }
+        for i in 0..3 {
+            g[0][i] = -(g[1][i] + g[2][i] + g[3][i]);
+        }
+        (g, det)
+    }
+
+    /// The smallest determinant over the ten nodes of the cell (vertices and edge nodes), a cheap validity probe.
+    pub fn min_det_at_nodes(&self) -> f64 {
+        let mut lams: Vec<[f64; 4]> = vec![[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        for &(i, j) in TET_EDGES.iter() {
+            let mut l = [0.0; 4];
+            l[i] = 0.5;
+            l[j] = 0.5;
+            lams.push(l);
+        }
+        lams.iter().map(|l| self.jacobian(l).1).fold(f64::INFINITY, f64::min)
+    }
+
+    /// Volume of the curved cell: the integral of `|det J|` over the reference tetrahedron, with a rule exact to degree 8.
+    pub fn volume(&self) -> f64 {
+        let q = quad_rule_collapsed(8);
+        q.lam.iter().zip(&q.w).map(|(l, w)| w * self.jacobian(&[l[0], l[1], l[2], l[3]]).1.abs() / 6.0).sum()
+    }
+}
+
 /// Physical gradients of the shape functions at quadrature point `q` of cell `c`:
 /// `grad[a*d + k]`.
 #[inline]

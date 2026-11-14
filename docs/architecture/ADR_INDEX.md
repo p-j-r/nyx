@@ -66,3 +66,5 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 63 | [One `format` key, JSON for small files, HDF5 for bulk data](adr/0063-the-format-key-and-no-json-for-bulk-data.md) | `nyx-engine::project`, `geom::model`, `nyx-physics::spec`, `nyx-store` |
 | 64 | [Identity: one persisted hash, the rest are cache keys](adr/0064-identity-hashes-one-persisted-the-rest-are-caches.md) | `nyx-store::util`, `nyx-engine::engine`, `geom::math` |
 | 65 | [Closing the restructure: what the final structure replaces](adr/0065-closing-the-restructure-what-the-structure-replaced.md) | `docs/architecture`, `Cargo.toml` |
+| 82 | [Curved (isoparametric, quadratic) tetrahedra for the `ems` cavity study; amends ADR 18](adr/0082-curved-order-2-geometry.md) | `femcore::fem`, `femcore::meshing::curve3`, `nyx-ems::cavity` |
+| 83 | [Size rules on faces and `max_dev` act in the 3D lattice mesher](adr/0083-face-size-rules-and-max-dev-in-the-lattice-mesher.md) | `femcore::meshing::geomdrive3`, `mesher3d` |

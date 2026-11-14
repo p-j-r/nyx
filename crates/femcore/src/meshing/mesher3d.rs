@@ -44,6 +44,19 @@ pub trait Domain3: Sync {
     /// The position of a new vertex on the mesh edge `pa`-`pb`, both of which lie on a model face, moved onto that face (`None` when the
     /// two ends lie on no common face).
     fn project_edge(&self, mid: [f64; 3], pa: [f64; 3], pb: [f64; 3]) -> Option<[f64; 3]>;
+    /// Whether the edge `pa`-`pb` lies along a crease: both ends lie on two different model faces that are not both flat. Such an edge is
+    /// left straight by `curve3` (ADR 82); the default says no.
+    fn edge_on_crease(&self, _pa: [f64; 3], _pb: [f64; 3]) -> bool {
+        false
+    }
+    /// The element size a model face asks for around `p` (`None`: no face asks, the sizes of the regions apply). ADR 83.
+    fn size_at(&self, _p: [f64; 3]) -> Option<f64> {
+        None
+    }
+    /// Whether any face asks for a size (`size_at` can answer `Some`); the local refinement then runs even where no region is finer.
+    fn asks_size_at(&self) -> bool {
+        false
+    }
 }
 
 /// Settings of the 3D mesher.
@@ -74,6 +87,8 @@ pub struct Report3d {
     pub cells: usize,
     /// edges split by local refinement
     pub refined: usize,
+    /// what the curving of the edges did (ADR 82); `None` when the mesh is straight-sided
+    pub curve: Option<crate::meshing::curve3::CurveReport>,
 }
 
 const TAG: u64 = 1 << 63;
@@ -778,18 +793,21 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     for ((tri, _, _), &l) in facets.iter().zip(&flabels) {
         mesh.push_facet(&tri.map(|v| new_id[v as usize]), l);
     }
-    let mut report = Report3d { lattice_vertices: nv, warped: n_warped, cut_points: n_cuts, cells: mesh.n_cells(), refined: 0 };
+    let mut report = Report3d { lattice_vertices: nv, warped: n_warped, cut_points: n_cuts, cells: mesh.n_cells(), refined: 0, curve: None };
 
     // 8. local refinement inside regions that ask for a finer element size
     let local: Vec<(u32, f64)> = (0..nreg as u32).filter_map(|r| dom.region_size(r).filter(|&hb| hb > 0.0 && hb < 0.999 * spec.h).map(|hb| (r, hb))).collect();
-    if local.is_empty() {
+    let faces = dom.asks_size_at();
+    if local.is_empty() && !faces {
         return Ok((mesh, report));
     }
     let size = |p: [f64; 3]| -> f64 {
-        match dom.region_at(p) {
+        let s = match dom.region_at(p) {
             Some(r) => local.iter().find(|l| l.0 == r).map_or(spec.h, |l| l.1),
             None => spec.h,
-        }
+        };
+        // the sizes of faces (ADR 83): graded away from the face
+        if faces { dom.size_at(p).map_or(s, |f| s.min(f)) } else { s }
     };
     let project = |mid: [f64; 3], pa: [f64; 3], pb: [f64; 3], _kind: super::refine3d::EdgeKind| -> [f64; 3] {
         let len = len3(sub3(pb, pa));

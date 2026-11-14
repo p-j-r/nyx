@@ -10,6 +10,7 @@
 //! /mesh/points               [n_points, dim] f64         /mesh/cells        [n_cells, dim+1] u32
 //! /mesh/cell_labels          [n_cells] i32               /mesh/facets       [n_facets, dim] u32
 //! /mesh/facet_labels         [n_facets] i32
+//! /mesh/edge_node_pairs      [n_curved, 2] u32           /mesh/edge_node_points  [n_curved, 3] f64   (optional: curved edges, ADR 82; absent = straight)
 //! /results/<physics>         attrs: study, order, dim, dofs, seconds, n_solutions
 //!   scalars, log             JSON text (u8 datasets)
 //!   solution_<k>             attrs: label, value (when present), eig_re, eig_im (when present)
@@ -330,6 +331,14 @@ fn write_into(
     io.put(&m, "cell_labels", mesh.cell_labels.as_slice(), 0)?;
     io.put(&m, "facets", &mesh.facets, d)?;
     io.put(&m, "facet_labels", mesh.facet_labels.as_slice(), 0)?;
+    // curved edges (ADR 82): written only when there are some, so a straight mesh gives the file it always gave
+    let curved = mesh.edge_node_list();
+    if !curved.is_empty() {
+        let pairs: Vec<u32> = curved.iter().flat_map(|e| e.0).collect();
+        let pos: Vec<f64> = curved.iter().flat_map(|e| e.1).collect();
+        io.put(&m, "edge_node_pairs", &pairs, 2)?;
+        io.put(&m, "edge_node_points", &pos, 3)?;
+    }
     let root = io.group(file, "results")?;
     for (code, r) in results {
         let g = io.group(&root, &link_name(code))?;
@@ -427,7 +436,7 @@ pub fn read_results(path: &Path) -> Result<Stored, String> {
     let m = file.group("mesh").map_err(e("mesh group"))?;
     let pts = m.dataset("points").map_err(e("points"))?;
     let dim = pts.shape().get(1).copied().ok_or("bad points shape")?;
-    let mesh = SimplexMesh::new(
+    let mut mesh = SimplexMesh::new(
         dim,
         pts.read_raw::<f64>().map_err(e("points"))?,
         m.dataset("cells").map_err(e("cells"))?.read_raw::<u32>().map_err(e("cells"))?,
@@ -435,6 +444,14 @@ pub fn read_results(path: &Path) -> Result<Stored, String> {
         m.dataset("facets").map_err(e("facets"))?.read_raw::<u32>().map_err(e("facets"))?,
         m.dataset("facet_labels").map_err(e("facet labels"))?.read_raw::<i32>().map_err(e("facet labels"))?,
     );
+    // optional curved edges: a file without them is a straight mesh
+    if let (Ok(p), Ok(q)) = (m.dataset("edge_node_pairs"), m.dataset("edge_node_points")) {
+        let pairs = p.read_raw::<u32>().map_err(e("edge node pairs"))?;
+        let pos = q.read_raw::<f64>().map_err(e("edge node points"))?;
+        let nodes: Vec<([u32; 2], [f64; 3])> =
+            pairs.chunks(2).zip(pos.chunks(3)).map(|(a, b)| ([a[0], a[1]], [b[0], b[1], b[2]])).collect();
+        mesh.set_edge_nodes(&nodes);
+    }
     let root = file.group("results").map_err(e("results group"))?;
     let mut codes = root.member_names().map_err(e("results"))?;
     codes.sort();

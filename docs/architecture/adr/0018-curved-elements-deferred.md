@@ -4,7 +4,7 @@ Date: 2026-11-02
 
 ## Status
 
-Accepted as a constraint (paul, 2026-11-02, quoted in `docs/ports/meshers/FEATURE_DEPENDENCIES.md`). Open: node-storage convention, Jacobian checks and maximum order on the solver side.
+Accepted as a constraint (paul, 2026-11-02, quoted in `docs/ports/meshers/FEATURE_DEPENDENCIES.md`). **Amended by ADR 82 (2026-11-15): curved order-2 geometry is stored (`edge_nodes`) and used by the `ems` cavity study when the mesh setting `curved` is on; with it off, cells are straight as described below.** Still open: curved nodes for sms and dfs, order above 2.
 
 ## Context
 
@@ -29,4 +29,4 @@ Cells are straight-sided (constant gradients), so any curved boundary carries an
 
 ## Contract
 
-`contracts/mesh` states that meshes carry vertices only (test `mesh_has_no_curved_node_storage`).
+`contracts/mesh_cells` states that cells store vertices only and that curved edges are the separate list `edge_nodes` (ADR 82; test `mesh_labels_are_one_based_and_cells_store_vertices_only`).

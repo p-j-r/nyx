@@ -20,7 +20,7 @@ graph TB
         style 79 fill:#85bbf0,stroke:#5d82a8,color:#000000
         80["<div style='font-weight: bold'>Meshing facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshPlan and mesh_model (the<br />one way to mesh a geom<br />model), the serialisable<br />request and report, sizing<br />from the physics, and the 2D<br />triangulation core.</div>"]
         style 80 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        81["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, and adaptive<br />meshing driven by exact<br />faces.</div>"]
+        81["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, adaptive<br />meshing driven by exact<br />faces, face sizes and<br />max_dev, and the curved<br />(quadratic) edges of boundary<br />cells.</div>"]
         style 81 fill:#85bbf0,stroke:#5d82a8,color:#000000
         82["<div style='font-weight: bold'>Structured absorbing layers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Structured PML around a<br />box-shaped or geom-model<br />mesh: prisms, hexahedra,<br />quads, labels.</div>"]
         style 82 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -120,12 +120,13 @@ graph TB
     80-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
     80-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
     80-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    80-. "<div>uses meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
+    80-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
     80-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
     80-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
     81-. "<div>uses geom: eval, labels +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
     81-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
     81-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
+    81-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
     81-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
     81-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->80
     81-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->84

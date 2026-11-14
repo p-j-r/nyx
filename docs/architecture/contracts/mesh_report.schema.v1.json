@@ -45,6 +45,32 @@
       "minimum": 0,
       "type": "integer"
     },
+    "curved": {
+      "additionalProperties": false,
+      "description": "the curved edges of a 3D mesh made with `curved`; absent for a straight-sided mesh",
+      "properties": {
+        "cells": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "edges": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_scaled_jacobian": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "edges",
+        "cells",
+        "min_scaled_jacobian"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "dim": {
       "enum": [
         2,
@@ -104,6 +130,13 @@
     "vertices": {
       "minimum": 0,
       "type": "integer"
+    },
+    "warnings": {
+      "description": "requests the mesher could not honour; absent when none",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [

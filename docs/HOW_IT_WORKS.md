@@ -70,7 +70,7 @@ displacements, then all y, then all z.
 On one triangle or tetrahedron the field is a sum of **shape functions** times the unknowns. Shape
 functions are written with barycentric coordinates `l_i` (the weights with which a point is a mixture of
 the cell's corners): P1 uses `l_i`; P2 uses `l_i(2 l_i − 1)` at corners and `4 l_i l_j` at edge middles.
-Cells are straight-sided, so the gradients of the `l_i` are constant over a cell (`fem::geometry`).
+Cells are straight-sided, so the gradients of the `l_i` are constant over a cell (`fem::geometry`). Exception (ADR 82): with the mesh setting `curved`, a 3D cell with a curved edge has quadratic geometry (`fem::CurvedTet`); its gradients are evaluated at every quadrature point and the `ems` cavity study integrates it with a degree-6 rule.
 
 An **element matrix** is an integral over the cell, evaluated by **quadrature** (a few well-chosen points
 with weights; exact for polynomials up to degree 2 or 4, `fem::quad_rule`). For elasticity
