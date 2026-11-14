@@ -142,8 +142,11 @@ pub fn assemble_cross_section(
         }
     }
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let stretch =
-        if spec.materials.has_pml() { Some(femcore::pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
+    let stretch = if spec.materials.has_pml() {
+        Some(crate::axisym::cylindrical_stretches(mesh, &spec.materials.pml))
+    } else {
+        None
+    };
     let k = match kind {
         CrossSection::Axisymmetric(m) => {
             crate::axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?
