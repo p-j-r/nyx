@@ -98,6 +98,8 @@ pub struct CrossAssembly {
     pub f_search: f64,
     /// a PML or a low-reflecting boundary makes the frequencies complex
     pub has_loss: bool,
+    /// dofs of the mesh on the axis `r = 0` (nodes, not components) whose regularity conditions are in `fixed`
+    pub axis_dofs: usize,
 }
 
 pub fn assemble_cross_section(
@@ -141,6 +143,10 @@ pub fn assemble_cross_section(
             }
         }
     }
+    // the axis of a body of revolution: regularity conditions on the dofs at r = 0 (axisym header, ADR 67)
+    let CrossSection::Axisymmetric(m_az) = kind;
+    let (axis_pairs, axis_dofs) = crate::axisym::axis_constraints(mesh, order, m_az)?;
+    fixed_set.extend(axis_pairs.into_iter().map(|(k, dof)| dof + k * n1));
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
     let stretch =
         if spec.materials.has_pml() { Some(femcore::pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
@@ -199,7 +205,7 @@ pub fn assemble_cross_section(
         Some(crate::lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free))
     };
     let has_loss = stretch.is_some() || !lrb_labels.is_empty();
-    Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss })
+    Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss, axis_dofs })
 }
 
 /// Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them.
@@ -346,6 +352,14 @@ pub fn cross_section_fields(
         solved.dim,
         if modes.converged { "" } else { " (not every pair converged; those are omitted)" }
     )];
+    if asm.axis_dofs > 0 {
+        let held = match m_az.round().abs() as u64 {
+            0 => "u_r and u_theta",
+            1 => "u_z",
+            _ => "u_r, u_z and u_theta",
+        };
+        log.push(format!("axis r = 0: {} dofs, {held} held at zero (regularity for m = {m_az})", asm.axis_dofs));
+    }
     if asm.fixed.is_empty() {
         log.push("no fixed boundary: the lowest modes may be rigid-body-like".into());
     }

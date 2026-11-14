@@ -58,6 +58,12 @@ Related: ADR numbers refer to `adr/`, contract names to `contracts/`.
 | R23 | M | `cargo clippy -D warnings` fails (8 errors in `ems_pml.rs`, `sms.rs`, `sms_kz.rs`); `cargo fmt --check` fails widely; `rust-version = 1.84` in the manifest vs toolchain 1.99.1 pinned. |
 | R24 | L | `docs/CAPABILITIES_MEMO.md` and `docs/ports/meshers/FEATURE_DEPENDENCIES.md` exist **untracked** in the main checkout (`nyx/`) and are not in this branch. The second is the source of the constraints quoted in ADR 0005 and 0018. |
 
+## F. Axisymmetric solid kernel (capability R6, 2026-11-14)
+
+| # | Sev | Spot | Evidence |
+|---|---|---|---|
+| R6a | L | **The axis tie for `m = +-1` is not exact.** On the axis `r = 0` the kernel holds the components that regularity forces to zero (`m = 0`: `u_r`, `u_theta`; `|m| = 1`: `u_z`; `|m| >= 2`: all three). For `m = +-1` regularity also asks `u_r = i m u_theta`, a relation between two dofs, which is not imposed: the `1/r` energy acts as a penalty on it, so a mode with `m = +-1` that touches the axis converges but with a slower, mesh-dependent error at the axis; rigid translation and tilt, which satisfy the tie exactly, come out at zero frequency (`axisym_axis.rs`). | `nyx-sms/src/axisym.rs` (`axis_constraints`), ADR 67 | Impose the tie as a multi-point constraint (eliminate `u_r` on axis nodes) if an `m = +-1` benchmark that touches the axis needs it |
+
 ## What is in good shape (so the list is not only bad news)
 
 * `section.rs` is a real single point for axis numbers, and the wafer-frame tests (`frame.rs`, `frame_roundtrip.rs`, `wafer_names.rs`, `ring_frame.rs`) exercise it from three sides.

@@ -11,7 +11,28 @@
 //! and the weight `r dr dz` (the common factor 2 pi dropped). A crystal's stiffness depends on the
 //! angle around the axis; the matrices used here are the one given per domain, so only materials
 //! with the symmetry of the ring (isotropic, or averaged around the axis with
-//! `average_about_axis`) are exact. A mesh must not touch the axis `r = 0`.
+//! `average_about_axis`) are exact.
+//!
+//! **The axis `r = 0` (K1, ADR 67).** A mesh may touch the axis (a solid disk, a post, a substrate). The
+//! quadrature rules are interior (`quad_rule` has no point on an edge), so the `1/r` terms are integrated at `r > 0`;
+//! what a body touching the axis needs besides is the regularity of `u(r, z) exp(-i m theta)` there. Finiteness of
+//!
+//! ```text
+//!   e_tt = (u_r - i m u_t) / r     g_zt = du_t/dz - i m u_z / r     g_rt = du_t/dr - u_t / r - i m u_r / r
+//! ```
+//!
+//! as `r -> 0` gives, with the displacement continuous on the axis (`u_r`, `u_t` are the components in a frame that
+//! turns with theta, so a single-valued vector field has `u_r = u_x cos th + u_y sin th` and so on):
+//!
+//! | `m`      | on the axis                                                              |
+//! |----------|--------------------------------------------------------------------------|
+//! | 0        | `u_r = u_t = 0`; `u_z` free                                              |
+//! | +-1      | `u_z = 0`; `u_r = i m u_t` (see below); `u_r`, `u_t` otherwise free      |
+//! | >= 2     | `u_r = u_t = u_z = 0`                                                    |
+//!
+//! `axis_constraints` holds the zeros of the table. For `m = +-1` the exact tie `u_r = i m u_t` is a relation between two
+//! dofs, not an essential condition; it is not imposed (the energy `1/r` terms act as a penalty on it) and is recorded in
+//! `ROUGH_SPOTS.md`.
 
 use femcore::fem::*;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
@@ -107,15 +128,19 @@ pub fn assemble_stiffness_axisym(
         let det = sx * sy;
         let v = mesh.cell(ci);
         let xs = [mesh.point(v[0] as usize)[0], mesh.point(v[1] as usize)[0], mesh.point(v[2] as usize)[0]];
+        if xs.iter().any(|&x| x < -axis_tolerance(mesh)) {
+            return Err(format!("the mesh of an axisymmetric problem must lie in r >= 0 (cell {ci} crosses the axis)"));
+        }
         for q in 0..re.w.len() {
             shape_gradients(&re, &geo, ci, q, &mut grad);
             // r at this point from the vertex shape functions: for P1 the first three are the barycentric coordinates
             let lam = barycentric(&re, q, order);
             let r = lam[0] * xs[0] + lam[1] * xs[1] + lam[2] * xs[2];
+            // the rules are interior, so this only fires for a cell whose three vertices lie on the axis (zero area)
             if r <= 0.0 {
-                return Err(
-                    "the mesh of an axisymmetric problem must lie in r > 0 (it touches or crosses the axis)".into()
-                );
+                return Err(format!(
+                    "cell {ci} of an axisymmetric problem has no extent in r (all vertices on the axis)"
+                ));
             }
             let beta = c(0.0, -m / r);
             let inv_r = 1.0 / r;
@@ -228,4 +253,37 @@ pub fn assemble_mass_axisym(mesh: &Discretisation, rho: &[f64], order: usize, st
         coo.push_block(&full, &full, &block[..nd * nd]);
     }
     coo.to_csr()
+}
+
+/// Distance from the axis below which a point counts as on it: 1e-9 of the extent of the mesh.
+pub fn axis_tolerance(mesh: &Discretisation) -> f64 {
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for i in 0..mesh.n_points() {
+        let p = mesh.point(i);
+        lo = lo.min(p[0].min(p[1]));
+        hi = hi.max(p[0].max(p[1]));
+    }
+    1e-9 * (hi - lo).max(f64::MIN_POSITIVE)
+}
+
+/// The essential conditions on the axis `r = 0` (module header): `(block, dof)` pairs to hold at zero, blocks as the
+/// stiffness has them (0 `u_r`, 1 `u_z`, 2 `u_theta`), and the number of dofs found on the axis. `m` must be an integer when
+/// the mesh touches the axis (the displacement of a body of revolution is single-valued).
+pub fn axis_constraints(mesh: &Discretisation, order: usize, m: f64) -> Result<(Vec<(usize, usize)>, usize), String> {
+    let tol = axis_tolerance(mesh);
+    let coords = mesh.dof_coordinates(order);
+    let on_axis: Vec<usize> = (0..coords.len() / 2).filter(|&d| coords[2 * d] <= tol).collect();
+    if on_axis.is_empty() {
+        return Ok((vec![], 0));
+    }
+    if (m - m.round()).abs() > 1e-9 {
+        return Err(format!("the mesh touches the axis, so the azimuthal order must be an integer (got {m})"));
+    }
+    let blocks: &[usize] = match m.round().abs() as u64 {
+        0 => &[0, 2],
+        1 => &[1],
+        _ => &[0, 1, 2],
+    };
+    let pairs = on_axis.iter().flat_map(|&d| blocks.iter().map(move |&k| (k, d))).collect();
+    Ok((pairs, on_axis.len()))
 }
