@@ -16,6 +16,25 @@ fn exported(registry: &Registry, physics: &str, result: &SolveResult, role: &str
     result.solutions.last()?.field(name).map(|f| f.values.clone())
 }
 
+/// A kernel knows the regions by number and names a scalar of one region `... domain <number> ...` (`share in domain 3 1`); the model knows
+/// the names, so the scalar becomes `share in disk 1` (ADR 80). A number that is not a region of the model is left as it is.
+fn name_domains(result: &mut SolveResult, model: &MeshedModel) {
+    let regions = model.regions();
+    for (name, _) in result.scalars.iter_mut() {
+        let words: Vec<&str> = name.split(' ').collect();
+        let Some(k) = words.iter().position(|w| *w == "domain") else { continue };
+        let Some(region) =
+            words.get(k + 1).and_then(|w| w.parse::<i32>().ok()).and_then(|id| regions.iter().find(|(i, _)| *i == id))
+        else {
+            continue;
+        };
+        let mut out: Vec<&str> = words[..k].to_vec();
+        out.push(&region.1);
+        out.extend_from_slice(&words[k + 2..]);
+        *name = out.join(" ");
+    }
+}
+
 /// Solves `targets` (and nothing else) in coupling order. The result of each is returned in the order it was solved.
 pub fn run_chain(
     registry: &Registry,
@@ -47,7 +66,8 @@ pub fn run_chain(
                 ctx.inputs.insert(imp.role.clone(), values);
             }
         }
-        let result = p.solve(model.mesh(), spec, &mut ctx)?;
+        let mut result = p.solve(model.mesh(), spec, &mut ctx)?;
+        name_domains(&mut result, model);
         done.push((id, result));
     }
     Ok(done.into_iter().map(|(_, r)| r).collect())

@@ -349,7 +349,9 @@ fn mass_norm(m: &CCsr, u: &[C]) -> f64 {
 /// Stage 3: the plot fields `|u|`, `Re ux` (radial), `Re uz` (axial), `Re uy` (azimuthal), `|uy|` of every mode (largest component
 /// real, unit maximum), the displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
 /// Every solution carries `eigenvalue = [Re f, Im f]` (Hz); the scalar `layer fraction N` is the share of `int rho |u|^2 r` that lies in
-/// absorbing layers (0 without layers), which tells a resonator mode from a layer mode.
+/// absorbing layers (0 without layers), which tells a resonator mode from a layer mode. What identifies a mode (ADR 80): `f re N (Hz)` and
+/// `f im N (Hz)`, always numbers; `radial share N`, `axial share N`, `azimuthal share N`, the split of `int rho |u|^2 r` outside the layers
+/// over the three components (sum 1); `share in domain <label> N`, the same integral per domain outside the layers (sum 1).
 pub fn cross_section_fields(
     mesh: &Discretisation,
     asm: &CrossAssembly,
@@ -370,6 +372,23 @@ pub fn cross_section_fields(
     } else {
         (None, None)
     };
+    // what identifies a mode (ADR 80): the split of `int rho |u|^2 r` outside the layers over the three components and over the domains
+    let mut domains: Vec<i32> = (0..mesh.n_cells())
+        .filter(|&ci| !asm.pml_cells[ci] && asm.rho[ci] != 0.0)
+        .map(|ci| mesh.cell_labels[ci])
+        .collect();
+    domains.sort_unstable();
+    domains.dedup();
+    let class: Vec<usize> = (0..mesh.n_cells())
+        .map(|ci| {
+            if asm.pml_cells[ci] {
+                usize::MAX
+            } else {
+                domains.binary_search(&mesh.cell_labels[ci]).unwrap_or(usize::MAX)
+            }
+        })
+        .collect();
+    let energy = crate::axisym::mode_energy_axisym(mesh, &asm.rho, order, &class, domains.len(), &modes.vectors);
     for (j, &fz) in modes.freqs.iter().enumerate() {
         let freq = fz.re;
         let u = &modes.vectors[j];
@@ -440,6 +459,20 @@ pub fn cross_section_fields(
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
         }
         scalars.push((format!("layer fraction {}", j + 1), Scalar::Num(layer_fraction)));
+        // numeric parts of the frequency, with or without loss (the text scalar `fN (Hz)` of a lossy mode stays, contract 1.1)
+        scalars.push((format!("f re {} (Hz)", j + 1), Scalar::Num(fz.re)));
+        scalars.push((format!("f im {} (Hz)", j + 1), Scalar::Num(fz.im)));
+        let total: f64 = energy[j].iter().map(|e| e[0] + e[1] + e[2]).sum();
+        let share = |x: f64| if total > 0.0 { x / total } else { 0.0 };
+        for (k, name) in ["radial", "axial", "azimuthal"].iter().enumerate() {
+            let part: f64 = energy[j].iter().map(|e| e[k]).sum();
+            scalars.push((format!("{name} share {}", j + 1), Scalar::Num(share(part))));
+        }
+        // the kernel knows domain numbers; the engine puts the region names in their place (`share in <region> N`)
+        for (d, label) in domains.iter().enumerate() {
+            let e = energy[j][d];
+            scalars.push((format!("share in domain {label} {}", j + 1), Scalar::Num(share(e[0] + e[1] + e[2]))));
+        }
     }
     if solutions.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());

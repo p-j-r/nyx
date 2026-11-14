@@ -299,6 +299,60 @@ pub fn assemble_mass_axisym(mesh: &Discretisation, rho: &[f64], order: usize, st
     coo.to_csr()
 }
 
+/// The kinetic-energy weight `int rho |u_k|^2 r dr dz` of every mode, split over the three displacement components (radial, axial,
+/// azimuthal) and over classes of cells: `class[cell]` is the class of a cell or `usize::MAX` for a cell that is left out (a layer). No
+/// stretch enters, so this is the energy of the physical displacement; the result is `[mode][class][component]`. It is the integrand of
+/// `assemble_mass_axisym` (the same quadrature), summed without assembling a matrix per class (ADR 80).
+pub fn mode_energy_axisym(
+    mesh: &Discretisation,
+    rho: &[f64],
+    order: usize,
+    class: &[usize],
+    n_classes: usize,
+    modes: &[Vec<C>],
+) -> Vec<Vec<[f64; 3]>> {
+    let re = RefElement::new(2, order, 2 * order + 1);
+    let geo = geometry(mesh);
+    let nloc = re.nloc;
+    let n1 = mesh.n_dofs(order);
+    let mut out = vec![vec![[0.0f64; 3]; n_classes]; modes.len()];
+    let mut dofs = Vec::new();
+    let mut me = vec![0.0f64; nloc * nloc];
+    for ci in 0..mesh.n_cells() {
+        let cl = class[ci];
+        if cl == usize::MAX || rho[ci] == 0.0 {
+            continue;
+        }
+        me.iter_mut().for_each(|x| *x = 0.0);
+        let v = mesh.cell(ci);
+        let xs = [mesh.point(v[0] as usize)[0], mesh.point(v[1] as usize)[0], mesh.point(v[2] as usize)[0]];
+        for q in 0..re.w.len() {
+            let lam = barycentric(&re, q, order);
+            let r = lam[0] * xs[0] + lam[1] * xs[1] + lam[2] * xs[2];
+            for a in 0..nloc {
+                for b in 0..nloc {
+                    me[a * nloc + b] += re.w[q] * re.n[q][a] * re.n[q][b] * r;
+                }
+            }
+        }
+        let sc = rho[ci] * geo.vol[ci];
+        mesh.cell_dofs(ci, order, &mut dofs);
+        for (j, u) in modes.iter().enumerate() {
+            for k in 0..3 {
+                let mut acc = 0.0;
+                for a in 0..nloc {
+                    let ua = u[k * n1 + dofs[a]];
+                    for b in 0..nloc {
+                        acc += me[a * nloc + b] * (ua.conj() * u[k * n1 + dofs[b]]).re;
+                    }
+                }
+                out[j][cl][k] += acc * sc;
+            }
+        }
+    }
+    out
+}
+
 /// Distance from the axis below which a point counts as on it: 1e-9 of the extent of the mesh.
 pub fn axis_tolerance(mesh: &Discretisation) -> f64 {
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
