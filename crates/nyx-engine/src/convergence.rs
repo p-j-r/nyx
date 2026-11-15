@@ -14,7 +14,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// The project with a finer mesh: the element size is multiplied by `factor` (below one is finer), so are the adaptive size factor and the
-/// wavelength rules; the layers of a sweep get `1 / factor` times as many cells.
+/// wavelength rules; the layers of a sweep get `1 / factor` times as many cells. Sizes that belong to the geometry (`add_size` features) are
+/// not changed (rough spot R11b): a model whose resolution is set by them is refined only where the global size rules.
 fn refined(p: &Project, factor: f64) -> Project {
     let mut q = p.clone();
     q.mesh.h *= factor;

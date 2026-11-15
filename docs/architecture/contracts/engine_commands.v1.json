@@ -1058,7 +1058,7 @@
   },
   {
     "access": "expensive",
-    "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner.",
+    "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner. Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.",
     "name": "convergence_check",
     "schema": {
       "additionalProperties": false,

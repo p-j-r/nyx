@@ -41,6 +41,7 @@ The integrals are computed by `axisym::mode_energy_axisym` in one pass over the 
 * A host picks a mode by numbers: small `layer fraction`, `radial share` and `share in disk` large, nearest a frequency. No field needs to be read.
 * Pairing by eigenvalue alone can pair two different modes that cross between meshes; the mutual rule drops most of these and `distance` shows how far a pair moved. Pairing by field overlap would be stricter and needs both fields on one mesh; not done.
 * The convention for per-mode scalar names is implicit. A scalar of another physics that ends in a number within the range of the solutions is taken as a per-mode scalar when pairing is asked for. Recorded in `ROUGH_SPOTS.md` (R11a).
+* `convergence_check` still refines only the global element size and its rules, not the sizes of `add_size` features (ADR 61 as it was). On the model that asked for the pairing, the A1 disk, the resolution is set by such sizes, so the check follows the right mode but tests the bulk mesh only. The tool description and the guide card say so; scaling size features is recorded as R11b and not done here.
 * The same scalars are the natural next step for `ems` (`axisymmetric_modes`, `cavity`), and for the 2D and 3D complex eigenfrequency kernels of `sms` (`pml.rs`, `lrb.rs`), which still give only the text frequency. Not done here.
 * Contracts: `physics_sms_result` 1.2, `physics_sms` 1.4, `engine_commands` and `mcp_tools` next minor, `kernel_stages` 1.5 (all additive).
 
