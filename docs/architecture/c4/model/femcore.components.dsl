@@ -35,7 +35,7 @@ meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, R
     properties {
         "adr" "40, 50, 51, 55"
         "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs"
-        "lines" "1671"
+        "lines" "1677"
         "codeDiagram" "4-code/femcore/meshing3d.md"
     }
 }
@@ -75,7 +75,7 @@ adaptdrive = component "Adaptation drivers" "Passes of operators until the mesh 
     properties {
         "adr" "7, 51"
         "code" "crates/femcore/src: adapt/drive.rs, adapt/drive3.rs, adapt/geom.rs, adapt/geom3.rs"
-        "lines" "716"
+        "lines" "720"
         "codeDiagram" "4-code/femcore/adaptdrive.md"
     }
 }

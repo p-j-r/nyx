@@ -71,9 +71,11 @@ pub fn adapt3_with<G: Geometry3>(
         Ok(())
     };
     for iter in 0..opt.max_iter {
+        crate::progress::check()?;
         w.compact_tets();
         let (mut ns, mut nc, mut nf, mut nm) = (0, 0, 0, 0);
         for _ in 0..30 {
+            crate::progress::check()?;
             w.compact_tets();
             if opt.max_cells.is_some_and(|m| w.n_alive() >= m.saturating_mul(20)) {
                 report.capped = true;

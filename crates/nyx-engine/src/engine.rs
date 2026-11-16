@@ -7,7 +7,7 @@
 //! never has to remember to invalidate them: a result whose key is not the one its physics has now is *stale* and says so. A key is a cache key
 //! (ADR 64, ADR 84): it is never stored in a file or sent to a front-end.
 
-use crate::jobs::{JobId, JobOutput, JobRunner};
+use crate::jobs::{JobId, JobOutput, JobRunner, Opened};
 use crate::meshing::{FemcoreMesher, MeshedModel, Mesher};
 use crate::project::Project;
 use crate::store_link::{RunOutcome, StoreLink};
@@ -29,8 +29,11 @@ pub(crate) struct Stored {
 }
 
 enum Pending {
-    Mesh { key: String },
-    Solve { key: String, keys: BTreeMap<String, String>, project: Box<Project> },
+    Mesh { key: String, generation: u64 },
+    Solve { key: String, keys: BTreeMap<String, String>, project: Box<Project>, generation: u64 },
+    Convergence,
+    Open,
+    Export,
 }
 
 pub struct Engine {
@@ -41,6 +44,8 @@ pub struct Engine {
     pub(crate) results: BTreeMap<String, Stored>,
     pub(crate) jobs: JobRunner,
     pending: BTreeMap<JobId, Pending>,
+    /// counts the projects this engine has held (`set_project`): a job started for an earlier one must not put its outcome into the present one
+    pub(crate) generation: u64,
     pub(crate) link: Option<StoreLink>,
     pub(crate) workspace: Option<PathBuf>,
     /// bind the project to a workflow of `workspace` at the first solve, so what a host does shows in the dashboard (the MCP server turns it on)
@@ -74,6 +79,7 @@ impl Engine {
             results: BTreeMap::new(),
             jobs: JobRunner::new(),
             pending: BTreeMap::new(),
+            generation: 0,
             link: None,
             workspace: None,
             auto_store: false,
@@ -197,6 +203,7 @@ impl Engine {
     /// Replaces the project (a new one, or one just opened). The mesh and results are dropped and the store binding is released.
     pub fn set_project(&mut self, project: Project) {
         self.project = project;
+        self.generation += 1;
         self.model = None;
         self.results.clear();
         self.link = None;
@@ -225,9 +232,11 @@ impl Engine {
             if progress.is_cancelled() {
                 return Err(Error::Cancelled);
             }
+            // the mesher checks the cancel flag between its passes and logs its stages, as a solve does
+            let _installed = femcore::progress::install(&progress);
             Ok(JobOutput::Mesh(Arc::new(mesher.mesh(&geometry, &settings, sizing.as_ref())?)))
         });
-        self.pending.insert(id, Pending::Mesh { key });
+        self.pending.insert(id, Pending::Mesh { key, generation: self.generation });
         Ok(id)
     }
 
@@ -265,7 +274,54 @@ impl Engine {
                 Ok(JobOutput::Solved { model, results })
             }
         });
-        self.pending.insert(id, Pending::Solve { key, keys, project: Box::new(project) });
+        self.pending.insert(id, Pending::Solve { key, keys, project: Box::new(project), generation: self.generation });
+        Ok(id)
+    }
+
+    /// Starts a mesh convergence check (two solves, the second on a finer mesh) on a job. Both solves run on the job's thread under its progress,
+    /// as two stages, so the check shows in `job_list`, reports where it is and can be cancelled.
+    pub fn start_convergence(&mut self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<JobId, Error> {
+        if !(factor > 0.0 && factor < 1.0) {
+            return Err(Error::invalid("`factor` is the ratio of the finer element size to the present one, between 0 and 1 (0.6 is a good step)"));
+        }
+        if self.project.spec(physics).is_none() {
+            return Err(Error::invalid(format!("the project has no problem for '{physics}'")));
+        }
+        let job = self.convergence_job();
+        let physics = physics.to_string();
+        let id = self.jobs.start(&format!("convergence {physics}"), move |progress| {
+            job.run_with(&progress, &physics, factor, tolerance).map(JobOutput::Convergence)
+        });
+        self.pending.insert(id, Pending::Convergence);
+        Ok(id)
+    }
+
+    /// Starts reading a results file, meshing its project again and checking the mesh against the stored one, on a job. The engine is not touched
+    /// until the job is applied; then the file's project replaces the project and its results become the latest results.
+    pub fn start_open_results(&mut self, path: &str) -> Result<JobId, Error> {
+        let (registry, mesher, library, path) =
+            (self.registry.clone(), self.mesher.clone(), self.base_library.clone(), path.to_string());
+        let id = self.jobs.start("open results", move |progress| {
+            crate::results_file::read_and_mesh(&registry, &mesher, &library, &path, &progress)
+                .map(|o| JobOutput::Opened(Box::new(o)))
+        });
+        self.pending.insert(id, Pending::Open);
+        Ok(id)
+    }
+
+    /// Starts writing the results the engine holds now (the project, the mesh and the latest result of every physics) into an HDF5 file on a job.
+    /// What is written is the snapshot of this moment, whatever the engine does next. The file appears under its name only when it is complete.
+    pub fn start_export_results(&mut self, path: &str, parallel: bool) -> Result<JobId, Error> {
+        let snapshot = self.results_snapshot()?;
+        let path = path.to_string();
+        let id = self.jobs.start("write results", move |progress| {
+            if progress.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            let _stage = femcore::progress::stage("writing the results file");
+            crate::results_file::write_snapshot(&snapshot, &path, parallel, true).map(JobOutput::Exported)
+        });
+        self.pending.insert(id, Pending::Export);
         Ok(id)
     }
 
@@ -297,12 +353,20 @@ impl Engine {
         let pending = self.pending.remove(&id).expect("a pending job");
         let seconds = self.jobs.info(id).map(|i| i.seconds).unwrap_or(0.0);
         match (pending, outcome) {
-            (Pending::Mesh { key }, Ok(JobOutput::Mesh(m))) => {
+            (Pending::Mesh { key, generation }, Ok(JobOutput::Mesh(m))) => {
                 let info = m.info();
+                if generation != self.generation {
+                    return Err(Error::invalid(
+                        "the project was replaced while the mesh was built; the mesh was dropped",
+                    ));
+                }
                 let current = self.install_model(key, m);
                 Ok(json!({ "job": id, "state": "done", "mesh": info, "seconds": seconds, "current": current }))
             }
-            (Pending::Solve { key, keys, project }, Ok(JobOutput::Solved { model, results })) => {
+            (Pending::Solve { generation, .. }, Ok(JobOutput::Solved { .. })) if generation != self.generation => {
+                Err(Error::invalid("the project was replaced while this solve ran; its results were dropped"))
+            }
+            (Pending::Solve { key, keys, project, .. }, Ok(JobOutput::Solved { model, results })) => {
                 let mesh = model.solver_mesh();
                 self.install_model(key, model);
                 // a job that finishes after the project changed, or after a newer job of the same physics, must not replace a result that is
@@ -335,6 +399,27 @@ impl Engine {
                 }
                 let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
                 Ok(json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds }))
+            }
+            (Pending::Convergence, Ok(JobOutput::Convergence(v))) => Ok(v),
+            (Pending::Export, Ok(JobOutput::Exported(v))) => Ok(v),
+            (Pending::Open, Ok(JobOutput::Opened(o))) => {
+                let Opened { project, model, results, path } = *o;
+                // the file's project replaces the present one (that is what opening means); the results are stored under the keys of the new project
+                self.set_project(project);
+                let key = self.mesh_key();
+                let cells = model.mesh().n_cells();
+                self.model = Some((key, model));
+                let keys = self.problem_keys();
+                let mut physics = vec![];
+                for (code, r) in results {
+                    physics.push(json!({
+                        "physics": code, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(),
+                        "scalars": r.scalars, "current": true, "stored": true,
+                    }));
+                    let k = keys.get(&code).cloned().unwrap_or_default();
+                    self.results.insert(code, Stored { result: Arc::new(r), key: k, job: id, at: Instant::now() });
+                }
+                Ok(json!({ "title": self.project.title, "path": path, "cells": cells, "results": physics }))
             }
             (Pending::Solve { project, .. }, Err(e)) => {
                 let log = self.jobs.log(id);

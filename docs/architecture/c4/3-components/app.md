@@ -60,8 +60,8 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Window](../4-code/app/window.md) | 3 | 1723 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
-| [Shell and dashboard](../4-code/app/shell.md) | 5 | 3231 | 14, 23 | The tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
+| [Window](../4-code/app/window.md) | 3 | 1788 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
+| [Shell and dashboard](../4-code/app/shell.md) | 5 | 3265 | 14, 23 | The tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
 | [Inspector tabs](../4-code/app/inspector.md) | 3 | 2034 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
 | [Viewport](../4-code/app/viewport.md) | 3 | 991 | 23 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, and what is kept between frames. |
 | [Look and widgets](../4-code/app/style.md) | 2 | 326 | 23 | The nyx look (palette, fonts, egui visuals, light and dark) and the small brand widgets (cards, chips, buttons, sparklines, sheets). |

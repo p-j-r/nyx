@@ -250,6 +250,11 @@ or "LOBPCG stalled" mean a fallback to the direct method happened.
 * Results are reproducible: the work is cut into pieces that depend only on the thread count and the pieces are added
   in a fixed order, so the same run gives the same numbers every time (different thread counts can differ in the last
   digits).
+* **Every long operation is a job** (`nyx-engine` jobs): a mesh build, a solve, a mesh convergence check (its two solves are two stages), opening
+  a results file (reading, meshing again, comparing) and writing one. The window starts them and polls; it never waits for the engine. Each job
+  can be cancelled and reports its stage, the seconds in it and whether a cancel was requested; the mesher checks the flag between its passes
+  and phases (not inside a pass), so a cancel of a mesh lands at the next pass boundary. A results file is written under a temporary name
+  and renamed when complete.
 * **Cancel** (toolbar button or Esc): the solver checks a flag at the top of every iteration, every multigrid level, every
   refinement step and every Brillouin pair and then returns "cancelled"; earlier results stay. Assembly of a matrix and a
   started factorisation finish first. Only one job runs at a time; mesh builds and file opens requested meanwhile wait.

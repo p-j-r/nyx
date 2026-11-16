@@ -51,7 +51,7 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [engine: Meshing seam](../engine/meshing.md) | crate root, error, physics | Error, LabelResolver, Mesh, Sizing |
 | [engine: Project](../engine/project.md) | error, registry | Error, Registry |
 | [engine: Registry and facade](../engine/registry.md) | crate root, error, physics, registry | Error, Physics, Registry |
-| [engine: Results files](../engine/resultsIO.md) | error | Error |
+| [engine: Results files](../engine/resultsIO.md) | error, registry | Error, Registry |
 | [engine: Store link](../engine/storeLink.md) | error | Error |
 | [Descriptors and schemas](./descriptors.md) | physics | Physics |
 | [Problem envelope](./envelope.md) | error, physics | Ctx, Error, LabelResolver, Physics |

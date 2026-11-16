@@ -4,7 +4,9 @@
 //! old session tools for every physics (ADR 61).
 
 use crate::engine::Engine;
+use crate::meshing::MeshedModel;
 use crate::project::Project;
+use femcore::progress::Progress;
 use nyx_physics::{Error, Scalar, SolveResult};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -74,7 +76,40 @@ impl ConvergenceJob {
 
     /// Runs the check (see `Engine::convergence_check`); blocks until both solves are done.
     pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {
-        check(self, physics, factor, tolerance)
+        self.run_with(&Progress::new(), physics, factor, tolerance)
+    }
+
+    /// Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either.
+    pub fn run_with(
+        &self,
+        progress: &Arc<Progress>,
+        physics: &str,
+        factor: f64,
+        tolerance: Option<f64>,
+    ) -> Result<Value, Error> {
+        let _installed = femcore::progress::install(progress);
+        check(self, progress, physics, factor, tolerance)
+    }
+
+    /// Meshes `project` and solves `targets` on the calling thread, under `progress`; returns the mesh and the result of `physics`.
+    fn solve_inline(
+        &self,
+        project: Project,
+        targets: &[String],
+        physics: &str,
+        progress: &Arc<Progress>,
+    ) -> Result<(Arc<MeshedModel>, Arc<SolveResult>), Error> {
+        let scratch = self.scratch(project.clone());
+        project.check(&self.registry)?;
+        let library = scratch.library()?;
+        let sizing = scratch.sizing();
+        let model = Arc::new(self.mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?);
+        let results = crate::solve::run_chain(&self.registry, &project, &model, targets, &library, progress.clone())?;
+        let result = results
+            .into_iter()
+            .find(|r| r.physics == physics)
+            .ok_or_else(|| Error::invalid("the solve gave no result"))?;
+        Ok((model, Arc::new(result)))
     }
 }
 
@@ -97,7 +132,13 @@ impl Engine {
     }
 }
 
-fn check(job: &ConvergenceJob, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {
+fn check(
+    job: &ConvergenceJob,
+    progress: &Arc<Progress>,
+    physics: &str,
+    factor: f64,
+    tolerance: Option<f64>,
+) -> Result<Value, Error> {
     {
         let this = job;
         if !(factor > 0.0 && factor < 1.0) {
@@ -107,21 +148,20 @@ fn check(job: &ConvergenceJob, physics: &str, factor: f64, tolerance: Option<f64
             .spec(physics)
             .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
         let targets = vec![physics.to_string()];
-        let mut coarse_engine = this.scratch(this.project.clone());
         let t0 = std::time::Instant::now();
-        let coarse_summary = coarse_engine.solve_now(Some(targets.clone()))?;
-        let coarse: Arc<SolveResult> = coarse_engine
-            .result(physics)
-            .map(|(r, _)| r.clone())
-            .ok_or_else(|| Error::invalid("the solve gave no result"))?;
-        let cells_coarse = coarse_engine.model().map(|m| m.mesh().n_cells());
-        let mut fine_engine = this.scratch(refined(&this.project, factor));
-        fine_engine.solve_now(Some(targets))?;
-        let fine: Arc<SolveResult> = fine_engine
-            .result(physics)
-            .map(|(r, _)| r.clone())
-            .ok_or_else(|| Error::invalid("the refined solve gave no result"))?;
-        let cells_fine = fine_engine.model().map(|m| m.mesh().n_cells());
+        // the two solves are stages of the one job, run here under its progress, so the check can be watched and cancelled
+        let (coarse_model, coarse) = {
+            let _stage = femcore::progress::stage("convergence check: the solve on the present mesh");
+            this.solve_inline(this.project.clone(), &targets, physics, progress)?
+        };
+        let cells_coarse = Some(coarse_model.mesh().n_cells());
+        let (fine_model, fine) = {
+            let _stage = femcore::progress::stage(format!(
+                "convergence check: the solve on the finer mesh (element size times {factor})"
+            ));
+            this.solve_inline(refined(&this.project, factor), &targets, physics, progress)?
+        };
+        let cells_fine = Some(fine_model.mesh().n_cells());
 
         let (a, b) = (numbers(&coarse), numbers(&fine));
         let mut rows = vec![];
@@ -139,7 +179,6 @@ fn check(job: &ConvergenceJob, physics: &str, factor: f64, tolerance: Option<f64
         if rows.is_empty() {
             return Err(Error::invalid("the result has no eigenvalue, value or numeric scalar to compare"));
         }
-        let _ = coarse_summary;
         Ok(json!({
             "physics": physics, "factor": factor, "tolerance": tolerance,
             "cells": { "coarse": cells_coarse, "refined": cells_fine },

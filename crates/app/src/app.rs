@@ -41,13 +41,15 @@ pub enum Queued {
 pub enum JobKind {
     Mesh,
     Solve,
+    /// the two solves of a mesh convergence check
+    Convergence,
+    /// reading a results file, meshing its project again and checking the mesh (the draft workflow is made when it ends)
+    Open,
 }
 
 /// A message from a helper thread (the optional Python script) to the window.
 pub enum Msg {
     Script(Result<String, String>),
-    /// the answer of a convergence check run on its own thread
-    Convergence(Result<Value, String>),
 }
 
 pub struct App {
@@ -103,7 +105,10 @@ pub struct App {
     pub colormap: Colormap,
     /// the last convergence check: its answer, whether one is running, and the settings of the next
     pub convergence: Option<Value>,
-    pub convergence_running: bool,
+    /// the results files being written on engine jobs (job id, path): they do not make the window busy, a failure is shown when they end
+    pub exports: HashMap<u64, String>,
+    /// the title of the results file being opened on a job, `Some` from the request until the draft workflow is made
+    pub opening: Option<String>,
     pub conv_factor: f64,
     pub conv_tol: f64,
     /// the `nyx-mcp` program the Connect menu registers with Claude (found at start, or picked by the user)
@@ -167,7 +172,8 @@ impl App {
             shell: crate::shell::Shell::detached(),
             colormap: Colormap::Viridis,
             convergence: None,
-            convergence_running: false,
+            exports: HashMap::new(),
+            opening: None,
             conv_factor: 0.6,
             conv_tol: 1e-3,
             mcp_server: nyx_connect::find_server(),
@@ -252,7 +258,7 @@ impl App {
         self.error = Some(e);
     }
 
-    fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool) {
+    pub(crate) fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool) {
         let progress = self.engine.jobs().progress(id).unwrap_or_else(Progress::new);
         self.busy = Some((label, Instant::now()));
         self.job = Some((id, progress, cancellable));
@@ -265,17 +271,22 @@ impl App {
     /// arrives as a message and is shown in the Study tab.
     pub fn check_convergence(&mut self) {
         let Some(active) = self.active() else { return };
-        if self.convergence_running || !self.push_edits() {
+        if self.refuse_while_busy() || !self.push_edits() {
             return;
         }
-        let (job, factor, tol, tx, ctx) = (self.engine.convergence_job(), self.conv_factor, self.conv_tol, self.tx.clone(), self.ctx.clone());
-        self.convergence_running = true;
-        self.convergence = None;
-        std::thread::spawn(move || {
-            let r = job.run(&active, factor, Some(tol)).map_err(|e| e.to_string());
-            let _ = tx.send((0, Msg::Convergence(r)));
-            ctx.request_repaint();
-        });
+        // an engine job: it shows in the job list, reports its two solves as stages and can be cancelled
+        match self.engine.start_convergence(&active, self.conv_factor, Some(self.conv_tol)) {
+            Ok(id) => {
+                self.convergence = None;
+                self.started(id, JobKind::Convergence, "Checking convergence".into(), true);
+            }
+            Err(e) => self.set_error(format!("convergence: {e}")),
+        }
+    }
+
+    /// True while a mesh convergence check runs.
+    pub fn convergence_running(&self) -> bool {
+        self.job_kind == Some(JobKind::Convergence)
     }
 
     /// Why the result at `i` is not up to date, in words, or `None` when it is current (productivity plan P1, ADR 84). It is stale when the engine
@@ -316,7 +327,7 @@ impl App {
     pub fn cancel_job(&mut self) {
         if let Some((id, _, true)) = &self.job {
             self.engine.jobs().cancel(*id);
-            self.status = "Cancelling: the solver stops at its next check (a factorisation in progress has to finish first)".into();
+            self.status = "Cancel requested: the job stops at its next check (a factorisation in progress has to finish first)".into();
         }
     }
 
@@ -338,7 +349,7 @@ impl App {
             return;
         }
         match self.engine.start_mesh() {
-            Ok(id) => self.started(id, JobKind::Mesh, "Building mesh".into(), false),
+            Ok(id) => self.started(id, JobKind::Mesh, "Building mesh".into(), true),
             Err(e) => self.set_error(format!("Geometry: {e}")),
         }
     }
@@ -392,17 +403,17 @@ impl App {
             match msg {
                 Msg::Script(Ok(t)) => self.script_output = Some(t),
                 Msg::Script(Err(e)) => self.set_error(e),
-                Msg::Convergence(r) => {
-                    self.convergence_running = false;
-                    match r {
-                        Ok(v) => self.convergence = Some(v),
-                        Err(e) => self.set_error(format!("convergence: {e}")),
-                    }
-                }
             }
         }
         let finished = self.engine.poll();
         for (id, outcome) in finished {
+            // a results file written on a job: it never held the window, only a failure is shown
+            if let Some(path) = self.exports.remove(&id) {
+                if let Err(e) = outcome {
+                    self.error = Some(format!("Results file {path}: {e}"));
+                }
+                continue;
+            }
             // only the job that is running clears the busy state
             let started = if self.job.as_ref().map(|j| j.0) == Some(id) {
                 self.job = None;
@@ -419,7 +430,29 @@ impl App {
                     self.status = format!("Mesh built: {c} cells, {f} boundary facets ({took:.2} s)");
                     self.geometry_dirty = false;
                 }
+                (Some(JobKind::Mesh), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
+                    self.error = None;
+                    self.status = format!("Mesh build cancelled after {took:.1} s; the previous mesh is unchanged");
+                }
                 (Some(JobKind::Mesh), Err(e)) => self.set_error(format!("Geometry: {e}")),
+                (Some(JobKind::Convergence), Ok(v)) => {
+                    self.convergence = Some(v);
+                    self.status = format!("Convergence checked ({took:.1} s)");
+                }
+                (Some(JobKind::Convergence), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
+                    self.error = None;
+                    self.status = format!("Convergence check cancelled after {took:.1} s");
+                }
+                (Some(JobKind::Convergence), Err(e)) => self.set_error(format!("convergence: {e}")),
+                (Some(JobKind::Open), Ok(summary)) => self.finish_open(&summary),
+                (Some(JobKind::Open), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
+                    self.opening = None;
+                    self.status = "Opening the results file cancelled; nothing was changed".into();
+                }
+                (Some(JobKind::Open), Err(e)) => {
+                    self.opening = None;
+                    self.set_error(e.to_string());
+                }
                 (Some(JobKind::Solve), Ok(summary)) => self.take_solved(&summary),
                 (Some(JobKind::Solve), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
                     self.error = None;
@@ -914,7 +947,11 @@ impl App {
                 ui.label(format!("{what}{stage}{pct}  [{:.1} s in this stage, {:.1} s in all]", st.stage_seconds, t.elapsed().as_secs_f64()));
                 if self.job.as_ref().is_some_and(|j| j.2) {
                     let cancelled = st.cancelled;
-                    if ui.add_enabled(!cancelled, egui::Button::new("Cancel")).on_hover_text("Stop the solve at the next safe point (Esc). A factorisation in progress has to finish first. Earlier results stay as they are.").clicked() {
+                    if cancelled {
+                        // what the person waits for is the stage, not an estimate: how long it has been running
+                        ui.colored_label(Color32::from_rgb(235, 170, 60), format!("Cancel requested: waiting for the stage to end ({:.1} s so far; it stops at its next check)", st.stage_seconds));
+                    }
+                    if ui.add_enabled(!cancelled, egui::Button::new("Cancel")).on_hover_text("Stop the job at the next safe point (Esc). A factorisation in progress has to finish first. Earlier results stay as they are.").clicked() {
                         self.cancel_job();
                     }
                 }
@@ -1136,7 +1173,7 @@ mod tests {
         loop {
             a.poll();
             a.run_queued();
-            if a.busy.is_none() && a.queued.is_none() {
+            if a.busy.is_none() && a.queued.is_none() && a.exports.is_empty() {
                 return;
             }
             assert!(t0.elapsed() < Duration::from_secs(secs), "still busy after {secs} s: {:?}", a.busy);
@@ -1339,6 +1376,9 @@ mod tests {
         assert!(v.is_some(), "{:?}", a.error);
         let mut b = app();
         b.open_path(path.clone());
+        // opening returns at once: reading, meshing again and checking run on a job, nothing is on show yet
+        assert!(b.busy.is_some(), "{} / {:?}", b.status, b.error);
+        assert!(b.doc.mesh.is_none() && b.results.is_empty(), "the file is not opened yet when open_path returns");
         wait_idle(&mut b, 30);
         assert!(b.error.is_none(), "{:?}", b.error);
         assert!(b.doc.mesh.is_some() && !b.results.is_empty(), "the results of the file are on show: mesh {} results {} status {}", b.doc.mesh.is_some(), b.results.len(), b.status);
@@ -1396,9 +1436,10 @@ mod tests {
         wait_idle(&mut a, 30);
         a.conv_tol = 5e-3;
         a.check_convergence();
-        assert!(a.convergence_running);
+        assert!(a.convergence_running());
+        assert!(a.busy.is_some(), "the check is the running job");
         let t0 = Instant::now();
-        while a.convergence_running {
+        while a.convergence_running() {
             a.poll();
             assert!(t0.elapsed() < Duration::from_secs(60), "no answer");
             std::thread::sleep(Duration::from_millis(10));
@@ -1407,6 +1448,30 @@ mod tests {
         a.tab = Tab::Study;
         let ctx = a.ctx.clone();
         let _ = ctx.run_ui(Default::default(), |ui| a.inspector(ui));
+    }
+
+    /// A convergence check is a job of the window: it is the busy job, it can be cancelled and it leaves the results as they were.
+    #[test]
+    fn the_window_cancels_a_convergence_check() {
+        let mut a = app();
+        a.load_example(example("14_box_cavity"));
+        wait_idle(&mut a, 30);
+        a.cmd("set_mesh", json!({ "h": 0.003, "sweep": [{ "domain_offset": 0, "n": 8, "thickness": 0.03 }] }));
+        a.mesh_edit = a.engine.project().mesh.clone();
+        a.check_convergence();
+        assert!(a.convergence_running());
+        let t0 = Instant::now();
+        while a.job.as_ref().is_some_and(|j| j.1.status().stage.is_empty()) {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(60), "the check never reported a stage");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        a.cancel_job();
+        assert!(a.job.as_ref().is_some_and(|j| j.1.status().cancelled), "the cancel is requested while the stage runs");
+        wait_idle(&mut a, 60);
+        assert!(a.convergence.is_none(), "a cancelled check gives no answer");
+        assert!(a.status.contains("cancelled"), "{}", a.status);
+        assert!(a.error.is_none(), "{:?}", a.error);
     }
 
     #[test]

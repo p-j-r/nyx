@@ -5,30 +5,31 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 > The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries.
 
 **Decisions:** [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md)  
-**Size:** 3 files, 1088 lines.
+**Size:** 3 files, 1193 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/commands.rs` | 627 | The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list... |
-| `crates/nyx-engine/src/engine.rs` | 428 | The engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them and the binding to a workflow folder. The window and the MCP server hold an `Engine` and nothing else; every action is a method... |
+| `crates/nyx-engine/src/commands.rs` | 647 | The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list... |
+| `crates/nyx-engine/src/engine.rs` | 513 | The engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them and the binding to a workflow folder. The window and the MCP server hold an `Engine` and nothing else; every action is a method... |
 | `crates/nyx-engine/src/guide.rs` | 33 | Cards: short texts a host reads on demand through the `get_guide` command, embedded in the binary. They describe the commands, not a physics: how to build a geometry, assign materials, solve and read a result. |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, mesh, progress | Library, SimplexMesh, install |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, mesh, progress | Library, SimplexMesh, install, stage |
 | [container `geom` (geom)](../../3-components/geom.md) | model | FeatureList, Op |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | contract, crate root, error, registry, result, spec, validate | BcSpec, Error, MaterialAssign, ProblemSpec, Registry, Sizing, SolveResult, StudySpec, canonical_json, validate_spec |
 | [container `store` (nyx-store)](../../3-components/store.md) | util | hash_bytes |
 | [Geometry operations](./geometry.md) | geomdesc, geometry |  |
-| [Job runner](./jobs.md) | jobs, solve | JobId, JobOutput, JobRunner, run_chain |
+| [Job runner](./jobs.md) | jobs, solve | JobId, JobOutput, JobRunner, Opened, run_chain |
 | [Materials](./materials.md) | materials | default_dirs, load_library |
 | [Meshing seam](./meshing.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
 | [Project](./project.md) | project | MeshSettings, Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
+| [Results files](./resultsIO.md) | results_file | read_and_mesh, write_snapshot |
 | [Store link](./storeLink.md) | store_link | RunOutcome, StoreLink |
 
 ## Used by
@@ -43,7 +44,7 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 | [Materials](./materials.md) | engine | Engine |
 | [Meshing seam](./meshing.md) | engine | Engine |
 | [Registry and facade](./registry.md) | commands, engine | Access, CommandDesc, Engine |
-| [Results files](./resultsIO.md) | engine | Engine, Stored |
+| [Results files](./resultsIO.md) | engine | Engine |
 
 ## Class diagram
 
@@ -74,9 +75,9 @@ classDiagram
         +model Option
         +results BTreeMap
         +jobs JobRunner
+        +generation u64
         +link Option~StoreLink~
-        +workspace Option~PathBuf~
-        +more_3_fields
+        +more_4_fields
         +catalog() Vec~CommandDesc~
         +call(name, args) R
         +new() Engine
@@ -85,7 +86,7 @@ classDiagram
         +project() Project
         +jobs() JobRunner
         +set_workspace(root, auto_store)
-        +more_18_methods()
+        +more_21_methods()
     }
   }
   namespace engine_rs {
@@ -118,31 +119,34 @@ classDiagram
 | fn | `Engine::catalog` | `commands.rs:105` | `pub fn catalog(&self) -> Vec<CommandDesc>` —  Every command of this build, with its schema. The geometry `add_*` commands come from `geomdesc`; the choices of physics from |
 | fn | `Engine::call` | `commands.rs:206` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
 | struct | `Stored` | `engine.rs:21` | fields: `result`, `key`, `job`, `at` |
-| struct | `Engine` | `engine.rs:36` | fields: `registry`, `mesher`, `project`, `model`, `results`, `jobs`, `link`, `workspace`, `auto_store`, `base_library`, `library_notes` |
-| fn | `Engine::new` | `engine.rs:60` | `pub fn new() -> Engine` —  An engine with the physics compiled into this build and an empty 2D project. |
-| fn | `Engine::with` | `engine.rs:68` | `pub fn with(registry: Registry, mesher: Arc<dyn Mesher>) -> Engine` |
-| fn | `Engine::registry` | `engine.rs:85` | `pub fn registry(&self) -> &Registry` |
-| fn | `Engine::project` | `engine.rs:89` | `pub fn project(&self) -> &Project` |
-| fn | `Engine::jobs` | `engine.rs:93` | `pub fn jobs(&self) -> &JobRunner` |
-| fn | `Engine::set_workspace` | `engine.rs:99` | `pub fn set_workspace(&mut self, root: PathBuf, auto_store: bool)` —  Names the workspace folder workflows are stored in. With `auto_store` the project is bound to a new workflow there at the first solve and |
-| fn | `Engine::sizing` | `engine.rs:106` | `pub fn sizing(&self) -> Option<Sizing>` —  What the physics of the project want the mesh to resolve, merged: the shortest wavelength of each region, the highest order and the |
-| fn | `Engine::mesh_key` | `engine.rs:126` | `pub fn mesh_key(&self) -> String` —  The hash of the geometry, the mesh settings and the sizing: what a mesh depends on. |
-| fn | `Engine::stamp` | `engine.rs:133` | `pub fn stamp(&self) -> String` —  The hash of the whole project. Staleness no longer uses it (`problem_key` does); it is kept for tools that want an identity of the whole |
-| fn | `Engine::problem_key` | `engine.rs:141` | `pub fn problem_key(&self, physics: &str) -> Option<String>` —  What a result of `physics` depends on, as a cache key: the problem of that physics, the materials the project carries, the mesh key and the |
-| fn | `Engine::problem_keys` | `engine.rs:147` | `pub fn problem_keys(&self) -> BTreeMap<String, String>` —  The problem key of every physics of the project, with the mesh key computed once. |
-| fn | `Engine::is_stale` | `engine.rs:185` | `pub fn is_stale(&self, physics: &str) -> bool` —  True when the result stored for `physics` was not made from the problem the project has now (or the project has no such problem any more). |
-| fn | `Engine::result_age` | `engine.rs:193` | `pub fn result_age(&self, physics: &str) -> Option<f64>` —  Seconds since the result of `physics` was stored. |
-| fn | `Engine::set_project` | `engine.rs:198` | `pub fn set_project(&mut self, project: Project)` —  Replaces the project (a new one, or one just opened). The mesh and results are dropped and the store binding is released. |
-| fn | `Engine::model` | `engine.rs:206` | `pub fn model(&self) -> Option<&Arc<MeshedModel>>` —  The mesh if one has been built for the current geometry and settings. |
-| fn | `Engine::result` | `engine.rs:211` | `pub fn result(&self, physics: &str) -> Option<(&Arc<SolveResult>, bool)>` —  The latest result of a physics and whether what it depends on has changed since (its problem key, not the whole project). |
-| fn | `Engine::start_mesh` | `engine.rs:219` | `pub fn start_mesh(&mut self) -> Result<JobId, Error>` —  Starts meshing the project on a job. |
-| fn | `Engine::start_solve` | `engine.rs:235` | `pub fn start_solve(&mut self, targets: Option<Vec<String>>) -> Result<JobId, Error>` —  Starts solving `targets` (default: the active physics, else all) on a job. The mesh is built inside the job when none is current. |
-| fn | `Engine::poll` | `engine.rs:274` | `pub fn poll(&mut self) -> Vec<(JobId, Result<Value, Error>)>` —  Takes the finished jobs and applies them: the mesh and results become current, a solve is recorded in the run table when the project |
-| fn | `Engine::wait` | `engine.rs:286` | `pub fn wait(&mut self, id: JobId) -> Result<Value, Error>` —  Waits for a job and applies it. |
-| fn | `Engine::mesh_now` | `engine.rs:380` | `pub fn mesh_now(&mut self) -> Result<Value, Error>` —  Mesh now (start and wait). |
-| fn | `Engine::solve_now` | `engine.rs:386` | `pub fn solve_now(&mut self, targets: Option<Vec<String>>) -> Result<Value, Error>` —  Solve now (start and wait). |
-| fn | `Engine::save_to_workspace` | `engine.rs:394` | `pub fn save_to_workspace(&mut self, workspace: Option<PathBuf>) -> Result<Value, Error>` —  Binds the project to a new workflow folder in `workspace` (or commits it, when already bound). |
-| fn | `Engine::open_workflow` | `engine.rs:413` | `pub fn open_workflow(&mut self, folder: &std::path::Path, experiment: Option<&str>) -> Result<Value, Error>` —  Opens a workflow folder and makes its experiment the project. |
+| struct | `Engine` | `engine.rs:39` | fields: `registry`, `mesher`, `project`, `model`, `results`, `jobs`, `generation`, `link`, `workspace`, `auto_store`, `base_library`, `library_notes` |
+| fn | `Engine::new` | `engine.rs:65` | `pub fn new() -> Engine` —  An engine with the physics compiled into this build and an empty 2D project. |
+| fn | `Engine::with` | `engine.rs:73` | `pub fn with(registry: Registry, mesher: Arc<dyn Mesher>) -> Engine` |
+| fn | `Engine::registry` | `engine.rs:91` | `pub fn registry(&self) -> &Registry` |
+| fn | `Engine::project` | `engine.rs:95` | `pub fn project(&self) -> &Project` |
+| fn | `Engine::jobs` | `engine.rs:99` | `pub fn jobs(&self) -> &JobRunner` |
+| fn | `Engine::set_workspace` | `engine.rs:105` | `pub fn set_workspace(&mut self, root: PathBuf, auto_store: bool)` —  Names the workspace folder workflows are stored in. With `auto_store` the project is bound to a new workflow there at the first solve and |
+| fn | `Engine::sizing` | `engine.rs:112` | `pub fn sizing(&self) -> Option<Sizing>` —  What the physics of the project want the mesh to resolve, merged: the shortest wavelength of each region, the highest order and the |
+| fn | `Engine::mesh_key` | `engine.rs:132` | `pub fn mesh_key(&self) -> String` —  The hash of the geometry, the mesh settings and the sizing: what a mesh depends on. |
+| fn | `Engine::stamp` | `engine.rs:139` | `pub fn stamp(&self) -> String` —  The hash of the whole project. Staleness no longer uses it (`problem_key` does); it is kept for tools that want an identity of the whole |
+| fn | `Engine::problem_key` | `engine.rs:147` | `pub fn problem_key(&self, physics: &str) -> Option<String>` —  What a result of `physics` depends on, as a cache key: the problem of that physics, the materials the project carries, the mesh key and the |
+| fn | `Engine::problem_keys` | `engine.rs:153` | `pub fn problem_keys(&self) -> BTreeMap<String, String>` —  The problem key of every physics of the project, with the mesh key computed once. |
+| fn | `Engine::is_stale` | `engine.rs:191` | `pub fn is_stale(&self, physics: &str) -> bool` —  True when the result stored for `physics` was not made from the problem the project has now (or the project has no such problem any more). |
+| fn | `Engine::result_age` | `engine.rs:199` | `pub fn result_age(&self, physics: &str) -> Option<f64>` —  Seconds since the result of `physics` was stored. |
+| fn | `Engine::set_project` | `engine.rs:204` | `pub fn set_project(&mut self, project: Project)` —  Replaces the project (a new one, or one just opened). The mesh and results are dropped and the store binding is released. |
+| fn | `Engine::model` | `engine.rs:213` | `pub fn model(&self) -> Option<&Arc<MeshedModel>>` —  The mesh if one has been built for the current geometry and settings. |
+| fn | `Engine::result` | `engine.rs:218` | `pub fn result(&self, physics: &str) -> Option<(&Arc<SolveResult>, bool)>` —  The latest result of a physics and whether what it depends on has changed since (its problem key, not the whole project). |
+| fn | `Engine::start_mesh` | `engine.rs:226` | `pub fn start_mesh(&mut self) -> Result<JobId, Error>` —  Starts meshing the project on a job. |
+| fn | `Engine::start_solve` | `engine.rs:244` | `pub fn start_solve(&mut self, targets: Option<Vec<String>>) -> Result<JobId, Error>` —  Starts solving `targets` (default: the active physics, else all) on a job. The mesh is built inside the job when none is current. |
+| fn | `Engine::start_convergence` | `engine.rs:283` | `pub fn start_convergence(&mut self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<JobId, Error>` —  Starts a mesh convergence check (two solves, the second on a finer mesh) on a job. Both solves run on the job's thread under its progress, |
+| fn | `Engine::start_open_results` | `engine.rs:301` | `pub fn start_open_results(&mut self, path: &str) -> Result<JobId, Error>` —  Starts reading a results file, meshing its project again and checking the mesh against the stored one, on a job. The engine is not touched |
+| fn | `Engine::start_export_results` | `engine.rs:314` | `pub fn start_export_results(&mut self, path: &str, parallel: bool) -> Result<JobId, Error>` —  Starts writing the results the engine holds now (the project, the mesh and the latest result of every physics) into an HDF5 file on a job. |
+| fn | `Engine::poll` | `engine.rs:330` | `pub fn poll(&mut self) -> Vec<(JobId, Result<Value, Error>)>` —  Takes the finished jobs and applies them: the mesh and results become current, a solve is recorded in the run table when the project |
+| fn | `Engine::wait` | `engine.rs:342` | `pub fn wait(&mut self, id: JobId) -> Result<Value, Error>` —  Waits for a job and applies it. |
+| fn | `Engine::mesh_now` | `engine.rs:465` | `pub fn mesh_now(&mut self) -> Result<Value, Error>` —  Mesh now (start and wait). |
+| fn | `Engine::solve_now` | `engine.rs:471` | `pub fn solve_now(&mut self, targets: Option<Vec<String>>) -> Result<Value, Error>` —  Solve now (start and wait). |
+| fn | `Engine::save_to_workspace` | `engine.rs:479` | `pub fn save_to_workspace(&mut self, workspace: Option<PathBuf>) -> Result<Value, Error>` —  Binds the project to a new workflow folder in `workspace` (or commits it, when already bound). |
+| fn | `Engine::open_workflow` | `engine.rs:498` | `pub fn open_workflow(&mut self, folder: &std::path::Path, experiment: Option<&str>) -> Result<Value, Error>` —  Opens a workflow folder and makes its experiment the project. |
 | const | `TOPICS` | `guide.rs:4` | `&[&str]` |
 | fn | `card` | `guide.rs:6` | `pub fn card(topic: &str) -> Option<&'static str>` |
 | const | `SERVER_INSTRUCTIONS` | `guide.rs:17` | `&str` —  The text a server sends with `initialize`: just enough to find the guide. |

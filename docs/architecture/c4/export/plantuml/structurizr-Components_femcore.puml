@@ -101,6 +101,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
 
 nyx.femcore.Adaptationdrivers --> nyx.femcore.Adaptationoperators <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::ops, adapt::ops3 +2\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationdrivers --> nyx.femcore.Metricfields <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::field, adapt::metric +2\n<size:16>[Rust paths]</size>"
+nyx.femcore.Adaptationdrivers --> nyx.femcore.Runtimeservices <<Relationship-UmVsYXRpb25zaGlw>> : "uses progress\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationoperators --> nyx.femcore.Adaptationdrivers <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::drive, adapt::geom +1\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationoperators --> nyx.femcore.Mesh <<Relationship-UmVsYXRpb25zaGlw>> : "uses mesh::quality\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationoperators --> nyx.femcore.Metricfields <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::field, adapt::metric +1\n<size:16>[Rust paths]</size>"

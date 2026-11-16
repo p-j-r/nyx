@@ -87,6 +87,7 @@ graph TB
     23-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
     23-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
     23-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->32
+    23-. "<div>uses results_file</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
     23-. "<div>uses store_link</div><div style='font-size: 70%'>[Rust paths]</div>" .->31
     25-. "<div>uses geom: error, eval +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
     25-. "<div>uses physics: error</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
@@ -100,7 +101,7 @@ graph TB
     28-. "<div>uses femcore: material,<br />material::spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     28-. "<div>uses physics: desc, error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
     28-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    27-. "<div>uses femcore: mesh,<br />meshing::geomdrive +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
+    27-. "<div>uses femcore: mesh,<br />meshing::geomdrive +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     27-. "<div>uses geom: eval, labels +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
     27-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
     27-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
@@ -121,9 +122,11 @@ graph TB
     32-. "<div>uses jobs</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     32-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
     32-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    30-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    30-. "<div>uses physics: error, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    30-. "<div>uses femcore: material::spec,<br />mesh +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
+    30-. "<div>uses physics: error, registry<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
     30-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    30-. "<div>uses jobs</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    30-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
     30-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
     31-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     31-. "<div>uses geom: expr, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
@@ -140,13 +143,13 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Commands](../4-code/engine/commands.md) | 3 | 1088 | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries. |
+| [Commands](../4-code/engine/commands.md) | 3 | 1193 | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries. |
 | [Project](../4-code/engine/project.md) | 1 | 197 | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary. |
 | [Geometry operations](../4-code/engine/geometry.md) | 2 | 730 | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only). |
-| [Job runner](../4-code/engine/jobs.md) | 3 | 381 | 61 | Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |
-| [Meshing seam](../4-code/engine/meshing.md) | 2 | 334 | 54, 50 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project. |
+| [Job runner](../4-code/engine/jobs.md) | 3 | 443 | 61 | Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |
+| [Meshing seam](../4-code/engine/meshing.md) | 2 | 345 | 54, 50 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project. |
 | [Materials](../4-code/engine/materials.md) | 1 | 155 | 58 | The material library plus the materials a project carries, resolved at the study wavelength. |
 | [Analyses](../4-code/engine/analyse.md) | 1 | 82 | 56 | Runs the analyses of nyx-analysis on the latest result of a physics. |
-| [Results files](../4-code/engine/resultsIO.md) | 3 | 947 | 62, 63 | HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results. |
+| [Results files](../4-code/engine/resultsIO.md) | 3 | 985 | 62, 63 | HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results. |
 | [Store link](../4-code/engine/storeLink.md) | 1 | 272 | 39, 59 | Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here). |
 | [Registry and facade](../4-code/engine/registry.md) | 1 | 84 | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with. |

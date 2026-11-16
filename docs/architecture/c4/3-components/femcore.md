@@ -73,6 +73,7 @@ graph TB
 
     86-. "<div>uses adapt::ops, adapt::ops3<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
     86-. "<div>uses adapt::field,<br />adapt::metric +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
+    86-. "<div>uses progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
     85-. "<div>uses adapt::drive,<br />adapt::geom +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
     85-. "<div>uses mesh::quality</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
     85-. "<div>uses adapt::field,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
@@ -162,12 +163,12 @@ graph TB
 | [Mesh files](../4-code/femcore/meshio.md) | 3 | 878 | 16 | The compact lossless .fmsh format for meshes and results and its entropy coder. |
 | [Fixtures and test kit](../4-code/femcore/fixtures.md) | 3 | 582 | 41, 10, 60 | Test meshes and the SOI wire cross-section used by the tests of every physics crate. |
 | [Meshing facade](../4-code/femcore/meshing.md) | 6 | 1707 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
-| [3D meshing](../4-code/femcore/meshing3d.md) | 4 | 1671 | 40, 50, 51, 55 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, and adaptive meshing driven by exact faces. |
+| [3D meshing](../4-code/femcore/meshing3d.md) | 4 | 1677 | 40, 50, 51, 55 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, and adaptive meshing driven by exact faces. |
 | [Structured absorbing layers](../4-code/femcore/structpml.md) | 4 | 1408 | 7, 52, 5 | Structured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels. |
 | [Meshing validation harness](../4-code/femcore/meshcheck.md) | 4 | 980 | 7 | A small independent scalar Helmholtz solver with PML used to validate meshes. |
 | [Metric fields](../4-code/femcore/metric.md) | 6 | 1846 | 7, 5 | Riemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers. |
 | [Adaptation operators](../4-code/femcore/adaptops.md) | 4 | 2255 | 7, 51 | Edge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification. |
-| [Adaptation drivers](../4-code/femcore/adaptdrive.md) | 4 | 716 | 7, 51 | Passes of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go. |
+| [Adaptation drivers](../4-code/femcore/adaptdrive.md) | 4 | 720 | 7, 51 | Passes of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go. |
 | [Error estimators](../4-code/femcore/estimators.md) | 3 | 1125 | 7, 17, 53 | Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements. |
 | [Matrices and vectors](../4-code/femcore/lacore.md) | 17 | 4131 | 33, 8, 11 | The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, problem bundles and test-problem generators. |
 | [Linear algebra driver](../4-code/femcore/ladriver.md) | 3 | 731 | 33 | The door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models. |

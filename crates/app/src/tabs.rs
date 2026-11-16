@@ -603,16 +603,16 @@ impl App {
             num(ui, &mut self.conv_factor);
             ui.label("tolerance");
             num(ui, &mut self.conv_tol);
-            start = ui.add_enabled(!self.convergence_running && self.busy.is_none(), egui::Button::new("Check convergence")).clicked();
+            start = ui.add_enabled(self.busy.is_none(), egui::Button::new("Check convergence")).clicked();
         });
         self.conv_factor = self.conv_factor.clamp(0.1, 0.95);
         if start {
             self.check_convergence();
         }
-        if self.convergence_running {
+        if self.convergence_running() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("two solves are running...");
+                ui.label("two solves are running (the toolbar shows the stage; Cancel stops it)...");
             });
         }
         if let Some(c) = &self.convergence {

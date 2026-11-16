@@ -465,25 +465,31 @@ impl App {
     /// A new draft workflow from a project (nothing is written until the first change).
     pub fn new_draft(&mut self, title: &str, start: Start) {
         self.flush();
+        if let Start::Results(path) = &start {
+            // reading the file, meshing its project again and checking the mesh run on a job; the draft workflow is made when it ends (`finish_open`)
+            match self.engine.start_open_results(path.to_str().unwrap_or_default()) {
+                Ok(job) => {
+                    self.opening = Some(title.to_string());
+                    self.started(job, crate::app::JobKind::Open, format!("Opening {title}"), true);
+                    self.status = format!("Opening {title}: reading the file, meshing its project and checking the mesh");
+                }
+                Err(e) => self.set_error(e.to_string()),
+            }
+            return;
+        }
         let id = nyx_engine::facade::store::util::short_id();
         let mut w = OpenWf::new(id.clone());
         w.draft_title = title.trim().to_string();
         self.shell.open.insert(id.clone(), w);
         self.shell.tabs.push(id.clone());
-        let mut shown = false;
+        let shown = false;
         match start {
             Start::Example(path) => {
                 if self.cmd("project_open", serde_json::json!({ "path": path.to_str().unwrap_or_default() })).is_none() {
                     return;
                 }
             }
-            Start::Results(path) => {
-                let Some(v) = self.cmd("open_results", serde_json::json!({ "path": path.to_str().unwrap_or_default() })) else { return };
-                self.adopt();
-                self.project_path = None;
-                self.take_solved(&v);
-                shown = true;
-            }
+            Start::Results(_) => return,
             Start::Blank { physics, three_d } => {
                 if let Err(e) = crate::examples::blank(&mut self.engine, &physics, three_d) {
                     self.set_error(e);
@@ -494,6 +500,27 @@ impl App {
         if !shown {
             self.adopt_project();
         }
+        self.finish_draft(&id, title, shown);
+    }
+
+    /// The results file the window was opening on a job is in: its project is the engine's, so the draft workflow is made around it and the
+    /// stored results are put on show.
+    pub(crate) fn finish_open(&mut self, summary: &serde_json::Value) {
+        let title = self.opening.take().unwrap_or_else(|| "Results".into());
+        let id = nyx_engine::facade::store::util::short_id();
+        let mut w = OpenWf::new(id.clone());
+        w.draft_title = title.trim().to_string();
+        self.shell.open.insert(id.clone(), w);
+        self.shell.tabs.push(id.clone());
+        self.adopt();
+        self.project_path = None;
+        self.take_solved(summary);
+        self.finish_draft(&id, &title, true);
+    }
+
+    /// The end of making a draft workflow: remembers its first spec, makes it the loaded one and shows it.
+    fn finish_draft(&mut self, id: &str, title: &str, shown: bool) {
+        let id = id.to_string();
         let spec = self.spec_json().unwrap_or_default();
         if let Some(w) = self.shell.open.get_mut(&id) {
             w.spec0 = spec.clone();
@@ -588,9 +615,16 @@ impl App {
                     let dir = d.run_dir(&rc.exp, &r.id);
                     let _ = std::fs::create_dir_all(&dir);
                     let _ = std::fs::write(dir.join("log.txt"), text);
+                    // written on an engine job, from a snapshot of what the engine holds now: the window does not wait for the file
                     #[cfg(feature = "hdf5")]
-                    if let Err(e) = self.engine.export_results(&dir.join("results.h5").to_string_lossy(), false) {
-                        self.error = Some(format!("Results file: {e}"));
+                    {
+                        let target = dir.join("results.h5").to_string_lossy().into_owned();
+                        match self.engine.start_export_results(&target, false) {
+                            Ok(job) => {
+                                self.exports.insert(job, target);
+                            }
+                            Err(e) => self.error = Some(format!("Results file: {e}")),
+                        }
                     }
                 }
                 if let Some(ws) = &self.shell.ws {

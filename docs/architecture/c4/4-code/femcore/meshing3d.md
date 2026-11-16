@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 > The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, and adaptive meshing driven by exact faces.
 
 **Decisions:** [ADR 40](../../../adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md), [ADR 55](../../../adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md)  
-**Size:** 4 files, 1671 lines.
+**Size:** 4 files, 1677 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 |---|---:|---|
 | `crates/femcore/src/meshing/adapt3d.rs` | 320 | Adaptive meshing of a 3D `geom` model (ADR 51): the metric adaptation of `adapt::drive3` driven by the exact faces of the model. |
 | `crates/femcore/src/meshing/geomdrive3.rs` | 219 | From a 3D `geom` model to a tetrahedral mesh: the adapter between `geom::Evaluated` and the lattice mesher (`mesher3d`), which only knows the trait `Domain3`. |
-| `crates/femcore/src/meshing/mesher3d.rs` | 888 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
+| `crates/femcore/src/meshing/mesher3d.rs` | 894 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
 | `crates/femcore/src/meshing/refine3d.rs` | 244 | Local refinement of a tetrahedral mesh by longest-edge (Rivara) bisection. |
 
 ## What it uses
@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 | [Mesh](./mesh.md) | mesh, mesh::cells | CellMesh, CellType, SimplexMesh |
 | [Meshing facade](./meshing.md) | meshing, meshing::geomdrive | Adaptive, GeomMeshOpts, MeshedGeom, evaluate, periodic_labels |
 | [Metric fields](./metric.md) | adapt::field3, adapt::metric, adapt::work | BackgroundMetric3, SimplexMesh, Sym, isotropic, simplex_to_adapt |
-| [Runtime services](./runtime.md) | par, progress | lap, threads |
+| [Runtime services](./runtime.md) | par, progress | check, lap, threads |
 
 ## Used by
 

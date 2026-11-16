@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 1723 lines.
+**Size:** 3 files, 1788 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 1428 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
+| `crates/app/src/app.rs` | 1493 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
 | `crates/app/src/main.rs` | 73 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
 | `crates/app/src/state.rs` | 222 | The run-time state of the window around the engine's project: the mesh on show (`Doc`) and a result on show with its plot settings (`ResultView`). The project itself, with its geometry, mesh settings and one problem per physics, is `nyx_... |
 
@@ -33,7 +33,7 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 |---|---|---|
 | [Scripts and batch](./headless.md) | app, state | App, Msg |
 | [Inspector tabs](./inspector.md) | app, state | App |
-| [Shell and dashboard](./shell.md) | app, state | App, Tab |
+| [Shell and dashboard](./shell.md) | app, state | App, JobKind, Tab |
 
 ## Class diagram
 
@@ -56,11 +56,12 @@ classDiagram
         <<enumeration>>
         Mesh
         Solve
+        Convergence
+        Open
     }
     class Msg {
         <<enumeration>>
         Script
-        Convergence
     }
     class App {
         <<struct>>
@@ -72,7 +73,7 @@ classDiagram
         +current Option~usize~
         +show_results bool
         +tx Sender
-        +more_38_fields
+        +more_39_fields
         +new(cc) Self
         +with_context(ctx) Self
         +cmd(name, args) Option~Value~
@@ -81,7 +82,7 @@ classDiagram
         +adopt()
         +push_edits() bool
         +set_error(e)
-        +more_20_methods()
+        +more_22_methods()
     }
   }
   namespace main_rs {
@@ -157,37 +158,39 @@ classDiagram
 |---|---|---|---|
 | struct | `NewDialog` | `app.rs:28` | fields: `physics`, `three_d` —  Choices of the File &gt; New dialog. |
 | enum | `Queued` | `app.rs:34` | variants: `Open`, `Rebuild` —  Work waiting for the running job to finish (the latest request wins). |
-| enum | `JobKind` | `app.rs:41` | variants: `Mesh`, `Solve` —  What a running engine job is. |
-| enum | `Msg` | `app.rs:47` | variants: `Script`, `Convergence` —  A message from a helper thread (the optional Python script) to the window. |
-| struct | `App` | `app.rs:53` | fields: `engine`, `doc`, `tab`, `vp`, `results`, `current`, `show_results`, `tx`, `rx`, `busy`, `job`, `job_kind`, ... |
-| fn | `App::new` | `app.rs:118` | `pub fn new(cc: &eframe::CreationContext<'_>) -> Self` |
-| fn | `App::with_context` | `app.rs:127` | `pub fn with_context(ctx: egui::Context) -> Self` —  The application state on an egui context; no window is needed (tests use a default context). It opens with the first example. |
-| fn | `App::cmd` | `app.rs:195` | `pub fn cmd(&mut self, name: &str, args: Value) -> Option<Value>` —  Runs an engine command and reports its error in the status bar. `None` after an error. |
-| fn | `App::active` | `app.rs:206` | `pub fn active(&self) -> Option<String>` —  The code of the active physics, if the project has one. |
-| fn | `App::physics_name` | `app.rs:212` | `pub fn physics_name(&self, id: &str) -> String` —  The display name of a physics from its descriptor. |
-| fn | `App::adopt` | `app.rs:217` | `pub fn adopt(&mut self)` —  The window's copies of what is edited (geometry, mesh settings) are taken from the engine's project: after a project was opened or made. |
-| fn | `App::push_edits` | `app.rs:227` | `pub fn push_edits(&mut self) -> bool` —  Hands the geometry and mesh settings being edited to the engine. False (and an error shown) when the engine refuses them. |
-| fn | `App::set_error` | `app.rs:249` | `pub fn set_error(&mut self, e: impl Into<String>)` |
-| fn | `App::check_convergence` | `app.rs:266` | `pub fn check_convergence(&mut self)` —  Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first). |
-| fn | `App::stale_reason` | `app.rs:284` | `pub fn stale_reason(&self, i: usize) -> Option<&'static str>` —  Why the result at `i` is not up to date, in words, or `None` when it is current (productivity plan P1, ADR 84). It is stale when the engine |
-| fn | `App::stale_band` | `app.rs:306` | `pub fn stale_band(&mut self, ui: &mut egui::Ui)` —  One line above the result on show when it is stale, with a button to solve again. |
-| fn | `App::cancel_job` | `app.rs:316` | `pub fn cancel_job(&mut self)` |
-| fn | `App::rebuild_mesh` | `app.rs:332` | `pub fn rebuild_mesh(&mut self)` |
-| fn | `App::open_path` | `app.rs:346` | `pub fn open_path(&mut self, path: PathBuf)` |
-| fn | `App::compute` | `app.rs:365` | `pub fn compute(&mut self)` —  Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed. |
-| fn | `App::take_solved` | `app.rs:449` | `pub(crate) fn take_solved(&mut self, summary: &Value)` —  A solve came back: the mesh it used, and one result view per physics it solved. |
-| fn | `App::sync_rules` | `app.rs:526` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
-| fn | `App::save_project` | `app.rs:550` | `pub fn save_project(&mut self, as_new: bool)` |
-| fn | `App::load_project` | `app.rs:566` | `pub fn load_project(&mut self, path: &std::path::Path)` |
-| fn | `App::load_example` | `app.rs:579` | `pub fn load_example(&mut self, i: usize)` |
-| fn | `App::result_csv` | `app.rs:594` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
-| fn | `App::export_csv` | `app.rs:622` | `pub fn export_csv(&mut self)` |
-| fn | `App::export_analysis` | `app.rs:635` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
-| fn | `App::run_python_script` | `app.rs:651` | `pub fn run_python_script(&mut self)` |
-| fn | `App::new_project` | `app.rs:671` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
-| fn | `App::viewport_ui` | `app.rs:957` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
-| fn | `App::set_condition_on` | `app.rs:1031` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
-| fn | `App::set_problem` | `app.rs:1041` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
+| enum | `JobKind` | `app.rs:41` | variants: `Mesh`, `Solve`, `Convergence`, `Open` —  What a running engine job is. |
+| enum | `Msg` | `app.rs:51` | variants: `Script` —  A message from a helper thread (the optional Python script) to the window. |
+| struct | `App` | `app.rs:55` | fields: `engine`, `doc`, `tab`, `vp`, `results`, `current`, `show_results`, `tx`, `rx`, `busy`, `job`, `job_kind`, ... |
+| fn | `App::new` | `app.rs:123` | `pub fn new(cc: &eframe::CreationContext<'_>) -> Self` |
+| fn | `App::with_context` | `app.rs:132` | `pub fn with_context(ctx: egui::Context) -> Self` —  The application state on an egui context; no window is needed (tests use a default context). It opens with the first example. |
+| fn | `App::cmd` | `app.rs:201` | `pub fn cmd(&mut self, name: &str, args: Value) -> Option<Value>` —  Runs an engine command and reports its error in the status bar. `None` after an error. |
+| fn | `App::active` | `app.rs:212` | `pub fn active(&self) -> Option<String>` —  The code of the active physics, if the project has one. |
+| fn | `App::physics_name` | `app.rs:218` | `pub fn physics_name(&self, id: &str) -> String` —  The display name of a physics from its descriptor. |
+| fn | `App::adopt` | `app.rs:223` | `pub fn adopt(&mut self)` —  The window's copies of what is edited (geometry, mesh settings) are taken from the engine's project: after a project was opened or made. |
+| fn | `App::push_edits` | `app.rs:233` | `pub fn push_edits(&mut self) -> bool` —  Hands the geometry and mesh settings being edited to the engine. False (and an error shown) when the engine refuses them. |
+| fn | `App::set_error` | `app.rs:255` | `pub fn set_error(&mut self, e: impl Into<String>)` |
+| fn | `App::started` | `app.rs:261` | `pub(crate) fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool)` |
+| fn | `App::check_convergence` | `app.rs:272` | `pub fn check_convergence(&mut self)` —  Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first). |
+| fn | `App::convergence_running` | `app.rs:288` | `pub fn convergence_running(&self) -> bool` —  True while a mesh convergence check runs. |
+| fn | `App::stale_reason` | `app.rs:295` | `pub fn stale_reason(&self, i: usize) -> Option<&'static str>` —  Why the result at `i` is not up to date, in words, or `None` when it is current (productivity plan P1, ADR 84). It is stale when the engine |
+| fn | `App::stale_band` | `app.rs:317` | `pub fn stale_band(&mut self, ui: &mut egui::Ui)` —  One line above the result on show when it is stale, with a button to solve again. |
+| fn | `App::cancel_job` | `app.rs:327` | `pub fn cancel_job(&mut self)` |
+| fn | `App::rebuild_mesh` | `app.rs:343` | `pub fn rebuild_mesh(&mut self)` |
+| fn | `App::open_path` | `app.rs:357` | `pub fn open_path(&mut self, path: PathBuf)` |
+| fn | `App::compute` | `app.rs:376` | `pub fn compute(&mut self)` —  Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed. |
+| fn | `App::take_solved` | `app.rs:482` | `pub(crate) fn take_solved(&mut self, summary: &Value)` —  A solve came back: the mesh it used, and one result view per physics it solved. |
+| fn | `App::sync_rules` | `app.rs:559` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
+| fn | `App::save_project` | `app.rs:583` | `pub fn save_project(&mut self, as_new: bool)` |
+| fn | `App::load_project` | `app.rs:599` | `pub fn load_project(&mut self, path: &std::path::Path)` |
+| fn | `App::load_example` | `app.rs:612` | `pub fn load_example(&mut self, i: usize)` |
+| fn | `App::result_csv` | `app.rs:627` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
+| fn | `App::export_csv` | `app.rs:655` | `pub fn export_csv(&mut self)` |
+| fn | `App::export_analysis` | `app.rs:668` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
+| fn | `App::run_python_script` | `app.rs:684` | `pub fn run_python_script(&mut self)` |
+| fn | `App::new_project` | `app.rs:704` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
+| fn | `App::viewport_ui` | `app.rs:994` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::set_condition_on` | `app.rs:1068` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
+| fn | `App::set_problem` | `app.rs:1078` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
 | fn | `main` | `main.rs:27` | `fn main() -> eframe::Result` |
 | enum | `Tab` | `state.rs:12` | variants: `Geometry`, `Materials`, `Physics`, `Study`, `Results`, `Analysis` |
 | struct | `Doc` | `state.rs:38` | fields: `model`, `mesh`, `view`, `source`, `mesh_error` —  The mesh on show and what we know about its origin. |

@@ -29,16 +29,19 @@ Nothing outside the component (the standard library and external crates are not 
 | [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads_up_to |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
-| [engine: Commands](../engine/commands.md) | progress | install |
-| [engine: Job runner](../engine/jobs.md) | progress | Progress |
+| [engine: Commands](../engine/commands.md) | progress | install, stage |
+| [engine: Job runner](../engine/jobs.md) | progress | Progress, install, stage |
+| [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, stage |
 | [engine: Registry and facade](../engine/registry.md) | progress | Progress |
+| [engine: Results files](../engine/resultsIO.md) | progress | Progress, install, stage |
+| [Adaptation drivers](./adaptdrive.md) | progress | check |
 | [Finite-element basics](./fem.md) | par, progress | check, lap_since, stage, threads, threads_up_to |
 | [Matrices and vectors](./lacore.md) | par | threads |
 | [Linear algebra driver](./ladriver.md) | par, progress | on_factor_pool, threads |
 | [Eigensolvers](./laeigen.md) | par, progress | check, threads |
 | [Preconditioners](./laprecond.md) | par, progress | check, lap_since, note, stage, threads |
 | [Mesh](./mesh.md) | par | threads |
-| [3D meshing](./meshing3d.md) | par, progress | lap, threads |
+| [3D meshing](./meshing3d.md) | par, progress | check, lap, threads |
 | [Metric fields](./metric.md) | par |  |
 | [physics: Physics trait and registry](../physics/trait.md) | progress | Progress |
 | [sms: Physics adapter](../sms/adapter.md) | progress | Progress |

@@ -172,10 +172,10 @@ impl Engine {
                 schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
             cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
             cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged.", Expensive,
-                schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report"))], &["physics"])),
-            cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)"))], &["path"])),
+                schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report")), ("wait", boolean("wait for the answer, default true; false starts a job that job_list, job_status and job_cancel see and job_wait answers"))], &["physics"])),
+            cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)")), ("wait", boolean("wait for the file, default true; false starts a job that writes what the engine holds now, under its name only when complete"))], &["path"])),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
-            cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support.", Edit, schema(vec![("path", text("file path, .h5"))], &["path"])),
+            cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support. With `wait` false it starts a job (reading and meshing happen on it; the project is replaced when job_wait or poll_jobs applies it).", Edit, schema(vec![("path", text("file path, .h5")), ("wait", boolean("wait for it, default true"))], &["path"])),
             cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
             cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups. The reply carries `stale` and `age_s` of the result it was run on.", Read,
                 schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys())], &["analysis", "physics"])),
@@ -427,14 +427,34 @@ impl Engine {
                 self.remove_material(get_str(args, "name")?)?;
                 ok()
             }
-            "convergence_check" => self.convergence_check(
-                get_str(args, "physics")?,
-                args.get("factor").and_then(Value::as_f64).unwrap_or(0.6),
-                args.get("tolerance").and_then(Value::as_f64),
-            ),
-            "export_results" => self.export_results(get_str(args, "path")?, args.get("parallel").and_then(Value::as_bool).unwrap_or(false)),
+            "convergence_check" => {
+                let (physics, factor, tolerance) = (
+                    get_str(args, "physics")?,
+                    args.get("factor").and_then(Value::as_f64).unwrap_or(0.6),
+                    args.get("tolerance").and_then(Value::as_f64),
+                );
+                if opt_bool(args, "wait", true) {
+                    self.convergence_check(physics, factor, tolerance)
+                } else {
+                    Ok(json!({ "job": self.start_convergence(physics, factor, tolerance)? }))
+                }
+            }
+            "export_results" => {
+                let parallel = args.get("parallel").and_then(Value::as_bool).unwrap_or(false);
+                if opt_bool(args, "wait", true) {
+                    self.export_results(get_str(args, "path")?, parallel)
+                } else {
+                    Ok(json!({ "job": self.start_export_results(get_str(args, "path")?, parallel)? }))
+                }
+            }
             "results_file_info" => self.results_file_info(get_str(args, "path")?),
-            "open_results" => self.open_results(get_str(args, "path")?),
+            "open_results" => {
+                if opt_bool(args, "wait", true) {
+                    self.open_results(get_str(args, "path")?)
+                } else {
+                    Ok(json!({ "job": self.start_open_results(get_str(args, "path")?)? }))
+                }
+            }
             "list_analyses" => Ok(self.list_analyses()),
             "analyse" => self.analyse(get_str(args, "analysis")?, get_str(args, "physics")?),
             "store_save" => self.save_to_workspace(opt_str(args, "workspace").map(Into::into)),

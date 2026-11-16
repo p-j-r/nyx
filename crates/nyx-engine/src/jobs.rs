@@ -3,9 +3,11 @@
 //! `try_take` (non-blocking, for a repaint loop) or `wait` (blocking, for a tool call).
 
 use crate::meshing::MeshedModel;
+use crate::project::Project;
 use femcore::progress::Progress;
 use nyx_physics::{Error, SolveResult};
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -21,6 +23,21 @@ pub enum JobOutput {
         model: Arc<MeshedModel>,
         results: Vec<SolveResult>,
     },
+    /// the answer of a mesh convergence check
+    Convergence(Value),
+    /// a results file read, its project meshed again and checked against the stored mesh (applied by replacing the project)
+    Opened(Box<Opened>),
+    /// a results file written
+    Exported(Value),
+}
+
+/// What opening a results file gives the engine to apply.
+pub struct Opened {
+    pub project: Project,
+    pub model: Arc<MeshedModel>,
+    /// one result per physics of the file
+    pub results: Vec<(String, SolveResult)>,
+    pub path: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -40,7 +57,11 @@ pub struct JobInfo {
     pub state: JobState,
     /// the stage the job is in now (plain words), empty before the first
     pub stage: String,
+    /// seconds the job has been in that stage: what a person waits for when the stage cannot be interrupted (a factorisation)
+    pub stage_seconds: f64,
     pub fraction: Option<f64>,
+    /// a cancel was asked for and the job has not stopped yet; it stops at its next check (a factorisation finishes first)
+    pub cancel_requested: bool,
     pub seconds: f64,
 }
 
@@ -116,7 +137,9 @@ impl JobRunner {
             label: s.label.clone(),
             state: g.state.clone(),
             stage: st.stage,
+            stage_seconds: st.stage_seconds,
             fraction: st.fraction,
+            cancel_requested: st.cancelled,
             seconds: if g.state == JobState::Running { s.started.elapsed().as_secs_f64() } else { g.seconds },
         })
     }

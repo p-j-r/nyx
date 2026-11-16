@@ -36,6 +36,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [engine: Commands](../engine/commands.md) | material::spec | Library |
 | [engine: Job runner](../engine/jobs.md) | material::spec | Library |
 | [engine: Materials](../engine/materials.md) | material, material::spec | Library, MaterialSpec |
+| [engine: Results files](../engine/resultsIO.md) | material::spec | Library |
 | [Finite-element basics](./fem.md) | material | Anisotropy, M3, M6 |
 | [Meshing facade](./meshing.md) | material | M6 |
 | [Frame and sections](./section.md) | material | M3, M6 |

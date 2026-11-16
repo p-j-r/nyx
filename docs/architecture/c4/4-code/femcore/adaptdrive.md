@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Adaptation drivers** (`femcore.adaptdrive`)
 > Passes of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md)  
-**Size:** 4 files, 716 lines.
+**Size:** 4 files, 720 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/adapt/drive.rs` | 209 | The adaptation driver: iterate split, collapse, flip and smooth passes until the mesh conforms to the metric field. |
-| `crates/femcore/src/adapt/drive3.rs` | 158 | The 3D adaptation driver: iterate split, collapse, flip and smooth passes until the mesh conforms to the metric field (the 3D counterpart of `drive`, with the operators of `ops3`). |
+| `crates/femcore/src/adapt/drive.rs` | 211 | The adaptation driver: iterate split, collapse, flip and smooth passes until the mesh conforms to the metric field. |
+| `crates/femcore/src/adapt/drive3.rs` | 160 | The 3D adaptation driver: iterate split, collapse, flip and smooth passes until the mesh conforms to the metric field (the 3D counterpart of `drive`, with the operators of `ops3`). |
 | `crates/femcore/src/adapt/geom.rs` | 132 | Geometry oracle for 2D: where may a vertex of a boundary or interface chain go? |
 | `crates/femcore/src/adapt/geom3.rs` | 217 | Geometry oracle for 3D: where may a vertex of a surface patch or a crease curve go? |
 
@@ -22,6 +22,7 @@ C4 level 4 (code) of the component **Adaptation drivers** (`femcore.adaptdrive`)
 |---|---|---|
 | [Adaptation operators](./adaptops.md) | adapt::ops, adapt::ops3, adapt::topo, adapt::topo3 | AdaptOptions3, Face, Sig, TopoOptions, TopoOptions3, Work2, Work3, all_edges, all_edges_of, collapse_pass +9 |
 | [Metric fields](./metric.md) | adapt::field, adapt::metric, adapt::timer, adapt::work | MetricField, Phases, SimplexMesh, Sym |
+| [Runtime services](./runtime.md) | progress | check |
 
 ## Used by
 
