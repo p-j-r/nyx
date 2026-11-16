@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs"
-        "lines" "1193"
+        "lines" "1320"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -23,11 +23,11 @@ geometry = component "Geometry operations" "Every edit of a geom feature list as
         "codeDiagram" "4-code/engine/geometry.md"
     }
 }
-jobs = component "Job runner" "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine." "Rust modules" {
+jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solving physics in the order of the one-way couplings, mesh convergence on a scratch engine." "Rust modules" {
     properties {
-        "adr" "61"
-        "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, solve.rs"
-        "lines" "443"
+        "adr" "61, 85, 87"
+        "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, queue.rs, solve.rs"
+        "lines" "1122"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -75,7 +75,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "84"
+        "lines" "86"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

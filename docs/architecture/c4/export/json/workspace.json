@@ -444,6 +444,13 @@
       "status" : "Accepted",
       "title" : "Every long operation is a job that can be watched and cancelled"
     }, {
+      "content" : "# 87. Work is queued in lanes; stages are shared by content\n\nDate: 2026-11-16\n\n## Status\n\nAccepted as a step of the productivity plan (Q1, `docs/NYX2_PRODUCTIVITY_PLAN.md` section 3a). **The number 87 is provisional**: take the next free ADR number at merge and renumber this file, the index row and the code comments. **Depends on ADR 84 (P1) and ADR 85 (P2)**: this bookmark is built on `productivity-2-jobs` and cannot merge without both. Builds on ADR 57 (the front-ends are thin), ADR 64 (cache keys, never persisted) and ADR 84 (the problem key).\n\n## Context\n\nThe runner started every job on a thread of its own at once. The engine refused nothing, so a host could start three solves and they ran together on the one rayon pool with their memory added up; the window kept its own \"one at a time\" rule beside it. A request that came after another of the same project meshed again, and a convergence check re-solved the mesh the user had just solved.\n\n## Decision\n\n* **Jobs run in lanes.** The *heavy* lane (mesh, solve, convergence check, opening a results file: they hold every core and the memory) runs one job at a time. The *light* lane (writing a results file) runs beside it, two at a time. The lane is fixed by the kind of job; nothing guesses a size (estimates are plan step Q2).\n* **A job submitted while its lane is busy waits in the queue, and the runner starts the next one itself** when a job ends, from the finishing job's own thread. No front-end has to poll for the queue to move; `wait` works on a queued job. The state `queued` is new, `JobInfo` carries `lane`, `owner`, `priority`, `held`, `position` and `queued_seconds`.\n* **Order:** priority (1 a person's request, 2 an agent's, 3 sweeps and batches; the window's engine is the owner `gui` and defaults to 1, others to 2), with ageing (a waiting job competes one level higher after a minute, never above 1); then the owner served longest ago (round robin, so a 50-point sweep of an agent delays a person by at most one item); then submission order. The order never enters a number: a job carries a frozen copy of the project (it always did) and reads no state another job left (a test submits the same three solves in three orders and compares the numbers bit for bit).\n* **Cancel, hold, supersede, pause.** A queued job that is cancelled never runs and finishes `Cancelled` at once; a request cancelled before it ran leaves no run record. `hold` keeps a queued job from starting until `release`; `supersede` (a key of the kind and targets) cancels a queued job of the same owner and key when a newer one arrives, which is what a new Compute of the same target does; `pause` stops anything new from starting.\n* **Stages are shared by content.** The engine keeps the last two meshes by mesh key and the last eight solve summaries by `(problem key, chain)`. A solve or mesh request that finds its mesh there does not build it (\"mesh: the same mesh was built by an earlier request\" in its log); a convergence check whose coarse solve (the physics alone on the present mesh) is there uses its numbers and solves only the finer mesh (`coarse_reused: true`, and a log line). The cache key includes the **chain** (the targets of the job that solved it), because the problem key alone is not enough: a physics solved alone and the same physics solved with the physics it imports from share a key and not their numbers (the limit recorded in ADR 84). A cancelled request keeps the mesh it built if it had built it. The summaries are the numbers a check compares, not the fields.\n* **A failure stops the chain after it, not before it.** `run_chain_partial` returns the physics solved before the one that failed; the engine stores them (they are valid results of their own problems), records the run as failed and returns the error. A cancel discards the chain as before.\n* **Commands.** `queue_submit` (solve, mesh or convergence), `queue_list`, `queue_get`, `queue_cancel`, `queue_hold`, `queue_release`, `queue_set_priority`, `queue_pause`, `queue_resume`, and `queue_wait` with a **required** `timeout_s`, which returns the job's entry with `waiting: true` at the timeout instead of blocking for ever. `job_wait` takes the same optional `timeout_s`. An entry says what was asked (`kind`, `targets`) and whether the project has changed since (`project_changed`).\n\n## Not in this decision\n\n* **Estimates and admission by memory** (plan Q2, with P4): the heavy lane's limit is one job, not a memory budget.\n* **A queue shared by the window and an MCP server** (Q3): each process has its own engine and queue; two processes still run their heavy jobs together.\n* **Stage graphs with refcounted nodes.** Requests share a mesh and a coarse solve through the content cache; a request is still one job, not a graph of stages that fail and cancel separately. The partial result of a failed chain is the one case that crosses that line.\n* **Fair share by an owner's permissions** (an AI host may only cancel its own requests) and moving an item up or down by drag; the priority number is the order control.\n\n## Consequences\n\n* `start_solve` and the other starters return at once with an id as before, but the job may be queued; `job_status` says so. Code that assumed two jobs run at the same time (a test that holds one job while waiting for the next) needs a gate; none in the tree did.\n* Two solves that a host starts with `wait: false` now run one after the other, in order of priority.\n\n## Code\n\n`crates/nyx-engine/src/{jobs,queue,engine,solve,convergence,commands}.rs`; tests `crates/nyx-engine/tests/queue.rs`.\n\n## Contract\n\n`engine_commands` 1.8 (provisional): the ten `queue_*` commands, `job_wait` takes `timeout_s`, the replies of `job_status` and `job_list` gain the queue fields, `convergence_check` gains `coarse_reused`. `mcp_tools` 2.4 (provisional): the same tools.\n",
+      "date" : "2026-11-15T23:00:00Z",
+      "format" : "Markdown",
+      "id" : "87",
+      "status" : "Accepted",
+      "title" : "Work is queued in lanes; stages are shared by content"
+    }, {
       "content" : "# 9. Every kernel is three stages behind one entry point\n\nDate: 2026-11-03\n\n## Status\n\nAccepted (commits `fa6eff2`, `106e7f8`; table in `docs/KERNEL_PORT_STATUS.md`).\n\n## Context\n\nKernels were single functions from mesh and spec to result. Swapping a linear-algebra backend (ADR 8), reusing an assembled system across a sweep, or exposing per-cell fields all required cutting them open.\n\n## Decision\n\n* `solve(mesh, spec, state)` / `solve_with(.., progress)` is the **one entry point for all physics**: it checks the element order and numbers (`validate`), dispatches by `Physics` (and by mesh dimension for EM waves), refuses a result containing NaN or infinity, and appends the plain-language stage log to `SolveResult::log`. A cancelled solve returns `Err(\"cancelled\")`.\n* Every kernel is **assemble -> solve -> fields**, and `solve_*` is their composition:\n  1. *assemble*: matrices on the free dofs, constraints, loads, the material data later stages need;\n  2. *solve*: the raw result (complex eigenpairs, a vector, transient states); the backend is chosen here (`spec.solver`, or the eigensolver the stage calls);\n  3. *fields*: plot fields (node-averaged, as before) and `Solution::cell_fields`, the same quantities per cell and local node, not averaged, with wafer names and complex values where the quantity is complex.\n* The node average of a cell field is the plot field of the same name (checked on every golden case).\n* Splitting changed no number: the golden files are unchanged.\n\n## Consequences\n\n* A `femcore::solvers` adapter replaces one function per kernel.\n* Stage function names are public API (`assemble_modes`, `solve_mode_pairs`, `mode_fields_cells`, ...); they are listed in contract `kernel_stages` because renaming one silently breaks callers outside the repository.\n* The `Physics::Emw` dispatch by mesh dimension is a quiet rule (R10).\n* `progress` is a thread-local, so stage functions called outside `solve_with` run unobserved and uncancellable (R19).\n\n## Code\n\n`crates/femcore/src/solve.rs`, `validate.rs`, `progress.rs`, `fields.rs`, and the kernels `dfs.rs`, `ems.rs`, `ems_pml.rs`, `ems_axisym.rs`, `ems3d.rs`, `sms.rs`, `sms_pml.rs`, `sms_floquet.rs`, `sms_lrb.rs`, `sms_kz.rs`, `sms_axisym.rs`, `sbs.rs`, `sbs_ring.rs`.\n\n## Contract\n\n`contracts/kernel_stages`: `crates/femcore/tests/stages.rs` (composition equals the one-call solver) plus `contracts.rs::kernel_stage_api_is_public`, which names every *public* stage function so removing one fails to compile. The stages of plain `sms`, `sms_lrb` and `ems3d` are `pub(crate)` (R26), so only 7 of 10 kernel families are reachable from outside the crate.\n",
       "date" : "2026-11-02T23:00:00Z",
       "format" : "Markdown",
@@ -1023,7 +1030,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.commands",
             "codeDiagram" : "4-code/engine/commands.md",
             "code" : "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs",
-            "lines" : "1193",
+            "lines" : "1320",
             "adr" : "57, 38, 15"
           },
           "relationships" : [ {
@@ -1062,7 +1069,7 @@
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
-            "description" : "uses jobs, solve",
+            "description" : "uses jobs, queue +1",
             "destinationId" : "26",
             "id" : "244",
             "sourceId" : "23",
@@ -1186,16 +1193,16 @@
           "tags" : "Element,Component",
           "technology" : "Rust modules"
         }, {
-          "description" : "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.",
+          "description" : "Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.",
           "documentation" : { },
           "id" : "26",
-          "name" : "Job runner",
+          "name" : "Job runner and queue",
           "properties" : {
             "structurizr.dsl.identifier" : "nyx.engine.jobs",
             "codeDiagram" : "4-code/engine/jobs.md",
-            "code" : "crates/nyx-engine/src: convergence.rs, jobs.rs, solve.rs",
-            "lines" : "443",
-            "adr" : "61"
+            "code" : "crates/nyx-engine/src: convergence.rs, jobs.rs, queue.rs, solve.rs",
+            "lines" : "1122",
+            "adr" : "61, 85, 87"
           },
           "relationships" : [ {
             "description" : "uses femcore: material::spec, progress",
@@ -1529,7 +1536,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.registry",
             "codeDiagram" : "4-code/engine/registry.md",
             "code" : "crates/nyx-engine/src: lib.rs",
-            "lines" : "84",
+            "lines" : "86",
             "adr" : "25"
           },
           "relationships" : [ {
@@ -1596,7 +1603,7 @@
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
-            "description" : "uses jobs",
+            "description" : "uses jobs, queue",
             "destinationId" : "26",
             "id" : "281",
             "sourceId" : "32",

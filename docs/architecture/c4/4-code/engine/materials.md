@@ -27,7 +27,7 @@ C4 level 4 (code) of the component **Materials** (`engine.materials`) in the con
 | Component | Modules | Items |
 |---|---|---|
 | [Commands](./commands.md) | materials | default_dirs, load_library |
-| [Job runner](./jobs.md) | materials | study_wavelength |
+| [Job runner and queue](./jobs.md) | materials | study_wavelength |
 
 ## Class diagram
 

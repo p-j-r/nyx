@@ -23,7 +23,7 @@ C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | error, registry, result | CellField, Error, Field, Registry, Scalar, Solution, SolveResult |
 | container `resultsFile` (Results file) |  (declared: Writes and opens) |  |
 | [Commands](./commands.md) | engine | Engine |
-| [Job runner](./jobs.md) | jobs | Opened |
+| [Job runner and queue](./jobs.md) | jobs | Opened |
 | [Meshing seam](./meshing.md) | meshing | MeshedModel, Mesher |
 | [Project](./project.md) | project | Project |
 

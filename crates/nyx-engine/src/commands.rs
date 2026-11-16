@@ -157,7 +157,22 @@ impl Engine {
             cmd("job_status", "Status of a job", "State, current stage, fraction done and elapsed time.", Read, schema(vec![("id", int("job id"))], &["id"])),
             cmd("job_list", "List the jobs", "", Read, schema(vec![], &[])),
             cmd("job_cancel", "Cancel a job", "The solver notices at its next check; a factorisation in progress finishes first.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
-            cmd("job_wait", "Wait for a job", "Blocks until the job has finished and applies its outcome.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
+            cmd("job_wait", "Wait for a job", "Blocks until the job has finished and applies its outcome. With `timeout_s` it gives up after that many seconds and returns the job's entry with `waiting: true` (the job goes on; wait again).", Expensive,
+                schema(vec![("id", int("job id")), ("timeout_s", number("longest wait in seconds; omit to wait until the job has finished"))], &["id"])),
+            cmd("queue_submit", "Submit work to the queue", "Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a mesh `convergence` check (`physics`, `factor`, `tolerance`) and returns its entry at once. The heavy lane runs one job at a time in order of priority (1 a person's request, 2 an agent's, the default, 3 sweeps and batches; a waiting job rises one level after a minute), then in turns between owners, then in order of submission. The job carries a frozen copy of the project: later edits do not change it (`project_changed` says they happened). `supersede` replaces a queued request of the same kind and targets; `hold` keeps it from starting until `queue_release`. A job that comes after another of the same project reuses the mesh the first built.", Expensive,
+                schema(vec![("kind", json!({ "type": "string", "enum": ["solve", "mesh", "convergence"], "description": "default solve" })), ("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("factor", number("convergence: finer/present element size, default 0.6")), ("tolerance", number("convergence: largest accepted relative difference")),
+                    ("priority", int("1, 2 or 3; lower runs first")), ("supersede", boolean("replace a queued request of the same kind and targets")), ("hold", boolean("start held"))], &[])),
+            cmd("queue_list", "List the queue", "Every job, oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.", Read,
+                schema(vec![("owner", text("only this owner: gui, ai or cli")), ("state", text("only this state"))], &[])),
+            cmd("queue_get", "One job of the queue", "The entry of `queue_list` for one job and the last lines of its stage log.", Read, schema(vec![("id", int("job id"))], &["id"])),
+            cmd("queue_cancel", "Cancel a queued or running job", "A queued job never runs. A running one stops at its next check (a factorisation in progress finishes first); `cancel_requested` says so until it stops.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
+            cmd("queue_hold", "Hold a queued job", "Keeps a queued job from starting until `queue_release`.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
+            cmd("queue_release", "Release a held job", "", Expensive, schema(vec![("id", int("job id"))], &["id"])),
+            cmd("queue_set_priority", "Change the priority of a queued job", "1 runs first, 3 last.", Expensive, schema(vec![("id", int("job id")), ("priority", int("1, 2 or 3"))], &["id", "priority"])),
+            cmd("queue_pause", "Pause the queue", "Nothing new starts; what runs finishes.", Expensive, schema(vec![], &[])),
+            cmd("queue_resume", "Resume the queue", "", Expensive, schema(vec![], &[])),
+            cmd("queue_wait", "Wait for a job, at most a while", "Waits for the job up to `timeout_s` seconds (required: a tool call must not block for ever) and applies its outcome. At the timeout it returns the job's entry with `waiting: true`, state and stage, and the job goes on.", Expensive,
+                schema(vec![("id", int("job id")), ("timeout_s", number("longest wait in seconds"))], &["id", "timeout_s"])),
             cmd("poll_jobs", "Apply finished jobs", "Applies every job that has finished since the last call and returns what each came to.", Read, schema(vec![], &[])),
             cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).", Read, schema(vec![("physics", phys())], &[])),
             cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`), with `stale` and `age_s` of the result it was read from.", Read,
@@ -401,7 +416,13 @@ impl Engine {
             }
             "job_list" => Ok(json!(self.jobs.list())),
             "job_cancel" => Ok(json!({ "cancelled": self.jobs.cancel(get_u64(args, "id")?) })),
-            "job_wait" => self.wait(get_u64(args, "id")?),
+            "job_wait" => match args.get("timeout_s").and_then(Value::as_f64) {
+                Some(t) if t >= 0.0 && t.is_finite() => self.wait_timeout(get_u64(args, "id")?, std::time::Duration::from_secs_f64(t)),
+                Some(_) => Err(Error::invalid("`timeout_s` is a number of seconds, zero or more")),
+                None => self.wait(get_u64(args, "id")?),
+            },
+            "queue_submit" | "queue_list" | "queue_get" | "queue_cancel" | "queue_hold" | "queue_release" | "queue_set_priority" | "queue_pause"
+            | "queue_resume" | "queue_wait" => self.queue_command(name, args),
             "poll_jobs" => Ok(json!(self
                 .poll()
                 .into_iter()

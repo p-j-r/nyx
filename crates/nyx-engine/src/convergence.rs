@@ -6,6 +6,7 @@
 use crate::engine::Engine;
 use crate::meshing::MeshedModel;
 use crate::project::Project;
+use crate::queue::{SolveSummary, Stages};
 use femcore::progress::Progress;
 use nyx_physics::{Error, Scalar, SolveResult};
 use serde_json::{json, Value};
@@ -34,7 +35,7 @@ fn refined(p: &Project, factor: f64) -> Project {
 }
 
 /// Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars.
-fn numbers(r: &SolveResult) -> Vec<(String, f64)> {
+pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)> {
     let mut out = vec![];
     for (i, s) in r.solutions.iter().enumerate() {
         if let Some(e) = s.eigenvalue {
@@ -64,6 +65,8 @@ pub struct ConvergenceJob {
     mesher: Arc<dyn crate::meshing::Mesher>,
     library: Arc<femcore::material::Library>,
     project: Project,
+    /// the stage cache and the key under which the coarse solve may already be there (set by `Engine::start_convergence_with`)
+    pub(crate) reuse: Option<(Arc<Stages>, String)>,
 }
 
 impl ConvergenceJob {
@@ -121,6 +124,7 @@ impl Engine {
             mesher: self.mesher.clone(),
             library: self.base_library.clone(),
             project: self.project.clone(),
+            reuse: None,
         }
     }
 
@@ -149,12 +153,22 @@ fn check(
             .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
         let targets = vec![physics.to_string()];
         let t0 = std::time::Instant::now();
-        // the two solves are stages of the one job, run here under its progress, so the check can be watched and cancelled
-        let (coarse_model, coarse) = {
-            let _stage = femcore::progress::stage("convergence check: the solve on the present mesh");
-            this.solve_inline(this.project.clone(), &targets, physics, progress)?
+        // the two solves are stages of the one job, run here under its progress, so the check can be watched and cancelled; the first is skipped
+        // when an earlier request solved this physics alone on this mesh (found by content, so the numbers are the ones this solve would give)
+        let (coarse, self_reused) = match this.reuse.as_ref().and_then(|(stages, key)| stages.solve(key)) {
+            Some(s) => {
+                let _stage = femcore::progress::stage(
+                    "convergence check: the solve on the present mesh (reused from an earlier solve)",
+                );
+                (s, true)
+            }
+            None => {
+                let _stage = femcore::progress::stage("convergence check: the solve on the present mesh");
+                let (model, r) = this.solve_inline(this.project.clone(), &targets, physics, progress)?;
+                (Arc::new(SolveSummary::of(&r, model.mesh().n_cells())), false)
+            }
         };
-        let cells_coarse = Some(coarse_model.mesh().n_cells());
+        let cells_coarse = Some(coarse.cells);
         let (fine_model, fine) = {
             let _stage = femcore::progress::stage(format!(
                 "convergence check: the solve on the finer mesh (element size times {factor})"
@@ -163,7 +177,7 @@ fn check(
         };
         let cells_fine = Some(fine_model.mesh().n_cells());
 
-        let (a, b) = (numbers(&coarse), numbers(&fine));
+        let (a, b) = (coarse.numbers.clone(), numbers(&fine));
         let mut rows = vec![];
         let mut worst = 0.0f64;
         let mut all = true;
@@ -183,6 +197,7 @@ fn check(
             "physics": physics, "factor": factor, "tolerance": tolerance,
             "cells": { "coarse": cells_coarse, "refined": cells_fine },
             "unknowns": { "coarse": coarse.dofs, "refined": fine.dofs },
+            "coarse_reused": self_reused,
             "seconds": t0.elapsed().as_secs_f64(),
             "worst_relative": worst,
             "converged": tolerance.map(|_| all),

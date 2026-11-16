@@ -7,9 +7,10 @@
 //! never has to remember to invalidate them: a result whose key is not the one its physics has now is *stale* and says so. A key is a cache key
 //! (ADR 64, ADR 84): it is never stored in a file or sent to a front-end.
 
-use crate::jobs::{JobId, JobOutput, JobRunner, Opened};
+use crate::jobs::{JobId, JobOutput, JobRunner, Lane, Opened};
 use crate::meshing::{FemcoreMesher, MeshedModel, Mesher};
 use crate::project::Project;
+use crate::queue::{solve_key, JobMeta, QueueOpts, SolveSummary, Stages};
 use crate::store_link::{RunOutcome, StoreLink};
 use nyx_physics::{Error, Registry, Sizing, SolveResult};
 use serde_json::{json, Value};
@@ -28,7 +29,7 @@ pub(crate) struct Stored {
     pub at: Instant,
 }
 
-enum Pending {
+pub(crate) enum Pending {
     Mesh { key: String, generation: u64 },
     Solve { key: String, keys: BTreeMap<String, String>, project: Box<Project>, generation: u64 },
     Convergence,
@@ -43,7 +44,13 @@ pub struct Engine {
     pub(crate) model: Option<(String, Arc<MeshedModel>)>,
     pub(crate) results: BTreeMap<String, Stored>,
     pub(crate) jobs: JobRunner,
-    pending: BTreeMap<JobId, Pending>,
+    pub(crate) pending: BTreeMap<JobId, Pending>,
+    /// what each job was asked for (kind, targets, the project it was made for), for the queue commands
+    pub(crate) meta: BTreeMap<JobId, JobMeta>,
+    /// recent meshes and results by content, shared by queued requests (ADR 87)
+    pub(crate) stages: Arc<Stages>,
+    /// who this engine's requests are made for: `gui`, `ai` or `cli`
+    pub(crate) owner: String,
     /// counts the projects this engine has held (`set_project`): a job started for an earlier one must not put its outcome into the present one
     pub(crate) generation: u64,
     pub(crate) link: Option<StoreLink>,
@@ -79,6 +86,9 @@ impl Engine {
             results: BTreeMap::new(),
             jobs: JobRunner::new(),
             pending: BTreeMap::new(),
+            meta: BTreeMap::new(),
+            stages: Arc::new(Stages::default()),
+            owner: "cli".into(),
             generation: 0,
             link: None,
             workspace: None,
@@ -90,6 +100,12 @@ impl Engine {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Replaces the mesher (a front-end with its own mesher, or a test that counts or holds its calls). The mesh the engine holds is kept; the
+    /// next one is built with the new mesher.
+    pub fn set_mesher(&mut self, mesher: Arc<dyn Mesher>) {
+        self.mesher = mesher;
     }
 
     pub fn project(&self) -> &Project {
@@ -207,6 +223,7 @@ impl Engine {
         self.model = None;
         self.results.clear();
         self.link = None;
+        self.stages.clear();
     }
 
     /// The mesh if one has been built for the current geometry and settings.
@@ -222,26 +239,46 @@ impl Engine {
 
     // ----------------------------------------------------------------------------------------------------------------- jobs
 
-    /// Starts meshing the project on a job.
+    /// Starts meshing the project on a job (queued when the heavy lane is busy).
     pub fn start_mesh(&mut self) -> Result<JobId, Error> {
+        self.start_mesh_with(&QueueOpts::default())
+    }
+
+    /// `start_mesh` with queue options.
+    pub fn start_mesh_with(&mut self, opts: &QueueOpts) -> Result<JobId, Error> {
         self.project.geometry.validate().map_err(|e| Error::invalid(format!("geometry: {e}")))?;
         let key = self.mesh_key();
         let (mesher, geometry, settings, sizing) =
             (self.mesher.clone(), self.project.geometry.clone(), self.project.mesh.clone(), self.sizing());
-        let id = self.jobs.start("mesh", move |progress| {
+        let stages = self.stages.clone();
+        let mesh_key = key.clone();
+        let submit = self.submission("mesh", Lane::Heavy, opts, "mesh");
+        let id = self.jobs.submit(submit, move |progress| {
             if progress.is_cancelled() {
                 return Err(Error::Cancelled);
             }
             // the mesher checks the cancel flag between its passes and logs its stages, as a solve does
             let _installed = femcore::progress::install(&progress);
-            Ok(JobOutput::Mesh(Arc::new(mesher.mesh(&geometry, &settings, sizing.as_ref())?)))
+            if let Some(m) = stages.mesh(&mesh_key) {
+                let _stage = femcore::progress::stage("mesh: the same mesh was built by an earlier request");
+                return Ok(JobOutput::Mesh(m));
+            }
+            let m = Arc::new(mesher.mesh(&geometry, &settings, sizing.as_ref())?);
+            stages.put_mesh(&mesh_key, &m);
+            Ok(JobOutput::Mesh(m))
         });
         self.pending.insert(id, Pending::Mesh { key, generation: self.generation });
+        self.note_job(id, "mesh", vec![]);
         Ok(id)
     }
 
     /// Starts solving `targets` (default: the active physics, else all) on a job. The mesh is built inside the job when none is current.
     pub fn start_solve(&mut self, targets: Option<Vec<String>>) -> Result<JobId, Error> {
+        self.start_solve_with(targets, &QueueOpts::default())
+    }
+
+    /// `start_solve` with queue options. The job waits in the queue while the heavy lane is busy; it carries a frozen copy of the project.
+    pub fn start_solve_with(&mut self, targets: Option<Vec<String>>, opts: &QueueOpts) -> Result<JobId, Error> {
         if self.project.physics.is_empty() {
             return Err(Error::invalid("the project has no physics; add one first (add_physics)"));
         }
@@ -260,39 +297,92 @@ impl Engine {
             (self.registry.clone(), self.mesher.clone(), self.project.clone(), self.sizing());
         let library = self.library()?;
         let cached = self.model().cloned();
-        let id = self.jobs.start(&format!("solve {}", targets.join(", ")), {
+        let stages = self.stages.clone();
+        let (mesh_key, solve_keys) = (key.clone(), keys.clone());
+        let submit = self.submission(
+            &format!("solve {}", targets.join(", ")),
+            Lane::Heavy,
+            opts,
+            &format!("solve {}", targets.join(",")),
+        );
+        let chain = targets.clone();
+        let id = self.jobs.submit(submit, {
             let project = project.clone();
             move |progress| {
+                // the mesh: the one the engine held when the request was made, else one an earlier request built, else built here
                 let model = match cached {
                     Some(m) => m,
                     None => {
                         let _stage = femcore::progress::install(&progress);
-                        Arc::new(mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?)
+                        match stages.mesh(&mesh_key) {
+                            Some(m) => {
+                                let _s =
+                                    femcore::progress::stage("mesh: the same mesh was built by an earlier request");
+                                m
+                            }
+                            None => {
+                                let m = Arc::new(mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?);
+                                stages.put_mesh(&mesh_key, &m);
+                                m
+                            }
+                        }
                     }
                 };
-                let results = crate::solve::run_chain(&registry, &project, &model, &targets, &library, progress)?;
-                Ok(JobOutput::Solved { model, results })
+                stages.put_mesh(&mesh_key, &model);
+                let (results, failed) =
+                    crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress);
+                match failed {
+                    Some(Error::Cancelled) => return Err(Error::Cancelled),
+                    Some(e) if results.is_empty() => return Err(e),
+                    _ => {}
+                }
+                let cells = model.mesh().n_cells();
+                for r in &results {
+                    if let Some(k) = solve_keys.get(&r.physics) {
+                        stages.put_solve(&solve_key(k, &chain), &Arc::new(SolveSummary::of(r, cells)));
+                    }
+                }
+                Ok(JobOutput::Solved { model, results, failed })
             }
         });
         self.pending.insert(id, Pending::Solve { key, keys, project: Box::new(project), generation: self.generation });
+        self.note_job(id, "solve", targets);
         Ok(id)
     }
 
     /// Starts a mesh convergence check (two solves, the second on a finer mesh) on a job. Both solves run on the job's thread under its progress,
     /// as two stages, so the check shows in `job_list`, reports where it is and can be cancelled.
     pub fn start_convergence(&mut self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<JobId, Error> {
+        self.start_convergence_with(physics, factor, tolerance, &QueueOpts::default())
+    }
+
+    /// `start_convergence` with queue options. When the solve of `physics` alone on the present mesh was done already by an earlier request, the
+    /// check uses its numbers and solves only the finer mesh.
+    pub fn start_convergence_with(
+        &mut self,
+        physics: &str,
+        factor: f64,
+        tolerance: Option<f64>,
+        opts: &QueueOpts,
+    ) -> Result<JobId, Error> {
         if !(factor > 0.0 && factor < 1.0) {
             return Err(Error::invalid("`factor` is the ratio of the finer element size to the present one, between 0 and 1 (0.6 is a good step)"));
         }
         if self.project.spec(physics).is_none() {
             return Err(Error::invalid(format!("the project has no problem for '{physics}'")));
         }
-        let job = self.convergence_job();
+        let mut job = self.convergence_job();
+        // the coarse solve of the check is the solve of this physics alone on the present mesh: its key is the problem key and that chain
+        job.reuse = self.problem_key(physics).map(|k| (self.stages.clone(), solve_key(&k, &[physics.to_string()])));
         let physics = physics.to_string();
-        let id = self.jobs.start(&format!("convergence {physics}"), move |progress| {
+        let submit =
+            self.submission(&format!("convergence {physics}"), Lane::Heavy, opts, &format!("convergence {physics}"));
+        let name = physics.clone();
+        let id = self.jobs.submit(submit, move |progress| {
             job.run_with(&progress, &physics, factor, tolerance).map(JobOutput::Convergence)
         });
         self.pending.insert(id, Pending::Convergence);
+        self.note_job(id, "convergence", vec![name]);
         Ok(id)
     }
 
@@ -301,11 +391,13 @@ impl Engine {
     pub fn start_open_results(&mut self, path: &str) -> Result<JobId, Error> {
         let (registry, mesher, library, path) =
             (self.registry.clone(), self.mesher.clone(), self.base_library.clone(), path.to_string());
-        let id = self.jobs.start("open results", move |progress| {
+        let submit = self.submission("open results", Lane::Heavy, &QueueOpts::default(), "open results");
+        let id = self.jobs.submit(submit, move |progress| {
             crate::results_file::read_and_mesh(&registry, &mesher, &library, &path, &progress)
                 .map(|o| JobOutput::Opened(Box::new(o)))
         });
         self.pending.insert(id, Pending::Open);
+        self.note_job(id, "open", vec![]);
         Ok(id)
     }
 
@@ -314,7 +406,9 @@ impl Engine {
     pub fn start_export_results(&mut self, path: &str, parallel: bool) -> Result<JobId, Error> {
         let snapshot = self.results_snapshot()?;
         let path = path.to_string();
-        let id = self.jobs.start("write results", move |progress| {
+        // writing a file is the light lane: it runs beside a solve and never waits for one
+        let submit = self.submission("write results", Lane::Light, &QueueOpts::default(), "write results");
+        let id = self.jobs.submit(submit, move |progress| {
             if progress.is_cancelled() {
                 return Err(Error::Cancelled);
             }
@@ -322,6 +416,7 @@ impl Engine {
             crate::results_file::write_snapshot(&snapshot, &path, parallel, true).map(JobOutput::Exported)
         });
         self.pending.insert(id, Pending::Export);
+        self.note_job(id, "export", vec![]);
         Ok(id)
     }
 
@@ -349,7 +444,7 @@ impl Engine {
         self.apply(id, outcome)
     }
 
-    fn apply(&mut self, id: JobId, outcome: Result<JobOutput, Error>) -> Result<Value, Error> {
+    pub(crate) fn apply(&mut self, id: JobId, outcome: Result<JobOutput, Error>) -> Result<Value, Error> {
         let pending = self.pending.remove(&id).expect("a pending job");
         let seconds = self.jobs.info(id).map(|i| i.seconds).unwrap_or(0.0);
         match (pending, outcome) {
@@ -366,7 +461,7 @@ impl Engine {
             (Pending::Solve { generation, .. }, Ok(JobOutput::Solved { .. })) if generation != self.generation => {
                 Err(Error::invalid("the project was replaced while this solve ran; its results were dropped"))
             }
-            (Pending::Solve { key, keys, project, .. }, Ok(JobOutput::Solved { model, results })) => {
+            (Pending::Solve { key, keys, project, .. }, Ok(JobOutput::Solved { model, results, failed })) => {
                 let mesh = model.solver_mesh();
                 self.install_model(key, model);
                 // a job that finishes after the project changed, or after a newer job of the same physics, must not replace a result that is
@@ -397,6 +492,13 @@ impl Engine {
                 for r in &results {
                     log.extend(r.log.iter().map(|l| format!("{}: {l}", r.physics)));
                 }
+                if let Some(e) = failed {
+                    // a physics of the chain failed after others had been solved: what was solved stays (it is a valid result of its own
+                    // problem), the run is recorded as failed and the caller gets the error
+                    log.push(format!("stopped: {e}"));
+                    let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log, Some(mesh));
+                    return Err(e);
+                }
                 let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
                 Ok(json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds }))
             }
@@ -423,9 +525,13 @@ impl Engine {
             }
             (Pending::Solve { project, .. }, Err(e)) => {
                 let log = self.jobs.log(id);
-                // a failed or cancelled run is a record too: the table shows what was tried
-                let mesh = self.model.as_ref().map(|(_, m)| m.solver_mesh());
-                let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log, mesh);
+                // a failed or cancelled run is a record too: the table shows what was tried. A request cancelled before it started (replaced by a
+                // newer one, or cancelled in the queue) never ran, so it leaves no record
+                let never_ran = matches!(e, Error::Cancelled) && log.is_empty() && seconds == 0.0;
+                if !never_ran {
+                    let mesh = self.model.as_ref().map(|(_, m)| m.solver_mesh());
+                    let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log, mesh);
+                }
                 Err(e)
             }
             (_, Err(e)) => Err(e),

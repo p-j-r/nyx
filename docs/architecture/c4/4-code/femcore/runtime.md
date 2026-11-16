@@ -30,7 +30,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
 | [engine: Commands](../engine/commands.md) | progress | install, stage |
-| [engine: Job runner](../engine/jobs.md) | progress | Progress, install, stage |
+| [engine: Job runner and queue](../engine/jobs.md) | progress | Progress, install, stage |
 | [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, stage |
 | [engine: Registry and facade](../engine/registry.md) | progress | Progress |
 | [engine: Results files](../engine/resultsIO.md) | progress | Progress, install, stage |

@@ -1011,6 +1011,9 @@
       "arguments": {
         "id": {
           "type": "integer"
+        },
+        "timeout_s": {
+          "type": "number"
         }
       },
       "name": "job_wait",
@@ -1237,6 +1240,204 @@
       "name": "project_save",
       "required": [
         "path"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Cancel a queued or running job"
+      },
+      "arguments": {
+        "id": {
+          "type": "integer"
+        }
+      },
+      "name": "queue_cancel",
+      "required": [
+        "id"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "One job of the queue"
+      },
+      "arguments": {
+        "id": {
+          "type": "integer"
+        }
+      },
+      "name": "queue_get",
+      "required": [
+        "id"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Hold a queued job"
+      },
+      "arguments": {
+        "id": {
+          "type": "integer"
+        }
+      },
+      "name": "queue_hold",
+      "required": [
+        "id"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List the queue"
+      },
+      "arguments": {
+        "owner": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "name": "queue_list",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Pause the queue"
+      },
+      "arguments": {},
+      "name": "queue_pause",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Release a held job"
+      },
+      "arguments": {
+        "id": {
+          "type": "integer"
+        }
+      },
+      "name": "queue_release",
+      "required": [
+        "id"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Resume the queue"
+      },
+      "arguments": {},
+      "name": "queue_resume",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Change the priority of a queued job"
+      },
+      "arguments": {
+        "id": {
+          "type": "integer"
+        },
+        "priority": {
+          "type": "integer"
+        }
+      },
+      "name": "queue_set_priority",
+      "required": [
+        "id",
+        "priority"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Submit work to the queue"
+      },
+      "arguments": {
+        "factor": {
+          "type": "number"
+        },
+        "hold": {
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "solve",
+            "mesh",
+            "convergence"
+          ],
+          "type": "string"
+        },
+        "physics": {
+          "type": null
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "supersede": {
+          "type": "boolean"
+        },
+        "tolerance": {
+          "type": "number"
+        }
+      },
+      "name": "queue_submit",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Wait for a job, at most a while"
+      },
+      "arguments": {
+        "id": {
+          "type": "integer"
+        },
+        "timeout_s": {
+          "type": "number"
+        }
+      },
+      "name": "queue_wait",
+      "required": [
+        "id",
+        "timeout_s"
       ]
     },
     {

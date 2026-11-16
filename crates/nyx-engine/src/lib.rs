@@ -30,15 +30,17 @@ pub mod xdmf;
 pub mod meshing;
 pub mod pml;
 pub mod project;
+pub mod queue;
 pub mod results_file;
 pub mod solve;
 pub mod store_link;
 
 pub use commands::{Access, CommandDesc};
 pub use engine::Engine;
-pub use jobs::{JobId, JobInfo, JobOutput, JobRunner, JobState};
+pub use jobs::{JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, Submit};
 pub use meshing::{FemcoreMesher, MeshedModel, Mesher};
 pub use project::{MeshSettings, Project, SweepLayer};
+pub use queue::QueueOpts;
 
 use nyx_physics::{Error, Registry};
 #[allow(unused_imports)]

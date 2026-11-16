@@ -68,3 +68,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 65 | [Closing the restructure: what the final structure replaces](adr/0065-closing-the-restructure-what-the-structure-replaced.md) | `docs/architecture`, `Cargo.toml` |
 | 84 | [Results are stale per physics: the key is the problem key](adr/0084-results-are-stale-per-physics-the-key-is-the-problem-key.md) | `nyx-engine::engine`, `app::app` |
 | 85 | [Every long operation is a job that can be watched and cancelled](adr/0085-every-long-operation-is-a-job.md) | `nyx-engine::{engine,jobs,convergence,results_file}`, `app::app` |
+| 87 | [Work is queued in lanes; stages are shared by content](adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md) | `nyx-engine::{jobs,queue,engine,solve,convergence}` |

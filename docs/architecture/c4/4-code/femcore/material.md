@@ -34,7 +34,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [dfs: Heat kernel](../dfs/heat.md) | material | M3 |
 | [ems: Physics adapter](../ems/adapter.md) | material, material::spec | Library, tensor_global |
 | [engine: Commands](../engine/commands.md) | material::spec | Library |
-| [engine: Job runner](../engine/jobs.md) | material::spec | Library |
+| [engine: Job runner and queue](../engine/jobs.md) | material::spec | Library |
 | [engine: Materials](../engine/materials.md) | material, material::spec | Library, MaterialSpec |
 | [engine: Results files](../engine/resultsIO.md) | material::spec | Library |
 | [Finite-element basics](./fem.md) | material | Anisotropy, M3, M6 |

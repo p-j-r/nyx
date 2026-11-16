@@ -843,8 +843,108 @@
   },
   {
     "access": "expensive",
-    "description": "Blocks until the job has finished and applies its outcome.",
+    "description": "Blocks until the job has finished and applies its outcome. With `timeout_s` it gives up after that many seconds and returns the job's entry with `waiting: true` (the job goes on; wait again).",
     "name": "job_wait",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "description": "longest wait in seconds; omit to wait until the job has finished",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "title": "Wait for a job"
+  },
+  {
+    "access": "expensive",
+    "description": "Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a mesh `convergence` check (`physics`, `factor`, `tolerance`) and returns its entry at once. The heavy lane runs one job at a time in order of priority (1 a person's request, 2 an agent's, the default, 3 sweeps and batches; a waiting job rises one level after a minute), then in turns between owners, then in order of submission. The job carries a frozen copy of the project: later edits do not change it (`project_changed` says they happened). `supersede` replaces a queued request of the same kind and targets; `hold` keeps it from starting until `queue_release`. A job that comes after another of the same project reuses the mesh the first built.",
+    "name": "queue_submit",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "factor": {
+          "description": "convergence: finer/present element size, default 0.6",
+          "type": "number"
+        },
+        "hold": {
+          "description": "start held",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "default solve",
+          "enum": [
+            "solve",
+            "mesh",
+            "convergence"
+          ],
+          "type": "string"
+        },
+        "physics": {
+          "description": "physics code(s); default the active one",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "priority": {
+          "description": "1, 2 or 3; lower runs first",
+          "type": "integer"
+        },
+        "supersede": {
+          "description": "replace a queued request of the same kind and targets",
+          "type": "boolean"
+        },
+        "tolerance": {
+          "description": "convergence: largest accepted relative difference",
+          "type": "number"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Submit work to the queue"
+  },
+  {
+    "access": "read",
+    "description": "Every job, oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.",
+    "name": "queue_list",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "description": "only this owner: gui, ai or cli",
+          "type": "string"
+        },
+        "state": {
+          "description": "only this state",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "List the queue"
+  },
+  {
+    "access": "read",
+    "description": "The entry of `queue_list` for one job and the last lines of its stage log.",
+    "name": "queue_get",
     "schema": {
       "additionalProperties": false,
       "properties": {
@@ -858,7 +958,136 @@
       ],
       "type": "object"
     },
-    "title": "Wait for a job"
+    "title": "One job of the queue"
+  },
+  {
+    "access": "expensive",
+    "description": "A queued job never runs. A running one stops at its next check (a factorisation in progress finishes first); `cancel_requested` says so until it stops.",
+    "name": "queue_cancel",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "title": "Cancel a queued or running job"
+  },
+  {
+    "access": "expensive",
+    "description": "Keeps a queued job from starting until `queue_release`.",
+    "name": "queue_hold",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "title": "Hold a queued job"
+  },
+  {
+    "access": "expensive",
+    "description": "",
+    "name": "queue_release",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "title": "Release a held job"
+  },
+  {
+    "access": "expensive",
+    "description": "1 runs first, 3 last.",
+    "name": "queue_set_priority",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        },
+        "priority": {
+          "description": "1, 2 or 3",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "priority"
+      ],
+      "type": "object"
+    },
+    "title": "Change the priority of a queued job"
+  },
+  {
+    "access": "expensive",
+    "description": "Nothing new starts; what runs finishes.",
+    "name": "queue_pause",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Pause the queue"
+  },
+  {
+    "access": "expensive",
+    "description": "",
+    "name": "queue_resume",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Resume the queue"
+  },
+  {
+    "access": "expensive",
+    "description": "Waits for the job up to `timeout_s` seconds (required: a tool call must not block for ever) and applies its outcome. At the timeout it returns the job's entry with `waiting: true`, state and stage, and the job goes on.",
+    "name": "queue_wait",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "job id",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "description": "longest wait in seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "timeout_s"
+      ],
+      "type": "object"
+    },
+    "title": "Wait for a job, at most a while"
   },
   {
     "access": "read",
