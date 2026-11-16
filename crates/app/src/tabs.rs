@@ -603,7 +603,7 @@ impl App {
             num(ui, &mut self.conv_factor);
             ui.label("tolerance");
             num(ui, &mut self.conv_tol);
-            start = ui.add_enabled(self.busy.is_none(), egui::Button::new("Check convergence")).clicked();
+            start = ui.add_enabled(self.job_kind != Some(crate::app::JobKind::Open), egui::Button::new(if self.busy.is_some() { "Queue convergence check" } else { "Check convergence" })).clicked();
         });
         self.conv_factor = self.conv_factor.clamp(0.1, 0.95);
         if start {
@@ -633,7 +633,7 @@ impl App {
             self.set_problem(&active, &spec);
         }
         ui.add_space(8.0);
-        let ok = self.busy.is_none() && self.doc.mesh.is_some();
+        let ok = self.can_queue_compute() && self.doc.mesh.is_some();
         if ui.add_enabled(ok, egui::Button::new(RichText::new("  Compute  ").strong()).fill(Color32::from_rgb(38, 110, 70))).clicked() {
             self.compute();
         }

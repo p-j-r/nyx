@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 > The tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points.
 
 **Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md)  
-**Size:** 5 files, 3265 lines.
+**Size:** 5 files, 3271 lines.
 
 ## Files
 
@@ -14,7 +14,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 | `crates/app/src/dashboard.rs` | 372 | The dashboard: running workflows with live status, pinned and recent ones as cards, everything older in a list, and search. The rules (three days, the card cap, "done", nothing deleted) are `nyx_engine::facade::store::Workspace::sections`. |
 | `crates/app/src/examples.rs` | 138 | Starting points: the example projects (files in the `examples` folder, found next to the program or in a parent folder of it, or at `NYX_EXAMPLES`) and a blank simulation built from engine commands. An example is a project file like any ... |
 | `crates/app/src/sheets.rs` | 724 | The sheets that open over the shell (new workflow, search palette, versions, share, open a received file) and the settings page. |
-| `crates/app/src/shell.rs` | 888 | The shell around the simulation window: the tab bar (Dashboard, one tab per open workflow, +), the status chip, the search palette entry, and the glue between the window's single live project and the workspace on disk (`nyx-store`). |
+| `crates/app/src/shell.rs` | 894 | The shell around the simulation window: the tab bar (Dashboard, one tab per open workflow, +), the status chip, the search palette entry, and the glue between the window's single live project and the workspace on disk (`nyx-store`). |
 | `crates/app/src/wfview.rs` | 1143 | The workflow view: header, experiments list, the three sections (1 Concept, 2 Build, 3 Analysis) and what hangs off them (the live run, the runs table and plot, compare, the field viewer and the model screen). |
 
 ## What it uses
@@ -213,7 +213,7 @@ classDiagram
 | struct | `RunCtx` | `shell.rs:156` | fields: `wf_id`, `exp`, `spec_json`, `params`, `started` —  The run that is being solved, so its record can be written whatever the window shows when it ends. |
 | struct | `NewState` | `shell.rs:164` | fields: `title`, `template`, `physics`, `three_d`, `all_examples` |
 | struct | `Shell` | `shell.rs:178` | fields: `ws`, `entries`, `spark`, `page`, `tabs`, `open`, `loaded`, `run`, `live_run`, `sheet`, `new`, `palette_q`, ... |
-| fn | `params_of` | `shell.rs:834` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
+| fn | `params_of` | `shell.rs:840` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
 | fn | `OpenWf::new` | `shell.rs:99` | `pub fn new(id: String) -> OpenWf` |
 | fn | `OpenWf::title` | `shell.rs:136` | `pub fn title(&self) -> String` |
 | fn | `OpenWf::reload_runs` | `shell.rs:143` | `pub fn reload_runs(&mut self)` |
@@ -236,8 +236,8 @@ classDiagram
 | fn | `App::record_ok` | `shell.rs:590` | `pub fn record_ok(&mut self, res: &nyx_engine::facade::physics::SolveResult) -> Option<String>` —  A solve finished well: writes its run record and keeps the log with it. Returns the run id. |
 | fn | `App::record_end` | `shell.rs:597` | `pub fn record_end(&mut self, status: RunStatus, error: Option<String>)` —  A solve failed or was cancelled. |
 | fn | `App::shell_ui` | `shell.rs:651` | `pub fn shell_ui(&mut self, ui: &mut egui::Ui)` —  The whole window in the shell layout. |
-| fn | `App::pick_nyx_file` | `shell.rs:812` | `pub fn pick_nyx_file(&mut self)` —  File dialog for a `.nyx` file; shows what is inside before anything is saved. |
-| fn | `App::open_received` | `shell.rs:817` | `pub fn open_received(&mut self, p: PathBuf)` |
+| fn | `App::pick_nyx_file` | `shell.rs:818` | `pub fn pick_nyx_file(&mut self)` —  File dialog for a `.nyx` file; shows what is inside before anything is saved. |
+| fn | `App::open_received` | `shell.rs:823` | `pub fn open_received(&mut self, p: PathBuf)` |
 | enum | `Act` | `wfview.rs:18` | variants: `Part`, `Sub`, `LoadExp`, `NewExp`, `Fork`, `Link`, `Compute`, `Cancel`, `Star`, `Title`, `Tags`, `ExportCsv`, ... |
 | fn | `fmt_value` | `wfview.rs:41` | `pub fn fmt_value(key: &str, v: f64) -> String` —  A length shown in nm, other numbers with four significant digits. |
 | fn | `App::workflow_ui` | `wfview.rs:62` | `pub fn workflow_ui(&mut self, ui: &mut egui::Ui, id: &str)` |

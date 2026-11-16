@@ -72,6 +72,7 @@ impl Server {
     fn new(dir: PathBuf) -> Server {
         let mut engine = Engine::new();
         engine.set_workspace(dir, true);
+        engine.set_owner("ai"); // its requests queue behind a person's at the same priority (ADR 87)
         Server { engine, proto: PROTOCOLS[0], session: session_id(), revision: 0 }
     }
 

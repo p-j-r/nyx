@@ -32,6 +32,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 
 | Component | Modules | Items |
 |---|---|---|
+| [app: Window](../app/window.md) | queue | QueueOpts |
 | [Commands](./commands.md) | jobs, queue, solve | JobId, JobMeta, JobOutput, JobRunner, Lane, Opened, QueueOpts, SolveSummary +3 |
 | [Registry and facade](./registry.md) | jobs, queue | JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, QueueOpts, Submit |
 | [Results files](./resultsIO.md) | jobs | Opened |

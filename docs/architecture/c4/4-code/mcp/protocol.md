@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Protocol loop** (`mcp.protocol`) in the con
 > Newline-delimited JSON-RPC 2.0 over stdin/stdout: initialize with protocol negotiation, method dispatch, notifications, logs on stderr. No async runtime and no SDK.
 
 **Decisions:** [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 1 file, 253 lines.
+**Size:** 1 file, 254 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-mcp/src/main.rs` | 253 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. The server holds one `nyx_engine::E... |
+| `crates/nyx-mcp/src/main.rs` | 254 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. The server holds one `nyx_engine::E... |
 
 ## What it uses
 
@@ -61,10 +61,10 @@ classDiagram
 | fn | `at_least` | `main.rs:53` | `fn at_least(proto: &str, min: &str) -> bool` —  Protocol revisions compare as dates, so string order is chronological. |
 | fn | `session_id` | `main.rs:58` | `fn session_id() -> String` —  A short id for this process: the session a result belongs to. |
 | struct | `Server` | `main.rs:63` |  |
-| fn | `serve` | `main.rs:168` | `fn serve(dir: PathBuf)` |
-| fn | `usage` | `main.rs:197` | `fn usage()` |
-| fn | `main` | `main.rs:201` | `fn main()` |
+| fn | `serve` | `main.rs:169` | `fn serve(dir: PathBuf)` |
+| fn | `usage` | `main.rs:198` | `fn usage()` |
+| fn | `main` | `main.rs:202` | `fn main()` |
 | fn | `Server::new` | `main.rs:72` | `fn new(dir: PathBuf) -> Server` |
-| fn | `Server::header` | `main.rs:78` | `fn header(&self) -> Value` |
-| fn | `Server::initialize` | `main.rs:83` | `fn initialize(&mut self, params: &Value) -> Value` |
-| fn | `Server::handle` | `main.rs:135` | `fn handle(&mut self, msg: &Value) -> Option<Value>` —  One incoming message; `None` means no reply (notifications). |
+| fn | `Server::header` | `main.rs:79` | `fn header(&self) -> Value` |
+| fn | `Server::initialize` | `main.rs:84` | `fn initialize(&mut self, params: &Value) -> Value` |
+| fn | `Server::handle` | `main.rs:136` | `fn handle(&mut self, msg: &Value) -> Option<Value>` —  One incoming message; `None` means no reply (notifications). |

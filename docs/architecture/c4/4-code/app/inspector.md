@@ -22,7 +22,7 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, project | Applies, BcSpec, Both, Env, Evaluated, Expr, FeatureList, LabelMap, MODE_COLOURS, MaterialAssign +20 |
 | [Shell and dashboard](./shell.md) | examples | list, typical |
 | [Viewport](./viewport.md) | colormap | Colormap |
-| [Window](./window.md) | app, state | App |
+| [Window](./window.md) | app, state | App, JobKind |
 
 ## Used by
 

@@ -557,7 +557,7 @@
             "structurizr.dsl.identifier" : "nyx.app.window",
             "codeDiagram" : "4-code/app/window.md",
             "code" : "crates/app/src: app.rs, main.rs, state.rs",
-            "lines" : "1788",
+            "lines" : "1993",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -568,7 +568,7 @@
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
-            "description" : "uses engine: crate root, engine +2",
+            "description" : "uses engine: crate root, engine +3",
             "destinationId" : "22",
             "id" : "167",
             "sourceId" : "7",
@@ -621,7 +621,7 @@
             "structurizr.dsl.identifier" : "nyx.app.shell",
             "codeDiagram" : "4-code/app/shell.md",
             "code" : "crates/app/src: dashboard.rs, examples.rs, sheets.rs, shell.rs, wfview.rs",
-            "lines" : "3265",
+            "lines" : "3271",
             "adr" : "14, 23"
           },
           "relationships" : [ {
@@ -806,7 +806,7 @@
             "structurizr.dsl.identifier" : "nyx.mcp.protocol",
             "codeDiagram" : "4-code/mcp/protocol.md",
             "code" : "crates/nyx-mcp/src: main.rs",
-            "lines" : "253",
+            "lines" : "254",
             "adr" : "15, 57"
           },
           "relationships" : [ {
@@ -828,7 +828,7 @@
             "structurizr.dsl.identifier" : "nyx.mcp.tools",
             "codeDiagram" : "4-code/mcp/tools.md",
             "code" : "crates/nyx-mcp/src: main.rs",
-            "lines" : "253",
+            "lines" : "254",
             "adr" : "15, 57"
           },
           "relationships" : [ {

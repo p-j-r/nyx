@@ -803,7 +803,13 @@ impl App {
                     ui.spacing_mut().item_spacing.x = 7.0;
                     crate::kit::dot(ui, dot);
                     ui.label(RichText::new(text).color(theme::text(&ctx)));
+                    if !self.waiting.is_empty() {
+                        ui.label(RichText::new(format!("+{} queued", self.waiting.len())).color(theme::muted(&ctx)));
+                    }
                 });
+                if (self.busy.is_some() || self.show_queue) && ui.small_button("Queue").on_hover_text("What runs and what waits, with cancel, hold and pause").clicked() {
+                    self.show_queue = !self.show_queue;
+                }
             });
         });
     }

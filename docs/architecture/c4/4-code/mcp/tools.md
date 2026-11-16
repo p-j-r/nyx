@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Tool bridge** (`mcp.tools`) in the containe
 > The tool list is the engine's command catalog (with annotations: read-only, destructive); a tool call is Engine::call, its reply rendered as text.
 
 **Decisions:** [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 1 file, 253 lines.
+**Size:** 1 file, 254 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-mcp/src/main.rs` | 253 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. The server holds one `nyx_engine::E... |
+| `crates/nyx-mcp/src/main.rs` | 254 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. The server holds one `nyx_engine::E... |
 
 ## What it uses
 
@@ -48,6 +48,6 @@ classDiagram
 |---|---|---|---|
 | fn | `destructive` | `main.rs:28` | `fn destructive(name: &str) -> bool` —  Commands that discard the project or a part of it: a host may ask the person first. |
 | fn | `tool_list` | `main.rs:32` | `fn tool_list(engine: &Engine) -> Value` |
-| fn | `render` | `main.rs:159` | `fn render(tool: &str, v: &Value) -> String` —  Text for the host: a guide is plain text, everything else compact JSON. |
-| fn | `Server::run` | `main.rs:95` | `fn run(&mut self, name: &str, args: &Value) -> Option<(Value, bool)>` —  Runs one command: its JSON with the session header, or the error as JSON. `None` when there is no such tool. |
-| fn | `Server::tools_call` | `main.rs:118` | `fn tools_call(&mut self, params: &Value) -> Result<Value, (i64, String)>` |
+| fn | `render` | `main.rs:160` | `fn render(tool: &str, v: &Value) -> String` —  Text for the host: a guide is plain text, everything else compact JSON. |
+| fn | `Server::run` | `main.rs:96` | `fn run(&mut self, name: &str, args: &Value) -> Option<(Value, bool)>` —  Runs one command: its JSON with the session header, or the error as JSON. `None` when there is no such tool. |
+| fn | `Server::tools_call` | `main.rs:119` | `fn tools_call(&mut self, params: &Value) -> Result<Value, (i64, String)>` |

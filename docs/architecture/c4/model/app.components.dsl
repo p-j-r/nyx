@@ -3,7 +3,7 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: app.rs, main.rs, state.rs"
-        "lines" "1788"
+        "lines" "1993"
         "codeDiagram" "4-code/app/window.md"
     }
 }
@@ -11,7 +11,7 @@ shell = component "Shell and dashboard" "The tab bar, the dashboard of workflows
     properties {
         "adr" "14, 23"
         "code" "crates/app/src: dashboard.rs, examples.rs, sheets.rs, shell.rs, wfview.rs"
-        "lines" "3265"
+        "lines" "3271"
         "codeDiagram" "4-code/app/shell.md"
     }
 }

@@ -15,7 +15,7 @@ use nyx_connect::{Env, HostInfo, Status};
 use nyx_engine::facade::geom::model::FeatureList;
 use nyx_engine::facade::physics::SolveResult;
 use nyx_engine::facade::Progress;
-use nyx_engine::{Engine, MeshSettings};
+use nyx_engine::{Engine, MeshSettings, QueueOpts};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -47,6 +47,14 @@ pub enum JobKind {
     Open,
 }
 
+/// A job of this window that waits in the engine's queue behind the running one (ADR 87).
+pub struct WinJob {
+    pub id: u64,
+    pub kind: JobKind,
+    pub label: String,
+    pub cancellable: bool,
+}
+
 /// A message from a helper thread (the optional Python script) to the window.
 pub enum Msg {
     Script(Result<String, String>),
@@ -66,6 +74,11 @@ pub struct App {
     /// the running engine job: its number, its progress/cancel handle and whether it can be cancelled
     pub job: Option<(u64, Arc<Progress>, bool)>,
     pub job_kind: Option<JobKind>,
+    /// solves and convergence checks asked for while another job runs: they wait in the engine's queue in this order and become the running job
+    /// one after the other
+    pub waiting: Vec<WinJob>,
+    /// the Queue panel is open
+    pub show_queue: bool,
     /// scripted runs: cancel the running job at this time (`cancel_after SECONDS`)
     pub cancel_at: Option<Instant>,
     /// a mesh build or file open asked for while another job was running; it starts when that job is done
@@ -145,6 +158,8 @@ impl App {
             busy: None,
             job: None,
             job_kind: None,
+            waiting: vec![],
+            show_queue: false,
             cancel_at: None,
             queued: None,
             status: "Ready".into(),
@@ -181,6 +196,7 @@ impl App {
             connect_note: None,
             ctx,
         };
+        app.engine.set_owner("gui"); // a person's requests run before an agent's (ADR 87)
         app.refresh_connect();
         let first = examples::list().into_iter().next();
         let started = match first {
@@ -258,12 +274,132 @@ impl App {
         self.error = Some(e);
     }
 
+    /// A job was submitted to the engine. With nothing running it is the running job; otherwise it waits in the queue behind it.
     pub(crate) fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool) {
-        let progress = self.engine.jobs().progress(id).unwrap_or_else(Progress::new);
-        self.busy = Some((label, Instant::now()));
-        self.job = Some((id, progress, cancellable));
-        self.job_kind = Some(kind);
+        let job = WinJob { id, kind, label, cancellable };
+        if self.job.is_some() {
+            self.status = format!("{} is queued behind the running job ({} waiting)", job.label, self.waiting.len() + 1);
+            self.error = None;
+            self.waiting.push(job);
+        } else {
+            self.make_front(job);
+        }
+    }
+
+    /// `job` is the running job: the busy label, the progress handle and the run it will record.
+    fn make_front(&mut self, job: WinJob) {
+        let progress = self.engine.jobs().progress(job.id).unwrap_or_else(Progress::new);
+        self.busy = Some((job.label, Instant::now()));
+        self.job = Some((job.id, progress, job.cancellable));
+        self.job_kind = Some(job.kind);
         self.error = None;
+    }
+
+    /// The next waiting job becomes the running one (the engine started it by itself when the lane freed).
+    fn promote_waiting(&mut self) {
+        if self.job.is_none() {
+            // a job held in the queue does not start, so it is not the running one until it is released
+            let held = |id: u64| self.engine.jobs().info(id).is_some_and(|i| i.held);
+            if let Some(i) = self.waiting.iter().position(|w| !held(w.id)) {
+                let next = self.waiting.remove(i);
+                self.make_front(next);
+            }
+        }
+    }
+
+    /// The Queue panel: what the engine runs and what waits (the same entries `queue_list` gives an agent), with cancel for each, hold and release for a
+    /// waiting job and pause for the queue (ADR 87). It calls the runner's methods that the `queue_*` commands call.
+    pub fn queue_panel(&mut self, ctx: &egui::Context) {
+        if !self.show_queue {
+            return;
+        }
+        let entries: Vec<Value> = self
+            .engine
+            .queue_list(None, None)
+            .into_iter()
+            .filter(|e| matches!(e["state"].as_str(), Some("queued" | "running")))
+            .collect();
+        let paused = self.engine.jobs().paused();
+        let mut open = true;
+        let mut act: Vec<(&str, u64)> = vec![];
+        egui::Window::new("Queue").open(&mut open).default_width(460.0).show(ctx, |ui| {
+            if entries.is_empty() {
+                ui.label("Nothing is running or waiting.");
+            }
+            egui::Grid::new("queue_grid").striped(true).num_columns(4).show(ui, |ui| {
+                for e in &entries {
+                    let id = e["id"].as_u64().unwrap_or(0);
+                    let queued = e["state"] == "queued";
+                    ui.label(e["label"].as_str().unwrap_or(""));
+                    if queued {
+                        let held = if e["held"] == true { ", held" } else { "" };
+                        ui.label(format!("waiting, number {}{held}", e["position"].as_u64().unwrap_or(0)));
+                    } else {
+                        let stage = e["stage"].as_str().unwrap_or("");
+                        let stage = if stage.is_empty() { "starting" } else { stage };
+                        let cancelled = if e["cancel_requested"] == true { " (cancel requested)" } else { "" };
+                        ui.label(format!("{stage}, {:.1} s{cancelled}", e["seconds"].as_f64().unwrap_or(0.0)));
+                    }
+                    ui.label(format!("{} · priority {}", e["owner"].as_str().unwrap_or(""), e["priority"]));
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Cancel").clicked() {
+                            act.push(("cancel", id));
+                        }
+                        if queued {
+                            if e["held"] == true {
+                                if ui.small_button("Release").clicked() {
+                                    act.push(("release", id));
+                                }
+                            } else if ui.small_button("Hold").clicked() {
+                                act.push(("hold", id));
+                            }
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button(if paused { "Resume the queue" } else { "Pause the queue" }).on_hover_text("A paused queue starts nothing new; what runs finishes").clicked() {
+                    act.push(("pause", 0));
+                }
+            });
+        });
+        for (what, id) in act {
+            match what {
+                "cancel" => {
+                    if self.job.as_ref().is_some_and(|j| j.0 == id) {
+                        self.cancel_job();
+                    } else {
+                        self.cancel_waiting(id);
+                    }
+                }
+                "hold" => {
+                    self.engine.jobs().hold(id);
+                }
+                "release" => {
+                    self.engine.jobs().release(id);
+                }
+                _ => {
+                    if paused {
+                        self.engine.jobs().resume();
+                    } else {
+                        self.engine.jobs().pause();
+                    }
+                }
+            }
+        }
+        self.show_queue = open;
+        if !entries.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
+
+    /// Cancels a job that waits in the queue (it never runs).
+    pub fn cancel_waiting(&mut self, id: u64) {
+        if self.engine.jobs().cancel(id) {
+            self.waiting.retain(|w| w.id != id);
+            self.status = "A queued job was cancelled before it started".into();
+        }
     }
 
     /// Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first).
@@ -271,17 +407,36 @@ impl App {
     /// arrives as a message and is shown in the Study tab.
     pub fn check_convergence(&mut self) {
         let Some(active) = self.active() else { return };
-        if self.refuse_while_busy() || !self.push_edits() {
+        if self.refuse_unless_queueable() || !self.push_edits() {
             return;
         }
-        // an engine job: it shows in the job list, reports its two solves as stages and can be cancelled
-        match self.engine.start_convergence(&active, self.conv_factor, Some(self.conv_tol)) {
+        // an engine job: it shows in the job list, reports its two solves as stages and can be cancelled; behind a running job it waits in the
+        // queue and replaces a check that has not started
+        let opts = QueueOpts { supersede: true, ..Default::default() };
+        match self.engine.start_convergence_with(&active, self.conv_factor, Some(self.conv_tol), &opts) {
             Ok(id) => {
+                self.waiting.retain(|w| w.kind != JobKind::Convergence);
                 self.convergence = None;
                 self.started(id, JobKind::Convergence, "Checking convergence".into(), true);
             }
             Err(e) => self.set_error(format!("convergence: {e}")),
         }
+    }
+
+    /// Whether a Compute can be asked for now: not while a results file is opened (it replaces the project), and in a workspace only when nothing
+    /// runs (each Compute there is one run record and the page is locked while it runs).
+    pub fn can_queue_compute(&self) -> bool {
+        self.job_kind != Some(JobKind::Open) && (!self.shell.active() || self.busy.is_none())
+    }
+
+    /// True (and a message in the status bar) when a solve or a check cannot be submitted now: while a results file is being opened, which
+    /// replaces the project the request would have been made for. Behind any other job the request waits in the queue.
+    fn refuse_unless_queueable(&mut self) -> bool {
+        if self.job_kind == Some(JobKind::Open) {
+            self.status = "Opening a results file: it replaces the project; wait for it to finish or cancel it".into();
+            return true;
+        }
+        false
     }
 
     /// True while a mesh convergence check runs.
@@ -374,7 +529,9 @@ impl App {
 
     /// Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed.
     pub fn compute(&mut self) {
-        if self.refuse_while_busy() {
+        // in a workspace every Compute is one run record and the workflow page is locked while it runs, so the shell keeps one solve at a time;
+        // without one a Compute behind a running job waits in the queue
+        if self.refuse_unless_queueable() || (self.shell.active() && self.refuse_while_busy()) {
             return;
         }
         self.sync_rules();
@@ -389,8 +546,11 @@ impl App {
             self.set_error("The project has no physics: add one in the Physics tab.");
             return;
         };
-        match self.engine.start_solve(None) {
+        // behind a running job the solve waits in the engine's queue; a Compute that has not started yet is replaced by this one
+        let opts = QueueOpts { supersede: true, ..Default::default() };
+        match self.engine.start_solve_with(None, &opts) {
             Ok(id) => {
+                self.waiting.retain(|w| w.kind != JobKind::Solve);
                 let label = format!("Solving {}", self.physics_name(&active));
                 self.started(id, JobKind::Solve, label, true);
             }
@@ -413,6 +573,17 @@ impl App {
                     self.error = Some(format!("Results file {path}: {e}"));
                 }
                 continue;
+            }
+            // a job that waited in the queue and is already over (the engine started it when the one before it ended) is the running one now; a
+            // job that is none of ours (replaced by a newer request, or cancelled in the queue) has nothing to show
+            if self.job.as_ref().map(|j| j.0) != Some(id) {
+                match self.waiting.iter().position(|w| w.id == id) {
+                    Some(i) if self.job.is_none() => {
+                        let w = self.waiting.remove(i);
+                        self.make_front(w);
+                    }
+                    _ => continue,
+                }
             }
             // only the job that is running clears the busy state
             let started = if self.job.as_ref().map(|j| j.0) == Some(id) {
@@ -465,7 +636,9 @@ impl App {
                 }
                 (None, _) => {}
             }
+            self.promote_waiting();
         }
+        self.promote_waiting();
     }
 
     /// Takes the mesh the engine has now (a new mesh clears the results of the old one).
@@ -933,9 +1106,9 @@ impl App {
                 self.picking = None;
                 self.rules_dirty = true;
             }
-            let busy = self.busy.is_some();
             let has_mesh = self.doc.mesh.is_some();
-            let b = ui.add_enabled(!busy && has_mesh, egui::Button::new(RichText::new("  Compute  ").strong()).fill(Color32::from_rgb(38, 110, 70)));
+            // behind a running job a Compute waits in the queue (without a workspace; a workspace keeps one run at a time)
+            let b = ui.add_enabled(self.can_queue_compute() && has_mesh, egui::Button::new(RichText::new(if self.busy.is_some() { "  Queue  " } else { "  Compute  " }).strong()).fill(Color32::from_rgb(38, 110, 70)));
             if b.on_hover_text("Solve the active physics on the current mesh (F5)").clicked() {
                 self.compute();
             }
@@ -954,6 +1127,12 @@ impl App {
                     if ui.add_enabled(!cancelled, egui::Button::new("Cancel")).on_hover_text("Stop the job at the next safe point (Esc). A factorisation in progress has to finish first. Earlier results stay as they are.").clicked() {
                         self.cancel_job();
                     }
+                }
+                if !self.waiting.is_empty() {
+                    ui.label(format!("+{} queued", self.waiting.len()));
+                }
+                if ui.small_button("Queue").on_hover_text("What runs and what waits, with cancel, hold and pause").clicked() {
+                    self.show_queue = !self.show_queue;
                 }
                 ui.ctx().request_repaint();
             }
@@ -1112,6 +1291,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let t_ui = Instant::now();
+        self.queue_panel(ui.ctx());
         if self.shell.active() {
             self.shell_ui(ui);
             return;
@@ -1230,18 +1410,49 @@ mod tests {
     }
 
     #[test]
-    fn a_second_job_is_refused_while_one_runs_and_a_mesh_build_waits_its_turn() {
+    fn a_compute_behind_a_running_job_waits_its_turn_and_a_newer_one_replaces_it() {
         let mut a = app();
         a.load_example(example("05_block"));
         assert!(a.busy.is_some());
-        a.compute(); // nothing to solve on yet and a job is running: refused with a message, not started
-        assert!(a.status.starts_with("Busy"), "{}", a.status);
         let first = a.job.as_ref().map(|j| j.0);
-        a.rebuild_mesh(); // queued
-        assert!(a.queued.is_some());
+        a.engine.jobs().pause(); // the mesh job may be over already: nothing new starts, so the queue can be looked at
+        a.compute(); // a job is running: the solve waits in the engine's queue behind it
+        assert_eq!(a.waiting.len(), 1, "{} / {:?}", a.status, a.error);
+        assert!(a.status.contains("queued"), "{}", a.status);
+        let queued = a.waiting[0].id;
+        assert_eq!(a.engine.jobs().info(queued).unwrap().position, Some(1));
         assert_eq!(a.job.as_ref().map(|j| j.0), first, "the running job is not replaced");
-        wait_idle(&mut a, 30);
-        assert!(a.doc.mesh.is_some() && a.queued.is_none());
+        a.compute(); // a Compute that has not started is replaced by the newer one
+        assert_eq!(a.waiting.len(), 1);
+        assert_ne!(a.waiting[0].id, queued);
+        a.rebuild_mesh(); // a mesh build still has its one slot
+        assert!(a.queued.is_some());
+        // the Queue panel lists what runs and what waits, and draws on a headless context
+        a.show_queue = true;
+        let ctx = a.ctx.clone();
+        let _ = ctx.run_ui(Default::default(), |ui| a.queue_panel(ui.ctx()));
+        a.engine.jobs().resume();
+        wait_idle(&mut a, 120);
+        assert!(a.doc.mesh.is_some() && a.queued.is_none() && a.waiting.is_empty());
+        assert!(!a.results.is_empty(), "the queued Compute ran when the first job ended and its result is on show");
+    }
+
+    #[test]
+    fn a_compute_that_waits_in_the_queue_can_be_cancelled_and_never_runs() {
+        let mut a = app();
+        a.load_example(example("05_block"));
+        let running = a.job.as_ref().map(|j| j.0).unwrap();
+        a.engine.jobs().pause(); // nothing new starts while the queue is looked at
+        a.compute();
+        let queued = a.waiting[0].id;
+        a.cancel_waiting(queued);
+        assert!(a.waiting.is_empty());
+        assert_eq!(a.engine.jobs().info(queued).unwrap().state, nyx_engine::JobState::Cancelled);
+        assert_eq!(a.job.as_ref().map(|j| j.0), Some(running), "the running job goes on");
+        a.engine.jobs().resume();
+        wait_idle(&mut a, 60);
+        assert!(a.results.is_empty(), "the cancelled Compute never ran");
+        assert!(a.engine.jobs().log(queued).is_empty());
     }
 
     #[test]
