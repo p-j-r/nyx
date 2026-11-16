@@ -82,16 +82,18 @@ pub struct Submit {
     pub owner: String,
     /// 1 a person's request now, 2 an agent's single request (the default), 3 sweeps and batches; lower runs first
     pub priority: u8,
-    /// a job of the same owner with the same key that is still queued is cancelled when this one is submitted (a new Compute of the same target
-    /// replaces the one that has not started)
-    pub supersede: Option<String>,
+    /// what the request is, by kind and targets (`solve ems`): the key a newer request can replace a queued one by
+    pub key: Option<String>,
+    /// cancel a job of the same owner and key that is still queued when this one is submitted (a new Compute of the same target replaces the one
+    /// that has not started); every job keeps its key, so a request made without this flag can still be replaced by one made with it
+    pub supersede: bool,
     /// start held: it runs only after `release`
     pub hold: bool,
 }
 
 impl Submit {
     pub fn new(label: &str, lane: Lane) -> Submit {
-        Submit { label: label.into(), lane, owner: "cli".into(), priority: 2, supersede: None, hold: false }
+        Submit { label: label.into(), lane, owner: "cli".into(), priority: 2, key: None, supersede: false, hold: false }
     }
 }
 
@@ -137,7 +139,7 @@ struct Slot {
     label: String,
     lane: Lane,
     owner: String,
-    supersede: Option<String>,
+    key: Option<String>,
     progress: Arc<Progress>,
     submitted: Instant,
     inner: Mutex<Inner>,
@@ -302,7 +304,7 @@ impl JobRunner {
         F: FnOnce(Arc<Progress>) -> Result<JobOutput, Error> + Send + 'static,
     {
         let id = self.shared.next.fetch_add(1, Ordering::SeqCst) + 1;
-        if let Some(key) = &spec.supersede {
+        if let (true, Some(key)) = (spec.supersede, &spec.key) {
             // the request this one replaces has not started: it never runs
             let old: Vec<(JobId, Arc<Slot>)> = self
                 .shared
@@ -310,7 +312,7 @@ impl JobRunner {
                 .lock()
                 .expect("job table")
                 .iter()
-                .filter(|(_, s)| s.owner == spec.owner && s.supersede.as_ref() == Some(key))
+                .filter(|(_, s)| s.owner == spec.owner && s.key.as_ref() == Some(key))
                 .map(|(i, s)| (*i, s.clone()))
                 .collect();
             for (i, _) in old {
@@ -321,7 +323,7 @@ impl JobRunner {
             label: spec.label,
             lane: spec.lane,
             owner: spec.owner,
-            supersede: spec.supersede,
+            key: spec.key,
             progress: Progress::new(),
             submitted: Instant::now(),
             inner: Mutex::new(Inner {
@@ -516,6 +518,23 @@ impl JobRunner {
     /// The outcome if the job has finished and it has not been taken; `None` while queued or running, or after it was taken.
     pub fn try_take(&self, id: JobId) -> Option<Result<JobOutput, Error>> {
         self.slot(id)?.inner.lock().expect("job slot").outcome.take()
+    }
+
+    /// Why a queued job cannot start however long it is waited for: it is held, or the queue is paused. `None` for a job that is running or will
+    /// start (behind a running one), and for a finished one. A caller that would block with no timeout asks first.
+    pub fn blocked(&self, id: JobId) -> Option<&'static str> {
+        let s = self.slot(id)?;
+        let g = s.inner.lock().expect("job slot");
+        if g.state != JobState::Queued {
+            return None;
+        }
+        if g.held {
+            Some("it is held (release it with queue_release, or wait with a timeout_s)")
+        } else if self.paused() {
+            Some("the queue is paused (resume it with queue_resume, or wait with a timeout_s)")
+        } else {
+            None
+        }
     }
 
     /// Blocks until the job has finished and takes its outcome.

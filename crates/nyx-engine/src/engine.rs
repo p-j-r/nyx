@@ -440,6 +440,11 @@ impl Engine {
                 "job {id} is not waiting to be applied (it was applied already, or there is no such job)"
             )));
         }
+        // a wait with no timeout on a job that cannot start would never return (and a host that answers one call at a time could never send the
+        // call that frees it)
+        if let Some(why) = self.jobs.blocked(id) {
+            return Err(Error::invalid(format!("job {id} cannot start: {why}")));
+        }
         let outcome = self.jobs.wait(id);
         self.apply(id, outcome)
     }

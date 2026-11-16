@@ -124,7 +124,8 @@ impl Engine {
         s.owner = self.owner.clone();
         s.priority = opts.priority.unwrap_or(if self.owner == "gui" { 1 } else { 2 });
         s.hold = opts.hold;
-        s.supersede = opts.supersede.then(|| key.to_string());
+        s.key = Some(key.to_string());
+        s.supersede = opts.supersede;
         s
     }
 
@@ -248,15 +249,14 @@ impl Engine {
                 Ok(json!({ "paused": false }))
             }
             "queue_wait" => {
-                let t = args
-                    .get("timeout_s")
-                    .and_then(Value::as_f64)
-                    .filter(|t| *t >= 0.0 && t.is_finite())
-                    .ok_or_else(|| {
-                        Error::invalid(
+                let t =
+                    args.get("timeout_s").and_then(Value::as_f64).filter(|t| *t >= 0.0 && t.is_finite()).ok_or_else(
+                        || {
+                            Error::invalid(
                             "`timeout_s` is required: seconds to wait at most (a tool call must not block for ever)",
                         )
-                    })?;
+                        },
+                    )?;
                 self.wait_timeout(id()?, Duration::from_secs_f64(t))
             }
             other => Err(Error::invalid(format!("no command '{other}'"))),

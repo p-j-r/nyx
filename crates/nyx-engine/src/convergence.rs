@@ -128,7 +128,8 @@ impl Engine {
         }
     }
 
-    /// Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results. `tolerance`,
+    /// Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread
+    /// and outside the queue (the `convergence_check` command goes through `start_convergence`). `tolerance`,
     /// when given, is the largest relative difference accepted (the difference of a quantity over the larger of the two values, or over 1 for
     /// a value near zero); every row then says whether it passed and `converged` is true when all did.
     pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {

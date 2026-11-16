@@ -173,9 +173,11 @@ fn a_queued_job_can_be_cancelled_held_and_superseded() {
     // supersede: the newer request replaces the queued one with the same key
     let mut s = Submit::new("d1", Lane::Heavy);
     s.owner = "y".into();
-    s.supersede = Some("solve ems".into());
+    s.key = Some("solve ems".into());
+    // d1 was made without the flag: it can still be replaced by a newer request that has it
     let d1 = r.submit(s.clone(), gated("d1", &open, &order));
     s.label = "d2".into();
+    s.supersede = true;
     let d2 = r.submit(s, gated("d2", &open, &order));
     assert_eq!(state(&r, d1), JobState::Cancelled);
     blocker.open();
@@ -452,4 +454,53 @@ fn a_failed_physics_keeps_the_ones_solved_before_it() {
     assert!(why.contains("no_such_boundary"), "it failed for another reason than the one the test made: {why}");
     assert!(e.result("dfs").is_some(), "the heat result that was solved before the failure is kept");
     assert!(e.result("sms").is_none());
+}
+
+#[test]
+fn a_wait_on_a_job_that_cannot_start_refuses_instead_of_hanging() {
+    let (mut e, _) = open("15_soi_wire");
+    // a paused queue starts nothing: a wait with no timeout would never return
+    e.call("queue_pause", &json!({})).unwrap();
+    let a = e.start_solve(None).unwrap();
+    let err = e.wait(a).expect_err("a wait on a paused queue must refuse").to_string();
+    assert!(err.contains("queue_resume"), "{err}");
+    let w = e.call("queue_wait", &json!({ "id": a, "timeout_s": 0.1 })).unwrap();
+    assert_eq!(w["state"], json!("queued"), "a bounded wait is fine, and says the job is still queued: {w}");
+    e.call("queue_resume", &json!({})).unwrap();
+    // a held job is the same
+    let b = e.call("queue_submit", &json!({ "hold": true })).unwrap()["id"].as_u64().unwrap();
+    e.wait(a).unwrap();
+    let err = e.call("job_wait", &json!({ "id": b })).expect_err("a wait on a held job must refuse").to_string();
+    assert!(err.contains("queue_release"), "{err}");
+    e.call("queue_release", &json!({ "id": b })).unwrap();
+    assert_eq!(e.call("job_wait", &json!({ "id": b })).unwrap()["state"], json!("done"));
+}
+
+#[test]
+fn the_convergence_check_command_goes_through_the_queue_and_reuses_the_coarse_solve() {
+    let (mut e, probe) = open("15_soi_wire");
+    e.call("solve_run", &json!({})).unwrap();
+    let _ = probe;
+    // the plain command (wait true, the default) is a job of the heavy lane like a solve, so it can reuse the solve before it
+    let jobs_before = e.jobs().list().len();
+    let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.6, "tolerance": 1e-2 })).unwrap();
+    assert_eq!(r["coarse_reused"], json!(true), "{r}");
+    assert_eq!(e.jobs().list().len(), jobs_before + 1, "the check was a job of the queue");
+    // and with the queue paused it cannot start, which a wait with no timeout refuses
+    e.call("queue_pause", &json!({})).unwrap();
+    let err = e.call("convergence_check", &json!({ "physics": "ems" })).expect_err("a paused queue").to_string();
+    assert!(err.contains("queue_resume"), "{err}");
+}
+
+#[test]
+fn a_newer_request_replaces_a_queued_one_even_when_the_first_was_made_without_the_flag() {
+    let (mut e, _) = open("15_soi_wire");
+    e.call("queue_pause", &json!({})).unwrap();
+    let a = e.start_solve(None).unwrap(); // no supersede flag
+    let b = e.start_solve_with(None, &QueueOpts { supersede: true, ..Default::default() }).unwrap();
+    assert_eq!(e.jobs().info(a).unwrap().state, JobState::Cancelled);
+    assert_eq!(e.jobs().info(b).unwrap().state, JobState::Queued);
+    e.call("queue_resume", &json!({})).unwrap();
+    assert_eq!(e.wait(b).unwrap()["state"], json!("done"));
+    assert!(matches!(e.wait(a), Err(Error::Cancelled)));
 }

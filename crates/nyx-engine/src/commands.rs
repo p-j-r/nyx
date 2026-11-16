@@ -455,7 +455,9 @@ impl Engine {
                     args.get("tolerance").and_then(Value::as_f64),
                 );
                 if opt_bool(args, "wait", true) {
-                    self.convergence_check(physics, factor, tolerance)
+                    // through the queue, like a solve: it waits for the heavy lane and reuses the coarse solve of an earlier request
+                    let id = self.start_convergence(physics, factor, tolerance)?;
+                    self.wait(id)
                 } else {
                     Ok(json!({ "job": self.start_convergence(physics, factor, tolerance)? }))
                 }
