@@ -7,6 +7,7 @@ use crate::engine::Engine;
 use crate::geomdesc as gd;
 use crate::geometry;
 use crate::project::{MeshSettings, Project};
+use crate::queue::QueueOpts;
 use nyx_physics::{contract, BcSpec, Error, MaterialAssign, ProblemSpec, StudySpec};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -153,7 +154,7 @@ impl Engine {
                     ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number", "description": "thickness of the layer along y, metres" }, "n": { "type": "integer", "description": "cells across the thickness" }, "domain_offset": { "type": "integer", "description": "added to the domain numbers of the layer's cells" } }, "required": ["thickness", "n"] }, "description": "layers to sweep the 2D mesh along y" }))], &[])),
             cmd("mesh_build", "Mesh the geometry", "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.", Expensive, schema(vec![("wait", boolean("wait for the mesh, default true"))], &[])),
             cmd("solve_run", "Solve", "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.", Expensive,
-                schema(vec![("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("wait", boolean("wait for the result, default true"))], &[])),
+                schema(vec![("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("wait", boolean("wait for the result, default true")), ("isolate", boolean("run the solve in a worker process: running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
             cmd("job_status", "Status of a job", "State, current stage, fraction done and elapsed time.", Read, schema(vec![("id", int("job id"))], &["id"])),
             cmd("job_list", "List the jobs", "", Read, schema(vec![], &[])),
             cmd("job_cancel", "Cancel a job", "The solver notices at its next check; a factorisation in progress finishes first.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
@@ -161,7 +162,8 @@ impl Engine {
                 schema(vec![("id", int("job id")), ("timeout_s", number("longest wait in seconds; omit to wait until the job has finished"))], &["id"])),
             cmd("queue_submit", "Submit work to the queue", "Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a mesh `convergence` check (`physics`, `factor`, `tolerance`) and returns its entry at once. The heavy lane runs one job at a time in order of priority (1 a person's request, 2 an agent's, the default, 3 sweeps and batches; a waiting job rises one level after a minute), then in turns between owners, then in order of submission. The job carries a frozen copy of the project: later edits do not change it (`project_changed` says they happened). `supersede` replaces a queued request of the same kind and targets; `hold` keeps it from starting until `queue_release`. A job that comes after another of the same project reuses the mesh the first built.", Expensive,
                 schema(vec![("kind", json!({ "type": "string", "enum": ["solve", "mesh", "convergence"], "description": "default solve" })), ("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("factor", number("convergence: finer/present element size, default 0.6")), ("tolerance", number("convergence: largest accepted relative difference")),
-                    ("priority", int("1, 2 or 3; lower runs first")), ("supersede", boolean("replace a queued request of the same kind and targets")), ("hold", boolean("start held"))], &[])),
+                    ("priority", int("1, 2 or 3; lower runs first")), ("supersede", boolean("replace a queued request of the same kind and targets")), ("hold", boolean("start held")),
+                    ("isolate", boolean("solve in a worker process (only for kind solve): running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
             cmd("queue_list", "List the queue", "Every job, oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.", Read,
                 schema(vec![("owner", text("only this owner: gui, ai or cli")), ("state", text("only this state"))], &[])),
             cmd("queue_get", "One job of the queue", "The entry of `queue_list` for one job and the last lines of its stage log.", Read, schema(vec![("id", int("job id"))], &["id"])),
@@ -177,7 +179,7 @@ impl Engine {
                 schema(vec![("name", text("a name for the table")), ("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "code or list of codes to solve at every point" })),
                     ("points", json!({ "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string", "description": "a name for the point in the table; default `point N`" }, "edits": { "type": "array", "description": "the edits that make this point, applied in order to a copy of the project", "items": { "type": "object", "properties": { "cmd": { "type": "string", "description": "a command that changes the project" }, "args": { "type": "object", "description": "its arguments" } }, "required": ["cmd"] } } }, "required": ["edits"] }, "description": "the points, each a list of edits" })),
                     ("series", json!({ "type": "object", "properties": { "cmd": { "type": "string", "description": "the edit command repeated at every point" }, "args": { "type": "object", "description": "its arguments that stay the same" }, "field": { "type": "string", "description": "the argument that takes each value" }, "values": { "type": "array", "description": "the values, one point each" } }, "required": ["cmd", "field", "values"], "description": "one command repeated with `field` set to each value" })),
-                    ("priority", int("1, 2 or 3; default 3")), ("hold", boolean("queue the points held; release each with queue_release"))], &[])),
+                    ("priority", int("1, 2 or 3; default 3")), ("hold", boolean("queue the points held; release each with queue_release")), ("isolate", boolean("solve every point in a worker process, as for solve_run")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
             cmd("sweep_table", "The table of a sweep", "Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.", Read,
                 schema(vec![("sweep", int("the sweep's number")), ("wait_s", number("longest wait in seconds, default 0"))], &[])),
             cmd("sweep_cancel", "Cancel the points of a sweep that have not finished", "Queued points never run; a running one stops at its next check.", Expensive, schema(vec![("sweep", int("the sweep's number"))], &["sweep"])),
@@ -412,10 +414,16 @@ impl Engine {
                     Some(Value::Array(a)) => Some(a.iter().filter_map(|x| x.as_str().map(String::from)).collect()),
                     Some(_) => return Err(Error::invalid("`physics` is a code or a list of codes")),
                 };
+                let opts = QueueOpts {
+                    isolate: args.get("isolate").and_then(Value::as_bool),
+                    force: opt_bool(args, "force", false),
+                    ..Default::default()
+                };
+                let id = self.start_solve_with(targets, &opts)?;
                 if opt_bool(args, "wait", true) {
-                    self.solve_now(targets)
+                    self.wait(id)
                 } else {
-                    Ok(json!({ "job": self.start_solve(targets)? }))
+                    Ok(json!({ "job": id }))
                 }
             }
             "job_status" => {

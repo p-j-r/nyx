@@ -79,6 +79,23 @@ impl Progress {
         Status { stage, stage_seconds, total_seconds: self.start.elapsed().as_secs_f64(), fraction: g.fraction, cancelled: self.is_cancelled() }
     }
 
+    /// Shows the state of work done in another process (a worker, productivity plan P4): the stage it is in and for how long, the fraction
+    /// done and its log so far replace what this `Progress` holds. The parent of a worker calls it for every status line the worker sends,
+    /// so a front-end reads one `Progress` whether the solve runs in this process or in a child.
+    pub fn mirror(&self, stage: &str, stage_seconds: f64, fraction: Option<f64>, log: Option<Vec<String>>) {
+        let mut g = self.inner.lock().unwrap();
+        g.stack.clear();
+        if !stage.is_empty() {
+            let since = Instant::now().checked_sub(std::time::Duration::from_secs_f64(stage_seconds.max(0.0))).unwrap_or_else(Instant::now);
+            g.stack.push((stage.to_string(), since));
+        }
+        g.fraction = fraction;
+        if let Some(mut l) = log {
+            l.truncate(MAX_LOG_LINES + 1);
+            g.log = l;
+        }
+    }
+
     /// The finished-stage lines and notes so far.
     pub fn log(&self) -> Vec<String> {
         self.inner.lock().unwrap().log.clone()

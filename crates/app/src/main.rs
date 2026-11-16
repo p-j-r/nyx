@@ -29,6 +29,10 @@ mod wfview;
 fn main() -> eframe::Result {
     nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // started by an engine as its worker (`--job FOLDER`, see `nyx_engine::worker`): solve, answer on stdout, never open a window
+    if args.first().map(String::as_str) == Some("--job") {
+        std::process::exit(nyx_engine::worker::serve(&args));
+    }
     if args.first().map(|a| a.as_str()) == Some("--batch") {
         if let Err(e) = batch::run(&args[1..]) {
             eprintln!("nyx: {e}");
@@ -78,6 +82,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut a = app::App::new(cc);
+            a.solve_in_child_processes();
             if let Some(p) = &arg {
                 a.open_path(std::path::PathBuf::from(p));
             }

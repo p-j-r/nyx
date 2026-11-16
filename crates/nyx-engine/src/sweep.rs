@@ -186,6 +186,8 @@ impl Engine {
             priority: Some(priority),
             supersede: false,
             hold: args.get("hold").and_then(Value::as_bool).unwrap_or(false),
+            isolate: args.get("isolate").and_then(Value::as_bool),
+            force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
         };
         // every point is edited and checked first: a bad one fails the request and nothing is submitted
         let allowed = self.point_commands();
@@ -306,7 +308,7 @@ impl Engine {
         let seconds = self.jobs.info(id).map(|i| i.seconds).unwrap_or(0.0);
         let mut log = self.jobs.log(id);
         let (state, error, run, numbers, dofs, cells) = match outcome {
-            Ok(JobOutput::Solved { model, results, failed }) => {
+            Ok(JobOutput::Solved { model, results, failed, worker }) => {
                 let mesh = model.solver_mesh();
                 for r in &results {
                     log.extend(r.log.iter().map(|l| format!("{}: {l}", r.physics)));
@@ -327,6 +329,7 @@ impl Engine {
                         ("failed", Some(e.to_string()), run, numbers, dofs, Some(cells))
                     }
                     None => {
+                        self.learn(&results, cells as u64, model.mesh().dim() as u8, &worker);
                         let run = self.record_point(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
                         ("done", None, run, numbers, dofs, Some(cells))
                     }

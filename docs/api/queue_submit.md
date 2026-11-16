@@ -9,7 +9,9 @@ Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a m
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
 | `factor` | number | no |  | convergence: finer/present element size, default 0.6 |
+| `force` | true or false | no |  | start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits |
 | `hold` | true or false | no |  | start held |
+| `isolate` | true or false | no |  | solve in a worker process (only for kind solve): running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do |
 | `kind` | text: `solve`, `mesh`, `convergence` | no |  | default solve |
 | `physics` | text or list of text | no |  | physics code(s); default the active one |
 | `priority` | integer | no |  | 1, 2 or 3; lower runs first |

@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, and refusal of NaN and infinity.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 4 files, 519 lines.
+**Size:** 4 files, 536 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 |---|---:|---|
 | `crates/femcore/src/lib.rs` | 45 | femcore: finite elements for the nyx application, in pure Rust. docs/HOW_IT_WORKS.md explains the whole chain in plain language; this is the map of the modules. |
 | `crates/femcore/src/par.rs` | 150 | The one shared pool of worker threads used by every parallel loop of the solvers. |
-| `crates/femcore/src/progress.rs` | 278 | What a running solve is doing, and a way to stop it. |
+| `crates/femcore/src/progress.rs` | 295 | What a running solve is doing, and a way to stop it. |
 | `crates/femcore/src/validate.rs` | 46 |  |
 
 ## What it uses
@@ -29,7 +29,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads_up_to |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
-| [engine: Commands](../engine/commands.md) | progress | install, stage |
+| [engine: Commands](../engine/commands.md) | progress | install, note, stage |
 | [engine: Job runner and queue](../engine/jobs.md) | progress | Progress, install, stage |
 | [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, stage |
 | [engine: Registry and facade](../engine/registry.md) | progress | Progress |
@@ -73,6 +73,7 @@ classDiagram
         +cancel()
         +is_cancelled() bool
         +status() Status
+        +mirror(stage, stage_seconds, fraction, log)
         +log() Vec~String~
     }
     class Status {
@@ -124,21 +125,22 @@ classDiagram
 | const | `CANCELLED` | `progress.rs:28` | `&str` —  The error text of a cancelled solve. |
 | struct | `Progress` | `progress.rs:42` |  Shared state of one job. Create with `Progress::new()`. |
 | struct | `Status` | `progress.rs:51` | fields: `stage`, `stage_seconds`, `total_seconds`, `fraction`, `cancelled` —  A snapshot for display. |
-| fn | `install` | `progress.rs:124` | `pub fn install(p: &Arc<Progress>) -> InstallGuard` —  Makes `p` the progress of the current thread until the returned guard is dropped. |
-| struct | `InstallGuard` | `progress.rs:129` |  |
-| fn | `current` | `progress.rs:141` | `pub fn current() -> Option<Arc<Progress>>` —  The progress installed on this thread, if any. |
-| struct | `Stage` | `progress.rs:152` |  A running stage: its line stands in the log from the start ("... running") and gets its duration when the guard is |
-| fn | `stage` | `progress.rs:161` | `pub fn stage(text: impl Into<String>) -> Stage` —  Starts a stage with a plain-language description, e.g. `stage(format!("assembling the stiffness matrix: {n} unknowns"))`. |
-| fn | `note` | `progress.rs:201` | `pub fn note(text: impl Into<String>)` —  Adds a line to the stage log (and to the display), e.g. `"iteration 30: residual 3.1e-6"`. |
-| fn | `lap` | `progress.rs:213` | `pub fn lap(what: &str, seconds: f64)` —  Timing of a finished piece of work: `what` (the label) took `seconds`. Labels that start with four spaces are |
-| fn | `lap_since` | `progress.rs:224` | `pub fn lap_since(t: &mut std::time::Instant, what: &str)` —  `lap` for the time since `t`, then restarts `t` (the helper the kernels use between their stages). |
-| fn | `fraction` | `progress.rs:230` | `pub fn fraction(f: f64)` —  Fraction (0..1) of the current stage that is done, for a progress bar. |
-| fn | `check` | `progress.rs:237` | `pub fn check() -> Result<(), String>` —  `Err("cancelled")` when the watcher asked to stop; call it once per iteration of a long loop. |
+| fn | `install` | `progress.rs:141` | `pub fn install(p: &Arc<Progress>) -> InstallGuard` —  Makes `p` the progress of the current thread until the returned guard is dropped. |
+| struct | `InstallGuard` | `progress.rs:146` |  |
+| fn | `current` | `progress.rs:158` | `pub fn current() -> Option<Arc<Progress>>` —  The progress installed on this thread, if any. |
+| struct | `Stage` | `progress.rs:169` |  A running stage: its line stands in the log from the start ("... running") and gets its duration when the guard is |
+| fn | `stage` | `progress.rs:178` | `pub fn stage(text: impl Into<String>) -> Stage` —  Starts a stage with a plain-language description, e.g. `stage(format!("assembling the stiffness matrix: {n} unknowns"))`. |
+| fn | `note` | `progress.rs:218` | `pub fn note(text: impl Into<String>)` —  Adds a line to the stage log (and to the display), e.g. `"iteration 30: residual 3.1e-6"`. |
+| fn | `lap` | `progress.rs:230` | `pub fn lap(what: &str, seconds: f64)` —  Timing of a finished piece of work: `what` (the label) took `seconds`. Labels that start with four spaces are |
+| fn | `lap_since` | `progress.rs:241` | `pub fn lap_since(t: &mut std::time::Instant, what: &str)` —  `lap` for the time since `t`, then restarts `t` (the helper the kernels use between their stages). |
+| fn | `fraction` | `progress.rs:247` | `pub fn fraction(f: f64)` —  Fraction (0..1) of the current stage that is done, for a progress bar. |
+| fn | `check` | `progress.rs:254` | `pub fn check() -> Result<(), String>` —  `Err("cancelled")` when the watcher asked to stop; call it once per iteration of a long loop. |
 | fn | `Progress::new` | `progress.rs:63` | `pub fn new() -> Arc<Progress>` |
 | fn | `Progress::cancel` | `progress.rs:68` | `pub fn cancel(&self)` —  Asks the solver to stop at its next check. |
 | fn | `Progress::is_cancelled` | `progress.rs:72` | `pub fn is_cancelled(&self) -> bool` |
 | fn | `Progress::status` | `progress.rs:76` | `pub fn status(&self) -> Status` |
-| fn | `Progress::log` | `progress.rs:83` | `pub fn log(&self) -> Vec<String>` —  The finished-stage lines and notes so far. |
+| fn | `Progress::mirror` | `progress.rs:85` | `pub fn mirror(&self, stage: &str, stage_seconds: f64, fraction: Option<f64>, log: Option<Vec<String>>)` —  Shows the state of work done in another process (a worker, productivity plan P4): the stage it is in and for how long, the fraction |
+| fn | `Progress::log` | `progress.rs:100` | `pub fn log(&self) -> Vec<String>` —  The finished-stage lines and notes so far. |
 | fn | `non_finite_token` | `validate.rs:11` | `pub fn non_finite_token(text: &str) -> Option<usize>` —  Byte position of the first bare `NaN` / `inf` token outside quotes in a `Debug` string. |
 
 Trait implementations in this component: `InstallGuard: Drop`, `Stage: Drop`

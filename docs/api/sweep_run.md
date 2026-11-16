@@ -8,7 +8,9 @@ Queues one solve per point and returns the sweep's number at once. A point is a 
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
+| `force` | true or false | no |  | start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits |
 | `hold` | true or false | no |  | queue the points held; release each with queue_release |
+| `isolate` | true or false | no |  | solve every point in a worker process, as for solve_run |
 | `name` | text | no |  | a name for the table |
 | `physics` | text or list of text | no |  | code or list of codes to solve at every point |
 | `points` | list of object | no |  | the points, each a list of edits |

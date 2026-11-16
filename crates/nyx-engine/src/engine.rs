@@ -85,6 +85,24 @@ pub struct Engine {
     pub(crate) base_library: Arc<femcore::material::Library>,
     /// why the library is empty or partial, in words
     pub library_notes: Vec<String>,
+    /// the worker program a solve runs in when it asks to be isolated (`set_worker`), and whether it does when it does not say (P4, ADR 86)
+    pub(crate) worker: Option<PathBuf>,
+    pub(crate) isolate_default: bool,
+    /// false for an engine whose registry or mesher is not the compiled-in one: a worker could not reproduce it
+    pub(crate) isolable: bool,
+    /// what solves of this machine have cost, learned from the workers (`estimate.rs`), and how the engine asks the machine about its memory
+    pub(crate) history: Arc<crate::estimate::History>,
+    pub(crate) memory_probe: crate::estimate::MemoryProbe,
+}
+
+/// What a worker reported, in words for the log of the run.
+fn worker_words(w: &crate::jobs::WorkerRun) -> String {
+    let gb = |b: u64| format!("{:.2} GB", b as f64 / 1e9);
+    match (w.peak_working_set, w.peak_commit) {
+        (Some(ws), Some(c)) => format!("peak memory {} in RAM, {} committed", gb(ws), gb(c)),
+        (Some(ws), None) => format!("peak memory {} in RAM", gb(ws)),
+        _ => "peak memory not reported by this system".into(),
+    }
 }
 
 fn hash_of(text: &str) -> String {
@@ -95,6 +113,7 @@ impl Engine {
     /// An engine with the physics compiled into this build and an empty 2D project.
     pub fn new() -> Engine {
         let mut e = Engine::with(crate::registry(), Arc::new(FemcoreMesher));
+        e.isolable = true;
         let (lib, notes) = crate::materials::load_library(&crate::materials::default_dirs());
         e.base_library = Arc::new(lib);
         e.library_notes = notes;
@@ -121,6 +140,49 @@ impl Engine {
             auto_store: false,
             base_library: Arc::new(femcore::material::Library::default()),
             library_notes: vec![],
+            worker: None,
+            isolate_default: false,
+            isolable: false,
+            history: Arc::new(crate::estimate::History::default()),
+            memory_probe: Arc::new(crate::process::system_memory),
+        }
+    }
+
+    /// Keeps what solves cost in `path` (JSON lines, appended to) and learns from what it holds: the memory and time estimates of later solves
+    /// come from it. A front-end names a file in its workspace; without one the engine learns for the session only.
+    pub fn set_history_file(&mut self, path: &std::path::Path) {
+        self.history.set_file(path);
+    }
+
+    /// What the engine has learned about the cost of solves.
+    pub fn history(&self) -> &Arc<crate::estimate::History> {
+        &self.history
+    }
+
+    /// Replaces how the engine asks the machine for `(total, available)` memory in bytes (a test that plays a machine that is full).
+    pub fn set_memory_probe(&mut self, probe: crate::estimate::MemoryProbe) {
+        self.memory_probe = probe;
+    }
+
+    /// Names the worker program (`nyx-worker`, built from this crate) that solves run in when they are isolated: a solve in a child process
+    /// cannot take this process down (out of memory) and can be stopped at once (killed), at the price of a results round trip. With
+    /// `by_default` every solve of this engine runs there unless it says `isolate: false`; without it only a solve that says `isolate: true`
+    /// does. The solves of an engine with another registry or mesher than the compiled-in ones cannot be isolated.
+    pub fn set_worker(&mut self, worker: PathBuf, by_default: bool) {
+        self.worker = Some(worker);
+        self.isolate_default = by_default;
+    }
+
+    /// Makes the running program its own worker: a front-end (`nyx`, `nyx-mcp`) that answers `--job FOLDER` with `worker::serve` calls this, so
+    /// there is nothing else to build or to ship beside it. Never call it from a test: the program would be the test runner. False when the
+    /// system does not say what the running program is.
+    pub fn set_self_as_worker(&mut self, by_default: bool) -> bool {
+        match std::env::current_exe() {
+            Ok(exe) => {
+                self.set_worker(exe, by_default);
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -131,6 +193,7 @@ impl Engine {
     /// Replaces the mesher (a front-end with its own mesher, or a test that counts or holds its calls). The mesh the engine holds is kept; the
     /// next one is built with the new mesher.
     pub fn set_mesher(&mut self, mesher: Arc<dyn Mesher>) {
+        self.isolable = false;
         self.mesher = mesher;
     }
 
@@ -351,6 +414,36 @@ impl Engine {
         };
         let submit = self.submission(&label, Lane::Heavy, opts, &lane_key(&targets));
         let chain = targets.clone();
+        // in a worker process (P4)? the library the worker is given is the one this job would have used
+        // asked for in the request, it must be possible or the request fails with the reason; only by the engine's default, a solve that cannot
+        // be isolated (no worker, another registry or mesher, no HDF5) runs in this process as before
+        let explicit = opts.isolate == Some(true);
+        let remote = if opts.isolate.unwrap_or(self.isolate_default) {
+            let why_not = if self.worker.is_none() {
+                Some("this engine has no worker program (`Engine::set_worker`: nyx and nyx-mcp use themselves)")
+            } else if !self.isolable {
+                Some("this engine has a registry or mesher of its own, which a worker process cannot rebuild")
+            } else if cfg!(not(feature = "hdf5")) {
+                Some("this build has no HDF5 support, which the worker needs to hand its results back")
+            } else {
+                None
+            };
+            match (why_not, self.worker.clone()) {
+                (None, Some(worker)) => Some(crate::worker::RemoteSpec {
+                    worker,
+                    project_json: project.to_json(),
+                    materials: crate::worker::material_texts(&library),
+                    targets: targets.clone(),
+                }),
+                (Some(why), _) if explicit => return Err(Error::invalid(format!("`isolate` is not possible: {why}"))),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let estimate_slot: Arc<std::sync::Mutex<Option<crate::estimate::Estimate>>> = Default::default();
+        let (history, probe, force, slot) =
+            (self.history.clone(), self.memory_probe.clone(), opts.force, estimate_slot.clone());
         let id = self.jobs.submit(submit, {
             let project = project.clone();
             move |progress| {
@@ -374,8 +467,40 @@ impl Engine {
                     }
                 };
                 stages.put_mesh(&mesh_key, &model);
-                let (results, failed) =
-                    crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress);
+                // what this solve is expected to cost, from the solves this machine has run; it starts only when the memory is there
+                if let Some(est) = history.estimate(&crate::estimate::chain_key(&chain), model.mesh().dim() as u8, model.mesh().n_cells() as u64) {
+                    *slot.lock().expect("estimate") = Some(est.clone());
+                    crate::estimate::admit(&est, force, &probe, &progress)?;
+                }
+                let (results, failed, worker) = match &remote {
+                    None => {
+                        let (r, f) =
+                            crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress);
+                        (r, f, None)
+                    }
+                    Some(spec) => {
+                        let done = crate::worker::run_remote(spec, &progress)?;
+                        {
+                            // the last word of the log: what the process cost (the log shown is the worker's, mirrored, until now)
+                            let _installed = femcore::progress::install(&progress);
+                            femcore::progress::note(format!("worker process: {}", worker_words(&done.run)));
+                        }
+                        if let Some(m) = &done.mesh {
+                            if !crate::worker::same_mesh(m, &model.solver_mesh()) {
+                                return Err(Error::Solver(
+                                    "the worker meshed the project to something else than this process did, so its results cannot be shown on this mesh (a worker of another version of nyx?)".into(),
+                                ));
+                            }
+                        }
+                        // in the order they were solved, which the file does not keep
+                        let order: Vec<String> = registry
+                            .solve_order(&chain.iter().map(String::as_str).collect::<Vec<_>>())
+                            .unwrap_or_else(|_| chain.clone());
+                        let mut stored = done.results;
+                        stored.sort_by_key(|(code, _)| order.iter().position(|o| o == code).unwrap_or(usize::MAX));
+                        (stored.into_iter().map(|(_, r)| r).collect(), done.failed, Some(done.run))
+                    }
+                };
                 match failed {
                     Some(Error::Cancelled) => return Err(Error::Cancelled),
                     Some(e) if results.is_empty() => return Err(e),
@@ -387,18 +512,18 @@ impl Engine {
                         stages.put_solve(&solve_key(k, &chain), &Arc::new(SolveSummary::of(r, cells)));
                     }
                 }
-                Ok(JobOutput::Solved { model, results, failed })
+                Ok(JobOutput::Solved { model, results, failed, worker })
             }
         });
         match purpose {
             Purpose::Current => {
                 self.pending
                     .insert(id, Pending::Solve { key, keys, project: Box::new(project), generation: self.generation });
-                self.note_job(id, "solve", targets);
+                self.note_job_estimate(id, "solve", targets, estimate_slot);
             }
             Purpose::Point { sweep, index } => {
                 self.pending.insert(id, Pending::Point { sweep, index, project: Box::new(project) });
-                self.note_job(id, "sweep", targets);
+                self.note_job_estimate(id, "sweep", targets, estimate_slot);
             }
         }
         Ok(id)
@@ -520,7 +645,8 @@ impl Engine {
             (Pending::Solve { generation, .. }, Ok(JobOutput::Solved { .. })) if generation != self.generation => {
                 Err(Error::invalid("the project was replaced while this solve ran; its results were dropped"))
             }
-            (Pending::Solve { key, keys, project, .. }, Ok(JobOutput::Solved { model, results, failed })) => {
+            (Pending::Solve { key, keys, project, .. }, Ok(JobOutput::Solved { model, results, failed, worker })) => {
+                let (cells, dim) = (model.mesh().n_cells() as u64, model.mesh().dim() as u8);
                 let mesh = model.solver_mesh();
                 self.install_model(key, model);
                 // a job that finishes after the project changed, or after a newer job of the same physics, must not replace a result that is
@@ -558,8 +684,14 @@ impl Engine {
                     let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log, Some(mesh));
                     return Err(e);
                 }
+                self.learn(&results, cells, dim, &worker);
                 let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
-                Ok(json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds }))
+                let mut answer =
+                    json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds });
+                if let Some(w) = worker {
+                    answer["worker"] = json!(w);
+                }
+                Ok(answer)
             }
             (Pending::Point { sweep, index, project }, outcome) => {
                 self.apply_point(id, sweep, index, *project, outcome)
@@ -599,6 +731,25 @@ impl Engine {
             (_, Err(e)) => Err(e),
             _ => Err(Error::invalid("a job returned something its kind does not produce")),
         }
+    }
+
+    /// Learns what a finished worker run cost: its peak memory against the size of the problem, for the estimates of later solves. Only runs
+    /// whose chain finished and whose worker measured its memory count (an in-process run cannot say how much of the process was its own).
+    pub(crate) fn learn(&self, results: &[SolveResult], cells: u64, dim: u8, worker: &Option<crate::jobs::WorkerRun>) {
+        let Some(ws) = worker.as_ref().and_then(|w| w.peak_working_set) else { return };
+        if results.is_empty() {
+            return;
+        }
+        let chain: Vec<String> = results.iter().map(|r| r.physics.clone()).collect();
+        self.history.add(crate::estimate::Row {
+            chain: crate::estimate::chain_key(&chain),
+            dim,
+            cells,
+            dofs: results.iter().map(|r| r.dofs as u64).max().unwrap_or(0),
+            peak_working_set: ws,
+            peak_commit: worker.as_ref().and_then(|w| w.peak_commit).unwrap_or(0),
+            seconds: results.iter().map(|r| r.seconds).sum(),
+        });
     }
 
     /// Makes `model` (built for mesh key `key`) the engine's mesh unless a mesh that is current for the project is already there. True when it

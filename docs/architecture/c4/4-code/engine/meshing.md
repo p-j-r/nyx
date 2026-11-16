@@ -32,7 +32,7 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 | [app: Window](../app/window.md) | meshing | MeshedModel |
 | [Analyses](./analyse.md) | meshing | MeshedModel |
 | [Commands](./commands.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
-| [Job runner and queue](./jobs.md) | meshing | MeshedModel, Mesher |
+| [Job runner and queue](./jobs.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
 | [Registry and facade](./registry.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
 | [Results files](./resultsIO.md) | meshing | MeshedModel, Mesher |
 

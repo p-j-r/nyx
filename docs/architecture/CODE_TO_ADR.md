@@ -160,6 +160,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/api/*` | 89, 57 | the API reference, one page per engine command, generated from `Engine::catalog()` (never edited by hand) |
 | `crates/app/tests/cli.rs` | 89 | `nyx check` and `nyx run`: the plan, exit codes, a bad list runs nothing |
 | `crates/nyx-engine/tests/sweep.rs` | 87 | sweeps: a point is an edit list, one recorded run per point, the numbers of a hand-made solve, the engine's own project and results untouched, a bad point stops the request |
+| `crates/nyx-engine/tests/worker.rs` | 86 | a worker gives the numbers of the same solve in this process to the bit (five examples, a coupled chain), its stage log is the job log, a cancel kills it at once, what cannot be isolated says so, sweep points in workers |
+| `crates/nyx-engine/tests/admission.rs` | 86 | estimates from worker runs, no estimate without two sizes, a solve waits for memory and says why, refusal unless forced, a cancel ends the wait, the history survives in a file |
+| `crates/nyx-engine/tests/worker_crash.rs` | 86 | a worker that dies fails its job only and the next job runs |
 | `crates/nyx-engine/tests/stale.rs` | 84, 64 | staleness per physics, late jobs, the `stale` fields of the replies |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |
 | `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |

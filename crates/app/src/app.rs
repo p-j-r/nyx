@@ -565,6 +565,16 @@ impl App {
         }
     }
 
+    /// Solves run in a child process (this program started with `--job`, see `nyx_engine::worker`), so a solve that runs out of memory or crashes
+    /// fails its job and not the window, and a cancel stops it at once (productivity plan P4, ADR 86). Called by `main`, not by `App::new`: a test
+    /// binary must not be its own worker.
+    pub fn solve_in_child_processes(&mut self) {
+        self.engine.set_self_as_worker(true);
+        // what solves cost on this machine is learned in the workspace folder, for the memory estimates of later solves (ADR 86)
+        let root = std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_engine::facade::store::workspace::default_root);
+        self.engine.set_history_file(&root.join("solve_history.jsonl"));
+    }
+
     pub fn open_path(&mut self, path: PathBuf) {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         if ext == "json" {

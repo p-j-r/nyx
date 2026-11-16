@@ -1,0 +1,42 @@
+# 86. Solves run in a worker process; their memory is estimated from what workers measured
+
+Date: 2026-11-17
+
+## Status
+
+Accepted as step P4 of the productivity plan (`docs/NYX2_PRODUCTIVITY_PLAN.md`, section 3), with Paul's answers of 2026-11-17: child processes are essential, and every solve of the window and of the MCP server runs in one by default. **The number 86 is the one the plan reserves and is provisional**: take the next free ADR number at merge and renumber this file, the index row and the code comments. Builds on the job runner and the queue (ADR 85, 87) and on the results file (ADR 62, 63); step Q2 (estimates and admission) is part of it.
+
+## Context
+
+A 3D solve can need more memory than the machine has (the A7 meshes need about 22 GB; a 109k-unknown cavity measured 10.7 GB in P0) and a factorisation cannot be interrupted, so a cancel can last minutes. In one process, running out of memory takes the window or the MCP server with every other thing it holds, and "cancel requested" cannot be honoured at once. P0 measured what a child process costs: about 0.07 s on a 2D solve that takes 0.01 s, 0.16 s on a 12k-unknown 3D cavity, 0.27 s (7 %) at 39k unknowns (`examples/isolate_cost.rs`).
+
+## Decision
+
+* **A solve job can run in a child process, the worker.** `nyx_engine::worker` holds both sides. The parent (`run_remote`) writes the frozen project (JSON), the materials of the library the job sees (TOML by name) and the chain of physics into a temporary folder and starts `PROGRAM --job FOLDER`. The worker (`serve`) builds a scratch `Engine` from them and runs the same `start_solve` path the in-process job runs, so the numbers cannot differ (ADR 11); `tests/worker.rs` compares every physics of five examples and a coupled chain, **to the bit** (scalars, eigenvalues, every field value), and the materials by their TOML and their debug text.
+* **Results come back as the results file** (`results.h5`, the writer and reader of ADR 62 and 63), the same round trip as opening a file. The parent holds a mesh of its own (it draws on it) and checks that the stored mesh is that mesh (meshing is deterministic, ADR 55); a difference fails the job with a message naming a worker of another version. A build without the `hdf5` feature cannot isolate.
+* **What the worker says** is on its standard output, one line per message starting with `@nyx ` and holding JSON; other output is ignored: `status` every 100 ms (the stage, how long it has been in it, the fraction, the stage log when it changed) and one `done` (the error if the chain failed, whether results were written, the peak working set and peak commit of the process). The parent copies each `status` into the job's `Progress` (`Progress::mirror`), so `job_status`, `queue_get` and the toolbar show a worker's stage exactly as they show an in-process one. The last line of the log says what the worker used (`worker process: peak memory ...`).
+* **Cancel kills the process.** The parent polls the job's cancel flag every 40 ms and kills the child, even in the middle of a factorisation: measured under 1.5 s on the 3D cavity, where an in-process cancel waits for the stage. A killed or crashed worker (exit without a `done`: an abort, an out-of-memory failure, a kill from outside) fails its job with the exit code and what the worker wrote on stderr, and says nothing else was affected; the next queued job starts by itself (`tests/worker_crash.rs`, with a crash drill `NYX_WORKER_DRILL=abort`).
+* **The worker ends with its parent.** It exits when its standard input closes, so no solve runs on for nobody. On Windows it starts without a console window and, like the programs that host an engine, opts out of power throttling (`process.rs`, P0b), which would otherwise move a piped background process to the efficiency cores.
+* **Which program is the worker.** The front-ends are their own workers: `nyx` and `nyx-mcp` answer `--job FOLDER` before anything else (`Engine::set_self_as_worker(true)`, called by `main`, never by a test, where the program would be the test runner). Nothing else has to be built or shipped. A small `nyx-worker` program (a `[[bin]]` of `nyx-engine`) does the same for the engine's tests.
+* **Default and per request.** With `set_worker(program, by_default)` every solve of that engine runs in a worker unless the request says `isolate: false`; `solve_run`, `queue_submit` and `sweep_run` take `isolate`. A request that **asks** for isolation (`isolate: true`) and cannot have it (no worker, an engine with a registry or mesher of its own, a build without HDF5) fails with the reason; a solve that is isolated only **by default** runs in the process as before.
+* **Memory is measured where it can be.** A process's peak memory (`process::peak_memory`: peak working set and peak commit on Windows, the high-water marks of `/proc` on Linux) is the worker's own, so it belongs to one run; in the process of a window it would be the peak of everything the window did. The `solve_run` answer carries `worker: { peak_working_set, peak_commit }`.
+* **Estimates are learned from the workers, never invented** (`estimate.rs`, step Q2). Each worker run that finished its chain adds a row (the chain's physics, the dimension, the cells, the unknowns, the peak working set and commit, the seconds) to the engine's history, kept as JSON lines in `solve_history.jsonl` in the workspace folder by the window and the MCP server and shared by appending. Before a solve starts, once its mesh is known, the rows of the same chain and dimension are fitted with a power law of memory against cells. **With fewer than two sizes there is no estimate** and the solve starts as before; a size outside those seen says `extrapolated`; the answer carries the number of runs, the exponent and the margin (the largest error the fit makes on its own rows, at least 10 %). P0 measured memory growing as the 1.5th power of the unknowns on the 3D cavity, so no constant per unknown is used. The estimate is in the `queue_get` / `queue_list` entry of the job (`estimate`: bytes, bytes_with_margin, seconds, runs, extrapolated, exponent).
+* **Admission.** A solve whose estimate with margin is above 90 % of the machine's physical memory is refused at once (`force: true` starts it anyway), because it could not run with nothing else on the machine. One that fits the machine but not what is free now (another program, the window and the MCP server both solving) **waits**, showing the stage "waiting for memory: needs about 9.0 GB, 6.0 GB free", asking again every 250 ms until it fits, and a cancel ends the wait. Free memory is asked of the system (`process::system_memory`, replaceable in tests), so two programs each check it before they start.
+* **Backfill is not built.** The heavy lane runs one job at a time (all solvers use every core: two solves at once gain nothing), so a waiting job holds the lane and there is nothing to backfill into; the item that is waiting for memory is the job in the lane. It is worth building if the heavy lane ever runs several jobs. The time estimate is shown, never used to decide.
+
+## Not in this decision
+
+* **Convergence checks run in the process** (two solves inside one job); they get a worker with the same estimate and admission as a solve when step Q2 lands.
+* **A workspace-wide queue shared by the window and the MCP server** (plan Q3): two programs still each run a heavy job. Workers make this survivable (a crash fails one job), not coordinated.
+* **Workers on other machines** (plan Q4).
+* **Streaming results** instead of a file. The file is written and read once per run; if it ever matters at 3D sizes, the cost shows in `isolate_cost`.
+
+## Consequences
+
+* A solve of 0.01 s costs about 0.07 s in a worker. Paul chose isolation everywhere over a size threshold.
+* `engine_commands` gains the argument `isolate` (a description-level and additive change, provisional version) and the `solve_run` answer a `worker` object.
+* The window needs nothing beyond `main`'s call; the toolbar's "cancel requested" now ends at once for a solve.
+
+## Code
+
+`crates/nyx-engine/src/{worker,estimate,engine,jobs,queue,process}.rs`, `crates/nyx-engine/src/bin/nyx-worker.rs`, `crates/femcore/src/progress.rs` (`mirror`), `crates/app/src/{main,app}.rs`, `crates/nyx-mcp/src/main.rs`, `crates/nyx-engine/examples/isolate_cost.rs`; tests `crates/nyx-engine/tests/{worker,worker_crash,admission}.rs`.

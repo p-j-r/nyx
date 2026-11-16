@@ -71,8 +71,10 @@ struct Server {
 impl Server {
     fn new(dir: PathBuf) -> Server {
         let mut engine = Engine::new();
-        engine.set_workspace(dir, true);
+        engine.set_workspace(dir.clone(), true);
         engine.set_owner("ai"); // its requests queue behind a person's at the same priority (ADR 87)
+        engine.set_self_as_worker(true); // solves run in a child process: running out of memory fails the job, not the server (ADR 86)
+        engine.set_history_file(&dir.join("solve_history.jsonl")); // what solves cost, for memory estimates
         Server { engine, proto: PROTOCOLS[0], session: session_id(), revision: 0 }
     }
 
@@ -202,6 +204,10 @@ fn usage() {
 fn main() {
     nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // started by an engine as its worker (`--job FOLDER`, see `nyx_engine::worker`): solve and answer on stdout, never serve MCP
+    if args.first().map(String::as_str) == Some("--job") {
+        std::process::exit(nyx_engine::worker::serve(&args));
+    }
     let mut dir = default_dir();
     if let Some(i) = args.iter().position(|a| a == "--dir") {
         if i + 1 >= args.len() {

@@ -29,6 +29,8 @@ pub enum JobOutput {
         results: Vec<SolveResult>,
         /// the chain the job solved (its targets), and the error that stopped it
         failed: Option<Error>,
+        /// what the worker process reported, when the solve ran in one (`worker.rs`)
+        worker: Option<WorkerRun>,
     },
     /// the answer of a mesh convergence check
     Convergence(Value),
@@ -36,6 +38,13 @@ pub enum JobOutput {
     Opened(Box<Opened>),
     /// a results file written
     Exported(Value),
+}
+
+/// What a worker process measured of its own solve: the most memory it used, in bytes (the in-process job cannot know: the process is shared).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct WorkerRun {
+    pub peak_working_set: Option<u64>,
+    pub peak_commit: Option<u64>,
 }
 
 /// What opening a results file gives the engine to apply.

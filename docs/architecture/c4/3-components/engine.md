@@ -23,7 +23,7 @@ graph TB
         style 24 fill:#85bbf0,stroke:#5d82a8,color:#000000
         25["<div style='font-weight: bold'>Geometry operations</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Every edit of a geom feature<br />list as a function that does<br />it or says why not, and the<br />descriptors of the geom<br />operations (they live here<br />because geom depends on serde<br />only).</div>"]
         style 25 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        26["<div style='font-weight: bold'>Job runner and queue</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Mesh, solve, convergence and<br />file jobs on their own<br />threads with progress and<br />cancel, queued in lanes<br />(priority, owners in turn,<br />stages shared by content),<br />solving physics in the order<br />of the one-way couplings,<br />mesh convergence on a scratch<br />engine.</div>"]
+        26["<div style='font-weight: bold'>Job runner and queue</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Mesh, solve, convergence and<br />file jobs on their own<br />threads with progress and<br />cancel, queued in lanes<br />(priority, owners in turn,<br />stages shared by content),<br />solves in a worker process<br />(killed on cancel, its stage<br />log mirrored, results read<br />back from a file), memory<br />estimates learned from the<br />workers and admission by free<br />memory, solving physics in<br />the order of the one-way<br />couplings, mesh convergence<br />on a scratch engine.</div>"]
         style 26 fill:#85bbf0,stroke:#5d82a8,color:#000000
         27["<div style='font-weight: bold'>Command lists</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A JSON-lines list of engine<br />commands is parsed, checked<br />against the catalog and its<br />schemas, planned on a scratch<br />engine (what would be meshed<br />and solved, nothing run) and<br />run in order through<br />Engine::call.</div>"]
         style 27 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -93,7 +93,7 @@ graph TB
     23-. "<div>uses physics: contract, crate<br />root +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
     23-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     23-. "<div>uses geomdesc, geometry</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
-    23-. "<div>uses jobs, queue +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    23-. "<div>uses estimate, jobs +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     23-. "<div>uses materials</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
     23-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
     23-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
@@ -109,6 +109,7 @@ graph TB
     26-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
     26-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
     26-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
+    26-. "<div>uses h5io</div><div style='font-size: 70%'>[Rust paths]</div>" .->32
     26-. "<div>uses store_link</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
     30-. "<div>uses femcore: material,<br />material::spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     30-. "<div>uses physics: desc, error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
@@ -131,7 +132,7 @@ graph TB
     34-. "<div>uses sms: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->47
     34-. "<div>uses store: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     34-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    34-. "<div>uses jobs, queue</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    34-. "<div>uses estimate, jobs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     34-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
     34-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
     32-. "<div>uses femcore: material::spec,<br />mesh +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
@@ -155,10 +156,10 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Commands](../4-code/engine/commands.md) | 3 | 1410 | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries. |
+| [Commands](../4-code/engine/commands.md) | 3 | 1567 | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries. |
 | [Project](../4-code/engine/project.md) | 1 | 197 | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary. |
 | [Geometry operations](../4-code/engine/geometry.md) | 2 | 730 | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only). |
-| [Job runner and queue](../4-code/engine/jobs.md) | 6 | 1593 | 61, 85, 87, 11 | Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |
+| [Job runner and queue](../4-code/engine/jobs.md) | 9 | 2298 | 61, 85, 87, 86, 11 | Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |
 | [Command lists](../4-code/engine/commandlist.md) | 1 | 567 | 89 | A JSON-lines list of engine commands is parsed, checked against the catalog and its schemas, planned on a scratch engine (what would be meshed and solved, nothing run) and run in order through Engine::call. |
 | [API reference](../4-code/engine/apiref.md) | 1 | 291 | 89, 57 | One Markdown page per engine command and an index, generated from Engine::catalog() (arguments flattened from the schema, an example that passes the check); docs/api is compared with it by a test. |
 | [Meshing seam](../4-code/engine/meshing.md) | 2 | 345 | 54, 50 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project. |
@@ -166,4 +167,4 @@ graph TB
 | [Analyses](../4-code/engine/analyse.md) | 1 | 82 | 56 | Runs the analyses of nyx-analysis on the latest result of a physics. |
 | [Results files](../4-code/engine/resultsIO.md) | 3 | 985 | 62, 63 | HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results. |
 | [Store link](../4-code/engine/storeLink.md) | 1 | 296 | 39, 59 | Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here). |
-| [Registry and facade](../4-code/engine/registry.md) | 1 | 90 | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with. |
+| [Registry and facade](../4-code/engine/registry.md) | 1 | 93 | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with. |

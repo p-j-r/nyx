@@ -21,6 +21,11 @@ pub struct QueueOpts {
     pub supersede: bool,
     /// start held: it runs only after `queue_release`
     pub hold: bool,
+    /// run a solve in a worker process (a crash or running out of memory fails the job, not this process; a cancel stops it at once); `None`
+    /// is what the engine was told to do by default (`Engine::set_worker`)
+    pub isolate: Option<bool>,
+    /// start a solve even when its memory estimate says the machine cannot hold it (admission, `estimate.rs`)
+    pub force: bool,
 }
 
 /// What the engine remembers of a job beyond the runner's own record.
@@ -29,6 +34,8 @@ pub(crate) struct JobMeta {
     pub targets: Vec<String>,
     /// the hash of the whole project when the request was made: the request carries a frozen copy, so it says when the project has moved on
     pub stamp: String,
+    /// what the job is expected to cost, filled in by the job once its mesh is known (`estimate.rs`); empty while there is no estimate
+    pub estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>,
 }
 
 /// What a mesh convergence check needs of the coarse solve: the numbers that identify its solutions, the unknowns and the cells. A result's
@@ -137,6 +144,9 @@ impl Engine {
             v["kind"] = json!(m.kind);
             v["targets"] = json!(m.targets);
             v["project_changed"] = json!(m.stamp != self.stamp());
+            if let Some(e) = m.estimate.lock().expect("estimate").as_ref() {
+                v["estimate"] = json!(e);
+            }
         }
         v["applied"] = json!(!self.pending.contains_key(&id));
         Some(v)
@@ -190,6 +200,8 @@ impl Engine {
                     priority: priority_of(args)?,
                     supersede: args.get("supersede").and_then(Value::as_bool).unwrap_or(false),
                     hold: args.get("hold").and_then(Value::as_bool).unwrap_or(false),
+                    isolate: args.get("isolate").and_then(Value::as_bool),
+                    force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
                 };
                 let physics = args.get("physics").and_then(Value::as_str);
                 let job = match args.get("kind").and_then(Value::as_str).unwrap_or("solve") {
@@ -264,7 +276,18 @@ impl Engine {
     }
 
     pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>) {
+        self.note_job_estimate(id, kind, targets, Default::default());
+    }
+
+    /// `note_job` for a job that fills in its own estimate (a solve, once its mesh is known).
+    pub(crate) fn note_job_estimate(
+        &mut self,
+        id: JobId,
+        kind: &'static str,
+        targets: Vec<String>,
+        estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>,
+    ) {
         let stamp = self.stamp();
-        self.meta.insert(id, JobMeta { kind, targets, stamp });
+        self.meta.insert(id, JobMeta { kind, targets, stamp, estimate });
     }
 }

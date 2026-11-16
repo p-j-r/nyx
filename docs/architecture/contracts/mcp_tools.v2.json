@@ -1391,7 +1391,13 @@
         "factor": {
           "type": "number"
         },
+        "force": {
+          "type": "boolean"
+        },
         "hold": {
+          "type": "boolean"
+        },
+        "isolate": {
           "type": "boolean"
         },
         "kind": {
@@ -1874,6 +1880,12 @@
         "title": "Solve"
       },
       "arguments": {
+        "force": {
+          "type": "boolean"
+        },
+        "isolate": {
+          "type": "boolean"
+        },
         "physics": {
           "type": null
         },
@@ -1981,7 +1993,13 @@
         "title": "Run a sweep: one recorded run per point"
       },
       "arguments": {
+        "force": {
+          "type": "boolean"
+        },
         "hold": {
+          "type": "boolean"
+        },
+        "isolate": {
           "type": "boolean"
         },
         "name": {

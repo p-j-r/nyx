@@ -136,3 +136,39 @@ fn api_list_and_show_print_the_reference_of_the_catalog() {
     assert_eq!(nyx(&["api"]).status.code(), Some(2));
     assert_eq!(nyx(&["api", "frob"]).status.code(), Some(2));
 }
+
+#[test]
+fn the_program_answers_job_as_a_worker_and_never_opens_a_window() {
+    // no folder: the usage, exit 2, at once (a window would not exit)
+    let o = nyx(&["--job"]);
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o.stderr));
+    // a real job, as an engine writes it: the project, the materials of its library and the chain; the answer is on stdout, the results in a file
+    let dir = tmp("job");
+    std::fs::copy(root().join("examples/01_capacitor.nyx.json"), dir.join("project.nyx.json")).unwrap();
+    let engine = nyx_engine::Engine::new();
+    let lib = engine.library().unwrap();
+    let job = serde_json::json!({ "targets": ["dfs"], "materials": nyx_engine::worker::material_texts(&lib) });
+    std::fs::write(dir.join("job.json"), job.to_string()).unwrap();
+    // the worker ends when its standard input closes, so the parent keeps it open while it reads
+    let mut child = Command::new(env!("CARGO_BIN_EXE_nyx"))
+        .args(["--job", dir.to_str().unwrap()])
+        .current_dir(root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the nyx program");
+    let mut out = String::new();
+    std::io::Read::read_to_string(child.stdout.as_mut().unwrap(), &mut out).unwrap();
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(0), "{out}");
+    let done = out
+        .lines()
+        .filter_map(|l| l.strip_prefix(nyx_engine::worker::PREFIX))
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find_map(|m| m.get("done").cloned())
+        .unwrap_or_else(|| panic!("no done message in: {out}"));
+    assert_eq!(done["ok"], true, "{done}");
+    assert_eq!(done["has_results"], true);
+    assert!(dir.join("results.h5").is_file());
+}

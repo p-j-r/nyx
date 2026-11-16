@@ -3,7 +3,7 @@ protocol = component "Protocol loop" "Newline-delimited JSON-RPC 2.0 over stdin/
     properties {
         "adr" "15, 57"
         "code" "crates/nyx-mcp/src: main.rs"
-        "lines" "255"
+        "lines" "261"
         "codeDiagram" "4-code/mcp/protocol.md"
     }
 }
@@ -11,7 +11,7 @@ tools = component "Tool bridge" "The tool list is the engine's command catalog (
     properties {
         "adr" "15, 57"
         "code" "crates/nyx-mcp/src: main.rs"
-        "lines" "255"
+        "lines" "261"
         "codeDiagram" "4-code/mcp/tools.md"
     }
 }

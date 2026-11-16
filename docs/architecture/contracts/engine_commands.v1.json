@@ -773,6 +773,14 @@
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "force": {
+          "description": "start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits",
+          "type": "boolean"
+        },
+        "isolate": {
+          "description": "run the solve in a worker process: running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do",
+          "type": "boolean"
+        },
         "physics": {
           "description": "physics code(s); default the active one",
           "oneOf": [
@@ -881,8 +889,16 @@
           "description": "convergence: finer/present element size, default 0.6",
           "type": "number"
         },
+        "force": {
+          "description": "start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits",
+          "type": "boolean"
+        },
         "hold": {
           "description": "start held",
+          "type": "boolean"
+        },
+        "isolate": {
+          "description": "solve in a worker process (only for kind solve): running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do",
           "type": "boolean"
         },
         "kind": {
@@ -1102,8 +1118,16 @@
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "force": {
+          "description": "start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits",
+          "type": "boolean"
+        },
         "hold": {
           "description": "queue the points held; release each with queue_release",
+          "type": "boolean"
+        },
+        "isolate": {
+          "description": "solve every point in a worker process, as for solve_run",
           "type": "boolean"
         },
         "name": {

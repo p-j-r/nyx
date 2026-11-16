@@ -107,7 +107,7 @@ nyx.app.Shellanddashboard --> nyx.app.Lookandwidgets <<Relationship-UmVsYXRpb25z
 nyx.app.Shellanddashboard --> nyx.app.Window <<Relationship-UmVsYXRpb25zaGlw>> : "uses app, state\n<size:16>[Rust paths]</size>"
 nyx.app.Viewport --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root\n<size:16>[Rust paths]</size>"
 nyx.app.Window --> nyx.nyxconnect <<Relationship-UmVsYXRpb25zaGlw>> : "uses connect: config, env +1\n<size:16>[Rust paths]</size>"
-nyx.app.Window --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, engine +4\n<size:16>[Rust paths]</size>"
+nyx.app.Window --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, engine +5\n<size:16>[Rust paths]</size>"
 nyx.app.Window --> nyx.app.Scriptsandbatch <<Relationship-UmVsYXRpb25zaGlw>> : "uses pyscript\n<size:16>[Rust paths]</size>"
 nyx.app.Window --> nyx.app.Inspectortabs <<Relationship-UmVsYXRpb25zaGlw>> : "uses geomui\n<size:16>[Rust paths]</size>"
 nyx.app.Window --> nyx.app.Shellanddashboard <<Relationship-UmVsYXRpb25zaGlw>> : "uses examples, shell\n<size:16>[Rust paths]</size>"

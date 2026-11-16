@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 2095 lines.
+**Size:** 3 files, 2110 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 1782 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
-| `crates/app/src/main.rs` | 91 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
+| `crates/app/src/app.rs` | 1792 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
+| `crates/app/src/main.rs` | 96 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
 | `crates/app/src/state.rs` | 222 | The run-time state of the window around the engine's project: the mesh on show (`Doc`) and a result on show with its plot settings (`ResultView`). The project itself, with its geometry, mesh settings and one problem per physics, is `nyx_... |
 
 ## What it uses
@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 | Target | Modules | Items |
 |---|---|---|
 | [container `connect` (nyx-connect)](../../3-components/connect.md) | config, env, server | Env, HostInfo, Status, connect, disconnect, find_server, list, plain_path, snippet |
-| [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, process, project, queue | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MeshSettings, MeshedModel, ModeAnalysis +10 |
+| [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, process, project, queue, worker | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MeshSettings, MeshedModel, ModeAnalysis +11 |
 | [Scripts and batch](./headless.md) | pyscript | spawn |
 | [Inspector tabs](./inspector.md) | geomui | State |
 | [Shell and dashboard](./shell.md) | examples, shell | Shell, Start |
@@ -89,7 +89,7 @@ classDiagram
         +adopt()
         +push_edits() bool
         +set_error(e)
-        +more_25_methods()
+        +more_26_methods()
     }
   }
   namespace main_rs {
@@ -188,21 +188,22 @@ classDiagram
 | fn | `App::stale_band` | `app.rs:484` | `pub fn stale_band(&mut self, ui: &mut egui::Ui)` —  One line above the result on show when it is stale, with a button to solve again. |
 | fn | `App::cancel_job` | `app.rs:538` | `pub fn cancel_job(&mut self)` |
 | fn | `App::rebuild_mesh` | `app.rs:554` | `pub fn rebuild_mesh(&mut self)` |
-| fn | `App::open_path` | `app.rs:568` | `pub fn open_path(&mut self, path: PathBuf)` |
-| fn | `App::compute` | `app.rs:587` | `pub fn compute(&mut self)` —  Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed. |
-| fn | `App::take_solved` | `app.rs:711` | `pub(crate) fn take_solved(&mut self, summary: &Value)` —  A solve came back: the mesh it used, and one result view per physics it solved. |
-| fn | `App::sync_rules` | `app.rs:788` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
-| fn | `App::save_project` | `app.rs:812` | `pub fn save_project(&mut self, as_new: bool)` |
-| fn | `App::load_project` | `app.rs:828` | `pub fn load_project(&mut self, path: &std::path::Path)` |
-| fn | `App::load_example` | `app.rs:841` | `pub fn load_example(&mut self, i: usize)` |
-| fn | `App::result_csv` | `app.rs:856` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
-| fn | `App::export_csv` | `app.rs:884` | `pub fn export_csv(&mut self)` |
-| fn | `App::export_analysis` | `app.rs:897` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
-| fn | `App::run_python_script` | `app.rs:913` | `pub fn run_python_script(&mut self)` |
-| fn | `App::new_project` | `app.rs:933` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
-| fn | `App::viewport_ui` | `app.rs:1229` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
-| fn | `App::set_condition_on` | `app.rs:1303` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
-| fn | `App::set_problem` | `app.rs:1313` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
+| fn | `App::solve_in_child_processes` | `app.rs:571` | `pub fn solve_in_child_processes(&mut self)` —  Solves run in a child process (this program started with `--job`, see `nyx_engine::worker`), so a solve that runs out of memory or crashes |
+| fn | `App::open_path` | `app.rs:578` | `pub fn open_path(&mut self, path: PathBuf)` |
+| fn | `App::compute` | `app.rs:597` | `pub fn compute(&mut self)` —  Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed. |
+| fn | `App::take_solved` | `app.rs:721` | `pub(crate) fn take_solved(&mut self, summary: &Value)` —  A solve came back: the mesh it used, and one result view per physics it solved. |
+| fn | `App::sync_rules` | `app.rs:798` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
+| fn | `App::save_project` | `app.rs:822` | `pub fn save_project(&mut self, as_new: bool)` |
+| fn | `App::load_project` | `app.rs:838` | `pub fn load_project(&mut self, path: &std::path::Path)` |
+| fn | `App::load_example` | `app.rs:851` | `pub fn load_example(&mut self, i: usize)` |
+| fn | `App::result_csv` | `app.rs:866` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
+| fn | `App::export_csv` | `app.rs:894` | `pub fn export_csv(&mut self)` |
+| fn | `App::export_analysis` | `app.rs:907` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
+| fn | `App::run_python_script` | `app.rs:923` | `pub fn run_python_script(&mut self)` |
+| fn | `App::new_project` | `app.rs:943` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
+| fn | `App::viewport_ui` | `app.rs:1239` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::set_condition_on` | `app.rs:1313` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
+| fn | `App::set_problem` | `app.rs:1323` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
 | fn | `main` | `main.rs:29` | `fn main() -> eframe::Result` |
 | enum | `Tab` | `state.rs:12` | variants: `Geometry`, `Materials`, `Physics`, `Study`, `Results`, `Analysis` |
 | struct | `Doc` | `state.rs:38` | fields: `model`, `mesh`, `view`, `source`, `mesh_error` —  The mesh on show and what we know about its origin. |

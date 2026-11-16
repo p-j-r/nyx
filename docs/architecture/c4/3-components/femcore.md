@@ -182,7 +182,7 @@ graph TB
 | [Optical mode sets](../4-code/femcore/optical.md) | 1 | 231 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
 | [Frame and sections](../4-code/femcore/section.md) | 1 | 221 | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y). |
 | [Expressions](../4-code/femcore/expr.md) | 1 | 286 | 65, 2 | A small safe expression evaluator for user input; a copy of geom's kept equal by a corpus test. |
-| [Runtime services](../4-code/femcore/runtime.md) | 4 | 519 | 9, 11 | The shared worker pool, stage log and cancel, and refusal of NaN and infinity. |
+| [Runtime services](../4-code/femcore/runtime.md) | 4 | 536 | 9, 11 | The shared worker pool, stage log and cancel, and refusal of NaN and infinity. |
 
 ## Part: Meshing and adaptation
 
