@@ -3,7 +3,7 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: app.rs, main.rs, state.rs"
-        "lines" "2031"
+        "lines" "2087"
         "codeDiagram" "4-code/app/window.md"
     }
 }
@@ -39,11 +39,11 @@ style = component "Look and widgets" "The nyx look (palette, fonts, egui visuals
         "codeDiagram" "4-code/app/style.md"
     }
 }
-headless = component "Scripts and batch" "Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, and the optional user Python script." "Rust modules" {
+headless = component "Scripts and batch" "Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run), and the optional user Python script." "Rust modules" {
     properties {
-        "adr" "23"
-        "code" "crates/app/src: batch.rs, pyscript.rs, script.rs"
-        "lines" "306"
+        "adr" "23, 89"
+        "code" "crates/app/src: batch.rs, pyscript.rs, runfile.rs, script.rs"
+        "lines" "450"
         "codeDiagram" "4-code/app/headless.md"
     }
 }

@@ -491,6 +491,50 @@ impl App {
         });
     }
 
+    /// Diagnostics only (productivity plan P0): when `NYX_FRAME_LOG` names a file ending in `.csv`, appends one row per frame: wall time of the
+    /// frame since the previous row, our layout and drawing time, the viewport time, and what the engine is doing (job kind, stage, seconds in
+    /// the stage and in the job). Nothing is written, and nothing is read from the engine, when the variable is unset or is not such a path.
+    fn frame_csv(&self, ui_ms: f64, viewport_ms: f64) {
+        use std::io::Write;
+        use std::sync::{Mutex, OnceLock};
+        static LOG: OnceLock<Option<Mutex<(std::fs::File, Instant)>>> = OnceLock::new();
+        let log = LOG.get_or_init(|| {
+            let path = std::env::var("NYX_FRAME_LOG").ok().filter(|p| p.to_lowercase().ends_with(".csv"))?;
+            let mut f = std::fs::File::create(path).ok()?;
+            let _ = writeln!(f, "t_s,frame_dt_ms,ui_ms,viewport_ms,busy,job_kind,stage,stage_s,job_s,convergence,show_results");
+            Some(Mutex::new((f, Instant::now())))
+        });
+        let Some(log) = log else { return };
+        let Ok(mut g) = log.lock() else { return };
+        let now = Instant::now();
+        let dt = now.duration_since(g.1).as_secs_f64() * 1e3;
+        g.1 = now;
+        let kind = match self.job_kind {
+            Some(JobKind::Mesh) => "mesh",
+            Some(JobKind::Solve) => "solve",
+            Some(JobKind::Convergence) => "convergence",
+            Some(JobKind::Open) => "open",
+            None => "",
+        };
+        let (stage, stage_s) = match &self.job {
+            Some((_, p, _)) => {
+                let st = p.status();
+                (st.stage.replace([',', '\n'], " "), st.stage_seconds)
+            }
+            None => (String::new(), 0.0),
+        };
+        let job_s = self.busy.as_ref().map(|(_, t)| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() % 100000.0).unwrap_or(0.0);
+        let _ = writeln!(
+            g.0,
+            "{t:.3},{dt:.2},{ui_ms:.2},{viewport_ms:.2},{},{kind},{stage},{stage_s:.2},{job_s:.2},{},{}",
+            self.busy.is_some() as u8,
+            self.convergence_running() as u8,
+            self.show_results as u8
+        );
+        let _ = g.0.flush();
+    }
+
     pub fn cancel_job(&mut self) {
         if let Some((id, _, true)) = &self.job {
             self.engine.jobs().cancel(*id);
@@ -1306,6 +1350,7 @@ impl eframe::App for App {
         self.queue_panel(ui.ctx());
         if self.shell.active() {
             self.shell_ui(ui);
+            self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, f64::NAN);
             return;
         }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
@@ -1346,6 +1391,7 @@ impl eframe::App for App {
             // diagnostics: time (s, wrapping every 1000) of the frame, our own layout and drawing code, whole viewport, state
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() % 1000.0).unwrap_or(0.0);
             eprintln!("FRAME t={now:.3} ui_ms={:.2} viewport_ms={:.2} busy={} show_results={}", t_ui.elapsed().as_secs_f64() * 1e3, t_vp.elapsed().as_secs_f64() * 1e3, self.busy.is_some(), self.show_results);
+            self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, t_vp.elapsed().as_secs_f64() * 1e3);
         }
     }
 }

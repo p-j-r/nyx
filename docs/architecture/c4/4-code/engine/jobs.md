@@ -4,8 +4,8 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.
 
-**Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md)  
-**Size:** 5 files, 1515 lines.
+**Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
+**Size:** 6 files, 1593 lines.
 
 ## Files
 
@@ -13,9 +13,10 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 |---|---:|---|
 | `crates/nyx-engine/src/convergence.rs` | 210 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
 | `crates/nyx-engine/src/jobs.rs` | 568 | The job runner and its queue (productivity plan P2 and Q1, ADR 85 and 87): a mesh build, a solve, a convergence check, opening or writing a results file is a job with a `Progress` handle, so it can be watched (stage, elapsed) and cancell... |
+| `crates/nyx-engine/src/process.rs` | 61 | Process-wide settings of the program that hosts the engine. Today one: on Windows, opt the process out of power throttling. |
 | `crates/nyx-engine/src/queue.rs` | 271 | The queue of the engine (productivity plan Q1, ADR 87): what a front-end sees of the job runner's lanes (`queue_*` commands), the options a request is submitted with, and the stage caches that let queued requests share work. A request th... |
 | `crates/nyx-engine/src/solve.rs` | 93 | Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then solved with the fields it imports from the physics before it. Everything goes through `Physics`, so ... |
-| `crates/nyx-engine/src/sweep.rs` | 373 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
+| `crates/nyx-engine/src/sweep.rs` | 390 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
 
 ## What it uses
 
@@ -34,7 +35,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 
 | Component | Modules | Items |
 |---|---|---|
-| [app: Window](../app/window.md) | queue | QueueOpts |
+| [app: Window](../app/window.md) | process, queue | QueueOpts, opt_out_of_power_throttling |
 | [Commands](./commands.md) | jobs, queue, solve, sweep | JobId, JobMeta, JobOutput, JobRunner, Lane, Opened, QueueOpts, SolveSummary +4 |
 | [Registry and facade](./registry.md) | jobs, queue | JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, QueueOpts, Submit |
 | [Results files](./resultsIO.md) | jobs | Opened |
@@ -62,7 +63,7 @@ classDiagram
         +queue_entry(id) Option~Value~
         +queue_list(owner, state) Vec~Value~
         +wait_timeout(id, timeout) Result
-        +more_4_methods()
+        +more_6_methods()
     }
     class fns_convergence_rs {
         <<module convergence.rs>>
@@ -139,6 +140,12 @@ classDiagram
         +JobId type
     }
   }
+  namespace process_rs {
+    class fns_process_rs {
+        <<module process.rs>>
+        +opt_out_of_power_throttling() bool
+    }
+  }
   namespace queue_rs {
     class QueueOpts {
         <<struct>>
@@ -193,6 +200,11 @@ classDiagram
         +targets Vec~String~
         +points Vec~Point~
     }
+    class Prepared {
+        <<struct>>
+        +targets Option
+        +engines Vec~Engine~
+    }
     class fns_sweep_rs {
         <<module sweep.rs>>
         +MAX_POINTS const
@@ -204,6 +216,7 @@ classDiagram
   JobInfo --> JobState
   JobInfo --> Lane
   Sweep --> Point
+  Prepared --> Engine
 ```
 
 ## Public items
@@ -247,6 +260,7 @@ classDiagram
 | fn | `JobRunner::blocked` | `jobs.rs:525` | `pub fn blocked(&self, id: JobId) -> Option<&'static str>` —  Why a queued job cannot start however long it is waited for: it is held, or the queue is paused. `None` for a job that is running or will |
 | fn | `JobRunner::wait` | `jobs.rs:541` | `pub fn wait(&self, id: JobId) -> Result<JobOutput, Error>` —  Blocks until the job has finished and takes its outcome. |
 | fn | `JobRunner::wait_timeout` | `jobs.rs:551` | `pub fn wait_timeout(&self, id: JobId, timeout: Duration) -> Option<Result<JobOutput, Error>>` —  Like `wait`, but gives up after `timeout`: `None` when the job is still queued or running then (it keeps going and can be waited for again). |
+| fn | `opt_out_of_power_throttling` | `process.rs:12` | `pub fn opt_out_of_power_throttling() -> bool` —  Asks Windows not to throttle this process. True when the request was accepted; false when it was refused (an older Windows) or on another |
 | struct | `QueueOpts` | `queue.rs:17` | fields: `priority`, `supersede`, `hold` —  How a request is queued. The default is the engine's owner at its usual priority, with nothing superseded. |
 | struct | `JobMeta` | `queue.rs:27` | fields: `kind`, `targets`, `stamp` —  What the engine remembers of a job beyond the runner's own record. |
 | struct | `SolveSummary` | `queue.rs:36` | fields: `dofs`, `cells`, `numbers` —  What a mesh convergence check needs of the coarse solve: the numbers that identify its solutions, the unknowns and the cells. A result's |
@@ -271,7 +285,10 @@ classDiagram
 | const | `MAX_POINTS` | `sweep.rs:18` | `usize` —  The most points one request may make: a sweep is a queue of jobs, not a way to start ten thousand. |
 | struct | `Point` | `sweep.rs:20` | fields: `label`, `edits`, `job`, `row` |
 | struct | `Sweep` | `sweep.rs:28` | fields: `name`, `targets`, `points` |
-| fn | `Engine::sweep_command` | `sweep.rs:138` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
-| fn | `Engine::apply_point` | `sweep.rs:281` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
+| struct | `Prepared` | `sweep.rs:35` | fields: `targets`, `engines` —  A checked sweep request: the points, the physics named (if any), the queue options and one engine per point. |
+| fn | `Engine::scratch` | `sweep.rs:106` | `pub(crate) fn scratch(&self) -> Engine` —  A copy of this engine for editing: the project is a copy, the mesher, the registry and the material library are shared. Nothing it does |
+| fn | `Engine::sweep_command` | `sweep.rs:148` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
+| fn | `Engine::sweep_prepare` | `sweep.rs:164` | `pub(crate) fn sweep_prepare(&self, args: &Value) -> Result<Prepared, Error>` —  Reads and checks a sweep request without submitting anything: the points, what they solve, how they queue, and the engine of every point |
+| fn | `Engine::apply_point` | `sweep.rs:298` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
 
 Trait implementations in this component: `JobRunner: Default`

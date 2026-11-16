@@ -255,11 +255,13 @@ or "LOBPCG stalled" mean a fallback to the direct method happened.
   can be cancelled and reports its stage, the seconds in it and whether a cancel was requested; the mesher checks the flag between its passes
   and phases (not inside a pass), so a cancel of a mesh lands at the next pass boundary. A results file is written under a temporary name
   and renamed when complete.
+* **Windows power throttling**: at start-up the window, `nyx --batch` and the MCP server ask Windows not to put the process in efficiency mode (`nyx_engine::process`). Without it a solve in a background or hidden process is moved to the efficiency cores after its first seconds and every later solve is 2 to 3 times slower on a hybrid processor. Timing only; the numbers do not change.
 * **Cancel** (toolbar button or Esc): the solver checks a flag at the top of every iteration, every multigrid level, every
   refinement step and every Brillouin pair and then returns "cancelled"; earlier results stay. Assembly of a matrix and a
   started factorisation finish first. Only one job runs at a time; mesh builds and file opens requested meanwhile wait.
 * Diagnostics: `NYX_PROFILE=1` echoes the log to the console as it is written; `NYX_FRAME_LOG=1` prints the
-  time of every window frame and which drawing passes ran; `NYX_LOBPCG_TRACE=1` and `NYX_AMG_*` (see `amg.rs`) are for solver work.
+  time of every window frame and which drawing passes ran (with `NYX_FRAME_LOG=frames.csv`, a name ending in `.csv`, the same frames are also
+  written as one CSV row each: wall time since the previous row, layout and viewport milliseconds, whether a job runs, its kind, stage and seconds); `NYX_LOBPCG_TRACE=1` and `NYX_AMG_*` (see `amg.rs`) are for solver work.
 * **Input checks** (`validate.rs`): NaN or infinite numbers in materials, coordinates, boundary values or study
   parameters are refused with a message naming the item; a solution containing NaN/infinity is refused too.
 

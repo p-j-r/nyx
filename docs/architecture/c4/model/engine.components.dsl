@@ -25,10 +25,18 @@ geometry = component "Geometry operations" "Every edit of a geom feature list as
 }
 jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solving physics in the order of the one-way couplings, mesh convergence on a scratch engine." "Rust modules" {
     properties {
-        "adr" "61, 85, 87"
-        "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, queue.rs, solve.rs, sweep.rs"
-        "lines" "1515"
+        "adr" "61, 85, 87, 11"
+        "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, process.rs, queue.rs, solve.rs, sweep.rs"
+        "lines" "1593"
         "codeDiagram" "4-code/engine/jobs.md"
+    }
+}
+commandlist = component "Command lists" "A JSON-lines list of engine commands is parsed, checked against the catalog and its schemas, planned on a scratch engine (what would be meshed and solved, nothing run) and run in order through Engine::call." "Rust modules" {
+    properties {
+        "adr" "89"
+        "code" "crates/nyx-engine/src: commandlist.rs"
+        "lines" "586"
+        "codeDiagram" "4-code/engine/commandlist.md"
     }
 }
 meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project." "Rust modules" {
@@ -75,7 +83,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "87"
+        "lines" "89"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

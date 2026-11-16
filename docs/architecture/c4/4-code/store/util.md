@@ -21,6 +21,7 @@ Nothing outside the component (the standard library and external crates are not 
 
 | Component | Modules | Items |
 |---|---|---|
+| [engine: Command lists](../engine/commandlist.md) | util | hash_bytes |
 | [engine: Commands](../engine/commands.md) | util | hash_bytes |
 | [engine: Store link](../engine/storeLink.md) | util | write_atomic |
 | [Archives](./archive.md) | util |  |

@@ -200,6 +200,7 @@ fn usage() {
 }
 
 fn main() {
+    nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let mut dir = default_dir();
     if let Some(i) = args.iter().position(|a| a == "--dir") {

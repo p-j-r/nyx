@@ -1,0 +1,20 @@
+# Workflow 1 (productivity plan P0): 2D SOI wire, change the width five times, solve, read the effective index.
+# Run from the repository root:  workflow.exe tools/workflows/w1_soi_width.jsonl
+{"cmd":"project_open","args":{"path":"examples/15_soi_wire.nyx.json"},"note":"open the SOI wire"}
+{"cmd":"solve_run","note":"first solve (w = 500 nm)"}
+{"cmd":"result_info","args":{"physics":"ems"}}
+{"cmd":"set_param","args":{"name":"w","value":4e-07},"note":"width 400 nm"}
+{"cmd":"solve_run","note":"mesh + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_param","args":{"name":"w","value":4.5e-07},"note":"width 450 nm"}
+{"cmd":"solve_run","note":"mesh + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_param","args":{"name":"w","value":5.5e-07},"note":"width 550 nm"}
+{"cmd":"solve_run","note":"mesh + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_param","args":{"name":"w","value":6e-07},"note":"width 600 nm"}
+{"cmd":"solve_run","note":"mesh + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_param","args":{"name":"w","value":6.5e-07},"note":"width 650 nm"}
+{"cmd":"solve_run","note":"mesh + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}

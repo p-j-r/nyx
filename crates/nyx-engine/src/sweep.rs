@@ -31,6 +31,14 @@ pub(crate) struct Sweep {
     pub points: Vec<Point>,
 }
 
+/// A checked sweep request: the points, the physics named (if any), the queue options and one engine per point.
+pub(crate) struct Prepared {
+    asked: Vec<Asked>,
+    pub targets: Option<Vec<String>>,
+    opts: QueueOpts,
+    pub engines: Vec<Engine>,
+}
+
 /// A point as asked for: its label and its edits (`{ "cmd": ..., "args": {...} }`).
 struct Asked {
     label: String,
@@ -95,7 +103,7 @@ fn asked_points(args: &Value) -> Result<Vec<Asked>, Error> {
 impl Engine {
     /// A copy of this engine for editing: the project is a copy, the mesher, the registry and the material library are shared. Nothing it does
     /// reaches this engine.
-    fn scratch(&self) -> Engine {
+    pub(crate) fn scratch(&self) -> Engine {
         let mut e = Engine::with(self.registry.clone(), self.mesher.clone());
         e.base_library = self.base_library.clone();
         e.project = self.project.clone();
@@ -131,7 +139,9 @@ impl Engine {
             .into_iter()
             .filter(|c| c.access == crate::commands::Access::Edit)
             .map(|c| c.name)
-            .filter(|n| !matches!(n.as_str(), "project_new" | "project_load" | "project_open" | "store_open" | "open_results"))
+            .filter(|n| {
+                !matches!(n.as_str(), "project_new" | "project_load" | "project_open" | "store_open" | "open_results")
+            })
             .collect()
     }
 
@@ -149,7 +159,9 @@ impl Engine {
         }
     }
 
-    fn sweep_run(&mut self, args: &Value) -> Result<Value, Error> {
+    /// Reads and checks a sweep request without submitting anything: the points, what they solve, how they queue, and the engine of every point
+    /// (a copy of this one with the point's edits applied). `sweep_run` submits these; a plan of a command list counts them.
+    pub(crate) fn sweep_prepare(&self, args: &Value) -> Result<Prepared, Error> {
         let asked = asked_points(args)?;
         if asked.is_empty() {
             return Err(Error::invalid("a sweep needs at least one point"));
@@ -188,6 +200,11 @@ impl Engine {
             }
             engines.push(e);
         }
+        Ok(Prepared { asked, targets, opts, engines })
+    }
+
+    fn sweep_run(&mut self, args: &Value) -> Result<Value, Error> {
+        let Prepared { asked, targets, opts, engines } = self.sweep_prepare(args)?;
         // a host that records (the MCP server) gets its workflow before the first run, as a solve does
         if self.auto_store && self.link.is_none() && self.workspace.is_some() {
             self.save_to_workspace(None)?;

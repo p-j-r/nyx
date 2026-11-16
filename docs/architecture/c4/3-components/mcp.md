@@ -34,5 +34,5 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Protocol loop](../4-code/mcp/protocol.md) | 1 | 254 | 15, 57 | Newline-delimited JSON-RPC 2.0 over stdin/stdout: initialize with protocol negotiation, method dispatch, notifications, logs on stderr. No async runtime and no SDK. |
-| [Tool bridge](../4-code/mcp/tools.md) | 1 | 254 | 15, 57 | The tool list is the engine's command catalog (with annotations: read-only, destructive); a tool call is Engine::call, its reply rendered as text. |
+| [Protocol loop](../4-code/mcp/protocol.md) | 1 | 255 | 15, 57 | Newline-delimited JSON-RPC 2.0 over stdin/stdout: initialize with protocol negotiation, method dispatch, notifications, logs on stderr. No async runtime and no SDK. |
+| [Tool bridge](../4-code/mcp/tools.md) | 1 | 255 | 15, 57 | The tool list is the engine's command catalog (with annotations: read-only, destructive); a tool call is Engine::call, its reply rendered as text. |

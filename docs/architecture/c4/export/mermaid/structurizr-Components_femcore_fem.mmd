@@ -7,38 +7,38 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 76 ["femcore"]
-        style 76 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 77 ["femcore"]
+        style 77 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        100["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, and refusal<br />of NaN and infinity.</div>"]
+        100["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input; a<br />copy of geom's kept equal by<br />a corpus test.</div>"]
         style 100 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        77["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
-        style 77 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        95["<div style='font-weight: bold'>Finite-element basics</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Lagrange P1/P2 elements and<br />quadrature, the 2D<br />edge-element basis, derived<br />fields, PML coordinate<br />stretching, Floquet pairs and<br />material properties per<br />domain.</div>"]
-        style 95 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        96["<div style='font-weight: bold'>Material specification</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>TOML material files with<br />explicit units, tensors,<br />dispersion models evaluated<br />at the wavelength, provenance<br />and the library loader.</div>"]
+        101["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, and refusal<br />of NaN and infinity.</div>"]
+        style 101 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        78["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
+        style 78 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        96["<div style='font-weight: bold'>Finite-element basics</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Lagrange P1/P2 elements and<br />quadrature, the 2D<br />edge-element basis, derived<br />fields, PML coordinate<br />stretching, Floquet pairs and<br />material properties per<br />domain.</div>"]
         style 96 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        97["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Optical modes of a 2D<br />cross-section as a<br />field-evaluable set with the<br />material data to evaluate<br />them.</div>"]
+        97["<div style='font-weight: bold'>Material specification</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>TOML material files with<br />explicit units, tensors,<br />dispersion models evaluated<br />at the wavelength, provenance<br />and the library loader.</div>"]
         style 97 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        98["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
+        98["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Optical modes of a 2D<br />cross-section as a<br />field-evaluable set with the<br />material data to evaluate<br />them.</div>"]
         style 98 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        99["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input; a<br />copy of geom's kept equal by<br />a corpus test.</div>"]
+        99["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
         style 99 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
     end
 
-    99-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    95-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
-    95-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    95-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    95-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    77-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    97-. "<div>uses edge, fem +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    97-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    97-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    98-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    98-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
-    98-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
+    100-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    96-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
+    96-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    96-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
+    96-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    78-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
+    98-. "<div>uses edge, fem +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    98-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    98-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    99-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    99-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
+    99-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
 
   end

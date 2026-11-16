@@ -27,8 +27,10 @@ pub mod materials;
 #[cfg(feature = "hdf5")]
 pub mod xdmf;
 
+pub mod commandlist;
 pub mod meshing;
 pub mod pml;
+pub mod process;
 pub mod project;
 pub mod queue;
 pub mod results_file;

@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the container **app** (crate `nyx`). [Component view of the container](../../3-components/app.md) · [All code pages](../README.md)
 
-> Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, and the optional user Python script.
+> Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run), and the optional user Python script.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md)  
-**Size:** 3 files, 306 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md)  
+**Size:** 4 files, 450 lines.
 
 ## Files
 
@@ -13,13 +13,14 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 |---|---:|---|
 | `crates/app/src/batch.rs` | 56 | Headless runs without a window, for workstations and clusters: |
 | `crates/app/src/pyscript.rs` | 53 | Runs an optional user Python script: `python script.py project.json [result.csv]`. Python is never needed by the application itself. The script runs on its own thread; its output comes back to the window as a message. |
+| `crates/app/src/runfile.rs` | 144 | Command lists from the command line (productivity plan S1), without a window: |
 | `crates/app/src/script.rs` | 197 | Scripted runs for testing and screenshots: `nyx --script "example 1; compute; shot out.png; quit"`. |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine | Engine, Scalar |
+| [container `engine` (nyx-engine)](../../3-components/engine.md) | commandlist, crate root, engine | Engine, Problem, Scalar |
 | [Shell and dashboard](./shell.md) | examples, shell | Page, Part, Sheet, Start, Sub, list |
 | [Window](./window.md) | app, state | App, Msg |
 
@@ -47,6 +48,14 @@ classDiagram
         +spawn(script, project_json, csv, tx, ctx)
     }
   }
+  namespace runfile_rs {
+    class fns_runfile_rs {
+        <<module runfile.rs>>
+        +check(args) Result
+        +run(args) Result
+        +Exit type
+    }
+  }
   namespace script_rs {
     class App {
         <<impl block>>
@@ -61,4 +70,7 @@ classDiagram
 |---|---|---|---|
 | fn | `run` | `batch.rs:14` | `pub fn run(args: &[String]) -> Result<(), String>` |
 | fn | `spawn` | `pyscript.rs:9` | `pub fn spawn(script: PathBuf, project_json: String, csv: Option<String>, tx: Sender<(u64, Msg)>, ctx: egui::Context)` |
+| type | `Exit` | `runfile.rs:18` |  |
+| fn | `check` | `runfile.rs:67` | `pub fn check(args: &[String]) -> Result<(), Exit>` —  `nyx check FILE`. |
+| fn | `run` | `runfile.rs:95` | `pub fn run(args: &[String]) -> Result<(), Exit>` —  `nyx run FILE`. |
 | fn | `App::script_step` | `script.rs:16` | `pub fn script_step(&mut self, ctx: &egui::Context)` |

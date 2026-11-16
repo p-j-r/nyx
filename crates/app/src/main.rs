@@ -2,7 +2,7 @@
 //! the engine and the physics crates).
 //!
 //! Command line: `nyx [FILE]` opens the window (and a project file), `--size WxH` sets the window size,
-//! `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.json` solves
+//! `check FILE` and `run FILE` check and run a JSON-lines list of engine commands without a window (see `runfile`), `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.json` solves
 //! without a window (see `batch`). Modules: `app` (state and layout), the Connect menu (in `app`, backed by the `nyx-connect` crate), `tabs` (the inspector), `viewport` and `scene` (drawing),
 //! `pyscript` (the optional Python script), `state` (the mesh and result on show), `examples`, `colormap`, `theme`.
 mod app;
@@ -14,6 +14,7 @@ mod forms;
 mod geomui;
 mod kit;
 mod pyscript;
+mod runfile;
 mod scene;
 mod script;
 mod sheets;
@@ -25,11 +26,20 @@ mod viewport;
 mod wfview;
 
 fn main() -> eframe::Result {
+    nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(|a| a.as_str()) == Some("--batch") {
         if let Err(e) = batch::run(&args[1..]) {
             eprintln!("nyx: {e}");
             std::process::exit(1);
+        }
+        return Ok(());
+    }
+    if let Some(which) = args.first().map(String::as_str).filter(|a| matches!(*a, "check" | "run")) {
+        let done = if which == "check" { runfile::check(&args[1..]) } else { runfile::run(&args[1..]) };
+        if let Err((code, msg)) = done {
+            eprintln!("nyx: {msg}");
+            std::process::exit(code);
         }
         return Ok(());
     }
