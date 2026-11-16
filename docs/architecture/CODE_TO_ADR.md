@@ -155,6 +155,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |
+| `crates/nyx-engine/tests/sweep.rs` | 87 | sweeps: a point is an edit list, one recorded run per point, the numbers of a hand-made solve, the engine's own project and results untouched, a bad point stops the request |
 | `crates/nyx-engine/tests/stale.rs` | 84, 64 | staleness per physics, late jobs, the `stale` fields of the replies |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |
 | `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |

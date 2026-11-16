@@ -29,9 +29,30 @@ pub(crate) struct Stored {
     pub at: Instant,
 }
 
+/// What a solve job is for: the engine's own project, or one point of a sweep.
+#[derive(Clone, Copy)]
+pub(crate) enum Purpose {
+    Current,
+    Point { sweep: u64, index: usize },
+}
+
 pub(crate) enum Pending {
-    Mesh { key: String, generation: u64 },
-    Solve { key: String, keys: BTreeMap<String, String>, project: Box<Project>, generation: u64 },
+    Mesh {
+        key: String,
+        generation: u64,
+    },
+    Solve {
+        key: String,
+        keys: BTreeMap<String, String>,
+        project: Box<Project>,
+        generation: u64,
+    },
+    /// a point of a sweep: its frozen project, solved for the table and recorded; it never replaces the engine's own results
+    Point {
+        sweep: u64,
+        index: usize,
+        project: Box<Project>,
+    },
     Convergence,
     Open,
     Export,
@@ -51,6 +72,9 @@ pub struct Engine {
     pub(crate) stages: Arc<Stages>,
     /// who this engine's requests are made for: `gui`, `ai` or `cli`
     pub(crate) owner: String,
+    /// the sweeps started on this engine, by number (`sweep.rs`)
+    pub(crate) sweeps: BTreeMap<u64, crate::sweep::Sweep>,
+    pub(crate) next_sweep: u64,
     /// counts the projects this engine has held (`set_project`): a job started for an earlier one must not put its outcome into the present one
     pub(crate) generation: u64,
     pub(crate) link: Option<StoreLink>,
@@ -89,6 +113,8 @@ impl Engine {
             meta: BTreeMap::new(),
             stages: Arc::new(Stages::default()),
             owner: "cli".into(),
+            sweeps: BTreeMap::new(),
+            next_sweep: 0,
             generation: 0,
             link: None,
             workspace: None,
@@ -279,32 +305,51 @@ impl Engine {
 
     /// `start_solve` with queue options. The job waits in the queue while the heavy lane is busy; it carries a frozen copy of the project.
     pub fn start_solve_with(&mut self, targets: Option<Vec<String>>, opts: &QueueOpts) -> Result<JobId, Error> {
-        if self.project.physics.is_empty() {
-            return Err(Error::invalid("the project has no physics; add one first (add_physics)"));
+        self.submit_solve(None, targets, opts, Purpose::Current)
+    }
+
+    /// The one place a solve is submitted. `src` is the engine whose project is solved (a point of a sweep is a scratch engine with the point's
+    /// edits applied; `None` is this engine). The job is always run and queued by this engine.
+    pub(crate) fn submit_solve(
+        &mut self,
+        src: Option<&Engine>,
+        targets: Option<Vec<String>>,
+        opts: &QueueOpts,
+        purpose: Purpose,
+    ) -> Result<JobId, Error> {
+        let lane_key = |t: &[String]| match purpose {
+            Purpose::Current => format!("solve {}", t.join(",")),
+            Purpose::Point { sweep, index } => format!("sweep {sweep} point {index}"),
+        };
+        {
+            let s = src.unwrap_or(&*self);
+            if s.project.physics.is_empty() {
+                return Err(Error::invalid("the project has no physics; add one first (add_physics)"));
+            }
+            s.project.check(&s.registry)?;
         }
-        self.project.check(&self.registry)?;
-        if self.auto_store && self.link.is_none() && self.workspace.is_some() {
+        if matches!(purpose, Purpose::Current) && self.auto_store && self.link.is_none() && self.workspace.is_some() {
             self.save_to_workspace(None)?;
         }
-        let targets = targets.unwrap_or_else(|| self.default_targets());
+        let s = src.unwrap_or(&*self);
+        let targets = targets.unwrap_or_else(|| s.default_targets());
         for t in &targets {
-            if self.project.spec(t).is_none() {
+            if s.project.spec(t).is_none() {
                 return Err(Error::invalid(format!("the project has no problem for '{t}'")));
             }
         }
-        let (key, keys) = (self.mesh_key(), self.problem_keys());
-        let (registry, mesher, project, sizing) =
-            (self.registry.clone(), self.mesher.clone(), self.project.clone(), self.sizing());
-        let library = self.library()?;
-        let cached = self.model().cloned();
+        let (key, keys) = (s.mesh_key(), s.problem_keys());
+        let (registry, mesher, project, sizing) = (s.registry.clone(), s.mesher.clone(), s.project.clone(), s.sizing());
+        let library = s.library()?;
+        // a point of a sweep has its own geometry and mesh settings: it never takes the mesh this engine holds
+        let cached = if matches!(purpose, Purpose::Current) { s.model().cloned() } else { None };
         let stages = self.stages.clone();
         let (mesh_key, solve_keys) = (key.clone(), keys.clone());
-        let submit = self.submission(
-            &format!("solve {}", targets.join(", ")),
-            Lane::Heavy,
-            opts,
-            &format!("solve {}", targets.join(",")),
-        );
+        let label = match purpose {
+            Purpose::Current => format!("solve {}", targets.join(", ")),
+            Purpose::Point { sweep, index } => format!("sweep {sweep} point {index}: {}", targets.join(", ")),
+        };
+        let submit = self.submission(&label, Lane::Heavy, opts, &lane_key(&targets));
         let chain = targets.clone();
         let id = self.jobs.submit(submit, {
             let project = project.clone();
@@ -345,8 +390,17 @@ impl Engine {
                 Ok(JobOutput::Solved { model, results, failed })
             }
         });
-        self.pending.insert(id, Pending::Solve { key, keys, project: Box::new(project), generation: self.generation });
-        self.note_job(id, "solve", targets);
+        match purpose {
+            Purpose::Current => {
+                self.pending
+                    .insert(id, Pending::Solve { key, keys, project: Box::new(project), generation: self.generation });
+                self.note_job(id, "solve", targets);
+            }
+            Purpose::Point { sweep, index } => {
+                self.pending.insert(id, Pending::Point { sweep, index, project: Box::new(project) });
+                self.note_job(id, "sweep", targets);
+            }
+        }
         Ok(id)
     }
 
@@ -506,6 +560,9 @@ impl Engine {
                 }
                 let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
                 Ok(json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds }))
+            }
+            (Pending::Point { sweep, index, project }, outcome) => {
+                self.apply_point(id, sweep, index, *project, outcome)
             }
             (Pending::Convergence, Ok(JobOutput::Convergence(v))) => Ok(v),
             (Pending::Export, Ok(JobOutput::Exported(v))) => Ok(v),

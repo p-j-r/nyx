@@ -1960,6 +1960,74 @@
         "idempotentHint": false,
         "openWorldHint": false,
         "readOnlyHint": false,
+        "title": "Cancel the points of a sweep that have not finished"
+      },
+      "arguments": {
+        "sweep": {
+          "type": "integer"
+        }
+      },
+      "name": "sweep_cancel",
+      "required": [
+        "sweep"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Run a sweep: one recorded run per point"
+      },
+      "arguments": {
+        "hold": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "physics": {
+          "type": null
+        },
+        "points": {
+          "type": "array"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "series": {
+          "type": "object"
+        }
+      },
+      "name": "sweep_run",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "The table of a sweep"
+      },
+      "arguments": {
+        "sweep": {
+          "type": "integer"
+        },
+        "wait_s": {
+          "type": "number"
+        }
+      },
+      "name": "sweep_table",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
         "title": "Tag a feature"
       },
       "arguments": {

@@ -29,6 +29,7 @@ C4 level 4 (code) of the component **Mesh** (`femcore.mesh`) in the container **
 | Component | Modules | Items |
 |---|---|---|
 | [engine: Commands](../engine/commands.md) | mesh | SimplexMesh |
+| [engine: Job runner and queue](../engine/jobs.md) | mesh | SimplexMesh |
 | [engine: Meshing seam](../engine/meshing.md) | mesh | SimplexMesh |
 | [engine: Registry and facade](../engine/registry.md) | mesh, mesh::view | SimplexMesh, ViewMesh |
 | [engine: Results files](../engine/resultsIO.md) | mesh | SimplexMesh |

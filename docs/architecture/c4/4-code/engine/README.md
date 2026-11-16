@@ -4,13 +4,13 @@ One page per component, C4 level 4. [Component view](../../3-components/engine.m
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Commands](./commands.md) | 3 | 1344 | 42 | 5 |
+| [Commands](./commands.md) | 3 | 1410 | 44 | 6 |
 | [Project](./project.md) | 1 | 197 | 13 | 3 |
 | [Geometry operations](./geometry.md) | 2 | 730 | 23 | 4 |
-| [Job runner and queue](./jobs.md) | 4 | 1142 | 58 | 13 |
+| [Job runner and queue](./jobs.md) | 5 | 1515 | 63 | 15 |
 | [Meshing seam](./meshing.md) | 2 | 345 | 17 | 4 |
 | [Materials](./materials.md) | 1 | 155 | 9 | 1 |
 | [Analyses](./analyse.md) | 1 | 82 | 5 | 1 |
 | [Results files](./resultsIO.md) | 3 | 985 | 29 | 6 |
-| [Store link](./storeLink.md) | 1 | 272 | 9 | 2 |
-| [Registry and facade](./registry.md) | 1 | 86 | 2 | 0 |
+| [Store link](./storeLink.md) | 1 | 296 | 10 | 2 |
+| [Registry and facade](./registry.md) | 1 | 87 | 2 | 0 |

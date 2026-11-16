@@ -1090,6 +1090,140 @@
     "title": "Wait for a job, at most a while"
   },
   {
+    "access": "expensive",
+    "description": "Queues one solve per point and returns the sweep's number at once. A point is a list of edits (`{ \"cmd\": \"set_param\", \"args\": { \"name\": \"w\", \"value\": 4e-7 } }`: any command that changes the project except those that replace it or start work), applied to a copy of the project: what varies, a geometry parameter, the wavelength in the study, a material, a mesh setting, is the case's to decide. Give `points` (each `{ label, edits }`) or `series` (`{ cmd, args, field, values }`: the command repeated with `field` set to each value). `physics` is the code or list solved at every point (default: what a solve would solve). The points are queued at priority 3 (sweeps and batches) so a person's request and a single request of an agent go before them, and run on the same mesh and solve caches as any request. Every point's edits are applied and checked first: a bad point fails the request with its number and nothing runs. The project, the mesh and the results of the engine are not touched; each point is recorded in the run table when the project is bound to a workflow. Read the table with `sweep_table`.",
+    "name": "sweep_run",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "hold": {
+          "description": "queue the points held; release each with queue_release",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "a name for the table",
+          "type": "string"
+        },
+        "physics": {
+          "description": "code or list of codes to solve at every point",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "points": {
+          "description": "the points, each a list of edits",
+          "items": {
+            "properties": {
+              "edits": {
+                "items": {
+                  "properties": {
+                    "args": {
+                      "type": "object"
+                    },
+                    "cmd": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "cmd"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "edits"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "description": "1, 2 or 3; default 3",
+          "type": "integer"
+        },
+        "series": {
+          "description": "one command repeated with `field` set to each value",
+          "properties": {
+            "args": {
+              "type": "object"
+            },
+            "cmd": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "values": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "cmd",
+            "field",
+            "values"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Run a sweep: one recorded run per point"
+  },
+  {
+    "access": "read",
+    "description": "Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.",
+    "name": "sweep_table",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "sweep": {
+          "description": "the sweep's number",
+          "type": "integer"
+        },
+        "wait_s": {
+          "description": "longest wait in seconds, default 0",
+          "type": "number"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "The table of a sweep"
+  },
+  {
+    "access": "expensive",
+    "description": "Queued points never run; a running one stops at its next check.",
+    "name": "sweep_cancel",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "sweep": {
+          "description": "the sweep's number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sweep"
+      ],
+      "type": "object"
+    },
+    "title": "Cancel the points of a sweep that have not finished"
+  },
+  {
     "access": "read",
     "description": "Applies every job that has finished since the last call and returns what each came to.",
     "name": "poll_jobs",

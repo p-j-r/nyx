@@ -34,6 +34,7 @@ pub mod queue;
 pub mod results_file;
 pub mod solve;
 pub mod store_link;
+pub mod sweep;
 
 pub use commands::{Access, CommandDesc};
 pub use engine::Engine;

@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md)  
-**Size:** 4 files, 1142 lines.
+**Size:** 5 files, 1515 lines.
 
 ## Files
 
@@ -15,25 +15,27 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | `crates/nyx-engine/src/jobs.rs` | 568 | The job runner and its queue (productivity plan P2 and Q1, ADR 85 and 87): a mesh build, a solve, a convergence check, opening or writing a results file is a job with a `Progress` handle, so it can be watched (stage, elapsed) and cancell... |
 | `crates/nyx-engine/src/queue.rs` | 271 | The queue of the engine (productivity plan Q1, ADR 87): what a front-end sees of the job runner's lanes (`queue_*` commands), the options a request is submitted with, and the stage caches that let queued requests share work. A request th... |
 | `crates/nyx-engine/src/solve.rs` | 93 | Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then solved with the fields it imports from the physics before it. Everything goes through `Physics`, so ... |
+| `crates/nyx-engine/src/sweep.rs` | 373 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, progress | Library, Progress, install, stage |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, mesh, progress | Library, Progress, SimplexMesh, install, stage |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | error, physics, registry, result, validate | Ctx, Error, Registry, Scalar, SolveResult, validate_spec |
-| [Commands](./commands.md) | engine | Engine |
+| [Commands](./commands.md) | commands, engine | Access, Engine, Purpose |
 | [Materials](./materials.md) | materials | study_wavelength |
 | [Meshing seam](./meshing.md) | meshing | MeshedModel, Mesher |
 | [Project](./project.md) | project | Project |
 | [Registry and facade](./registry.md) | crate root | physics_for |
+| [Store link](./storeLink.md) | store_link | RunOutcome |
 
 ## Used by
 
 | Component | Modules | Items |
 |---|---|---|
 | [app: Window](../app/window.md) | queue | QueueOpts |
-| [Commands](./commands.md) | jobs, queue, solve | JobId, JobMeta, JobOutput, JobRunner, Lane, Opened, QueueOpts, SolveSummary +3 |
+| [Commands](./commands.md) | jobs, queue, solve, sweep | JobId, JobMeta, JobOutput, JobRunner, Lane, Opened, QueueOpts, SolveSummary +4 |
 | [Registry and facade](./registry.md) | jobs, queue | JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, QueueOpts, Submit |
 | [Results files](./resultsIO.md) | jobs | Opened |
 
@@ -60,7 +62,7 @@ classDiagram
         +queue_entry(id) Option~Value~
         +queue_list(owner, state) Vec~Value~
         +wait_timeout(id, timeout) Result
-        +more_2_methods()
+        +more_4_methods()
     }
     class fns_convergence_rs {
         <<module convergence.rs>>
@@ -177,11 +179,31 @@ classDiagram
         +run_chain_partial(registry, project, model, targets, library, progress) tuple
     }
   }
+  namespace sweep_rs {
+    class Point {
+        <<struct>>
+        +label String
+        +edits Vec~Value~
+        +job JobId
+        +row Option~Value~
+    }
+    class Sweep {
+        <<struct>>
+        +name String
+        +targets Vec~String~
+        +points Vec~Point~
+    }
+    class fns_sweep_rs {
+        <<module sweep.rs>>
+        +MAX_POINTS const
+    }
+  }
   ConvergenceJob --> Stages
   JobOutput --> Opened
   Submit --> Lane
   JobInfo --> JobState
   JobInfo --> Lane
+  Sweep --> Point
 ```
 
 ## Public items
@@ -246,5 +268,10 @@ classDiagram
 | fn | `Engine::note_job` | `queue.rs:266` | `pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>)` |
 | fn | `run_chain` | `solve.rs:20` | `pub fn run_chain( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> Result<Vec<SolveResult>, Error>` —  Solves `targets` (and nothing else) in coupling order. The result of each is returned in the order it was solved. |
 | fn | `run_chain_partial` | `solve.rs:36` | `pub fn run_chain_partial( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> (Vec<SolveResult>, Option<Error>)` —  Like `run_chain`, but when a physics fails the physics solved before it are returned with the error: a failed `sms` keeps the `ems` result |
+| const | `MAX_POINTS` | `sweep.rs:18` | `usize` —  The most points one request may make: a sweep is a queue of jobs, not a way to start ten thousand. |
+| struct | `Point` | `sweep.rs:20` | fields: `label`, `edits`, `job`, `row` |
+| struct | `Sweep` | `sweep.rs:28` | fields: `name`, `targets`, `points` |
+| fn | `Engine::sweep_command` | `sweep.rs:138` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
+| fn | `Engine::apply_point` | `sweep.rs:281` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
 
 Trait implementations in this component: `JobRunner: Default`

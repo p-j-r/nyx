@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Store link** (`engine.storeLink`) in the co
 > Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here).
 
 **Decisions:** [ADR 39](../../../adr/0039-the-store-takes-spec-text-and-a-card-function.md), [ADR 59](../../../adr/0059-the-store-knows-nothing-of-a-project.md)  
-**Size:** 1 file, 272 lines.
+**Size:** 1 file, 296 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/store_link.rs` | 272 | The engine's persistence, through `nyx-store`: a project is the spec of one experiment of a workflow folder, every solve is a run in its run table, and the search card and the run metrics are made here, from the project and the results, ... |
+| `crates/nyx-engine/src/store_link.rs` | 296 | The engine's persistence, through `nyx-store`: a project is the spec of one experiment of a workflow folder, every solve is a run in its run table, and the search card and the run metrics are made here, from the project and the results, ... |
 
 ## What it uses
 
@@ -31,6 +31,7 @@ C4 level 4 (code) of the component **Store link** (`engine.storeLink`) in the co
 |---|---|---|
 | [app: Shell and dashboard](../app/shell.md) | store_link | card_of, metrics_of |
 | [Commands](./commands.md) | store_link | RunOutcome, StoreLink |
+| [Job runner and queue](./jobs.md) | store_link | RunOutcome |
 
 ## Class diagram
 
@@ -51,6 +52,7 @@ classDiagram
       +open(root, experiment) Result
       +commit(project) Result
       +record(project, outcome, seconds, log, mesh) Result
+      +record_point(project, outcome, seconds, log, mesh) Result
       +runs() Vec~RunRecord~
   }
   class fns_store_link_rs {
@@ -72,4 +74,5 @@ classDiagram
 | fn | `StoreLink::open` | `store_link.rs:145` | `pub fn open(root: &Path, experiment: Option<&str>) -> Result<(StoreLink, Project), Error>` —  Opens a workflow folder and reads the project of its first experiment (or of `experiment`). |
 | fn | `StoreLink::commit` | `store_link.rs:166` | `pub fn commit(&mut self, project: &Project) -> Result<Option<u32>, Error>` —  Stores the project when it differs from the saved one; returns the new version number, `None` when nothing changed. |
 | fn | `StoreLink::record` | `store_link.rs:172` | `pub fn record( &mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String], mesh: Option<&femcore::mesh::SimplexMesh>, ) -> Result<RunRecord, Error>` —  Adds a run to the table: the project as it was solved (frozen), the metrics of the results and the stage log. The heavy files |
-| fn | `StoreLink::runs` | `store_link.rs:268` | `pub fn runs(&self) -> Vec<RunRecord>` —  The run table of the bound experiment, oldest first. |
+| fn | `StoreLink::record_point` | `store_link.rs:186` | `pub fn record_point( &mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String], mesh: Option<&femcore::mesh::SimplexMesh>, ) -> Result<RunRecord, Error>` —  Adds a run for a project that is not the experiment's own (a point of a sweep): the run freezes the project it solved, and the |
+| fn | `StoreLink::runs` | `store_link.rs:292` | `pub fn runs(&self) -> Vec<RunRecord>` —  The run table of the bound experiment, oldest first. |

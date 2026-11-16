@@ -178,6 +178,30 @@ impl StoreLink {
         mesh: Option<&femcore::mesh::SimplexMesh>,
     ) -> Result<RunRecord, Error> {
         self.commit(project)?;
+        self.record_frozen(project, outcome, seconds, log, mesh)
+    }
+
+    /// Adds a run for a project that is not the experiment's own (a point of a sweep): the run freezes the project it solved, and the
+    /// experiment's project, its versions and its history are left as they are.
+    pub fn record_point(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<&femcore::mesh::SimplexMesh>,
+    ) -> Result<RunRecord, Error> {
+        self.record_frozen(project, outcome, seconds, log, mesh)
+    }
+
+    fn record_frozen(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<&femcore::mesh::SimplexMesh>,
+    ) -> Result<RunRecord, Error> {
         let (existing, _) = self.dir.runs(&self.experiment);
         let id = runs::next_id(&existing);
         let mut rec = RunRecord {
