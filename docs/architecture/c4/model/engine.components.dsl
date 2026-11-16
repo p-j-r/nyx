@@ -23,11 +23,11 @@ geometry = component "Geometry operations" "Every edit of a geom feature list as
         "codeDiagram" "4-code/engine/geometry.md"
     }
 }
-jobs = component "Job runner" "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine." "Rust modules" {
+jobs = component "Job runner" "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine; the start-up request that Windows not throttle the process." "Rust modules" {
     properties {
-        "adr" "61"
-        "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, solve.rs"
-        "lines" "381"
+        "adr" "61, 11"
+        "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, process.rs, solve.rs"
+        "lines" "442"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -75,7 +75,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "84"
+        "lines" "85"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

@@ -25,6 +25,7 @@ mod viewport;
 mod wfview;
 
 fn main() -> eframe::Result {
+    nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(|a| a.as_str()) == Some("--batch") {
         if let Err(e) = batch::run(&args[1..]) {

@@ -49,7 +49,7 @@ graph TB
     8-. "<div>uses app, state</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
     10-. "<div>uses engine: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
     7-. "<div>uses connect: config, env +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->16
-    7-. "<div>uses engine: crate root,<br />engine +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    7-. "<div>uses engine: crate root,<br />engine +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
     7-. "<div>uses pyscript</div><div style='font-size: 70%'>[Rust paths]</div>" .->12
     7-. "<div>uses geomui</div><div style='font-size: 70%'>[Rust paths]</div>" .->9
     7-. "<div>uses examples, shell</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
@@ -60,7 +60,7 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Window](../4-code/app/window.md) | 3 | 1613 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
+| [Window](../4-code/app/window.md) | 3 | 1614 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
 | [Shell and dashboard](../4-code/app/shell.md) | 5 | 3231 | 14, 23 | The tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
 | [Inspector tabs](../4-code/app/inspector.md) | 3 | 2030 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
 | [Viewport](../4-code/app/viewport.md) | 3 | 991 | 23 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, and what is kept between frames. |

@@ -29,6 +29,7 @@ pub mod xdmf;
 
 pub mod meshing;
 pub mod pml;
+pub mod process;
 pub mod project;
 pub mod results_file;
 pub mod solve;

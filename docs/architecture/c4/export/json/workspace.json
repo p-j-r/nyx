@@ -536,7 +536,7 @@
             "structurizr.dsl.identifier" : "nyx.app.window",
             "codeDiagram" : "4-code/app/window.md",
             "code" : "crates/app/src: app.rs, main.rs, state.rs",
-            "lines" : "1613",
+            "lines" : "1614",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -547,7 +547,7 @@
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
-            "description" : "uses engine: crate root, engine +2",
+            "description" : "uses engine: crate root, engine +3",
             "destinationId" : "22",
             "id" : "167",
             "sourceId" : "7",
@@ -785,7 +785,7 @@
             "structurizr.dsl.identifier" : "nyx.mcp.protocol",
             "codeDiagram" : "4-code/mcp/protocol.md",
             "code" : "crates/nyx-mcp/src: main.rs",
-            "lines" : "253",
+            "lines" : "254",
             "adr" : "15, 57"
           },
           "relationships" : [ {
@@ -807,7 +807,7 @@
             "structurizr.dsl.identifier" : "nyx.mcp.tools",
             "codeDiagram" : "4-code/mcp/tools.md",
             "code" : "crates/nyx-mcp/src: main.rs",
-            "lines" : "253",
+            "lines" : "254",
             "adr" : "15, 57"
           },
           "relationships" : [ {
@@ -1165,16 +1165,16 @@
           "tags" : "Element,Component",
           "technology" : "Rust modules"
         }, {
-          "description" : "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.",
+          "description" : "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine; the start-up request that Windows not throttle the process.",
           "documentation" : { },
           "id" : "26",
           "name" : "Job runner",
           "properties" : {
             "structurizr.dsl.identifier" : "nyx.engine.jobs",
             "codeDiagram" : "4-code/engine/jobs.md",
-            "code" : "crates/nyx-engine/src: convergence.rs, jobs.rs, solve.rs",
-            "lines" : "381",
-            "adr" : "61"
+            "code" : "crates/nyx-engine/src: convergence.rs, jobs.rs, process.rs, solve.rs",
+            "lines" : "442",
+            "adr" : "61, 11"
           },
           "relationships" : [ {
             "description" : "uses femcore: material::spec, progress",
@@ -1494,7 +1494,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.registry",
             "codeDiagram" : "4-code/engine/registry.md",
             "code" : "crates/nyx-engine/src: lib.rs",
-            "lines" : "84",
+            "lines" : "85",
             "adr" : "25"
           },
           "relationships" : [ {

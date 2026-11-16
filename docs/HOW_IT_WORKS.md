@@ -250,6 +250,7 @@ or "LOBPCG stalled" mean a fallback to the direct method happened.
 * Results are reproducible: the work is cut into pieces that depend only on the thread count and the pieces are added
   in a fixed order, so the same run gives the same numbers every time (different thread counts can differ in the last
   digits).
+* **Windows power throttling**: at start-up the window, `nyx --batch` and the MCP server ask Windows not to put the process in efficiency mode (`nyx_engine::process`). Without it a solve in a background or hidden process is moved to the efficiency cores after its first seconds and every later solve is 2 to 3 times slower on a hybrid processor. Timing only; the numbers do not change.
 * **Cancel** (toolbar button or Esc): the solver checks a flag at the top of every iteration, every multigrid level, every
   refinement step and every Brillouin pair and then returns "cancelled"; earlier results stay. Assembly of a matrix and a
   started factorisation finish first. Only one job runs at a time; mesh builds and file opens requested meanwhile wait.

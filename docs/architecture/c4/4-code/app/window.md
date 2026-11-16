@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 1613 lines.
+**Size:** 3 files, 1614 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/app/src/app.rs` | 1318 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
-| `crates/app/src/main.rs` | 73 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
+| `crates/app/src/main.rs` | 74 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
 | `crates/app/src/state.rs` | 222 | The run-time state of the window around the engine's project: the mesh on show (`Doc`) and a result on show with its plot settings (`ResultView`). The project itself, with its geometry, mesh settings and one problem per physics, is `nyx_... |
 
 ## What it uses
@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 | Target | Modules | Items |
 |---|---|---|
 | [container `connect` (nyx-connect)](../../3-components/connect.md) | config, env, server | Env, HostInfo, Status, connect, disconnect, find_server, list, plain_path, snippet |
-| [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, project | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MeshSettings, MeshedModel, ModeAnalysis +8 |
+| [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, process, project | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MeshSettings, MeshedModel, ModeAnalysis +9 |
 | [Scripts and batch](./headless.md) | pyscript | spawn |
 | [Inspector tabs](./inspector.md) | geomui | State |
 | [Shell and dashboard](./shell.md) | examples, shell | Shell, Start |

@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Job runner** (`engine.jobs`) in the container **nyx-engine** (crate `nyx_engine`). [Component view of the container](../../3-components/engine.md) · [All code pages](../README.md)
 
-> Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.
+> Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine; the start-up request that Windows not throttle the process.
 
-**Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md)  
-**Size:** 3 files, 381 lines.
+**Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
+**Size:** 4 files, 442 lines.
 
 ## Files
 
@@ -13,6 +13,7 @@ C4 level 4 (code) of the component **Job runner** (`engine.jobs`) in the contain
 |---|---:|---|
 | `crates/nyx-engine/src/convergence.rs` | 155 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
 | `crates/nyx-engine/src/jobs.rs` | 171 | The job runner: a mesh build or a solve runs on its own thread with a `Progress` handle, so it can be watched (stage, fraction, elapsed) and cancelled, by the window, a script or the MCP server alike. The runner knows nothing of windows:... |
+| `crates/nyx-engine/src/process.rs` | 61 | Process-wide settings of the program that hosts the engine. Today one: on Windows, opt the process out of power throttling. |
 | `crates/nyx-engine/src/solve.rs` | 55 | Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then solved with the fields it imports from the physics before it. Everything goes through `Physics`, so ... |
 
 ## What it uses
@@ -31,6 +32,7 @@ C4 level 4 (code) of the component **Job runner** (`engine.jobs`) in the contain
 
 | Component | Modules | Items |
 |---|---|---|
+| [app: Window](../app/window.md) | process | opt_out_of_power_throttling |
 | [Commands](./commands.md) | jobs, solve | JobId, JobOutput, JobRunner, run_chain |
 | [Registry and facade](./registry.md) | jobs | JobId, JobInfo, JobOutput, JobRunner, JobState |
 
@@ -90,6 +92,12 @@ classDiagram
         +JobId type
     }
   }
+  namespace process_rs {
+    class fns_process_rs {
+        <<module process.rs>>
+        +opt_out_of_power_throttling() bool
+    }
+  }
   namespace solve_rs {
     class fns_solve_rs {
         <<module solve.rs>>
@@ -122,4 +130,5 @@ classDiagram
 | fn | `JobRunner::log` | `jobs.rs:152` | `pub fn log(&self, id: JobId) -> Vec<String>` —  The stage log of the job so far. |
 | fn | `JobRunner::try_take` | `jobs.rs:157` | `pub fn try_take(&self, id: JobId) -> Option<Result<JobOutput, Error>>` —  The outcome if the job has finished and it has not been taken; `None` while running or after it was taken. |
 | fn | `JobRunner::wait` | `jobs.rs:162` | `pub fn wait(&self, id: JobId) -> Result<JobOutput, Error>` —  Blocks until the job has finished and takes its outcome. |
+| fn | `opt_out_of_power_throttling` | `process.rs:12` | `pub fn opt_out_of_power_throttling() -> bool` —  Asks Windows not to throttle this process. True when the request was accepted; false when it was refused (an older Windows) or on another |
 | fn | `run_chain` | `solve.rs:20` | `pub fn run_chain( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> Result<Vec<SolveResult>, Error>` —  Solves `targets` (and nothing else) in coupling order. The result of each is returned in the order it was solved. |
