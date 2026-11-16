@@ -247,6 +247,18 @@ impl App {
 
     /// Hands the geometry and mesh settings being edited to the engine. False (and an error shown) when the engine refuses them.
     pub fn push_edits(&mut self) -> bool {
+        // both edits are checked before either is applied, so a mesh edit that is refused cannot leave the geometry edit applied (a half-pushed
+        // project); each command checks its own argument again when it runs
+        if self.geom_edit != self.engine.project().geometry {
+            if let Err(e) = self.geom_edit.validate() {
+                self.set_error(format!("geometry: {e}"));
+                return false;
+            }
+        }
+        if self.mesh_edit != self.engine.project().mesh && !(self.mesh_edit.h > 0.0 && self.mesh_edit.h.is_finite()) {
+            self.set_error("mesh: the element size must be a positive finite number");
+            return false;
+        }
         if self.geom_edit != self.engine.project().geometry {
             let g = serde_json::to_value(&self.geom_edit).unwrap_or(Value::Null);
             if self.cmd("set_geometry", json!({ "geometry": g })).is_none() {
@@ -1435,6 +1447,26 @@ mod tests {
         wait_idle(&mut a, 120);
         assert!(a.doc.mesh.is_some() && a.queued.is_none() && a.waiting.is_empty());
         assert!(!a.results.is_empty(), "the queued Compute ran when the first job ended and its result is on show");
+    }
+
+    #[test]
+    fn a_refused_mesh_edit_cannot_leave_the_geometry_edit_applied() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
+        wait_idle(&mut a, 30);
+        let before = a.engine.project().clone();
+        nyx_engine::geometry::set_param(&mut a.geom_edit, "w", &json!(6.0e-7)).unwrap();
+        a.mesh_edit.h = -1.0;
+        assert!(!a.push_edits(), "a negative element size is refused");
+        assert_eq!(*a.engine.project(), before, "neither edit was applied");
+        // every mesh field the window sends is accepted by the engine
+        a.mesh_edit.h = 2.0e-7;
+        a.mesh_edit.max_dev = Some(1.0e-9);
+        a.mesh_edit.points_per_wavelength = Some(10.0);
+        a.mesh_edit.structured_pml = true;
+        assert!(a.push_edits(), "{:?}", a.error);
+        assert_eq!(a.engine.project().mesh, a.mesh_edit);
+        assert_eq!(a.engine.project().geometry, a.geom_edit);
     }
 
     #[test]

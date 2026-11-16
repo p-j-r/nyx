@@ -589,6 +589,23 @@ impl Engine {
                 "physics_sizing" => {
                     s.physics_sizing = v.as_bool().ok_or_else(|| Error::invalid("`physics_sizing` is true or false"))?
                 }
+                "points_per_wavelength" => {
+                    s.points_per_wavelength = if v.is_null() {
+                        None
+                    } else {
+                        Some(v.as_f64().ok_or_else(|| Error::invalid("`points_per_wavelength` is a number or null"))?)
+                    }
+                }
+                "structured_pml" => {
+                    s.structured_pml = v.as_bool().ok_or_else(|| Error::invalid("`structured_pml` is true or false"))?
+                }
+                "max_dev" => {
+                    s.max_dev = if v.is_null() {
+                        None
+                    } else {
+                        Some(v.as_f64().ok_or_else(|| Error::invalid("`max_dev` is a number in metres or null"))?)
+                    }
+                }
                 "sweep" => {
                     s.sweep = if v.is_null() {
                         None
@@ -598,7 +615,7 @@ impl Engine {
                 }
                 other => {
                     return Err(Error::invalid(format!(
-                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, sweep)"
+                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, points_per_wavelength, structured_pml, max_dev, sweep)"
                     )))
                 }
             }

@@ -504,3 +504,41 @@ fn a_newer_request_replaces_a_queued_one_even_when_the_first_was_made_without_th
     assert_eq!(e.wait(b).unwrap()["state"], json!("done"));
     assert!(matches!(e.wait(a), Err(Error::Cancelled)));
 }
+
+#[test]
+fn set_mesh_takes_every_field_it_lists_and_refuses_others() {
+    let mut e = Engine::new();
+    e.call(
+        "set_mesh",
+        &json!({ "h": 2e-7, "physics_sizing": true, "points_per_wavelength": 9.0, "structured_pml": true, "max_dev": 1e-9, "adapt_scale": 0.5 }),
+    )
+    .unwrap();
+    let m = &e.project().mesh;
+    assert_eq!(
+        (m.h, m.points_per_wavelength, m.structured_pml, m.max_dev, m.adapt_scale),
+        (2e-7, Some(9.0), true, Some(1e-9), Some(0.5))
+    );
+    e.call("set_mesh", &json!({ "points_per_wavelength": null, "max_dev": null })).unwrap();
+    assert_eq!((e.project().mesh.points_per_wavelength, e.project().mesh.max_dev), (None, None));
+    assert!(e.call("set_mesh", &json!({ "no_such_field": 1 })).is_err());
+    // a refused call changes nothing
+    assert!(e.call("set_mesh", &json!({ "h": -1.0, "structured_pml": false })).is_err());
+    assert!(e.project().mesh.structured_pml, "a refused set_mesh left the settings as they were");
+}
+
+#[test]
+fn job_wait_with_a_timeout_returns_the_entry_and_the_job_goes_on() {
+    let (mut e, probe) = open("15_soi_wire");
+    let gate = probe.close();
+    let id = e.start_solve(None).unwrap();
+    wait_for("the solve to hold the lane", || probe.calls() == 1);
+    let t = Instant::now();
+    let r = e.call("job_wait", &json!({ "id": id, "timeout_s": 0.2 })).unwrap();
+    assert_eq!(r["waiting"], json!(true), "{r}");
+    assert!(t.elapsed() < Duration::from_secs(5));
+    gate.open();
+    // without a timeout it waits for the end as before
+    let done = e.call("job_wait", &json!({ "id": id })).unwrap();
+    assert_eq!(done["state"], json!("done"));
+    assert!(e.call("job_wait", &json!({ "id": id, "timeout_s": -1 })).is_err());
+}
