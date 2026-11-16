@@ -1,0 +1,11 @@
+# Blocking paths on the window thread (P0, plan section 1): project_open, mesh, the results.h5 write, open_results. 3d.
+# Needs the HDF5 DLLs on PATH and a runs/ folder (git-ignored).
+{"cmd":"project_open","args":{"path":"examples/14_box_cavity.nyx.json"},"note":"project_open"}
+{"cmd":"set_mesh","args":{"h":0.003,"sweep":[{"domain_offset":0,"n":8,"thickness":0.03}]},"note":"6672 cells, 39k unknowns"}
+{"cmd":"mesh_build","note":"mesh (a blocking call from a window)"}
+{"cmd":"solve_run","note":"solve (mesh cached)"}
+{"cmd":"export_results","args":{"path":"runs/p0_3d.h5"},"note":"results.h5 write after a run"}
+{"cmd":"project_open","args":{"path":"examples/14_box_cavity.nyx.json"},"note":"drop the results"}
+{"cmd":"set_mesh","args":{"h":0.003,"sweep":[{"domain_offset":0,"n":8,"thickness":0.03}]},"note":"6672 cells, 39k unknowns"}
+{"cmd":"open_results","args":{"path":"runs/p0_3d.h5"},"note":"open_results: read + re-mesh + compare"}
+{"cmd":"results_file_info","args":{"path":"runs/p0_3d.h5"},"note":"results_file_info"}

@@ -536,7 +536,7 @@
             "structurizr.dsl.identifier" : "nyx.app.window",
             "codeDiagram" : "4-code/app/window.md",
             "code" : "crates/app/src: app.rs, main.rs, state.rs",
-            "lines" : "1613",
+            "lines" : "1657",
             "adr" : "23, 57"
           },
           "relationships" : [ {

@@ -1,0 +1,8 @@
+# P0: the larger 3D cavity, one run: the memory data point for a later estimate, and the blocking results I/O at that size. Needs about 11 GB free.
+{"cmd":"project_open","args":{"path":"examples/14_box_cavity.nyx.json"}}
+{"cmd":"set_mesh","args":{"h":0.002,"sweep":[{"domain_offset":0,"n":10,"thickness":0.03}]},"note":"finer: h 2 mm, 10 layers"}
+{"cmd":"solve_run","note":"mesh + solve (about 55 s, 10.7 GB peak working set)"}
+{"cmd":"export_results","args":{"path":"runs/p0_3dlarge.h5"},"note":"results.h5 write after a run"}
+{"cmd":"project_open","args":{"path":"examples/14_box_cavity.nyx.json"}}
+{"cmd":"set_mesh","args":{"h":0.002,"sweep":[{"domain_offset":0,"n":10,"thickness":0.03}]},"note":"finer: h 2 mm, 10 layers"}
+{"cmd":"open_results","args":{"path":"runs/p0_3dlarge.h5"},"note":"open_results"}

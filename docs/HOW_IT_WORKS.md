@@ -254,7 +254,8 @@ or "LOBPCG stalled" mean a fallback to the direct method happened.
   refinement step and every Brillouin pair and then returns "cancelled"; earlier results stay. Assembly of a matrix and a
   started factorisation finish first. Only one job runs at a time; mesh builds and file opens requested meanwhile wait.
 * Diagnostics: `NYX_PROFILE=1` echoes the log to the console as it is written; `NYX_FRAME_LOG=1` prints the
-  time of every window frame and which drawing passes ran; `NYX_LOBPCG_TRACE=1` and `NYX_AMG_*` (see `amg.rs`) are for solver work.
+  time of every window frame and which drawing passes ran (with `NYX_FRAME_LOG=frames.csv`, a name ending in `.csv`, the same frames are also
+  written as one CSV row each: wall time since the previous row, layout and viewport milliseconds, whether a job runs, its kind, stage and seconds); `NYX_LOBPCG_TRACE=1` and `NYX_AMG_*` (see `amg.rs`) are for solver work.
 * **Input checks** (`validate.rs`): NaN or infinite numbers in materials, coordinates, boundary values or study
   parameters are refused with a message naming the item; a solution containing NaN/infinity is refused too.
 
