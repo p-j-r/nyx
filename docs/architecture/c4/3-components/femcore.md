@@ -27,7 +27,7 @@ graph TB
         style 79 fill:#85bbf0,stroke:#5d82a8,color:#000000
         80["<div style='font-weight: bold'>Meshing facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshPlan and mesh_model (the<br />one way to mesh a geom<br />model), the serialisable<br />request and report, sizing<br />from the physics, and the 2D<br />triangulation core.</div>"]
         style 80 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        81["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, and adaptive<br />meshing driven by exact<br />faces.</div>"]
+        81["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, adaptive<br />meshing driven by exact<br />faces, face sizes and<br />max_dev, and the curved<br />(quadratic) edges of boundary<br />cells.</div>"]
         style 81 fill:#85bbf0,stroke:#5d82a8,color:#000000
         82["<div style='font-weight: bold'>Structured absorbing layers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Structured PML around a<br />box-shaped or geom-model<br />mesh: prisms, hexahedra,<br />quads, labels.</div>"]
         style 82 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -127,12 +127,13 @@ graph TB
     80-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
     80-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
     80-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    80-. "<div>uses meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
+    80-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
     80-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
     80-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
     81-. "<div>uses geom: eval, labels +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
     81-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
     81-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
+    81-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
     81-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
     81-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->80
     81-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
@@ -158,11 +159,11 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Mesh](../4-code/femcore/mesh.md) | 5 | 1594 | 4, 5, 32 | The native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics. |
+| [Mesh](../4-code/femcore/mesh.md) | 5 | 1707 | 4, 5, 32 | The native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics. |
 | [Mesh files](../4-code/femcore/meshio.md) | 3 | 878 | 16 | The compact lossless .fmsh format for meshes and results and its entropy coder. |
 | [Fixtures and test kit](../4-code/femcore/fixtures.md) | 3 | 582 | 41, 10, 60 | Test meshes and the SOI wire cross-section used by the tests of every physics crate. |
-| [Meshing facade](../4-code/femcore/meshing.md) | 6 | 1707 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
-| [3D meshing](../4-code/femcore/meshing3d.md) | 4 | 1671 | 40, 50, 51, 55 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, and adaptive meshing driven by exact faces. |
+| [Meshing facade](../4-code/femcore/meshing.md) | 6 | 1777 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
+| [3D meshing](../4-code/femcore/meshing3d.md) | 5 | 2084 | 40, 50, 51, 55, 82, 83 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, and the curved (quadratic) edges of boundary cells. |
 | [Structured absorbing layers](../4-code/femcore/structpml.md) | 4 | 1408 | 7, 52, 5 | Structured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels. |
 | [Meshing validation harness](../4-code/femcore/meshcheck.md) | 4 | 980 | 7 | A small independent scalar Helmholtz solver with PML used to validate meshes. |
 | [Metric fields](../4-code/femcore/metric.md) | 6 | 1846 | 7, 5 | Riemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers. |
@@ -176,7 +177,7 @@ graph TB
 | [Eigensolvers](../4-code/femcore/laeigen.md) | 12 | 4560 | 33, 8, 11 | Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities. |
 | [Preconditioners](../4-code/femcore/laprecond.md) | 8 | 2516 | 33, 8 | Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations. |
 | [Time, nonlinear, sweeps](../4-code/femcore/laother.md) | 10 | 3627 | 33, 8 | Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators. |
-| [Finite-element basics](../4-code/femcore/fem.md) | 6 | 1845 | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
+| [Finite-element basics](../4-code/femcore/fem.md) | 6 | 2013 | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
 | [Material specification](../4-code/femcore/material.md) | 9 | 3519 | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader. |
 | [Optical mode sets](../4-code/femcore/optical.md) | 1 | 231 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
 | [Frame and sections](../4-code/femcore/section.md) | 1 | 221 | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y). |
@@ -208,7 +209,7 @@ graph TB
         style 79 fill:#85bbf0,stroke:#5d82a8,color:#000000
         80["<div style='font-weight: bold'>Meshing facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshPlan and mesh_model (the<br />one way to mesh a geom<br />model), the serialisable<br />request and report, sizing<br />from the physics, and the 2D<br />triangulation core.</div>"]
         style 80 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        81["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, and adaptive<br />meshing driven by exact<br />faces.</div>"]
+        81["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, adaptive<br />meshing driven by exact<br />faces, face sizes and<br />max_dev, and the curved<br />(quadratic) edges of boundary<br />cells.</div>"]
         style 81 fill:#85bbf0,stroke:#5d82a8,color:#000000
         82["<div style='font-weight: bold'>Structured absorbing layers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Structured PML around a<br />box-shaped or geom-model<br />mesh: prisms, hexahedra,<br />quads, labels.</div>"]
         style 82 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -246,7 +247,7 @@ graph TB
     80-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
     80-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
     80-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    80-. "<div>uses meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
+    80-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
     80-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
     80-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
     81-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86

@@ -144,3 +144,26 @@ fn a_file_that_cannot_be_opened_leaves_the_project_as_it_was() {
     assert_eq!(e.project(), &before);
     let _ = std::fs::remove_file(&other);
 }
+
+#[test]
+fn curved_edges_are_stored_in_the_file_and_a_file_without_them_reads_as_straight() {
+    // ADR 82: two optional datasets in /mesh; a straight mesh writes none
+    let mut opts = femcore::meshing::geomdrive::GeomMeshOpts::new(0.5);
+    opts.curved = true;
+    let curved = femcore::meshing::geomdrive3::sphere_cavity_with(1.0, &opts).unwrap().mesh;
+    assert!(curved.has_curved());
+    let straight = femcore::meshing::geomdrive3::sphere_cavity(1.0, 0.5).unwrap().mesh;
+    assert!(!straight.has_curved());
+    let project = nyx_engine::Project::new("curved edges", 3);
+    for (name, mesh) in [("curved", &curved), ("straight", &straight)] {
+        let path = tmp(&format!("edge-nodes-{name}.h5"));
+        nyx_engine::h5io::write_results(&path, &project, mesh, &[]).unwrap();
+        let stored = nyx_engine::h5io::read_results(&path).unwrap();
+        assert_eq!(stored.mesh.edge_node_list(), mesh.edge_node_list(), "{name}");
+        assert_eq!(stored.mesh.has_curved(), name == "curved");
+        let file = hdf5_metno::File::open(&path).unwrap();
+        let has = file.group("mesh").unwrap().dataset("edge_node_pairs").is_ok();
+        assert_eq!(has, name == "curved", "the datasets exist only for a curved mesh");
+        let _ = std::fs::remove_file(&path);
+    }
+}

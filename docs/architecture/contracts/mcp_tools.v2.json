@@ -1525,6 +1525,9 @@
             "null"
           ]
         },
+        "curved": {
+          "type": "boolean"
+        },
         "h": {
           "type": "number"
         },

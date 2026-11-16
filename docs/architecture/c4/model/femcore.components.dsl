@@ -3,7 +3,7 @@ mesh = component "Mesh" "The native mixed-cell mesh, the exchange mesh the physi
     properties {
         "adr" "4, 5, 32"
         "code" "crates/femcore/src: mesh/cells.rs, mesh/exchange.rs, mesh/mod.rs, mesh/quality.rs, mesh/view.rs"
-        "lines" "1594"
+        "lines" "1707"
         "codeDiagram" "4-code/femcore/mesh.md"
     }
 }
@@ -27,15 +27,15 @@ meshing = component "Meshing facade" "MeshPlan and mesh_model (the one way to me
     properties {
         "adr" "6, 17, 54"
         "code" "crates/femcore/src: meshing/geomdrive.rs, meshing/mesher.rs, meshing/mod.rs, meshing/physics_size.rs, meshing/request.rs, meshing/sizing.rs"
-        "lines" "1707"
+        "lines" "1777"
         "codeDiagram" "4-code/femcore/meshing.md"
     }
 }
-meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, and adaptive meshing driven by exact faces." "Rust modules" {
+meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, and the curved (quadratic) edges of boundary cells." "Rust modules" {
     properties {
-        "adr" "40, 50, 51, 55"
-        "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs"
-        "lines" "1671"
+        "adr" "40, 50, 51, 55, 82, 83"
+        "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/curve3.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs"
+        "lines" "2084"
         "codeDiagram" "4-code/femcore/meshing3d.md"
     }
 }
@@ -147,7 +147,7 @@ fem = component "Finite-element basics" "Lagrange P1/P2 elements and quadrature,
     properties {
         "adr" "9, 4, 45, 69"
         "code" "crates/femcore/src: edge.rs, fem.rs, fields.rs, periodic.rs, pml.rs, props.rs"
-        "lines" "1845"
+        "lines" "2013"
         "codeDiagram" "4-code/femcore/fem.md"
     }
 }

@@ -235,7 +235,7 @@ impl App {
             let m = &self.mesh_edit;
             let args = json!({
                 "h": m.h, "adapt_scale": m.adapt_scale, "physics_sizing": m.physics_sizing, "points_per_wavelength": m.points_per_wavelength,
-                "structured_pml": m.structured_pml, "max_dev": m.max_dev, "sweep": m.sweep,
+                "structured_pml": m.structured_pml, "max_dev": m.max_dev, "curved": m.curved, "sweep": m.sweep,
             });
             if self.cmd("set_mesh", args).is_none() {
                 return false;

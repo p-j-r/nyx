@@ -75,6 +75,9 @@ pub struct MeshRequest {
     /// the waves of the study the mesh is for
     #[serde(default)]
     pub waves: Option<WavesRequest>,
+    /// 3D: quadratic (isoparametric) geometry for the cells on a curved surface (ADR 82)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub curved: bool,
 }
 
 impl MeshRequest {
@@ -82,6 +85,7 @@ impl MeshRequest {
     pub fn plan(&self) -> MeshPlan {
         let mut opts = GeomMeshOpts::new(self.h);
         opts.max_dev = self.max_dev;
+        opts.curved = self.curved;
         MeshPlan {
             opts,
             mesher: match self.mesher {
@@ -130,6 +134,23 @@ pub struct MeshReport {
     /// layers per side of the structured absorbing layers, `[axis][side]` (x, y, z); absent for inline layers
     #[serde(default)]
     pub structured_layers: Option<Vec<[usize; 2]>>,
+    /// the curved edges of a 3D mesh made with `curved` (ADR 82); absent for a straight-sided mesh
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curved: Option<CurvedSummary>,
+    /// things the request asked for that the mesher could not do (a size rule on an edge of a 3D model, say); absent when none
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+/// The curved geometry of a 3D mesh (ADR 82).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CurvedSummary {
+    /// edges that carry a geometry node
+    pub edges: usize,
+    /// cells with at least one such edge
+    pub cells: usize,
+    /// smallest ratio of the Jacobian determinant to the straight cell's over those cells
+    pub min_scaled_jacobian: f64,
 }
 
 fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, sizes: &[Option<f64>]) -> MeshReport {
@@ -160,7 +181,31 @@ fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, si
     } else {
         None
     };
-    MeshReport { dim: m.dim, vertices: m.n_points(), cells: m.n_cells(), facets: m.n_facets(), domains, adaptation, structured_layers }
+    // size rules that a 3D mesh cannot honour are named, not dropped in silence (ADR 83)
+    let mut warnings = vec![];
+    if m.dim == 3 {
+        for rule in g.eval.size_rules() {
+            let name = g.eval.list.features.iter().find(|f| f.id == rule.feature).map_or(String::new(), |f| f.name.clone());
+            let what = match rule.entities.kind {
+                geom::select::EntityKind::Edges => Some("crease edges"),
+                geom::select::EntityKind::Vertices => Some("vertices"),
+                _ => None,
+            };
+            if let Some(w) = what {
+                warnings.push(format!("size rule '{name}' selects {w}, which a 3D mesh has no size for: it is ignored (select regions or faces)"));
+            } else if rule.min_layers.is_some() {
+                warnings.push(format!("size rule '{name}': min_layers has no effect in the 3D lattice mesher and is ignored"));
+            } else if rule.entities.kind == geom::select::EntityKind::Regions && rule.max_dev.is_some() {
+                warnings.push(format!("size rule '{name}': max_deviation applies to curved faces, not to regions, and is ignored here (select the faces)"));
+            }
+        }
+    }
+    let curved = (m.dim == 3 && m.has_curved()).then(|| {
+        let cells: Vec<usize> = (0..m.n_cells()).filter(|&c| m.cell_is_curved(c)).collect();
+        let min_sj = cells.iter().map(|&c| crate::meshing::curve3::scaled_jacobian_min(m, c)).fold(f64::INFINITY, f64::min);
+        CurvedSummary { edges: m.edge_node_list().len(), cells: cells.len(), min_scaled_jacobian: if min_sj.is_finite() { min_sj } else { 1.0 } }
+    });
+    MeshReport { dim: m.dim, vertices: m.n_points(), cells: m.n_cells(), facets: m.n_facets(), domains, adaptation, structured_layers, curved, warnings }
 }
 
 /// Meshes `list` as `req` asks (any dimension) and reports what came out.
@@ -211,6 +256,7 @@ pub fn request_schema() -> Value {
                 ]
             },
             "structured_pml": { "type": "boolean", "default": false },
+            "curved": { "type": "boolean", "default": false, "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface" },
             "waves": {
                 "type": ["object", "null"],
                 "required": ["sizing"],
@@ -266,7 +312,11 @@ pub fn report_schema() -> Value {
                     "cells_start": { "type": "integer", "minimum": 0 },
                     "cells_end": { "type": "integer", "minimum": 0 }
                 } },
-            "structured_layers": { "type": ["array", "null"], "items": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2 } }
+            "structured_layers": { "type": ["array", "null"], "items": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2 } },
+            "curved": { "type": ["object", "null"], "required": ["edges", "cells", "min_scaled_jacobian"], "additionalProperties": false,
+                "description": "the curved edges of a 3D mesh made with `curved`; absent for a straight-sided mesh",
+                "properties": { "edges": { "type": "integer", "minimum": 0 }, "cells": { "type": "integer", "minimum": 0 }, "min_scaled_jacobian": { "type": "number" } } },
+            "warnings": { "type": "array", "items": { "type": "string" }, "description": "requests the mesher could not honour; absent when none" }
         }
     })
 }

@@ -149,7 +149,7 @@ impl Engine {
             cmd("set_active", "Set the active physics", "The one solved by default.", Edit, schema(vec![("physics", phys())], &["physics"])),
             cmd("check_project", "Check the project", "Checks the geometry, the element size and every problem against the descriptors of its physics, without meshing.", Read, schema(vec![], &[])),
             cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale` or `sweep` set to null return to the simple mesher / a 2D mesh.", Edit,
-                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"] })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"] })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge, metres" })),
+                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"] })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"] })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity study, default false")),
                     ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number" }, "n": { "type": "integer" }, "domain_offset": { "type": "integer" }, "fill": { "type": "string", "description": "region name: every cell of the layer belongs to it" } }, "required": ["thickness", "n"] }, "description": "layers to sweep the 2D mesh along y" }))], &[])),
             cmd("mesh_build", "Mesh the geometry", "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.", Expensive, schema(vec![("wait", boolean("wait for the mesh, default true"))], &[])),
             cmd("solve_run", "Solve", "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.", Expensive,
@@ -549,6 +549,24 @@ impl Engine {
                 "physics_sizing" => {
                     s.physics_sizing = v.as_bool().ok_or_else(|| Error::invalid("`physics_sizing` is true or false"))?
                 }
+                "points_per_wavelength" => {
+                    s.points_per_wavelength = if v.is_null() {
+                        None
+                    } else {
+                        Some(v.as_f64().ok_or_else(|| Error::invalid("`points_per_wavelength` is a number or null"))?)
+                    }
+                }
+                "structured_pml" => {
+                    s.structured_pml = v.as_bool().ok_or_else(|| Error::invalid("`structured_pml` is true or false"))?
+                }
+                "max_dev" => {
+                    s.max_dev = if v.is_null() {
+                        None
+                    } else {
+                        Some(v.as_f64().ok_or_else(|| Error::invalid("`max_dev` is a number in metres or null"))?)
+                    }
+                }
+                "curved" => s.curved = v.as_bool().ok_or_else(|| Error::invalid("`curved` is true or false"))?,
                 "sweep" => {
                     s.sweep = if v.is_null() {
                         None
@@ -558,7 +576,7 @@ impl Engine {
                 }
                 other => {
                     return Err(Error::invalid(format!(
-                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, sweep)"
+                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, points_per_wavelength, structured_pml, max_dev, curved, sweep)"
                     )))
                 }
             }

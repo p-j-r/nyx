@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Job runner** (`engine.jobs`) in the contain
 > Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed.
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md)  
-**Size:** 3 files, 608 lines.
+**Size:** 3 files, 609 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/convergence.rs` | 362 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
+| `crates/nyx-engine/src/convergence.rs` | 363 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
 | `crates/nyx-engine/src/jobs.rs` | 171 | The job runner: a mesh build or a solve runs on its own thread with a `Progress` handle, so it can be watched (stage, fraction, elapsed) and cancelled, by the window, a script or the MCP server alike. The runner knows nothing of windows:... |
 | `crates/nyx-engine/src/solve.rs` | 75 | Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then solved with the fields it imports from the physics before it. Everything goes through `Physics`, so ... |
 
@@ -112,14 +112,14 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| enum | `Matching` | `convergence.rs:64` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
-| struct | `ConvergenceJob` | `convergence.rs:191` |  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
-| fn | `Matching::from_args` | `convergence.rs:78` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` is `{ "f": <value> }` and implies `nearest`. |
-| fn | `ConvergenceJob::run` | `convergence.rs:207` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
-| fn | `ConvergenceJob::run_matched` | `convergence.rs:212` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
-| fn | `Engine::convergence_job` | `convergence.rs:225` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
-| fn | `Engine::convergence_check` | `convergence.rs:237` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results. `tolerance`, |
-| fn | `Engine::convergence_check_matched` | `convergence.rs:244` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
+| enum | `Matching` | `convergence.rs:65` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
+| struct | `ConvergenceJob` | `convergence.rs:192` |  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
+| fn | `Matching::from_args` | `convergence.rs:79` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` is `{ "f": <value> }` and implies `nearest`. |
+| fn | `ConvergenceJob::run` | `convergence.rs:208` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
+| fn | `ConvergenceJob::run_matched` | `convergence.rs:213` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
+| fn | `Engine::convergence_job` | `convergence.rs:226` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
+| fn | `Engine::convergence_check` | `convergence.rs:238` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results. `tolerance`, |
+| fn | `Engine::convergence_check_matched` | `convergence.rs:245` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
 | type | `JobId` | `jobs.rs:14` |  |
 | enum | `JobOutput` | `jobs.rs:17` | variants: `Mesh`, `Solved` —  What a finished job hands back. The engine applies it to its state (`Engine::apply`). |
 | enum | `JobState` | `jobs.rs:28` | variants: `Running`, `Done`, `Cancelled`, `Failed` |

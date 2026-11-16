@@ -227,11 +227,57 @@ where
     acc
 }
 
+/// Degree of the quadrature rule on cells with a curved edge (ADR 82): the integrand is rational in the barycentric coordinates there.
+pub const CURVED_QUAD_DEGREE: usize = 6;
+
+/// Adds the contribution of one quadrature point (weight `wq`, basis values `w` and curls `cu`) to the element matrix: the curl-curl
+/// matrix for `which == 0`, the mass matrix otherwise. The same arithmetic serves straight and curved cells.
+#[allow(clippy::too_many_arguments)]
+fn add_point(
+    which: usize,
+    nb: usize,
+    ke: &mut [C],
+    w: &[[f64; 3]],
+    cu: &[[f64; 3]],
+    wq: f64,
+    eps: &C3,
+    mu_inv: &[C; 3],
+) {
+    for i in 0..nb {
+        if which == 0 {
+            let ci_ = cu[i];
+            for j in 0..nb {
+                let cj = cu[j];
+                let mut acc = c(0.0, 0.0);
+                for a in 0..3 {
+                    acc += mu_inv[a] * (ci_[a] * cj[a]);
+                }
+                ke[i * nb + j] += acc * wq;
+            }
+        } else {
+            let wi = w[i];
+            for j in 0..nb {
+                let wj = w[j];
+                let mut acc = c(0.0, 0.0);
+                for a in 0..3 {
+                    for b in 0..3 {
+                        acc += eps[a][b] * (wi[a] * wj[b]);
+                    }
+                }
+                ke[i * nb + j] += acc * wq;
+            }
+        }
+    }
+}
+
 /// The curl-curl matrix `K` (weights `1/mu` per axis) and the mass matrix `M` (permittivity tensor)
 /// over all dofs.
 pub fn assemble_maxwell(mesh: &Discretisation, ned: &Ned3, eps: &[C3], mu_inv: &[[C; 3]]) -> (CCsr, CCsr) {
     let geo = geometry(mesh);
     let quad = quad_rule(3, 4);
+    // cells with a curved edge (ADR 82) are integrated with the geometry of their ten nodes; every other cell keeps the affine path
+    let curved_cell: Vec<bool> = (0..mesh.n_cells()).map(|ci| mesh.cell_is_curved(ci)).collect();
+    let cquad = quad_rule_collapsed(CURVED_QUAD_DEGREE);
     let nb = ned.nb();
     let n = ned.n_dofs();
     let nc = mesh.n_cells();
@@ -248,34 +294,22 @@ pub fn assemble_maxwell(mesh: &Discretisation, ned: &Ned3, eps: &[C3], mu_inv: &
                     }
                 }
                 ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
-                for q in 0..quad.w.len() {
-                    let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
-                    basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
-                    let wq = quad.w[q] * geo.vol[ci];
-                    for i in 0..nb {
-                        if which == 0 {
-                            let ci_ = cu[i];
-                            for j in 0..nb {
-                                let cj = cu[j];
-                                let mut acc = c(0.0, 0.0);
-                                for a in 0..3 {
-                                    acc += mu_inv[ci][a] * (ci_[a] * cj[a]);
-                                }
-                                ke[i * nb + j] += acc * wq;
-                            }
-                        } else {
-                            let wi = w[i];
-                            for j in 0..nb {
-                                let wj = w[j];
-                                let mut acc = c(0.0, 0.0);
-                                for a in 0..3 {
-                                    for b in 0..3 {
-                                        acc += eps[ci][a][b] * (wi[a] * wj[b]);
-                                    }
-                                }
-                                ke[i * nb + j] += acc * wq;
-                            }
-                        }
+                if curved_cell[ci] {
+                    // quadratic geometry (ADR 82): gradients of the barycentric functions and the weight at every point
+                    let ct = CurvedTet::new(mesh.cell_geometry_nodes(ci));
+                    for q in 0..cquad.w.len() {
+                        let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
+                        let (gq, det) = ct.jacobian(&lam);
+                        basis3(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
+                        let wq = cquad.w[q] * det.abs() / 6.0;
+                        add_point(which, nb, &mut ke, &w, &cu, wq, &eps[ci], &mu_inv[ci]);
+                    }
+                } else {
+                    for q in 0..quad.w.len() {
+                        let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
+                        basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        let wq = quad.w[q] * geo.vol[ci];
+                        add_point(which, nb, &mut ke, &w, &cu, wq, &eps[ci], &mu_inv[ci]);
                     }
                 }
                 coo.push_block(&ned.cell_dofs[ci], &ned.cell_dofs[ci], &ke);
@@ -651,8 +685,14 @@ pub fn emw_eigen_fields(
                     gs[b][kk] = geo.g[ci * 12 + b * 3 + kk];
                 }
             }
+            let curved = mesh.cell_is_curved(ci).then(|| CurvedTet::new(mesh.cell_geometry_nodes(ci)));
             for (a, l) in lamn.iter().enumerate() {
-                basis3(order, &[l[0], l[1], l[2], l[3]], &gs, &gid, &mut w, &mut cu);
+                let lam = [l[0], l[1], l[2], l[3]];
+                match &curved {
+                    // gradients at the point for a cell with a curved edge (ADR 82); the plotted nodes stay at the straight positions
+                    Some(ct) => basis3(order, &lam, &ct.jacobian(&lam).0, &gid, &mut w, &mut cu),
+                    None => basis3(order, &lam, &gs, &gid, &mut w, &mut cu),
+                }
                 let mut val = [c(0.0, 0.0); 3];
                 for s in 0..nb {
                     let coef = x[ned.cell_dofs[ci][s]];

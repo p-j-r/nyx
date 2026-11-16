@@ -93,6 +93,9 @@ pub struct SimplexMesh {
     edges: Vec<(u32, u32)>,
     /// per cell, the edge index of each local vertex pair (i<j in lexicographic order)
     cell_edges: Vec<u32>,
+    /// 3D: the curved edges (ADR 82), as (edge index, position of the mid-edge geometry node), sorted by edge index; an edge that is not
+    /// listed is straight. Empty for every mesh made by `new`.
+    edge_nodes: Vec<(u32, [f64; 3])>,
 }
 
 /// The distinct edges of a mesh as sorted vertex pairs, and for every cell the edge index of each
@@ -214,9 +217,64 @@ impl SimplexMesh {
         assert!(dim == 2 || dim == 3);
         let nv = points.len() / dim;
         let (edges, cell_edges) = build_edges(dim, &cells, nv);
-        SimplexMesh { dim, points, cells, cell_labels, facets, facet_labels, edges, cell_edges }
+        SimplexMesh { dim, points, cells, cell_labels, facets, facet_labels, edges, cell_edges, edge_nodes: Vec::new() }
     }
 
+    /// Sets the curved edges of a 3D mesh: `(vertex pair, node position)`; pairs that are not an edge of the mesh are ignored (the
+    /// connectivity is what decides), and the list is kept sorted by edge index.
+    pub fn set_edge_nodes(&mut self, nodes: &[([u32; 2], [f64; 3])]) {
+        if self.dim != 3 {
+            self.edge_nodes.clear();
+            return;
+        }
+        let mut v: Vec<(u32, [f64; 3])> = nodes
+            .iter()
+            .filter_map(|&([a, b], p)| self.edges.binary_search(&(a.min(b), a.max(b))).ok().map(|e| (e as u32, p)))
+            .collect();
+        v.sort_by_key(|e| e.0);
+        v.dedup_by_key(|e| e.0);
+        self.edge_nodes = v;
+    }
+    /// The curved edges as `(sorted vertex pair, node position)`, sorted by pair (the exchange form of `CellMesh::edge_nodes`).
+    pub fn edge_node_list(&self) -> Vec<([u32; 2], [f64; 3])> {
+        let mut v: Vec<([u32; 2], [f64; 3])> = self.edge_nodes.iter().map(|&(e, p)| ([self.edges[e as usize].0, self.edges[e as usize].1], p)).collect();
+        v.sort_by_key(|e| e.0);
+        v
+    }
+    /// Position of the mid-edge geometry node of edge `e` (index into `edges()`); `None` when the edge is straight.
+    pub fn edge_node(&self, e: usize) -> Option<[f64; 3]> {
+        self.edge_nodes.binary_search_by_key(&(e as u32), |x| x.0).ok().map(|i| self.edge_nodes[i].1)
+    }
+    /// Whether the mesh has any curved edge.
+    pub fn has_curved(&self) -> bool {
+        !self.edge_nodes.is_empty()
+    }
+    /// Whether one of the edges of cell `c` is curved (3D only).
+    pub fn cell_is_curved(&self, c: usize) -> bool {
+        !self.edge_nodes.is_empty() && self.dim == 3 && self.cell_edge_ids(c).iter().any(|&e| self.edge_node(e as usize).is_some())
+    }
+    /// The ten geometry nodes of tetrahedron `c`: its four vertices, then the nodes of its six edges in the order of the local vertex
+    /// pairs (0,1), (0,2), (0,3), (1,2), (1,3), (2,3); a straight edge gives its midpoint.
+    pub fn cell_geometry_nodes(&self, c: usize) -> [[f64; 3]; 10] {
+        let v = self.cell(c);
+        let p = |i: usize| -> [f64; 3] { [self.points[v[i] as usize * 3], self.points[v[i] as usize * 3 + 1], self.points[v[i] as usize * 3 + 2]] };
+        let mut out = [[0.0; 3]; 10];
+        for (i, o) in out.iter_mut().enumerate().take(4) {
+            *o = p(i);
+        }
+        let ids = self.cell_edge_ids(c);
+        let mut k = 4;
+        for i in 0..4 {
+            for j in i + 1..4 {
+                out[k] = self.edge_node(ids[k - 4] as usize).unwrap_or_else(|| {
+                    let (a, b) = (p(i), p(j));
+                    [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0, (a[2] + b[2]) / 2.0]
+                });
+                k += 1;
+            }
+        }
+        out
+    }
     pub fn n_points(&self) -> usize {
         self.points.len() / self.dim
     }
@@ -580,7 +638,13 @@ impl SimplexMesh {
             return Err("the mesh has no cells or no boundary elements".into());
         }
         report.cells_after = cells.len() / (d + 1);
-        Ok((SimplexMesh::new(d, points, cells, cell_labels, facets, facet_labels), report))
+        let mut mesh = SimplexMesh::new(d, points, cells, cell_labels, facets, facet_labels);
+        // curved edges (ADR 82) survive only where the cells are the cells that were given: a mesh that had to be split keeps none
+        if d == 3 && !nm.edge_nodes.is_empty() && report.is_empty() {
+            let nodes: Vec<([u32; 2], [f64; 3])> = nm.edge_nodes.iter().map(|e| (e.0, [e.1[0], e.1[1], e.1[2]])).collect();
+            mesh.set_edge_nodes(&nodes);
+        }
+        Ok((mesh, report))
     }
 }
 

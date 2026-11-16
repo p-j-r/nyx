@@ -45,6 +45,10 @@ pub struct MeshSettings {
     /// largest distance of a chord from a curved edge or face in metres; absent: h / 50
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_dev: Option<f64>,
+    /// 3D: give the cells on a curved surface quadratic (isoparametric) geometry, so a sphere is a sphere to third order in the element size
+    /// instead of a polyhedron (ADR 82). Only the `ems` cavity study uses it; the other physics see straight cells
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub curved: bool,
 }
 
 impl Default for MeshSettings {
@@ -57,6 +61,7 @@ impl Default for MeshSettings {
             points_per_wavelength: None,
             structured_pml: false,
             max_dev: None,
+            curved: false,
         }
     }
 }

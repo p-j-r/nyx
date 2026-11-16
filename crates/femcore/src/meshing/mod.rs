@@ -12,6 +12,7 @@
 //! Hessian, say) and it adapts the same way. Nothing else of the interface changes.
 
 pub mod adapt3d;
+pub mod curve3;
 pub mod geomdrive;
 pub mod geomdrive3;
 pub mod mesher;
@@ -220,7 +221,14 @@ fn mesh_3d_plan(ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &Physics
         Mesher::Simple => Sizes3 { region_h: want.clone(), skip },
         Mesher::Adaptive(_) => Sizes3 { region_h: vec![], skip },
     };
-    let (g, _, _) = geomdrive3::mesh_geom_3d_with(ev, &plan.opts, &start_sizes)?;
+    // curved geometry (ADR 82) is given by the lattice mesher itself when it makes the final mesh; after an adaptation or the structured
+    // layers the connectivity changes, so the edges are curved last
+    let curve_last = plan.opts.curved && (matches!(plan.mesher, Mesher::Adaptive(_)) || matches!(plan.pml, PmlMode::Structured));
+    let mut start_opts = plan.opts;
+    if curve_last {
+        start_opts.curved = false;
+    }
+    let (g, _, _) = geomdrive3::mesh_geom_3d_with(ev, &start_opts, &start_sizes)?;
     let (g, report) = match plan.mesher {
         Mesher::Simple => (g, None),
         Mesher::Adaptive(a) => {
@@ -245,10 +253,15 @@ fn mesh_3d_plan(ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &Physics
             (g, Some(r))
         }
     };
-    match plan.pml {
-        PmlMode::Inline => Ok((g, report)),
-        PmlMode::Structured => Ok((pml_geom3::structured_pml_3d(g)?.0, report)),
+    let mut g = match plan.pml {
+        PmlMode::Inline => g,
+        PmlMode::Structured => pml_geom3::structured_pml_3d(g)?.0,
+    };
+    if curve_last {
+        let dom = geomdrive3::GeomDomain3::new(&g.eval, &g.labels, plan.opts.h)?;
+        curve3::curve_solver_mesh(&mut g.mesh, &dom);
     }
+    Ok((g, report))
 }
 
 /// The isotropic metric at every vertex of a meshed model that the model itself asks for: the size of the region(s) the vertex belongs

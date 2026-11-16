@@ -66,22 +66,23 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/rustfmt.toml` | 13 | only formatted crate (R23) |
 | `crates/geom/Cargo.toml` | 3, 13 | serde only |
 | `crates/femcore/src/linalg/*` | 33, 8, 11 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver |
-| `crates/femcore/src/mesh/mod.rs` | 4 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
+| `crates/femcore/src/mesh/mod.rs` | 4, 82 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
 | `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
-| `crates/femcore/src/mesh/cells.rs` | 5 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
-| `crates/femcore/src/mesh/exchange.rs` | 32, 41 | the mesh a physics is given (native cell mesh, 2D or 3D) and its numbering of unknowns |
+| `crates/femcore/src/mesh/cells.rs` | 5, 82 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
+| `crates/femcore/src/mesh/exchange.rs` | 32, 41, 82 | the mesh a physics is given (native cell mesh, 2D or 3D) and its numbering of unknowns |
 | `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
-| `crates/femcore/src/meshing/mod.rs` | 6, 7, 18, 50, 51, 52 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
-| `crates/femcore/src/meshing/geomdrive.rs` | 2, 6 | |
+| `crates/femcore/src/meshing/mod.rs` | 6, 7, 18, 50, 51, 52, 82 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
+| `crates/femcore/src/meshing/geomdrive.rs` | 2, 6, 82 | |
 | `crates/femcore/src/meshing/mesher.rs` | 6, 2, 66 | 2D triangulation core; `extrude_y` with `Layer::fill` |
-| `crates/femcore/src/meshing/mesher3d.rs` | 40, 55 | lattice (isosurface stuffing) tetrahedral mesher on the trait `Domain3`; was the R05 fixture |
+| `crates/femcore/src/meshing/mesher3d.rs` | 40, 55, 82, 83 | lattice (isosurface stuffing) tetrahedral mesher on the trait `Domain3`; was the R05 fixture |
 | `crates/femcore/src/meshing/refine3d.rs` | 40 | Rivara longest-edge refinement of a `CellMesh<3>` |
-| `crates/femcore/src/meshing/geomdrive3.rs` | 40, 2, 50, 52 | adapter: a 3D geom model as `Domain3` (classify, facet_project, LabelMap), `mesh_geom_3d`, `sphere_cavity` |
+| `crates/femcore/src/meshing/curve3.rs` | 82 | curved edges: mid-edge geometry nodes from the exact surface, Jacobian validity, `CurveReport` |
+| `crates/femcore/src/meshing/geomdrive3.rs` | 40, 2, 50, 52, 82, 83 | adapter: a 3D geom model as `Domain3` (classify, facet_project, LabelMap), `mesh_geom_3d`, `sphere_cavity` |
 | `crates/femcore/src/meshing/pml3.rs` | 5, 7 | |
 | `crates/femcore/src/meshing/pml_geom3.rs` | 52, 5 | structured absorbing layers for a meshed 3D geom model: the physical window, `build_pml`, geom labels, the tetrahedral cut |
 | `crates/femcore/src/meshing/adapt3d.rs` | 51, 40 | adaptive meshing of a 3D geom model: the exact faces as the oracle of `adapt3`, interface facets, vertex sizes |
-| `crates/femcore/src/meshing/request.rs` | 54 | the serialisable mesh request and report, their JSON Schemas |
+| `crates/femcore/src/meshing/request.rs` | 54, 82, 83 | the serialisable mesh request and report, their JSON Schemas |
 | `crates/femcore/src/meshing/pml_geom.rs` | 5, 7, 52 | structured PML for a meshed geom model, an adapter over `pml_box` (was `meshing_pml.rs`, then `meshing/pml.rs`) |
 | `crates/femcore/src/meshing/pml_box.rs` | 7, 5 | structured PML generator (was `meshers/adapt/pml.rs`) |
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
@@ -108,7 +109,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/pml.rs` | 45, 7, 69 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`; `radial_coordinate` is the cylindrical stretch both axisymmetric kernels use) |
 | `crates/femcore/src/optical.rs` | 21, 9, 45 | optical mode sets, field sampling and the complex material tensors (split out of `sbs.rs` in phase 1; the solvers that fill a set are in `nyx-ems`) |
 | `crates/femcore/src/fields.rs` | 9 | cell fields |
-| `crates/femcore/src/fem.rs` | 4, 8 | element basics, original stack |
+| `crates/femcore/src/fem.rs` | 4, 8, 82 | element basics, original stack |
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
@@ -123,6 +124,10 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/mesh3d_features.rs` | 50, 51, 52, 55 | wavelength sizing, adaptive meshing, structured layers and thread-count independence for 3D geom models |
 | `crates/nyx-ems/tests/maxwell_estimator.rs` | 53 | the Maxwell estimator and loop on a PEC cavity and on a sphere from geom |
 | `crates/femcore/tests/meshing.rs` | 6, 66 | |
+| `crates/femcore/tests/curved.rs` | 82 | curved tetrahedra: the map, the quadrature, storage, sphere volume, thread independence |
+| `crates/femcore/tests/face_size.rs` | 83 | face sizes and `max_dev` in the lattice mesher |
+| `crates/nyx-ems/tests/curved.rs` | 82 | the cavity kernel on curved tetrahedra against closed forms and the PEC sphere cavity |
+| `crates/nyx-engine/tests/curved.rs` | 82 | a periodic dielectric sphere with `curved` on and off |
 | `crates/femcore/tests/geom_meshes.rs` | 2, 6 | |
 | `crates/femcore/tests/*` | 9, 12 | physics tests: solid, solid_pml, anisotropic, common |
 | `crates/femcore/examples/fs_*.rs` | 8 | ported CLI tools |

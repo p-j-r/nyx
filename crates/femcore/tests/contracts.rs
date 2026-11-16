@@ -96,8 +96,11 @@ fn frames_pml_directions_use_x_and_z_on_a_cross_section() {
 // ---------------------------------------------------------------------------------------------------------------- mesh
 
 #[test]
-fn mesh_labels_are_one_based_and_arrays_carry_no_curved_nodes() {
+fn mesh_labels_are_one_based_and_cells_store_vertices_only() {
     let m = common::rect(1.0, 0.5, 4, 2);
+    // curved edges are a separate list (ADR 82): an empty list is the straight mesh of ADR 18
+    assert!(!m.has_curved());
+    assert!(matches!(femcore::mesh::Mesh::from_solver_mesh(&m).unwrap(), femcore::mesh::Mesh::D2(c) if c.edge_nodes.is_empty()));
     assert_eq!(m.dim, 2);
     assert_eq!(m.points.len(), 2 * m.n_points());
     assert_eq!(m.cells.len(), 3 * m.n_cells(), "a triangle stores its three vertices, no mid-edge nodes (ADR 18)");
@@ -240,7 +243,7 @@ fn mesh_cell_model_matches_the_exemplar() {
         "arrays": ["points [D]", "types", "offsets", "conn", "label", "facet_offsets", "facet_conn", "facet_label"],
         "label_base": { "domains": 1, "boundaries": 1, "exterior": 0 },
         "boundary_facets": { "2d": "2 nodes", "3d": "3 nodes (triangle) or 4 nodes (quadrilateral, counter-clockwise)" },
-        "curved_nodes": "not stored (ADR 18)",
+        "curved_nodes": "edge_nodes: Vec<(sorted vertex pair, position)> sorted by pair, empty by default; an edge not listed is straight, its mid-edge node is the midpoint (ADR 82, amends ADR 18)",
         "cell_types": cell_types,
         "file": { "format": ".fmsh", "version": 2 },
         "solver_view": {
@@ -491,6 +494,7 @@ fn mesh_request_and_report_match_their_exemplars_and_schemas() {
         max_dev: None,
         mesher: MesherRequest::Adaptive { scale: 0.7, grade: 0.4, max_cells: Some(200_000) },
         structured_pml: true,
+        curved: false,
         waves: Some(WavesRequest {
             sizing: Sizing { order: 2, headroom: 1.0, wavelengths: [("air".to_string(), 4.0), ("ball".to_string(), 1.2)].into_iter().collect() },
             points_per_wavelength: None,

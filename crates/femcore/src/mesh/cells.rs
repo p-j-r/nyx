@@ -100,6 +100,10 @@ pub struct CellMesh<const D: usize> {
     pub facet_conn: Vec<u32>,
     /// Label of every boundary facet.
     pub facet_label: Vec<i32>,
+    /// Curved edges (ADR 82): for an edge, given as its sorted vertex pair, the position of its mid-edge geometry node, so that the
+    /// cells around it are quadratic (isoparametric) there. Sorted by pair. Empty by default; an edge that is not listed is straight
+    /// (its node is the midpoint), so an empty list is the straight mesh of ADR 18.
+    pub edge_nodes: Vec<([u32; 2], [f64; D])>,
 }
 
 impl<const D: usize> CellMesh<D> {
@@ -154,6 +158,44 @@ impl<const D: usize> CellMesh<D> {
         self.facet_conn.extend_from_slice(vs);
         self.facet_offsets.push(self.facet_conn.len() as u32);
         self.facet_label.push(label);
+    }
+
+    /// Sets the curved edges: pairs are put in ascending vertex order, the list is sorted by pair, and when an edge is given twice
+    /// the last position wins.
+    pub fn set_edge_nodes(&mut self, nodes: impl IntoIterator<Item = ([u32; 2], [f64; D])>) {
+        let mut v: Vec<([u32; 2], [f64; D])> = nodes.into_iter().map(|([a, b], p)| ([a.min(b), a.max(b)], p)).collect();
+        v.sort_by_key(|e| e.0);
+        let mut out: Vec<([u32; 2], [f64; D])> = Vec::with_capacity(v.len());
+        for e in v {
+            match out.last_mut() {
+                Some(l) if l.0 == e.0 => *l = e,
+                _ => out.push(e),
+            }
+        }
+        self.edge_nodes = out;
+    }
+
+    /// Position of the mid-edge node of the edge `a`-`b`, `None` when the edge is straight.
+    pub fn edge_node(&self, a: u32, b: u32) -> Option<[f64; D]> {
+        let key = [a.min(b), a.max(b)];
+        self.edge_nodes.binary_search_by_key(&key, |e| e.0).ok().map(|i| self.edge_nodes[i].1)
+    }
+
+    /// Drops the curved edges that are not an edge of any cell (after the connectivity changed). Never adds one.
+    pub fn retain_existing_edge_nodes(&mut self) {
+        if self.edge_nodes.is_empty() {
+            return;
+        }
+        let mut exist: std::collections::HashSet<[u32; 2]> = std::collections::HashSet::new();
+        for c in 0..self.n_cells() {
+            let vs = self.cell(c);
+            for i in 0..vs.len() {
+                for j in i + 1..vs.len() {
+                    exist.insert([vs[i].min(vs[j]), vs[i].max(vs[j])]);
+                }
+            }
+        }
+        self.edge_nodes.retain(|e| exist.contains(&e.0));
     }
 
     /// Number of cells of each shape.

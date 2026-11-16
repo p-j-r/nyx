@@ -13,6 +13,7 @@
 
 use crate::mesh::cells::CellMesh;
 use crate::mesh::SimplexMesh;
+use crate::meshing::curve3::curve_boundary_edges;
 use crate::meshing::geomdrive::{GeomMeshOpts, MeshedGeom};
 use crate::meshing::mesher3d::{mesh_3d, Domain3, Report3d, Spec3d};
 use geom::eval::Evaluated;
@@ -31,6 +32,8 @@ pub struct GeomDomain3<'a> {
     sides: Vec<(Option<u32>, Option<u32>)>,
     boxes: Vec<geom::math::Aabb>,
     face_label: Vec<i32>,
+    /// per face: the element size next to it that a `Size` rule or the chord limit asks for (infinite: none), ADR 83
+    face_h: Vec<f64>,
 }
 
 impl<'a> GeomDomain3<'a> {
@@ -49,12 +52,30 @@ impl<'a> GeomDomain3<'a> {
         for p in ev.pml_regions() {
             region_h[p.region as usize] = region_h[p.region as usize].min(p.thickness / p.layers);
         }
-        // only the sizes of regions apply to a 3D mesh (a rule on edges has no meaning for the lattice)
+        // the sizes of regions lower the size of the region; the sizes of faces (and their chord limit) are kept per face (ADR 83). A rule on
+        // the crease edges or vertices of a 3D model has no meaning for the lattice and is reported as a warning by the mesh report
+        let mut face_h = vec![f64::INFINITY; ev.complex().facet_count()];
         for rule in ev.size_rules() {
-            if let (Some(rh), EntityKind::Regions) = (rule.h, rule.entities.kind) {
-                for &r in &rule.entities.ids {
-                    region_h[r as usize] = region_h[r as usize].min(rh);
+            match rule.entities.kind {
+                EntityKind::Regions => {
+                    if let Some(rh) = rule.h {
+                        for &r in &rule.entities.ids {
+                            region_h[r as usize] = region_h[r as usize].min(rh);
+                        }
+                    }
                 }
+                EntityKind::Faces => {
+                    for &i in &rule.entities.ids {
+                        let i = i as usize;
+                        if let Some(rh) = rule.h {
+                            face_h[i] = face_h[i].min(rh);
+                        }
+                        if let (Some(md), Some(r)) = (rule.max_dev, ev.complex().facet_radius(i as u32)) {
+                            face_h[i] = face_h[i].min(chord_size(r, md));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         // the wave sizes of a study ask for finer elements only; a region that is not meshed needs none
@@ -83,7 +104,45 @@ impl<'a> GeomDomain3<'a> {
         let face_label = (0..nf as u32)
             .map(|i| labels.label_of_edge(i).ok_or_else(|| format!("face '{}' has no boundary label", cx.facet_name(i))))
             .collect::<Result<Vec<i32>, String>>()?;
-        Ok(GeomDomain3 { ev, labels, region_h, meshable, sides, boxes, face_label })
+        Ok(GeomDomain3 { ev, labels, region_h, meshable, sides, boxes, face_label, face_h })
+    }
+
+    /// Adds the chord limit `max_dev` (metres) of the request to every curved face: the element size at which a chord stays within it
+    /// (ADR 83). `None`: no limit, so a mesh without face rules is the mesh it always was.
+    pub fn with_max_dev(mut self, max_dev: Option<f64>) -> Self {
+        if let Some(md) = max_dev {
+            for i in 0..self.face_h.len() {
+                if let Some(r) = self.ev.complex().facet_radius(i as u32) {
+                    self.face_h[i] = self.face_h[i].min(chord_size(r, md));
+                }
+            }
+        }
+        self
+    }
+
+    /// A face with a size request that a periodic face is within reach of: refused (the two faces of a pair would be refined differently
+    /// and no longer match; congruent periodic faces are R30 of `capability-r7-periodic-cells`).
+    pub fn check_periodic_faces(&self) -> Result<(), String> {
+        if !self.face_h.iter().any(|h| h.is_finite()) {
+            return Ok(());
+        }
+        let h_glob = self.coarsest_meshed_size();
+        let gap = |a: &geom::math::Aabb, b: &geom::math::Aabb| (0..3).map(|k| (a.lo[k] - b.hi[k]).max(b.lo[k] - a.hi[k]).max(0.0)).fold(0.0, f64::max);
+        for pp in self.ev.periodic_pairs() {
+            for &pf in pp.a.ids.iter().chain(pp.b.ids.iter()) {
+                for (i, &hf) in self.face_h.iter().enumerate() {
+                    if hf.is_finite() && gap(&self.boxes[pf as usize], &self.boxes[i]) < (h_glob - hf).max(0.0) / 0.3 + 1e-12 {
+                        return Err(format!(
+                            "the size requested at face '{}' reaches the periodic face '{}': the two faces of a periodic pair would be meshed differently. Keep faces with a size away from periodic faces (a distance of {:.3e} m) or use a uniform size",
+                            self.ev.complex().facet_name(i as u32),
+                            self.ev.complex().facet_name(pf),
+                            (h_glob - hf).max(0.0) / 0.3
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The element size of each geom region (global size lowered by `Size` rules, absorbing layers and requested sizes).
@@ -164,6 +223,55 @@ impl Domain3 for GeomDomain3<'_> {
         }
         None
     }
+    fn asks_size_at(&self) -> bool {
+        let h_glob = self.coarsest_meshed_size();
+        self.face_h.iter().any(|&h| h.is_finite() && h < 0.999 * h_glob)
+    }
+    fn size_at(&self, p: [f64; 3]) -> Option<f64> {
+        // the smallest size a face asks for, graded away from it with a growth of 0.3 per unit length (a ratio of 1.3 between neighbours)
+        let h_glob = self.coarsest_meshed_size();
+        let mut best: Option<f64> = None;
+        for (i, &hf) in self.face_h.iter().enumerate() {
+            if !hf.is_finite() || hf >= h_glob {
+                continue;
+            }
+            let cap = (h_glob - hf) / 0.3;
+            let d = self.face_distance(i, p, cap);
+            if d < cap {
+                let s = hf + 0.3 * d;
+                best = Some(best.map_or(s, |b: f64| b.min(s)));
+            }
+        }
+        best
+    }
+    fn edge_on_crease(&self, pa: [f64; 3], pb: [f64; 3]) -> bool {
+        let len = ((pb[0] - pa[0]).powi(2) + (pb[1] - pa[1]).powi(2) + (pb[2] - pa[2]).powi(2)).sqrt();
+        let tol = 1e-6 * len;
+        let cx = self.ev.complex();
+        let mid = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0, (pa[2] + pb[2]) / 2.0];
+        // the faces that both ends lie on; they are a crease when they put the midpoint in different places
+        let mut first: Option<[f64; 3]> = None;
+        for i in 0..self.sides.len() {
+            if self.face_distance(i, pa, tol) <= tol && self.face_distance(i, pb, tol) <= tol {
+                let q = cx.facet_project(i as u32, mid);
+                match first {
+                    None => first = Some(q),
+                    Some(f) => {
+                        if ((q[0] - f[0]).powi(2) + (q[1] - f[1]).powi(2) + (q[2] - f[2]).powi(2)).sqrt() > tol {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+/// The element size at which a chord of a surface with radius of curvature `r` stays within `max_dev` of it (the formula of the adaptive
+/// mesher, `adapt3d`).
+fn chord_size(r: f64, max_dev: f64) -> f64 {
+    2.0 * (2.0 * r * max_dev).sqrt()
 }
 
 /// What a caller asks of the 3D mesh beyond the model's own sizes.
@@ -198,9 +306,15 @@ pub fn mesh_geom_3d_with(ev: Evaluated, opts: &GeomMeshOpts, sizes: &Sizes3) -> 
     }
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let (cells, report) = {
-        let dom = GeomDomain3::new_with(&ev, &labels, opts.h, sizes)?;
+        let dom = GeomDomain3::new_with(&ev, &labels, opts.h, sizes)?.with_max_dev(opts.max_dev);
+        dom.check_periodic_faces()?;
         let h_lattice = if sizes.region_h.iter().any(|h| h.is_finite() && *h > 0.0) { dom.coarsest_meshed_size().min(opts.h) } else { opts.h };
-        mesh_3d(&dom, &Spec3d::new(h_lattice))?
+        let (mut cells, mut report) = mesh_3d(&dom, &Spec3d::new(h_lattice))?;
+        // curved (quadratic) geometry for the cells on a curved surface (ADR 82), after the last change of the connectivity
+        if opts.curved {
+            report.curve = Some(curve_boundary_edges(&mut cells, &dom));
+        }
+        (cells, report)
     };
     let mesh = SimplexMesh::from_cells(&cells)?;
     Ok((MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) }, report, cells))
@@ -210,9 +324,14 @@ pub fn mesh_geom_3d_with(ev: Evaluated, opts: &GeomMeshOpts, sizes: &Sizes3) -> 
 /// the sphere (`cavity.surface`). The sphere sits in a host box that is a hole, so nothing but the ball is meshed. The quick problem for the
 /// closed-form PEC cavity (lowest mode `k r = 2.7437`), tests and benchmarks.
 pub fn sphere_cavity(r: f64, h: f64) -> Result<MeshedGeom, String> {
+    sphere_cavity_with(r, &GeomMeshOpts::new(h))
+}
+
+/// `sphere_cavity` with the mesh options of the caller (`curved`, `max_dev`).
+pub fn sphere_cavity_with(r: f64, opts: &GeomMeshOpts) -> Result<MeshedGeom, String> {
     let mut m = geom::model::Model::new_3d();
     let host = m.box_("host", (-2.0 * r, -2.0 * r, -2.0 * r), (2.0 * r, 2.0 * r, 2.0 * r));
     let ball = m.sphere("cavity", (0.0, 0.0, 0.0), r);
     m.overlay_full(&[("host", host, RegionKind::Hole, None), ("cavity", ball, RegionKind::Material, None)], &[]);
-    mesh_geom_3d(crate::meshing::geomdrive::evaluate(&m.list)?, &GeomMeshOpts::new(h))
+    mesh_geom_3d(crate::meshing::geomdrive::evaluate(&m.list)?, opts)
 }

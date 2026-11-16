@@ -172,7 +172,7 @@
       "nodes": 8
     }
   ],
-  "curved_nodes": "not stored (ADR 18)",
+  "curved_nodes": "edge_nodes: Vec<(sorted vertex pair, position)> sorted by pair, empty by default; an edge not listed is straight, its mid-edge node is the midpoint (ADR 82, amends ADR 18)",
   "file": {
     "format": ".fmsh",
     "version": 2

@@ -32,11 +32,13 @@ pub struct GeomMeshOpts {
     /// largest distance of a chord from its curve (default `h / 50`)
     pub max_dev: Option<f64>,
     pub min_angle_deg: f64,
+    /// 3D: give the cells on a curved surface quadratic (isoparametric) geometry (ADR 82). Off by default: straight-sided cells (ADR 18).
+    pub curved: bool,
 }
 
 impl GeomMeshOpts {
     pub fn new(h: f64) -> Self {
-        GeomMeshOpts { h, max_dev: None, min_angle_deg: 25.0 }
+        GeomMeshOpts { h, max_dev: None, min_angle_deg: 25.0, curved: false }
     }
 }
 

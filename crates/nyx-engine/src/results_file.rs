@@ -79,6 +79,7 @@ impl Engine {
                 || made.cell_labels != s.cell_labels
                 || made.facets != s.facets
                 || made.facet_labels != s.facet_labels
+                || made.edge_node_list() != s.edge_node_list()
             {
                 restore(self, before);
                 return Err(Error::invalid(format!(

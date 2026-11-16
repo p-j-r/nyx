@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of ems: descri
     properties {
         "adr" "45, 25"
         "code" "crates/nyx-ems/src: lib.rs"
-        "lines" "286"
+        "lines" "293"
         "codeDiagram" "4-code/ems/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed ems problem the kernels read, dec
     properties {
         "adr" "45"
         "code" "crates/nyx-ems/src: problem.rs"
-        "lines" "171"
+        "lines" "187"
         "codeDiagram" "4-code/ems/problem.md"
     }
 }
@@ -43,7 +43,7 @@ cavity = component "3D cavity kernel" "Electromagnetic eigenmodes of 3D cavities
     properties {
         "adr" "45"
         "code" "crates/nyx-ems/src: cavity.rs"
-        "lines" "746"
+        "lines" "789"
         "codeDiagram" "4-code/ems/cavity.md"
     }
 }

@@ -687,12 +687,16 @@
             "null"
           ]
         },
+        "curved": {
+          "description": "3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity study, default false",
+          "type": "boolean"
+        },
         "h": {
           "description": "global element size in metres",
           "type": "number"
         },
         "max_dev": {
-          "description": "largest chord deviation from a curved edge, metres",
+          "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher",
           "type": [
             "number",
             "null"

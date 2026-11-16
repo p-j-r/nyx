@@ -71,3 +71,5 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 68 | [The axisymmetric solid gets a study](adr/0068-the-axisymmetric-solid-gets-a-study.md) | `nyx-sms::{problem,lib,cross_section}` |
 | 69 | [Axis conditions and the cylindrical stretch of the axisymmetric solid kernel](adr/0069-axis-conditions-and-cylindrical-stretch-of-the-axisymmetric-solid.md) | `nyx-sms::axisym`, `femcore::pml` |
 | 80 | [Modes carry what identifies them, and a convergence check follows a mode](adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md) | `nyx-sms::{cross_section,axisym}`, `nyx-engine::{convergence,solve}` |
+| 82 | [Curved (isoparametric, quadratic) tetrahedra for the `ems` cavity study; amends ADR 18](adr/0082-curved-order-2-geometry.md) | `femcore::fem`, `femcore::meshing::curve3`, `nyx-ems::cavity` |
+| 83 | [Size rules on faces and `max_dev` act in the 3D lattice mesher](adr/0083-face-size-rules-and-max-dev-in-the-lattice-mesher.md) | `femcore::meshing::geomdrive3`, `mesher3d` |

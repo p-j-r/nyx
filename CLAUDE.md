@@ -17,7 +17,7 @@ Desktop finite-element application for photonics and phononics, in pure Rust. No
 | `crates/nyx-mcp`, `nyx-connect` | the AI interface (stdio MCP server whose tools are the engine commands, ADR 57; one-click host connection) |
 | `examples/`, `materials/` | example projects (`*.nyx.json`, written by `crates/nyx-engine/tests/make_examples.rs`) and the material library (`*.toml`), both found next to the program or in a parent folder |
 | `docs/` | design notes and per-project status files |
-| `docs/architecture/` | C4 model (`workspace.dsl`, matches the crate layering test; validated with the Structurizr CLI on 2026-11-13) and the full C4 set in `c4/` (components and code pages generated from the source: `bash docs/architecture/c4/tools/build.sh`; rebuild it when files or crates change), ADRs (`adr/`, index `ADR_INDEX.md`, 68 records: numbers 66 and 67 are used by `restructure-10-a3-snowflake`, so this line of work has 68 and 69; 80 is the mode scalars of capability R11, 70 to 79 are reserved by other capability plans), `ROUGH_SPOTS.md`, `CODE_TO_ADR.md`, interface `contracts/`, the restructure plan. Read `README.md` there first |
+| `docs/architecture/` | C4 model (`workspace.dsl`, matches the crate layering test; validated with the Structurizr CLI on 2026-11-13) and the full C4 set in `c4/` (components and code pages generated from the source: `bash docs/architecture/c4/tools/build.sh`; rebuild it when files or crates change), ADRs (`adr/`, index `ADR_INDEX.md`, 69 records: 66 and 67 (A3 swept cells), 68 and 69 (axisymmetric solid), 80 (mode scalars), 82 and 83 (curved elements); 70 to 79 and 81 are reserved by other capability plans), `ROUGH_SPOTS.md`, `CODE_TO_ADR.md`, interface `contracts/`, the restructure plan. Read `README.md` there first |
 | `tools/` | `baseline.sh` (tests and benchmark timings recorded per phase) |
 | `runs/`, `dist/` | local outputs, git-ignored; never commit results |
 
@@ -50,6 +50,7 @@ Always use `--release`: the solvers are unusably slow unoptimised. The toolchain
 * Every source file of `femcore` and of the new crates starts with a short comment saying what it does; keep that when adding files.
 * `*.py` is git-ignored on purpose: nothing Python ships. Any GDS layout is built with gdsfactory, never raw gdstk.
 * Determinism: the same input gives the same numbers for any thread count. `NYX_THREADS=N` sets the rayon pool, `NYX_PROFILE=1` echoes the solver log.
+* **Curved geometry** (ADR 82, 83): the mesh setting `curved` (`set_mesh`, default off) gives the 3D cells on a curved surface quadratic geometry (`CellMesh::edge_nodes`, `femcore::fem::CurvedTet`); only the `ems` `cavity` study uses it, the other physics see straight cells. With it off every number is the one of the straight mesh. `add_size` on a face and `max_dev` act in the 3D lattice mesher.
 * **File format** (ADR 63): `Project`, `FeatureList` and `ProblemSpec` carry `format` (value 1); files without it or of another format are refused, nothing is converted. Project and spec files are JSON (`*.nyx.json`, `experiment.nyx.json`); results and meshes are HDF5 (feature `hdf5`), never JSON.
 
 ## Known state of the checks (phase 9, 2026-11-13, Windows, Rust 1.99.1)

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Physics adapter** (`ems.adapter`) in the co
 > The Physics implementation of ems: descriptors, validation, solve entry.
 
 **Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 1 file, 286 lines.
+**Size:** 1 file, 293 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/lib.rs` | 286 | nyx-ems: electromagnetic waves (`ems`, ADR 12): guided modes of a 2D cross-section (real or complex, with absorbing layers and tilted crystals), axisymmetric modes, and the eigenfrequencies of 3D cavities and Floquet cells. |
+| `crates/nyx-ems/src/lib.rs` | 293 | nyx-ems: electromagnetic waves (`ems`, ADR 12): guided modes of a 2D cross-section (real or complex, with absorbing layers and tilted crystals), axisymmetric modes, and the eigenfrequencies of 3D cavities and Floquet cells. |
 
 ## What it uses
 
@@ -53,6 +53,6 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | struct | `Ems` | `lib.rs:44` |  |
-| fn | `run` | `lib.rs:251` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
+| fn | `run` | `lib.rs:258` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
 
 Trait implementations in this component: `Ems: Physics`

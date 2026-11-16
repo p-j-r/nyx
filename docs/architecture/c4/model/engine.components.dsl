@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs"
-        "lines" "990"
+        "lines" "1008"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -11,7 +11,7 @@ project = component "Project" "The saved state: feature list, mesh settings, one
     properties {
         "adr" "63"
         "code" "crates/nyx-engine/src: project.rs"
-        "lines" "197"
+        "lines" "206"
         "codeDiagram" "4-code/engine/project.md"
     }
 }
@@ -27,7 +27,7 @@ jobs = component "Job runner" "Mesh and solve jobs on their own threads with pro
     properties {
         "adr" "61, 80"
         "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, solve.rs"
-        "lines" "608"
+        "lines" "609"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -35,7 +35,7 @@ meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, lab
     properties {
         "adr" "54, 50"
         "code" "crates/nyx-engine/src: meshing.rs, pml.rs"
-        "lines" "334"
+        "lines" "354"
         "codeDiagram" "4-code/engine/meshing.md"
     }
 }
@@ -59,7 +59,7 @@ resultsIO = component "Results files" "HDF5 results (serial or MPI-IO), the XDMF
     properties {
         "adr" "62, 63"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "940"
+        "lines" "958"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }
