@@ -10,15 +10,15 @@ graph TB
       subgraph 45 ["nyx-sms"]
         style 45 fill:#ffffff,stroke:#205723,color:#205723
 
-        46["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />sms: descriptors, validation,<br />solve entry.</div>"]
+        46["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />sms with three studies<br />(static, eigenfrequency,<br />axisymmetric eigenfrequency):<br />descriptors, validation,<br />solve entry.</div>"]
         style 46 fill:#85bbf0,stroke:#5d82a8,color:#000000
         47["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed sms problem the<br />kernels read, decoded from<br />the envelope.</div>"]
         style 47 fill:#85bbf0,stroke:#5d82a8,color:#000000
         48["<div style='font-weight: bold'>Solid kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Linear elastic solid<br />mechanics on P1/P2 triangles<br />and tetrahedra: static solve<br />and eigenfrequencies.</div>"]
         style 48 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        49["<div style='font-weight: bold'>Cross-section kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Stiffness and mass on a 2D<br />mesh with three displacement<br />components (the shared kernel<br />of the elastic cross-section<br />models).</div>"]
+        49["<div style='font-weight: bold'>Axisymmetric study kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Axisymmetric study kernel:<br />constraints and axis<br />conditions, absorbing layers,<br />complex eigensolve and fields<br />on the (r, z) half plane (the<br />shared cross-section stages);<br />every mode carries numeric<br />frequency parts, a layer<br />fraction and its energy<br />shares per component and<br />domain.</div>"]
         style 49 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        50["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Elastic modes of a body of<br />revolution on its half-plane<br />cross-section.</div>"]
+        50["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Elastic modes of a body of<br />revolution on its half-plane<br />cross-section, with the axis<br />regularity conditions, the<br />cylindrical PML stretch and<br />the energy weight of a mode<br />per component and class of<br />cells.</div>"]
         style 50 fill:#85bbf0,stroke:#5d82a8,color:#000000
         51["<div style='font-weight: bold'>Floquet kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Eigenfrequencies of a solid<br />with Floquet-periodic<br />boundaries (phononic<br />crystals).</div>"]
         style 51 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -40,7 +40,7 @@ graph TB
     46-. "<div>uses cross_section</div><div style='font-size: 70%'>[Rust paths]</div>" .->49
     46-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->47
     46-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->48
-    50-. "<div>uses femcore: fem,<br />linalg::csr +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
+    50-. "<div>uses femcore: fem,<br />linalg::csr +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     50-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
     49-. "<div>uses femcore: fem, fields +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     49-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
@@ -64,6 +64,7 @@ graph TB
     47-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
     48-. "<div>uses femcore: fem, fields +9</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
     48-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    48-. "<div>uses cross_section</div><div style='font-size: 70%'>[Rust paths]</div>" .->49
     48-. "<div>uses floquet</div><div style='font-size: 70%'>[Rust paths]</div>" .->51
     48-. "<div>uses lrb</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
     48-. "<div>uses pml</div><div style='font-size: 70%'>[Rust paths]</div>" .->52

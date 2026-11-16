@@ -41,7 +41,7 @@ graph LR
       style 33 fill:#438dd5,stroke:#2e6295,color:#ffffff
       39["<div style='font-weight: bold'>nyx-dfs</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Diffusion physics: heat and<br />electrostatics. Typed<br />problem, three-stage kernels,<br />descriptors, goldens.</div>"]
       style 39 fill:#2e7d32,stroke:#205723,color:#ffffff
-      45["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric.</div>"]
+      45["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric eigenfrequency<br />study (bodies of revolution,<br />axis conditions, cylindrical<br />layers).</div>"]
       style 45 fill:#2e7d32,stroke:#205723,color:#ffffff
       54["<div style='font-weight: bold'>nyx-ems</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>EM waves: waveguide modes<br />(real and complex),<br />axisymmetric, cavity in 3D.</div>"]
       style 54 fill:#2e7d32,stroke:#205723,color:#ffffff
@@ -96,7 +96,7 @@ graph LR
 | [nyx-engine](../3-components/engine.md) | `crates/nyx-engine` | The Engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them, and the binding to a workflow. Every action is a named command with a JSON Schema. |
 | [nyx-physics](../3-components/physics.md) | `crates/nyx-physics` | The Physics trait, the problem envelope (ProblemSpec), descriptors, SolveResult, the registry type, validation, JSON Schemas. |
 | [nyx-dfs](../3-components/dfs.md) | `crates/nyx-dfs` | Diffusion physics: heat and electrostatics. Typed problem, three-stage kernels, descriptors, goldens. |
-| [nyx-sms](../3-components/sms.md) | `crates/nyx-sms` | Solid mechanics: static, eigenfrequency, PML, Floquet, low-reflecting boundaries, axisymmetric. |
+| [nyx-sms](../3-components/sms.md) | `crates/nyx-sms` | Solid mechanics: static, eigenfrequency, PML, Floquet, low-reflecting boundaries, axisymmetric eigenfrequency study (bodies of revolution, axis conditions, cylindrical layers). |
 | [nyx-ems](../3-components/ems.md) | `crates/nyx-ems` | EM waves: waveguide modes (real and complex), axisymmetric, cavity in 3D. |
 | [nyx-analysis](../3-components/analysis.md) | `crates/nyx-analysis` | Analyses of results: the polarization (Stokes parameters, Poincare sphere, classes, degenerate groups) as a function of a SolveResult and its mesh. |
 | [nyx-store](../3-components/store.md) | `crates/nyx-store` | Workspace, workflow, experiment and run storage: manifests, append-only run log, versions, search, .nyx archives. Knows nothing of a project. |

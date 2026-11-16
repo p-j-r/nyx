@@ -62,6 +62,12 @@ pub enum Study {
         n_modes: usize,
         f_search: f64,
     },
+    /// vibration modes of a body of revolution on its (r, z) half plane (mesh x = r); the displacement goes as `exp(-j m theta)`
+    AxisymmetricEigenfrequency {
+        n_modes: usize,
+        f_search: f64,
+        azimuthal_order: i64,
+    },
 }
 
 impl Study {
@@ -70,7 +76,13 @@ impl Study {
         match self {
             Study::Static => "static",
             Study::Eigenfrequency { .. } => "eigenfrequency",
+            Study::AxisymmetricEigenfrequency { .. } => "axisymmetric_eigenfrequency",
         }
+    }
+
+    /// Whether the study finds eigenfrequencies (`Eigenfrequency` or `AxisymmetricEigenfrequency`).
+    pub fn is_eigen(&self) -> bool {
+        matches!(self, Study::Eigenfrequency { .. } | Study::AxisymmetricEigenfrequency { .. })
     }
 }
 
@@ -144,7 +156,8 @@ impl Problem {
                 ));
             }
         }
-        if let Study::Eigenfrequency { f_search, .. } = &self.study {
+        if let Study::Eigenfrequency { f_search, .. } | Study::AxisymmetricEigenfrequency { f_search, .. } = &self.study
+        {
             if !f_search.is_finite() {
                 return Err("the study's search frequency is NaN or infinite".into());
             }
@@ -177,6 +190,45 @@ impl Problem {
     }
 }
 
+impl Problem {
+    /// The rules of the axisymmetric study that do not need the mesh (ADR 68): no boundary load, no Floquet pair, no low-reflecting boundary
+    /// (its damping matrix has no `r` weight, rough spot D1), only zero constraints, and a layer cannot absorb towards the axis. A problem of
+    /// another study passes. The mesh rule (the half plane lies in `x >= 0`) is checked by `cross_section::solve_axisymmetric`.
+    pub fn check_axisymmetric(&self) -> Result<(), Error> {
+        if !matches!(self.study, Study::AxisymmetricEigenfrequency { .. }) {
+            return Ok(());
+        }
+        if !self.periodic.is_empty() {
+            return Err(Error::invalid(
+                "a Floquet-periodic pair has no meaning in an axisymmetric model (no translation to repeat)",
+            ));
+        }
+        for bc in &self.bcs {
+            match &bc.kind {
+                BcKind::Load(_) => return Err(Error::invalid("a boundary load belongs to the static study")),
+                BcKind::LowReflecting => {
+                    return Err(Error::Unsupported(
+                        "a low-reflecting boundary is not available in the axisymmetric study yet (its damping matrix has no r weight, rough spot D1): use a perfectly matched layer".into(),
+                    ))
+                }
+                BcKind::Fixed { fixed, values } => {
+                    if (0..3).any(|k| fixed[k] && values[k] != 0.0) {
+                        return Err(Error::invalid(
+                            "an eigenfrequency study takes zero constraints only: a fixed displacement must be 0",
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some((d, _)) = self.materials.pml.iter().find(|(_, p)| p.x == PmlDir::Minus) {
+            return Err(Error::invalid(format!(
+                "the perfectly matched layer of domain {d} absorbs towards the axis (x = minus): a layer cannot absorb towards the axis, use plus"
+            )));
+        }
+        Ok(())
+    }
+}
+
 fn pml_dir(s: &str) -> PmlDir {
     match s {
         "plus" => PmlDir::Plus,
@@ -201,9 +253,14 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         "eigenfrequency" => {
             Study::Eigenfrequency { n_modes: sp.integer("n_modes").max(0) as usize, f_search: sp.number("f_search") }
         }
+        "axisymmetric_eigenfrequency" => Study::AxisymmetricEigenfrequency {
+            n_modes: sp.integer("n_modes").max(0) as usize,
+            f_search: sp.number("f_search"),
+            azimuthal_order: sp.integer("azimuthal_order"),
+        },
         other => return Err(Error::Unsupported(format!("sms has no study '{other}'"))),
     };
-    let eigen = matches!(study, Study::Eigenfrequency { .. });
+    let eigen = study.is_eigen();
     let params = sms.params();
     let pp = Params::new(&spec.params, &params);
     let plane = if pp.text("plane") == "stress" { Plane::Stress } else { Plane::Strain };
@@ -298,7 +355,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         "iterative" => LinearSolver::Iterative,
         _ => LinearSolver::Auto,
     };
-    Ok(Problem {
+    let problem = Problem {
         order: spec.order as usize,
         study,
         materials,
@@ -309,5 +366,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         solver,
         inactive,
         periodic,
-    })
+    };
+    problem.check_axisymmetric()?;
+    Ok(problem)
 }

@@ -41,7 +41,7 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [Problem envelope](./envelope.md) | result | SolveResult |
 | [Test support](./testsupport.md) | result | Scalar, SolveResult |
 | [Physics trait and registry](./trait.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_back +1 |
-| [sms: Cross-section kernel](../sms/crosssection.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Axisymmetric study kernel](../sms/crosssection.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [sms: Floquet kernel](../sms/floquet.md) | result | Scalar, Solution, SolveResult, cell_fields_of |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | result | Scalar, Solution, SolveResult, cell_fields_of |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | result | Scalar, Solution, SolveResult, cell_fields_of |

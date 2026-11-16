@@ -1,4 +1,154 @@
 {
+  "axisymmetric_eigenfrequency": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "layer fraction 1",
+      "f re 1 (Hz)",
+      "f im 1 (Hz)",
+      "radial share 1",
+      "axial share 1",
+      "azimuthal share 1",
+      "share in domain 1 1",
+      "f2 (Hz)",
+      "layer fraction 2",
+      "f re 2 (Hz)",
+      "f im 2 (Hz)",
+      "radial share 2",
+      "axial share 2",
+      "azimuthal share 2",
+      "share in domain 1 2",
+      "f3 (Hz)",
+      "layer fraction 3",
+      "f re 3 (Hz)",
+      "f im 3 (Hz)",
+      "radial share 3",
+      "axial share 3",
+      "azimuthal share 3",
+      "share in domain 1 3"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz",
+          "uy"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|u|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re ux",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uz",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uy",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|uy|",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "Re ux",
+          "Re uz",
+          "Re uy",
+          "|uy|"
+        ],
+        "has_value": true,
+        "label": "mode 1: 78.838574 Hz"
+      }
+    ],
+    "study": "axisymmetric_eigenfrequency"
+  },
+  "axisymmetric_eigenfrequency_pml": {
+    "physics": "sms",
+    "scalars": [
+      "f1 (Hz)",
+      "Q1",
+      "layer fraction 1",
+      "f re 1 (Hz)",
+      "f im 1 (Hz)",
+      "radial share 1",
+      "axial share 1",
+      "azimuthal share 1",
+      "f2 (Hz)",
+      "Q2",
+      "layer fraction 2",
+      "f re 2 (Hz)",
+      "f im 2 (Hz)",
+      "radial share 2",
+      "axial share 2",
+      "azimuthal share 2",
+      "f3 (Hz)",
+      "Q3",
+      "layer fraction 3",
+      "f re 3 (Hz)",
+      "f im 3 (Hz)",
+      "radial share 3",
+      "axial share 3",
+      "azimuthal share 3"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz",
+          "uy"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|u|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re ux",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uz",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re uy",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|uy|",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "Re ux",
+          "Re uz",
+          "Re uy",
+          "|uy|"
+        ],
+        "has_value": true,
+        "label": "mode 1: 7.650961e1 +1.546e1i Hz (Q = 2.475e0)"
+      }
+    ],
+    "study": "axisymmetric_eigenfrequency"
+  },
   "eigenfrequency": {
     "physics": "sms",
     "scalars": [

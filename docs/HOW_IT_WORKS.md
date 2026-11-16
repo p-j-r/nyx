@@ -86,6 +86,19 @@ components live on a 2D cross-section with a travelling-wave factor `exp(−i kz
 (`sms_axisym.rs`), complex coordinate stretching for absorbing layers (`sms_pml.rs`), and boundary
 damping that absorbs outgoing waves (`sms_lrb.rs`).
 
+**Axisymmetric eigenfrequency study (`nyx-sms`, ADR 68 and 69).** A body of revolution is a 2D model whose x is the
+radius r; the displacement goes as `exp(−i m θ)` with the azimuthal order `m` and three components (radial, axial,
+azimuthal). The study `axisymmetric_eigenfrequency` takes `n_modes`, `f_search` and `azimuthal_order`. A mesh may touch
+the axis `r = 0`: there the kernel holds the components that regularity forces to zero (`m = 0`: radial and azimuthal;
+`|m| = 1`: axial; `|m| ≥ 2`: all three), and the log line `axis r = 0: N dofs, K held at zero` says how many. Absorbing
+layers (on +x, +z, −z, never towards the axis) are the *cylindrical* stretch: the radius becomes the complex `r̃` and the
+`1/r` terms and the weight `r` carry `r̃/r`, as in the electromagnetic ring. The frequencies are then complex; the result
+carries `fN (Hz)`, `QN = Re f / (2|Im f|)` and `layer fraction N`, the share of the mass that lies in the layers (modes
+with a large fraction belong to the layers, not to the resonator, and have a Q near 1). Every mode also carries what
+identifies it (ADR 80): `f re N (Hz)` and `f im N (Hz)` as numbers, and the split of `∫ρ|u|² r` outside the layers over the
+three components (`radial share N`, `axial share N`, `azimuthal share N`) and over the regions (`share in <region> N`).
+The modes returned are the eigenpairs near `f_search` whose residual is below 1e-6, so their number can differ from `n_modes`.
+
 ## 5. Assembly and boundary conditions (`fem::assemble_parallel`, `sparse.rs`, `periodic.rs`)
 
 **Assembly** loops over all cells, computes each element matrix and adds its entries into the global matrix

@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs"
-        "lines" "987"
+        "lines" "990"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -23,11 +23,11 @@ geometry = component "Geometry operations" "Every edit of a geom feature list as
         "codeDiagram" "4-code/engine/geometry.md"
     }
 }
-jobs = component "Job runner" "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine." "Rust modules" {
+jobs = component "Job runner" "Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed." "Rust modules" {
     properties {
-        "adr" "61"
+        "adr" "61, 80"
         "code" "crates/nyx-engine/src: convergence.rs, jobs.rs, solve.rs"
-        "lines" "381"
+        "lines" "608"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }

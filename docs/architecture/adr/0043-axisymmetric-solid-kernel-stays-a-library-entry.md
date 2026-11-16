@@ -4,7 +4,7 @@ Date: 2026-11-04
 
 ## Status
 
-Accepted (restructure phase 4, bookmark `restructure-4-sms`). Follows the gate answer G1 (keep the axisymmetric kernels, with a verification note) and ADR 24 (the out-of-plane wave-number model is removed).
+Amended by ADR 68 and ADR 69: the library entry stays, the study `axisymmetric_eigenfrequency` is added (ADR 68), a mesh may touch the axis and the layers are cylindrical (ADR 69). Accepted (restructure phase 4, bookmark `restructure-4-sms`). Follows the gate answer G1 (keep the axisymmetric kernels, with a verification note) and ADR 24 (the out-of-plane wave-number model is removed).
 
 ## Context
 
@@ -19,7 +19,7 @@ Accepted (restructure phase 4, bookmark `restructure-4-sms`). Follows the gate a
 ## Consequences
 
 * The ring tests keep running on the moved code; the electromagnetic ring (`ems_axisym`) is the ems thread's.
-* A mesh that touches the axis `r = 0` is refused as before.
+* A mesh that touches the axis `r = 0` is refused as before. *(Superseded by ADR 69: a mesh may touch the axis, with regularity conditions on the axis dofs.)*
 
 ## Code
 

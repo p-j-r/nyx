@@ -3,7 +3,8 @@
 //!
 //! The crate holds the typed problem (`problem`, decoded from the envelope by `problem::decode`), the kernels in the three stages of
 //! ADR 9 (`solid`: static and real eigenfrequencies; `pml`, `lrb`, `floquet`: the complex-frequency variants; `axisym` and
-//! `cross_section`: bodies of revolution on their half-plane) and the `Physics` implementation below. Moved here from
+//! `cross_section`: bodies of revolution on their half-plane, reached by the study `axisymmetric_eigenfrequency`, ADR 68) and the `Physics`
+//! implementation below. Moved here from
 //! `femcore::{sms, sms_pml, sms_lrb, sms_floquet, sms_axisym, sms_kz}` in restructure phase 4 (ADR 42). `femcore::periodic` (the Floquet
 //! reduction, shared with 3D EM waves) stays in femcore.
 
@@ -18,7 +19,7 @@ pub mod pml;
 pub mod problem;
 pub mod solid;
 
-pub use cross_section::{solve_solid_axisym, CrossModes};
+pub use cross_section::{solve_axisymmetric, solve_solid_axisym, CrossModes};
 pub use problem::{decode, Bc, BcKind, Plane, Problem, Study, ThermalExpansion, ThermalSource};
 pub use solid::{solve_solid, Setup};
 
@@ -65,6 +66,18 @@ impl Physics for Sms {
                 params: vec![
                     ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
                     ParamDesc::number("f_search", "Search around", "Hz", 0.0, "0 finds the lowest modes").range(Some(0.0), None),
+                ],
+            },
+            StudyDesc {
+                kind: "axisymmetric_eigenfrequency".into(),
+                name: "Axisymmetric eigenfrequencies".into(),
+                doc: "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.".into(),
+                dims: Dims::Two,
+                params: vec![
+                    ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
+                    ParamDesc::number("f_search", "Search around", "Hz", 0.0, "0 finds the lowest modes").range(Some(0.0), None),
+                    ParamDesc::integer("azimuthal_order", "Azimuthal order", 0, -100000, "the displacement goes as exp(-j m theta); m > 0 runs along +y")
+                        .range(Some(-100000.0), Some(100000.0)),
                 ],
             },
         ]
@@ -169,6 +182,18 @@ impl Physics for Sms {
                 FieldDesc::new("von Mises", "Pa", &[], "equivalent stress"),
             ],
             "eigenfrequency" => vec![FieldDesc::new("u", "a.u.", &WAFER, "displacement of a mode (normalised)")],
+            "axisymmetric_eigenfrequency" => vec![
+                FieldDesc::new("|u|", "a.u.", &[], "magnitude of the displacement of a mode, scaled to a maximum of 1"),
+                FieldDesc::new(
+                    "Re ux",
+                    "a.u.",
+                    &[],
+                    "real part of the radial component, phase chosen so that the largest component is real",
+                ),
+                FieldDesc::new("Re uz", "a.u.", &[], "real part of the axial component"),
+                FieldDesc::new("Re uy", "a.u.", &[], "real part of the azimuthal component"),
+                FieldDesc::new("|uy|", "a.u.", &[], "magnitude of the azimuthal component"),
+            ],
             _ => vec![],
         }
     }
@@ -186,6 +211,12 @@ impl Physics for Sms {
             return Err(Error::Unsupported(format!("sms supports element order 1 and 2, not {}", spec.order)));
         }
         check_mesh(mesh)?;
+        if spec.study.kind == "axisymmetric_eigenfrequency" && mesh.dim() != 2 {
+            return Err(Error::invalid(format!(
+                "the study 'axisymmetric_eigenfrequency' needs a 2D mesh (the (r, z) half plane), this one is {}D",
+                mesh.dim()
+            )));
+        }
         Ok(())
     }
 
@@ -193,9 +224,11 @@ impl Physics for Sms {
         use femcore::material::{isotropic_stiffness, stiffness_global};
         use femcore::meshing::physics_size::elastic_wavelength;
         let empty = Sizing { order: spec.order, headroom: 1.5, wavelengths: Default::default() };
-        // only an eigenfrequency study with a search frequency has a wave to resolve
+        // only an eigenfrequency study (plain or axisymmetric) with a search frequency has a wave to resolve
         let studies = self.studies();
-        let Some(sd) = studies.iter().find(|s| s.kind == "eigenfrequency" && spec.study.kind == s.kind) else {
+        let Some(sd) = studies.iter().find(|s| {
+            matches!(s.kind.as_str(), "eigenfrequency" | "axisymmetric_eigenfrequency") && spec.study.kind == s.kind
+        }) else {
             return empty;
         };
         let f = nyx_physics::decode::Params::new(&spec.study.params, &sd.params).number("f_search");
@@ -255,7 +288,15 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             progress::stage(format!("solving solid mechanics on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
         let d = discretise(mesh)?;
         problem.check_wafer(d.dim).map_err(Error::invalid)?;
-        solve_solid(&d, problem).map_err(Error::from_kernel)?
+        if matches!(problem.study, Study::AxisymmetricEigenfrequency { .. }) {
+            if d.dim != 2 {
+                return Err(Error::invalid("the axisymmetric study needs a 2D mesh (the (r, z) half plane)"));
+            }
+            problem.check_axisymmetric()?;
+            solve_axisymmetric(&d, problem).map_err(Error::from_kernel)?
+        } else {
+            solve_solid(&d, problem).map_err(Error::from_kernel)?
+        }
     };
     check_result_finite(&result)?;
     result.log.extend(progress.log().into_iter().skip(first_line));

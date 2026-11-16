@@ -11,11 +11,40 @@
 //! and the weight `r dr dz` (the common factor 2 pi dropped). A crystal's stiffness depends on the
 //! angle around the axis; the matrices used here are the one given per domain, so only materials
 //! with the symmetry of the ring (isotropic, or averaged around the axis with
-//! `average_about_axis`) are exact. A mesh must not touch the axis `r = 0`.
+//! `average_about_axis`) are exact.
+//!
+//! **The axis `r = 0` (K1, ADR 69).** A mesh may touch the axis (a solid disk, a post, a substrate). The
+//! quadrature rules are interior (`quad_rule` has no point on an edge), so the `1/r` terms are integrated at `r > 0`;
+//! what a body touching the axis needs besides is the regularity of `u(r, z) exp(-i m theta)` there. Finiteness of
+//!
+//! ```text
+//!   e_tt = (u_r - i m u_t) / r     g_zt = du_t/dz - i m u_z / r     g_rt = du_t/dr - u_t / r - i m u_r / r
+//! ```
+//!
+//! as `r -> 0` gives, with the displacement continuous on the axis (`u_r`, `u_t` are the components in a frame that
+//! turns with theta, so a single-valued vector field has `u_r = u_x cos th + u_y sin th` and so on):
+//!
+//! | `m`      | on the axis                                                              |
+//! |----------|--------------------------------------------------------------------------|
+//! | 0        | `u_r = u_t = 0`; `u_z` free                                              |
+//! | +-1      | `u_z = 0`; `u_r = i m u_t` (see below); `u_r`, `u_t` otherwise free      |
+//! | >= 2     | `u_r = u_t = u_z = 0`                                                    |
+//!
+//! `axis_constraints` holds the zeros of the table. For `m = +-1` the exact tie `u_r = i m u_t` is a relation between two
+//! dofs, not an essential condition; it is not imposed (the energy `1/r` terms act as a penalty on it) and is recorded in
+//! `ROUGH_SPOTS.md`.
+//!
+//! Absorbing layers are the cylindrical coordinate stretch (ADR 69), the one of `nyx-ems` (ADR 46): inside a layer
+//! `r -> r~ = int s_r dr`, so with `s_theta = r~ / r` every `1/r` above becomes `1/(s_theta r)` and the weight `r dr dz`
+//! becomes `s_theta r s_r s_z dr dz` (`cylindrical_stretches` builds `[s_r, s_z, s_theta]` per cell). The test function carries
+//! the conjugate phase `exp(+i m theta)` only, so the stretch is not conjugated in the test-side strain: the matrices are
+//! complex symmetric, not Hermitian, inside a layer. Outside a radial layer `s_theta = 1` and nothing changes.
 
 use femcore::fem::*;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::material::M6;
+use femcore::pml::{cell_stretches, radial_coordinate};
+use femcore::props::{Pml, PmlDir};
 use nyx_physics::Discretisation;
 
 /// The stiffness (solver Voigt order xx, yy, zz, xy, yz, xz in the frame of the cross-section)
@@ -74,7 +103,36 @@ pub fn average_about_axis(c6: &M6, axis: usize, samples: usize) -> M6 {
     out
 }
 
-/// Stiffness matrix over `3 * n_dofs(order)` unknowns (component blocks u_r, u_z, u_theta).
+/// Per-cell stretch `[s_r, s_z, s_theta]` of the absorbing layers of an axisymmetric model (mesh x = r, mesh y = z). `s_r` and `s_z` are
+/// those of `femcore::pml::cell_stretches`; `s_theta = r~ / r` with the complex radius `r~` of `femcore::pml::radial_coordinate` at the cell
+/// centre, as `AxiMaterial::with_pml` does in `nyx-ems` (ADR 46). A cell outside a layer with a radial (`x`) stretch has `s_theta = 1` exactly,
+/// so a model without such a layer assembles to the same matrices as before (ADR 69).
+pub fn cylindrical_stretches(mesh: &Discretisation, pml: &std::collections::BTreeMap<i32, Pml>) -> Vec<[C; 3]> {
+    let mut out = cell_stretches(mesh, pml);
+    // radial extent of each layer domain
+    let mut boxes: std::collections::BTreeMap<i32, (f64, f64)> = Default::default();
+    for ci in 0..mesh.n_cells() {
+        let l = mesh.cell_labels[ci];
+        if pml.get(&l).is_some_and(|p| p.x != PmlDir::Off) {
+            let e = boxes.entry(l).or_insert((f64::INFINITY, f64::NEG_INFINITY));
+            for &v in mesh.cell(ci) {
+                let r = mesh.point(v as usize)[0];
+                e.0 = e.0.min(r);
+                e.1 = e.1.max(r);
+            }
+        }
+    }
+    for (ci, s) in out.iter_mut().enumerate() {
+        let l = mesh.cell_labels[ci];
+        let (Some(p), Some(&(lo, hi))) = (pml.get(&l), boxes.get(&l)) else { continue };
+        let r = (0..3).map(|k| mesh.point(mesh.cell(ci)[k] as usize)[0]).sum::<f64>() / 3.0;
+        s[2] = radial_coordinate(p, r, lo, hi) / r;
+    }
+    out
+}
+
+/// Stiffness matrix over `3 * n_dofs(order)` unknowns (component blocks u_r, u_z, u_theta). `stretch` holds `[s_r, s_z, s_theta]` per cell
+/// (`cylindrical_stretches`).
 // The B-matrix tables below are written `row * nd + component * nloc + a` for every entry, including the ones with a
 // zero factor, so that all lines read alike.
 #[allow(clippy::erasing_op)]
@@ -103,22 +161,32 @@ pub fn assemble_stiffness_axisym(
     for ci in 0..mesh.n_cells() {
         ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
         let dm = &c6[ci];
-        let (sx, sy) = stretch.map_or((c(1.0, 0.0), c(1.0, 0.0)), |s| (s[ci][0], s[ci][1]));
-        let det = sx * sy;
+        let (sx, sy, st) = stretch.map_or((c(1.0, 0.0), c(1.0, 0.0), c(1.0, 0.0)), |s| (s[ci][0], s[ci][1], s[ci][2]));
+        // s_theta = r~ / r: the cylindrical part of the stretch. The `1/r` of the strains becomes `1/(s_theta r)` and the
+        // weight `r` becomes `s_theta r`; with s_theta = 1 (every cell outside a radial layer) nothing changes.
+        let ist = c(1.0, 0.0) / st;
+        let det = sx * sy * st;
         let v = mesh.cell(ci);
         let xs = [mesh.point(v[0] as usize)[0], mesh.point(v[1] as usize)[0], mesh.point(v[2] as usize)[0]];
+        if xs.iter().any(|&x| x < -axis_tolerance(mesh)) {
+            return Err(format!("the mesh of an axisymmetric problem must lie in r >= 0 (cell {ci} crosses the axis)"));
+        }
         for q in 0..re.w.len() {
             shape_gradients(&re, &geo, ci, q, &mut grad);
             // r at this point from the vertex shape functions: for P1 the first three are the barycentric coordinates
             let lam = barycentric(&re, q, order);
             let r = lam[0] * xs[0] + lam[1] * xs[1] + lam[2] * xs[2];
+            // the rules are interior, so this only fires for a cell whose three vertices lie on the axis (zero area)
             if r <= 0.0 {
-                return Err(
-                    "the mesh of an axisymmetric problem must lie in r > 0 (it touches or crosses the axis)".into()
-                );
+                return Err(format!(
+                    "cell {ci} of an axisymmetric problem has no extent in r (all vertices on the axis)"
+                ));
             }
-            let beta = c(0.0, -m / r);
-            let inv_r = 1.0 / r;
+            // beta multiplies the trial (u) side, beta_h the test (v) side: the test function carries exp(+i m theta), and
+            // only that phase is conjugated, not the complex stretch, so beta_h = -beta (not conj(beta)) inside a layer
+            let beta = c(0.0, -m / r) * ist;
+            let beta_h = c(0.0, m / r) * ist;
+            let inv_r = ist / r;
             b0.iter_mut().for_each(|x| *x = c(0.0, 0.0));
             b1.iter_mut().for_each(|x| *x = 0.0);
             b2.iter_mut().for_each(|x| *x = 0.0);
@@ -142,7 +210,7 @@ pub fn assemble_stiffness_axisym(
                 for j in 0..nd {
                     let mut acc = c(0.0, 0.0);
                     for t in 0..6 {
-                        acc += (b0[t * nd + j] + beta * b1[t * nd + j] + c(b2[t * nd + j] * inv_r, 0.0)) * dm[s][t];
+                        acc += (b0[t * nd + j] + beta * b1[t * nd + j] + inv_r * b2[t * nd + j]) * dm[s][t];
                     }
                     db[s * nd + j] = acc;
                 }
@@ -151,7 +219,7 @@ pub fn assemble_stiffness_axisym(
                 for j in 0..nd {
                     let mut acc = c(0.0, 0.0);
                     for s in 0..6 {
-                        let bh = b0[s * nd + i] + beta.conj() * b1[s * nd + i] + c(b2[s * nd + i] * inv_r, 0.0);
+                        let bh = b0[s * nd + i] + beta_h * b1[s * nd + i] + inv_r * b2[s * nd + i];
                         acc += bh * db[s * nd + j];
                     }
                     ke[i * nd + j] += acc * re.w[q] * r;
@@ -185,7 +253,7 @@ fn barycentric(re: &RefElement, q: usize, order: usize) -> [f64; 3] {
     [nv[0] + (nv[3] + nv[4]) / 2.0, nv[1] + (nv[3] + nv[5]) / 2.0, nv[2] + (nv[4] + nv[5]) / 2.0]
 }
 
-/// Mass matrix `rho r` over `3 * n_dofs` unknowns, with the PML stretch determinant as a complex weight.
+/// Mass matrix `rho r` over `3 * n_dofs` unknowns, with the PML stretch determinant `s_r s_z s_theta` as a complex weight.
 pub fn assemble_mass_axisym(mesh: &Discretisation, rho: &[f64], order: usize, stretch: Option<&[[C; 3]]>) -> CCsr {
     let re = RefElement::new(2, order, 2 * order + 1);
     let geo = geometry(mesh);
@@ -209,7 +277,8 @@ pub fn assemble_mass_axisym(mesh: &Discretisation, rho: &[f64], order: usize, st
                 }
             }
         }
-        let det = stretch.map_or(c(1.0, 0.0), |s| s[ci][0] * s[ci][1]);
+        // the weight `r` becomes `s_theta r` in a radial layer (third stretch component), as in the stiffness
+        let det = stretch.map_or(c(1.0, 0.0), |s| s[ci][0] * s[ci][1] * s[ci][2]);
         let sc = det * (rho[ci] * geo.vol[ci]);
         block.iter_mut().for_each(|x| *x = c(0.0, 0.0));
         let nd = 3 * nloc;
@@ -228,4 +297,91 @@ pub fn assemble_mass_axisym(mesh: &Discretisation, rho: &[f64], order: usize, st
         coo.push_block(&full, &full, &block[..nd * nd]);
     }
     coo.to_csr()
+}
+
+/// The kinetic-energy weight `int rho |u_k|^2 r dr dz` of every mode, split over the three displacement components (radial, axial,
+/// azimuthal) and over classes of cells: `class[cell]` is the class of a cell or `usize::MAX` for a cell that is left out (a layer). No
+/// stretch enters, so this is the energy of the physical displacement; the result is `[mode][class][component]`. It is the integrand of
+/// `assemble_mass_axisym` (the same quadrature), summed without assembling a matrix per class (ADR 80).
+pub fn mode_energy_axisym(
+    mesh: &Discretisation,
+    rho: &[f64],
+    order: usize,
+    class: &[usize],
+    n_classes: usize,
+    modes: &[Vec<C>],
+) -> Vec<Vec<[f64; 3]>> {
+    let re = RefElement::new(2, order, 2 * order + 1);
+    let geo = geometry(mesh);
+    let nloc = re.nloc;
+    let n1 = mesh.n_dofs(order);
+    let mut out = vec![vec![[0.0f64; 3]; n_classes]; modes.len()];
+    let mut dofs = Vec::new();
+    let mut me = vec![0.0f64; nloc * nloc];
+    for ci in 0..mesh.n_cells() {
+        let cl = class[ci];
+        if cl == usize::MAX || rho[ci] == 0.0 {
+            continue;
+        }
+        me.iter_mut().for_each(|x| *x = 0.0);
+        let v = mesh.cell(ci);
+        let xs = [mesh.point(v[0] as usize)[0], mesh.point(v[1] as usize)[0], mesh.point(v[2] as usize)[0]];
+        for q in 0..re.w.len() {
+            let lam = barycentric(&re, q, order);
+            let r = lam[0] * xs[0] + lam[1] * xs[1] + lam[2] * xs[2];
+            for a in 0..nloc {
+                for b in 0..nloc {
+                    me[a * nloc + b] += re.w[q] * re.n[q][a] * re.n[q][b] * r;
+                }
+            }
+        }
+        let sc = rho[ci] * geo.vol[ci];
+        mesh.cell_dofs(ci, order, &mut dofs);
+        for (j, u) in modes.iter().enumerate() {
+            for k in 0..3 {
+                let mut acc = 0.0;
+                for a in 0..nloc {
+                    let ua = u[k * n1 + dofs[a]];
+                    for b in 0..nloc {
+                        acc += me[a * nloc + b] * (ua.conj() * u[k * n1 + dofs[b]]).re;
+                    }
+                }
+                out[j][cl][k] += acc * sc;
+            }
+        }
+    }
+    out
+}
+
+/// Distance from the axis below which a point counts as on it: 1e-9 of the extent of the mesh.
+pub fn axis_tolerance(mesh: &Discretisation) -> f64 {
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for i in 0..mesh.n_points() {
+        let p = mesh.point(i);
+        lo = lo.min(p[0].min(p[1]));
+        hi = hi.max(p[0].max(p[1]));
+    }
+    1e-9 * (hi - lo).max(f64::MIN_POSITIVE)
+}
+
+/// The essential conditions on the axis `r = 0` (module header): `(block, dof)` pairs to hold at zero, blocks as the
+/// stiffness has them (0 `u_r`, 1 `u_z`, 2 `u_theta`), and the number of dofs found on the axis. `m` must be an integer when
+/// the mesh touches the axis (the displacement of a body of revolution is single-valued).
+pub fn axis_constraints(mesh: &Discretisation, order: usize, m: f64) -> Result<(Vec<(usize, usize)>, usize), String> {
+    let tol = axis_tolerance(mesh);
+    let coords = mesh.dof_coordinates(order);
+    let on_axis: Vec<usize> = (0..coords.len() / 2).filter(|&d| coords[2 * d] <= tol).collect();
+    if on_axis.is_empty() {
+        return Ok((vec![], 0));
+    }
+    if (m - m.round()).abs() > 1e-9 {
+        return Err(format!("the mesh touches the axis, so the azimuthal order must be an integer (got {m})"));
+    }
+    let blocks: &[usize] = match m.round().abs() as u64 {
+        0 => &[0, 2],
+        1 => &[1],
+        _ => &[0, 1, 2],
+    };
+    let pairs = on_axis.iter().flat_map(|&d| blocks.iter().map(move |&k| (k, d))).collect();
+    Ok((pairs, on_axis.len()))
 }

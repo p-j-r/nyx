@@ -23,7 +23,7 @@ graph TB
         style 24 fill:#85bbf0,stroke:#5d82a8,color:#000000
         25["<div style='font-weight: bold'>Geometry operations</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Every edit of a geom feature<br />list as a function that does<br />it or says why not, and the<br />descriptors of the geom<br />operations (they live here<br />because geom depends on serde<br />only).</div>"]
         style 25 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        26["<div style='font-weight: bold'>Job runner</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Mesh and solve jobs on their<br />own threads with progress and<br />cancel, solving physics in<br />the order of the one-way<br />couplings, mesh convergence<br />on a scratch engine.</div>"]
+        26["<div style='font-weight: bold'>Job runner</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Mesh and solve jobs on their<br />own threads with progress and<br />cancel, solving physics in<br />the order of the one-way<br />couplings (region names put<br />into the scalars a kernel<br />names by domain number), mesh<br />convergence on a scratch<br />engine with solutions<br />compared by index, paired by<br />nearest eigenvalue or one<br />mode followed.</div>"]
         style 26 fill:#85bbf0,stroke:#5d82a8,color:#000000
         27["<div style='font-weight: bold'>Meshing seam</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshRequest to MeshedModel<br />(mesh, names, label<br />resolver); the only caller of<br />the femcore mesher; absorbing<br />layers across the two halves<br />of a project.</div>"]
         style 27 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -51,7 +51,7 @@ graph TB
       style 33 fill:#438dd5,stroke:#2e6295,color:#ffffff
       39["<div style='font-weight: bold'>nyx-dfs</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Diffusion physics: heat and<br />electrostatics. Typed<br />problem, three-stage kernels,<br />descriptors, goldens.</div>"]
       style 39 fill:#2e7d32,stroke:#205723,color:#ffffff
-      45["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric.</div>"]
+      45["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric eigenfrequency<br />study (bodies of revolution,<br />axis conditions, cylindrical<br />layers).</div>"]
       style 45 fill:#2e7d32,stroke:#205723,color:#ffffff
       54["<div style='font-weight: bold'>nyx-ems</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>EM waves: waveguide modes<br />(real and complex),<br />axisymmetric, cavity in 3D.</div>"]
       style 54 fill:#2e7d32,stroke:#205723,color:#ffffff
@@ -82,7 +82,7 @@ graph TB
     23-. "<div>uses physics: contract, crate<br />root +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
     23-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
     23-. "<div>uses geomdesc, geometry</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
-    23-. "<div>uses jobs, solve</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    23-. "<div>uses convergence, jobs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     23-. "<div>uses materials</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
     23-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
     23-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
@@ -140,10 +140,10 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Commands](../4-code/engine/commands.md) | 3 | 987 | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries. |
+| [Commands](../4-code/engine/commands.md) | 3 | 990 | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries. |
 | [Project](../4-code/engine/project.md) | 1 | 197 | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary. |
 | [Geometry operations](../4-code/engine/geometry.md) | 2 | 730 | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only). |
-| [Job runner](../4-code/engine/jobs.md) | 3 | 381 | 61 | Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |
+| [Job runner](../4-code/engine/jobs.md) | 3 | 608 | 61, 80 | Mesh and solve jobs on their own threads with progress and cancel, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed. |
 | [Meshing seam](../4-code/engine/meshing.md) | 2 | 334 | 54, 50 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project. |
 | [Materials](../4-code/engine/materials.md) | 1 | 155 | 58 | The material library plus the materials a project carries, resolved at the study wavelength. |
 | [Analyses](../4-code/engine/analyse.md) | 1 | 80 | 56 | Runs the analyses of nyx-analysis on the latest result of a physics. |

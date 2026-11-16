@@ -213,6 +213,38 @@
     }
   ],
   "fields": {
+    "axisymmetric_eigenfrequency": [
+      {
+        "components": [],
+        "doc": "magnitude of the displacement of a mode, scaled to a maximum of 1",
+        "name": "|u|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the radial component, phase chosen so that the largest component is real",
+        "name": "Re ux",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the axial component",
+        "name": "Re uz",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the azimuthal component",
+        "name": "Re uy",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the azimuthal component",
+        "name": "|uy|",
+        "unit": "a.u."
+      }
+    ],
     "eigenfrequency": [
       {
         "components": [
@@ -764,6 +796,45 @@
               "kind"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.",
+            "properties": {
+              "kind": {
+                "const": "axisymmetric_eigenfrequency"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "azimuthal_order": {
+                    "default": 0,
+                    "description": "Azimuthal order. the displacement goes as exp(-j m theta); m > 0 runs along +y",
+                    "maximum": 100000,
+                    "minimum": -100000,
+                    "type": "integer"
+                  },
+                  "f_search": {
+                    "default": 0.0,
+                    "description": "Search around [Hz]. 0 finds the lowest modes",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "n_modes": {
+                    "default": 6,
+                    "description": "Number of modes",
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
           }
         ]
       }
@@ -815,6 +886,53 @@
           "name": "f_search",
           "required": false,
           "unit": "Hz"
+        }
+      ]
+    },
+    {
+      "dims": "two",
+      "doc": "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.",
+      "kind": "axisymmetric_eigenfrequency",
+      "name": "Axisymmetric eigenfrequencies",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 6,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "0 finds the lowest modes",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Search around",
+          "name": "f_search",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "the displacement goes as exp(-j m theta); m > 0 runs along +y",
+          "kind": {
+            "default": 0,
+            "max": 100000,
+            "min": -100000,
+            "type": "integer"
+          },
+          "label": "Azimuthal order",
+          "name": "azimuthal_order",
+          "required": false,
+          "unit": ""
         }
       ]
     }

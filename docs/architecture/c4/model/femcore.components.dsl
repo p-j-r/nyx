@@ -145,9 +145,9 @@ laother = component "Time, nonlinear, sweeps" "Time integration, Newton and opti
 }
 fem = component "Finite-element basics" "Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain." "Rust modules" {
     properties {
-        "adr" "9, 4, 45"
+        "adr" "9, 4, 45, 69"
         "code" "crates/femcore/src: edge.rs, fem.rs, fields.rs, periodic.rs, pml.rs, props.rs"
-        "lines" "1826"
+        "lines" "1845"
         "codeDiagram" "4-code/femcore/fem.md"
     }
 }

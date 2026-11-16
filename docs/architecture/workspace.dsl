@@ -85,7 +85,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                 }
                 !include c4/model/dfs.components.dsl
             }
-            sms = container "nyx-sms" "Solid mechanics: static, eigenfrequency, PML, Floquet, low-reflecting boundaries, axisymmetric." "Rust library" "Library,Kernel" {
+            sms = container "nyx-sms" "Solid mechanics: static, eigenfrequency, PML, Floquet, low-reflecting boundaries, axisymmetric eigenfrequency study (bodies of revolution, axis conditions, cylindrical layers)." "Rust library" "Library,Kernel" {
                 properties {
                     "adr" "0042, 0009"
                     "code" "crates/nyx-sms/src"
@@ -224,7 +224,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
             autolayout lr
         }
 
-        dynamic nyx "AICommand" "An AI host builds a model and solves it through the same commands." {
+        dynamic nyx "AICommand" "An AI host builds a model and solves it through the same commands (an instance: the anchor-loss run of a disk on a post, set_study axisymmetric_eigenfrequency then add_pml_conditions, solve_run and result_info, which returns Q)." {
             aiHost -> nyx.mcp "tools/call add_rect, add_overlay, add_physics, solve_run"
             nyx.mcp -> nyx.engine "call(command, arguments)"
             nyx.engine -> nyx.geom "feature list edit and evaluation"

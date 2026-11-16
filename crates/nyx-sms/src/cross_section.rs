@@ -10,6 +10,7 @@ use femcore::fem::*;
 use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::csr::{c, CCsr, C};
 use femcore::material::M6;
+use femcore::props::PmlDir;
 use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use std::time::Instant;
 
@@ -65,6 +66,35 @@ pub fn solve_solid_axisym(mesh: &Discretisation, spec: &Problem, m: f64) -> Resu
     solve_cross_section(mesh, spec, CrossSection::Axisymmetric(m))
 }
 
+/// The axisymmetric eigenfrequency study (ADR 68): the azimuthal order is taken from the study, the result carries `physics` and `study`.
+/// Refuses what the study cannot say (`Problem::check_axisymmetric`) and a mesh that leaves the half plane `x >= 0`; with absorbing layers the
+/// frequencies are complex (`Q` and `layer fraction` scalars, `eigenvalue` on every mode).
+pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    let Study::AxisymmetricEigenfrequency { azimuthal_order, .. } = problem.study else {
+        return Err("solve_axisymmetric needs the axisymmetric_eigenfrequency study".into());
+    };
+    problem.check_axisymmetric().map_err(|e| e.to_string())?;
+    check_half_plane(mesh)?;
+    let (mut result, _) = solve_cross_section(mesh, problem, CrossSection::Axisymmetric(azimuthal_order as f64))?;
+    result.physics = "sms".into();
+    result.study = problem.study.kind().into();
+    // the study reads neither the plane assumption nor the thickness: say so when one was set
+    if problem.plane != Plane::Strain || problem.thickness != 1.0 {
+        result.log.push("axisymmetric study: the 2D parameters plane and thickness are not used".into());
+    }
+    Ok(result)
+}
+
+/// The (r, z) half plane lies in `x >= 0` (up to 1e-9 of the width of the mesh).
+fn check_half_plane(mesh: &Discretisation) -> Result<(), String> {
+    let xs = (0..mesh.n_points()).map(|i| mesh.point(i)[0]);
+    let (lo, hi) = xs.fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), x| (l.min(x), h.max(x)));
+    if lo < -1e-9 * (hi - lo).abs() {
+        return Err(format!("the (r, z) half plane must lie in x >= 0 (x = r): the mesh reaches x = {lo:.6e}"));
+    }
+    Ok(())
+}
+
 pub fn solve_cross_section(
     mesh: &Discretisation,
     spec: &Problem,
@@ -98,6 +128,10 @@ pub struct CrossAssembly {
     pub f_search: f64,
     /// a PML or a low-reflecting boundary makes the frequencies complex
     pub has_loss: bool,
+    /// dofs of the mesh on the axis `r = 0` (nodes, not components) whose regularity conditions are in `fixed`
+    pub axis_dofs: usize,
+    /// per cell: the cell belongs to a perfectly matched layer (for the `layer fraction` scalar)
+    pub pml_cells: Vec<bool>,
 }
 
 pub fn assemble_cross_section(
@@ -108,8 +142,10 @@ pub fn assemble_cross_section(
     if mesh.dim != 2 {
         return Err("a cross-section model needs a 2D mesh".into());
     }
-    let Study::Eigenfrequency { n_modes, f_search } = spec.study.clone() else {
-        return Err("the cross-section solid models need an Eigenfrequency study".into());
+    let (Study::Eigenfrequency { n_modes, f_search } | Study::AxisymmetricEigenfrequency { n_modes, f_search, .. }) =
+        spec.study.clone()
+    else {
+        return Err("the cross-section solid models need an eigenfrequency study".into());
     };
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
@@ -141,9 +177,16 @@ pub fn assemble_cross_section(
             }
         }
     }
+    // the axis of a body of revolution: regularity conditions on the dofs at r = 0 (axisym header, ADR 69)
+    let CrossSection::Axisymmetric(m_az) = kind;
+    let (axis_pairs, axis_dofs) = crate::axisym::axis_constraints(mesh, order, m_az)?;
+    fixed_set.extend(axis_pairs.into_iter().map(|(k, dof)| dof + k * n1));
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let stretch =
-        if spec.materials.has_pml() { Some(femcore::pml::cell_stretches(mesh, &spec.materials.pml)) } else { None };
+    let stretch = if spec.materials.has_pml() {
+        Some(crate::axisym::cylindrical_stretches(mesh, &spec.materials.pml))
+    } else {
+        None
+    };
     let k = match kind {
         CrossSection::Axisymmetric(m) => {
             crate::axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?
@@ -199,7 +242,32 @@ pub fn assemble_cross_section(
         Some(crate::lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free))
     };
     let has_loss = stretch.is_some() || !lrb_labels.is_empty();
-    Ok(CrossAssembly { kind, order, n, n1, kf, mf, cf, free, fixed, c6, rho, n_modes, f_search, has_loss })
+    let pml_cells: Vec<bool> = (0..mesh.n_cells())
+        .map(|ci| {
+            spec.materials
+                .pml
+                .get(&mesh.cell_labels[ci])
+                .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
+        })
+        .collect();
+    Ok(CrossAssembly {
+        kind,
+        order,
+        n,
+        n1,
+        kf,
+        mf,
+        cf,
+        free,
+        fixed,
+        c6,
+        rho,
+        n_modes,
+        f_search,
+        has_loss,
+        axis_dofs,
+        pml_cells,
+    })
 }
 
 /// Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them.
@@ -265,8 +333,25 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
     })
 }
 
-/// Stage 3: the plot fields `|u|`, `ux`, `uz`, `uy`, `|uy|` of every mode (largest component real, unit maximum), the
-/// displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
+/// `u^H M u` of a real-weighted block-diagonal mass matrix (the complex matrix `assemble_mass_axisym` gives without a stretch).
+fn mass_norm(m: &CCsr, u: &[C]) -> f64 {
+    let mut acc = 0.0;
+    for r in 0..m.nrows() {
+        let mut row = c(0.0, 0.0);
+        for k in m.indptr()[r]..m.indptr()[r + 1] {
+            row += m.values()[k] * u[m.indices()[k] as usize];
+        }
+        acc += (u[r].conj() * row).re;
+    }
+    acc
+}
+
+/// Stage 3: the plot fields `|u|`, `Re ux` (radial), `Re uz` (axial), `Re uy` (azimuthal), `|uy|` of every mode (largest component
+/// real, unit maximum), the displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
+/// Every solution carries `eigenvalue = [Re f, Im f]` (Hz); the scalar `layer fraction N` is the share of `int rho |u|^2 r` that lies in
+/// absorbing layers (0 without layers), which tells a resonator mode from a layer mode. What identifies a mode (ADR 80): `f re N (Hz)` and
+/// `f im N (Hz)`, always numbers; `radial share N`, `axial share N`, `azimuthal share N`, the split of `int rho |u|^2 r` outside the layers
+/// over the three components (sum 1); `share in domain <label> N`, the same integral per domain outside the layers (sum 1).
 pub fn cross_section_fields(
     mesh: &Discretisation,
     asm: &CrossAssembly,
@@ -276,6 +361,34 @@ pub fn cross_section_fields(
     let modes = &solved.modes;
     let mut solutions = vec![];
     let mut scalars = vec![];
+    // mass weights `rho r` over all cells and over the cells of the layers only
+    let any_pml = asm.pml_cells.iter().any(|&p| p);
+    let (m_all, m_pml) = if any_pml {
+        let rho_pml: Vec<f64> = asm.rho.iter().zip(&asm.pml_cells).map(|(r, &p)| if p { *r } else { 0.0 }).collect();
+        (
+            Some(crate::axisym::assemble_mass_axisym(mesh, &asm.rho, order, None)),
+            Some(crate::axisym::assemble_mass_axisym(mesh, &rho_pml, order, None)),
+        )
+    } else {
+        (None, None)
+    };
+    // what identifies a mode (ADR 80): the split of `int rho |u|^2 r` outside the layers over the three components and over the domains
+    let mut domains: Vec<i32> = (0..mesh.n_cells())
+        .filter(|&ci| !asm.pml_cells[ci] && asm.rho[ci] != 0.0)
+        .map(|ci| mesh.cell_labels[ci])
+        .collect();
+    domains.sort_unstable();
+    domains.dedup();
+    let class: Vec<usize> = (0..mesh.n_cells())
+        .map(|ci| {
+            if asm.pml_cells[ci] {
+                usize::MAX
+            } else {
+                domains.binary_search(&mesh.cell_labels[ci]).unwrap_or(usize::MAX)
+            }
+        })
+        .collect();
+    let energy = crate::axisym::mode_energy_axisym(mesh, &asm.rho, order, &class, domains.len(), &modes.vectors);
     for (j, &fz) in modes.freqs.iter().enumerate() {
         let freq = fz.re;
         let u = &modes.vectors[j];
@@ -289,13 +402,25 @@ pub fn cross_section_fields(
         let re = |v: &[C]| -> Vec<f64> { v.iter().map(|z| z.re).collect() };
         // the names of the three blocks: wafer (x, z, y); for a ring (r, z, theta) = (x, z, y)
         let names = ["ux", "uz", "uy"];
+        // the node fields say `Re` because the modes are complex; the cell fields below keep the complex values under the plain names
         let fields = vec![
             Field::scalar("|u|", "a.u.", mag),
-            Field::scalar(names[0], "a.u.", re(&ux)),
-            Field::scalar(names[1], "a.u.", re(&uy)),
-            Field::scalar(names[2], "a.u.", re(&uz)),
+            Field::scalar(format!("Re {}", names[0]), "a.u.", re(&ux)),
+            Field::scalar(format!("Re {}", names[1]), "a.u.", re(&uy)),
+            Field::scalar(format!("Re {}", names[2]), "a.u.", re(&uz)),
             Field::scalar(format!("|{}|", names[2]), "a.u.", uz.iter().map(|z| z.norm()).collect()),
         ];
+        let layer_fraction = match (&m_all, &m_pml) {
+            (Some(ma), Some(mp)) => {
+                let (tot, in_layer) = (mass_norm(ma, u), mass_norm(mp, u));
+                if tot > 0.0 {
+                    (in_layer / tot).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        };
         let nloc = mesh.nloc(order);
         let mut cells = femcore::fields::CellFields::new(mesh, order);
         for (k, name) in names.iter().enumerate() {
@@ -319,7 +444,7 @@ pub fn cross_section_fields(
                 fields,
                 cell_fields: cell_fields_of(&cells),
                 value: Some(freq),
-                ..Default::default()
+                eigenvalue: Some([fz.re, fz.im]),
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", fz.re, fz.im))));
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
@@ -329,9 +454,24 @@ pub fn cross_section_fields(
                 fields,
                 cell_fields: cell_fields_of(&cells),
                 value: Some(freq),
-                ..Default::default()
+                eigenvalue: Some([fz.re, fz.im]),
             });
             scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
+        }
+        scalars.push((format!("layer fraction {}", j + 1), Scalar::Num(layer_fraction)));
+        // numeric parts of the frequency, with or without loss (the text scalar `fN (Hz)` of a lossy mode stays, contract 1.1)
+        scalars.push((format!("f re {} (Hz)", j + 1), Scalar::Num(fz.re)));
+        scalars.push((format!("f im {} (Hz)", j + 1), Scalar::Num(fz.im)));
+        let total: f64 = energy[j].iter().map(|e| e[0] + e[1] + e[2]).sum();
+        let share = |x: f64| if total > 0.0 { x / total } else { 0.0 };
+        for (k, name) in ["radial", "axial", "azimuthal"].iter().enumerate() {
+            let part: f64 = energy[j].iter().map(|e| e[k]).sum();
+            scalars.push((format!("{name} share {}", j + 1), Scalar::Num(share(part))));
+        }
+        // the kernel knows domain numbers; the engine puts the region names in their place (`share in <region> N`)
+        for (d, label) in domains.iter().enumerate() {
+            let e = energy[j][d];
+            scalars.push((format!("share in domain {label} {}", j + 1), Scalar::Num(share(e[0] + e[1] + e[2]))));
         }
     }
     if solutions.is_empty() {
@@ -346,6 +486,14 @@ pub fn cross_section_fields(
         solved.dim,
         if modes.converged { "" } else { " (not every pair converged; those are omitted)" }
     )];
+    if asm.axis_dofs > 0 {
+        let held = match m_az.round().abs() as u64 {
+            0 => "u_r and u_theta",
+            1 => "u_z",
+            _ => "u_r, u_z and u_theta",
+        };
+        log.push(format!("axis r = 0: {} dofs, {held} held at zero (regularity for m = {m_az})", asm.axis_dofs));
+    }
     if asm.fixed.is_empty() {
         log.push("no fixed boundary: the lowest modes may be rigid-body-like".into());
     }

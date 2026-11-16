@@ -35,7 +35,7 @@ axisym = component "Axisymmetric kernel" "Electromagnetic eigenmodes of a body o
     properties {
         "adr" "46"
         "code" "crates/nyx-ems/src: axisym.rs"
-        "lines" "478"
+        "lines" "467"
         "codeDiagram" "4-code/ems/axisym.md"
     }
 }

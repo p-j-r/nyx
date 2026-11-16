@@ -25,7 +25,7 @@ use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::eigs_complex;
 use femcore::optical::{fine_rule, EPS0, MU0};
-use femcore::pml::stretch;
+use femcore::pml::{radial_coordinate, stretch};
 use femcore::props::{Materials, Pml, PmlDir};
 use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use std::time::Instant;
@@ -92,18 +92,7 @@ impl AxiMaterial {
             let (sr, sz) = stretch(p, [p.x, p.z], cen, *lo, *hi);
             // r~ at the centre of the cell
             let r = cen[0];
-            let len = (hi[0] - lo[0]).max(1e-300);
-            let rt = match p.x {
-                PmlDir::Off => c(r, 0.0),
-                PmlDir::Plus => {
-                    let t = ((r - lo[0]) / len).clamp(0.0, 1.0);
-                    c(lo[0] + p.re * (r - lo[0]), -p.strength * len * t.powf(p.order + 1.0) / (p.order + 1.0))
-                }
-                PmlDir::Minus => {
-                    let t = ((hi[0] - r) / len).clamp(0.0, 1.0);
-                    c(hi[0] - p.re * (hi[0] - r), p.strength * len * t.powf(p.order + 1.0) / (p.order + 1.0))
-                }
-            };
+            let rt = radial_coordinate(p, r, lo[0], hi[0]);
             let st = rt / r;
             // order r, z, theta
             let lam = [st * sz / sr, sr * st / sz, sr * sz / st];

@@ -1,5 +1,5 @@
 @startuml
-title <size:24>Dynamic View: nyx</size>\n<size:24>An AI host builds a model and solves it through the same commands.</size>
+title <size:24>Dynamic View: nyx</size>\n<size:24>An AI host builds a model and solves it through the same commands (an instance: the anchor-loss run of a disk on a post, set_study axisymmetric_eigenfrequency then add_pml_conditions, solve_run and result_info, which returns Q).</size>
 
 set separator none
 left to right direction

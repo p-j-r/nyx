@@ -105,7 +105,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `examples/*` | 60 | the example projects, written by `nyx-engine/tests/make_examples.rs` |
 | `crates/femcore/src/periodic.rs` | 12, 9 | Floquet pairs; belongs to no single physics |
 | `crates/femcore/src/edge.rs` | 45, 9 | the 2D edge-element basis shared by the ems kernels and the field sampler (split out of `ems.rs`) |
-| `crates/femcore/src/pml.rs` | 45, 7 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`) |
+| `crates/femcore/src/pml.rs` | 45, 7, 69 | coordinate stretching shared by the ems and sms kernels (split out of `ems_pml.rs`; `radial_coordinate` is the cylindrical stretch both axisymmetric kernels use) |
 | `crates/femcore/src/optical.rs` | 21, 9, 45 | optical mode sets, field sampling and the complex material tensors (split out of `sbs.rs` in phase 1; the solvers that fill a set are in `nyx-ems`) |
 | `crates/femcore/src/fields.rs` | 9 | cell fields |
 | `crates/femcore/src/fem.rs` | 4, 8 | element basics, original stack |
@@ -145,8 +145,11 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
 | `crates/nyx-dfs/*` | 41, 25, 12, 9 | diffusion: typed problem, electrostatics and heat kernels (moved from femcore::dfs), descriptors |
 | `crates/nyx-sms/tests/golden/*` | 10, 42 | the sms goldens (and `ring_model_axes`), moved unchanged from femcore |
-| `crates/nyx-sms/src/{axisym,cross_section}.rs` | 43, 42 | bodies of revolution on their half-plane (library entry, not in the envelope) |
-| `crates/nyx-sms/*` | 42, 41, 25, 12, 9 | solid mechanics: typed problem, static, eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
+| `crates/nyx-sms/src/{axisym,cross_section}.rs` | 43, 42, 68, 69, 80 | bodies of revolution on their half-plane: the library entry and the axisymmetric eigenfrequency study, axis conditions, cylindrical layers, the scalars that identify a mode (numeric frequency parts, energy shares per component and domain) |
+| `crates/nyx-sms/tests/axisym_mode_scalars.rs` | 80 | the numeric frequency parts and the energy shares against closed forms whose family is known |
+| `crates/nyx-engine/src/convergence.rs` | 61, 80 | mesh convergence on a scratch engine; solutions compared by index, paired by nearest eigenvalue, or one mode followed |
+| `crates/nyx-engine/src/solve.rs` | 61, 80 | the solve chain in coupling order; puts the region names into the scalars a kernel names by domain number |
+| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |

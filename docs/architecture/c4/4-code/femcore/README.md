@@ -22,7 +22,7 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 | [Eigensolvers](./laeigen.md) | 12 | 4560 | 95 | 36 (+11 not shown) |
 | [Preconditioners](./laprecond.md) | 8 | 2516 | 57 | 19 |
 | [Time, nonlinear, sweeps](./laother.md) | 10 | 3627 | 82 | 28 |
-| [Finite-element basics](./fem.md) | 6 | 1826 | 89 | 16 |
+| [Finite-element basics](./fem.md) | 6 | 1845 | 90 | 16 |
 | [Material specification](./material.md) | 9 | 3519 | 127 | 25 |
 | [Optical mode sets](./optical.md) | 1 | 231 | 12 | 4 |
 | [Frame and sections](./section.md) | 1 | 221 | 15 | 0 |

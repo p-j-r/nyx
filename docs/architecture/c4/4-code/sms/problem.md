@@ -4,14 +4,14 @@ C4 level 4 (code) of the component **Typed problem** (`sms.problem`) in the cont
 
 > The typed sms problem the kernels read, decoded from the envelope.
 
-**Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md)  
-**Size:** 1 file, 314 lines.
+**Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 68](../../../adr/0068-the-axisymmetric-solid-gets-a-study.md)  
+**Size:** 1 file, 373 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/problem.rs` | 314 | The typed problem of `sms`: what the kernels read. It is decoded from the `ProblemSpec` envelope by `decode` (names and selectors resolved to mesh numbers, parameters with their defaults, the imported temperature taken from `ctx.inputs`)... |
+| `crates/nyx-sms/src/problem.rs` | 373 | The typed problem of `sms`: what the kernels read. It is decoded from the `ProblemSpec` envelope by `decode` (names and selectors resolved to mesh numbers, parameters with their defaults, the imported temperature taken from `ctx.inputs`)... |
 
 ## What it uses
 
@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **Typed problem** (`sms.problem`) in the cont
 | Component | Modules | Items |
 |---|---|---|
 | [Physics adapter](./adapter.md) | problem | Bc, BcKind, Plane, Problem, Study, ThermalExpansion, ThermalSource, decode |
-| [Cross-section kernel](./crosssection.md) | problem |  |
+| [Axisymmetric study kernel](./crosssection.md) | problem |  |
 | [Floquet kernel](./floquet.md) | problem |  |
 | [Low-reflecting boundary](./lrb.md) | problem | Problem |
 | [Absorbing-layer kernel](./pml.md) | problem |  |
@@ -69,7 +69,9 @@ classDiagram
       <<enumeration>>
       Static
       Eigenfrequency
+      AxisymmetricEigenfrequency
       +kind() str
+      +is_eigen() bool
   }
   class Problem {
       <<struct>>
@@ -85,6 +87,7 @@ classDiagram
       +new(study, order) Problem
       +check_finite() Result
       +check_wafer(dim) Result
+      +check_axisymmetric() Result
   }
   class fns_problem_rs {
       <<module problem.rs>>
@@ -107,11 +110,13 @@ classDiagram
 | struct | `Bc` | `problem.rs:39` | fields: `labels`, `kind` —  A condition on boundary numbers of the mesh. |
 | enum | `ThermalSource` | `problem.rs:45` | variants: `Uniform`, `Imported` |
 | struct | `ThermalExpansion` | `problem.rs:52` | fields: `source`, `t_ref` |
-| enum | `Study` | `problem.rs:58` | variants: `Static`, `Eigenfrequency` |
-| struct | `Problem` | `problem.rs:78` | fields: `order`, `study`, `materials`, `bcs`, `plane`, `thickness`, `thermal`, `solver`, `inactive`, `periodic` |
-| fn | `decode` | `problem.rs:191` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
+| enum | `Study` | `problem.rs:58` | variants: `Static`, `Eigenfrequency`, `AxisymmetricEigenfrequency` |
+| struct | `Problem` | `problem.rs:90` | fields: `order`, `study`, `materials`, `bcs`, `plane`, `thickness`, `thermal`, `solver`, `inactive`, `periodic` |
+| fn | `decode` | `problem.rs:243` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
 | fn | `BcKind::name` | `problem.rs:28` | `pub fn name(&self) -> &'static str` |
-| fn | `Study::kind` | `problem.rs:69` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
-| fn | `Problem::new` | `problem.rs:97` | `pub fn new(study: Study, order: usize) -> Problem` |
-| fn | `Problem::check_finite` | `problem.rs:114` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation or a Krylov iteration, it flows into |
-| fn | `Problem::check_wafer` | `problem.rs:168` | `pub fn check_wafer(&self, dim: usize) -> Result<(), String>` —  Refuses what a wafer-frame 2D problem cannot say: there is no y axis in the plane of a cross-section. |
+| fn | `Study::kind` | `problem.rs:75` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
+| fn | `Study::is_eigen` | `problem.rs:84` | `pub fn is_eigen(&self) -> bool` —  Whether the study finds eigenfrequencies (`Eigenfrequency` or `AxisymmetricEigenfrequency`). |
+| fn | `Problem::new` | `problem.rs:109` | `pub fn new(study: Study, order: usize) -> Problem` |
+| fn | `Problem::check_finite` | `problem.rs:126` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation or a Krylov iteration, it flows into |
+| fn | `Problem::check_wafer` | `problem.rs:181` | `pub fn check_wafer(&self, dim: usize) -> Result<(), String>` —  Refuses what a wafer-frame 2D problem cannot say: there is no y axis in the plane of a cross-section. |
+| fn | `Problem::check_axisymmetric` | `problem.rs:197` | `pub fn check_axisymmetric(&self) -> Result<(), Error>` —  The rules of the axisymmetric study that do not need the mesh (ADR 68): no boundary load, no Floquet pair, no low-reflecting boundary |
