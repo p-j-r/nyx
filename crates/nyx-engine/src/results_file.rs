@@ -87,14 +87,21 @@ impl Engine {
                     s.n_cells()
                 )));
             }
-            let stamp = self.stamp();
+            let keys = self.problem_keys();
             let mut physics = vec![];
             for (code, r) in stored.results {
                 physics.push(json!({
                     "physics": code, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(), "scalars": r.scalars,
                 }));
-                self.results
-                    .insert(code, crate::engine::Stored { result: std::sync::Arc::new(r), stamp: stamp.clone() });
+                self.results.insert(
+                    code.clone(),
+                    crate::engine::Stored {
+                        result: std::sync::Arc::new(r),
+                        key: keys.get(&code).cloned().unwrap_or_default(),
+                        job: 0,
+                        at: std::time::Instant::now(),
+                    },
+                );
             }
             Ok(json!({ "title": self.project.title, "path": path, "cells": made.n_cells(), "results": physics }))
         }

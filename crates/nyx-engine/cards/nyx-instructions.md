@@ -14,6 +14,6 @@ How to work (one project is open; every tool is a command)
 
 Answering
 - Quote the number with its assumptions: the geometry you built, the materials, the mesh size, the wavelength. Say which values the person did not give.
-- Do not report a mode whose class does not match what was asked: check analyse. A result is stale when the project changed after it (result_info says so).
+- Do not report a mode whose class does not match what was asked: check analyse. A result is stale when what it was made from changed after it: its own problem, the materials, the mesh or a physics it takes fields from (result_info, result_field, analyse and list_analyses say `stale`; do not quote a stale number).
 
 More: get_guide topics "geometry", "optical-modes" (reading mode tables), "troubleshooting" (errors).

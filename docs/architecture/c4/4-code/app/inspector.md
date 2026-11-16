@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 > The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 2030 lines.
+**Size:** 3 files, 2034 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 |---|---:|---|
 | `crates/app/src/forms.rs` | 135 | Forms drawn from descriptors: a study, a condition or the options of a physics are a list of `ParamDesc`s (name, label, unit, type and range, default), and the form for them is made here, the same for every physics. A new physics needs n... |
 | `crates/app/src/geomui.rs` | 917 | The Geometry tab's model editor: named parameters, the ordered feature list with one generated form per feature kind, the names the model gives its regions and boundaries, and the same model as builder code. It edits `geom::model::Featur... |
-| `crates/app/src/tabs.rs` | 978 | Inspector tabs (geometry, materials, physics, study, results, analysis) and the results panel. The Materials, Physics and Study tabs are drawn from the descriptors of the physics (`forms`), so they are the same for every physics; every c... |
+| `crates/app/src/tabs.rs` | 982 | Inspector tabs (geometry, materials, physics, study, results, analysis) and the results panel. The Materials, Physics and Study tabs are drawn from the descriptors of the physics (`forms`), so they are the same for every physics; every c... |
 
 ## What it uses
 
@@ -83,5 +83,5 @@ classDiagram
 | fn | `num` | `tabs.rs:31` | `pub fn num(ui: &mut Ui, v: &mut f64) -> egui::Response` —  A number field: drag to change, or double-click and type (scientific notation accepted). |
 | fn | `App::inspector` | `tabs.rs:92` | `pub fn inspector(&mut self, ui: &mut Ui)` |
 | fn | `App::inspector_tab` | `tabs.rs:121` | `pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab)` —  One inspector tab on its own: the workflow view lays the six tabs out in its three sections. |
-| fn | `App::has_analysis` | `tabs.rs:782` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
-| fn | `App::results_panel` | `tabs.rs:930` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |
+| fn | `App::has_analysis` | `tabs.rs:785` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
+| fn | `App::results_panel` | `tabs.rs:933` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |

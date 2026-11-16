@@ -91,7 +91,7 @@ nyx.engine.analyse -> nyx.analysis "uses analysis: crate root, modes +1" "Rust p
 nyx.engine.analyse -> nyx.physics "uses physics: error, result" "Rust paths"
 nyx.engine.analyse -> nyx.engine.commands "uses engine" "Rust paths"
 nyx.engine.analyse -> nyx.engine.meshing "uses meshing" "Rust paths"
-nyx.engine.commands -> nyx.femcore "uses femcore: material::spec, progress" "Rust paths"
+nyx.engine.commands -> nyx.femcore "uses femcore: material::spec, mesh +1" "Rust paths"
 nyx.engine.commands -> nyx.geom "uses geom: model" "Rust paths"
 nyx.engine.commands -> nyx.physics "uses physics: contract, crate root +5" "Rust paths"
 nyx.engine.commands -> nyx.store "uses store: util" "Rust paths"

@@ -647,10 +647,13 @@ impl App {
             return;
         };
         ui.heading("Results");
+        self.stale_band(ui);
         if self.results.len() > 1 {
-            egui::ComboBox::from_id_salt("result_sel").selected_text(self.results[cur].name.clone()).show_ui(ui, |ui| {
+            let stale: Vec<bool> = (0..self.results.len()).map(|i| self.stale_reason(i).is_some()).collect();
+            let label = |i: usize, name: &str| if stale[i] { format!("{name} (stale)") } else { name.to_string() };
+            egui::ComboBox::from_id_salt("result_sel").selected_text(label(cur, &self.results[cur].name)).show_ui(ui, |ui| {
                 for (i, r) in self.results.iter().enumerate() {
-                    ui.selectable_value(&mut cur, i, r.name.clone());
+                    ui.selectable_value(&mut cur, i, label(i, &r.name));
                 }
             });
             if cur != self.current.unwrap() {
@@ -929,6 +932,7 @@ impl App {
     /// solutions of the current result.
     pub fn results_panel(&mut self, ui: &mut Ui) {
         let Some(cur) = self.current else { return };
+        self.stale_band(ui);
         let rv = &self.results[cur];
         let nsol = rv.sols.len();
         ui.horizontal(|ui| {

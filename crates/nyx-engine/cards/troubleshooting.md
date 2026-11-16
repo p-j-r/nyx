@@ -7,7 +7,7 @@ An error is JSON with an "error" code and a message that says what to change.
 - cancelled: a job was cancelled with job_cancel.
 - A region name that does not exist: call geometry_names; names are those of add_overlay, and a region with absorbing layers also has pieces (use region*).
 - A selector that selects nothing: use a boundary name from geometry_names, or check the coordinates in the selector.
-- "no mesh" or "stale": mesh_build or solve_run again after an edit; result_info marks a result stale when the project changed.
+- "no mesh" or "stale": mesh_build or solve_run again after an edit; result_info marks a result stale when what it was made from changed (an edit of another physics does not stale it).
 - A material not found: list_materials. The error lists the names; add_material writes one of your own.
 - Before quoting a number: convergence_check {physics, factor, tolerance} solves again on a finer mesh and compares every eigenvalue and scalar; do not quote an index that is not converged.
 - Long solves: solve_run {wait:false} returns a job id; job_status shows the stage and fraction done; job_wait collects it.

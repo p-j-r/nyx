@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Analyses** (`engine.analyse`) in the contai
 > Runs the analyses of nyx-analysis on the latest result of a physics.
 
 **Decisions:** [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 1 file, 80 lines.
+**Size:** 1 file, 82 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/analyse.rs` | 80 | Analyses of results as engine commands: a result is solved once, an analysis is a function of it and of the mesh it was solved on (`nyx-analysis`, ADR 56). The window draws the typed `ModeAnalysis`; the MCP server gets the same through `... |
+| `crates/nyx-engine/src/analyse.rs` | 82 | Analyses of results as engine commands: a result is solved once, an analysis is a function of it and of the mesh it was solved on (`nyx-analysis`, ADR 56). The window draws the typed `ModeAnalysis`; the MCP server gets the same through `... |
 
 ## What it uses
 
@@ -53,4 +53,4 @@ classDiagram
 | fn | `Engine::polarization` | `analyse.rs:33` | `pub fn polarization(&self, physics: &str) -> Result<ModeAnalysis, Error>` —  The polarization analysis of the modes of `physics`, typed (what the Analysis tab draws). |
 | fn | `Engine::polarization_applies` | `analyse.rs:39` | `pub fn polarization_applies(&self, physics: &str) -> bool` —  Whether the polarization applies to the latest result of `physics`. |
 | fn | `Engine::list_analyses` | `analyse.rs:44` | `pub fn list_analyses(&self) -> Value` —  Lists the analyses and says which apply to which result. |
-| fn | `Engine::analyse` | `analyse.rs:56` | `pub fn analyse(&self, analysis: &str, physics: &str) -> Result<Value, Error>` —  Runs one analysis on the latest result of `physics` and returns its JSON. |
+| fn | `Engine::analyse` | `analyse.rs:57` | `pub fn analyse(&self, analysis: &str, physics: &str) -> Result<Value, Error>` —  Runs one analysis on the latest result of `physics` and returns its JSON. |

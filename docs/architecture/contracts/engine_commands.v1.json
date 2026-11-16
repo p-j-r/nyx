@@ -874,7 +874,7 @@
   },
   {
     "access": "read",
-    "description": "For each physics solved: the study, size, time, solutions with their values, fields and scalars, and whether the project changed since.",
+    "description": "For each physics solved: the study, size, time, solutions with their values, fields and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).",
     "name": "result_info",
     "schema": {
       "additionalProperties": false,
@@ -896,7 +896,7 @@
   },
   {
     "access": "read",
-    "description": "The values of one field of one solution (sampled evenly when there are more than `max_values`).",
+    "description": "The values of one field of one solution (sampled evenly when there are more than `max_values`), with `stale` and `age_s` of the result it was read from.",
     "name": "result_field",
     "schema": {
       "additionalProperties": false,
@@ -1151,7 +1151,7 @@
   },
   {
     "access": "read",
-    "description": "The analyses of results (polarization of the modes) and which solved physics each applies to.",
+    "description": "The analyses of results (polarization of the modes), which solved physics each applies to and, per physics, whether its result is `stale`.",
     "name": "list_analyses",
     "schema": {
       "additionalProperties": false,
@@ -1163,7 +1163,7 @@
   },
   {
     "access": "read",
-    "description": "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups.",
+    "description": "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups. The reply carries `stale` and `age_s` of the result it was run on.",
     "name": "analyse",
     "schema": {
       "additionalProperties": false,

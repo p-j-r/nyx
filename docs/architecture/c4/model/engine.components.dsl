@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs"
-        "lines" "987"
+        "lines" "1088"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -51,7 +51,7 @@ analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest 
     properties {
         "adr" "56"
         "code" "crates/nyx-engine/src: analyse.rs"
-        "lines" "80"
+        "lines" "82"
         "codeDiagram" "4-code/engine/analyse.md"
     }
 }
@@ -59,7 +59,7 @@ resultsIO = component "Results files" "HDF5 results (serial or MPI-IO), the XDMF
     properties {
         "adr" "62, 63"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "940"
+        "lines" "947"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }

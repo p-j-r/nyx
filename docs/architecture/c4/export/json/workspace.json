@@ -430,6 +430,13 @@
       "status" : "Accepted",
       "title" : "The ported solver library is merged but not wired into the physics"
     }, {
+      "content" : "# 84. Results are stale per physics: the key is the problem key\n\nDate: 2026-11-16\n\n## Status\n\nAccepted by paul (productivity plan question 1, 2026-11-16). **The number 84 is provisional**: take the next free ADR number at merge, after the capability bookmarks (`NYX2_PENDING_CHANGES.md` reserves 66 to 83), and renumber this file, the index row and the code comments. Refines ADR 64 (cache keys); implements step P1 of `docs/NYX2_PRODUCTIVITY_PLAN.md`.\n\n## Context\n\nA result was stamped with a hash of the whole project, so any edit made every result stale, and the window dropped the flag that the engine already returned: a plot of a solve from before an edit looked current. Two solves of one physics could finish out of order (an AI host can start two) and the last to finish became the stored result whatever it was made from.\n\n## Decision\n\n* **The key of a result is the problem key of its physics** (`Engine::problem_key`): a hash of that physics' problem, the materials the project carries, the mesh key (geometry, mesh settings, sizing) and the problem keys of the physics it takes fields from (its imports, found through the `exports` and `imports` of the `Physics` trait, as `solve_order` does). The active physics, the title and everything about how a result is looked at (colormap, camera, field, range) are not in it. A result is *stale* when its key is not the key its physics has now. Staleness follows the content: undoing an edit makes the result current again.\n* **It is a cache key in the sense of ADR 64**: computed in the process, never stored in a file, never sent. The replies of the commands carry `stale` and `age_s`, not the key.\n* **Late jobs.** A finished solve replaces the stored result of a physics only when its key is the one the physics has now, or when the stored result is stale and the job started later (jobs are numbered in the order they start). Otherwise it is recorded in the run table but not stored; the reply says `current` and `stored` per result. The same rule keeps an old mesh from displacing the mesh of the project. A run is recorded with the mesh of its own job.\n* **The window** shows a stale result as stale: a mark on the plot, a band with \"Solve again\" in the Results tab and panel, \"(stale)\" in the list of results. A result is stale for the window when the engine says so, when a newer result of the physics replaced it, or when the Geometry or Mesh tab holds edits that were not applied to the engine yet.\n\n## Known limits\n\n* **Not an identity (\"same key, same numbers\").** `run_chain` hands a physics the fields of the physics that were *in the same job*, so `solve_run` of `sms` alone and of `dfs, sms` have the same `sms` key and different numbers. For staleness this is acceptable: both are results of the current problem. A later use of the key to deduplicate work (the queue, plan step Q1) must add what was chained.\n* **The whole `materials` map of the project is hashed**, not only the entries a problem names, so editing a project material that a physics does not use stales it. This errs on the safe side; the library files are loaded once per session and are not in the key.\n* **A mesh sized from the physics** (`physics_sizing`) puts the wavelengths of every physics in the mesh key, so a wavelength edit then stales every result on that mesh. That is correct (the mesh is different); with `physics_sizing` off it stales only its own physics.\n* The key is computed on each call (no cache): about 0.2 ms for the examples and 5 ms at a project of 1,000 features (measured, `docs/PRODUCTIVITY_STATUS.md`). Caching waits for a model that needs it.\n\n## Consequences\n\n* An edit of one physics no longer marks the others stale; an edit of the geometry still marks all.\n* An MCP host sees `stale` on every answer that quotes a result; it cannot quote a stale number without the JSON saying so.\n\n## Code\n\n`crates/nyx-engine/src/engine.rs` (`problem_key`, `problem_keys`, `is_stale`, `apply`), `commands.rs`, `analyse.rs`, `results_file.rs`, `crates/app/src/{app,tabs}.rs`; tests `crates/nyx-engine/tests/stale.rs` and the window tests `a_result_on_show_says_when_the_model_changed`, `a_result_the_engine_did_not_keep_is_not_put_on_show`.\n\n## Contract\n\n`engine_commands` 1.6 (provisional): descriptions of `result_info`, `result_field`, `analyse`, `list_analyses`; replies gain `stale`, `age_s`, `current`, `stored`.\n",
+      "date" : "2026-11-15T23:00:00Z",
+      "format" : "Markdown",
+      "id" : "84",
+      "status" : "Accepted",
+      "title" : "Results are stale per physics: the key is the problem key"
+    }, {
       "content" : "# 9. Every kernel is three stages behind one entry point\n\nDate: 2026-11-03\n\n## Status\n\nAccepted (commits `fa6eff2`, `106e7f8`; table in `docs/KERNEL_PORT_STATUS.md`).\n\n## Context\n\nKernels were single functions from mesh and spec to result. Swapping a linear-algebra backend (ADR 8), reusing an assembled system across a sweep, or exposing per-cell fields all required cutting them open.\n\n## Decision\n\n* `solve(mesh, spec, state)` / `solve_with(.., progress)` is the **one entry point for all physics**: it checks the element order and numbers (`validate`), dispatches by `Physics` (and by mesh dimension for EM waves), refuses a result containing NaN or infinity, and appends the plain-language stage log to `SolveResult::log`. A cancelled solve returns `Err(\"cancelled\")`.\n* Every kernel is **assemble -> solve -> fields**, and `solve_*` is their composition:\n  1. *assemble*: matrices on the free dofs, constraints, loads, the material data later stages need;\n  2. *solve*: the raw result (complex eigenpairs, a vector, transient states); the backend is chosen here (`spec.solver`, or the eigensolver the stage calls);\n  3. *fields*: plot fields (node-averaged, as before) and `Solution::cell_fields`, the same quantities per cell and local node, not averaged, with wafer names and complex values where the quantity is complex.\n* The node average of a cell field is the plot field of the same name (checked on every golden case).\n* Splitting changed no number: the golden files are unchanged.\n\n## Consequences\n\n* A `femcore::solvers` adapter replaces one function per kernel.\n* Stage function names are public API (`assemble_modes`, `solve_mode_pairs`, `mode_fields_cells`, ...); they are listed in contract `kernel_stages` because renaming one silently breaks callers outside the repository.\n* The `Physics::Emw` dispatch by mesh dimension is a quiet rule (R10).\n* `progress` is a thread-local, so stage functions called outside `solve_with` run unobserved and uncancellable (R19).\n\n## Code\n\n`crates/femcore/src/solve.rs`, `validate.rs`, `progress.rs`, `fields.rs`, and the kernels `dfs.rs`, `ems.rs`, `ems_pml.rs`, `ems_axisym.rs`, `ems3d.rs`, `sms.rs`, `sms_pml.rs`, `sms_floquet.rs`, `sms_lrb.rs`, `sms_kz.rs`, `sms_axisym.rs`, `sbs.rs`, `sbs_ring.rs`.\n\n## Contract\n\n`contracts/kernel_stages`: `crates/femcore/tests/stages.rs` (composition equals the one-call solver) plus `contracts.rs::kernel_stage_api_is_public`, which names every *public* stage function so removing one fails to compile. The stages of plain `sms`, `sms_lrb` and `ems3d` are `pub(crate)` (R26), so only 7 of 10 kernel families are reachable from outside the crate.\n",
       "date" : "2026-11-02T23:00:00Z",
       "format" : "Markdown",
@@ -536,7 +543,7 @@
             "structurizr.dsl.identifier" : "nyx.app.window",
             "codeDiagram" : "4-code/app/window.md",
             "code" : "crates/app/src: app.rs, main.rs, state.rs",
-            "lines" : "1613",
+            "lines" : "1723",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -636,7 +643,7 @@
             "structurizr.dsl.identifier" : "nyx.app.inspector",
             "codeDiagram" : "4-code/app/inspector.md",
             "code" : "crates/app/src: forms.rs, geomui.rs, tabs.rs",
-            "lines" : "2030",
+            "lines" : "2034",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -1009,11 +1016,11 @@
             "structurizr.dsl.identifier" : "nyx.engine.commands",
             "codeDiagram" : "4-code/engine/commands.md",
             "code" : "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs",
-            "lines" : "987",
+            "lines" : "1088",
             "adr" : "57, 38, 15"
           },
           "relationships" : [ {
-            "description" : "uses femcore: material::spec, progress",
+            "description" : "uses femcore: material::spec, mesh +1",
             "destinationId" : "76",
             "id" : "239",
             "sourceId" : "23",
@@ -1337,7 +1344,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.analyse",
             "codeDiagram" : "4-code/engine/analyse.md",
             "code" : "crates/nyx-engine/src: analyse.rs",
-            "lines" : "80",
+            "lines" : "82",
             "adr" : "56"
           },
           "relationships" : [ {
@@ -1380,7 +1387,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.resultsIO",
             "codeDiagram" : "4-code/engine/resultsIO.md",
             "code" : "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs",
-            "lines" : "940",
+            "lines" : "947",
             "adr" : "62, 63"
           },
           "relationships" : [ {

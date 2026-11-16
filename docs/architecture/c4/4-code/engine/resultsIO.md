@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the
 > HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results.
 
 **Decisions:** [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md)  
-**Size:** 3 files, 940 lines.
+**Size:** 3 files, 947 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-engine/src/h5io.rs` | 621 | Results in HDF5 files (cargo feature `hdf5`): the project, the mesh and every solution of every solved physics with all its fields and cell fields, written compressed and read back exactly (ADR 62). This is the efficient store of the dat... |
-| `crates/nyx-engine/src/results_file.rs` | 136 | Writing and reading the results file as engine commands. The HDF5 writer lives in `h5io` (cargo feature `hdf5`); a build without the feature answers these commands with a plain refusal, so a host can tell. |
+| `crates/nyx-engine/src/results_file.rs` | 143 | Writing and reading the results file as engine commands. The HDF5 writer lives in `h5io` (cargo feature `hdf5`); a build without the feature answers these commands with a plain refusal, so a host can tell. |
 | `crates/nyx-engine/src/xdmf.rs` | 183 | The visualisation layer of a results file and its XDMF description (ADR 62), recovered from the writer of the old `femcore::h5io` and moved to the new result types. `/viz/<physics>` holds the nodes (dofs) and cells in the node order XDMF... |
 
 ## What it uses
@@ -123,7 +123,7 @@ classDiagram
 | fn | `Io::put_text` | `h5io.rs:242` | `pub fn put_text(&self, g: &h5::Group, name: &str, s: &str) -> Result<(), String>` —  Text as UTF-8 bytes in a 1-D `u8` dataset (variable-length strings cannot be written in parallel). |
 | fn | `Engine::export_results` | `results_file.rs:13` | `pub fn export_results(&self, path: &str, parallel: bool) -> Result<Value, Error>` —  Writes the project, the mesh and the latest result of every solved physics into an HDF5 file. With `parallel` the file is written with |
 | fn | `Engine::open_results` | `results_file.rs:55` | `pub fn open_results(&mut self, path: &str) -> Result<Value, Error>` —  Opens a results file: its project becomes the project, the project is meshed again and the stored results become the latest results |
-| fn | `Engine::results_file_info` | `results_file.rs:111` | `pub fn results_file_info(&self, path: &str) -> Result<Value, Error>` —  What a results file holds: the project title, the mesh size and, per physics, the study, the solutions and the scalars. |
+| fn | `Engine::results_file_info` | `results_file.rs:118` | `pub fn results_file_info(&self, path: &str) -> Result<Value, Error>` —  What a results file holds: the project title, the mesh size and, per physics, the study, the solutions and the scalars. |
 | fn | `sanitize` | `xdmf.rs:11` | `pub fn sanitize(name: &str) -> String` —  Name usable in a plain HDF5/XDMF path: letters, digits and underscores. |
 | fn | `write_viz` | `xdmf.rs:35` | `pub(crate) fn write_viz(io: &Io, code: &str, mesh: &SimplexMesh, r: &SolveResult) -> Result<(), String>` —  `/viz/<physics>`: the nodes and cells in the node order XDMF reads, and for each solution the fields it points at: a scalar field is a |
 | fn | `write_xdmf` | `xdmf.rs:83` | `pub fn write_xdmf( h5_path: &Path, mesh: &SimplexMesh, results: &[(String, &SolveResult)], ) -> Result<std::path::PathBuf, String>` —  Writes the XDMF description of the results in `h5_path` next to it (same name, extension `.xdmf`). Every physics is a collection of |

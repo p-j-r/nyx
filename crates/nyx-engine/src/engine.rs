@@ -2,8 +2,10 @@
 //! workflow folder. The window and the MCP server hold an `Engine` and nothing else; every action is a method here or a named command
 //! (`commands.rs`, which calls these methods).
 //!
-//! The mesh and the results are caches keyed by the content they were made from (a hash of the geometry and mesh settings, a hash of the
-//! whole project), so an edit never has to remember to invalidate them: a result whose stamp is not the project's is *stale* and says so.
+//! The mesh and the results are caches keyed by the content they were made from (a hash of the geometry and mesh settings; for a result the
+//! *problem key* of its physics: its own problem, the project materials, the mesh key and the keys of the physics it takes fields from), so an edit
+//! never has to remember to invalidate them: a result whose key is not the one its physics has now is *stale* and says so. A key is a cache key
+//! (ADR 64, ADR 84): it is never stored in a file or sent to a front-end.
 
 use crate::jobs::{JobId, JobOutput, JobRunner};
 use crate::meshing::{FemcoreMesher, MeshedModel, Mesher};
@@ -14,16 +16,21 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 pub(crate) struct Stored {
     pub result: Arc<SolveResult>,
-    /// the hash of the project it was solved from
-    pub stamp: String,
+    /// the problem key of its physics when the solve was started
+    pub key: String,
+    /// the job that made it (jobs are numbered in the order they start; 0 for results read from a file)
+    pub job: JobId,
+    /// when it was stored
+    pub at: Instant,
 }
 
 enum Pending {
     Mesh { key: String },
-    Solve { key: String, stamp: String, project: Box<Project> },
+    Solve { key: String, keys: BTreeMap<String, String>, project: Box<Project> },
 }
 
 pub struct Engine {
@@ -121,9 +128,70 @@ impl Engine {
         hash_of(&nyx_physics::canonical_json(&v).to_string())
     }
 
-    /// The hash of the whole project: what a result depends on.
+    /// The hash of the whole project. Staleness no longer uses it (`problem_key` does); it is kept for tools that want an identity of the whole
+    /// project in this process (a cache key, ADR 64).
     pub fn stamp(&self) -> String {
         hash_of(&self.project.to_json())
+    }
+
+    /// What a result of `physics` depends on, as a cache key: the problem of that physics, the materials the project carries, the mesh key and the
+    /// problem keys of the physics it takes fields from. Settings that do not change a result (the active physics, the title, plot settings) are
+    /// not in it. `None` when the project has no problem for `physics`. Not an identity: the physics a solve was *chained* with is not part of it
+    /// (`solve_run` with one physics runs without the fields of the others), see ADR 84.
+    pub fn problem_key(&self, physics: &str) -> Option<String> {
+        self.project.spec(physics)?;
+        Some(self.key_of(physics, &self.mesh_key(), &mut BTreeMap::new(), &mut vec![]))
+    }
+
+    /// The problem key of every physics of the project, with the mesh key computed once.
+    pub fn problem_keys(&self) -> BTreeMap<String, String> {
+        let mesh = self.mesh_key();
+        let mut memo = BTreeMap::new();
+        for s in &self.project.physics {
+            self.key_of(&s.physics, &mesh, &mut memo, &mut vec![]);
+        }
+        memo
+    }
+
+    fn key_of(&self, id: &str, mesh: &str, memo: &mut BTreeMap<String, String>, stack: &mut Vec<String>) -> String {
+        if let Some(k) = memo.get(id) {
+            return k.clone();
+        }
+        let (Some(spec), Some(me)) = (self.project.spec(id), self.registry.get(id)) else { return String::new() };
+        if stack.iter().any(|s| s == id) {
+            return String::new(); // a cycle: solving refuses it, the key only has to terminate
+        }
+        stack.push(id.to_string());
+        let mut from = std::collections::BTreeSet::new();
+        for imp in me.imports() {
+            for other in &self.project.physics {
+                if other.physics != id
+                    && self.registry.get(&other.physics).is_some_and(|q| q.exports().iter().any(|e| e.role == imp.role))
+                {
+                    from.insert(other.physics.clone());
+                }
+            }
+        }
+        let imports: BTreeMap<String, String> =
+            from.into_iter().map(|o| (o.clone(), self.key_of(&o, mesh, memo, stack))).collect();
+        stack.pop();
+        let v = json!({ "physics": id, "problem": spec, "materials": self.project.materials, "mesh": mesh, "imports": imports });
+        let key = hash_of(&nyx_physics::canonical_json(&v).to_string());
+        memo.insert(id.to_string(), key.clone());
+        key
+    }
+
+    /// True when the result stored for `physics` was not made from the problem the project has now (or the project has no such problem any more).
+    pub fn is_stale(&self, physics: &str) -> bool {
+        match (self.results.get(physics), self.problem_key(physics)) {
+            (Some(s), Some(k)) => s.key != k,
+            _ => true,
+        }
+    }
+
+    /// Seconds since the result of `physics` was stored.
+    pub fn result_age(&self, physics: &str) -> Option<f64> {
+        self.results.get(physics).map(|s| s.at.elapsed().as_secs_f64())
     }
 
     /// Replaces the project (a new one, or one just opened). The mesh and results are dropped and the store binding is released.
@@ -139,10 +207,10 @@ impl Engine {
         self.model.as_ref().filter(|(k, _)| *k == self.mesh_key()).map(|(_, m)| m)
     }
 
-    /// The latest result of a physics and whether the project has changed since.
+    /// The latest result of a physics and whether what it depends on has changed since (its problem key, not the whole project).
     pub fn result(&self, physics: &str) -> Option<(&Arc<SolveResult>, bool)> {
         let s = self.results.get(physics)?;
-        Some((&s.result, s.stamp != self.stamp()))
+        Some((&s.result, self.is_stale(physics)))
     }
 
     // ----------------------------------------------------------------------------------------------------------------- jobs
@@ -178,7 +246,7 @@ impl Engine {
                 return Err(Error::invalid(format!("the project has no problem for '{t}'")));
             }
         }
-        let (key, stamp) = (self.mesh_key(), self.stamp());
+        let (key, keys) = (self.mesh_key(), self.problem_keys());
         let (registry, mesher, project, sizing) =
             (self.registry.clone(), self.mesher.clone(), self.project.clone(), self.sizing());
         let library = self.library()?;
@@ -197,7 +265,7 @@ impl Engine {
                 Ok(JobOutput::Solved { model, results })
             }
         });
-        self.pending.insert(id, Pending::Solve { key, stamp, project: Box::new(project) });
+        self.pending.insert(id, Pending::Solve { key, keys, project: Box::new(project) });
         Ok(id)
     }
 
@@ -231,31 +299,48 @@ impl Engine {
         match (pending, outcome) {
             (Pending::Mesh { key }, Ok(JobOutput::Mesh(m))) => {
                 let info = m.info();
-                self.model = Some((key, m));
-                Ok(json!({ "job": id, "state": "done", "mesh": info, "seconds": seconds }))
+                let current = self.install_model(key, m);
+                Ok(json!({ "job": id, "state": "done", "mesh": info, "seconds": seconds, "current": current }))
             }
-            (Pending::Solve { key, stamp, project }, Ok(JobOutput::Solved { model, results })) => {
-                self.model = Some((key, model));
+            (Pending::Solve { key, keys, project }, Ok(JobOutput::Solved { model, results })) => {
+                let mesh = model.solver_mesh();
+                self.install_model(key, model);
+                // a job that finishes after the project changed, or after a newer job of the same physics, must not replace a result that is
+                // current: it replaces the stored one only when its key is the one the physics has now, or when the stored one is stale and
+                // this job started later (jobs are numbered in start order)
+                let now = self.problem_keys();
                 let mut summary = vec![];
                 for r in &results {
+                    let current = keys.contains_key(&r.physics) && keys.get(&r.physics) == now.get(&r.physics);
+                    let replace = current
+                        || match self.results.get(&r.physics) {
+                            None => true,
+                            Some(old) => Some(&old.key) != now.get(&r.physics) && id > old.job,
+                        };
+                    if replace {
+                        let key = keys.get(&r.physics).cloned().unwrap_or_default();
+                        self.results.insert(
+                            r.physics.clone(),
+                            Stored { result: Arc::new(r.clone()), key, job: id, at: Instant::now() },
+                        );
+                    }
                     summary.push(json!({
                         "physics": r.physics, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(),
-                        "scalars": r.scalars,
+                        "scalars": r.scalars, "current": current, "stored": replace,
                     }));
-                    self.results
-                        .insert(r.physics.clone(), Stored { result: Arc::new(r.clone()), stamp: stamp.clone() });
                 }
                 let mut log = self.jobs.log(id);
                 for r in &results {
                     log.extend(r.log.iter().map(|l| format!("{}: {l}", r.physics)));
                 }
-                let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log);
+                let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
                 Ok(json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds }))
             }
             (Pending::Solve { project, .. }, Err(e)) => {
                 let log = self.jobs.log(id);
                 // a failed or cancelled run is a record too: the table shows what was tried
-                let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log);
+                let mesh = self.model.as_ref().map(|(_, m)| m.solver_mesh());
+                let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log, mesh);
                 Err(e)
             }
             (_, Err(e)) => Err(e),
@@ -263,8 +348,25 @@ impl Engine {
         }
     }
 
-    fn record(&mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String]) -> Value {
-        let mesh = self.model.as_ref().map(|(_, m)| m.solver_mesh());
+    /// Makes `model` (built for mesh key `key`) the engine's mesh unless a mesh that is current for the project is already there. True when it
+    /// is the mesh the project has now.
+    fn install_model(&mut self, key: String, model: Arc<MeshedModel>) -> bool {
+        let now = self.mesh_key();
+        let have_current = self.model.as_ref().is_some_and(|(k, _)| *k == now);
+        if key == now || !have_current {
+            self.model = Some((key.clone(), model));
+        }
+        key == now
+    }
+
+    fn record(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<Arc<femcore::mesh::SimplexMesh>>,
+    ) -> Value {
         match self.link.as_mut() {
             None => Value::Null,
             Some(l) => match l.record(project, outcome, seconds, log, mesh.as_deref()) {

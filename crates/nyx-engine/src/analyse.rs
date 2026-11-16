@@ -48,6 +48,7 @@ impl Engine {
                 "analysis": a.id(),
                 "name": a.name(),
                 "applies_to": self.results.iter().filter(|(_, s)| a.applies_to(&s.result)).map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+                "stale": self.results.iter().filter(|(_, s)| a.applies_to(&s.result)).map(|(k, _)| (k.clone(), self.is_stale(k))).collect::<std::collections::BTreeMap<_, _>>(),
             }))
             .collect::<Vec<_>>())
     }
@@ -72,7 +73,8 @@ impl Engine {
         if let Some(o) = v.as_object_mut() {
             o.insert("analysis".into(), json!(analysis));
             o.insert("physics".into(), json!(physics));
-            o.insert("stale".into(), json!(self.results[physics].stamp != self.stamp()));
+            o.insert("stale".into(), json!(self.is_stale(physics)));
+            o.insert("age_s".into(), json!(self.result_age(physics)));
         }
         Ok(v)
     }

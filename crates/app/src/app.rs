@@ -278,6 +278,41 @@ impl App {
         });
     }
 
+    /// Why the result at `i` is not up to date, in words, or `None` when it is current (productivity plan P1, ADR 84). It is stale when the engine
+    /// says what it was solved from has changed (the problem key of its physics, so an edit of another physics does not count), when a newer result
+    /// of the physics replaced it, or when the Geometry or Mesh tab holds edits that were not applied to the engine yet.
+    pub fn stale_reason(&self, i: usize) -> Option<&'static str> {
+        let rv = self.results.get(i)?;
+        if let Some(id) = &rv.physics {
+            match self.engine.result(id) {
+                None => return Some("this result is no longer the engine's"),
+                Some((r, stale)) => {
+                    if !Arc::ptr_eq(r, &rv.result) {
+                        return Some("a newer result of this physics replaced it");
+                    }
+                    if stale {
+                        return Some("the model changed since this solve");
+                    }
+                }
+            }
+        }
+        if self.geom_edit != self.engine.project().geometry || self.mesh_edit != self.engine.project().mesh {
+            return Some("Geometry or Mesh edits are not applied yet");
+        }
+        None
+    }
+
+    /// One line above the result on show when it is stale, with a button to solve again.
+    pub fn stale_band(&mut self, ui: &mut egui::Ui) {
+        let Some(why) = self.current.and_then(|i| self.stale_reason(i)) else { return };
+        ui.horizontal(|ui| {
+            ui.colored_label(Color32::from_rgb(235, 170, 60), format!("⚠ Stale: {why}."));
+            if self.busy.is_none() && ui.small_button("Solve again").clicked() {
+                self.compute();
+            }
+        });
+    }
+
     pub fn cancel_job(&mut self) {
         if let Some((id, _, true)) = &self.job {
             self.engine.jobs().cancel(*id);
@@ -414,7 +449,15 @@ impl App {
     pub(crate) fn take_solved(&mut self, summary: &Value) {
         self.take_model();
         let Some(mesh) = self.doc.mesh.clone() else { return };
-        let solved: Vec<String> = summary["results"].as_array().into_iter().flatten().filter_map(|r| r["physics"].as_str().map(str::to_string)).collect();
+        // a job that finished after the project changed again, or after a newer job, can come back with results the engine did not keep (`stored`
+        // false): they are not shown and not recorded as the run on screen
+        let all: Vec<&Value> = summary["results"].as_array().into_iter().flatten().collect();
+        let solved: Vec<String> = all.iter().filter(|r| r["stored"] != json!(false)).filter_map(|r| r["physics"].as_str().map(str::to_string)).collect();
+        if solved.is_empty() && !all.is_empty() {
+            self.shell.run = None;
+            self.status = "A solve finished after the model changed again; its result was not kept (solve again)".into();
+            return;
+        }
         let active = self.active();
         let mut last_secs = 0.0;
         let mut live: Option<Arc<SolveResult>> = None;
@@ -928,6 +971,7 @@ impl App {
         let show_results = show_results && preview.is_none();
         let view = preview.or_else(|| self.doc.view.clone());
 
+        let stale = if show_results { self.current.and_then(|i| self.stale_reason(i)) } else { None };
         let out = match (self.current, view) {
             (Some(i), Some(view)) if show_results => {
                 let rv = &mut self.results[i];
@@ -959,6 +1003,15 @@ impl App {
             (_, Some(view)) => self.vp.show(ui, Content::Mesh { view: &view, bc_colors: &bc_colors, selected: &selected, show_edges, show_numbers }, picking, bg),
             _ => self.vp.show(ui, Content::Empty, false, bg),
         };
+        if let Some(why) = stale {
+            // on the plot itself, so a stale field is never read as current; the button to solve again is in the Results tab and its panel
+            let at = ui.max_rect().left_top() + egui::vec2(10.0, 10.0);
+            let text = format!("⚠ STALE: {why}");
+            let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(14.0), Color32::from_rgb(40, 30, 10));
+            let rect = egui::Rect::from_min_size(at, galley.size() + egui::vec2(12.0, 6.0));
+            ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(235, 170, 60));
+            ui.painter().galley(rect.min + egui::vec2(6.0, 3.0), galley, Color32::BLACK);
+        }
         if let (Some(label), Some(i)) = (out.picked, self.picking) {
             if let Some(p) = self.picked.iter().position(|&l| l == label) {
                 self.picked.remove(p);
@@ -1216,6 +1269,63 @@ mod tests {
     }
 
     /// A results file written by one window opens in another: the project, the mesh and the stored results are on show, with no solve.
+    /// A result on show says when it is stale (productivity plan P1): an unapplied edit of the Geometry tab, an edit the engine has taken, a
+    /// Study edit; looking at it differently (colormap, camera, field) is not a change of the model.
+    #[test]
+    fn a_result_on_show_says_when_the_model_changed() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        let i = a.current.expect("a result on show");
+        assert_eq!(a.stale_reason(i), None);
+        // the way it is drawn is not in the project, so no key moves
+        let keys = a.engine.problem_keys();
+        a.colormap = Colormap::Gray;
+        a.vp.fit_token += 1;
+        a.results[i].field = a.results[i].field.saturating_sub(1);
+        assert_eq!(a.engine.problem_keys(), keys);
+        assert_eq!(a.stale_reason(i), None);
+        // an edit of the Geometry tab that was not applied: the engine does not know it yet, the window does
+        nyx_engine::geometry::set_param(&mut a.geom_edit, "w", &json!(6.0e-7)).unwrap();
+        assert_eq!(a.stale_reason(i), Some("Geometry or Mesh edits are not applied yet"));
+        // applied: now the engine says so
+        assert!(a.push_edits(), "{:?}", a.error);
+        assert_eq!(a.stale_reason(i), Some("the model changed since this solve"));
+        // the band is drawn on a headless context without a panic, with the button to solve again
+        let ctx = a.ctx.clone();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            a.results_panel(ui);
+            a.viewport_ui(ui);
+        });
+        // a Study edit (a wavelength) is a change of the problem of its physics
+        let mut b = app();
+        b.load_example(example("15_soi_wire"));
+        wait_idle(&mut b, 30);
+        b.compute();
+        wait_idle(&mut b, 120);
+        let j = b.current.expect("a result on show");
+        assert_eq!(b.stale_reason(j), None);
+        b.cmd("set_study", json!({ "physics": "ems", "kind": "modes", "params": { "freq": 190.0e12, "n_modes": 2, "n_target": 2.75 } }));
+        assert_eq!(b.stale_reason(j), Some("the model changed since this solve"));
+    }
+
+    /// A solve that comes back after the project changed again and was not kept by the engine is not shown as the run on screen.
+    #[test]
+    fn a_result_the_engine_did_not_keep_is_not_put_on_show() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        let before = a.results.len();
+        a.take_solved(&json!({ "results": [{ "physics": "ems", "current": false, "stored": false }] }));
+        assert_eq!(a.results.len(), before);
+        assert!(a.status.contains("not kept"), "{}", a.status);
+    }
+
     #[test]
     fn a_results_file_opens_with_its_results_on_show() {
         let mut a = app();

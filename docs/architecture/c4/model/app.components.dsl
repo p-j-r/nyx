@@ -3,7 +3,7 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: app.rs, main.rs, state.rs"
-        "lines" "1613"
+        "lines" "1723"
         "codeDiagram" "4-code/app/window.md"
     }
 }
@@ -19,7 +19,7 @@ inspector = component "Inspector tabs" "The tabs beside the viewport: geometry e
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: forms.rs, geomui.rs, tabs.rs"
-        "lines" "2030"
+        "lines" "2034"
         "codeDiagram" "4-code/app/inspector.md"
     }
 }

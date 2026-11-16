@@ -159,8 +159,8 @@ impl Engine {
             cmd("job_cancel", "Cancel a job", "The solver notices at its next check; a factorisation in progress finishes first.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
             cmd("job_wait", "Wait for a job", "Blocks until the job has finished and applies its outcome.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
             cmd("poll_jobs", "Apply finished jobs", "Applies every job that has finished since the last call and returns what each came to.", Read, schema(vec![], &[])),
-            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields and scalars, and whether the project changed since.", Read, schema(vec![("physics", phys())], &[])),
-            cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`).", Read,
+            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).", Read, schema(vec![("physics", phys())], &[])),
+            cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`), with `stale` and `age_s` of the result it was read from.", Read,
                 schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("field", text("field name")), ("max_values", int("default 2000"))], &["physics", "field"])),
             cmd("get_guide", "Read a nyx guide", "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).", Read,
                 schema(vec![("topic", json!({ "type": "string", "enum": crate::guide::TOPICS, "description": "which card; omit for nyx-instructions" }))], &[])),
@@ -176,8 +176,8 @@ impl Engine {
             cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)"))], &["path"])),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
             cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support.", Edit, schema(vec![("path", text("file path, .h5"))], &["path"])),
-            cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes) and which solved physics each applies to.", Read, schema(vec![], &[])),
-            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups.", Read,
+            cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
+            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups. The reply carries `stale` and `age_s` of the result it was run on.", Read,
                 schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys())], &["analysis", "physics"])),
             cmd("store_save", "Save into a workspace", "Binds the project to a workflow folder (created in `workspace` the first time) or stores a new version of it. Later solves are recorded in the run table.", Expensive,
                 schema(vec![("workspace", text("workspace folder, needed the first time"))], &[])),
@@ -472,7 +472,7 @@ impl Engine {
                 "physics": s.physics, "study": s.study.kind, "order": s.order,
                 "materials": s.materials.keys().collect::<Vec<_>>(), "conditions": s.bcs,
             })).collect::<Vec<_>>(),
-            "results": self.results.iter().map(|(k, v)| json!({ "physics": k, "stale": v.stamp != self.stamp() })).collect::<Vec<_>>(),
+            "results": self.results.keys().map(|k| json!({ "physics": k, "stale": self.is_stale(k), "age_s": self.result_age(k) })).collect::<Vec<_>>(),
             "store": self.link.as_ref().map(|l| json!({ "workflow": l.dir.wf.id, "folder": l.dir.root, "experiment": l.experiment, "version": l.dir.wf.version })),
             "jobs_running": self.jobs.running(),
         })
@@ -568,7 +568,6 @@ impl Engine {
     }
 
     fn result_info(&self, physics: Option<&str>) -> R {
-        let stamp = self.stamp();
         let rows: Vec<Value> = self
             .results
             .iter()
@@ -577,7 +576,7 @@ impl Engine {
                 let r = &v.result;
                 json!({
                     "physics": k, "study": r.study, "order": r.order, "dim": r.dim, "dofs": r.dofs, "seconds": r.seconds,
-                    "stale": v.stamp != stamp,
+                    "stale": self.is_stale(k), "age_s": self.result_age(k),
                     "solutions": r.solutions.iter().enumerate().map(|(i, s)| json!({
                         "index": i, "label": s.label, "value": s.value, "eigenvalue": s.eigenvalue,
                         "fields": s.fields.iter().map(|f| json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len() })).collect::<Vec<_>>(),
@@ -616,7 +615,7 @@ impl Engine {
         let stride = f.values.len().div_ceil(max).max(1);
         let values: Vec<f64> = f.values.iter().step_by(stride).copied().collect();
         Ok(
-            json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values }),
+            json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values, "stale": self.is_stale(p), "age_s": self.result_age(p) }),
         )
     }
 }
