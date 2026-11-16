@@ -110,3 +110,29 @@ fn the_usage_errors_exit_two() {
     assert_eq!(nyx(&["run", "x.jsonl", "--nope"]).status.code(), Some(2));
     assert_eq!(nyx(&["check", "no_such_file.jsonl"]).status.code(), Some(2));
 }
+
+#[test]
+fn api_list_and_show_print_the_reference_of_the_catalog() {
+    let o = nyx(&["api", "list"]);
+    assert_eq!(o.status.code(), Some(0));
+    let out = text(&o.stdout);
+    assert!(out.lines().any(|l| l.starts_with("set_param") && l.contains("edit")), "{out}");
+    assert!(out.lines().count() > 80, "every command is listed");
+    let j: serde_json::Value = serde_json::from_str(&text(&nyx(&["api", "list", "--json"]).stdout)).unwrap();
+    assert_eq!(j.as_array().unwrap().len(), out.lines().count());
+
+    let o = nyx(&["api", "show", "set_param"]);
+    assert_eq!(o.status.code(), Some(0));
+    // the page is the file in docs/api, byte for byte
+    let file = std::fs::read_to_string(root().join("docs/api/set_param.md")).unwrap().replace("\r\n", "\n");
+    assert_eq!(text(&o.stdout), file);
+    let j: serde_json::Value = serde_json::from_str(&text(&nyx(&["api", "show", "set_param", "--json"]).stdout)).unwrap();
+    assert_eq!(j["example"]["cmd"], "set_param");
+    assert!(j["schema"]["properties"]["value"].is_object());
+
+    let o = nyx(&["api", "show", "set_parm"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(text(&o.stderr).contains("did you mean set_param"), "{}", text(&o.stderr));
+    assert_eq!(nyx(&["api"]).status.code(), Some(2));
+    assert_eq!(nyx(&["api", "frob"]).status.code(), Some(2));
+}

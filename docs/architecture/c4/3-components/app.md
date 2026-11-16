@@ -21,7 +21,7 @@ graph TB
         style 10 fill:#85bbf0,stroke:#5d82a8,color:#000000
         11["<div style='font-weight: bold'>Look and widgets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The nyx look (palette, fonts,<br />egui visuals, light and dark)<br />and the small brand widgets<br />(cards, chips, buttons,<br />sparklines, sheets).</div>"]
         style 11 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        12["<div style='font-weight: bold'>Scripts and batch</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Runs without a person at the<br />window: scripted runs with<br />screenshots (--script), batch<br />runs for clusters, command<br />lists (nyx check, nyx run),<br />and the optional user Python<br />script.</div>"]
+        12["<div style='font-weight: bold'>Scripts and batch</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Runs without a person at the<br />window: scripted runs with<br />screenshots (--script), batch<br />runs for clusters, command<br />lists (nyx check, nyx run)<br />and the command reference<br />(nyx api), and the optional<br />user Python script.</div>"]
         style 12 fill:#85bbf0,stroke:#5d82a8,color:#000000
         7["<div style='font-weight: bold'>Window</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The application object around<br />one Engine: window layout,<br />the run-time state (mesh on<br />show, result on show, plot<br />settings) and the frame<br />update loop.</div>"]
         style 7 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -37,7 +37,7 @@ graph TB
       style 22 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    12-. "<div>uses engine: commandlist,<br />crate root +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    12-. "<div>uses engine: apiref,<br />commandlist +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
     12-. "<div>uses examples, shell</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
     12-. "<div>uses app, state</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
     9-. "<div>uses engine: crate root,<br />project</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
@@ -60,9 +60,9 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Window](../4-code/app/window.md) | 3 | 2087 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
+| [Window](../4-code/app/window.md) | 3 | 2095 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
 | [Shell and dashboard](../4-code/app/shell.md) | 5 | 3271 | 14, 23 | The tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
 | [Inspector tabs](../4-code/app/inspector.md) | 3 | 2034 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
 | [Viewport](../4-code/app/viewport.md) | 3 | 991 | 23 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, and what is kept between frames. |
 | [Look and widgets](../4-code/app/style.md) | 2 | 326 | 23 | The nyx look (palette, fonts, egui visuals, light and dark) and the small brand widgets (cards, chips, buttons, sparklines, sheets). |
-| [Scripts and batch](../4-code/app/headless.md) | 4 | 450 | 23, 89 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run), and the optional user Python script. |
+| [Scripts and batch](../4-code/app/headless.md) | 5 | 514 | 23, 89 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script. |

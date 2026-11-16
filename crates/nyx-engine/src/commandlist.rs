@@ -142,21 +142,6 @@ pub fn parse(text: &str) -> (Vec<Line>, Vec<Problem>) {
 
 // ------------------------------------------------------------------------------------------------------------------ static stage
 
-fn edit_distance(a: &str, b: &str) -> usize {
-    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
-    let mut row: Vec<usize> = (0..=b.len()).collect();
-    for i in 1..=a.len() {
-        let mut prev = row[0];
-        row[0] = i;
-        for j in 1..=b.len() {
-            let keep = row[j];
-            row[j] = (row[j] + 1).min(row[j - 1] + 1).min(prev + usize::from(a[i - 1] != b[j - 1]));
-            prev = keep;
-        }
-    }
-    row[b.len()]
-}
-
 fn type_ok(t: &str, v: &Value) -> bool {
     match t {
         "string" => v.is_string(),
@@ -303,16 +288,12 @@ impl Engine {
         let mut out = vec![];
         for l in lines {
             let Some(schema) = catalog.get(&l.cmd) else {
-                let mut near: Vec<(usize, &String)> =
-                    catalog.keys().map(|n| (edit_distance(n, &l.cmd), n)).filter(|(d, _)| *d <= 3).collect();
-                near.sort();
+                let names: Vec<String> = catalog.keys().cloned().collect();
+                let near = crate::apiref::nearest(&names, &l.cmd);
                 let hint = if near.is_empty() {
                     "list_commands lists them".to_string()
                 } else {
-                    format!(
-                        "did you mean {}?",
-                        near.iter().take(3).map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")
-                    )
+                    format!("did you mean {}?", near.join(", "))
                 };
                 out.push(Problem {
                     line: l.number,

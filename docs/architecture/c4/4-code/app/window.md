@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 2087 lines.
+**Size:** 3 files, 2095 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/app/src/app.rs` | 1782 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
-| `crates/app/src/main.rs` | 83 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
+| `crates/app/src/main.rs` | 91 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
 | `crates/app/src/state.rs` | 222 | The run-time state of the window around the engine's project: the mesh on show (`Doc`) and a result on show with its plot settings (`ResultView`). The project itself, with its geometry, mesh settings and one problem per physics, is `nyx_... |
 
 ## What it uses
@@ -203,7 +203,7 @@ classDiagram
 | fn | `App::viewport_ui` | `app.rs:1229` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
 | fn | `App::set_condition_on` | `app.rs:1303` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
 | fn | `App::set_problem` | `app.rs:1313` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
-| fn | `main` | `main.rs:28` | `fn main() -> eframe::Result` |
+| fn | `main` | `main.rs:29` | `fn main() -> eframe::Result` |
 | enum | `Tab` | `state.rs:12` | variants: `Geometry`, `Materials`, `Physics`, `Study`, `Results`, `Analysis` |
 | struct | `Doc` | `state.rs:38` | fields: `model`, `mesh`, `view`, `source`, `mesh_error` —  The mesh on show and what we know about its origin. |
 | struct | `ViewField` | `state.rs:65` | fields: `name`, `unit`, `values` —  A field in the flat form the window reads: scalars keep their name, a vector `E` is `\|E\|`, `Ex`, `Ez`. |

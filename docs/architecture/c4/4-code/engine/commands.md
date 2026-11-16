@@ -40,6 +40,7 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 | [app: Shell and dashboard](../app/shell.md) | engine | Engine |
 | [app: Window](../app/window.md) | engine | Engine |
 | [Analyses](./analyse.md) | engine | Engine |
+| [API reference](./apiref.md) | commands, engine | Access, CommandDesc, Engine |
 | [Command lists](./commandlist.md) | commands, engine | Access, Engine |
 | [Job runner and queue](./jobs.md) | commands, engine | Access, Engine, Purpose |
 | [Materials](./materials.md) | engine | Engine |

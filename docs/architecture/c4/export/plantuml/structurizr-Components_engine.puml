@@ -99,6 +99,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==Geometry operations\n<size:16>[Component: Rust modules]</size>\n\nEvery edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Geometryoperations
     rectangle "==Job runner and queue\n<size:16>[Component: Rust modules]</size>\n\nMesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solving physics in the order of the one-way couplings, mesh convergence on a scratch engine." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Jobrunnerandqueue
     rectangle "==Command lists\n<size:16>[Component: Rust modules]</size>\n\nA JSON-lines list of engine commands is parsed, checked against the catalog and its schemas, planned on a scratch engine (what would be meshed and solved, nothing run) and run in order through Engine::call." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Commandlists
+    rectangle "==API reference\n<size:16>[Component: Rust modules]</size>\n\nOne Markdown page per engine command and an index, generated from Engine::catalog() (arguments flattened from the schema, an example that passes the check); docs/api is compared with it by a test." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.APIreference
     rectangle "==Meshing seam\n<size:16>[Component: Rust modules]</size>\n\nMeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Meshingseam
     rectangle "==Materials\n<size:16>[Component: Rust modules]</size>\n\nThe material library plus the materials a project carries, resolved at the study wavelength." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Materials
     rectangle "==Analyses\n<size:16>[Component: Rust modules]</size>\n\nRuns the analyses of nyx-analysis on the latest result of a physics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Analyses
@@ -134,8 +135,12 @@ nyx.nyxengine.Analyses --> nyx.nyxanalysis <<Relationship-UmVsYXRpb25zaGlw>> : "
 nyx.nyxengine.Analyses --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: error, result\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Analyses --> nyx.nyxengine.Commands <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Analyses --> nyx.nyxengine.Meshingseam <<Relationship-UmVsYXRpb25zaGlw>> : "uses meshing\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.APIreference --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: spec\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.APIreference --> nyx.nyxstore <<Relationship-UmVsYXRpb25zaGlw>> : "uses store: util\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.APIreference --> nyx.nyxengine.Commands <<Relationship-UmVsYXRpb25zaGlw>> : "uses commands, engine\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commandlists --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: error\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commandlists --> nyx.nyxstore <<Relationship-UmVsYXRpb25zaGlw>> : "uses store: util\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.Commandlists --> nyx.nyxengine.APIreference <<Relationship-UmVsYXRpb25zaGlw>> : "uses apiref\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commandlists --> nyx.nyxengine.Commands <<Relationship-UmVsYXRpb25zaGlw>> : "uses commands, engine\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commands --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material::spec, mesh +1\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commands --> nyx.geom <<Relationship-UmVsYXRpb25zaGlw>> : "uses geom: model\n<size:16>[Rust paths]</size>"

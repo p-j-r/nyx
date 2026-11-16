@@ -14,51 +14,51 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 68 ["nyx-store"]
-        style 68 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 69 ["nyx-store"]
+        style 69 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        69["<div style='font-weight: bold'>Data model and card</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The workflow manifest,<br />experiments, run digest and<br />the concept card generated<br />from an experiment's spec.</div>"]
-        style 69 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        70["<div style='font-weight: bold'>Workspace</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The folder behind the<br />dashboard: settings, the list<br />of workflows (manifests only)<br />and the sections of the<br />dashboard.</div>"]
+        70["<div style='font-weight: bold'>Data model and card</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The workflow manifest,<br />experiments, run digest and<br />the concept card generated<br />from an experiment's spec.</div>"]
         style 70 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        71["<div style='font-weight: bold'>Workflow folder</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One workflow folder:<br />workflow.json, history.jsonl,<br />notes, specs and one folder<br />per experiment.</div>"]
+        71["<div style='font-weight: bold'>Workspace</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The folder behind the<br />dashboard: settings, the list<br />of workflows (manifests only)<br />and the sections of the<br />dashboard.</div>"]
         style 71 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        72["<div style='font-weight: bold'>Versions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Every change to an<br />experiment's set-up kept in<br />history.jsonl with the hash<br />of its spec.</div>"]
+        72["<div style='font-weight: bold'>Workflow folder</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One workflow folder:<br />workflow.json, history.jsonl,<br />notes, specs and one folder<br />per experiment.</div>"]
         style 72 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        73["<div style='font-weight: bold'>Runs</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Append-only run records in<br />runs.jsonl, the digest<br />derived from them and the<br />filter language of the runs<br />table.</div>"]
+        73["<div style='font-weight: bold'>Versions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Every change to an<br />experiment's set-up kept in<br />history.jsonl with the hash<br />of its spec.</div>"]
         style 73 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        74["<div style='font-weight: bold'>Search</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Search over the manifests:<br />plain words with a synonym<br />table and numbers with units<br />matched against card<br />dimensions.</div>"]
+        74["<div style='font-weight: bold'>Runs</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Append-only run records in<br />runs.jsonl, the digest<br />derived from them and the<br />filter language of the runs<br />table.</div>"]
         style 74 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        75["<div style='font-weight: bold'>Archives</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>.nyx files: a workflow as one<br />deterministic ZIP and the<br />safe way back in.</div>"]
+        75["<div style='font-weight: bold'>Search</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Search over the manifests:<br />plain words with a synonym<br />table and numbers with units<br />matched against card<br />dimensions.</div>"]
         style 75 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        76["<div style='font-weight: bold'>Utilities</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>UTC time without a time<br />crate, time-ordered ids,<br />atomic file writes, hashes<br />and slugs.</div>"]
+        76["<div style='font-weight: bold'>Archives</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>.nyx files: a workflow as one<br />deterministic ZIP and the<br />safe way back in.</div>"]
         style 76 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        77["<div style='font-weight: bold'>Utilities</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>UTC time without a time<br />crate, time-ordered ids,<br />atomic file writes, hashes<br />and slugs.</div>"]
+        style 77 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      112[("<div style='font-weight: bold'>Workspace data</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files and folders]</div><div style='font-size: 80%; margin-top:10px'>workspace.json,<br />workflow.json, history.jsonl,<br />runs.jsonl, specs/<br />(experiment.nyx.json,<br />specs/<hash>.nyx.json), run<br />folders with results.h5, .nyx<br />archives.</div>")]
-      style 112 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      113[("<div style='font-weight: bold'>Workspace data</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files and folders]</div><div style='font-size: 80%; margin-top:10px'>workspace.json,<br />workflow.json, history.jsonl,<br />runs.jsonl, specs/<br />(experiment.nyx.json,<br />specs/<hash>.nyx.json), run<br />folders with results.h5, .nyx<br />archives.</div>")]
+      style 113 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    75-. "<div>uses flow</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
-    75-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    75-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    71-. "<div>uses archive</div><div style='font-size: 70%'>[Rust paths]</div>" .->75
-    71-. "<div>uses card, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    71-. "<div>uses runs</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
-    71-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    71-. "<div>uses versions</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
-    69-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    73-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    73-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    74-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    74-. "<div>uses runs</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
-    74-. "<div>uses workspace</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
-    70-. "<div>uses flow</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
-    70-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    70-. "<div>uses runs</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
-    70-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    71-. "<div>Reads and writes workflow<br />folders</div><div style='font-size: 70%'>[declared in spec]</div>" .->112
-    73-. "<div>Appends runs.jsonl</div><div style='font-size: 70%'>[declared in spec]</div>" .->112
+    76-. "<div>uses flow</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
+    76-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
+    76-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
+    72-. "<div>uses archive</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
+    72-. "<div>uses card, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
+    72-. "<div>uses runs</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
+    72-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
+    72-. "<div>uses versions</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
+    70-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
+    74-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
+    74-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
+    75-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
+    75-. "<div>uses runs</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
+    75-. "<div>uses workspace</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
+    71-. "<div>uses flow</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
+    71-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
+    71-. "<div>uses runs</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
+    71-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
+    72-. "<div>Reads and writes workflow<br />folders</div><div style='font-size: 70%'>[declared in spec]</div>" .->113
+    74-. "<div>Appends runs.jsonl</div><div style='font-size: 70%'>[declared in spec]</div>" .->113
 
   end```
 

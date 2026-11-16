@@ -2,9 +2,10 @@
 //! the engine and the physics crates).
 //!
 //! Command line: `nyx [FILE]` opens the window (and a project file), `--size WxH` sets the window size,
-//! `check FILE` and `run FILE` check and run a JSON-lines list of engine commands without a window (see `runfile`), `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.json` solves
+//! `api list` and `api show COMMAND` print the command reference (see `apicmd`), `check FILE` and `run FILE` check and run a JSON-lines list of engine commands without a window (see `runfile`), `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.json` solves
 //! without a window (see `batch`). Modules: `app` (state and layout), the Connect menu (in `app`, backed by the `nyx-connect` crate), `tabs` (the inspector), `viewport` and `scene` (drawing),
 //! `pyscript` (the optional Python script), `state` (the mesh and result on show), `examples`, `colormap`, `theme`.
+mod apicmd;
 mod app;
 mod batch;
 mod colormap;
@@ -32,6 +33,13 @@ fn main() -> eframe::Result {
         if let Err(e) = batch::run(&args[1..]) {
             eprintln!("nyx: {e}");
             std::process::exit(1);
+        }
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("api") {
+        if let Err((code, msg)) = apicmd::run(&args[1..]) {
+            eprintln!("nyx: {msg}");
+            std::process::exit(code);
         }
         return Ok(());
     }

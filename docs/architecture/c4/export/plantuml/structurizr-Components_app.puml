@@ -85,7 +85,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "app\n<size:16>[Container: Rust, eframe/egui]</size>" <<Boundary-YXBw>> {
     rectangle "==Viewport\n<size:16>[Component: Rust modules]</size>\n\nThe 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, and what is kept between frames." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Viewport
     rectangle "==Look and widgets\n<size:16>[Component: Rust modules]</size>\n\nThe nyx look (palette, fonts, egui visuals, light and dark) and the small brand widgets (cards, chips, buttons, sparklines, sheets)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Lookandwidgets
-    rectangle "==Scripts and batch\n<size:16>[Component: Rust modules]</size>\n\nRuns without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run), and the optional user Python script." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Scriptsandbatch
+    rectangle "==Scripts and batch\n<size:16>[Component: Rust modules]</size>\n\nRuns without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Scriptsandbatch
     rectangle "==Window\n<size:16>[Component: Rust modules]</size>\n\nThe application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Window
     rectangle "==Shell and dashboard\n<size:16>[Component: Rust modules]</size>\n\nThe tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Shellanddashboard
     rectangle "==Inspector tabs\n<size:16>[Component: Rust modules]</size>\n\nThe tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.app.Inspectortabs
@@ -95,7 +95,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   component "==nyx-engine\n<size:16>[Container: Rust library]</size>\n\nThe Engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them, and the binding to a workflow. Every action is a named command with a JSON Schema." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxengine
 }
 
-nyx.app.Scriptsandbatch --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: commandlist, crate root +1\n<size:16>[Rust paths]</size>"
+nyx.app.Scriptsandbatch --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: apiref, commandlist +2\n<size:16>[Rust paths]</size>"
 nyx.app.Scriptsandbatch --> nyx.app.Shellanddashboard <<Relationship-UmVsYXRpb25zaGlw>> : "uses examples, shell\n<size:16>[Rust paths]</size>"
 nyx.app.Scriptsandbatch --> nyx.app.Window <<Relationship-UmVsYXRpb25zaGlw>> : "uses app, state\n<size:16>[Rust paths]</size>"
 nyx.app.Inspectortabs --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, project\n<size:16>[Rust paths]</size>"

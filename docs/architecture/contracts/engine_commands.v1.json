@@ -319,6 +319,7 @@
           "type": "string"
         },
         "value": {
+          "description": "a number in metres (or the unit the features give it), or an expression over other parameters",
           "oneOf": [
             {
               "type": "number"
@@ -682,6 +683,7 @@
       "additionalProperties": false,
       "properties": {
         "adapt_scale": {
+          "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher",
           "type": [
             "number",
             "null"
@@ -703,6 +705,7 @@
           "type": "boolean"
         },
         "points_per_wavelength": {
+          "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2",
           "type": [
             "number",
             "null"
@@ -717,12 +720,15 @@
           "items": {
             "properties": {
               "domain_offset": {
+                "description": "added to the domain numbers of the layer's cells",
                 "type": "integer"
               },
               "n": {
+                "description": "cells across the thickness",
                 "type": "integer"
               },
               "thickness": {
+                "description": "thickness of the layer along y, metres",
                 "type": "number"
               }
             },
@@ -1123,12 +1129,15 @@
           "items": {
             "properties": {
               "edits": {
+                "description": "the edits that make this point, applied in order to a copy of the project",
                 "items": {
                   "properties": {
                     "args": {
+                      "description": "its arguments",
                       "type": "object"
                     },
                     "cmd": {
+                      "description": "a command that changes the project",
                       "type": "string"
                     }
                   },
@@ -1140,6 +1149,7 @@
                 "type": "array"
               },
               "label": {
+                "description": "a name for the point in the table; default `point N`",
                 "type": "string"
               }
             },
@@ -1158,15 +1168,19 @@
           "description": "one command repeated with `field` set to each value",
           "properties": {
             "args": {
+              "description": "its arguments that stay the same",
               "type": "object"
             },
             "cmd": {
+              "description": "the edit command repeated at every point",
               "type": "string"
             },
             "field": {
+              "description": "the argument that takes each value",
               "type": "string"
             },
             "values": {
+              "description": "the values, one point each",
               "type": "array"
             }
           },

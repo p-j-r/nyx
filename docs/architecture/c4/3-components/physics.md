@@ -14,41 +14,41 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 34 ["nyx-physics"]
-        style 34 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 35 ["nyx-physics"]
+        style 35 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        35["<div style='font-weight: bold'>Physics trait and registry</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait (everything<br />the rest of nyx may ask of a<br />physics), the Registry of the<br />physics a build contains, and<br />the plain-data error every<br />method returns.</div>"]
-        style 35 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        36["<div style='font-weight: bold'>Problem envelope</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one shape every physics<br />is given (ProblemSpec), its<br />decoding into typed<br />parameters with descriptor<br />defaults and name resolution,<br />and its structural<br />validation.</div>"]
+        36["<div style='font-weight: bold'>Physics trait and registry</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait (everything<br />the rest of nyx may ask of a<br />physics), the Registry of the<br />physics a build contains, and<br />the plain-data error every<br />method returns.</div>"]
         style 36 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        37["<div style='font-weight: bold'>Descriptors and schemas</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>What a physics tells nyx<br />about itself (studies,<br />conditions, parameters) and<br />the JSON Schemas generated<br />from it for the window, the<br />MCP server and the<br />documentation.</div>"]
+        37["<div style='font-weight: bold'>Problem envelope</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one shape every physics<br />is given (ProblemSpec), its<br />decoding into typed<br />parameters with descriptor<br />defaults and name resolution,<br />and its structural<br />validation.</div>"]
         style 37 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        38["<div style='font-weight: bold'>Result and frame</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>SolveResult as plain<br />serialisable data, and the<br />frame a result states for the<br />analysis of its vector<br />fields.</div>"]
+        38["<div style='font-weight: bold'>Descriptors and schemas</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>What a physics tells nyx<br />about itself (studies,<br />conditions, parameters) and<br />the JSON Schemas generated<br />from it for the window, the<br />MCP server and the<br />documentation.</div>"]
         style 38 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        39["<div style='font-weight: bold'>Test support</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The golden-file harness and<br />the contract-test helpers<br />shared by every physics<br />crate.</div>"]
+        39["<div style='font-weight: bold'>Result and frame</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>SolveResult as plain<br />serialisable data, and the<br />frame a result states for the<br />analysis of its vector<br />fields.</div>"]
         style 39 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        40["<div style='font-weight: bold'>Test support</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The golden-file harness and<br />the contract-test helpers<br />shared by every physics<br />crate.</div>"]
+        style 40 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      77["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 77 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      78["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 78 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    37-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    37-. "<div>uses physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    36-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    36-. "<div>uses desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->37
-    36-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
-    36-. "<div>uses error, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    38-. "<div>uses femcore: adapt, fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    39-. "<div>uses femcore: fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    39-. "<div>uses schema</div><div style='font-size: 70%'>[Rust paths]</div>" .->37
-    39-. "<div>uses spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
-    39-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
-    39-. "<div>uses crate root, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    35-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
-    35-. "<div>uses crate root, desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->37
-    35-. "<div>uses spec, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
-    35-. "<div>uses frame, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    38-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    38-. "<div>uses physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
+    37-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    37-. "<div>uses desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    37-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    37-. "<div>uses error, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
+    39-. "<div>uses femcore: adapt, fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    40-. "<div>uses femcore: fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    40-. "<div>uses schema</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    40-. "<div>uses spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->37
+    40-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    40-. "<div>uses crate root, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
+    36-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    36-. "<div>uses crate root, desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    36-. "<div>uses spec, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->37
+    36-. "<div>uses frame, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
 
   end```
 

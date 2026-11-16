@@ -35,8 +35,16 @@ commandlist = component "Command lists" "A JSON-lines list of engine commands is
     properties {
         "adr" "89"
         "code" "crates/nyx-engine/src: commandlist.rs"
-        "lines" "586"
+        "lines" "567"
         "codeDiagram" "4-code/engine/commandlist.md"
+    }
+}
+apiref = component "API reference" "One Markdown page per engine command and an index, generated from Engine::catalog() (arguments flattened from the schema, an example that passes the check); docs/api is compared with it by a test." "Rust modules" {
+    properties {
+        "adr" "89, 57"
+        "code" "crates/nyx-engine/src: apiref.rs"
+        "lines" "291"
+        "codeDiagram" "4-code/engine/apiref.md"
     }
 }
 meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project." "Rust modules" {
@@ -83,7 +91,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "89"
+        "lines" "90"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }
