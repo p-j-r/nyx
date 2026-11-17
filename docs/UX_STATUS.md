@@ -4,7 +4,7 @@ Handoff file for `docs/ux/UX_REVIEW.md` and `docs/ux/UX_ACTION_PLAN.md`. Read th
 
 ## State (2026-11-17, after U0 review; nothing implemented)
 
-* Bookmark `ux-0-review`, workspace `nyx2-ux` (jj, from `productivity-4-memory` `fb57860d`). **Documentation only**: `docs/ux/` (review, action plan, `tokens.json`, `contrast.py`, `shots/`), ADR 90 (proposed, provisional number, index row added), this file, The mockups are in Paper (file "nyx - app mockups", page "nyx UX (review mockups)", five artboards U-1 to U-5, outside the repository; `docs/ux/UX_ACTION_PLAN.md` section 6 lists them). No source file, contract, golden or C4 input changed, so no C4 rebuild was due.
+* Bookmark `ux-0-review`, workspace `nyx2-ux` (jj, from `productivity-4-memory` `fb57860d`). **Documentation only**: `docs/ux/` (review, action plan, `tokens.json`, `contrast.py`, `shots/`), ADR 88 (proposed, provisional number, index row added), this file, The mockups are in Paper (file "nyx - app mockups", page "nyx UX (review mockups)", five artboards U-1 to U-5, outside the repository; `docs/ux/UX_ACTION_PLAN.md` section 6 lists them). No source file, contract, golden or C4 input changed, so no C4 rebuild was due.
 * Checks run: `bash docs/architecture/check_code_to_adr.sh` (1047 files, 0 without a row, after adding rows for `docs/ux/*` and this file); `docs/ux/contrast.py` (every proposed token pair passes). **Not run:** `cargo test`, `clippy`, no baseline of the `nyx` window tests (the productivity status records two failing ones, `every_tab_draws_for_the_examples` and `the_window_checks_convergence_on_its_own_thread`; plan U0 re-measures them).
 * The review looked at the prebuilt `nyx.exe` of `nyx2-productivity-target` (built 2026-11-17 00:52 from `productivity-4-memory`), not at a build of this workspace.
 
@@ -15,7 +15,7 @@ Handoff file for `docs/ux/UX_REVIEW.md` and `docs/ux/UX_ACTION_PLAN.md`. Read th
 * **The skill** `apple-design` was installed by cloning `github.com/dickwu/apple-design-skill` into `~/.claude/skills/apple-design` (Node/npx is not installed here, so `npx skills add` could not run). Files copied: `SKILL.md`, `references/`, `scripts/`.
 * **The running-job state could not be captured** (the script waits while a job is busy; the PowerShell route is blocked by the execution policy and was not bypassed). U5 needs a held job in a window test to draw it.
 * The productivity plan documents (`docs/NYX2_PRODUCTIVITY_PLAN.md`, `docs/PRODUCTIVITY_STATUS.md`) are on the `productivity-plan` bookmark, which is a sibling head of `productivity-4-memory`, not an ancestor; they were read with `jj file show -r productivity-plan`.
-* ADR 90 is provisional: 84 to 89 belong to the productivity line (88 unused there); renumber at merge.
+* ADR 88: Paul chose this number (2026-11-17); it was the one the productivity line left unused. The text in the other session's workspace (`nyx2-ux2`) still says 90: renumber when merging.
 
 * **Mockups: two sets on one Paper page** ("nyx UX (review mockups)"): U-1 to U-5 by an earlier or parallel session and B1 to B6 by this one (see plan section 6). Two writers were active at once (which session the other was is not established): the page holds interleaved artboards from both, `ux-0-review` was rewritten under me (`8a867a87` to `09be7cc7`), and the other writer's edits to `UX_ACTION_PLAN.md` and `UX_STATUS.md` were in the shared working copy, so they are inside my commit on `ux-0b-mockups` (the text of section 6 for U-1 to U-5 is theirs). Paper is outside the repository: only the B1 to B6 PNGs are in `docs/ux/mockups/`; export U-1 to U-5 if they are wanted in git.
 * **jj, this session's own default-workspace snapshot.** This session also ran its first two `jj` commands inside `nyx2` (default workspace): that snapshotted `wyyuszkw` again and rebased three descendants (`wyyuszkw` `50c92f1a` to `aa5d6d49`; `rnqpznxl`, `xmowyyyk` and `mxwyrwkp` rebased, content unchanged; the `(conflict)` on `xmowyyyk` and `nyx2-a3@` was there before). Nothing else was done in `nyx2`.
@@ -27,3 +27,13 @@ Handoff file for `docs/ux/UX_REVIEW.md` and `docs/ux/UX_ACTION_PLAN.md`. Read th
 ## Next
 
 Plan phases U0 to U6 in `docs/ux/UX_ACTION_PLAN.md`; decisions D1 to D6 for Paul are in its section 4. First code step is U1 (`tokens.rs`, accessibility), alone; then U2, U3 and U4 can run in three workspaces.
+
+## Merged plan (workspace `nyx2-ux-compare`, bookmark `ux-compare`, 2026-11-17)
+
+Two sessions reviewed and mocked up the window in parallel (S1 `nyx2-ux`, boards B1 to B6; S2 `nyx2-ux2`, boards U-1 to U-6). They were compared and merged in **`docs/ux/UX_MERGED_PLAN.md`** (read it first); Paul accepted it. Documentation, `docs/ux/tokens.json` (corrected) and the font only: **no Rust changed, nothing built or run.**
+
+* Decisions: native menu (`muda`), system theme by default, dark canvas by default, brand pink kept (ink text on the dark pink), High contrast as a setting plus a Windows read, 8 solid region colours (hatch for 9 to 16, grey beyond, confirmed), queue = cancel, pause, priority, ADR number 88.
+* **KNOWN PROBLEM I-9 (not fixed, treat as a bug):** a STALE banner appeared on a freshly computed result. Reproduce by hand, then write a freshness test. See section 8 of the merged plan. Do not ship the stale and busy surfaces before it is understood.
+* The region palettes of the two earlier sets failed the colour-blind all-pairs check; the replacements are in `tokens.json` and need a second cue (number chip and legend) on every region.
+* EB Garamond Italic (SIL OFL 1.1) is in `crates/app/assets/fonts/` with its licence; the About / Licences view that shows the licence is plan item U2.
+* Not checked in the app: Narrator, High Contrast, scaling, a running-job screenshot, `muda` on Linux and macOS.

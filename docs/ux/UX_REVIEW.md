@@ -2,7 +2,7 @@
 
 Date: 2026-11-17. Reviewed: the window of `productivity-4-memory` (`fb57860d`, built binary of 2026-11-17 00:52), Windows 11, Rust 1.99, `eframe`/`egui` 0.37, release build, driven with `nyx --script` into a scratch workspace (`NYX_WORKSPACE`), 1440 x 900.
 Method: the `apple-design` skill (Apple's HIG as design principles; nyx is a desktop Rust/egui app, so the platform pages apply as principles, Windows is not macOS). Every citation below was read from the skill's reference pages in this session. Contrast figures are computed from the hex values in `crates/app/src/theme.rs` and `kit.rs` (scripts and numbers in section 7). Palette checks were run with the `dataviz` validator.
-The plan that follows from this review is `docs/ux/UX_ACTION_PLAN.md`; the colour decision is ADR 90 (provisional number).
+The plan that follows from this review is `docs/ux/UX_ACTION_PLAN.md`; the colour decision is ADR 88.
 
 ## 0. What was and was not looked at
 
@@ -88,7 +88,7 @@ Brand: plum `#820C4F` (OKLCH L 0.40, C 0.158, h 353), amber `#FFBD59` (L 0.84, C
 | 5 | **Black canvas in a light shell, rainbow in the canvas.** L 0.97 beside L 0.22; 12 categorical hues at half alpha. | I-3, I-4 | `app.rs`, `colormap.rs` |
 | 6 | **Colour with no redundancy**, so users try to read it harder (dots, chips). | C3 | tab strip, status chip |
 
-**The way to use the palette** (decision text in ADR 90; tokens in `docs/ux/tokens.json`; checked values in section 7):
+**The way to use the palette** (decision text in ADR 88; tokens in `docs/ux/tokens.json`; checked values in section 7):
 
 1. **Brand rests in four places only:** the logo, the italic titles, the single primary action, and a one-step tint for the selected item. Everything else is neutral.
 2. **Neutrals lose their tint:** dark page `#141218` (C 0.012), card `#1D1A22` (C 0.016), raised `#262230`; light page `#F8F6F8`. The violet cast is kept in the *text* (`#ECE7EF`) so the app still reads as plum, not grey.

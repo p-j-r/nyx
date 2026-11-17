@@ -1,6 +1,6 @@
 # nyx window: UX action plan (Rust, egui 0.37)
 
-Date: 2026-11-17. Base: `productivity-4-memory` (`fb57860d`). Evidence: `docs/ux/UX_REVIEW.md`. Decision: ADR 90 (provisional number). Tokens: `docs/ux/tokens.json`, checked by `docs/ux/contrast.py`. Mockups: Paper file, pages "nyx UX" (see the end of this file).
+Date: 2026-11-17. Base: `productivity-4-memory` (`fb57860d`). Evidence: `docs/ux/UX_REVIEW.md`. Decision: ADR 88. Tokens: `docs/ux/tokens.json`, checked by `docs/ux/contrast.py`. Mockups: Paper file, pages "nyx UX" (see the end of this file).
 Nothing in this plan has been implemented; this branch changes documentation only. The Paper mockups are made (section 6).
 
 ## 0. Principles of the plan

@@ -70,5 +70,5 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 85 | [Every long operation is a job that can be watched and cancelled](adr/0085-every-long-operation-is-a-job.md) | `nyx-engine::{engine,jobs,convergence,results_file}`, `app::app` |
 | 86 | [Solves run in a worker process; their memory is estimated from what workers measured](adr/0086-solves-run-in-a-worker-process.md) | `nyx-engine::{worker,estimate,engine,jobs,process}`, `app::main`, `nyx-mcp::main` |
 | 87 | [Work is queued in lanes; stages are shared by content](adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md) | `nyx-engine::{jobs,queue,sweep,engine,solve,convergence}` |
+| 88 | [Colour has roles, and the window follows the system appearance (proposed)](adr/0088-colour-has-roles-and-the-window-follows-the-system.md) | `app::{theme,kit,colormap,shell}` (planned: `app::tokens`) |
 | 89 | [Command lists are a front-end: checked, planned and run](adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md) | `nyx-engine::commandlist`, `app::runfile` |
-| 90 | [Colour has roles, and the window follows the system appearance (proposed; number provisional)](adr/0090-colour-has-roles-and-the-window-follows-the-system.md) | `app::{theme,kit,colormap,shell}` (planned: `app::tokens`) |
