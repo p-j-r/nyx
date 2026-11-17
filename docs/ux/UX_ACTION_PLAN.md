@@ -1,7 +1,7 @@
 # nyx window: UX action plan (Rust, egui 0.37)
 
 Date: 2026-11-17. Base: `productivity-4-memory` (`fb57860d`). Evidence: `docs/ux/UX_REVIEW.md`. Decision: ADR 90 (provisional number). Tokens: `docs/ux/tokens.json`, checked by `docs/ux/contrast.py`. Mockups: Paper file, pages "nyx UX" (see the end of this file).
-Nothing in this plan has been implemented; this branch changes documentation only. The Paper mockups (section 6) are still to be made: Paper Desktop was not running.
+Nothing in this plan has been implemented; this branch changes documentation only. The Paper mockups are made (section 6).
 
 ## 0. Principles of the plan
 
@@ -135,4 +135,22 @@ U5 after U2 to U4 land (it needs the menu, the formats and the legend). Bookmark
 
 ## 6. Mockups (Paper)
 
-Planned, page "nyx UX" in the Paper file: tokens and roles; Dashboard light and dark with a running card; Build with viewport (follows theme) and the legend; Analysis with the quiet selection; states sheet (saved, running, queued, stale, failed with glyph and word); Queue panel; Settings with the new options. Every colour in them is a value of `docs/ux/tokens.json`; egui cannot blur or cast the soft shadows, so none is drawn.
+Made, in the Paper file "nyx - app mockups", page "nyx UX (review mockups)" (the 14 earlier mockups on Page 1 are untouched; the new colours are tokens `--ux-light-*`, `--ux-dark-*`, `--ux-data-*` in the file):
+
+* **U-1 Dashboard, light** and **U-2 Dashboard, dark**: menu strip, no Light/Dark button, selected tab as tint + bar, one filled action (New workflow), a Running card and a Queued card with glyph + word, aligned "Earlier" table.
+* **U-3 Build, dark, running, queue open**: section tabs as tint + bar, one filled action ("Queue sweep, position 3"), canvas with the validated palette and a legend that names every colour, the Stale band, a sweep card showing the engine's plan, and the Queue panel (Hold / Release / Cancel, Pause queue).
+* **U-4 Colour roles, rules and states**: both token sets with their measured contrast, the five rules, and the six states each with a shape and a word.
+* **U-5 Settings, light**: Appearance (Follow system default), Viewport background, Contrast, Reduce motion, Text size.
+
+A **second set, B1 to B6**, was drawn on the same page by another session working at the same time (two sessions ended up on one task; both sets are kept, neither was edited by the other). PNG exports at 1x are in `docs/ux/mockups/` (all under 1 MiB):
+
+* **B1 Colour roles** (`b1-colour-roles.png`): the main roles of `tokens.json` in light and dark (14 rows each side; `on_accent`, `on_activity`, and in light `activity_tint`, appear only in use in B2 to B6) with hex and job, the five rules, and the dark Compute button before (white on `#D96AA4`, 3.2:1) and after (ink on `#E58BB8`, 7.5:1).
+* **B2 States** (`b2-states.png`): saved, running, queued, stale, failed as chips with a glyph and a word, in both modes; controls with `control_edge`, the focus ring, selection as tint plus a 2 px bar.
+* **B3 Build, dark** (`b3-build-dark.png`): the after of `shots/dark-build.png`: no Light/Dark button, tabs as tint plus bar or underline, Compute the only filled object, viewport following the theme with a legend, the "coming soon" Sweep card replaced by a plain one, boundaries in one aligned table. The top-right icon button was removed after review (it read as the appearance toggle that I-1 removes, and Settings belongs in the menu, I-6).
+* **B4 Dashboard, light** (`b4-dashboard-light.png`): amber chip only while something runs, cards with state glyph and word, the Earlier table in fixed lanes (review I-11); the progress track has a `control_edge` outline because the amber fill is only 1.5:1 on its tint (measured).
+* **B5 Analysis, light** (`b5-analysis-light.png`): a plot with the validated light series colours, each series also carrying a marker shape and an end label set in the text colour (the series colours measure 2.5 to 3.9:1 on the canvas, so they are never used for text), the selected run ringed; runs table with the tint-plus-bar selection.
+* **B6 Queue panel and Settings** (`b6-queue-settings.png`): running, queued and finished jobs with glyph and word, and the new Settings (Follow system, canvas follows the theme, Contrast, Reduce motion, Text size).
+
+**How the sets differ.** U-1 to U-5 draw the menu strip, the Queue overlay (hold, release, cancel, pause), the Stale band, the domain palette on the canvas and a dark Dashboard; U-4 covers colour roles, rules and states; they have no Analysis board. B1 to B6 add the Compute before/after, a state sheet with focus and selection, Analysis with a plot, and the Queue panel as a page; they draw no menu strip (U2 adds it, see U-1). Use U-1 to U-3 for the shell, menu and queue, B5 for plots, and U-4 with B1/B2 for colour; Settings is in U-5 and B6.
+
+Not drawn in either set: Build in light, the Start-a-workflow, palette and Share sheets, and the numbers of a real run (all figures are placeholders). Numbers in all boards are placeholders for layout, not results of a run. B3 shows the mesh as a CSS grid, not a real triangulation. Every colour of B1 to B6 is a hex value of `docs/ux/tokens.json` (the file's own tokens `--ux-*` hold the same values); egui cannot blur or cast soft shadows, so none is drawn. Only Inter Regular is loaded in the app, so no UI text is bold.
