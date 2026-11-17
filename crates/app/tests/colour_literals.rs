@@ -11,7 +11,7 @@ const PATTERNS: [&str; 15] = [
 ];
 
 /// Where colour literals are still allowed, and how many (counted 2026-11-17, after plan step U1). `TRANSPARENT` is not a colour.
-const ALLOWED: [(&str, usize); 7] = [("app.rs", 13), ("dashboard.rs", 3), ("geomui.rs", 3), ("scene.rs", 3), ("tabs.rs", 20), ("viewport.rs", 18), ("wfview.rs", 3)];
+const ALLOWED: [(&str, usize); 7] = [("app.rs", 13), ("dashboard.rs", 3), ("geomui.rs", 3), ("scene.rs", 3), ("tabs.rs", 20), ("viewport.rs", 9), ("wfview.rs", 3)];
 const EXEMPT: [&str; 3] = ["theme.rs", "tokens.rs", "colormap.rs"];
 
 /// Occurrences of `pat` that are not the start of a longer name (`from_rgb` must not count `from_rgba_unmultiplied`).

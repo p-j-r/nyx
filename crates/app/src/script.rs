@@ -68,6 +68,9 @@ impl App {
                 if let Some(e) = arg.strip_prefix("example ").and_then(|n| n.trim().parse::<usize>().ok()).and_then(|i| crate::examples::list().into_iter().nth(i)) {
                     let t = e.title.split('(').next().unwrap_or("Example").trim().to_string();
                     self.new_draft(&t, crate::shell::Start::Example(e.path));
+                } else if let Some(p) = arg.strip_prefix("open ") {
+                    // `wf open PATH`: a project file as a workflow (for a shot of a model the examples do not have)
+                    self.new_draft("Opened model", crate::shell::Start::Example(p.trim().into()));
                 }
             }
             "page" => match arg.as_str() {
@@ -107,6 +110,18 @@ impl App {
                 }
                 self.sync_look(ctx);
             }
+            // `canvas dark|theme`, `colour material|region`, `isolate N|none` (the legend row N, 1-based): settings for a shot, not saved
+            "canvas" => {
+                if let Some(ws) = &mut self.shell.ws {
+                    ws.settings.canvas = arg.clone();
+                }
+            }
+            "colour" => {
+                if let Some(ws) = &mut self.shell.ws {
+                    ws.settings.region_colouring = arg.clone();
+                }
+            }
+            "isolate" => self.vp.isolate = arg.parse::<usize>().ok().and_then(|n| n.checked_sub(1)),
             "motion" => {
                 if let Some(ws) = &mut self.shell.ws {
                     ws.settings.reduce_motion = arg == "on";

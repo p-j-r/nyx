@@ -17,6 +17,7 @@ mod geomui;
 mod kit;
 mod menu;
 mod pyscript;
+mod regions;
 mod runfile;
 mod scene;
 mod script;

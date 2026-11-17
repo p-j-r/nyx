@@ -119,9 +119,39 @@ pub fn reduce_motion(ctx: &egui::Context) -> bool {
     look(ctx).reduce_motion
 }
 
-/// The viewport and plot background: the dark canvas by default (also in a light window), or the canvas of the look when `follow_theme`.
-pub fn canvas(ctx: &egui::Context, follow_theme: bool) -> Color32 {
-    if follow_theme { role(ctx, tokens::CANVAS) } else { rgb(tokens::CANVAS.dark) }
+/// The mode of the canvas that is drawn: dark by default also in a light window, the mode of the look when `follow_theme`.
+pub fn canvas_mode(ctx: &egui::Context, follow_theme: bool) -> Mode {
+    if follow_theme { mode(ctx) } else { Mode::Dark }
+}
+
+/// Everything drawn on the canvas, in the colours of the canvas and not of the window (a light window can hold a dark canvas): the viewport and the
+/// plots read their background, ink, chips and region colours from here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ink {
+    pub mode: Mode,
+    pub bg: Color32,
+    pub text: Color32,
+    pub muted: Color32,
+    /// background of a region number chip (the canvas colour, so the chip does not depend on the region it sits on)
+    pub chip: Color32,
+    /// the outline of the selected region and the hatch lines
+    pub line: Color32,
+    /// mesh edges: the text colour at low opacity, so they show on either canvas
+    pub edge: Color32,
+}
+
+pub fn ink(ctx: &egui::Context, follow_theme: bool) -> Ink {
+    ink_of(canvas_mode(ctx, follow_theme))
+}
+
+pub fn ink_of(m: Mode) -> Ink {
+    let (text, edge) = (rgb(tokens::TEXT.get(m)), rgb(tokens::TEXT.get(m)));
+    Ink { mode: m, bg: rgb(tokens::CANVAS.get(m)), text, muted: rgb(tokens::MUTED.get(m)), chip: rgb(tokens::CHIP.get(m)), line: text, edge: with_alpha(edge, 70) }
+}
+
+/// A colour with the given opacity (0 to 255), not premultiplied.
+pub fn with_alpha(c: Color32, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
 }
 
 /// True when the system asks for High Contrast: read from Windows (`SPI_GETHIGHCONTRAST`); other platforms have no such flag we read yet.

@@ -1236,12 +1236,45 @@ impl App {
         });
     }
 
+    /// The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions
+    /// by), the surfaces of a 3D mesh by boundary number (a surface has no region; the materials belong to the volume).
+    pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint {
+        use crate::regions::{assign, keys_by_material};
+        use nyx_engine::facade::physics::{LabelResolver, MaterialAssign};
+        if view.dim == 3 {
+            let labels = if view.boundary_labels.is_empty() { &view.tri_label } else { &view.boundary_labels };
+            return assign(labels, |l| l.to_string(), false);
+        }
+        let labels = if view.domain_labels.is_empty() { &view.tri_label } else { &view.domain_labels };
+        let name_of = |l: i32| self.domain_names.iter().find(|(i, _)| *i == l).map_or_else(|| l.to_string(), |(_, n)| n.clone());
+        let key: HashMap<i32, String> = match (self.shell.settings().region_colouring == "region", self.doc.model.as_ref(), self.active().and_then(|a| self.engine.project().spec(&a).cloned())) {
+            (false, Some(model), Some(spec)) => {
+                let materials = spec
+                    .materials
+                    .iter()
+                    .map(|(region, m)| {
+                        let material = match m {
+                            MaterialAssign::Named(n) => Some(n.clone()),
+                            MaterialAssign::Oriented { material, .. } => Some(material.clone()),
+                            MaterialAssign::Props(_) => None,
+                        };
+                        (region.clone(), material)
+                    })
+                    .collect();
+                keys_by_material(&self.domain_names, &materials, |p| LabelResolver::domains(model.as_ref(), p).unwrap_or_default())
+            }
+            _ => HashMap::new(),
+        };
+        assign(labels, |l| key.get(&l).cloned().unwrap_or_else(|| name_of(l)), true)
+    }
+
     pub fn viewport_ui(&mut self, ui: &mut egui::Ui) {
-        let bg = crate::theme::canvas(ui.ctx(), self.shell.settings().canvas == "theme");
+        // everything on the canvas uses the colours of the canvas: dark by default, also in a light window (Settings: Canvas)
+        let ink = crate::theme::ink(ui.ctx(), self.shell.settings().canvas == "theme");
         let mut bc_colors: HashMap<i32, Color32> = HashMap::new();
         for (i, labels) in self.bc_labels.iter().enumerate() {
             for &l in labels {
-                bc_colors.insert(l, crate::colormap::palette(i + 3));
+                bc_colors.insert(l, crate::colormap::palette(i + 3, ink.mode));
             }
         }
         let selected: Vec<i32> = if self.picking.is_some() { self.picked.clone() } else { vec![] };
@@ -1279,11 +1312,14 @@ impl App {
                         show_edges,
                     },
                     false,
-                    bg,
+                    &ink,
                 )
             }
-            (_, Some(view)) => self.vp.show(ui, Content::Mesh { view: &view, bc_colors: &bc_colors, selected: &selected, show_edges, show_numbers }, picking, bg),
-            _ => self.vp.show(ui, Content::Empty, false, bg),
+            (_, Some(view)) => {
+                let paint = self.region_paint(&view);
+                self.vp.show(ui, Content::Mesh { view: &view, bc_colors: &bc_colors, selected: &selected, show_edges, show_numbers, paint: &paint }, picking, &ink)
+            }
+            _ => self.vp.show(ui, Content::Empty, false, &ink),
         };
         if let Some(why) = stale {
             // on the plot itself, so a stale field is never read as current; the button to solve again is in the Results tab and its panel

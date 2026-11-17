@@ -82,16 +82,16 @@ pub const ACTIVITY_TINT: Pair = pair("#FFF1DC", "#3D2D1A");
 pub const SUCCESS: Pair = pair("#1F6B43", "#5FC08C");
 /// failed, destructive (always with a glyph and a word)
 pub const DANGER: Pair = pair("#A32020", "#F27A7A");
-#[allow(dead_code)] // the canvas of plan step U4
 /// viewport and plot background (default dark in both themes)
 pub const CANVAS: Pair = pair("#F1EFF2", "#181A1E");
-#[allow(dead_code)] // the region chips of plan step U4
 /// region number chip background: the canvas colour of the same mode, with `TEXT` on it
 pub const CHIP: Pair = pair("#F1EFF2", "#181A1E");
+/// fill of regions beyond the sixteenth (slot 17 and up): neutral, told apart by the number chip only
+pub const REGION_GREY: Pair = pair("#848890", "#B8BCC4");
 
 /// Every role by its name in `tokens.json`.
 #[cfg(test)]
-pub const ROLES: [(&str, Pair); 19] = [
+pub const ROLES: [(&str, Pair); 20] = [
     ("page", PAGE),
     ("card", CARD),
     ("raised", RAISED),
@@ -111,6 +111,7 @@ pub const ROLES: [(&str, Pair); 19] = [
     ("danger", DANGER),
     ("canvas", CANVAS),
     ("chip", CHIP),
+    ("region_grey", REGION_GREY),
 ];
 
 /// Eight region colours for the dark canvas (the default canvas, also in a light window). Any two can touch: checked with all pairs.
@@ -121,7 +122,6 @@ pub const REGIONS_ON_DARK_CANVAS: [Rgb; 8] =
 pub const REGIONS_ON_LIGHT_CANVAS: [Rgb; 8] =
     [hex("#B69AF8"), hex("#E64F65"), hex("#9B084D"), hex("#2A81C2"), hex("#BD9D0D"), hex("#1F7C13"), hex("#5F36A1"), hex("#46BEBB")];
 
-#[allow(dead_code)] // drawn by the viewport in plan step U4
 /// The region palette for the canvas that is drawn.
 pub fn regions(canvas: Mode) -> &'static [Rgb; 8] {
     match canvas {
@@ -264,6 +264,21 @@ mod tests {
             let (cvd, normal) = worst(p);
             assert!(cvd >= 6.0, "{name}: worst protan or deutan distance {cvd:.2} < 6");
             assert!(normal >= 15.0, "{name}: worst normal-vision distance {normal:.2} < 15");
+        }
+    }
+
+    #[test]
+    fn the_grey_of_the_far_regions_is_apart_from_every_hue_and_from_the_canvas() {
+        for (mode, set) in [(Mode::Dark, &REGIONS_ON_DARK_CANVAS), (Mode::Light, &REGIONS_ON_LIGHT_CANVAS)] {
+            let grey = REGION_GREY.get(mode);
+            assert!(contrast(grey, CANVAS.get(mode)) >= 3.0, "{mode:?}: grey on the canvas is {:.2}:1", contrast(grey, CANVAS.get(mode)));
+            for c in set {
+                for m in [&PROTAN, &DEUTAN] {
+                    assert!(delta_e(grey, *c, Some(m)) >= 6.0, "{mode:?} {c:?}: grey is too near for a colour-blind reader ({:.1})", delta_e(grey, *c, Some(m)));
+                }
+                assert!(delta_e(grey, *c, None) >= 12.0, "{mode:?} {c:?}: grey too near ({:.1})", delta_e(grey, *c, None));
+            }
+            assert!(oklch(grey).1 <= 0.03, "grey must stay neutral");
         }
     }
 

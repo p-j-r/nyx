@@ -1,12 +1,15 @@
-//! Colour maps for field plots (Viridis, Turbo, Inferno, cool-warm, gray) as functions of a value in [0, 1], and the
-//! palette used to tell domains and boundaries apart.
+//! Colour maps for field plots (Viridis, Cividis, Turbo, Inferno, cool-warm, gray) as functions of a value in [0, 1], and the
+//! palette used to tell boundary conditions apart (the eight region colours of `tokens.rs`).
 
+use crate::tokens::{self, Mode};
 use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Colormap {
     Viridis,
+    /// designed to read the same for every kind of colour-vision difference (Nunez, Anderton and Renslow, 2018)
+    Cividis,
     Turbo,
     Inferno,
     Coolwarm,
@@ -14,12 +17,14 @@ pub enum Colormap {
 }
 
 impl Colormap {
-    pub const ALL: [Colormap; 5] = [Colormap::Viridis, Colormap::Turbo, Colormap::Inferno, Colormap::Coolwarm, Colormap::Gray];
+    pub const ALL: [Colormap; 6] = [Colormap::Viridis, Colormap::Cividis, Colormap::Turbo, Colormap::Inferno, Colormap::Coolwarm, Colormap::Gray];
 
+    /// Turbo is a rainbow: its lightness goes up and down, so equal steps of the value do not look like equal steps. It says so in its name.
     pub fn name(self) -> &'static str {
         match self {
             Colormap::Viridis => "Viridis",
-            Colormap::Turbo => "Turbo",
+            Colormap::Cividis => "Cividis (colour-vision safe)",
+            Colormap::Turbo => "Turbo (rainbow)",
             Colormap::Inferno => "Inferno",
             Colormap::Coolwarm => "Cool-warm",
             Colormap::Gray => "Gray",
@@ -33,6 +38,7 @@ impl Colormap {
         let rgb = match self {
             Colormap::Viridis => lerp_table(&VIRIDIS, t),
             Colormap::Inferno => lerp_table(&INFERNO, t),
+            Colormap::Cividis => lerp_table(&CIVIDIS, t),
             Colormap::Coolwarm => lerp_table(&COOLWARM, t),
             Colormap::Gray => [t, t, t],
             Colormap::Turbo => {
@@ -96,22 +102,54 @@ const COOLWARM: [[f32; 3]; 5] = [
     [0.706, 0.016, 0.150],
 ];
 
-/// A categorical palette for domain and boundary numbers.
-pub fn palette(i: usize) -> Color32 {
-    const P: [[u8; 3]; 12] = [
-        [86, 154, 211],
-        [230, 145, 56],
-        [106, 190, 108],
-        [199, 99, 99],
-        [164, 126, 214],
-        [210, 180, 70],
-        [80, 190, 190],
-        [214, 120, 170],
-        [150, 150, 150],
-        [120, 170, 90],
-        [190, 130, 90],
-        [100, 120, 200],
-    ];
-    let c = P[i % P.len()];
-    Color32::from_rgb(c[0], c[1], c[2])
+/// Eleven samples (every 25.5th of 256) of matplotlib's `cividis` table (`_cm_listed.py`, CC0): values read from that file, not typed from memory.
+const CIVIDIS: [[f32; 3]; 11] = [
+    [0.000000, 0.135112, 0.304751],
+    [0.046205, 0.203903, 0.440196],
+    [0.208926, 0.272546, 0.424809],
+    [0.313287, 0.343120, 0.425120],
+    [0.401418, 0.411790, 0.440708],
+    [0.488697, 0.485318, 0.471008],
+    [0.582087, 0.558670, 0.468118],
+    [0.683950, 0.638793, 0.444251],
+    [0.785965, 0.720438, 0.399613],
+    [0.896818, 0.811030, 0.320982],
+    [0.995737, 0.909344, 0.217772],
+];
+
+/// One of the eight validated categorical colours for the canvas of `mode` (any two are told apart under protan and deutan vision, see
+/// `tokens.rs`). Index `i` wraps at eight: the policy for more than eight things (hatch, grey) is in `regions.rs`.
+pub fn palette(i: usize, mode: Mode) -> Color32 {
+    crate::theme::rgb(tokens::regions(mode)[i % 8])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn luma(c: Color32) -> f32 {
+        0.2126 * f32::from(c.r()) + 0.7152 * f32::from(c.g()) + 0.0722 * f32::from(c.b())
+    }
+
+    #[test]
+    fn cividis_gets_lighter_with_the_value_and_viridis_too() {
+        for m in [Colormap::Cividis, Colormap::Viridis, Colormap::Gray] {
+            let l: Vec<f32> = (0..=40).map(|i| luma(m.sample(i as f32 / 40.0))).collect();
+            assert!(l.windows(2).all(|w| w[1] >= w[0] - 0.5), "{}: lightness is not monotone", m.name());
+        }
+        // the rainbow is not: its lightness goes up and down, and its name says so
+        let t: Vec<f32> = (0..=40).map(|i| luma(Colormap::Turbo.sample(i as f32 / 40.0))).collect();
+        assert!(!t.windows(2).all(|w| w[1] >= w[0] - 0.5));
+        assert!(Colormap::Turbo.name().contains("rainbow"));
+    }
+
+    #[test]
+    fn the_categorical_palette_is_the_validated_eight() {
+        for mode in [Mode::Dark, Mode::Light] {
+            for i in 0..8 {
+                assert_eq!(palette(i, mode), crate::theme::rgb(tokens::regions(mode)[i]));
+            }
+            assert_eq!(palette(8, mode), palette(0, mode));
+        }
+    }
 }

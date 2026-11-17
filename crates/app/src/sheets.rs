@@ -683,22 +683,24 @@ impl App {
                         });
                         ui.label(kit::muted(ui, "High contrast: stronger edges on every control. Follow system reads the Windows High Contrast setting; on other systems it stays standard.").size(12.5));
                         ui.checkbox(&mut s.reduce_motion, "Reduce motion (no sliding progress bar, no easing)");
-                        ui.add_enabled_ui(false, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Canvas");
-                                for (t, l) in [("dark", "Always dark"), ("theme", "Follow the look")] {
-                                    let _ = ui.selectable_label(s.canvas == t, l);
+                        ui.horizontal(|ui| {
+                            ui.label("Canvas");
+                            for (t, l) in [("dark", "Always dark"), ("theme", "Follow the look")] {
+                                if ui.selectable_label(s.canvas == t, l).clicked() {
+                                    s.canvas = t.into();
                                 }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Colour regions by");
-                                for (t, l) in [("material", "Material"), ("region", "Region")] {
-                                    let _ = ui.selectable_label(s.region_colouring == t, l);
+                            }
+                        });
+                        ui.label(kit::muted(ui, "The canvas is the background of the model and the plots. Dark is the default also in a light window; the region colours are chosen for the canvas that is drawn.").size(12.5));
+                        ui.horizontal(|ui| {
+                            ui.label("Colour regions by");
+                            for (t, l) in [("material", "Material"), ("region", "Region")] {
+                                if ui.selectable_label(s.region_colouring == t, l).clicked() {
+                                    s.region_colouring = t.into();
                                 }
-                            });
-                        })
-                        .response
-                        .on_disabled_hover_text("Stored already; they take effect with the data colours of plan step U4");
+                            }
+                        });
+                        ui.label(kit::muted(ui, "Material: regions of one material share a colour. Region: every region has its own. Eight colours are solid, the next eight are hatched, further regions are grey; the number chip and the legend always say which is which.").size(12.5));
                         ui.horizontal(|ui| {
                             ui.label("Length");
                             ui.label(kit::mono("nm"));
