@@ -2,7 +2,7 @@
 
 **Describe the results** · access `read`: reads the project or the results
 
-For each physics solved: the study, size, time, solutions with their values, fields and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).
+For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not) and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).
 
 ## Arguments
 

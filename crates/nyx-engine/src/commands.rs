@@ -50,6 +50,10 @@ fn int(doc: &str) -> Value {
 fn boolean(doc: &str) -> Value {
     json!({ "type": "boolean", "description": doc })
 }
+/// An expression of fields (ADR 90): a field name, a number, a handle or an operation object; `overlap` and `confinement` also take a list of them.
+fn expr_schema(doc: &str) -> Value {
+    json!({ "type": ["string", "number", "object", "array"], "description": doc })
+}
 fn object(doc: &str) -> Value {
     json!({ "type": "object", "description": doc })
 }
@@ -184,11 +188,27 @@ impl Engine {
                 schema(vec![("sweep", int("the sweep's number")), ("wait_s", number("longest wait in seconds, default 0"))], &[])),
             cmd("sweep_cancel", "Cancel the points of a sweep that have not finished", "Queued points never run; a running one stops at its next check.", Expensive, schema(vec![("sweep", int("the sweep's number"))], &["sweep"])),
             cmd("poll_jobs", "Apply finished jobs", "Applies every job that has finished since the last call and returns what each came to.", Read, schema(vec![], &[])),
-            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).", Read, schema(vec![("physics", phys())], &[])),
+            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not) and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).", Read, schema(vec![("physics", phys())], &[])),
             cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`), with `stale` and `age_s` of the result it was read from.", Read,
                 schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("field", text("field name")), ("max_values", int("default 2000"))], &["physics", "field"])),
             cmd("get_guide", "Read a nyx guide", "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).", Read,
                 schema(vec![("topic", json!({ "type": "string", "enum": crate::guide::TOPICS, "description": "which card; omit for nyx-instructions" }))], &[])),
+            cmd("field", "A handle to a field", "A handle to a field of a solution, to compute with (`integrate`, `extremum`, `probe`, `line_cut`, `overlap`, `confinement`, `field_op`). A handle is a small value, not the field: it names the physics, the solution and the field, and is read from the stored result each time it is used. A name is a per-cell field of the solution (`Ex`, `uz`, ...: complex when the solve is) or else a flat field of `result_info` (`T`, `|E|`: real). A vector name (`E` when `Ex` and `Ez` exist) answers one handle per component.", Read,
+                schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("name", text("field name, e.g. Ex, or a vector name such as E"))], &["name"])),
+            cmd("field_op", "Arithmetic on handles", "Combines handles: `add`, `mul` (two or more operands), `sub`, `div`, `neg`, `abs`, `abs2` (|z|^2 with no square root), `re`, `im`, `conj`, `sqrt` and `pow` (with `n`, a whole number 1 to 16). An operand is a handle, a field name of `physics`/`solution`, a number, or another operation `{op, args}`. The operation is checked against the results and returned as one handle.", Read,
+                schema(vec![("op", text("add, sub, mul, div, neg, abs, abs2, re, im, conj, sqrt or pow")), ("args", json!({ "type": "array", "description": "the operands" })), ("n", int("the power, for pow")), ("physics", phys()), ("solution", int("default 0"))], &["op", "args"])),
+            cmd("integrate", "Integrate an expression over a region", "The integral of an expression of fields over a region (a region name, comma list or `name*`; default the whole mesh), with the degree-4 rule of the finite elements (exact for the product of two P2 fields). A real expression answers a number, a complex one [re, im]. `measure` is the area or volume of the region. `revolution: true` weights by 2 pi r for a body of revolution (a 2D r-z mesh). Answers `stale` and `age_s` of what it read.", Read,
+                schema(vec![("expr", expr_schema("a handle, a field name, a number or {op, args}")), ("region", text("region name(s); default all")), ("revolution", boolean("weight by 2 pi r, default false")), ("physics", phys()), ("solution", int("default 0"))], &["expr"])),
+            cmd("extremum", "Largest or smallest value of an expression", "The largest (`op: max`, default) or smallest (`min`) real value of an expression at the nodes of the cells of a region, with the cell and the point. It is the maximum over the nodes, not over the interpolant between them. A complex expression has no order: wrap it in `abs`, `abs2`, `re` or `im`.", Read,
+                schema(vec![("expr", expr_schema("a handle, a field name, a number or {op, args}")), ("op", json!({ "type": "string", "enum": ["max", "min"], "description": "default max" })), ("region", text("region name(s); default all")), ("physics", phys()), ("solution", int("default 0"))], &["expr"])),
+            cmd("probe", "Value of an expression at points", "The value of an expression at points, interpolated in the cell that holds each point. Points are in mesh axes: [x, z] on a 2D mesh, [x, y, z] on a 3D one. A point outside the mesh answers `inside: false` and a null value.", Read,
+                schema(vec![("expr", expr_schema("a handle, a field name, a number or {op, args}")), ("points", json!({ "type": "array", "description": "a list of points, each a list of coordinates", "items": { "type": "array", "items": { "type": "number" } } })), ("physics", phys()), ("solution", int("default 0"))], &["expr", "points"])),
+            cmd("line_cut", "Values of an expression along a line", "The value of an expression at `n` equally spaced points from `from` to `to` (inclusive), with the distance `s` along the line. Points outside the mesh answer `inside: false`.", Read,
+                schema(vec![("expr", expr_schema("a handle, a field name, a number or {op, args}")), ("from", json!({ "type": "array", "items": { "type": "number" }, "description": "start point: [x, z] on a 2D mesh, [x, y, z] on a 3D one" })), ("to", json!({ "type": "array", "items": { "type": "number" }, "description": "end point" })), ("n", int("number of points, default 101")), ("physics", phys()), ("solution", int("default 0"))], &["expr", "from", "to"])),
+            cmd("overlap", "Overlap of two fields", "The overlap integral of two fields (or two lists of components, e.g. [Ex, Ey, Ez]) over a region: the complex integral of sum_k conj(a_k) b_k, the two norms (integrals of sum_k |c_k|^2) and the coefficient |overlap|^2 / (norm_a norm_b), a number from 0 to 1.", Read,
+                schema(vec![("a", expr_schema("a field, an expression, or a list of components")), ("b", expr_schema("a field, an expression, or a list of components")), ("region", text("region name(s); default all")), ("revolution", boolean("weight by 2 pi r, default false")), ("physics", phys()), ("solution", int("default 0"))], &["a", "b"])),
+            cmd("confinement", "Fraction of a field in a region", "The integral of sum_k |c_k|^2 over a region divided by the same over the whole mesh, for the components `fields` (e.g. [Ex, Ey, Ez]). It has no material weight (no permittivity): for the energy or power fraction use an expression that has it.", Read,
+                schema(vec![("fields", expr_schema("a field, an expression, or a list of components")), ("region", text("the region the fraction is of")), ("revolution", boolean("weight by 2 pi r, default false")), ("physics", phys()), ("solution", int("default 0"))], &["fields", "region"])),
             cmd("add_pml_conditions", "Add the absorbing-layer conditions", "Adds a `pml` condition for every absorbing piece the geometry made with add_pml (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. `strength` is the imaginary stretch at the outer edge (default 3).", Edit,
                 schema(vec![("physics", phys()), ("strength", number("imaginary stretch at the outer edge, default 3"))], &["physics"])),
             cmd("list_materials", "List the materials", "The materials a problem can name: those of the library (material files) and those the project carries.", Read, schema(vec![], &[])),
@@ -450,6 +470,14 @@ impl Engine {
                 .collect::<Vec<_>>())),
             "result_info" => self.result_info(opt_str(args, "physics")),
             "result_field" => self.result_field(args),
+            "field" => self.cmd_field(args),
+            "field_op" => self.cmd_field_op(args),
+            "integrate" => self.cmd_integrate(args),
+            "extremum" => self.cmd_extremum(args),
+            "probe" => self.cmd_probe(args),
+            "line_cut" => self.cmd_line_cut(args),
+            "overlap" => self.cmd_overlap(args),
+            "confinement" => self.cmd_confinement(args),
             "get_guide" => {
                 let topic = opt_str(args, "topic").unwrap_or("nyx-instructions");
                 let text = crate::guide::card(topic).ok_or_else(|| {
@@ -657,6 +685,7 @@ impl Engine {
                     "solutions": r.solutions.iter().enumerate().map(|(i, s)| json!({
                         "index": i, "label": s.label, "value": s.value, "eigenvalue": s.eigenvalue,
                         "fields": s.fields.iter().map(|f| json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len() })).collect::<Vec<_>>(),
+                        "cell_fields": s.cell_fields.iter().map(|f| json!({ "name": f.name, "unit": f.unit, "complex": !f.im.is_empty() })).collect::<Vec<_>>(),
                     })).collect::<Vec<_>>(),
                     "scalars": r.scalars,
                 })

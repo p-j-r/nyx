@@ -824,6 +824,47 @@
     {
       "annotations": {
         "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Fraction of a field in a region"
+      },
+      "arguments": {
+        "fields": {
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "revolution": {
+          "type": "boolean"
+        },
+        "solution": {
+          "type": "integer"
+        }
+      },
+      "name": "confinement",
+      "required": [
+        "fields",
+        "region"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false,
         "readOnlyHint": false,
@@ -924,6 +965,115 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": true,
+        "title": "Largest or smallest value of an expression"
+      },
+      "arguments": {
+        "expr": {
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "op": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "type": "string"
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "solution": {
+          "type": "integer"
+        }
+      },
+      "name": "extremum",
+      "required": [
+        "expr"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "A handle to a field"
+      },
+      "arguments": {
+        "name": {
+          "type": "string"
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "solution": {
+          "type": "integer"
+        }
+      },
+      "name": "field",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Arithmetic on handles"
+      },
+      "arguments": {
+        "args": {
+          "type": "array"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "op": {
+          "type": "string"
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "solution": {
+          "type": "integer"
+        }
+      },
+      "name": "field_op",
+      "required": [
+        "args",
+        "op"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
         "title": "Evaluate the geometry and list its names"
       },
       "arguments": {},
@@ -951,6 +1101,46 @@
       },
       "name": "get_guide",
       "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Integrate an expression over a region"
+      },
+      "arguments": {
+        "expr": {
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "revolution": {
+          "type": "boolean"
+        },
+        "solution": {
+          "type": "integer"
+        }
+      },
+      "name": "integrate",
+      "required": [
+        "expr"
+      ]
     },
     {
       "annotations": {
@@ -1019,6 +1209,51 @@
       "name": "job_wait",
       "required": [
         "id"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Values of an expression along a line"
+      },
+      "arguments": {
+        "expr": {
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "from": {
+          "type": "array"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "solution": {
+          "type": "integer"
+        },
+        "to": {
+          "type": "array"
+        }
+      },
+      "name": "line_cut",
+      "required": [
+        "expr",
+        "from",
+        "to"
       ]
     },
     {
@@ -1136,11 +1371,98 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": true,
+        "title": "Overlap of two fields"
+      },
+      "arguments": {
+        "a": {
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "b": {
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "revolution": {
+          "type": "boolean"
+        },
+        "solution": {
+          "type": "integer"
+        }
+      },
+      "name": "overlap",
+      "required": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
         "title": "Apply finished jobs"
       },
       "arguments": {},
       "name": "poll_jobs",
       "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Value of an expression at points"
+      },
+      "arguments": {
+        "expr": {
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "points": {
+          "type": "array"
+        },
+        "solution": {
+          "type": "integer"
+        }
+      },
+      "name": "probe",
+      "required": [
+        "expr",
+        "points"
+      ]
     },
     {
       "annotations": {

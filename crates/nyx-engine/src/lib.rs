@@ -35,6 +35,7 @@ pub mod pml;
 pub mod process;
 pub mod project;
 pub mod queue;
+pub mod reduce;
 pub mod results_file;
 pub mod solve;
 pub mod store_link;

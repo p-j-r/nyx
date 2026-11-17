@@ -1275,7 +1275,7 @@
   },
   {
     "access": "read",
-    "description": "For each physics solved: the study, size, time, solutions with their values, fields and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).",
+    "description": "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not) and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).",
     "name": "result_info",
     "schema": {
       "additionalProperties": false,
@@ -1354,6 +1354,379 @@
       "type": "object"
     },
     "title": "Read a nyx guide"
+  },
+  {
+    "access": "read",
+    "description": "A handle to a field of a solution, to compute with (`integrate`, `extremum`, `probe`, `line_cut`, `overlap`, `confinement`, `field_op`). A handle is a small value, not the field: it names the physics, the solution and the field, and is read from the stored result each time it is used. A name is a per-cell field of the solution (`Ex`, `uz`, ...: complex when the solve is) or else a flat field of `result_info` (`T`, `|E|`: real). A vector name (`E` when `Ex` and `Ez` exist) answers one handle per component.",
+    "name": "field",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "field name, e.g. Ex, or a vector name such as E",
+          "type": "string"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "solution": {
+          "description": "solution number from 0, default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "A handle to a field"
+  },
+  {
+    "access": "read",
+    "description": "Combines handles: `add`, `mul` (two or more operands), `sub`, `div`, `neg`, `abs`, `abs2` (|z|^2 with no square root), `re`, `im`, `conj`, `sqrt` and `pow` (with `n`, a whole number 1 to 16). An operand is a handle, a field name of `physics`/`solution`, a number, or another operation `{op, args}`. The operation is checked against the results and returned as one handle.",
+    "name": "field_op",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "description": "the operands",
+          "type": "array"
+        },
+        "n": {
+          "description": "the power, for pow",
+          "type": "integer"
+        },
+        "op": {
+          "description": "add, sub, mul, div, neg, abs, abs2, re, im, conj, sqrt or pow",
+          "type": "string"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "solution": {
+          "description": "default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "type": "object"
+    },
+    "title": "Arithmetic on handles"
+  },
+  {
+    "access": "read",
+    "description": "The integral of an expression of fields over a region (a region name, comma list or `name*`; default the whole mesh), with the degree-4 rule of the finite elements (exact for the product of two P2 fields). A real expression answers a number, a complex one [re, im]. `measure` is the area or volume of the region. `revolution: true` weights by 2 pi r for a body of revolution (a 2D r-z mesh). Answers `stale` and `age_s` of what it read.",
+    "name": "integrate",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "description": "a handle, a field name, a number or {op, args}",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "description": "region name(s); default all",
+          "type": "string"
+        },
+        "revolution": {
+          "description": "weight by 2 pi r, default false",
+          "type": "boolean"
+        },
+        "solution": {
+          "description": "default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expr"
+      ],
+      "type": "object"
+    },
+    "title": "Integrate an expression over a region"
+  },
+  {
+    "access": "read",
+    "description": "The largest (`op: max`, default) or smallest (`min`) real value of an expression at the nodes of the cells of a region, with the cell and the point. It is the maximum over the nodes, not over the interpolant between them. A complex expression has no order: wrap it in `abs`, `abs2`, `re` or `im`.",
+    "name": "extremum",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "description": "a handle, a field name, a number or {op, args}",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "op": {
+          "description": "default max",
+          "enum": [
+            "max",
+            "min"
+          ],
+          "type": "string"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "description": "region name(s); default all",
+          "type": "string"
+        },
+        "solution": {
+          "description": "default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expr"
+      ],
+      "type": "object"
+    },
+    "title": "Largest or smallest value of an expression"
+  },
+  {
+    "access": "read",
+    "description": "The value of an expression at points, interpolated in the cell that holds each point. Points are in mesh axes: [x, z] on a 2D mesh, [x, y, z] on a 3D one. A point outside the mesh answers `inside: false` and a null value.",
+    "name": "probe",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "description": "a handle, a field name, a number or {op, args}",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "points": {
+          "description": "a list of points, each a list of coordinates",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "solution": {
+          "description": "default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expr",
+        "points"
+      ],
+      "type": "object"
+    },
+    "title": "Value of an expression at points"
+  },
+  {
+    "access": "read",
+    "description": "The value of an expression at `n` equally spaced points from `from` to `to` (inclusive), with the distance `s` along the line. Points outside the mesh answer `inside: false`.",
+    "name": "line_cut",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "description": "a handle, a field name, a number or {op, args}",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "from": {
+          "description": "start point: [x, z] on a 2D mesh, [x, y, z] on a 3D one",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "n": {
+          "description": "number of points, default 101",
+          "type": "integer"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "solution": {
+          "description": "default 0",
+          "type": "integer"
+        },
+        "to": {
+          "description": "end point",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "expr",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "title": "Values of an expression along a line"
+  },
+  {
+    "access": "read",
+    "description": "The overlap integral of two fields (or two lists of components, e.g. [Ex, Ey, Ez]) over a region: the complex integral of sum_k conj(a_k) b_k, the two norms (integrals of sum_k |c_k|^2) and the coefficient |overlap|^2 / (norm_a norm_b), a number from 0 to 1.",
+    "name": "overlap",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "a field, an expression, or a list of components",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "b": {
+          "description": "a field, an expression, or a list of components",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "description": "region name(s); default all",
+          "type": "string"
+        },
+        "revolution": {
+          "description": "weight by 2 pi r, default false",
+          "type": "boolean"
+        },
+        "solution": {
+          "description": "default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "type": "object"
+    },
+    "title": "Overlap of two fields"
+  },
+  {
+    "access": "read",
+    "description": "The integral of sum_k |c_k|^2 over a region divided by the same over the whole mesh, for the components `fields` (e.g. [Ex, Ey, Ez]). It has no material weight (no permittivity): for the energy or power fraction use an expression that has it.",
+    "name": "confinement",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "a field, an expression, or a list of components",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "region": {
+          "description": "the region the fraction is of",
+          "type": "string"
+        },
+        "revolution": {
+          "description": "weight by 2 pi r, default false",
+          "type": "boolean"
+        },
+        "solution": {
+          "description": "default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fields",
+        "region"
+      ],
+      "type": "object"
+    },
+    "title": "Fraction of a field in a region"
   },
   {
     "access": "edit",

@@ -68,6 +68,8 @@ pub struct App {
     pub results: Vec<ResultView>,
     pub current: Option<usize>,
     pub show_results: bool,
+    /// the Reduce form of the Results tab (integrals, extremes and fractions of the field on show: the engine commands of ADR 90)
+    pub reduce: crate::state::ReduceForm,
     pub tx: Sender<(u64, Msg)>,
     pub rx: Receiver<(u64, Msg)>,
     pub busy: Option<(String, Instant)>,
@@ -153,6 +155,7 @@ impl App {
             results: vec![],
             current: None,
             show_results: false,
+            reduce: Default::default(),
             tx,
             rx,
             busy: None,
@@ -1477,6 +1480,42 @@ mod tests {
         assert!(a.results[0].result.log.iter().any(|l| l.contains("solving")), "{:?}", a.results[0].result.log);
     }
 
+
+    #[test]
+    fn the_reduce_form_shows_the_numbers_of_the_engine_commands() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 60);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        assert_eq!(a.results.len(), 1);
+        let physics = a.results[0].physics.clone().unwrap();
+        let sol = a.results[0].result.solutions[0].clone();
+        let names: Vec<String> = sol.cell_fields.iter().map(|f| f.name.clone()).collect();
+        let ex = names.iter().position(|n| n == "Ex").expect("a field Ex");
+        let regions = a.engine.result_regions(&physics);
+        let si = regions.iter().position(|r| r == "Si").expect("a region Si") + 1;
+        // the integral of |Ex|^2 over the silicon: the line of the form carries the engine's number
+        a.reduce.field = ex;
+        a.reduce.quantity = 2;
+        a.reduce.region = si;
+        a.reduce_now("integrate");
+        let want = a.engine.call("integrate", &json!({ "expr": { "op": "abs2", "args": ["Ex"] }, "physics": physics, "region": "Si" })).unwrap();
+        assert_eq!(a.reduce.lines[0], format!("integral of |Ex|² over Si = {}", crate::tabs::reduce_number(&want["value"])));
+        // the share of the whole vector in the silicon is the engine's `confinement` over the components `field` finds (Ex, Ey, Ez: a mode has the propagation component too)
+        a.reduce_now("fraction");
+        let conf = a.engine.call("confinement", &json!({ "fields": ["Ex", "Ey", "Ez"], "physics": physics, "region": "Si" })).unwrap();
+        assert_eq!(a.reduce.lines[0], format!("share of |Ex, Ey, Ez|² in Si = {:.6}", conf["fraction"].as_f64().unwrap()));
+        // the largest squared modulus over the whole mesh, then the largest plain value (the mode of this example is real, so it has an order)
+        a.reduce.region = 0;
+        a.reduce_now("max");
+        assert!(a.reduce.lines[0].starts_with("max of |Ex|² in the whole mesh = "), "{:?}", a.reduce.lines);
+        a.reduce.quantity = 0;
+        a.reduce_now("min");
+        assert!(a.reduce.lines[0].starts_with("min of Ex in the whole mesh = "), "{:?}", a.reduce.lines);
+        assert!(a.error.is_none(), "{:?}", a.error);
+    }
     #[test]
     fn a_compute_behind_a_running_job_waits_its_turn_and_a_newer_one_replaces_it() {
         let mut a = app();

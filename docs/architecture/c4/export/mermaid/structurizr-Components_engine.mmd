@@ -10,7 +10,7 @@ graph TB
       subgraph 22 ["nyx-engine"]
         style 22 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        23["<div style='font-weight: bold'>Commands</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Engine and its catalog:<br />every action by name with<br />JSON arguments, JSON Schema<br />and JSON reply; the<br />dispatcher; the guide cards a<br />host reads on demand. The<br />window and the MCP server use<br />the same entries.</div>"]
+        23["<div style='font-weight: bold'>Commands</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Engine and its catalog:<br />every action by name with<br />JSON arguments, JSON Schema<br />and JSON reply; the<br />dispatcher; the guide cards a<br />host reads on demand; the<br />reductions of results (field<br />handles, integrals, extrema,<br />probes, overlaps). The window<br />and the MCP server use the<br />same entries.</div>"]
         style 23 fill:#85bbf0,stroke:#5d82a8,color:#000000
         24["<div style='font-weight: bold'>Project</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The saved state: feature<br />list, mesh settings, one<br />ProblemSpec per physics,<br />project materials. The format<br />key is checked at the file<br />boundary.</div>"]
         style 24 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -81,9 +81,9 @@ graph TB
     27-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     27-. "<div>uses apiref</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
     27-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    23-. "<div>uses femcore: material::spec,<br />mesh +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    23-. "<div>uses femcore: fem, fieldexpr<br />+5</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     23-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    23-. "<div>uses physics: contract, crate<br />root +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
+    23-. "<div>uses physics: contract, crate<br />root +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
     23-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     23-. "<div>uses geomdesc, geometry</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
     23-. "<div>uses estimate, jobs +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->26

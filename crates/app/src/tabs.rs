@@ -774,8 +774,145 @@ impl App {
             });
         });
         ui.add_space(6.0);
+        self.reductions(ui, cur);
+        ui.add_space(6.0);
         if ui.button("Export CSV...").clicked() {
             self.export_csv();
+        }
+    }
+
+    /// What the Reduce form offers for the result on show: its physics, the solution on show, the fields it can read and the regions of its mesh.
+    fn reduce_choices(&self, cur: usize) -> Option<(String, usize, Vec<String>, Vec<String>)> {
+        let physics = self.results[cur].physics.clone()?;
+        let r = &self.results[cur];
+        let sol = r.sol.min(r.result.solutions.len().checked_sub(1)?);
+        let s = &r.result.solutions[sol];
+        let mut names: Vec<String> = s.cell_fields.iter().map(|f| f.name.clone()).collect();
+        for f in &s.fields {
+            if f.components.is_empty() && !names.contains(&f.name) {
+                names.push(f.name.clone());
+            }
+        }
+        if names.is_empty() {
+            return None;
+        }
+        let regions = self.engine.result_regions(&physics);
+        Some((physics, sol, names, regions))
+    }
+
+    /// The Reduce form: integrals, extremes and the fraction in a region of the field on show, by the engine commands `integrate`, `extremum` and
+    /// `confinement` (ADR 90), so the number is the one a script or the MCP server gets. The answers stay listed, newest first.
+    fn reductions(&mut self, ui: &mut Ui, cur: usize) {
+        let Some((_, _, names, regions)) = self.reduce_choices(cur) else { return };
+        let f = &mut self.reduce;
+        f.field = f.field.min(names.len() - 1);
+        f.region = f.region.min(regions.len());
+        let mut action: Option<&'static str> = None;
+        egui::CollapsingHeader::new("Reduce: integral, extremes, fraction").default_open(false).show(ui, |ui| {
+            ui.weak("Computed by the engine on the cells the result was solved on, with the rule in ADR 90: the same numbers a script or the MCP server gets.");
+            ui.horizontal(|ui| {
+                ui.label("Field");
+                egui::ComboBox::from_id_salt("reduce_field").selected_text(names[f.field].clone()).show_ui(ui, |ui| {
+                    for (i, n) in names.iter().enumerate() {
+                        ui.selectable_value(&mut f.field, i, n);
+                    }
+                });
+                egui::ComboBox::from_id_salt("reduce_quantity").selected_text(QUANTITIES[f.quantity.min(2)]).show_ui(ui, |ui| {
+                    for (i, n) in QUANTITIES.iter().enumerate() {
+                        ui.selectable_value(&mut f.quantity, i, *n);
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Region");
+                egui::ComboBox::from_id_salt("reduce_region").selected_text(if f.region == 0 { "whole mesh".to_string() } else { regions[f.region - 1].clone() }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut f.region, 0, "whole mesh");
+                    for (i, r) in regions.iter().enumerate() {
+                        ui.selectable_value(&mut f.region, i + 1, r);
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Integral").on_hover_text("the integral over the region (a complex field with the value quantity gives re + im i)").clicked() {
+                    action = Some("integrate");
+                }
+                if ui.button("Largest").on_hover_text("the largest real value at the nodes of the region").clicked() {
+                    action = Some("max");
+                }
+                if ui.button("Smallest").clicked() {
+                    action = Some("min");
+                }
+                if ui.add_enabled(f.region > 0, egui::Button::new("Fraction in region")).on_hover_text("the integral of the squared moduli of the components of the vector this field belongs to (Ex, Ey, Ez for Ex) over the region, divided by the same over the whole mesh; no material weight").clicked() {
+                    action = Some("fraction");
+                }
+            });
+            for l in f.lines.iter().take(8) {
+                ui.add(egui::Label::new(RichText::new(l).monospace().size(11.0)).wrap());
+            }
+        });
+        if let Some(a) = action {
+            self.reduce_now(a);
+        }
+    }
+
+    /// Runs one reduction of the Reduce form (`integrate`, `max`, `min` or `fraction`) on the field, quantity and region it holds, through the engine
+    /// command of that name, and puts the answer first in its list.
+    pub fn reduce_now(&mut self, action: &str) {
+        let Some(cur) = self.current else { return };
+        let Some((physics, sol, names, regions)) = self.reduce_choices(cur) else { return };
+        let name = names[self.reduce.field.min(names.len() - 1)].clone();
+        let quantity = self.reduce.quantity.min(2);
+        let region = (self.reduce.region > 0 && self.reduce.region <= regions.len()).then(|| regions[self.reduce.region - 1].clone());
+        let expr = match quantity {
+            1 => json!({ "op": "abs", "args": [name] }),
+            2 => json!({ "op": "abs2", "args": [name] }),
+            _ => json!(name),
+        };
+        let label = match quantity {
+            1 => format!("|{name}|"),
+            2 => format!("|{name}|²"),
+            _ => name.clone(),
+        };
+        let place = region.clone().unwrap_or_else(|| "the whole mesh".into());
+        let mut args = json!({ "physics": physics, "solution": sol });
+        if let Some(r) = &region {
+            args["region"] = json!(r);
+        }
+        let stale = |v: &Value| if v["stale"] == json!(true) { "  (stale result)" } else { "" };
+        let line = match action {
+            "integrate" => {
+                args["expr"] = expr;
+                self.cmd("integrate", args).map(|v| format!("integral of {label} over {place} = {}{}", reduce_number(&v["value"]), stale(&v)))
+            }
+            "fraction" => {
+                if region.is_none() {
+                    self.set_error("fraction: choose a region".to_string());
+                    return;
+                }
+                // the components of the vector this field belongs to: the engine knows them (`field` on the name without its axis letter)
+                let stem = name.strip_suffix(['x', 'y', 'z']).unwrap_or(&name).to_string();
+                let comps: Vec<String> = self
+                    .engine
+                    .call("field", &json!({ "physics": physics, "solution": sol, "name": stem }))
+                    .ok()
+                    .and_then(|v| v["components"].as_object().map(|m| m.values().filter_map(|c| c["name"].as_str().map(String::from)).collect()))
+                    .unwrap_or_else(|| vec![name.clone()]);
+                args["fields"] = json!(comps);
+                let shown = comps.join(", ");
+                self.cmd("confinement", args).map(|v| format!("share of |{shown}|² in {place} = {:.6}{}", v["fraction"].as_f64().unwrap_or(f64::NAN), stale(&v)))
+            }
+            op => {
+                args["expr"] = expr;
+                args["op"] = json!(op);
+                self.cmd("extremum", args).map(|v| {
+                    let at: Vec<String> = v["point"].as_array().map(|p| p.iter().map(|x| format!("{:.4e}", x.as_f64().unwrap_or(f64::NAN))).collect()).unwrap_or_default();
+                    format!("{op} of {label} in {place} = {:.6e} at ({})", v["value"].as_f64().unwrap_or(f64::NAN), at.join(", "))
+                })
+            }
+        };
+        if let Some(l) = line {
+            self.reduce.lines.insert(0, l);
+            self.reduce.lines.truncate(20);
         }
     }
 
@@ -977,5 +1114,16 @@ impl App {
                 p.vline(egui_plot::VLine::new("now", current).color(Color32::from_rgb(230, 190, 80)));
             }
         });
+    }
+}
+
+/// What the Reduce form can take of a field.
+const QUANTITIES: [&str; 3] = ["value", "modulus", "modulus squared"];
+
+/// A number of a reduction answer as the form shows it: a real one, or `re + im i` for a pair.
+pub fn reduce_number(v: &Value) -> String {
+    match v {
+        Value::Array(a) if a.len() == 2 => format!("{:.6e} + {:.6e} i", a[0].as_f64().unwrap_or(f64::NAN), a[1].as_f64().unwrap_or(f64::NAN)),
+        other => format!("{:.6e}", other.as_f64().unwrap_or(f64::NAN)),
     }
 }
