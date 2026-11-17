@@ -20,6 +20,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/architecture/contracts/*` | 19 | exemplars |
 | `docs/architecture/*` | 19, 20 | model, rough spots, indexes |
 | `docs/RESTRUCTURE_STATUS.md` | 20, 19 | handoff for the restructure plan |
+| `docs/UX_STATUS.md` | 20, 90 | handoff for the UX review and plan |
+| `docs/ux/*` | 90 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
 | `docs/FRAME_UNIFICATION_STATUS.md` | 1 | |
 | `docs/KERNEL_PORT_STATUS.md` | 1, 9, 10, 12 | |
 | `docs/GEOMETRY_ARCHITECTURE.md` | 2, 3, 18 | historical |

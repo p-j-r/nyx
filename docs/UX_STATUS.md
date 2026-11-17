@@ -1,0 +1,22 @@
+# UX review and plan: status
+
+Handoff file for `docs/ux/UX_REVIEW.md` and `docs/ux/UX_ACTION_PLAN.md`. Read those first, then this file; update it before finishing a session.
+
+## State (2026-11-17, after U0 review; nothing implemented)
+
+* Bookmark `ux-0-review`, workspace `nyx2-ux` (jj, from `productivity-4-memory` `fb57860d`). **Documentation only**: `docs/ux/` (review, action plan, `tokens.json`, `contrast.py`, `shots/`), ADR 90 (proposed, provisional number, index row added), this file, **The Paper mockups are not made yet**: Paper Desktop was not running when the step was reached (`docs/ux/UX_ACTION_PLAN.md` section 6 lists what they will show). No source file, contract, golden or C4 input changed, so no C4 rebuild was due.
+* Checks run: `bash docs/architecture/check_code_to_adr.sh` (1047 files, 0 without a row, after adding rows for `docs/ux/*` and this file); `docs/ux/contrast.py` (every proposed token pair passes). **Not run:** `cargo test`, `clippy`, no baseline of the `nyx` window tests (the productivity status records two failing ones, `every_tab_draws_for_the_examples` and `the_window_checks_convergence_on_its_own_thread`; plan U0 re-measures them).
+* The review looked at the prebuilt `nyx.exe` of `nyx2-productivity-target` (built 2026-11-17 00:52 from `productivity-4-memory`), not at a build of this workspace.
+
+## Things to know
+
+* **The first screenshot run wrote to the real workspace** `Documents\nyx`: it created and saved the workflow folder `parallel-plate-capacitor-with-two-dielec_1nfqn30rp` (example 1, two versions, 2026-11-17 05:13). It is not removed; delete it if unwanted. Every later run used a scratch `NYX_WORKSPACE`. Those first screenshots show real workflow names and the home path and were **not** copied into the repository.
+* **jj, default workspace.** The first `jj` command of the session ran in `nyx2` and snapshotted the default working copy (`wyyuszkw`, which holds many added files), rebasing three descendants. `restructure-10-a3-snowflake` (`xmowyyyk`) and the working copy of workspace `nyx2-a3` show `(conflict)`; **the conflict was already there before** that snapshot (operation `e32f2f18` shows `xmowyyyk` conflicted), so it was not introduced by it. Not resolved: that is Paul's call. After the snapshot the commit ids of `rnqpznxl`, `xmowyyyk` and `wyyuszkw` changed (rebased, content the same). All later jj commands ran from `nyx2-ux` or with `--ignore-working-copy`.
+* **The skill** `apple-design` was installed by cloning `github.com/dickwu/apple-design-skill` into `~/.claude/skills/apple-design` (Node/npx is not installed here, so `npx skills add` could not run). Files copied: `SKILL.md`, `references/`, `scripts/`.
+* **The running-job state could not be captured** (the script waits while a job is busy; the PowerShell route is blocked by the execution policy and was not bypassed). U5 needs a held job in a window test to draw it.
+* The productivity plan documents (`docs/NYX2_PRODUCTIVITY_PLAN.md`, `docs/PRODUCTIVITY_STATUS.md`) are on the `productivity-plan` bookmark, which is a sibling head of `productivity-4-memory`, not an ancestor; they were read with `jj file show -r productivity-plan`.
+* ADR 90 is provisional: 84 to 89 belong to the productivity line (88 unused there); renumber at merge.
+
+## Next
+
+Plan phases U0 to U6 in `docs/ux/UX_ACTION_PLAN.md`; decisions D1 to D6 for Paul are in its section 4. First code step is U1 (`tokens.rs`, accessibility), alone; then U2, U3 and U4 can run in three workspaces.
