@@ -73,7 +73,6 @@ pub fn tint(ctx: &egui::Context) -> Color32 {
 pub fn activity(ctx: &egui::Context) -> Color32 {
     role(ctx, tokens::ACTIVITY)
 }
-#[allow(dead_code)] // text on an amber fill: the busy chip of plan step U5
 pub fn on_activity(ctx: &egui::Context) -> Color32 {
     role(ctx, tokens::ON_ACTIVITY)
 }

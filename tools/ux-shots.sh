@@ -4,7 +4,7 @@
 # It builds the release binary, then drives `nyx --script` for every view x light/dark x size, ALWAYS in a scratch NYX_WORKSPACE that is
 # deleted afterwards: the first run of the UX review wrote into the real workspace (docs/UX_STATUS.md), so this script refuses to run without
 # one. It fails when a run exits non-zero or a shot is missing or empty.
-# The shots of the build view include the other canvas, an isolated legend row and colouring by region (plan U4).
+# The shots of the build view include the other canvas, an isolated legend row and colouring by region (plan U4), and a job that waits with the queue popover open (plan U5).
 # UX_SHOTS_FAST=1 skips the views that need a solve (results, analysis). The shots show example data and the home path of the machine:
 # do not commit them (docs/ux/shots holds the few that were reviewed).
 set -eu
@@ -32,6 +32,8 @@ for size in 1440x900 1100x700; do
     s="$s; canvas theme; shot $p-build-canvas-theme.png; isolate 1; shot $p-build-isolate.png; isolate none; colour region; shot $p-build-by-region.png; colour material; canvas dark"
     # views that show a result: wait for the solve (the script waits while the job runs)
     if [ -z "${UX_SHOTS_FAST:-}" ]; then
+      # a job that waits (the queue is paused) with the queue popover open; resumed, the job runs and the script waits for it again
+      s="$s; wait off; queue pause; compute; shot $p-queued.png; queue open; shot $p-queue.png; queue close; queue resume; wait on"
       s="$s; compute; shot $p-results.png; canvas theme; shot $p-results-canvas-theme.png; canvas dark; section analysis; shot $p-analysis.png"
       # a workflow that was saved and is marked done moves to the Earlier table of the Dashboard
       s="$s; done 0; page dashboard; shot $p-earlier.png"
@@ -44,7 +46,7 @@ for f in "$out"/*.png; do
   [ -s "$f" ] || { echo "FAIL: empty or missing $f" >&2; fail=1; }
 done
 n=$(ls "$out"/*.png 2>/dev/null | wc -l)
-[ -n "${UX_SHOTS_FAST:-}" ] && want=44 || want=60
+[ -n "${UX_SHOTS_FAST:-}" ] && want=44 || want=68
 [ "$n" -ge "$want" ] || { echo "FAIL: $n shots, expected $want" >&2; fail=1; }
 echo "$n shots in $out"
 exit $fail

@@ -113,6 +113,8 @@ pub struct App {
     pub script_output: Option<String>,
     pub script: VecDeque<String>,
     pub settle: u32,
+    /// a script with `wait off` carries on while a job runs (to shoot a running job and the queue); by default it waits for the job
+    pub script_free: bool,
     pub shot_pending: Arc<AtomicBool>,
     pub shell: crate::shell::Shell,
     pub colormap: Colormap,
@@ -183,6 +185,7 @@ impl App {
             script_output: None,
             script: VecDeque::new(),
             settle: 6,
+            script_free: false,
             shot_pending: Arc::new(AtomicBool::new(false)),
             shell: crate::shell::Shell::detached(),
             colormap: Colormap::Viridis,
@@ -319,93 +322,6 @@ impl App {
         }
     }
 
-    /// The Queue panel: what the engine runs and what waits (the same entries `queue_list` gives an agent), with cancel for each, hold and release for a
-    /// waiting job and pause for the queue (ADR 87). It calls the runner's methods that the `queue_*` commands call.
-    pub fn queue_panel(&mut self, ctx: &egui::Context) {
-        if !self.show_queue {
-            return;
-        }
-        let entries: Vec<Value> = self
-            .engine
-            .queue_list(None, None)
-            .into_iter()
-            .filter(|e| matches!(e["state"].as_str(), Some("queued" | "running")))
-            .collect();
-        let paused = self.engine.jobs().paused();
-        let mut open = true;
-        let mut act: Vec<(&str, u64)> = vec![];
-        egui::Window::new("Queue").open(&mut open).default_width(460.0).show(ctx, |ui| {
-            if entries.is_empty() {
-                ui.label("Nothing is running or waiting.");
-            }
-            egui::Grid::new("queue_grid").striped(true).num_columns(4).show(ui, |ui| {
-                for e in &entries {
-                    let id = e["id"].as_u64().unwrap_or(0);
-                    let queued = e["state"] == "queued";
-                    ui.label(e["label"].as_str().unwrap_or(""));
-                    if queued {
-                        let held = if e["held"] == true { ", held" } else { "" };
-                        ui.label(format!("waiting, number {}{held}", e["position"].as_u64().unwrap_or(0)));
-                    } else {
-                        let stage = e["stage"].as_str().unwrap_or("");
-                        let stage = if stage.is_empty() { "starting" } else { stage };
-                        let cancelled = if e["cancel_requested"] == true { " (cancel requested)" } else { "" };
-                        ui.label(format!("{stage}, {:.1} s{cancelled}", e["seconds"].as_f64().unwrap_or(0.0)));
-                    }
-                    ui.label(format!("{} · priority {}", e["owner"].as_str().unwrap_or(""), e["priority"]));
-                    ui.horizontal(|ui| {
-                        if ui.small_button("Cancel").clicked() {
-                            act.push(("cancel", id));
-                        }
-                        if queued {
-                            if e["held"] == true {
-                                if ui.small_button("Release").clicked() {
-                                    act.push(("release", id));
-                                }
-                            } else if ui.small_button("Hold").clicked() {
-                                act.push(("hold", id));
-                            }
-                        }
-                    });
-                    ui.end_row();
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.button(if paused { "Resume the queue" } else { "Pause the queue" }).on_hover_text("A paused queue starts nothing new; what runs finishes").clicked() {
-                    act.push(("pause", 0));
-                }
-            });
-        });
-        for (what, id) in act {
-            match what {
-                "cancel" => {
-                    if self.job.as_ref().is_some_and(|j| j.0 == id) {
-                        self.cancel_job();
-                    } else {
-                        self.cancel_waiting(id);
-                    }
-                }
-                "hold" => {
-                    self.engine.jobs().hold(id);
-                }
-                "release" => {
-                    self.engine.jobs().release(id);
-                }
-                _ => {
-                    if paused {
-                        self.engine.jobs().resume();
-                    } else {
-                        self.engine.jobs().pause();
-                    }
-                }
-            }
-        }
-        self.show_queue = open;
-        if !entries.is_empty() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        }
-    }
-
     /// Cancels a job that waits in the queue (it never runs).
     pub fn cancel_waiting(&mut self, id: u64) {
         if self.engine.jobs().cancel(id) {
@@ -478,17 +394,6 @@ impl App {
             return Some("Geometry or Mesh edits are not applied yet");
         }
         None
-    }
-
-    /// One line above the result on show when it is stale, with a button to solve again.
-    pub fn stale_band(&mut self, ui: &mut egui::Ui) {
-        let Some(why) = self.current.and_then(|i| self.stale_reason(i)) else { return };
-        ui.horizontal(|ui| {
-            ui.colored_label(Color32::from_rgb(235, 170, 60), format!("⚠ Stale: {why}."));
-            if self.busy.is_none() && ui.small_button("Solve again").clicked() {
-                self.compute();
-            }
-        });
     }
 
     /// Diagnostics only (productivity plan P0): when `NYX_FRAME_LOG` names a file ending in `.csv`, appends one row per frame: wall time of the
@@ -1042,7 +947,7 @@ impl App {
         ui.weak("Registers the nyx MCP server with the app, so Claude can set up and solve simulations here.");
         ui.separator();
         let Some(server) = self.mcp_server.clone() else {
-            ui.colored_label(Color32::from_rgb(200, 120, 20), "nyx-mcp was not found next to nyx.");
+            ui.colored_label(crate::theme::activity_text(ui.ctx()), "nyx-mcp was not found next to nyx.");
             ui.weak("Build it (cargo build --release -p nyx-mcp) or point to it:");
             if ui.button("Locate nyx-mcp...").clicked() {
                 ui.close();
@@ -1054,7 +959,7 @@ impl App {
             return;
         };
         let Ok(env) = Env::detect() else {
-            ui.colored_label(Color32::from_rgb(200, 60, 60), "cannot find the home folder");
+            ui.colored_label(crate::theme::danger(ui.ctx()), "cannot find the home folder");
             return;
         };
         if self.connect_status.is_empty() {
@@ -1065,9 +970,9 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(host.name).strong());
                 match &status {
-                    Status::Connected => ui.colored_label(Color32::from_rgb(40, 150, 70), "connected"),
-                    Status::Stale { .. } => ui.colored_label(Color32::from_rgb(200, 120, 20), "points to another nyx-mcp"),
-                    Status::Unreadable { .. } => ui.colored_label(Color32::from_rgb(200, 60, 60), "config unreadable"),
+                    Status::Connected => ui.colored_label(crate::theme::success(ui.ctx()), "connected"),
+                    Status::Stale { .. } => ui.colored_label(crate::theme::activity_text(ui.ctx()), "points to another nyx-mcp"),
+                    Status::Unreadable { .. } => ui.colored_label(crate::theme::danger(ui.ctx()), "config unreadable"),
                     Status::NotConnected | Status::NotInstalled => ui.weak("not connected"),
                 };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1091,7 +996,7 @@ impl App {
             });
             ui.weak(host.config.display().to_string());
             if let Status::Unreadable { why } = &status {
-                ui.colored_label(Color32::from_rgb(200, 60, 60), why);
+                ui.colored_label(crate::theme::danger(ui.ctx()), why);
             }
             ui.add_space(4.0);
         }
@@ -1174,7 +1079,8 @@ impl App {
             }
             let has_mesh = self.doc.mesh.is_some();
             // behind a running job a Compute waits in the queue (without a workspace; a workspace keeps one run at a time)
-            let b = ui.add_enabled(self.can_queue_compute() && has_mesh, egui::Button::new(RichText::new(if self.busy.is_some() { "  Queue  " } else { "  Compute  " }).strong()).fill(Color32::from_rgb(38, 110, 70)));
+            let queue_label = if self.busy.is_some() { format!("  Queue · position {}  ", self.waiting.len() + 1) } else { "  Compute  ".to_string() };
+            let b = ui.add_enabled(self.can_queue_compute() && has_mesh, egui::Button::new(RichText::new(queue_label).strong().color(crate::theme::on_accent(ui.ctx()))).fill(crate::theme::accent(ui.ctx())));
             if b.on_hover_text("Solve the active physics on the current mesh (F5)").clicked() {
                 self.compute();
             }
@@ -1188,7 +1094,7 @@ impl App {
                     let cancelled = st.cancelled;
                     if cancelled {
                         // what the person waits for is the stage, not an estimate: how long it has been running
-                        ui.colored_label(Color32::from_rgb(235, 170, 60), format!("Cancel requested: waiting for the stage to end ({:.1} s so far; it stops at its next check)", st.stage_seconds));
+                        ui.colored_label(crate::theme::activity_text(ui.ctx()), format!("Cancel requested: waiting for the stage to end ({:.1} s so far; it stops at its next check)", st.stage_seconds));
                     }
                     if ui.add_enabled(!cancelled, egui::Button::new("Cancel")).on_hover_text("Stop the job at the next safe point (Esc). A factorisation in progress has to finish first. Earlier results stay as they are.").clicked() {
                         self.cancel_job();
@@ -1218,7 +1124,7 @@ impl App {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if let Some(e) = self.error.clone() {
-                ui.colored_label(Color32::from_rgb(235, 110, 100), format!("⚠ {e}"));
+                ui.colored_label(crate::theme::danger(ui.ctx()), format!("⚠ {e}"));
                 if ui.small_button("dismiss").clicked() {
                     self.error = None;
                 }
@@ -1324,11 +1230,11 @@ impl App {
         if let Some(why) = stale {
             // on the plot itself, so a stale field is never read as current; the button to solve again is in the Results tab and its panel
             let at = ui.max_rect().left_top() + egui::vec2(10.0, 10.0);
-            let text = format!("⚠ STALE: {why}");
-            let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(14.0), Color32::from_rgb(40, 30, 10));
+            let text = format!("Stale: {why}");
+            let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(14.0), crate::activity::band_colours(ui.ctx()).1);
             let rect = egui::Rect::from_min_size(at, galley.size() + egui::vec2(12.0, 6.0));
-            ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(235, 170, 60));
-            ui.painter().galley(rect.min + egui::vec2(6.0, 3.0), galley, Color32::BLACK);
+            ui.painter().rect_filled(rect, 4.0, crate::activity::band_colours(ui.ctx()).0);
+            ui.painter().galley(rect.min + egui::vec2(6.0, 3.0), galley, crate::activity::band_colours(ui.ctx()).1);
         }
         if let (Some(label), Some(i)) = (out.picked, self.picking) {
             if let Some(p) = self.picked.iter().position(|&l| l == label) {
@@ -1682,6 +1588,46 @@ mod tests {
         assert_eq!(b.stale_reason(j), None);
         b.cmd("set_study", json!({ "physics": "ems", "kind": "modes", "params": { "freq": 190.0e12, "n_modes": 2, "n_target": 2.75 } }));
         assert_eq!(b.stale_reason(j), Some("the model changed since this solve"));
+    }
+
+    /// Review I-9: a result that was just computed is never stale, whichever way it was asked for (the plain window or a workflow, which
+    /// records the run and saves the model around the solve), for the physics of the examples that solve fast.
+    #[test]
+    fn a_result_just_computed_is_not_stale() {
+        for name in ["03_heated_plate", "04_thermal_bar", "02_cantilever", "01_capacitor", "05_block_cantilever"] {
+            // the plain window
+            let mut a = app();
+            a.load_example(example(name));
+            wait_idle(&mut a, 30);
+            a.compute();
+            wait_idle(&mut a, 120);
+            assert!(a.error.is_none(), "{name}: {:?}", a.error);
+            for i in 0..a.results.len() {
+                assert_eq!(a.stale_reason(i), None, "{name}: result {i} of the plain window");
+            }
+            // a workflow, as the scripted shots of the review ran it (`wf example N; compute; view result`)
+            let mut b = app();
+            let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains(name)).unwrap().path;
+            b.new_draft("Fresh", crate::shell::Start::Example(path));
+            wait_idle(&mut b, 30);
+            b.shell_compute();
+            wait_idle(&mut b, 120);
+            assert!(b.error.is_none(), "{name}: {:?}", b.error);
+            assert!(!b.results.is_empty(), "{name}: the workflow solved");
+            b.show_results = true;
+            let keys = b.engine.problem_keys();
+            // whatever the frames do after the solve (saving the workflow, the run record, the page itself) must not move a key
+            let ctx = b.ctx.clone();
+            for _ in 0..12 {
+                let _ = ctx.run_ui(Default::default(), |ui| b.shell_ui(ui));
+                b.poll();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(b.engine.problem_keys(), keys, "{name}: a frame after the solve moved a problem key");
+            for i in 0..b.results.len() {
+                assert_eq!(b.stale_reason(i), None, "{name}: result {i} of a workflow, after twelve frames");
+            }
+        }
     }
 
     /// A solve that comes back after the project changed again and was not kept by the engine is not shown as the run on screen.

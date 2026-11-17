@@ -800,25 +800,9 @@ impl App {
                     self.shell.sheet = Sheet::Palette;
                     self.shell.palette_q.clear();
                 }
-                // the status chip: only when a job runs or waits (review I-12: an always-on "Idle" is noise)
-                let (text, dot) = match &self.busy {
-                    Some((what, _)) if self.shell.run.is_some() => (format!("1 running · {what}"), crate::kit::State::Running),
-                    Some((what, _)) => (what.clone(), crate::kit::State::Running),
-                    None => ("Waiting".to_string(), crate::kit::State::Waiting),
-                };
-                if self.busy.is_some() || !self.waiting.is_empty() {
-                egui::Frame::new().fill(theme::warm(&ctx)).corner_radius(16).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
-                    crate::kit::glyph(ui, dot);
-                    ui.label(RichText::new(text).color(theme::text(&ctx)));
-                    if !self.waiting.is_empty() {
-                        ui.label(RichText::new(format!("+{} queued", self.waiting.len())).color(theme::muted(&ctx)));
-                    }
-                });
-                }
-                if (self.busy.is_some() || self.show_queue) && ui.small_button("Queue").on_hover_text("What runs and what waits, with cancel, hold and pause").clicked() {
-                    self.show_queue = !self.show_queue;
-                }
+                // the busy chip and its queue popover (activity.rs): only while something runs or waits (review I-12: an always-on "Idle" is noise)
+                let activity = self.activity();
+                self.busy_chip(ui, &activity);
             });
         });
     }

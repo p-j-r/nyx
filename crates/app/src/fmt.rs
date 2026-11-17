@@ -15,6 +15,23 @@ pub fn ellipsize(s: &str, max: usize) -> String {
     s.chars().take(max.saturating_sub(1)).collect::<String>().trim_end().to_string() + "…"
 }
 
+/// A time that has passed: "0.4 s", "12 s", "1:05", "1:02:09" (seconds below ten show a decimal; a minute and more show minutes and seconds).
+pub fn seconds(s: f64) -> String {
+    let s = if s.is_finite() { s.max(0.0) } else { 0.0 };
+    if s < 10.0 {
+        format!("{s:.1} s")
+    } else if s < 60.0 {
+        format!("{s:.0} s")
+    } else {
+        let t = s.round() as u64;
+        if t < 3600 {
+            format!("{}:{:02}", t / 60, t % 60)
+        } else {
+            format!("{}:{:02}:{:02}", t / 3600, (t / 60) % 60, t % 60)
+        }
+    }
+}
+
 /// A value with an SI prefix and four significant digits: `si(2.017e-4, "m")` is "201.7 µm", `si(6.175e6, "Pa")` is "6.175 MPa".
 pub fn si(v: f64, unit: &str) -> String {
     if v == 0.0 || !v.is_finite() {
@@ -102,6 +119,15 @@ pub fn value(key: &str, v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_time_that_has_passed_reads_naturally() {
+        assert_eq!(seconds(0.43), "0.4 s");
+        assert_eq!(seconds(12.4), "12 s");
+        assert_eq!(seconds(65.0), "1:05");
+        assert_eq!(seconds(3729.0), "1:02:09");
+        assert_eq!(seconds(f64::NAN), "0.0 s");
+    }
 
     #[test]
     fn plurals_follow_the_count() {

@@ -22,7 +22,7 @@ impl App {
             self.cancel_at = None;
             self.cancel_job();
         }
-        if self.busy.is_some() || self.shot_pending.load(Ordering::SeqCst) {
+        if (self.busy.is_some() && !self.script_free) || self.shot_pending.load(Ordering::SeqCst) {
             return;
         }
         if self.settle > 0 {
@@ -121,6 +121,15 @@ impl App {
                     ws.settings.region_colouring = arg.clone();
                 }
             }
+            // `wait off|on`: with `off` the script carries on while a job runs, so that a running job and the queue can be shot (`on`, the default,
+            // waits for the job to end before the next command); `queue pause|resume|open|close`: the engine's queue and its popover
+            "wait" => self.script_free = arg == "off",
+            "queue" => match arg.as_str() {
+                "pause" => self.engine.jobs().pause(),
+                "resume" => self.engine.jobs().resume(),
+                "open" => self.show_queue = true,
+                _ => self.show_queue = false,
+            },
             "isolate" => self.vp.isolate = arg.parse::<usize>().ok().and_then(|n| n.checked_sub(1)),
             "motion" => {
                 if let Some(ws) = &mut self.shell.ws {

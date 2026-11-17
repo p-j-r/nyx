@@ -73,8 +73,6 @@ pub fn label_caps(ui: &mut Ui, text: &str, hint: &str) {
 
 /// What a workflow, a run or the solver is doing. Colour is never the only channel: every state has its own glyph (drawn, so it needs no font)
 /// and a word.
-// `Waiting` and `Failed` are drawn by the queue and the run table of plan steps U5 and later
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     /// saved, converged, passed: a check mark
@@ -84,6 +82,7 @@ pub enum State {
     /// queued, waiting: an amber ring
     Waiting,
     /// failed: a cross
+    #[allow(dead_code)] // drawn by the sweep table
     Failed,
     /// nothing to report, or not saved yet: a hollow grey ring
     Idle,
@@ -109,7 +108,7 @@ pub fn glyph(ui: &mut Ui, state: State) -> Response {
     r
 }
 
-fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State) {
+pub fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State) {
     let ctx = ui.ctx();
     let p = ui.painter();
     match state {
@@ -136,7 +135,6 @@ fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State) {
     }
 }
 
-#[allow(dead_code)] // used by the queue popover and the Dashboard states of plan step U5
 /// A state with its word (or `label` instead of the word): glyph, then text in the colour that reads on the page.
 pub fn status(ui: &mut Ui, state: State, label: impl Into<String>) {
     let ctx = ui.ctx().clone();

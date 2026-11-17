@@ -187,7 +187,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&e.wf.title).strong().size(18.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.link("Cancel").clicked() {
+                            if kit::danger(ui, "Cancel").clicked() {
                                 cancel = true;
                             }
                         });

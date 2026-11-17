@@ -189,7 +189,7 @@ impl App {
         ui.add_space(6.0);
         let dirty = self.geometry_dirty || self.geom_edit != self.engine.project().geometry || self.mesh_edit != self.engine.project().mesh;
         ui.horizontal(|ui| {
-            let b = ui.add_enabled(self.busy.is_none(), egui::Button::new(RichText::new("Build mesh").strong()).fill(if dirty { Color32::from_rgb(40, 90, 150) } else { Color32::from_rgb(52, 56, 66) }));
+            let b = ui.add_enabled(self.busy.is_none(), egui::Button::new(RichText::new("Build mesh").strong().color(if dirty { crate::theme::on_accent(ui.ctx()) } else { crate::theme::text(ui.ctx()) })).fill(if dirty { crate::theme::accent(ui.ctx()) } else { crate::theme::raised(ui.ctx()) }));
             if b.clicked() {
                 self.rebuild_mesh();
             }
@@ -267,7 +267,7 @@ impl App {
         }
         let lib_names: Vec<String> = self.engine.library().map(|l| l.names()).unwrap_or_default();
         if lib_names.is_empty() {
-            ui.colored_label(Color32::from_rgb(200, 120, 20), "No material files were found (set NYX_MATERIALS, or keep a `materials` folder next to the program).");
+            ui.colored_label(crate::theme::activity_text(ui.ctx()), "No material files were found (set NYX_MATERIALS, or keep a `materials` folder next to the program).");
         }
         let mut apply_all: Option<String> = None;
         ui.horizontal(|ui| {
@@ -394,7 +394,7 @@ impl App {
                 }
             }
             Err(e) => {
-                ui.colored_label(Color32::from_rgb(200, 60, 60), e.to_string());
+                ui.colored_label(crate::theme::danger(ui.ctx()), e.to_string());
             }
         }
     }
@@ -497,7 +497,7 @@ impl App {
                 });
                 match self.rule_errors.get(&i) {
                     Some(e) => {
-                        ui.colored_label(Color32::from_rgb(235, 110, 100), e);
+                        ui.colored_label(crate::theme::danger(ui.ctx()), e);
                     }
                     None => {
                         if let Some(l) = self.bc_labels.get(i).filter(|l| !l.is_empty()) {
@@ -579,7 +579,7 @@ impl App {
                 nyx_engine::facade::physics::Dims::Both => true,
             };
             if !runs_here {
-                ui.colored_label(Color32::from_rgb(200, 120, 20), format!("This study runs on a {}D mesh; the model on show is {}D.", if dim == 2 { 3 } else { 2 }, dim));
+                ui.colored_label(crate::theme::activity_text(ui.ctx()), format!("This study runs on a {}D mesh; the model on show is {}D.", if dim == 2 { 3 } else { 2 }, dim));
             }
             forms::param_form(ui, &format!("study_{active}_{}", s.kind), &s.params, &mut spec.study.params);
         }
@@ -617,14 +617,14 @@ impl App {
         }
         if let Some(c) = &self.convergence {
             let ok = c["converged"] == true;
-            ui.colored_label(if ok { Color32::from_rgb(40, 150, 70) } else { Color32::from_rgb(200, 120, 20) }, format!("{} (worst relative difference {:.2e}; {} to {} cells, {:.1} s)", if ok { "converged" } else { "NOT converged" }, c["worst_relative"].as_f64().unwrap_or(f64::NAN), c["cells"]["coarse"], c["cells"]["refined"], c["seconds"].as_f64().unwrap_or(0.0)));
+            ui.colored_label(if ok { crate::theme::success(ui.ctx()) } else { crate::theme::activity_text(ui.ctx()) }, format!("{} (worst relative difference {:.2e}; {} to {} cells, {:.1} s)", if ok { "converged" } else { "NOT converged" }, c["worst_relative"].as_f64().unwrap_or(f64::NAN), c["cells"]["coarse"], c["cells"]["refined"], c["seconds"].as_f64().unwrap_or(0.0)));
             egui::Grid::new("conv_rows").num_columns(4).striped(true).show(ui, |ui| {
                 for r in c["rows"].as_array().into_iter().flatten().take(40) {
                     ui.label(r["quantity"].as_str().unwrap_or(""));
                     ui.monospace(format!("{:.6e}", r["coarse"].as_f64().unwrap_or(f64::NAN)));
                     ui.monospace(format!("{:.6e}", r["refined"].as_f64().unwrap_or(f64::NAN)));
                     let pass = r["converged"] == true;
-                    ui.colored_label(if pass { Color32::from_rgb(40, 150, 70) } else { Color32::from_rgb(200, 120, 20) }, format!("{:.1e}", r["relative"].as_f64().unwrap_or(f64::NAN)));
+                    ui.colored_label(if pass { crate::theme::success(ui.ctx()) } else { crate::theme::activity_text(ui.ctx()) }, format!("{:.1e}", r["relative"].as_f64().unwrap_or(f64::NAN)));
                     ui.end_row();
                 }
             });
@@ -634,7 +634,7 @@ impl App {
         }
         ui.add_space(8.0);
         let ok = self.can_queue_compute() && self.doc.mesh.is_some();
-        if ui.add_enabled(ok, egui::Button::new(RichText::new("  Compute  ").strong()).fill(Color32::from_rgb(38, 110, 70))).clicked() {
+        if ui.add_enabled(ok, egui::Button::new(RichText::new("  Compute  ").strong().color(crate::theme::on_accent(ui.ctx()))).fill(crate::theme::accent(ui.ctx()))).clicked() {
             self.compute();
         }
     }
