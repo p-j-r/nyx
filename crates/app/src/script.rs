@@ -63,7 +63,7 @@ impl App {
                 }
             }
             "compute" => self.shell_compute(),
-            // shell layout: `wf example N`, `page dashboard|settings|N`, `section concept|build|analysis`, `sheet new|palette|versions|share`
+            // shell layout: `wf example N`, `page dashboard|settings|N`, `section concept|build|analysis`, `sheet new|palette|versions|share|none`, `theme light|dark`
             "wf" => {
                 if let Some(e) = arg.strip_prefix("example ").and_then(|n| n.trim().parse::<usize>().ok()).and_then(|i| crate::examples::list().into_iter().nth(i)) {
                     let t = e.title.split('(').next().unwrap_or("Example").trim().to_string();
@@ -92,6 +92,11 @@ impl App {
                         _ => crate::shell::Part::Concept,
                     };
                 }
+            }
+            // `theme light|dark`: the look of the window for the shots of `tools/ux-shots.sh` (not saved to the workspace settings)
+            "theme" => {
+                self.shell.dark = arg == "dark";
+                crate::theme::apply_mode(ctx, self.shell.dark);
             }
             "sheet" => {
                 use crate::shell::Sheet;

@@ -37,3 +37,14 @@ Two sessions reviewed and mocked up the window in parallel (S1 `nyx2-ux`, boards
 * The region palettes of the two earlier sets failed the colour-blind all-pairs check; the replacements are in `tokens.json` and need a second cue (number chip and legend) on every region.
 * EB Garamond Italic (SIL OFL 1.1) is in `crates/app/assets/fonts/` with its licence; the About / Licences view that shows the licence is plan item U2.
 * Not checked in the app: Narrator, High Contrast, scaling, a running-job screenshot, `muda` on Linux and macOS.
+
+## Implementation (workspace `nyx2-ux-impl`, from `ux-compare`; started 2026-11-17)
+
+Paul said "start implementing" on 2026-11-17, which **replaces the earlier evaluation-only brief** of the two review sessions: the plan of `docs/ux/UX_MERGED_PLAN.md` section 6 is being built, in order, one bookmark per step. Build directory `..\nyx2-ux-impl-target` (`CARGO_TARGET_DIR`).
+
+### U0, baseline (bookmark `ux-u0-baseline`)
+
+* **Baseline on this base** (`ux-compare` = `ux-0b-mockups` over `productivity-4-memory`, no Rust change): `cargo test --release -p nyx --no-fail-fast` gives **23 + 7 pass, 0 fail** (unit tests of the window, `tests/cli.rs`). The two tests the productivity status records as failing, `every_tab_draws_for_the_examples` and `the_window_checks_convergence_on_its_own_thread`, **pass** here (one run each; "Dropped TexturesDelta" did not appear in the output). Treat them as possibly flaky, not as fixed.
+* **`tools/ux-shots.sh`**: builds the release binary and drives `nyx --script` for 8 views (dashboard, settings, command palette, new-workflow sheet, concept, build, results, analysis) x light/dark x 1440x900 and 1100x700, into `<target dir>/ux-shots/`. It always sets a scratch `NYX_WORKSPACE` (deleted afterwards) and refuses to run without one; it fails when a run exits non-zero or a shot is missing or empty. `UX_SHOTS_FAST=1` skips the two views that need a solve. Run on this base: **32 shots, exit 0**, and the real workspace `Documents\nyx` was not touched (newest entry still the folder of the review's first run).
+* New script command `theme light|dark` (`script.rs`), because the shots need both looks and the script had no way to set one.
+* Not captured: a running job and the queue panel (U5/U6: hold a job in a window test through the engine's queue).
