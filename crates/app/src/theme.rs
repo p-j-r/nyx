@@ -47,11 +47,11 @@ pub fn raised(ctx: &egui::Context) -> Color32 {
 }
 /// Dividers and card outlines. Never the edge of a control: that is `edge`.
 pub fn line(ctx: &egui::Context) -> Color32 {
-    role(ctx, tokens::SEPARATOR)
+    if look(ctx).high_contrast { edge(ctx) } else { role(ctx, tokens::SEPARATOR) }
 }
 /// The edge of buttons, fields and checkboxes (3:1 against the page and the card).
 pub fn edge(ctx: &egui::Context) -> Color32 {
-    role(ctx, tokens::CONTROL_EDGE)
+    role(ctx, if look(ctx).high_contrast { tokens::CONTROL_EDGE_HIGH } else { tokens::CONTROL_EDGE })
 }
 pub fn text(ctx: &egui::Context) -> Color32 {
     role(ctx, tokens::TEXT)
@@ -96,6 +96,75 @@ pub fn scrim(alpha: u8) -> Color32 {
     Color32::from_black_alpha(alpha)
 }
 
+/// The settings of the look that are not the light or dark colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Look {
+    pub dark: bool,
+    /// control edges at 4.5:1 and 1.5 px, separators as strong as edges
+    pub high_contrast: bool,
+    /// no easing, no sliding progress block
+    pub reduce_motion: bool,
+}
+
+fn look_id() -> egui::Id {
+    egui::Id::unique("nyx-look")
+}
+
+/// The look that was installed last (`apply_look`).
+pub fn look(ctx: &egui::Context) -> Look {
+    ctx.data(|d| d.get_temp::<Look>(look_id())).unwrap_or_default()
+}
+
+pub fn reduce_motion(ctx: &egui::Context) -> bool {
+    look(ctx).reduce_motion
+}
+
+/// The viewport and plot background: the dark canvas by default (also in a light window), or the canvas of the look when `follow_theme`.
+pub fn canvas(ctx: &egui::Context, follow_theme: bool) -> Color32 {
+    if follow_theme { role(ctx, tokens::CANVAS) } else { rgb(tokens::CANVAS.dark) }
+}
+
+/// True when the system asks for High Contrast: read from Windows (`SPI_GETHIGHCONTRAST`); other platforms have no such flag we read yet.
+pub fn system_high_contrast() -> bool {
+    platform_high_contrast()
+}
+
+#[cfg(not(windows))]
+fn platform_high_contrast() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn platform_high_contrast() -> bool {
+    {
+        #[repr(C)]
+        struct HighContrastW {
+            size: u32,
+            flags: u32,
+            default_scheme: *mut u16,
+        }
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn SystemParametersInfoW(action: u32, param: u32, data: *mut HighContrastW, win_ini: u32) -> i32;
+        }
+        const SPI_GETHIGHCONTRAST: u32 = 0x0042;
+        const HCF_HIGHCONTRASTON: u32 = 0x0000_0001;
+        let mut hc = HighContrastW { size: std::mem::size_of::<HighContrastW>() as u32, flags: 0, default_scheme: std::ptr::null_mut() };
+        // SAFETY: `hc` is a valid HIGHCONTRASTW with its size set; the call only writes into it.
+        let ok = unsafe { SystemParametersInfoW(SPI_GETHIGHCONTRAST, hc.size, &mut hc, 0) };
+        ok != 0 && hc.flags & HCF_HIGHCONTRASTON != 0
+    }
+}
+
+/// The High contrast setting ("auto", "standard", "high") as a yes or no.
+pub fn resolve_contrast(setting: &str) -> bool {
+    match setting {
+        "high" => true,
+        "standard" => false,
+        _ => system_high_contrast(),
+    }
+}
+
 /// Light visuals (what tests and the first frame use).
 pub fn apply(ctx: &egui::Context) {
     apply_mode(ctx, false);
@@ -103,10 +172,11 @@ pub fn apply(ctx: &egui::Context) {
 
 /// The full `Visuals` of one look. Neutral fills come from the tokens, the focus ring is the 2 px accent stroke of `widgets.active` (egui draws
 /// a focused widget with the active visuals), every control has a 3:1 edge and dividers use the separator colour only.
-fn build_visuals(m: Mode) -> Visuals {
+fn build_visuals(m: Mode, high: bool) -> Visuals {
     let g = |p: Pair| rgb(p.get(m));
     let mut v = if m == Mode::Dark { Visuals::dark() } else { Visuals::light() };
-    let (page, card, raised, line, edge, text, accent, tint) = (g(tokens::PAGE), g(tokens::CARD), g(tokens::RAISED), g(tokens::SEPARATOR), g(tokens::CONTROL_EDGE), g(tokens::TEXT), g(tokens::ACCENT), g(tokens::TINT));
+    let edge_role = if high { tokens::CONTROL_EDGE_HIGH } else { tokens::CONTROL_EDGE };
+    let (page, card, raised, line, edge, text, accent, tint) = (g(tokens::PAGE), g(tokens::CARD), g(tokens::RAISED), if high { g(edge_role) } else { g(tokens::SEPARATOR) }, g(edge_role), g(tokens::TEXT), g(tokens::ACCENT), g(tokens::TINT));
     v.panel_fill = page;
     v.window_fill = card;
     v.extreme_bg_color = card;
@@ -129,7 +199,7 @@ fn build_visuals(m: Mode) -> Visuals {
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, line);
     v.widgets.inactive.bg_fill = card;
     v.widgets.inactive.weak_bg_fill = card;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, edge);
+    v.widgets.inactive.bg_stroke = Stroke::new(if high { 1.5 } else { 1.0 }, edge);
     v.widgets.hovered.bg_fill = raised;
     v.widgets.hovered.weak_bg_fill = raised;
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent);
@@ -142,19 +212,28 @@ fn build_visuals(m: Mode) -> Visuals {
     v
 }
 
-/// Installs the light and the dark look and makes `dark` the active one. Both are installed every time (it is cheap) so nothing depends on which
-/// was installed first; following the system setting is a later step, so the theme preference is pinned here.
+/// Light or dark with the other options of the look as they were last set (`apply_look`).
 pub fn apply_mode(ctx: &egui::Context, dark: bool) {
-    ctx.set_visuals_of(Theme::Light, build_visuals(Mode::Light));
-    ctx.set_visuals_of(Theme::Dark, build_visuals(Mode::Dark));
+    apply_look(ctx, Look { dark, ..look(ctx) });
+}
+
+/// Installs the light and the dark look and makes `look.dark` the active one. Both are installed every time (it is cheap) so nothing depends on
+/// which was installed first. The window decides light or dark itself (Settings: follow the system, light, dark) and pins the theme here, so egui
+/// never switches on its own.
+pub fn apply_look(ctx: &egui::Context, look: Look) {
+    ctx.data_mut(|d| d.insert_temp(look_id(), look));
+    ctx.set_visuals_of(Theme::Light, build_visuals(Mode::Light, look.high_contrast));
+    ctx.set_visuals_of(Theme::Dark, build_visuals(Mode::Dark, look.high_contrast));
+    let (dark, motion) = (look.dark, look.reduce_motion);
     // spacing and fonts belong to the style of each theme: set them on both, or a switch of theme would lose them
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(12.0, 5.0);
-        style.spacing.interact_size.y = 26.0;
+        style.spacing.interact_size.y = 28.0;
+        style.animation_time = if motion { 0.0 } else { 1.0 / 12.0 };
         style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
         style.text_styles.insert(TextStyle::Button, FontId::new(14.0, FontFamily::Proportional));
-        style.text_styles.insert(TextStyle::Heading, FontId::new(17.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Heading, FontId::new(18.0, FontFamily::Proportional));
         style.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
         style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
     });

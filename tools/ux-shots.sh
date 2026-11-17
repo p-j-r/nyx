@@ -24,7 +24,8 @@ for size in 1440x900 1100x700; do
     p="$(win "$out")/$look-$size"
     # views that need no solve: dashboard, settings, the command palette, the new-workflow sheet, a workflow's concept and build sections
     s="theme $look; page dashboard; shot $p-dashboard.png; page settings; shot $p-settings.png; page dashboard"
-    s="$s; sheet palette; shot $p-palette.png; sheet new; shot $p-new.png; sheet none"
+    s="$s; sheet palette; shot $p-palette.png; sheet new; shot $p-new.png; sheet about; shot $p-about.png; sheet none"
+    s="$s; contrast high; page settings; shot $p-settings-high.png; contrast standard; page dashboard"
     s="$s; wf example 1; section concept; shot $p-concept.png; section build; shot $p-build.png"
     # views that show a result: wait for the solve (the script waits while the job runs)
     if [ -z "${UX_SHOTS_FAST:-}" ]; then
@@ -38,7 +39,7 @@ for f in "$out"/*.png; do
   [ -s "$f" ] || { echo "FAIL: empty or missing $f" >&2; fail=1; }
 done
 n=$(ls "$out"/*.png 2>/dev/null | wc -l)
-[ -n "${UX_SHOTS_FAST:-}" ] && want=24 || want=32
+[ -n "${UX_SHOTS_FAST:-}" ] && want=32 || want=40
 [ "$n" -ge "$want" ] || { echo "FAIL: $n shots, expected $want" >&2; fail=1; }
 echo "$n shots in $out"
 exit $fail

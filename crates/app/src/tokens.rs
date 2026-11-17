@@ -58,6 +58,8 @@ pub const RAISED: Pair = pair("#F1EEF2", "#262230");
 pub const SEPARATOR: Pair = pair("#E6E4E6", "#2E2A35");
 /// edge of buttons, fields, combo boxes, checkboxes (3:1 on page and card)
 pub const CONTROL_EDGE: Pair = pair("#8A8091", "#6E6578");
+/// the control edge of the High contrast setting (4.5:1 on page, card and raised)
+pub const CONTROL_EDGE_HIGH: Pair = pair("#6B6173", "#9A91A5");
 /// primary text
 pub const TEXT: Pair = pair("#1D1224", "#ECE7EF");
 /// secondary text
@@ -89,12 +91,13 @@ pub const CHIP: Pair = pair("#F1EFF2", "#181A1E");
 
 /// Every role by its name in `tokens.json`.
 #[cfg(test)]
-pub const ROLES: [(&str, Pair); 18] = [
+pub const ROLES: [(&str, Pair); 19] = [
     ("page", PAGE),
     ("card", CARD),
     ("raised", RAISED),
     ("separator", SEPARATOR),
     ("control_edge", CONTROL_EDGE),
+    ("control_edge_high", CONTROL_EDGE_HIGH),
     ("text", TEXT),
     ("muted", MUTED),
     ("accent", ACCENT),
@@ -200,7 +203,7 @@ mod tests {
     fn pairs_of(mode: Mode) -> Vec<(&'static str, Rgb, &'static str, Rgb, f64)> {
         let g = |p: Pair| p.get(mode);
         // (foreground role, background role, least contrast): text 7, secondary text and statuses 4.5, controls 3 (WCAG 2.2 AA/AAA)
-        let table: [(&str, Pair, &str, Pair, f64); 22] = [
+        let table: [(&str, Pair, &str, Pair, f64); 25] = [
             ("text", TEXT, "page", PAGE, 7.0),
             ("text", TEXT, "card", CARD, 7.0),
             ("text", TEXT, "raised", RAISED, 7.0),
@@ -221,6 +224,9 @@ mod tests {
             ("danger", DANGER, "card", CARD, 4.5),
             ("control_edge", CONTROL_EDGE, "page", PAGE, 3.0),
             ("control_edge", CONTROL_EDGE, "card", CARD, 3.0),
+            ("control_edge_high", CONTROL_EDGE_HIGH, "page", PAGE, 4.5),
+            ("control_edge_high", CONTROL_EDGE_HIGH, "card", CARD, 4.5),
+            ("control_edge_high", CONTROL_EDGE_HIGH, "raised", RAISED, 4.5),
             ("text", TEXT, "chip", CHIP, 7.0),
             ("text", TEXT, "canvas", CANVAS, 7.0),
         ];

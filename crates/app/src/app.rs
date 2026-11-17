@@ -1237,7 +1237,7 @@ impl App {
     }
 
     pub fn viewport_ui(&mut self, ui: &mut egui::Ui) {
-        let bg = Color32::from_rgb(24, 26, 30);
+        let bg = crate::theme::canvas(ui.ctx(), self.shell.settings().canvas == "theme");
         let mut bc_colors: HashMap<i32, Color32> = HashMap::new();
         for (i, labels) in self.bc_labels.iter().enumerate() {
             for &l in labels {

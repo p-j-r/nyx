@@ -63,7 +63,7 @@ impl App {
                 }
             }
             "compute" => self.shell_compute(),
-            // shell layout: `wf example N`, `page dashboard|settings|N`, `section concept|build|analysis`, `sheet new|palette|versions|share|none`, `theme light|dark`
+            // shell layout: `wf example N`, `page dashboard|settings|N`, `section concept|build|analysis`, `sheet new|palette|versions|share|about|none`; looks for a shot (not saved): `theme light|dark|system`, `contrast standard|high|auto`, `motion on|off`
             "wf" => {
                 if let Some(e) = arg.strip_prefix("example ").and_then(|n| n.trim().parse::<usize>().ok()).and_then(|i| crate::examples::list().into_iter().nth(i)) {
                     let t = e.title.split('(').next().unwrap_or("Example").trim().to_string();
@@ -95,8 +95,23 @@ impl App {
             }
             // `theme light|dark`: the look of the window for the shots of `tools/ux-shots.sh` (not saved to the workspace settings)
             "theme" => {
-                self.shell.dark = arg == "dark";
-                crate::theme::apply_mode(ctx, self.shell.dark);
+                if let Some(ws) = &mut self.shell.ws {
+                    ws.settings.theme = arg.clone();
+                }
+                self.sync_look(ctx);
+            }
+            // `contrast standard|high|auto`, `motion on|off` (reduce motion), settings for a shot, not saved
+            "contrast" => {
+                if let Some(ws) = &mut self.shell.ws {
+                    ws.settings.contrast = arg.clone();
+                }
+                self.sync_look(ctx);
+            }
+            "motion" => {
+                if let Some(ws) = &mut self.shell.ws {
+                    ws.settings.reduce_motion = arg == "on";
+                }
+                self.sync_look(ctx);
             }
             "sheet" => {
                 use crate::shell::Sheet;
@@ -105,6 +120,7 @@ impl App {
                     "palette" => Sheet::Palette,
                     "versions" => Sheet::Versions,
                     "share" => Sheet::Share,
+                    "about" => Sheet::About,
                     _ => Sheet::None,
                 };
             }

@@ -258,6 +258,12 @@ pub fn bar(ui: &mut Ui, fraction: Option<f32>, width: f32) {
             ui.painter().rect_filled(r, 4.0, color);
         }
         None => {
+            if theme::reduce_motion(ui.ctx()) {
+                // reduced motion: a still block in the middle, no animation and no repaint
+                let w = rect.width() * 0.25;
+                ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(rect.center().x - w / 2.0, rect.top()), Vec2::new(w, rect.height())), 4.0, color);
+                return;
+            }
             let t = ui.input(|i| i.time) as f32;
             let w = rect.width() * 0.25;
             let x = rect.left() + (rect.width() - w) * (0.5 + 0.5 * (t * 2.0).sin());
@@ -281,6 +287,8 @@ pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui))
     });
     let frame = egui::Frame::new().fill(theme::card(ctx)).stroke(Stroke::new(1.0, theme::line(ctx))).corner_radius(CornerRadius::same(16)).inner_margin(Margin::same(22)).shadow(egui::Shadow { offset: [0, 8], blur: 40, spread: 0, color: theme::scrim(70) });
     egui::Area::new(egui::Id::unique((id, "sheet"))).order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+        // an anchored area is only offered the size it had last frame, so a sheet could never grow past its first (sizing) frame: offer the height of the window
+        ui.set_max_height(screen.height() - 40.0);
         frame.show(ui, |ui| {
             ui.set_width(width.min(screen.width() - 60.0));
             egui::ScrollArea::vertical().max_height(screen.height() - 120.0).auto_shrink([false, true]).show(ui, f);

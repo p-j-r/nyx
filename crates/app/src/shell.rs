@@ -9,7 +9,7 @@
 
 use crate::app::App;
 use crate::theme;
-use eframe::egui::{self, Color32, RichText, Vec2};
+use eframe::egui::{self, RichText, Vec2};
 use nyx_engine::facade::store::runs::{RunRecord, RunStatus};
 use nyx_engine::facade::store::util::{hash_bytes, now_secs};
 use nyx_engine::facade::store::{Entry, Settings, Workspace, WorkflowDir};
@@ -57,6 +57,8 @@ pub enum Sheet {
     Versions,
     Share,
     Open,
+    /// the version, the licences of the fonts and the tagline
+    About,
 }
 
 pub struct OpenWf {
@@ -203,6 +205,11 @@ pub struct Shell {
     pub open_file: Option<(PathBuf, nyx_engine::facade::store::archive::Inspection)>,
     pub classic: bool,
     pub dark: bool,
+    /// the zoom factor last seen: a change is Ctrl +/- (or the View menu) and is saved
+    pub last_zoom: f32,
+    /// the native menu bar (Windows)
+    #[cfg(windows)]
+    pub native_menu: Option<crate::menu::Native>,
     pub logo: Option<egui::TextureHandle>,
     pub last_tick: Instant,
     pub last_refresh: Instant,
@@ -243,6 +250,9 @@ impl Shell {
             open_file: None,
             classic: true,
             dark: false,
+            last_zoom: 1.0,
+            #[cfg(windows)]
+            native_menu: None,
             logo: None,
             last_tick: Instant::now(),
             last_refresh: Instant::now() - Duration::from_secs(60),
@@ -277,10 +287,12 @@ impl App {
     pub fn attach_workspace(&mut self, root: PathBuf) {
         match Workspace::open(&root) {
             Ok(ws) => {
-                self.shell.dark = ws.settings.theme == "dark";
+                let zoom = ws.settings.zoom.clamp(0.5, 3.0);
                 self.shell.ws = Some(ws);
                 self.shell.classic = false;
-                theme::apply_mode(&self.ctx, self.shell.dark);
+                self.ctx.set_zoom_factor(zoom);
+                self.shell.last_zoom = zoom;
+                self.sync_look(&self.ctx.clone());
                 self.refresh_entries();
                 let tabs = self.shell.settings().open_tabs;
                 for id in tabs {
@@ -650,6 +662,14 @@ impl App {
     /// The whole window in the shell layout.
     pub fn shell_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.sync_look(&ctx);
+        #[cfg(windows)]
+        {
+            let clicked = self.shell.native_menu.as_ref().map(|m| m.take()).unwrap_or_default();
+            for act in clicked {
+                self.do_act(&ctx, act);
+            }
+        }
         self.shell_shortcuts(&ctx);
         if self.shell.logo.is_none() {
             self.shell.logo = load_logo(&ctx);
@@ -778,27 +798,19 @@ impl App {
                     self.flush();
                     self.shell.page = Page::Settings;
                 }
-                if ui.add(egui::Button::new(if self.shell.dark { "Light" } else { "Dark" }).min_size(Vec2::new(0.0, 32.0))).on_hover_text("Switch between the light and the dark look").clicked() {
-                    self.shell.dark = !self.shell.dark;
-                    theme::apply_mode(&ctx, self.shell.dark);
-                    if let Some(ws) = &mut self.shell.ws {
-                        ws.settings.theme = if self.shell.dark { "dark".into() } else { "light".into() };
-                        let _ = ws.save_settings();
-                    }
-                }
                 let search = ui.add(egui::Button::new(RichText::new("Search or run anything        Ctrl K").color(theme::muted(&ctx))).min_size(Vec2::new(250.0, 32.0)));
                 if search.clicked() {
                     self.shell.sheet = Sheet::Palette;
                     self.shell.palette_q.clear();
                 }
-                // the status chip follows the one job that can run
+                // the status chip: only when a job runs or waits (review I-12: an always-on "Idle" is noise)
                 let (text, dot) = match &self.busy {
                     Some((what, _)) if self.shell.run.is_some() => (format!("1 running · {what}"), crate::kit::State::Running),
                     Some((what, _)) => (what.clone(), crate::kit::State::Running),
-                    None => ("Idle".to_string(), crate::kit::State::Idle),
+                    None => ("Waiting".to_string(), crate::kit::State::Waiting),
                 };
-                let fill = if self.busy.is_some() { theme::warm(&ctx) } else { Color32::TRANSPARENT };
-                egui::Frame::new().fill(fill).corner_radius(16).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
+                if self.busy.is_some() || !self.waiting.is_empty() {
+                egui::Frame::new().fill(theme::warm(&ctx)).corner_radius(16).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 7.0;
                     crate::kit::glyph(ui, dot);
                     ui.label(RichText::new(text).color(theme::text(&ctx)));
@@ -806,6 +818,7 @@ impl App {
                         ui.label(RichText::new(format!("+{} queued", self.waiting.len())).color(theme::muted(&ctx)));
                     }
                 });
+                }
                 if (self.busy.is_some() || self.show_queue) && ui.small_button("Queue").on_hover_text("What runs and what waits, with cancel, hold and pause").clicked() {
                     self.show_queue = !self.show_queue;
                 }
@@ -887,6 +900,33 @@ impl App {
         }
         if stop || keep || esc_closed {
             self.shell.confirm_cancel = false;
+        }
+    }
+}
+
+impl App {
+    /// Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs),
+    /// High contrast, reduced motion, and the zoom (a change made with Ctrl +/- or the View menu is saved).
+    pub fn sync_look(&mut self, ctx: &egui::Context) {
+        let Some(ws) = &self.shell.ws else { return };
+        let s = &ws.settings;
+        let dark = match s.theme.as_str() {
+            "dark" => true,
+            "light" => false,
+            _ => ctx.system_theme() == Some(egui::Theme::Dark),
+        };
+        let want = theme::Look { dark, high_contrast: theme::resolve_contrast(&s.contrast), reduce_motion: s.reduce_motion };
+        if theme::look(ctx) != want {
+            theme::apply_look(ctx, want);
+        }
+        self.shell.dark = dark;
+        let z = ctx.zoom_factor();
+        if (z - self.shell.last_zoom).abs() > 1e-4 {
+            self.shell.last_zoom = z;
+            if let Some(ws) = &mut self.shell.ws {
+                ws.settings.zoom = z;
+                let _ = ws.save_settings();
+            }
         }
     }
 }

@@ -32,6 +32,7 @@ impl App {
             Sheet::Versions => kit::modal(ctx, "versions", 1000.0, |ui| self.sheet_versions(ui)),
             Sheet::Share => kit::modal(ctx, "share", 820.0, |ui| self.sheet_share(ui)),
             Sheet::Open => kit::modal(ctx, "open", 820.0, |ui| self.sheet_open(ui)),
+            Sheet::About => kit::modal(ctx, "about", 760.0, |ui| self.sheet_about(ui)),
         };
         if close {
             self.shell.sheet = Sheet::None;
@@ -158,7 +159,7 @@ impl App {
         let entries = self.shell.entries.clone();
         let hits = nyx_engine::facade::store::search::search(&q, &entries);
         let mut open: Option<String> = None;
-        let mut go: Option<&'static str> = None;
+        let mut go: Option<crate::menu::Act> = None;
         if !q.is_empty() {
             kit::label_caps(ui, "Workflows and experiments", "");
             if hits.is_empty() {
@@ -199,9 +200,14 @@ impl App {
         ui.add_space(8.0);
         ui.columns(2, |cols| {
             kit::label_caps(&mut cols[0], "Do something", "");
-            for (label, act) in [("New workflow", "new"), ("Open a .nyx file", "open"), ("Go to the dashboard", "dash"), ("Compute the open experiment (F5)", "compute"), ("Settings", "settings")] {
+            // the same table as the menu bar (`menu::ACTIONS`)
+            for it in &crate::menu::ACTIONS {
+                if it.act == crate::menu::Act::Palette {
+                    continue;
+                }
+                let label = if it.keys.is_empty() { it.label.to_string() } else { format!("{}  ({})", it.label, it.keys) };
                 if cols[0].link(label).clicked() {
-                    go = Some(act);
+                    go = Some(it.act);
                 }
             }
             kit::label_caps(&mut cols[1], "Browse what nyx can do", "");
@@ -218,26 +224,12 @@ impl App {
             self.shell.sheet = Sheet::None;
             self.open_tab(&id, true);
         }
-        match go {
-            Some("new") => self.shell.sheet = Sheet::New,
-            Some("open") => {
+        if let Some(act) = go {
+            // an entry that opens another sheet replaces the palette; the others close it first
+            if !matches!(act, crate::menu::Act::New | crate::menu::Act::About) {
                 self.shell.sheet = Sheet::None;
-                self.pick_nyx_file();
             }
-            Some("dash") => {
-                self.shell.sheet = Sheet::None;
-                self.flush();
-                self.shell.page = Page::Dashboard;
-            }
-            Some("compute") => {
-                self.shell.sheet = Sheet::None;
-                self.shell_compute();
-            }
-            Some("settings") => {
-                self.shell.sheet = Sheet::None;
-                self.shell.page = Page::Settings;
-            }
-            _ => {}
+            self.do_act(&ctx, act);
         }
     }
 
@@ -579,6 +571,28 @@ impl App {
         });
     }
 
+    // ------------------------------------------------------------------------------------------------------ about
+
+    /// The version, what the fonts are and under which licence: the OFL asks that the licence text travels with the font and is shown.
+    fn sheet_about(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        ui.label(kit::title("nyx", 42.0).color(theme::accent(&ctx)));
+        ui.label(RichText::new("creative chaos.").font(theme::title(20.0)));
+        ui.label(kit::muted(ui, format!("Version {}. Finite-element photonics and phononics.", env!("CARGO_PKG_VERSION"))));
+        ui.add_space(10.0);
+        kit::label_caps(ui, "Fonts and their licences", "");
+        ui.label("Titles: EB Garamond Italic, Copyright 2017 The EB Garamond Project Authors, SIL Open Font License 1.1 (full text below). It is shipped as crates/app/assets/fonts/EBGaramond-Italic[wght].ttf with its licence next to it; when it is not found the window uses Georgia Italic.");
+        ui.label("Text and numbers: Inter and JetBrains Mono when installed (not shipped with nyx), otherwise Segoe UI and Cascadia or Consolas.");
+        ui.label("Fallback fonts inside egui (Ubuntu-Light, Hack, NotoEmoji, emoji-icon-font) keep their own licences; see the egui project.");
+        ui.add_space(10.0);
+        kit::label_caps(ui, "SIL Open Font License 1.1 (EB Garamond)", "");
+        ui.label(kit::mono(include_str!("../assets/fonts/OFL-EBGaramond.txt")).size(12.0));
+        ui.add_space(8.0);
+        if kit::ghost(ui, "Close  Esc").clicked() {
+            self.shell.sheet = Sheet::None;
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------------ settings
 
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
@@ -668,6 +682,32 @@ impl App {
                             }
                         });
                         ui.horizontal(|ui| {
+                            ui.label("Contrast");
+                            for (t, l) in [("auto", "Follow system"), ("standard", "Standard"), ("high", "High")] {
+                                if ui.selectable_label(s.contrast == t, l).clicked() {
+                                    s.contrast = t.into();
+                                }
+                            }
+                        });
+                        ui.label(kit::muted(ui, "High contrast: stronger edges on every control. Follow system reads the Windows High Contrast setting; on other systems it stays standard.").size(12.5));
+                        ui.checkbox(&mut s.reduce_motion, "Reduce motion (no sliding progress bar, no easing)");
+                        ui.add_enabled_ui(false, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Canvas");
+                                for (t, l) in [("dark", "Always dark"), ("theme", "Follow the look")] {
+                                    let _ = ui.selectable_label(s.canvas == t, l);
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Colour regions by");
+                                for (t, l) in [("material", "Material"), ("region", "Region")] {
+                                    let _ = ui.selectable_label(s.region_colouring == t, l);
+                                }
+                            });
+                        })
+                        .response
+                        .on_disabled_hover_text("Stored already; they take effect with the data colours of plan step U4");
+                        ui.horizontal(|ui| {
                             ui.label("Length");
                             ui.label(kit::mono("nm"));
                             ui.label("Frequency");
@@ -676,6 +716,9 @@ impl App {
                         ui.label(kit::muted(ui, "Unit choice is fixed for now; the numbers are always stored in SI.").size(12.5));
                         if ui.checkbox(&mut self.shell.classic, "Use the classic layout (menus and six tabs)").changed() {
                             self.status = "Layout changed.".into();
+                        }
+                        if ui.link("About nyx and licences").clicked() {
+                            self.shell.sheet = Sheet::About;
                         }
                     });
                     ui.add_space(10.0);
@@ -696,8 +739,7 @@ impl App {
             });
         });
         if s != before {
-            self.shell.dark = s.theme == "dark" || (s.theme == "system" && ctx.system_theme() == Some(egui::Theme::Dark));
-            theme::apply_mode(&ctx, self.shell.dark);
+            ctx.request_repaint(); // `sync_look` applies the look at the start of the next frame
             if let Some(ws) = &mut self.shell.ws {
                 ws.settings = s;
                 if let Err(e) = ws.save_settings() {

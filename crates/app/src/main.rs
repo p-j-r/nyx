@@ -14,6 +14,7 @@ mod examples;
 mod forms;
 mod geomui;
 mod kit;
+mod menu;
 mod pyscript;
 mod runfile;
 mod scene;
@@ -83,6 +84,10 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut a = app::App::new(cc);
+            #[cfg(windows)]
+            if script.is_none() {
+                a.shell.native_menu = menu::Native::install(cc);
+            }
             a.solve_in_child_processes();
             if let Some(p) = &arg {
                 a.open_path(std::path::PathBuf::from(p));

@@ -83,8 +83,6 @@ impl App {
                 } else {
                     self.dashboard_sections(ui);
                 }
-                ui.add_space(30.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| ui.label(kit::title("creative chaos.", 20.0).color(theme::muted(&ctx))));
             });
         });
     }
