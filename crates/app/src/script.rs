@@ -113,6 +113,13 @@ impl App {
                 }
                 self.sync_look(ctx);
             }
+            // `done N`: marks the workflow of tab N done, so that it moves to Earlier on the Dashboard (for the shot of that table)
+            "done" => {
+                if let Some(id) = arg.parse::<usize>().ok().and_then(|i| self.shell.tabs.get(i).cloned()) {
+                    self.edit_workflow(&id, |d| d.set_status(nyx_engine::facade::store::Status::Done));
+                    self.refresh_entries();
+                }
+            }
             "sheet" => {
                 use crate::shell::Sheet;
                 self.shell.sheet = match arg.as_str() {

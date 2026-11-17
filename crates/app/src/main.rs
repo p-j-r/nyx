@@ -11,6 +11,7 @@ mod batch;
 mod colormap;
 mod dashboard;
 mod examples;
+mod fmt;
 mod forms;
 mod geomui;
 mod kit;
@@ -75,10 +76,11 @@ fn main() -> eframe::Result {
         }
     }
     let arg = args.first().cloned();
-    let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default().with_inner_size(size).with_min_inner_size([900.0, 600.0]).with_title("nyx").with_drag_and_drop(true),
-        ..Default::default()
-    };
+    let mut viewport = eframe::egui::ViewportBuilder::default().with_inner_size(size).with_min_inner_size([900.0, 600.0]).with_title("nyx").with_drag_and_drop(true);
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
         "nyx",
         options,
@@ -98,4 +100,11 @@ fn main() -> eframe::Result {
             Ok(Box::new(a))
         }),
     )
+}
+
+/// The nyx mark as the icon of the window (title bar, taskbar, Alt+Tab): the same picture as the top bar, scaled once with a good filter.
+fn window_icon() -> Option<eframe::egui::IconData> {
+    let img = image::load_from_memory(include_bytes!("../../../docs/brand/nyx-mark.png")).ok()?.to_rgba8();
+    let img = image::imageops::resize(&img, 256, 256, image::imageops::FilterType::Lanczos3);
+    Some(eframe::egui::IconData { rgba: img.into_raw(), width: 256, height: 256 })
 }

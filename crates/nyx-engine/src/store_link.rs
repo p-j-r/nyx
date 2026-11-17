@@ -63,10 +63,12 @@ pub fn card_of(v: &serde_json::Value) -> Card {
     keywords.dedup();
     let wl = wavelength_m.map(|w| format!(", {:.0} nm", w * 1e9)).unwrap_or_default();
     let summary = format!(
-        "{}D, {} features, {} regions, {} {}{}",
+        "{}D, {} feature{}, {} region{}, {} {}{}",
         p.geometry.dim,
         p.geometry.features.len(),
+        if p.geometry.features.len() == 1 { "" } else { "s" },
         regions.len(),
+        if regions.len() == 1 { "" } else { "s" },
         if active.is_empty() { "no physics" } else { &active },
         study,
         wl

@@ -39,19 +39,7 @@ pub enum Act {
 
 /// A length shown in nm, other numbers with four significant digits.
 pub fn fmt_value(key: &str, v: f64) -> String {
-    let lengthy = v != 0.0 && v.abs() < 1e-3 && (key.contains("width") || key.contains("height") || key.contains("thick") || key.contains("diam") || key.contains("wavelength") || key.contains("layer") || key.contains("box") || key.starts_with("l") || key.contains("gap"));
-    if lengthy {
-        format!("{} nm", trim(v * 1e9))
-    } else if v != 0.0 && (v.abs() < 1e-3 || v.abs() >= 1e6) {
-        format!("{v:.3e}")
-    } else {
-        format!("{v:.4}")
-    }
-}
-
-fn trim(x: f64) -> String {
-    let s = format!("{x:.3}");
-    s.trim_end_matches('0').trim_end_matches('.').to_string()
+    crate::fmt::value(key, v)
 }
 
 impl App {
@@ -72,7 +60,6 @@ impl App {
         self.wf_sectionbar(ui, &mut w, &mut acts, locked);
         match (w.sub, w.part) {
             (Sub::Compare, _) => self.wf_compare(ui, &mut w, &mut acts),
-            (Sub::Model, _) => self.wf_model(ui, &mut w, &mut acts),
             (Sub::Field, _) => self.wf_field(ui, &mut w, &mut acts),
             (Sub::Main, Part::Concept) => self.wf_concept(ui, &mut w, locked),
             (Sub::Main, Part::Build) => self.wf_build(ui, &mut w, &mut acts, locked),
@@ -254,7 +241,7 @@ impl App {
         let name = format!("{}-runs.csv", nyx_engine::facade::store::util::slug(&w.title()));
         let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name(name).save_file() else { return };
         match std::fs::write(&path, csv) {
-            Ok(()) => self.status = format!("Exported {} runs to {}", rows.len(), path.display()),
+            Ok(()) => self.status = format!("Exported {} to {}", crate::fmt::plural(rows.len(), "run"), path.display()),
             Err(e) => self.set_error(format!("Could not write the file: {e}")),
         }
     }
@@ -391,8 +378,8 @@ impl App {
                             ui.set_width(ui.available_width());
                             ui.label(RichText::new(&title).strong());
                             let sub = match &parent {
-                                Some(p) => format!("fork of {p} · {runs} runs"),
-                                None => format!("{runs} runs · {what}"),
+                                Some(p) => format!("fork of {p} · {}", crate::fmt::plural(runs, "run")),
+                                None => format!("{} · {what}", crate::fmt::plural(runs, "run")),
                             };
                             ui.label(kit::muted(ui, sub));
                             for (to, label) in &links {
@@ -406,11 +393,6 @@ impl App {
                 }
                 ui.add_space(8.0);
                 ui.separator();
-                let n_runs: usize = w.dir.as_ref().map(|d| d.wf.experiments.iter().map(|e| e.runs.count).sum()).unwrap_or(0);
-                let m = ui.selectable_label(w.sub == Sub::Model, RichText::new(format!("Model m1  (not yet functional)\n{n_runs} runs recorded")).size(13.0));
-                if m.clicked() {
-                    acts.push(Act::Sub(if w.sub == Sub::Model { Sub::Main } else { Sub::Model }));
-                }
                 if ui.selectable_label(w.notes_open, "Notes").clicked() {
                     w.notes_open = !w.notes_open;
                 }
@@ -466,7 +448,7 @@ impl App {
                         if w.part == Part::Build {
                             let ok: Vec<f64> = w.runs.iter().filter(|r| r.status == RunStatus::Ok).map(|r| r.sec).collect();
                             if !ok.is_empty() {
-                                ui.label(kit::muted(ui, format!("{} runs · about {:.1} s each · no mesh stored", ok.len(), ok.iter().sum::<f64>() / ok.len() as f64)));
+                                ui.label(kit::muted(ui, format!("{} · about {:.1} s each · no mesh stored", crate::fmt::plural(ok.len(), "run"), ok.iter().sum::<f64>() / ok.len() as f64)));
                             }
                         }
                     }
@@ -578,15 +560,6 @@ impl App {
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                 self.tab = w.build_tab;
                 self.inspector_tab(ui, w.build_tab);
-                ui.add_space(12.0);
-                kit::card(ui, theme::tint(&ctx), theme::accent(&ctx), 12, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Sweep").strong().size(16.0));
-                        ui.label(kit::muted(ui, "coming soon"));
-                    });
-                    ui.label(kit::muted(ui, "One run per parameter point needs the shared parameter table (see docs/SWEEP_CACHING_PROPOSAL.md). Today one Compute is one run, recorded in Analysis.").size(12.5));
-                });
             });
         });
         let strip = match &self.doc.mesh {
@@ -742,7 +715,6 @@ impl App {
                     if ui.add_enabled(has_pol, egui::Button::new("Polarization on the Poincaré sphere")).on_disabled_hover_text("Needs a result with a polarization analysis in this session: compute a mode study first.").clicked() {
                         acts.push(Act::Field(String::new()));
                     }
-                    kit::soon(ui, "Group velocity and dispersion", "needs a wavelength sweep");
                     if ui.add(egui::Button::new("Your script...")).on_hover_text("Runs a Python script on the project and the result on show").clicked() {
                         acts.push(Act::Script);
                     }
@@ -752,13 +724,13 @@ impl App {
                 let out = match w.function.as_str() {
                     "Best run" => pts.iter().max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal)).map(|p| format!("Highest {yk}: {} at {xk} = {} ({:.6})", p.0, fmt_value(&xk, p.1), p.2)).unwrap_or_else(|| "No runs to rank.".into()),
                     "Sensitivity" => match slope(&pts) {
-                        Some(s) => format!("d {yk} / d {xk} ≈ {:.4e} per {} (least squares over {} runs)", if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { s * 1e-9 } else { s }, if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { "nm" } else { "unit" }, pts.len()),
+                        Some(s) => format!("d {yk} / d {xk} ≈ {:.4e} per {} (least squares over {})", if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { s * 1e-9 } else { s }, if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { "nm" } else { "unit" }, crate::fmt::plural(pts.len(), "run")),
                         None => "Needs at least two runs with different values of the parameter.".into(),
                     },
                     "Difference of two runs" => {
                         if w.selected.len() == 2 { "Open Compare selected for the table of differences.".into() } else { "Tick two runs in the table, then Compare.".into() }
                     }
-                    _ => format!("{} runs plotted.", pts.len()),
+                    _ => format!("{} plotted.", crate::fmt::plural(pts.len(), "run")),
                 };
                 ui.label(RichText::new(out).size(13.0));
                 ui.add_space(6.0);
@@ -837,11 +809,11 @@ impl App {
             });
             return;
         }
-        let widths = |_k: &str| 96.0;
+        let widths = |_k: &str| 124.0;
         let head = |ui: &mut egui::Ui, w: &mut OpenWf, label: &str, key: &str, width: f32| {
             let on = w.sort == key;
-            let t = format!("{}{}", label.to_uppercase().replace('_', " "), if on { if w.desc { " ▾" } else { " ▴" } } else { "" });
-            if ui.add_sized([width, 22.0], egui::Label::new(RichText::new(t).size(12.0).strong().color(theme::muted(&ctx))).sense(Sense::click())).clicked() {
+            let t = format!("{}{}", crate::fmt::key_label(label), if on { if w.desc { " ▾" } else { " ▴" } } else { "" });
+            if ui.add_sized([width, 22.0], egui::Label::new(RichText::new(t).size(12.0).strong().color(theme::muted(&ctx))).truncate().sense(Sense::click())).on_hover_text(label).clicked() {
                 if on { w.desc = !w.desc } else { w.sort = key.into(); w.desc = true }
             }
         };
@@ -895,7 +867,7 @@ impl App {
                 }
             });
         });
-        ui.label(kit::muted(ui, format!("{} of {} runs match · {} hidden by the filter{}", n_rows, w.runs.len(), hidden, if w.show_failed { "" } else { " · failed and cancelled runs are hidden unless you ask for them" })).size(12.5));
+        ui.label(kit::muted(ui, format!("{} of {} match · {} hidden by the filter{}", n_rows, crate::fmt::plural(w.runs.len(), "run"), hidden, if w.show_failed { "" } else { " · failed and cancelled runs are hidden unless you ask for them" })).size(12.5));
     }
 
     // ------------------------------------------------------------------------------------------------------ compare, fields, model
@@ -968,12 +940,6 @@ impl App {
                     });
                     ui.label(kit::muted(ui, "Values that are the same in every run are greyed.").size(12.5));
                 });
-                kit::plain_card(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new("REPRODUCE").size(12.5).strong());
-                    ui.label(kit::muted(ui, "Re-mesh and re-solve these runs on this machine and check the numbers against the recorded ones."));
-                    kit::soon(ui, format!("Reproduce {} runs", runs.len()), "needs a re-run queue");
-                });
                 let ui = &mut cols[1];
                 kit::plain_card(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -993,7 +959,7 @@ impl App {
                             }
                         }
                     });
-                    ui.label(kit::muted(ui, "Field profiles of past runs are not stored yet (coming soon with stored results), so only recorded numbers are compared. Export PNG: coming soon.").size(12.5));
+                    ui.label(kit::muted(ui, "Only the recorded numbers of each run are compared; field profiles of past runs are not stored.").size(12.5));
                 });
             });
         });
@@ -1021,7 +987,7 @@ impl App {
                 });
             } else {
                 ui.label(RichText::new("Fields of this run are not stored").strong());
-                ui.label(kit::muted(ui, "Heavy results are kept for the session only; stored fields need the HDF5 build and a results setting (coming soon). Compute again to see the fields."));
+                ui.label(kit::muted(ui, "Heavy results are kept for the session only. Compute again to see the fields."));
             }
         });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
@@ -1031,76 +997,6 @@ impl App {
                 self.show_results = true;
             }
             self.viewport_ui(ui);
-        });
-    }
-
-    fn wf_model(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
-        let ctx = ui.ctx().clone();
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(24))).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(kit::title("Model m1", 38.0).color(theme::accent(&ctx)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if kit::ghost(ui, "Back").clicked() {
-                            acts.push(Act::Sub(Sub::Main));
-                        }
-                        kit::soon(ui, "Retrain", "no surrogate trainer exists yet");
-                        kit::soon(ui, "Export model", "no model to export");
-                    });
-                });
-                ui.label(kit::muted(ui, "A fast stand-in for the solver, learned from every run in this workflow."));
-                ui.add_space(8.0);
-                kit::card(ui, theme::warm(&ctx), theme::activity(&ctx), 12, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new("Not functional yet").strong());
-                    ui.label("nyx has no surrogate trainer in this version. This screen shows what your recorded runs would hand to one; nothing below is a prediction.");
-                });
-                ui.add_space(10.0);
-                ui.columns(2, |cols| {
-                    let ui = &mut cols[0];
-                    kit::plain_card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.label(RichText::new("INPUTS (parameters seen in the runs)").size(12.5).strong());
-                        let mut n_runs = 0;
-                        let mut n_exp = 0;
-                        if let Some(d) = &w.dir {
-                            for e in &d.wf.experiments {
-                                if e.runs.count > 0 {
-                                    n_exp += 1;
-                                    n_runs += e.runs.count;
-                                }
-                                for (k, r) in &e.runs.params {
-                                    ui.label(kit::mono(format!("{k:<26}{} – {}", fmt_value(k, r.min), fmt_value(k, r.max))));
-                                }
-                            }
-                            ui.add_space(4.0);
-                            ui.label(RichText::new("OUTPUTS (metrics recorded)").size(12.5).strong());
-                            for e in &d.wf.experiments {
-                                for (k, r) in &e.runs.metrics {
-                                    ui.label(kit::mono(format!("{k:<26}{:.4} – {:.4}", r.min, r.max)));
-                                }
-                            }
-                        }
-                        ui.add_space(4.0);
-                        ui.label(kit::mono(format!("FROM  {n_exp} experiments, {n_runs} runs")));
-                    });
-                    ui.horizontal(|ui| {
-                        for m in ["Gaussian process", "Radial basis", "Small network"] {
-                            kit::soon(ui, m, "no model code exists yet");
-                        }
-                    });
-                    let ui = &mut cols[1];
-                    kit::plain_card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.label(RichText::new("Predicted against solved, held-out runs").strong().size(16.0));
-                        ui.add_space(70.0);
-                        ui.label(kit::muted(ui, "Appears once a model has been trained."));
-                        ui.add_space(70.0);
-                    });
-                });
-                ui.add_space(8.0);
-                ui.label(kit::muted(ui, "Models will only answer inside the ranges above. Outside them nyx will say so instead of guessing."));
-            });
         });
     }
 }

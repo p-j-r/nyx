@@ -617,8 +617,8 @@ fn summary(op: &Op) -> String {
         Op::Rect { min, max } => format!("({}, {}) to ({}, {})", v(&min[0]), v(&min[1]), v(&max[0]), v(&max[1])),
         Op::Circle { center, r } => format!("r {}  at ({}, {})", v(r), v(&center[0]), v(&center[1])),
         Op::Polygon { pts, .. } => format!("{} points", pts.len()),
-        Op::Union { ids } | Op::Intersect { ids } => format!("{} features", ids.len()),
-        Op::Overlay { regions, .. } => format!("{} regions", regions.len()),
+        Op::Union { ids } | Op::Intersect { ids } => crate::fmt::plural(ids.len(), "feature"),
+        Op::Overlay { regions, .. } => crate::fmt::plural(regions.len(), "region"),
         Op::Size { h: Some(h), .. } => format!("h {}", v(h)),
         _ => String::new(),
     }

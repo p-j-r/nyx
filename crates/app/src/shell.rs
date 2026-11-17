@@ -46,7 +46,6 @@ pub enum Sub {
     Main,
     Compare,
     Field,
-    Model,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -747,7 +746,8 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             if let Some(tex) = &self.shell.logo {
-                ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(34.0)).corner_radius(6));
+                // the whole mark, not clipped: it is a square with its own offset shadow, and a rounded clip cut its corners
+                ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(38.0)));
             } else {
                 ui.label(RichText::new("Nyx").font(theme::title(24.0)).color(theme::accent(&ctx)));
             }
@@ -763,10 +763,7 @@ impl App {
             for id in self.shell.tabs.clone() {
                 let Some(w) = self.shell.open.get(&id) else { continue };
                 let on = self.shell.page == Page::Workflow(id.clone());
-                let mut title = w.title();
-                if title.chars().count() > 22 {
-                    title = title.chars().take(21).collect::<String>() + "…";
-                }
+                let title = crate::fmt::ellipsize(&w.title(), 22);
                 let running = running_wf.as_deref() == Some(&id);
                 let state = if running { crate::kit::State::Running } else if w.dir.is_none() { crate::kit::State::Idle } else { crate::kit::State::Done };
                 let hit = crate::kit::tab(ui, ("tab", &id), &title, on, Some(state), true);
@@ -866,7 +863,9 @@ pub fn params_of(json: &str) -> BTreeMap<String, f64> {
 
 fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let bytes = include_bytes!("../../../docs/brand/nyx-mark.png");
+    // the mark is 286 px and drawn at about 38: scale it once with a good filter, or the small drawing shimmers
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let img = image::imageops::resize(&img, 96, 96, image::imageops::FilterType::Lanczos3);
     let size = [img.width() as usize, img.height() as usize];
     Some(ctx.load_texture("nyx-mark", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR))
 }

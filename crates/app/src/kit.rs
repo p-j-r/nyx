@@ -49,11 +49,6 @@ pub fn pill(ui: &mut Ui, on: bool, text: impl Into<String>) -> Response {
     ui.add(egui::Button::new(RichText::new(text.into()).color(fg)).fill(fill).stroke(Stroke::new(1.0, stroke)).corner_radius(CornerRadius::same(8)))
 }
 
-/// A pill that is not available yet: dimmed, with "soon" in the hover text.
-pub fn soon(ui: &mut Ui, text: impl Into<String>, why: &str) -> Response {
-    ui.add_enabled(false, egui::Button::new(RichText::new(text.into()).color(theme::muted(ui.ctx())))).on_disabled_hover_text(format!("Coming soon: {why}"))
-}
-
 /// A small rounded label such as a tag.
 pub fn chip(ui: &mut Ui, text: impl Into<String>) -> Response {
     let ctx = ui.ctx().clone();
@@ -291,6 +286,12 @@ pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui))
         ui.set_max_height(screen.height() - 40.0);
         frame.show(ui, |ui| {
             ui.set_width(width.min(screen.width() - 60.0));
+            // every sheet can be closed by name, not only by the Esc key or a click outside (a control, so it is also reachable by keyboard)
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                if ui.button("Close  Esc").clicked() {
+                    close = true;
+                }
+            });
             egui::ScrollArea::vertical().max_height(screen.height() - 120.0).auto_shrink([false, true]).show(ui, f);
         });
     });

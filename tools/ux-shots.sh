@@ -30,6 +30,8 @@ for size in 1440x900 1100x700; do
     # views that show a result: wait for the solve (the script waits while the job runs)
     if [ -z "${UX_SHOTS_FAST:-}" ]; then
       s="$s; compute; shot $p-results.png; section analysis; shot $p-analysis.png"
+      # a workflow that was saved and is marked done moves to the Earlier table of the Dashboard
+      s="$s; done 0; page dashboard; shot $p-earlier.png"
     fi
     s="$s; quit"
     if ! "$exe" --size "$size" --script "$s"; then echo "FAIL: $look $size: nyx exited non-zero" >&2; fail=1; fi
@@ -39,7 +41,7 @@ for f in "$out"/*.png; do
   [ -s "$f" ] || { echo "FAIL: empty or missing $f" >&2; fail=1; }
 done
 n=$(ls "$out"/*.png 2>/dev/null | wc -l)
-[ -n "${UX_SHOTS_FAST:-}" ] && want=32 || want=40
+[ -n "${UX_SHOTS_FAST:-}" ] && want=32 || want=44
 [ "$n" -ge "$want" ] || { echo "FAIL: $n shots, expected $want" >&2; fail=1; }
 echo "$n shots in $out"
 exit $fail

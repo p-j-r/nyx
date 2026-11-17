@@ -12,11 +12,10 @@ use nyx_engine::facade::store::versions::{self, VersionKind};
 use nyx_engine::facade::store::ShareLevel;
 
 /// Start-from cards: (title, text, index in `examples::list()`, or `None` when it starts blank)
-const TEMPLATES: [(&str, &str, Option<usize>); 8] = [
+const TEMPLATES: [(&str, &str, Option<usize>); 7] = [
     ("Optical waveguide", "Strip or rib cross-section, modes and n_eff", Some(14)),
     ("Strip on sapphire", "Optical and acoustic modes of a silicon strip", Some(12)),
     ("Rectangular cavity", "3D electromagnetic eigenmodes of a box", Some(13)),
-    ("Ring resonator", "Whispering-gallery modes, axisymmetric", None),
     ("Vibrating structure", "Solid mechanics, eigenfrequencies", Some(1)),
     ("Heat transfer", "Stationary or transient temperature", Some(2)),
     ("Electrostatics", "Potentials, fields, capacitance", Some(0)),
@@ -57,22 +56,21 @@ impl App {
         ui.add_space(4.0);
         let sel = self.shell.new.template;
         let w = (ui.available_width() - 3.0 * 12.0) / 4.0;
-        for row in 0..2 {
+        for row in 0..TEMPLATES.len().div_ceil(4) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 for col in 0..4 {
                     let i = row * 4 + col;
-                    let (title, text, ex) = TEMPLATES[i];
+                    let Some(&(title, text, _)) = TEMPLATES.get(i) else { break };
                     let on = sel == i;
-                    let avail = ex.is_some() || i == 7;
                     let r = egui::Frame::new().fill(if on { theme::tint(&ctx) } else { theme::card(&ctx) }).stroke(egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { theme::accent(&ctx) } else { theme::line(&ctx) })).corner_radius(12).inner_margin(egui::Margin::same(12)).show(ui, |ui| ui.vertical(|ui| {
                         ui.set_width(w - 26.0);
                         ui.set_min_height(86.0);
-                        ui.label(RichText::new(title).strong().color(if avail { theme::text(&ctx) } else { theme::muted(&ctx) }));
-                        ui.label(kit::muted(ui, if avail { text.to_string() } else { format!("{text} (template coming soon)") }).size(12.5));
+                        ui.label(RichText::new(title).strong());
+                        ui.label(kit::muted(ui, text).size(12.5));
                     }));
                     let resp = ui.interact(r.response.rect, ui.scope_id().with(("tpl", i)), egui::Sense::click());
-                    if resp.clicked() && avail {
+                    if resp.clicked() {
                         self.shell.new.template = i;
                     }
                 }
@@ -81,7 +79,7 @@ impl App {
         }
         ui.separator();
         ui.horizontal(|ui| {
-            let blank = self.shell.new.template == 7;
+            let blank = self.shell.new.template == TEMPLATES.len() - 1;
             ui.add_enabled_ui(blank, |ui| {
                 ui.label("Physics");
                 let ids: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).collect();
@@ -170,7 +168,7 @@ impl App {
                 let rect = ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&e.wf.title).strong());
-                        ui.label(kit::muted(ui, format!("matches {} · {} experiments", h.reasons.join(" · "), e.wf.experiments.len())).size(12.5));
+                        ui.label(kit::muted(ui, format!("matches {} · {}", h.reasons.join(" · "), crate::fmt::plural(e.wf.experiments.len(), "experiment"))).size(12.5));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if e.wf.status == nyx_engine::facade::store::Status::Done { "done" } else { "active" }, ago(e.wf.touched_secs(), now_secs())))));
                 });
@@ -212,13 +210,12 @@ impl App {
             }
             kit::label_caps(&mut cols[1], "Browse what nyx can do", "");
             let ui = &mut cols[1];
-            for (area, items) in [("CONCEPT", "Use-case templates · Named regions · Geometry as code (soon)"), ("BUILD", "Mesh preview · Boundary numbers · Solver diagnostics"), ("ANALYSIS", "Runs table and filter · Compare runs · Polarization · Sensitivity · Your script")] {
+            for (area, items) in [("CONCEPT", "Use-case templates · Named regions · Geometry as code"), ("BUILD", "Mesh preview · Boundary numbers · Solver diagnostics"), ("ANALYSIS", "Runs table and filter · Compare runs · Polarization · Sensitivity · Your script")] {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(area).monospace().strong());
                     ui.label(kit::muted(ui, items).size(12.5));
                 });
             }
-            ui.label(kit::muted(ui, "Not yet: fast frequency sweep, optimise a parameter, adaptive meshing, surrogate models.").size(12.5));
         });
         if let Some(id) = open {
             self.shell.sheet = Sheet::None;
@@ -285,7 +282,7 @@ impl App {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if v.kind == VersionKind::Named { "named" } else { "auto" }, ago(nyx_engine::facade::store::util::parse_iso(&v.t).unwrap_or(0), now_secs())))));
                         });
                         ui.label(v.summary.as_str());
-                        ui.label(kit::muted(ui, format!("{nruns} run{} recorded on this version", if nruns == 1 { "" } else { "s" })).size(12.5));
+                        ui.label(kit::muted(ui, format!("{} recorded on this version", crate::fmt::plural(nruns, "run"))).size(12.5));
                     });
                     if ui.interact(r.response.rect, ui.scope_id().with(("ver", v.n)), egui::Sense::click()).clicked() {
                         self.shell.version_sel = Some(v.n);
@@ -307,7 +304,7 @@ impl App {
                         }
                     });
                     ui.add_space(4.0);
-                    ui.label(kit::muted(ui, format!("Runs on this version keep the numbers they were solved with ({} run{}).", runs_all.iter().filter(|r| r.version == v.n).count(), if runs_all.iter().filter(|r| r.version == v.n).count() == 1 { "" } else { "s" })).size(12.5));
+                    ui.label(kit::muted(ui, format!("Runs on this version keep the numbers they were solved with ({}).", crate::fmt::plural(runs_all.iter().filter(|r| r.version == v.n).count(), "run"))).size(12.5));
                 });
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -502,7 +499,7 @@ impl App {
                 kit::badge(ui, theme::raised(&ctx), theme::success(&ctx), format!("Made with nyx {}", ins.nyx_version));
             }
             if !ins.scripts.is_empty() {
-                kit::badge(ui, theme::warm(&ctx), theme::activity_text(&ctx), format!("{} script{}, off until you approve", ins.scripts.len(), if ins.scripts.len() == 1 { "" } else { "s" }));
+                kit::badge(ui, theme::warm(&ctx), theme::activity_text(&ctx), format!("{}, off until you approve", crate::fmt::plural(ins.scripts.len(), "script")));
             }
         });
         ui.add_space(8.0);
@@ -527,7 +524,7 @@ impl App {
                 ui.label(RichText::new("WHAT IS INSIDE").size(12.5).strong());
                 ui.label(RichText::new(&ins.title).strong().size(17.0));
                 ui.label(&ins.summary);
-                ui.label(kit::mono(format!("{} experiments · {} runs recorded", ins.experiments, ins.runs)));
+                ui.label(kit::mono(format!("{} · {} recorded", crate::fmt::plural(ins.experiments, "experiment"), crate::fmt::plural(ins.runs, "run"))));
                 ui.label(kit::mono(format!("{} versions", ins.versions)));
                 ui.label(kit::mono(format!("tags  {}", ins.tags.join("  "))));
             });
@@ -539,7 +536,6 @@ impl App {
             });
         });
         ui.add_space(8.0);
-        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Rebuild now and check the answers match the recorded ones (coming soon)"));
         if !ins.scripts.is_empty() {
             ui.label(kit::muted(ui, format!("Scripts: {}. They stay off; nothing runs until you approve it in the workflow.", ins.scripts.join(", "))).size(12.5));
         }
@@ -587,10 +583,6 @@ impl App {
         ui.add_space(10.0);
         kit::label_caps(ui, "SIL Open Font License 1.1 (EB Garamond)", "");
         ui.label(kit::mono(include_str!("../assets/fonts/OFL-EBGaramond.txt")).size(12.0));
-        ui.add_space(8.0);
-        if kit::ghost(ui, "Close  Esc").clicked() {
-            self.shell.sheet = Sheet::None;
-        }
     }
 
     // ------------------------------------------------------------------------------------------------------ settings
@@ -625,7 +617,7 @@ impl App {
                             ui.label("Run at once");
                             ui.label(kit::mono("1 experiment"));
                         });
-                        ui.label(kit::muted(ui, "One solve runs at a time: the solvers already use every core. A queue, per-run threads and memory limits are coming soon.").size(12.5));
+                        ui.label(kit::muted(ui, "One solve runs at a time: the solvers already use every core.").size(12.5));
                     });
                     ui.add_space(10.0);
                     kit::plain_card(ui, |ui| {
