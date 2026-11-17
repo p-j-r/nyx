@@ -9,7 +9,7 @@
 
 use crate::app::App;
 use crate::theme;
-use eframe::egui::{self, Color32, RichText, Sense, Vec2};
+use eframe::egui::{self, Color32, RichText, Vec2};
 use nyx_engine::facade::store::runs::{RunRecord, RunStatus};
 use nyx_engine::facade::store::util::{hash_bytes, now_secs};
 use nyx_engine::facade::store::{Entry, Settings, Workspace, WorkflowDir};
@@ -667,9 +667,9 @@ impl App {
         self.cancel_dialog(&ctx);
         if let Some(n) = self.shell.notice.clone() {
             egui::Area::new(egui::Id::unique("notice")).order(egui::Order::Tooltip).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0]).show(&ctx, |ui| {
-                crate::kit::card(ui, theme::INK, theme::INK, 12, |ui| {
+                crate::kit::card(ui, theme::text(&ctx), theme::text(&ctx), 12, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(n).color(Color32::WHITE));
+                        ui.label(RichText::new(n).color(theme::page(&ctx)));
                         if ui.button("OK").clicked() {
                             self.shell.notice = None;
                         }
@@ -732,7 +732,7 @@ impl App {
                 ui.label(RichText::new("Nyx").font(theme::title(24.0)).color(theme::accent(&ctx)));
             }
             let on_dash = self.shell.page == Page::Dashboard;
-            let dash = ui.add(egui::Button::new(RichText::new("Dashboard").color(if on_dash { Color32::WHITE } else { theme::text(&ctx) }).strong()).fill(if on_dash { theme::accent(&ctx) } else { Color32::TRANSPARENT }).stroke(egui::Stroke::NONE).min_size(Vec2::new(0.0, 34.0)));
+            let dash = crate::kit::tab(ui, "dashboard", "Dashboard", on_dash, None, false).select;
             if dash.clicked() {
                 self.flush();
                 self.shell.page = Page::Dashboard;
@@ -748,21 +748,20 @@ impl App {
                     title = title.chars().take(21).collect::<String>() + "…";
                 }
                 let running = running_wf.as_deref() == Some(&id);
-                let (fill, stroke) = if on { (theme::tint(&ctx), theme::accent(&ctx)) } else { (Color32::TRANSPARENT, Color32::TRANSPARENT) };
-                egui::Frame::new().fill(fill).stroke(egui::Stroke::new(1.0, stroke)).corner_radius(10).inner_margin(egui::Margin::symmetric(10, 5)).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    crate::kit::dot(ui, if running { theme::AMBER } else if w.dir.is_none() { theme::line(&ctx) } else { theme::GREEN });
-                    let r = ui.add(egui::Label::new(RichText::new(title).color(if on { theme::accent(&ctx) } else { theme::text(&ctx) }).strong()).sense(Sense::click()));
-                    if r.clicked() {
-                        show = Some(id.clone());
-                    }
-                    if r.middle_clicked() {
+                let state = if running { crate::kit::State::Running } else if w.dir.is_none() { crate::kit::State::Idle } else { crate::kit::State::Done };
+                let hit = crate::kit::tab(ui, ("tab", &id), &title, on, Some(state), true);
+                hit.select.clone().on_hover_text(state.word());
+                if hit.select.clicked() {
+                    show = Some(id.clone());
+                }
+                if hit.select.middle_clicked() {
+                    close = Some(id.clone());
+                }
+                if let Some(c) = hit.close {
+                    if c.on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
                         close = Some(id.clone());
                     }
-                    if ui.add(egui::Label::new(RichText::new("×").size(16.0).color(theme::muted(&ctx))).sense(Sense::click())).on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
-                        close = Some(id.clone());
-                    }
-                });
+                }
             }
             if ui.add(egui::Button::new(RichText::new("+").size(18.0)).min_size(Vec2::new(34.0, 34.0))).on_hover_text("New workflow (Ctrl+N)").clicked() {
                 self.shell.sheet = Sheet::New;
@@ -794,14 +793,14 @@ impl App {
                 }
                 // the status chip follows the one job that can run
                 let (text, dot) = match &self.busy {
-                    Some((what, _)) if self.shell.run.is_some() => (format!("1 running · {what}"), theme::AMBER),
-                    Some((what, _)) => (what.clone(), theme::AMBER),
-                    None => ("Idle".to_string(), theme::line(&ctx)),
+                    Some((what, _)) if self.shell.run.is_some() => (format!("1 running · {what}"), crate::kit::State::Running),
+                    Some((what, _)) => (what.clone(), crate::kit::State::Running),
+                    None => ("Idle".to_string(), crate::kit::State::Idle),
                 };
                 let fill = if self.busy.is_some() { theme::warm(&ctx) } else { Color32::TRANSPARENT };
                 egui::Frame::new().fill(fill).corner_radius(16).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 7.0;
-                    crate::kit::dot(ui, dot);
+                    crate::kit::glyph(ui, dot);
                     ui.label(RichText::new(text).color(theme::text(&ctx)));
                     if !self.waiting.is_empty() {
                         ui.label(RichText::new(format!("+{} queued", self.waiting.len())).color(theme::muted(&ctx)));

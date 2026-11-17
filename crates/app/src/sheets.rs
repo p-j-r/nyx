@@ -5,7 +5,7 @@ use crate::examples;
 use crate::kit;
 use crate::shell::{Page, Sheet, Start};
 use crate::theme;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use nyx_engine::facade::store::archive::{ExportOptions, Limits};
 use nyx_engine::facade::store::util::{ago, now_secs};
 use nyx_engine::facade::store::versions::{self, VersionKind};
@@ -474,7 +474,7 @@ impl App {
             });
         });
         if !self.shell.share_msg.is_empty() {
-            ui.label(RichText::new(&self.shell.share_msg).color(theme::GREEN));
+            ui.label(RichText::new(&self.shell.share_msg).color(theme::success(ui.ctx())));
         }
         if let Some((ext, level, strip)) = save {
             let Some(path) = rfd::FileDialog::new().add_filter(ext, &[ext]).set_file_name(if ext == "zip" { file_name.replace(".nyx", ".zip") } else { file_name.clone() }).save_file() else { return };
@@ -502,22 +502,22 @@ impl App {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ins.intact {
-                kit::badge(ui, Color32::from_rgb(0xE3, 0xF2, 0xE9), theme::GREEN, "File is intact");
+                kit::badge(ui, theme::raised(&ctx), theme::success(&ctx), "File is intact");
             } else {
-                kit::badge(ui, Color32::from_rgb(0xF8, 0xE1, 0xE1), theme::RED, "File cannot be opened");
+                kit::badge(ui, theme::raised(&ctx), theme::danger(&ctx), "File cannot be opened");
             }
             if !ins.nyx_version.is_empty() {
-                kit::badge(ui, Color32::from_rgb(0xE3, 0xF2, 0xE9), theme::GREEN, format!("Made with nyx {}", ins.nyx_version));
+                kit::badge(ui, theme::raised(&ctx), theme::success(&ctx), format!("Made with nyx {}", ins.nyx_version));
             }
             if !ins.scripts.is_empty() {
-                kit::badge(ui, theme::AMBER_TINT, Color32::from_rgb(0x8A, 0x55, 0x00), format!("{} script{}, off until you approve", ins.scripts.len(), if ins.scripts.len() == 1 { "" } else { "s" }));
+                kit::badge(ui, theme::warm(&ctx), theme::activity_text(&ctx), format!("{} script{}, off until you approve", ins.scripts.len(), if ins.scripts.len() == 1 { "" } else { "s" }));
             }
         });
         ui.add_space(8.0);
         if !ins.problems.is_empty() {
-            kit::card(ui, Color32::from_rgb(0xF8, 0xE1, 0xE1), theme::RED, 12, |ui| {
+            kit::card(ui, theme::raised(&ctx), theme::danger(&ctx), 12, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("This file was not opened").strong().color(theme::RED));
+                ui.label(RichText::new("This file was not opened").strong().color(theme::danger(ui.ctx())));
                 for p in &ins.problems {
                     ui.label(p);
                 }

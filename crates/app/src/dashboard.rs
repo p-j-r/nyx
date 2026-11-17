@@ -177,14 +177,14 @@ impl App {
 
         if !sec.running.is_empty() {
             ui.horizontal(|ui| {
-                kit::dot(ui, theme::AMBER);
+                kit::glyph(ui, kit::State::Running);
                 kit::label_caps(ui, "Running", "follow along without opening anything");
             });
             ui.add_space(6.0);
             for &i in &sec.running {
                 let e = &entries[i];
                 let mut cancel = false;
-                kit::card(ui, theme::warm(&ctx), theme::AMBER, 16, |ui| {
+                kit::card(ui, theme::warm(&ctx), theme::activity(&ctx), 16, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&e.wf.title).strong().size(18.0));
@@ -340,14 +340,14 @@ fn filter_menu(ui: &mut egui::Ui, label: &str, value: &mut String, options: &[St
 
 fn workflow_card(ui: &mut egui::Ui, e: &Entry, spark: &[f64], width: f32) -> egui::Response {
     let ctx = ui.ctx().clone();
-    let colors = [theme::PLUM, Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0xC9, 0x7F, 0x1F), Color32::from_rgb(0x2F, 0x7A, 0x66)];
+    let colors = [theme::accent(ui.ctx()), Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0xC9, 0x7F, 0x1F), Color32::from_rgb(0x2F, 0x7A, 0x66)];
     let color = colors[e.wf.id.bytes().last().unwrap_or(0) as usize % colors.len()];
     let ok_last = e.wf.experiments.last().is_some_and(|x| x.runs.ok > 0 && x.runs.failed == 0);
     let r = egui::Frame::new().fill(theme::card(&ctx)).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).corner_radius(12).inner_margin(egui::Margin::same(14)).show(ui, |ui| ui.vertical(|ui| {
         ui.set_width(width - 30.0);
         ui.set_min_height(150.0);
         ui.horizontal(|ui| {
-            kit::dot(ui, if ok_last { theme::GREEN } else { theme::line(&ctx) });
+            kit::glyph(ui, if ok_last { kit::State::Done } else { kit::State::Idle });
             ui.add(egui::Label::new(RichText::new(&e.wf.title).strong().size(16.0)).truncate());
             if e.wf.pinned {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new("pinned").size(12.0).color(theme::accent(&ctx))));

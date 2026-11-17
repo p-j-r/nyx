@@ -23,6 +23,7 @@ mod shell;
 mod state;
 mod tabs;
 mod theme;
+mod tokens;
 mod viewport;
 mod wfview;
 

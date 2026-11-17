@@ -334,7 +334,7 @@ impl App {
                         (Some(d), None) => format!("Saved · {}", ago(d.wf.touched_secs(), now_secs())),
                     };
                     ui.label(kit::muted(ui, text));
-                    kit::dot(ui, if w.dir.is_some() { theme::GREEN } else { theme::line(&ctx) });
+                    kit::glyph(ui, if w.dir.is_some() { kit::State::Done } else { kit::State::Idle });
                 });
             });
         });
@@ -437,7 +437,7 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 ui.add_space(8.0);
                 if locked {
-                    kit::dot(ui, theme::AMBER);
+                    kit::glyph(ui, kit::State::Running);
                     ui.label(RichText::new("Running").strong());
                     ui.label(kit::muted(ui, "editing is locked until it finishes or you cancel"));
                 } else {
@@ -499,7 +499,7 @@ impl App {
                 if let Some(m) = &self.doc.mesh {
                     ui.label(kit::muted(ui, format!("{}D · {} cells · {} points", m.dim, m.n_cells(), m.n_points())));
                 } else if let Some(e) = &self.doc.mesh_error {
-                    ui.colored_label(theme::RED, e);
+                    ui.colored_label(theme::danger(ui.ctx()), e);
                 } else {
                     ui.label(kit::muted(ui, "meshing..."));
                 }
@@ -605,11 +605,11 @@ impl App {
             None => (Default::default(), vec![]),
         };
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(16))).show(ui, |ui| {
-            kit::card(ui, theme::warm(&ctx), theme::AMBER, 16, |ui| {
+            kit::card(ui, theme::warm(&ctx), theme::activity(&ctx), 16, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     if self.doc.mesh.is_some() {
-                        ui.label(RichText::new("Mesh ready").color(theme::GREEN).strong());
+                        ui.label(RichText::new("Mesh ready").color(theme::success(ui.ctx())).strong());
                     }
                     ui.label(kit::muted(ui, "›"));
                     ui.label(RichText::new(if status.stage.is_empty() { "Starting".to_string() } else { status.stage.clone() }).strong().size(16.0));
@@ -769,7 +769,7 @@ impl App {
             ui.horizontal(|ui| {
                 let hint = "params.w between 450 nm and 550 nm and metrics.neff_re > 2.4";
                 let bad = filter.is_err();
-                ui.add_sized([(ui.available_width() - 330.0).max(180.0), 30.0], egui::TextEdit::singleline(&mut w.filter_text).hint_text(hint).font(egui::TextStyle::Monospace).text_color(if bad { theme::RED } else { theme::text(&ctx) }));
+                ui.add_sized([(ui.available_width() - 330.0).max(180.0), 30.0], egui::TextEdit::singleline(&mut w.filter_text).hint_text(hint).font(egui::TextStyle::Monospace).text_color(if bad { theme::danger(ui.ctx()) } else { theme::text(&ctx) }));
                 let cols_changed = &mut w.hidden_cols;
                 let mut keys: Vec<String> = w.runs.iter().flat_map(|r| r.params.keys().map(|k| format!("params.{k}")).chain(r.metrics.keys().map(|k| format!("metrics.{k}")))).collect();
                 keys.sort();
@@ -792,7 +792,7 @@ impl App {
                 }
             });
             if let Err(e) = &filter {
-                ui.colored_label(theme::RED, e);
+                ui.colored_label(theme::danger(ui.ctx()), e);
             }
             ui.add_space(6.0);
             self.runs_table(ui, w, &active_filter, acts);
@@ -832,7 +832,7 @@ impl App {
                 ui.label(RichText::new("No runs yet").strong().size(16.0));
                 ui.label(kit::muted(ui, "Press Compute (F5). Every Compute is recorded here with its parameters, results and the version of the set-up it used."));
                 if w.runs_bad > 0 {
-                    ui.colored_label(theme::RED, format!("{} lines of runs.jsonl could not be read and were skipped.", w.runs_bad));
+                    ui.colored_label(theme::danger(ui.ctx()), format!("{} lines of runs.jsonl could not be read and were skipped.", w.runs_bad));
                 }
             });
             return;
@@ -873,10 +873,10 @@ impl App {
                             if ui.checkbox(&mut s, "").changed() {
                                 if s { w.selected.insert(r.id.clone()); } else { w.selected.remove(&r.id); }
                             }
-                            if ui.add(egui::Label::new(RichText::new(if r.star { "*" } else { "·" }).strong().size(16.0).color(if r.star { theme::AMBER } else { theme::muted(&ctx) })).sense(Sense::click())).on_hover_text("Star: kept forever, never cleaned up").clicked() {
+                            if ui.add(egui::Label::new(RichText::new(if r.star { "*" } else { "·" }).strong().size(16.0).color(if r.star { theme::activity_text(ui.ctx()) } else { theme::muted(&ctx) })).sense(Sense::click())).on_hover_text("Star: kept forever, never cleaned up").clicked() {
                                 acts.push(Act::Star(r.id.clone(), !r.star));
                             }
-                            let id_text = if r.status == RunStatus::Ok { kit::mono(r.id.split('_').next().unwrap_or(&r.id)) } else { kit::mono(format!("{} ({:?})", r.id.split('_').next().unwrap_or(&r.id), r.status).to_lowercase()).color(theme::RED) };
+                            let id_text = if r.status == RunStatus::Ok { kit::mono(r.id.split('_').next().unwrap_or(&r.id)) } else { kit::mono(format!("{} ({:?})", r.id.split('_').next().unwrap_or(&r.id), r.status).to_lowercase()).color(theme::danger(ui.ctx())) };
                             let open = ui.add_sized([120.0, h - 4.0], egui::Label::new(id_text).sense(Sense::click()));
                             if open.clicked() {
                                 acts.push(Act::Field(r.id.clone()));
@@ -903,7 +903,7 @@ impl App {
     fn wf_compare(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
         let ctx = ui.ctx().clone();
         let runs: Vec<RunRecord> = w.runs.iter().filter(|r| w.selected.contains(&r.id)).cloned().collect();
-        let colors = [theme::PLUM, theme::AMBER, Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0x2F, 0x7A, 0x66), Color32::from_rgb(0x9B, 0x3A, 0x3A)];
+        let colors = [theme::accent(ui.ctx()), theme::activity(ui.ctx()), Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0x2F, 0x7A, 0x66), Color32::from_rgb(0x9B, 0x3A, 0x3A)];
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(18))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(kit::title("Compare runs", 30.0).color(theme::accent(&ctx)));
@@ -1050,7 +1050,7 @@ impl App {
                 });
                 ui.label(kit::muted(ui, "A fast stand-in for the solver, learned from every run in this workflow."));
                 ui.add_space(8.0);
-                kit::card(ui, theme::warm(&ctx), theme::AMBER, 12, |ui| {
+                kit::card(ui, theme::warm(&ctx), theme::activity(&ctx), 12, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new("Not functional yet").strong());
                     ui.label("nyx has no surrogate trainer in this version. This screen shows what your recorded runs would hand to one; nothing below is a prediction.");
