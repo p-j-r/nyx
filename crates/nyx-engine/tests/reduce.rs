@@ -46,7 +46,10 @@ impl Physics for Fld {
         vec![]
     }
     fn properties(&self) -> Vec<PropDesc> {
-        vec![]
+        vec![
+            PropDesc::new("rho", "Density", "kg/m3", PropKind::Scalar, &[], Some(1.0)),
+            PropDesc::new("eps_r", "Relative permittivity", "", PropKind::Scalar, &[], Some(1.0)),
+        ]
     }
     fn params(&self) -> Vec<ParamDesc> {
         vec![]
@@ -201,6 +204,8 @@ fn pair(v: &Value) -> (f64, f64) {
 
 /// The integrand of a reference loop: the interpolated (re, im) of each named field at a point in, one (re, im) value out.
 type Integrand<'a> = &'a dyn Fn(&[(f64, f64)]) -> (f64, f64);
+/// The same with the interpolated coordinates (x, z) of the point.
+type IntegrandAt<'a> = &'a dyn Fn(&[(f64, f64)], [f64; 2]) -> (f64, f64);
 
 /// The raw arrays a reference loop reads.
 struct Raw {
@@ -231,8 +236,34 @@ impl Raw {
         self.sol.cell_fields.iter().find(|f| f.name == name).unwrap()
     }
 
-    /// `sum_c vol * sum_q w_q f_q` over blocks of 2048 cells, `f` given the interpolated (re, im) of each named field at the point.
     fn integral(&self, names: &[&str], f: Integrand) -> (f64, f64) {
+        self.integral_at(names, &|a, _| f(a))
+    }
+
+    /// The wafer coordinates (x, z) of local node `a` of cell `c`: the vertices, then the midpoints of the vertex pairs.
+    fn node(&self, c: usize, a: usize) -> [f64; 2] {
+        let (sm, dim) = (&self.mesh, self.mesh.dim);
+        let v = sm.cell(c);
+        if a <= dim {
+            let p = sm.point(v[a] as usize);
+            return [p[0], p[1]];
+        }
+        let mut k = dim + 1;
+        for i in 0..=dim {
+            for j in i + 1..=dim {
+                if k == a {
+                    let (p, q) = (sm.point(v[i] as usize), sm.point(v[j] as usize));
+                    return [0.5 * (p[0] + q[0]), 0.5 * (p[1] + q[1])];
+                }
+                k += 1;
+            }
+        }
+        unreachable!()
+    }
+
+    /// `sum_c vol * sum_q w_q f_q` over blocks of 2048 cells, `f` given the interpolated (re, im) of each named field and the interpolated
+    /// coordinates (x, z) at the point.
+    fn integral_at(&self, names: &[&str], f: IntegrandAt) -> (f64, f64) {
         let dim = self.mesh.dim;
         let quad = quad_rule(dim, 4);
         let ns: Vec<Vec<f64>> = quad.lam.iter().map(|l| shape(l, self.order).0).collect();
@@ -260,7 +291,13 @@ impl Raw {
                             (r, i)
                         })
                         .collect();
-                    let v = f(&at);
+                    let (mut x, mut z) = (0.0, 0.0);
+                    for a in 0..self.nloc {
+                        let p = self.node(c, a);
+                        x += ns[q][a] * p[0];
+                        z += ns[q][a] * p[1];
+                    }
+                    let v = f(&at, [x, z]);
                     cre += quad.w[q] * v.0;
                     cim += quad.w[q] * v.1;
                 }
@@ -668,4 +705,219 @@ fn a_result_that_came_back_from_a_worker_reduces_to_the_same_bits() {
         call(&mut here, "confinement", args.clone())["fraction"],
         call(&mut there, "confinement", args)["fraction"]
     );
+}
+
+// ------------------------------------------------------------------------------------------------------ N2: formulas
+
+fn value(e: &mut Engine, expr: Value, region: Option<&str>) -> Value {
+    let mut args = json!({ "expr": expr, "physics": "fld" });
+    if let Some(r) = region {
+        args["region"] = json!(r);
+    }
+    call(e, "integrate", args)
+}
+
+fn bits(v: &Value) -> (u64, u64) {
+    if v.is_array() {
+        let (re, im) = pair(v);
+        (re.to_bits(), im.to_bits())
+    } else {
+        (num(v).to_bits(), 0)
+    }
+}
+
+#[test]
+fn a_formula_equals_the_handle_form_to_the_bit() {
+    let mut e = strip();
+    let h = |op: &str, args: Vec<Value>| json!({ "op": op, "args": args });
+    let pow2 = |x: Value| json!({ "op": "pow", "args": [x], "n": 2 });
+    // |Ex|^2 + |Ez|^2 written three ways
+    let handle = h("add", vec![pow2(h("abs", vec![json!("Ex")])), pow2(h("abs", vec![json!("Ez")]))]);
+    let by_handle = value(&mut e, handle, Some("silicon"));
+    let by_text = value(&mut e, json!("abs(Ex)^2 + abs(Ez)^2"), Some("silicon"));
+    assert_eq!(bits(&by_handle["value"]), bits(&by_text["value"]));
+    let handle2 = h("add", vec![h("abs2", vec![json!("Ex")]), h("abs2", vec![json!("Ez")])]);
+    let by_handle2 = value(&mut e, handle2, Some("silicon"));
+    let by_text2 = value(&mut e, json!("abs2(Ex) + abs2(Ez)"), Some("silicon"));
+    assert_eq!(bits(&by_handle2["value"]), bits(&by_text2["value"]));
+    // a formula and a handle mix inside one operation
+    let mixed = value(&mut e, h("add", vec![json!("abs2(Ex)"), h("abs2", vec![json!("Ez")])]), Some("silicon"));
+    assert_eq!(bits(&mixed["value"]), bits(&by_handle2["value"]));
+    // and the loop on the raw arrays, and the closed form (degree 4: exact)
+    let reference = raw(&e, Some("silicon"))
+        .integral(&["Ex", "Ez"], &|a| (a[0].0 * a[0].0 + a[0].1 * a[0].1 + (a[1].0 * a[1].0 + a[1].1 * a[1].1), 0.0));
+    assert_eq!(num(&by_text2["value"]).to_bits(), reference.0.to_bits());
+    let closed = exact(&SILICON.0, &SILICON.1, &|x| {
+        let (_, ex, ez) = polys(&u(x));
+        ex.0 * ex.0 + ex.1 * ex.1 + ez.0 * ez.0 + ez.1 * ez.1
+    });
+    close(num(&by_text["value"]), closed, 1e-9);
+    // a complex product: a pair, equal to the handle `mul` to the bit
+    let prod = value(&mut e, json!("Ex * Ez"), None);
+    assert_eq!(prod["complex"], json!(true));
+    let by_handle = value(&mut e, h("mul", vec![json!("Ex"), json!("Ez")]), None);
+    assert_eq!(bits(&prod["value"]), bits(&by_handle["value"]));
+    // a plain field name still reads the field, and a parenthesised one is the same formula
+    let plain = value(&mut e, json!("p"), None);
+    let as_formula = value(&mut e, json!("(p)"), None);
+    assert_eq!(bits(&plain["value"]), bits(&as_formula["value"]));
+    let q1 = value(&mut e, json!("p / 4"), None);
+    let q2 = value(&mut e, json!("p * 0.25"), None);
+    close(num(&q1["value"]), num(&q2["value"]), 1e-13);
+    // the prefixes name the physics and the solution
+    let a = value(&mut e, json!("`fld:Ex` * `fld:0:Ez`"), None);
+    assert_eq!(bits(&a["value"]), bits(&prod["value"]));
+    assert!(err(&mut e, "integrate", json!({ "expr": "`fld:5:Ex`", "physics": "fld" })).contains("there is no 5"));
+}
+
+#[test]
+fn coordinates_where_and_regions_read_each_point() {
+    let mut e = strip();
+    // x * p has degree 3, exact with the rule: the closed form and the loop (with interpolated coordinates) agree
+    let xp = value(&mut e, json!("x * p"), None);
+    close(num(&xp["value"]), exact(&WINDOW.0, &WINDOW.1, &|x| x[0] * polys(&u(x)).0), 1e-9);
+    let reference = raw(&e, None).integral_at(&["p"], &|a, xz| (xz[0] * a[0].0, 0.0));
+    assert_eq!(num(&xp["value"]).to_bits(), reference.0.to_bits());
+    // z = 0 is the edge between oxide and air, so each cell is on one side of it and where(z > 0, ..) is the integral over the upper half
+    let upper = value(&mut e, json!("where(z > 0, p, 0)"), None);
+    let half = ([-2e-6, 0.0], [2e-6, 1.5e-6]);
+    close(num(&upper["value"]), exact(&half.0, &half.1, &|x| polys(&u(x)).0), 1e-9);
+    let reference = raw(&e, None).integral_at(&["p"], &|a, xz| (if xz[1] > 0.0 { a[0].0 } else { 0.0 }, 0.0));
+    assert_eq!(num(&upper["value"]).to_bits(), reference.0.to_bits());
+    // the region indicator is the area of the region; `y` is 0 on a cross-section
+    let area = value(&mut e, json!("region(\"silicon\")"), None);
+    close(num(&area["value"]), 0.5e-6 * 0.22e-6, 1e-9);
+    let ox = value(&mut e, json!("where(region(\"oxide\"), 1, 0)"), None);
+    close(num(&ox["value"]), 4e-6 * 1.5e-6, 1e-9);
+    let y = value(&mut e, json!("y + 1"), None);
+    close(num(&y["value"]), 4e-6 * 3e-6, 1e-9);
+    // probes, extrema and line cuts read the same formulas
+    let pr = call(&mut e, "probe", json!({ "expr": "x * z", "physics": "fld", "points": [[1e-7, 1e-7], [3e-6, 0.0]] }));
+    close(num(&pr["values"][0]), 1e-14, 1e-9);
+    assert_eq!(pr["inside"], json!([true, false]));
+    let m = call(&mut e, "extremum", json!({ "expr": "where(z > 0, p, -1e9)", "physics": "fld" }));
+    assert!(num(&m["value"]) > -1e9);
+    let lc = call(
+        &mut e,
+        "line_cut",
+        json!({ "expr": "x", "physics": "fld", "from": [-1e-6, 0.5e-6], "to": [1e-6, 0.5e-6], "n": 3 }),
+    );
+    close(num(&lc["values"][2]), 1e-6, 1e-9);
+}
+
+#[test]
+fn vectors_are_the_components_of_a_name() {
+    let mut e = strip();
+    // norm2(E) is abs2(Ex) + abs2(Ez), the same tree, so the same bits
+    let n2 = value(&mut e, json!("norm2(E)"), Some("silicon"));
+    let by_hand = value(&mut e, json!("abs2(Ex) + abs2(Ez)"), Some("silicon"));
+    assert_eq!(bits(&n2["value"]), bits(&by_hand["value"]));
+    assert_eq!(n2["complex"], json!(false));
+    // inner(E, E) is the same sum written with conjugates: complex-typed, the same real part to rounding and a zero imaginary part
+    let inner = value(&mut e, json!("inner(E, E)"), Some("silicon"));
+    let (re, im) = pair(&inner["value"]);
+    close(re, num(&n2["value"]), 1e-12);
+    assert_eq!(im, 0.0);
+    // dot(E, E) has no conjugate: the sum of the squares, equal to the loop to the bit
+    let dot = value(&mut e, json!("dot(E, E)"), Some("silicon"));
+    let reference = raw(&e, Some("silicon")).integral(&["Ex", "Ez"], &|a| {
+        (
+            (a[0].0 * a[0].0 - a[0].1 * a[0].1) + (a[1].0 * a[1].0 - a[1].1 * a[1].1),
+            (a[0].0 * a[0].1 + a[0].1 * a[0].0) + (a[1].0 * a[1].1 + a[1].1 * a[1].0),
+        )
+    });
+    assert_eq!(bits(&dot["value"]), (reference.0.to_bits(), reference.1.to_bits()));
+    let comp = value(&mut e, json!("E.x * conj(E.x)"), Some("silicon"));
+    let ex2 = value(&mut e, json!("abs2(Ex)"), Some("silicon"));
+    close(pair(&comp["value"]).0, num(&ex2["value"]), 1e-12);
+    // a vector can be scaled before it is reduced
+    let scaled = value(&mut e, json!("norm2(2 * E)"), Some("silicon"));
+    close(num(&scaled["value"]), 4.0 * num(&n2["value"]), 1e-12);
+    let norm = value(&mut e, json!("where(norm(E) > 0, 1, 0)"), Some("silicon"));
+    assert!(num(&norm["value"]) > 0.0);
+}
+
+#[test]
+fn material_values_are_those_the_solver_read() {
+    let mut e = strip();
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "oxide", "material": { "rho": 2200.0 } }));
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "silicon", "material": { "rho": 2330.0 } }));
+    call(&mut e, "solve_run", json!({}));
+    let (a_ox, a_si) = (4e-6 * 1.5e-6, 0.5e-6 * 0.22e-6);
+    let a_air = 4e-6 * 3e-6 - a_ox - a_si;
+    let rho = value(&mut e, json!("rho"), None);
+    close(num(&rho["value"]), 2200.0 * a_ox + 2330.0 * a_si + 1.0 * a_air, 1e-12);
+    let si = value(&mut e, json!("material(\"rho\") * region(\"silicon\")"), None);
+    close(num(&si["value"]), 2330.0 * a_si, 1e-12);
+    // a material value with a field: rho * p over the oxide is 2200 times the integral of p
+    let rp = value(&mut e, json!("rho * p"), Some("oxide"));
+    let p = value(&mut e, json!("p"), Some("oxide"));
+    close(num(&rp["value"]), 2200.0 * num(&p["value"]), 1e-12);
+    // `eps` is `eps_r`; every region has the default 1
+    let eps = value(&mut e, json!("eps"), None);
+    close(num(&eps["value"]), 4e-6 * 3e-6, 1e-12);
+    // not a property of this physics
+    let msg = err(&mut e, "integrate", json!({ "expr": "material(\"E\")", "physics": "fld" }));
+    assert!(msg.contains("no material property 'E'") && msg.contains("rho"), "{msg}");
+    // a changed material makes the result stale, and the answer says so
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "oxide", "material": { "rho": 1000.0 } }));
+    let stale = value(&mut e, json!("rho"), Some("oxide"));
+    assert_eq!(stale["stale"], json!(true));
+}
+
+#[test]
+fn a_formula_that_cannot_be_read_says_where_and_why() {
+    let mut e = strip();
+    let msg = err(&mut e, "integrate", json!({ "expr": "abs(Ex) * foo", "physics": "fld" }));
+    assert!(
+        msg.contains("unknown name 'foo'") && msg.contains("Ex") && msg.contains("rho") && msg.contains("character 14"),
+        "{msg}"
+    );
+    // an order of a complex value is refused before any point is read, naming the formula
+    let msg = err(&mut e, "integrate", json!({ "expr": "where(Ex > 0, 1, 2)", "physics": "fld" }));
+    assert!(msg.contains("where(Ex > 0, 1, 2)") && msg.contains("complex") && msg.contains("abs"), "{msg}");
+    assert!(err(&mut e, "integrate", json!({ "expr": "log(Ex)", "physics": "fld" })).contains("complex"));
+    // a vector is not a number
+    assert!(err(&mut e, "integrate", json!({ "expr": "E", "physics": "fld" })).contains("vector"));
+    // syntax
+    assert!(err(&mut e, "integrate", json!({ "expr": "abs(Ex", "physics": "fld" })).contains("expected"));
+    assert!(err(&mut e, "integrate", json!({ "expr": "__import__('os')", "physics": "fld" })).contains("does not read"));
+    // a division by zero that the condition guards is fine, and an unguarded one is the same error as before
+    let ok = value(&mut e, json!("where(z != 0, 1 / z, 0)"), None);
+    assert!(num(&ok["value"]).is_finite());
+    assert!(err(&mut e, "integrate", json!({ "expr": "1 / (z - z)", "physics": "fld" })).contains("not finite"));
+    // a name that is no field and no formula keeps the message that lists the fields
+    let msg = err(&mut e, "integrate", json!({ "expr": "nope", "physics": "fld" }));
+    assert!(msg.contains("no field 'nope'") && msg.contains("Ex"), "{msg}");
+}
+
+#[test]
+fn the_permittivity_of_a_real_mode_comes_from_its_materials() {
+    let mut e = Engine::new();
+    call(&mut e, "project_open", json!({ "path": example("15_soi_wire") }));
+    call(&mut e, "solve_run", json!({}));
+    // eps_r in a region is the index squared of the material at the study wavelength: a constant, so its integral is it times the area
+    let area = call(&mut e, "integrate", json!({ "expr": 1.0, "physics": "ems", "region": "Si" }));
+    let eps = call(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "region": "Si" }));
+    let n_si = (num(&eps["value"]) / num(&area["value"])).sqrt();
+    assert!((3.4..3.6).contains(&n_si), "silicon index at the wavelength of the example: {n_si}");
+    // the energy fraction of the plan: integrate(eps |E|^2, core) / integrate(eps |E|^2), as one formula and as the handle form
+    let by_text = call(&mut e, "integrate", json!({ "expr": "eps_r * norm2(E)", "physics": "ems", "region": "Si" }));
+    let eps_handle = json!("eps_r");
+    let power = json!({ "op": "add", "args": [{ "op": "abs2", "args": ["Ex"] }, { "op": "abs2", "args": ["Ez"] }] });
+    let by_hand = call(
+        &mut e,
+        "integrate",
+        json!({ "expr": { "op": "mul", "args": [eps_handle, power] }, "physics": "ems", "region": "Si" }),
+    );
+    // the vector E has Ey too, so norm2(E) adds |Ey|^2 and is larger
+    assert!(num(&by_text["value"]) >= num(&by_hand["value"]));
+    let ey = call(&mut e, "integrate", json!({ "expr": "eps_r * abs2(Ey)", "physics": "ems", "region": "Si" }));
+    close(num(&by_text["value"]), num(&by_hand["value"]) + num(&ey["value"]), 1e-12);
+    let gamma = num(&by_text["value"])
+        / num(&call(&mut e, "integrate", json!({ "expr": "eps_r * norm2(E)", "physics": "ems" }))["value"]);
+    assert!(gamma > 0.05 && gamma < 1.0, "{gamma}");
+    // a material value that is a tensor is refused, not read as its default
+    let msg = err(&mut e, "integrate", json!({ "expr": "material(\"rho\")", "physics": "ems" }));
+    assert!(msg.contains("no material property 'rho'") && msg.contains("eps_r"), "{msg}");
 }

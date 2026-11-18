@@ -88,9 +88,9 @@ graph TB
     31-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
     31-. "<div>uses apiref</div><div style='font-size: 70%'>[Rust paths]</div>" .->32
     31-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
-    27-. "<div>uses femcore: fem, fieldexpr<br />+5</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    27-. "<div>uses femcore: fem, fieldexpr<br />+8</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
     27-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
-    27-. "<div>uses physics: contract, crate<br />root +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    27-. "<div>uses physics: contract, crate<br />root +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
     27-. "<div>uses store: runs, util</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
     27-. "<div>uses geomdesc, geometry</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
     27-. "<div>uses estimate, jobs +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
@@ -158,7 +158,7 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Commands](../4-code/engine/commands.md) | 6 | 3120 | 57, 38, 15, 90, 91, 93 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries. |
+| [Commands](../4-code/engine/commands.md) | 6 | 3446 | 57, 38, 15, 90, 91, 93 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries. |
 | [Project](../4-code/engine/project.md) | 1 | 197 | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary. |
 | [Geometry operations](../4-code/engine/geometry.md) | 2 | 730 | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only). |
 | [Job runner and queue](../4-code/engine/jobs.md) | 9 | 2415 | 61, 85, 87, 86, 11 | Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |

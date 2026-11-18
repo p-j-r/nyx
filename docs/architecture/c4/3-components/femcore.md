@@ -27,7 +27,7 @@ graph TB
         style 103 fill:#85bbf0,stroke:#5d82a8,color:#000000
         104["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
         style 104 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        105["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate (ADR 90).</div>"]
+        105["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate, and the<br />text formulas parsed into it<br />(ADR 90).</div>"]
         style 105 fill:#85bbf0,stroke:#5d82a8,color:#000000
         106["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, and refusal<br />of NaN and infinity.</div>"]
         style 106 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -182,8 +182,8 @@ graph TB
 | [Material specification](../4-code/femcore/material.md) | 9 | 3519 | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader. |
 | [Optical mode sets](../4-code/femcore/optical.md) | 1 | 231 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
 | [Frame and sections](../4-code/femcore/section.md) | 1 | 221 | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y). |
-| [Expressions](../4-code/femcore/expr.md) | 2 | 465 | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate (ADR 90). |
-| [Runtime services](../4-code/femcore/runtime.md) | 4 | 537 | 9, 11 | The shared worker pool, stage log and cancel, and refusal of NaN and infinity. |
+| [Expressions](../4-code/femcore/expr.md) | 3 | 1562 | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90). |
+| [Runtime services](../4-code/femcore/runtime.md) | 4 | 538 | 9, 11 | The shared worker pool, stage log and cancel, and refusal of NaN and infinity. |
 
 ## Part: Meshing and adaptation
 
@@ -344,7 +344,7 @@ graph TB
         style 103 fill:#85bbf0,stroke:#5d82a8,color:#000000
         104["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
         style 104 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        105["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate (ADR 90).</div>"]
+        105["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate, and the<br />text formulas parsed into it<br />(ADR 90).</div>"]
         style 105 fill:#85bbf0,stroke:#5d82a8,color:#000000
         106["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, and refusal<br />of NaN and infinity.</div>"]
         style 106 fill:#85bbf0,stroke:#5d82a8,color:#000000

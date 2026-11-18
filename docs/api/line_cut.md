@@ -8,7 +8,7 @@ The value of an expression at `n` equally spaced points from `from` to `to` (inc
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
-| `expr` | text or number or object or list of any | yes |  | a handle, a field name, a number or {op, args} |
+| `expr` | text or number or object or list of any | yes |  | a formula text such as "abs(Ex)^2 * eps_r" (see integrate), a handle, a field name, a number or {op, args} |
 | `from` | list of number | yes |  | start point: [x, z] on a 2D mesh, [x, y, z] on a 3D one |
 | `n` | integer | no |  | number of points, default 101 |
 | `physics` | text: `dfs`, `ems`, `sms` | no |  | the three-letter code of the physics |

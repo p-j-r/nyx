@@ -8,7 +8,7 @@ The value of an expression at points, interpolated in the cell that holds each p
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
-| `expr` | text or number or object or list of any | yes |  | a handle, a field name, a number or {op, args} |
+| `expr` | text or number or object or list of any | yes |  | a formula text such as "abs(Ex)^2 * eps_r" (see integrate), a handle, a field name, a number or {op, args} |
 | `physics` | text: `dfs`, `ems`, `sms` | no |  | the three-letter code of the physics |
 | `points` | list of list of number | yes |  | a list of points, each a list of coordinates |
 | `solution` | integer | no |  | default 0 |

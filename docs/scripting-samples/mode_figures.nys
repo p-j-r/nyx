@@ -1,0 +1,27 @@
+# mode_figures.nys -- figures of merit of a waveguide mode, written as formulas (productivity plan N2, ADR 90).
+#
+# A formula is a text the engine parses once and evaluates at every quadrature point in Rust, so the script does not loop over elements.
+# Names: the fields of the result (Ex, Ey, Ez, |E| in backticks), the coordinates x y z, the material values of the problem (eps_r, rho),
+# region("Si"), where(cond, a, b), and vectors (E stands for Ex, Ey, Ez: dot, inner, cross, norm, norm2, E.x).
+# Run it from the repository root, which is the folder the script may use: nyx run docs/scripting-samples/mode_figures.nys --workspace .
+
+nyx.project_open(path="examples/15_soi_wire.nyx.json")
+nyx.solve_run()
+
+# the plan's confinement factor: integral of eps |E|^2 over the core divided by the same over everything
+power = "eps_r * norm2(E)"
+core = nyx.integrate(expr=power, physics="ems", region="Si")["value"]
+total = nyx.integrate(expr=power, physics="ems")["value"]
+print("energy confinement in Si: %.4f" % (core / total))
+
+# the part of the power that is longitudinal (|Ey|^2), a quantity no stock command has
+long_part = nyx.integrate(expr="eps_r * abs2(Ey)", physics="ems")["value"]
+print("longitudinal fraction: %.4f" % (long_part / total))
+
+# a condition inside the formula: only the cells above the oxide (z > 0), without a region name
+above = nyx.integrate(expr="where(z > 0, eps_r * norm2(E), 0)", physics="ems")["value"]
+print("power above z = 0: %.4f" % (above / total))
+
+# a profile along a line with the same formula language (`from` is a Python keyword, so it goes through **)
+cut = nyx.line_cut(expr="norm(E)", physics="ems", n=5, **{"from": [-1e-6, 1.1e-7], "to": [1e-6, 1.1e-7]})
+print([round(v, 4) for v in cut["values"]])

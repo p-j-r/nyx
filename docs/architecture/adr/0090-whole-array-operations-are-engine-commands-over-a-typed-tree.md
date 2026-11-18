@@ -4,7 +4,7 @@ Date: 2026-11-17
 
 ## Status
 
-Accepted as step S3 (plan item N1) of the productivity plan (`docs/NYX2_PRODUCTIVITY_PLAN.md`, section 3b). **The number 90 is the one the plan reserves for "per-element numerics are formulas evaluated in Rust" and is provisional**: take the next free ADR number at merge and renumber this file, the index row and the code comments. This record covers level N1 (whole-array operations) and the tree that levels N2 to N4 build on; N2 (text formulas, material values, `where`), N3 (tracing script functions) and N4 (a code generator) amend it when they land.
+Accepted as step S3 (plan item N1) of the productivity plan (`docs/NYX2_PRODUCTIVITY_PLAN.md`, section 3b). **The number 90 is the one the plan reserves for "per-element numerics are formulas evaluated in Rust" and is provisional**: take the next free ADR number at merge and renumber this file, the index row and the code comments. This record covers level N1 (whole-array operations) and the tree that levels N2 to N4 build on; N2 (text formulas, material values, `where`, vectors) is added below (step S5); N3 (tracing script functions) and N4 (a code generator) amend it when they land.
 
 ## Context
 
@@ -22,20 +22,32 @@ A researcher or an agent wants numbers computed from a field: the integral of `|
 * **`overlap` and `confinement` have no material weight.** `overlap` returns the complex integral of `sum_k conj(a_k) b_k` over a region, the two norms and the coefficient `|overlap|^2 / (norm_a norm_b)` (0 to 1, Cauchy-Schwarz); `a` and `b` are a field or a list of components. `confinement` returns the integral of `sum_k |c_k|^2` over a region divided by the same over the whole mesh. The energy or power fraction needs the permittivity at each point, which is N2 (material values in formulas); until then the commands say what they computed in `meaning`.
 * **Where the tree lives.** The plan says N1's handle arithmetic builds the formula tree of N2, extending `femcore::expr`. That evaluator is real-valued and has no fields; making it complex and giving it field leaves is the substance of N2. So S3 adds the typed tree `femcore::fieldexpr` (complex, field leaves) and N2 adds a text parser that produces the same tree and moves `expr::Expr` (initial values from `x y z`) onto it. Until then there are two small evaluators in `femcore`; the gate for N2 is that a formula and a handle give the same bits.
 
+## N2: text formulas (step S5, 2026-11-18)
+
+A string in an `expr` is now a formula: `abs(Ex)^2 * eps_r`, `where(z > 0, p, 0)`, `inner(E, E)`. `femcore::formula` parses it once into the same `fieldexpr::Tree` that handles build, so a formula and a handle are one request with one evaluator, and the gate is that they give the same bits (`tests/reduce.rs::a_formula_equals_the_handle_form_to_the_bit`: `abs(Ex)^2 + abs(Ez)^2` equals the handle `add(pow(abs Ex), pow(abs Ez))`, and `Ex * Ez` equals `mul`, both to the bit; the loop on the raw arrays agrees).
+
+* **Grammar** (the module comment of `formula.rs` is the reference): numbers (`2j` is imaginary), `pi`, `e`; `+ - * / ^` (also `**`), comparisons, `and or not`; `abs abs2 re im conj sqrt exp sin cos arg` on complex values; `log log10 tan sinh cosh tanh atan step min max atan2` and a non-integer power on real values; `where(cond, a, b)`, which evaluates only the branch that applies (so `where(x != 0, 1/x, 0)` is safe). A power with a whole constant exponent from -16 to 16 is repeated multiplication, which is exactly what the handle `pow` builds. Nothing else parses: no input can run code, name a file or call anything not listed. Nesting is limited to 64 levels.
+* **Real-only operations are checked, not guessed.** `Tree::check` runs once per request, before any point, and refuses a comparison, a `where` condition, `log`, `tan`, `min` and so on whose operand is complex, naming the formula and advising `abs`, `abs2`, `re` or `im`. A formula never silently takes the real part.
+* **Names** are resolved by the engine (`reduce::Namer`) in this order: the coordinates `x y z` (wafer axes; `y` is 0 on a cross-section; interpolated from the nodes like a field); a field of the result (a plain string that is exactly a field name still means that field, as before; a name that is not an identifier, such as `|E|` or `Re Ex`, goes in backticks inside a formula); a vector (`E` when the solution has two or three of `Ex Ey Ez`; `dot`, `inner` which conjugates the first, `cross`, `norm`, `norm2`, `E.x`); a **material value** by descriptor name (`eps_r`, `rho`, ...; `eps` and `mu` mean `eps_r` and `mu_r`). `material("rho")`, `region("Si")` and a backticked `ems:1:Ex` say what they are when a name is ambiguous or belongs to another physics or solution. An unknown name lists the names there are.
+* **Material values are what the solver read.** They come from the problem of the physics as `nyx_physics::decode::materials_by_label` builds them for the solve (library materials, inline numbers, the optical model at the wavelength of the study), one scalar per cell, **constant over the cell** (not interpolated, so a region indicator or a material is the same number at every quadrature point). They are read from the project's current problem and the result's own mesh: if the materials changed since the solve the answer carries `stale: true`. A property that is a tensor in some material of the mesh (an anisotropic or rotated `eps_r`) is refused rather than read as its scalar default. `region("name")` is 1 in the cells of the region and 0 elsewhere.
+* **An expression of numbers only** (`1`, for an area) uses the mesh of the default result.
+* **`femcore::expr` is unchanged.** The plan says N2 moves `expr::Expr` onto the new tree. It does not: `expr` is the real grammar of geometry and initial fields that `geom::expr` copies (ROUGH_SPOTS R06), the two are held equal by `tests/expr_grammar.rs`, and moving one side would break that test or force `geom` onto `femcore`. The formula grammar is a superset kept separate, and the gate "the existing `expr_grammar` tests unchanged" holds because the file is untouched. Two evaluators remain in `femcore`: the real one for geometry and initial fields, the typed one for results.
+* **Not done:** line and surface integrals; a formula inside a worker; tensor material values; a material dispersion evaluated at a wavelength other than the study's.
+
 ## Not in this decision
 
-* Material values (`eps`, `rho`) at each point, text formulas, `where`, vectors and dot products (N2); tracing a script function into the tree (N3); a code generator (N4).
+* Tracing a script function into the tree (N3); a code generator (N4).
 * Convergence of an integral under refinement (a reduction reads one result on one mesh).
 * Reductions in a worker process: they read the result the parent holds and take about as long as reading it.
 * Maxima of the interpolant between nodes; surface and line integrals along boundaries (`integrate` is over cells).
 
 ## Consequences
 
-* `engine_commands` gains eight commands and `result_info` gains `cell_fields` (additive); `mcp_tools` gains eight tools (additive). Provisional versions 1.12 and 2.8.
+* `engine_commands` gains eight commands and `result_info` gains `cell_fields` (additive); `mcp_tools` gains eight tools (additive). Provisional versions 1.12 and 2.8. N2 changes only descriptions (provisional 1.14 and 2.10).
 * `Stored` holds the mesh model of its result, so a result keeps its mesh alive until it is replaced.
 * `nyx check` treats the eight commands as readers of a result.
 
 ## Code
 
-* `crates/femcore/src/fieldexpr.rs` (the tree and its evaluator), `crates/nyx-engine/src/reduce.rs` (the commands), `crates/nyx-engine/src/engine.rs` (`Stored.model`), `crates/app/src/tabs.rs` (the Reduce form).
+* `crates/femcore/src/fieldexpr.rs` (the tree and its evaluator), `crates/femcore/src/formula.rs` (the formula parser), `crates/nyx-engine/src/reduce.rs` (the commands and the names of a formula), `crates/nyx-engine/src/engine.rs` (`Stored.model`), `crates/app/src/tabs.rs` (the Reduce form).
 * Tests: `crates/nyx-engine/tests/reduce.rs` (closed forms, loops to the bit, thread counts, a worker result, a real mode and a real thermal field), `crates/app/src/app.rs` (the form shows the engine's numbers).

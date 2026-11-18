@@ -8,7 +8,7 @@ The largest (`op: max`, default) or smallest (`min`) real value of an expression
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
-| `expr` | text or number or object or list of any | yes |  | a handle, a field name, a number or {op, args} |
+| `expr` | text or number or object or list of any | yes |  | a formula text such as "abs(Ex)^2 * eps_r" (see integrate), a handle, a field name, a number or {op, args} |
 | `op` | text: `max`, `min` | no |  | default max |
 | `physics` | text: `dfs`, `ems`, `sms` | no |  | the three-letter code of the physics |
 | `region` | text | no |  | region name(s); default all |

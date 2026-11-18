@@ -26,5 +26,5 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 | [Material specification](./material.md) | 9 | 3519 | 127 | 25 |
 | [Optical mode sets](./optical.md) | 1 | 231 | 12 | 4 |
 | [Frame and sections](./section.md) | 1 | 221 | 15 | 0 |
-| [Expressions](./expr.md) | 2 | 465 | 12 | 4 |
-| [Runtime services](./runtime.md) | 4 | 537 | 27 | 4 |
+| [Expressions](./expr.md) | 3 | 1562 | 20 | 8 |
+| [Runtime services](./runtime.md) | 4 | 538 | 27 | 4 |

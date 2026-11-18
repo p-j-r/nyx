@@ -45,7 +45,7 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [ems: Typed problem](../ems/problem.md) | error, physics | Ctx, Error, Physics |
 | [engine: Analyses](../engine/analyse.md) | error | Error |
 | [engine: Command lists](../engine/commandlist.md) | error | Error |
-| [engine: Commands](../engine/commands.md) | crate root, error, physics, registry | Error, LabelResolver, Registry, Sizing |
+| [engine: Commands](../engine/commands.md) | crate root, error, physics, registry | Ctx, Error, LabelResolver, Registry, Sizing |
 | [engine: Geometry operations](../engine/geometry.md) | error | Error |
 | [engine: Job runner and queue](../engine/jobs.md) | error, physics, registry | Ctx, Error, Registry |
 | [engine: Materials](../engine/materials.md) | error, physics | Error, Physics |

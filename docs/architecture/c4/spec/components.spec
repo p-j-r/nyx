@@ -137,7 +137,7 @@ fem         | Finite-element basics | fem.rs edge.rs fields.rs pml.rs periodic.r
 material    | Material specification | material/ | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader.
 optical     | Optical mode sets | optical.rs | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them.
 section     | Frame and sections | section.rs | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y).
-expr        | Expressions | expr.rs fieldexpr.rs | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate (ADR 90).
+expr        | Expressions | expr.rs fieldexpr.rs formula.rs | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90).
 runtime     | Runtime services | par.rs progress.rs validate.rs lib.rs | 9, 11 | The shared worker pool, stage log and cancel, and refusal of NaN and infinity.
 view femcore | meshing | Meshing and adaptation | mesh meshio fixtures meshing meshing3d structpml meshcheck metric adaptops adaptdrive estimators
 view femcore | linalg | Linear algebra | lacore ladriver ladirect laksp laeigen laprecond laother

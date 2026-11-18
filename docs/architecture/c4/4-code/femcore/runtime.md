@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, and refusal of NaN and infinity.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 4 files, 537 lines.
+**Size:** 4 files, 538 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/lib.rs` | 46 | femcore: finite elements for the nyx application, in pure Rust. docs/HOW_IT_WORKS.md explains the whole chain in plain language; this is the map of the modules. |
+| `crates/femcore/src/lib.rs` | 47 | femcore: finite elements for the nyx application, in pure Rust. docs/HOW_IT_WORKS.md explains the whole chain in plain language; this is the map of the modules. |
 | `crates/femcore/src/par.rs` | 150 | The one shared pool of worker threads used by every parallel loop of the solvers. |
 | `crates/femcore/src/progress.rs` | 295 | What a running solve is doing, and a way to stop it. |
 | `crates/femcore/src/validate.rs` | 46 |  |

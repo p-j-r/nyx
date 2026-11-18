@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91, 93"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, validated.rs"
-        "lines" "3120"
+        "lines" "3446"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }

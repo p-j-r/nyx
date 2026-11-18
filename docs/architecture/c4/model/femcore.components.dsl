@@ -175,11 +175,11 @@ section = component "Frame and sections" "The one place that knows the wafer axe
         "codeDiagram" "4-code/femcore/section.md"
     }
 }
-expr = component "Expressions" "A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate (ADR 90)." "Rust modules" {
+expr = component "Expressions" "A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90)." "Rust modules" {
     properties {
         "adr" "65, 2, 90"
-        "code" "crates/femcore/src: expr.rs, fieldexpr.rs"
-        "lines" "465"
+        "code" "crates/femcore/src: expr.rs, fieldexpr.rs, formula.rs"
+        "lines" "1562"
         "codeDiagram" "4-code/femcore/expr.md"
     }
 }
@@ -187,7 +187,7 @@ runtime = component "Runtime services" "The shared worker pool, stage log and ca
     properties {
         "adr" "9, 11"
         "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs"
-        "lines" "537"
+        "lines" "538"
         "codeDiagram" "4-code/femcore/runtime.md"
     }
 }

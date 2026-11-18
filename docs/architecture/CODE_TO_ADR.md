@@ -99,7 +99,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `materials/*` | 29, 30, 34, 35 | the shipped material library (TOML) |
 | `docs/MATERIALS.md` | 29, 30, 34, 35 | |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
-| `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 adds a parser for it) |
+| `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
+| `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |
 | `crates/femcore/src/validate.rs` | 9 | |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
 | `crates/femcore/src/section.rs` | 1 | |

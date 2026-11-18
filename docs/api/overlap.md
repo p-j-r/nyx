@@ -8,8 +8,8 @@ The overlap integral of two fields (or two lists of components, e.g. [Ex, Ey, Ez
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
-| `a` | text or number or object or list of any | yes |  | a field, an expression, or a list of components |
-| `b` | text or number or object or list of any | yes |  | a field, an expression, or a list of components |
+| `a` | text or number or object or list of any | yes |  | a field, a formula, an expression, or a list of components |
+| `b` | text or number or object or list of any | yes |  | a field, a formula, an expression, or a list of components |
 | `physics` | text: `dfs`, `ems`, `sms` | no |  | the three-letter code of the physics |
 | `region` | text | no |  | region name(s); default all |
 | `revolution` | true or false | no |  | weight by 2 pi r, default false |

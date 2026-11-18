@@ -29,6 +29,7 @@
 use crate::engine::Engine;
 use femcore::fem::{geometry, quad_rule, shape, RefElement};
 use femcore::fieldexpr::{Fun, Op, Tree, MAX_POWER};
+use femcore::formula::{self, Named, Names};
 use femcore::linalg::csr::C;
 use femcore::mesh::SimplexMesh;
 use nyx_physics::{Error, LabelResolver, SolveResult};
@@ -47,12 +48,25 @@ const INSIDE: f64 = 1e-10;
 const MAX_DEPTH: usize = 64;
 const MAX_POINTS: usize = 200_000;
 
-/// One leaf of an expression: a named field of one solution of one physics.
+/// What a leaf reads (N2): a field, a coordinate, a material value or the indicator of a region. All of them live on the mesh of one result.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum What {
+    Field,
+    /// a wafer coordinate, 0 x, 1 y, 2 z; `name` is its letter
+    Coord(usize),
+    /// the value of a property of the material of each cell, under the descriptor name in `name`
+    Material,
+    /// 1 in the cells of the region `name`, else 0
+    Region,
+}
+
+/// One leaf of an expression: a named field of one solution of one physics (or, with `what`, a coordinate, a material value, a region).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Spec {
     pub physics: String,
     pub solution: usize,
     pub name: String,
+    pub what: What,
 }
 
 /// Where the arguments say a bare name comes from.
@@ -66,6 +80,10 @@ enum Kind {
     Cell(usize),
     /// the node-averaged values of the field, one per dof
     Dof(Vec<f64>),
+    /// a wafer coordinate (0 x, 1 y, 2 z), interpolated from the coordinates of the nodes
+    Coord(usize),
+    /// one value per cell, the same at every point of the cell (a material value, a region indicator): not interpolated
+    Const(Vec<f64>),
 }
 
 struct Leaf {
@@ -113,6 +131,154 @@ fn interp(n: &[f64], loc: &[C]) -> C {
     C::new(re, im)
 }
 
+/// What the names of a formula mean for this engine: coordinates, the fields of a result, the material values of its problem.
+struct Namer<'a> {
+    engine: &'a Engine,
+    d: &'a Defaults,
+    specs: &'a mut Vec<Spec>,
+    /// an error that is not about the text (no result yet, no physics given), returned as it is
+    missing: Option<Error>,
+    /// a name that nothing in the result or the materials has
+    unknown: bool,
+}
+
+/// `ems:Ex`, `ems:1:Ex` or `Ex`: the physics and solution a name is read from, and the name.
+fn split_target(text: &str, d: &Defaults) -> Result<(Option<String>, usize, String), String> {
+    let parts: Vec<&str> = text.split(':').collect();
+    match parts.as_slice() {
+        [n] => Ok((d.physics.clone(), d.solution, n.to_string())),
+        [p, n] => Ok((Some(p.to_string()), d.solution, n.to_string())),
+        [p, s, n] => {
+            let s = s.trim().parse::<usize>().map_err(|_| format!("'{s}' in '{text}' is not a solution number"))?;
+            Ok((Some(p.to_string()), s, n.to_string()))
+        }
+        _ => Err(format!("'{text}' has more than two ':' (it is physics:solution:name)")),
+    }
+}
+
+/// The material property a formula name means (`eps` and `mu` are `eps_r` and `mu_r`).
+fn prop_name(name: &str) -> &str {
+    match name {
+        "eps" => "eps_r",
+        "mu" => "mu_r",
+        other => other,
+    }
+}
+
+impl Namer<'_> {
+    fn slot(&mut self, physics: &str, solution: usize, name: &str, what: What) -> Tree {
+        Tree::Leaf(slot(self.specs, Spec { physics: physics.to_string(), solution, name: name.to_string(), what }))
+    }
+
+    /// The physics and solution of a name, with the result they live in checked.
+    fn target(&mut self, text: &str) -> Result<(String, usize, String), String> {
+        let (physics, solution, name) = split_target(text, self.d)?;
+        let Some(physics) = physics else {
+            let e = Error::invalid(format!(
+                "the name '{name}' needs a physics: give `physics` (the results are: {})",
+                self.engine.results.keys().cloned().collect::<Vec<_>>().join(", ")
+            ));
+            let m = e.to_string();
+            self.missing = Some(e);
+            return Err(m);
+        };
+        let Some(stored) = self.engine.results.get(&physics) else {
+            let e = Error::invalid(format!(
+                "there is no result for '{physics}' yet; solve first{}",
+                if self.engine.results.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " (the results are: {})",
+                        self.engine.results.keys().cloned().collect::<Vec<_>>().join(", ")
+                    )
+                }
+            ));
+            let m = e.to_string();
+            self.missing = Some(e);
+            return Err(m);
+        };
+        if stored.result.solutions.get(solution).is_none() {
+            let e = Error::invalid(format!(
+                "the result of '{physics}' has {} solutions; there is no {solution}",
+                stored.result.solutions.len()
+            ));
+            let m = e.to_string();
+            self.missing = Some(e);
+            return Err(m);
+        }
+        Ok((physics, solution, name))
+    }
+
+    fn props_of(&self, physics: &str) -> Vec<String> {
+        crate::physics_for(&self.engine.registry, physics)
+            .map(|p| p.properties().into_iter().map(|d| d.name).collect())
+            .unwrap_or_default()
+    }
+}
+
+impl Names for Namer<'_> {
+    fn name(&mut self, text: &str) -> Result<Option<Named>, String> {
+        let (physics, solution, name) = self.target(text)?;
+        let sol = &self.engine.results[&physics].result.solutions[solution];
+        if let Some(axis) = ["x", "y", "z"].iter().position(|a| *a == name) {
+            return Ok(Some(Named::Scalar(self.slot(&physics, solution, &name, What::Coord(axis)))));
+        }
+        if Engine::field_names(sol).contains(&name) {
+            return Ok(Some(Named::Scalar(self.slot(&physics, solution, &name, What::Field))));
+        }
+        let comps: Vec<(usize, String)> = ["x", "y", "z"]
+            .iter()
+            .enumerate()
+            .map(|(a, c)| (a, format!("{name}{c}")))
+            .filter(|(_, n)| sol.cell_fields.iter().any(|f| f.name == *n))
+            .collect();
+        if comps.len() >= 2 {
+            return Ok(Some(Named::Vector(
+                comps.into_iter().map(|(a, n)| (a, self.slot(&physics, solution, &n, What::Field))).collect(),
+            )));
+        }
+        let prop = prop_name(&name);
+        if self.props_of(&physics).iter().any(|p| p == prop) {
+            return Ok(Some(Named::Scalar(self.slot(&physics, solution, prop, What::Material))));
+        }
+        self.unknown = true;
+        Ok(None)
+    }
+
+    fn material(&mut self, text: &str) -> Result<Tree, String> {
+        let (physics, solution, name) = self.target(text)?;
+        let prop = prop_name(&name).to_string();
+        let props = self.props_of(&physics);
+        if !props.contains(&prop) {
+            return Err(format!("'{physics}' has no material property '{name}' (it has: {})", props.join(", ")));
+        }
+        Ok(self.slot(&physics, solution, &prop, What::Material))
+    }
+
+    fn region(&mut self, text: &str) -> Result<Tree, String> {
+        let (physics, solution, name) = self.target(text)?;
+        Ok(self.slot(&physics, solution, &name, What::Region))
+    }
+
+    fn known(&self) -> String {
+        let mut v = vec!["x".to_string(), "y".to_string(), "z".to_string()];
+        if let Some(sol) = self
+            .d
+            .physics
+            .as_deref()
+            .and_then(|p| self.engine.results.get(p))
+            .and_then(|s| s.result.solutions.get(self.d.solution))
+        {
+            v.extend(Engine::field_names(sol));
+        }
+        if let Some(p) = self.d.physics.as_deref() {
+            v.extend(self.props_of(p));
+        }
+        v.join(", ")
+    }
+}
+
 // ------------------------------------------------------------------------------------------------------------- the engine side
 
 impl Engine {
@@ -142,11 +308,14 @@ impl Engine {
                     self.results.keys().cloned().collect::<Vec<_>>().join(", ")
                 ))
             })?;
-            Ok(Tree::Leaf(slot(specs, Spec { physics: physics.to_string(), solution, name: name.to_string() })))
+            Ok(Tree::Leaf(slot(
+                specs,
+                Spec { physics: physics.to_string(), solution, name: name.to_string(), what: What::Field },
+            )))
         };
         match v {
             Value::Number(n) => Ok(Tree::num(n.as_f64().ok_or_else(|| Error::invalid("a number is out of range"))?)),
-            Value::String(s) => leaf(s, d.physics.as_deref(), d.solution, specs),
+            Value::String(s) => self.parse_text(s, d, specs),
             Value::Object(m) => {
                 if let Some(f) = m.get("field") {
                     let name = f.as_str().ok_or_else(|| Error::invalid("`field` must be the name of a field"))?;
@@ -244,6 +413,95 @@ impl Engine {
         }
     }
 
+    /// A string in an expression: the exact name of a field (`Ex`, `|E|`, `Re Ex`: what a bare string always meant), else a formula
+    /// (`femcore::formula`, N2). A string that is not a formula either and reads like a name is reported as a missing field.
+    fn parse_text(&self, text: &str, d: &Defaults, specs: &mut Vec<Spec>) -> Result<Tree, Error> {
+        let plain = |s: &str| {
+            !s.chars().any(|c| "+-*/^()<>=!,[]\"'`.:".contains(c)) && !s.contains(" and ") && !s.contains(" or ")
+        };
+        if let Some(p) = d.physics.as_deref() {
+            let named = self
+                .results
+                .get(p)
+                .and_then(|st| st.result.solutions.get(d.solution))
+                .is_some_and(|sol| Self::field_names(sol).iter().any(|n| n == text));
+            if named {
+                return Ok(Tree::Leaf(slot(
+                    specs,
+                    Spec { physics: p.to_string(), solution: d.solution, name: text.to_string(), what: What::Field },
+                )));
+            }
+        }
+        let mut namer = Namer { engine: self, d, specs, missing: None, unknown: false };
+        match formula::parse(text, &mut namer) {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                if let Some(m) = namer.missing.take() {
+                    return Err(m);
+                }
+                if namer.unknown && plain(text.trim()) {
+                    // a name that is no field and no formula: say which fields there are, as a missing field always did
+                    let physics = d.physics.as_deref().ok_or_else(|| {
+                        Error::invalid(format!(
+                            "the field '{text}' needs a physics: give `physics` (the results are: {})",
+                            self.results.keys().cloned().collect::<Vec<_>>().join(", ")
+                        ))
+                    })?;
+                    namer.specs.push(Spec {
+                        physics: physics.to_string(),
+                        solution: d.solution,
+                        name: text.to_string(),
+                        what: What::Field,
+                    });
+                    return Ok(Tree::Leaf(namer.specs.len() - 1));
+                }
+                Err(Error::invalid(format!("the formula '{text}' does not read: {e}")))
+            }
+        }
+    }
+
+    /// The value of a material property in each cell of the mesh a result was solved on: the problem's materials as the solver saw them
+    /// (library or inline numbers, the optical model at the wavelength of the study), under the descriptor name (`eps_r`, `rho`, ...).
+    /// A property that is a tensor in some material of the mesh is refused rather than read as its scalar default.
+    fn material_values(
+        &self,
+        s: &Spec,
+        model: &Arc<MeshedModel>,
+        mesh: &SimplexMesh,
+    ) -> Result<(Vec<f64>, String), Error> {
+        let p = crate::physics_for(&self.registry, &s.physics)?;
+        let spec = self.project.spec(&s.physics).ok_or_else(|| {
+            Error::invalid(format!("the project has no problem for '{}', so its materials are not known", s.physics))
+        })?;
+        let props = p.properties();
+        let desc = props.iter().find(|d| d.name == s.name).ok_or_else(|| {
+            Error::invalid(format!(
+                "'{}' has no material property '{}' (it has: {})",
+                s.physics,
+                s.name,
+                props.iter().map(|d| d.name.clone()).collect::<Vec<_>>().join(", ")
+            ))
+        })?;
+        let mut ctx = nyx_physics::Ctx::new(model.as_ref());
+        ctx.library = Some(self.library()?);
+        ctx.wavelength = crate::materials::study_wavelength(p, spec);
+        let m = nyx_physics::decode::materials_by_label(spec, &ctx, &props)?;
+        let tensor = |a: &femcore::material::Anisotropy| match s.name.as_str() {
+            "eps_r" => a.permittivity.is_some(),
+            "k" => a.conductivity.is_some(),
+            "alpha" => a.expansion.is_some(),
+            _ => false,
+        };
+        if mesh.domain_labels().iter().any(|l| m.aniso.get(l).is_some_and(tensor)) {
+            return invalid(format!(
+                "'{}' is a tensor in a material of this mesh (an anisotropic or rotated crystal); a formula reads scalar values",
+                s.name
+            ));
+        }
+        let v = m.cell_values(mesh, &s.name, desc.default).map_err(Error::invalid)?;
+        Ok((v, desc.unit.clone()))
+    }
+
     /// The names a solution offers: its cell fields and its flat fields.
     fn field_names(sol: &nyx_physics::Solution) -> Vec<String> {
         let mut v: Vec<String> = sol.cell_fields.iter().map(|f| f.name.clone()).collect();
@@ -287,41 +545,59 @@ impl Engine {
             let mesh = stored.model.solver_mesh();
             let order = res.order as usize;
             let nloc = mesh.nloc(order);
-            let (kind, complex, unit) = if let Some(i) = sol.cell_fields.iter().position(|f| f.name == s.name) {
-                let f = &sol.cell_fields[i];
-                if f.nloc != nloc
-                    || f.re.len() != mesh.n_cells() * nloc
-                    || (!f.im.is_empty() && f.im.len() != f.re.len())
-                {
-                    return invalid(format!(
-                        "the field '{}' of '{}' does not fit its mesh ({} values for {} cells of {} nodes)",
-                        s.name,
-                        s.physics,
-                        f.re.len(),
-                        mesh.n_cells(),
-                        nloc
-                    ));
+            let (kind, complex, unit) = match &s.what {
+                What::Coord(a) => (Kind::Coord(*a), false, "m".to_string()),
+                What::Region => {
+                    let labels = stored.model.domains(&s.name)?;
+                    let v: Vec<f64> =
+                        mesh.cell_labels.iter().map(|l| if labels.contains(l) { 1.0 } else { 0.0 }).collect();
+                    if !v.contains(&1.0) {
+                        return invalid(format!("the region '{}' has no cells", s.name));
+                    }
+                    (Kind::Const(v), false, String::new())
                 }
-                (Kind::Cell(i), !f.im.is_empty(), f.unit.clone())
-            } else if let Some((_, unit, vals)) = sol.flat_fields().into_iter().find(|(n, _, _)| *n == s.name) {
-                if vals.len() != mesh.n_dofs(order) {
-                    return invalid(format!(
-                        "the field '{}' of '{}' has {} values for {} dofs",
-                        s.name,
-                        s.physics,
-                        vals.len(),
-                        mesh.n_dofs(order)
-                    ));
+                What::Material => {
+                    let (v, unit) = self.material_values(s, &stored.model, &mesh)?;
+                    (Kind::Const(v), false, unit)
                 }
-                (Kind::Dof(vals), false, unit)
-            } else {
-                return invalid(format!(
-                    "'{}' has no field '{}' in solution {} (the fields are: {})",
-                    s.physics,
-                    s.name,
-                    s.solution,
-                    Self::field_names(sol).join(", ")
-                ));
+                What::Field => {
+                    if let Some(i) = sol.cell_fields.iter().position(|f| f.name == s.name) {
+                        let f = &sol.cell_fields[i];
+                        if f.nloc != nloc
+                            || f.re.len() != mesh.n_cells() * nloc
+                            || (!f.im.is_empty() && f.im.len() != f.re.len())
+                        {
+                            return invalid(format!(
+                                "the field '{}' of '{}' does not fit its mesh ({} values for {} cells of {} nodes)",
+                                s.name,
+                                s.physics,
+                                f.re.len(),
+                                mesh.n_cells(),
+                                nloc
+                            ));
+                        }
+                        (Kind::Cell(i), !f.im.is_empty(), f.unit.clone())
+                    } else if let Some((_, unit, vals)) = sol.flat_fields().into_iter().find(|(n, _, _)| *n == s.name) {
+                        if vals.len() != mesh.n_dofs(order) {
+                            return invalid(format!(
+                                "the field '{}' of '{}' has {} values for {} dofs",
+                                s.name,
+                                s.physics,
+                                vals.len(),
+                                mesh.n_dofs(order)
+                            ));
+                        }
+                        (Kind::Dof(vals), false, unit)
+                    } else {
+                        return invalid(format!(
+                            "'{}' has no field '{}' in solution {} (the fields are: {})",
+                            s.physics,
+                            s.name,
+                            s.solution,
+                            Self::field_names(sol).join(", ")
+                        ));
+                    }
+                }
             };
             match &base {
                 None => base = Some((stored.model.clone(), mesh, order)),
@@ -355,7 +631,20 @@ impl Engine {
         for e in exprs {
             trees.push(self.parse_expr(e, &d, &mut specs, 0)?);
         }
+        // an expression of numbers only (`1` for an area) still needs a mesh to integrate over: the one of the default result
+        if specs.is_empty() {
+            if let Some(p) = &d.physics {
+                specs.push(Spec { physics: p.clone(), solution: d.solution, name: "x".into(), what: What::Coord(0) });
+            }
+        }
         let prep = self.prepare(&specs)?;
+        let flags = prep.complex_flags();
+        for (t, e) in trees.iter().zip(exprs) {
+            t.check(&flags).map_err(|m| match e {
+                Value::String(s) => Error::invalid(format!("the formula '{s}': {m}")),
+                _ => Error::invalid(m),
+            })?;
+        }
         Ok((trees, prep))
     }
 
@@ -405,12 +694,12 @@ impl Engine {
         })?;
         let handle = |n: &str| json!({ "field": n, "physics": physics, "solution": d.solution });
         let describe = |n: &str| -> Result<Value, Error> {
-            let spec = Spec { physics: physics.clone(), solution: d.solution, name: n.to_string() };
+            let spec = Spec { physics: physics.clone(), solution: d.solution, name: n.to_string(), what: What::Field };
             let p = self.prepare(std::slice::from_ref(&spec))?;
             let l = &p.leaves[0];
             Ok(json!({
                 "handle": handle(n), "name": n, "unit": l.unit, "complex": l.complex,
-                "source": match l.kind { Kind::Cell(_) => "cell", Kind::Dof(_) => "dof" },
+                "source": match l.kind { Kind::Cell(_) => "cell", Kind::Dof(_) => "dof", _ => "formula" },
                 "order": p.order, "cells": p.mesh.n_cells(), "nodes_per_cell": p.nloc,
             }))
         };
@@ -524,16 +813,53 @@ impl Prep {
                         out[a] = C::new(vals[dofs[a]], 0.0);
                     }
                 }
+                Kind::Coord(axis) => {
+                    for (a, o) in out.iter_mut().enumerate() {
+                        *o = C::new(self.node_xyz(c, a)[*axis], 0.0);
+                    }
+                }
+                Kind::Const(vals) => {
+                    for o in out.iter_mut() {
+                        *o = C::new(vals[c], 0.0);
+                    }
+                }
             }
         }
     }
 
+    /// The value of every leaf at one point of the cell: the interpolant of its nodal values, or the cell's own value for a constant one.
     fn at_point(&self, tree: &Tree, loc: &[C], n: &[f64], work: &mut Vec<C>) -> C {
         work.clear();
-        for i in 0..self.leaves.len() {
-            work.push(interp(n, &loc[i * self.nloc..(i + 1) * self.nloc]));
+        for (i, l) in self.leaves.iter().enumerate() {
+            let nodes = &loc[i * self.nloc..(i + 1) * self.nloc];
+            work.push(if matches!(l.kind, Kind::Const(_)) { nodes[0] } else { interp(n, nodes) });
         }
         tree.eval(work)
+    }
+
+    /// The wafer coordinates `(x, y, z)` of local node `a` of cell `c` (the corners, then the edge midpoints of a P2 cell).
+    fn node_xyz(&self, c: usize, a: usize) -> [f64; 3] {
+        let dim = self.mesh.dim;
+        let v = self.mesh.cell(c);
+        let mut p = [0.0; 3];
+        if a <= dim {
+            p[..dim].copy_from_slice(self.mesh.point(v[a] as usize));
+        } else {
+            let mut k = dim + 1;
+            'find: for i in 0..=dim {
+                for j in i + 1..=dim {
+                    if k == a {
+                        let (q, r) = (self.mesh.point(v[i] as usize), self.mesh.point(v[j] as usize));
+                        for d in 0..dim {
+                            p[d] = 0.5 * (q[d] + r[d]);
+                        }
+                        break 'find;
+                    }
+                    k += 1;
+                }
+            }
+        }
+        femcore::section::wafer_point(&p[..dim], dim)
     }
 
     fn complex_flags(&self) -> Vec<bool> {
