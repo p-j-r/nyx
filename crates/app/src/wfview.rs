@@ -317,12 +317,14 @@ impl App {
                             ui.close();
                         }
                     });
-                    let text = match (&w.dir, w.saved_at) {
-                        (None, _) => "Draft: nothing is saved until you change something".to_string(),
-                        (Some(_), Some(t)) => format!("Saved automatically · {}", ago(now_secs() - t.elapsed().as_secs() as i64, now_secs())),
-                        (Some(d), None) => format!("Saved · {}", ago(d.wf.touched_secs(), now_secs())),
+                    let (text, short) = match (&w.dir, w.saved_at) {
+                        (None, _) => ("Draft: nothing is saved until you change something".to_string(), "Draft"),
+                        (Some(_), Some(t)) => (format!("Saved automatically · {}", ago(now_secs() - t.elapsed().as_secs() as i64, now_secs())), "Saved"),
+                        (Some(d), None) => (format!("Saved · {}", ago(d.wf.touched_secs(), now_secs())), "Saved"),
                     };
-                    ui.label(kit::muted(ui, text));
+                    // the short word when the title and the tags leave too little room (a narrow window, a scaled interface)
+                    let wide = ui.painter().layout_no_wrap(text.clone(), egui::TextStyle::Body.resolve(ui.style()), theme::muted(&ctx)).size().x;
+                    ui.label(kit::muted(ui, if wide + 24.0 <= ui.available_width() { text } else { short.to_string() }));
                     kit::glyph(ui, if w.dir.is_some() { kit::State::Done } else { kit::State::Idle });
                 });
             });
@@ -425,14 +427,17 @@ impl App {
                     ui.label(RichText::new("Running").strong());
                     ui.label(kit::muted(ui, "editing is locked until it finishes or you cancel"));
                 } else {
-                    ui.label(kit::muted(
-                        ui,
-                        match w.part {
-                            Part::Concept => "What are we simulating? Geometry, materials and the essential physics.",
-                            Part::Build => "How is it computed? Mesh, boundaries, study and solver.",
-                            Part::Analysis => "What came out? Runs, plots, comparisons and fields.",
-                        },
-                    ));
+                    // the hint gives way (and is cut with an ellipsis) when the window is narrow or the interface is scaled: Compute keeps its place
+                    let hint = match w.part {
+                        Part::Concept => "What are we simulating? Geometry, materials and the essential physics.",
+                        Part::Build => "How is it computed? Mesh, boundaries, study and solver.",
+                        Part::Analysis => "What came out? Runs, plots, comparisons and fields.",
+                    };
+                    let room = (ui.available_width() - 330.0).max(40.0);
+                    ui.scope(|ui| {
+                        ui.set_max_width(room);
+                        ui.add(egui::Label::new(kit::muted(ui, hint)).truncate());
+                    });
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if locked {
@@ -471,6 +476,7 @@ impl App {
             });
         });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
+            let narrow = ui.available_width() < 480.0;
             ui.horizontal(|ui| {
                 if kit::pill(ui, !self.show_edges, "Geometry").clicked() {
                     self.show_edges = false;
@@ -480,20 +486,39 @@ impl App {
                     self.show_edges = true;
                     self.show_results = false;
                 }
-                if let Some(m) = &self.doc.mesh {
-                    ui.label(kit::muted(ui, format!("{}D · {} cells · {} points", m.dim, m.n_cells(), m.n_points())));
-                } else if let Some(e) = &self.doc.mesh_error {
-                    ui.colored_label(theme::danger(ui.ctx()), e);
-                } else {
-                    ui.label(kit::muted(ui, "meshing..."));
+                // the counts give way (cut with an ellipsis) before the Fit button and the checkbox on the right do
+                let room = (ui.available_width() - 250.0).max(0.0);
+                ui.scope(|ui| {
+                    ui.set_max_width(room);
+                    if room < 60.0 {
+                        return;
+                    }
+                    if let Some(m) = &self.doc.mesh {
+                        ui.add(egui::Label::new(kit::muted(ui, format!("{}D · {} cells · {} points", m.dim, m.n_cells(), m.n_points()))).truncate());
+                    } else if let Some(e) = &self.doc.mesh_error {
+                        ui.add(egui::Label::new(RichText::new(e.to_string()).color(theme::danger(ui.ctx()))).truncate());
+                    } else {
+                        ui.label(kit::muted(ui, "meshing..."));
+                    }
+                });
+                if !narrow {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.checkbox(&mut self.show_numbers, "Boundary numbers");
+                        if ui.small_button("Fit").clicked() {
+                            self.vp.fit_token += 1;
+                        }
+                    });
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.checkbox(&mut self.show_numbers, "Boundary numbers");
+            });
+            if narrow {
+                // a narrow viewport (a small window, a scaled interface): the two controls go to a row of their own
+                ui.horizontal(|ui| {
                     if ui.small_button("Fit").clicked() {
                         self.vp.fit_token += 1;
                     }
+                    ui.checkbox(&mut self.show_numbers, "Boundary numbers");
                 });
-            });
+            }
             egui::Frame::new().corner_radius(12).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).show(ui, |ui| {
                 self.viewport_ui(ui);
             });
@@ -550,7 +575,7 @@ impl App {
             self.wf_live(ui, w, acts);
             return;
         }
-        egui::Panel::right("wf_build_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::right("wf_build_inspector").default_size((ui.available_width() * 0.42).clamp(300.0, 440.0)).size_range(300.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (t, l) in [(Tab::Physics, "Boundaries and conditions"), (Tab::Study, "Study and solver")] {
                     if kit::pill(ui, !w.sweep.shown && w.build_tab == t, l).clicked() {
@@ -723,7 +748,7 @@ impl App {
         let ctx = ui.ctx().clone();
         let filter = Filter::parse(&w.filter_text);
         let active_filter = filter.clone().unwrap_or_default();
-        egui::Panel::right("wf_analysis_side").exact_size(400.0).resizable(false).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::right("wf_analysis_side").exact_size((ui.available_width() * 0.42).clamp(300.0, 400.0)).resizable(false).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 kit::plain_card(ui, |ui| {
                     ui.set_width(ui.available_width());

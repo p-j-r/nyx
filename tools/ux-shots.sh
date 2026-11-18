@@ -44,11 +44,25 @@ for size in 1440x900 1100x700; do
     if ! "$exe" --size "$size" --script "$s"; then echo "FAIL: $look $size: nyx exited non-zero" >&2; fail=1; fi
   done
 done
+# U6: the interface at 150 and 200 percent (the window at its 900 x 600 minimum in logical pixels: nothing may be cut or overlap), and the canvas as
+# a person with a colour-vision difference sees it (cvd.rs: protan, deutan, tritan; a simulation, not a person). Light look, scratch workspace.
+for sc in 1.5 2.0; do
+  case $sc in 1.5) size=1350x900;; *) size=1800x1200;; esac
+  p="$(win "$out")/scale-$sc"
+  s="theme light; scale $sc; page dashboard; shot $p-dashboard.png; sheet new; shot $p-new.png; sheet none; wf example 14; section build; shot $p-build.png; quit"
+  if ! "$exe" --size "$size" --script "$s"; then echo "FAIL: scale $sc: nyx exited non-zero" >&2; fail=1; fi
+done
+for k in protan deutan tritan; do
+  p="$(win "$out")/cvd-$k"
+  s="theme dark; scale 1.0; wf example 14; section build; cvd $k; shot $p-build.png"
+  [ -z "${UX_SHOTS_FAST:-}" ] && s="$s; compute; shot $p-results.png"
+  if ! "$exe" --size 1440x900 --script "$s; quit"; then echo "FAIL: cvd $k: nyx exited non-zero" >&2; fail=1; fi
+done
 for f in "$out"/*.png; do
   [ -s "$f" ] || { echo "FAIL: empty or missing $f" >&2; fail=1; }
 done
 n=$(ls "$out"/*.png 2>/dev/null | wc -l)
-[ -n "${UX_SHOTS_FAST:-}" ] && want=44 || want=84
+[ -n "${UX_SHOTS_FAST:-}" ] && want=53 || want=96
 [ "$n" -ge "$want" ] || { echo "FAIL: $n shots, expected $want" >&2; fail=1; }
 echo "$n shots in $out"
 exit $fail
