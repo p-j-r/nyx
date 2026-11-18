@@ -296,6 +296,63 @@ impl App {
             self.compute();
         }
     }
+
+    /// The engine's validated state of `physics`, kept for a third of a second so a frame that asks twice (the plot and the Results tab) does
+    /// not hash the project twice; a check, a solve or an edit that ends clears it (`forget_validated`).
+    pub fn validated_of(&self, physics: &str) -> nyx_engine::validated::Validated {
+        let mut c = self.validated_cache.borrow_mut();
+        if let Some((at, p, v)) = c.as_ref() {
+            if p == physics && at.elapsed() < std::time::Duration::from_millis(330) {
+                return v.clone();
+            }
+        }
+        let v = self.engine.validated(physics);
+        *c = Some((std::time::Instant::now(), physics.to_string(), v.clone()));
+        v
+    }
+
+    pub fn forget_validated(&self) {
+        *self.validated_cache.borrow_mut() = None;
+    }
+
+    /// The validated state of the result on show (productivity plan P6, ADR 91): a glyph and a word (Exploratory, Checked, Check not affordable),
+    /// the engine's reason, and for a result that is not checked a button for the check with the factor and tolerance of the Study tab. Nothing
+    /// is drawn for a stale result (the band above says it, and a stale result is never checked) or for a result read from a file.
+    pub fn validated_line(&mut self, ui: &mut egui::Ui) {
+        let Some(cur) = self.current else { return };
+        let Some(physics) = self.results[cur].physics.clone() else { return };
+        if self.stale_reason(cur).is_some() {
+            return;
+        }
+        let v = self.validated_of(&physics);
+        let state = validation_state(v.state);
+        let ctx = ui.ctx().clone();
+        let can_check = v.state != nyx_engine::validated::Validation::Checked && self.active().as_deref() == Some(physics.as_str()) && !self.convergence_running();
+        let mut check = false;
+        ui.horizontal_wrapped(|ui| {
+            kit::status(ui, state, state.word());
+            ui.label(RichText::new(v.reason.clone()).color(theme::muted(&ctx)));
+            if can_check {
+                let label = format!("Check convergence (x{}, tolerance {:e})", self.conv_factor, self.conv_tol);
+                if ui.small_button(label).on_hover_text("Solves again on a finer mesh and compares every eigenvalue, value and number of the result; the factor and tolerance are set in the Study tab").clicked() {
+                    check = true;
+                }
+            }
+        });
+        if check {
+            self.check_convergence();
+        }
+    }
+}
+
+/// The glyph state of a validated state.
+pub fn validation_state(v: nyx_engine::validated::Validation) -> State {
+    use nyx_engine::validated::Validation;
+    match v {
+        Validation::Exploratory => State::Exploratory,
+        Validation::Checked => State::Checked,
+        Validation::NotAffordable => State::NotAffordable,
+    }
 }
 
 enum Action {

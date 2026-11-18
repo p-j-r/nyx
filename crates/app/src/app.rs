@@ -126,6 +126,8 @@ pub struct App {
     pub colormap: Colormap,
     /// the last convergence check: its answer, whether one is running, and the settings of the next
     pub convergence: Option<Value>,
+    /// the validated state of a physics as the engine last said it (the plot asks every frame; the state changes only with a solve, a check or an edit)
+    pub validated_cache: std::cell::RefCell<Option<(std::time::Instant, String, nyx_engine::validated::Validated)>>,
     /// the results files being written on engine jobs (job id, path): they do not make the window busy, a failure is shown when they end
     pub exports: HashMap<u64, String>,
     /// the title of the results file being opened on a job, `Some` from the request until the draft workflow is made
@@ -199,6 +201,7 @@ impl App {
             shell: crate::shell::Shell::detached(),
             colormap: Colormap::Viridis,
             convergence: None,
+            validated_cache: std::cell::RefCell::new(None),
             exports: HashMap::new(),
             opening: None,
             conv_factor: 0.6,
@@ -573,6 +576,7 @@ impl App {
             } else {
                 None
             };
+            self.forget_validated();
             let kind = self.job_kind.take();
             let took = started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
             match (kind, outcome) {
@@ -589,6 +593,7 @@ impl App {
                 (Some(JobKind::Mesh), Err(e)) => self.set_error(format!("Geometry: {e}")),
                 (Some(JobKind::Convergence), Ok(v)) => {
                     self.convergence = Some(v);
+                    self.note_check_in_run();
                     self.status = format!("Convergence checked ({took:.1} s)");
                 }
                 (Some(JobKind::Convergence), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
@@ -1245,6 +1250,20 @@ impl App {
             let rect = egui::Rect::from_min_size(at, galley.size() + egui::vec2(12.0, 6.0));
             ui.painter().rect_filled(rect, 4.0, crate::activity::band_colours(ui.ctx()).0);
             ui.painter().galley(rect.min + egui::vec2(6.0, 3.0), galley, crate::activity::band_colours(ui.ctx()).1);
+        } else if show_results {
+            // the trust state of the field on show (P6): a chip on the plot, in the colours of the window, so it reads on either canvas and does not
+            // depend on the side panel being wide enough to show the same line
+            if let Some(physics) = self.current.and_then(|i| self.results.get(i)).and_then(|r| r.physics.clone()) {
+                let v = self.validated_of(&physics);
+                let state = crate::activity::validation_state(v.state);
+                let ctx = ui.ctx().clone();
+                let at = out.rect.left_top() + egui::vec2(10.0, 10.0);
+                let galley = ui.painter().layout_no_wrap(state.word().to_string(), egui::FontId::proportional(14.0), crate::theme::text(&ctx));
+                let rect = egui::Rect::from_min_size(at, egui::vec2(galley.size().x + 36.0, galley.size().y + 8.0));
+                ui.painter().rect(rect, 4.0, crate::theme::card(&ctx), egui::Stroke::new(1.0, crate::theme::edge(&ctx)), egui::StrokeKind::Inside);
+                crate::kit::paint_glyph(ui, rect.left_center() + egui::vec2(14.0, 0.0), state);
+                ui.painter().galley(rect.left_top() + egui::vec2(28.0, 4.0), galley, crate::theme::text(&ctx));
+            }
         }
         if let (Some(label), Some(i)) = (out.picked, self.picking) {
             if let Some(p) = self.picked.iter().position(|&l| l == label) {
@@ -1715,6 +1734,53 @@ mod tests {
                 assert_eq!(b.stale_reason(i), None, "{name}: result {i} of a workflow, after twelve frames");
             }
         }
+    }
+
+    /// P6: a result starts as exploratory, a passed convergence check makes it checked, the window draws the state, and the verdict is
+    /// written into the run record that solved it (the cantilever: its scalars move with the mesh, so a tight tolerance fails and a loose one
+    /// passes).
+    #[test]
+    fn the_window_shows_the_validated_state_and_a_check_goes_into_the_run() {
+        use nyx_engine::validated::Validation;
+        let mut b = app();
+        let root = std::env::temp_dir().join(format!("nyx-validated-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        b.attach_workspace(root.clone());
+        let path =examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("02_cantilever")).unwrap().path;
+        b.new_draft("Checked", crate::shell::Start::Example(path));
+        wait_idle(&mut b, 30);
+        b.shell_compute();
+        wait_idle(&mut b, 120);
+        assert!(b.error.is_none(), "{:?}", b.error);
+        assert_eq!(b.engine.validated("sms").state, Validation::Exploratory);
+        let ctx = b.ctx.clone();
+        let _ = ctx.run_ui(Default::default(), |ui| b.validated_line(ui));
+
+        // a tolerance the cantilever misses: still exploratory, and the reason says the check did not pass
+        b.conv_tol = 1e-9;
+        b.check_convergence();
+        wait_idle(&mut b, 120);
+        assert!(b.error.is_none(), "{:?}", b.error);
+        let v = b.engine.validated("sms");
+        assert_eq!(v.state, Validation::Exploratory, "{v:?}");
+        assert!(v.reason.contains("did not pass"), "{v:?}");
+
+        b.conv_tol = 0.5;
+        b.check_convergence();
+        wait_idle(&mut b, 120);
+        assert_eq!(b.engine.validated("sms").state, Validation::Checked);
+        let _ = ctx.run_ui(Default::default(), |ui| b.validated_line(ui));
+
+        let live = b.shell.live_run.clone().expect("the run whose result is on show");
+        let runs = b.shell.open[&live.wf_id].dir.as_ref().expect("a workflow folder").runs(&live.exp).0;
+        let run = runs.iter().find(|r| r.id == live.run).expect("the run");
+        let c = run.convergence.as_ref().expect("the verdict is in the run record");
+        assert!(c.passed && c.tolerance == 0.5 && c.factor == 0.6, "{c:?}");
+
+        // a mesh edit makes the result stale: nothing is claimed for it
+        b.cmd("set_mesh", json!({ "h": 0.015 }));
+        assert_eq!(b.engine.validated("sms").state, Validation::Exploratory);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A solve that comes back after the project changed again and was not kept by the engine is not shown as the run on screen.

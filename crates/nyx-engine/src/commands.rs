@@ -188,7 +188,7 @@ impl Engine {
                 schema(vec![("sweep", int("the sweep's number")), ("wait_s", number("longest wait in seconds, default 0"))], &[])),
             cmd("sweep_cancel", "Cancel the points of a sweep that have not finished", "Queued points never run; a running one stops at its next check.", Expensive, schema(vec![("sweep", int("the sweep's number"))], &["sweep"])),
             cmd("poll_jobs", "Apply finished jobs", "Applies every job that has finished since the last call and returns what each came to.", Read, schema(vec![], &[])),
-            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not) and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored).", Read, schema(vec![("physics", phys())], &[])),
+            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not) and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored), and `validated`: `{state, reason, check?}` where `state` is `exploratory` (no mesh-convergence check with a tolerance has passed on this problem), `checked` (one did: `check` says factor, tolerance, what was compared and the worst difference) or `check_not_affordable` (not checked, and a check is expected not to fit this machine). A stale result is never checked; every answer that carries `stale` carries `validated`.", Read, schema(vec![("physics", phys())], &[])),
             cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`), with `stale` and `age_s` of the result it was read from.", Read,
                 schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("field", text("field name")), ("max_values", int("default 2000"))], &["physics", "field"])),
             cmd("get_guide", "Read a nyx guide", "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).", Read,
@@ -216,7 +216,7 @@ impl Engine {
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
                 schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
             cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
-            cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged.", Expensive,
+            cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged.", Expensive,
                 schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report")), ("wait", boolean("wait for the answer, default true; false starts a job that job_list, job_status and job_cancel see and job_wait answers"))], &["physics"])),
             cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)")), ("wait", boolean("wait for the file, default true; false starts a job that writes what the engine holds now, under its name only when complete"))], &["path"])),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
@@ -560,7 +560,7 @@ impl Engine {
                 "physics": s.physics, "study": s.study.kind, "order": s.order,
                 "materials": s.materials.keys().collect::<Vec<_>>(), "conditions": s.bcs,
             })).collect::<Vec<_>>(),
-            "results": self.results.keys().map(|k| json!({ "physics": k, "stale": self.is_stale(k), "age_s": self.result_age(k) })).collect::<Vec<_>>(),
+            "results": self.results.keys().map(|k| json!({ "physics": k, "stale": self.is_stale(k), "age_s": self.result_age(k), "validated": self.validated_json(k) })).collect::<Vec<_>>(),
             "store": self.link.as_ref().map(|l| json!({ "workflow": l.dir.wf.id, "folder": l.dir.root, "experiment": l.experiment, "version": l.dir.wf.version })),
             "jobs_running": self.jobs.running(),
         })
@@ -681,7 +681,7 @@ impl Engine {
                 let r = &v.result;
                 json!({
                     "physics": k, "study": r.study, "order": r.order, "dim": r.dim, "dofs": r.dofs, "seconds": r.seconds,
-                    "stale": self.is_stale(k), "age_s": self.result_age(k),
+                    "stale": self.is_stale(k), "age_s": self.result_age(k), "validated": self.validated_json(k),
                     "solutions": r.solutions.iter().enumerate().map(|(i, s)| json!({
                         "index": i, "label": s.label, "value": s.value, "eigenvalue": s.eigenvalue,
                         "fields": s.fields.iter().map(|f| json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len() })).collect::<Vec<_>>(),
@@ -721,7 +721,7 @@ impl Engine {
         let stride = f.values.len().div_ceil(max).max(1);
         let values: Vec<f64> = f.values.iter().step_by(stride).copied().collect();
         Ok(
-            json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values, "stale": self.is_stale(p), "age_s": self.result_age(p) }),
+            json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values, "stale": self.is_stale(p), "age_s": self.result_age(p), "validated": self.validated_json(p) }),
         )
     }
 }

@@ -35,7 +35,7 @@ runs = component "Runs" "Append-only run records in runs.jsonl, the digest deriv
     properties {
         "adr" "64"
         "code" "crates/nyx-store/src: runs.rs"
-        "lines" "400"
+        "lines" "448"
         "codeDiagram" "4-code/store/runs.md"
     }
 }

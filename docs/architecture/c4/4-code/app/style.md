@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 > The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 5 files, 1221 lines.
+**Size:** 5 files, 1252 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 |---|---:|---|
 | `crates/app/src/cvd.rs` | 88 | Colour-vision simulation for the screenshots of the scripted runs (UX plan U6): `cvd protan\|deutan\|tritan` makes every later `shot` show the window as a person with that kind of colour-vision difference sees it, so the canvas, the legend... |
 | `crates/app/src/fmt.rs` | 175 | Small text helpers of the window (plan U3): plurals ("1 run", "2 runs"), ellipsis for long titles, SI prefixes ("201.7 µm"), and readable labels for the metric and parameter keys of the runs table ("max_von_mises_pa" becomes "Max von Mi... |
-| `crates/app/src/kit.rs` | 301 | Small widgets of the shell: cards, chips, buttons in the brand style, sparklines and modal sheets. |
+| `crates/app/src/kit.rs` | 332 | Small widgets of the shell: cards, chips, buttons in the brand style, sparklines and modal sheets. |
 | `crates/app/src/theme.rs` | 332 | The nyx look: every colour of the shell comes from `tokens.rs` (ADR 88) through the functions here, in a light and a dark look, both installed once (`apply_mode`) so a switch of the theme only changes which one is active. Body text is In... |
 | `crates/app/src/tokens.rs` | 325 | The colour tokens of the window as plain data (ADR 88): every role in a light and a dark value, and the two region palettes. No egui types here: `theme.rs` turns this into `Visuals`, the tests below check the contrast of every text pair ... |
 
@@ -29,7 +29,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [Inspector tabs](./inspector.md) | fmt, theme | accent, activity_text, danger, on_accent, plural, raised, success, text |
 | [Shell and dashboard](./shell.md) | fmt, kit, theme | State, card, danger, ellipsize, key_label, modal, muted, plural +3 |
 | [Viewport](./viewport.md) | fmt, theme, tokens | Ink, Mode, ellipsize, rgb, with_alpha |
-| [Window](./window.md) | cvd, theme | Kind, accent, activity_text, apply, danger, ink, install_fonts, on_accent +1 |
+| [Window](./window.md) | cvd, kit, theme | Kind, accent, activity_text, apply, card, danger, edge, ink +5 |
 
 ## Class diagram
 
@@ -71,6 +71,9 @@ classDiagram
         Waiting
         Failed
         Idle
+        Checked
+        Exploratory
+        NotAffordable
         +word() str
     }
     class TabHit {
@@ -177,19 +180,19 @@ classDiagram
 | fn | `chip` | `kit.rs:53` | `pub fn chip(ui: &mut Ui, text: impl Into<String>) -> Response` —  A small rounded label such as a tag. |
 | fn | `badge` | `kit.rs:60` | `pub fn badge(ui: &mut Ui, fill: Color32, fg: Color32, text: impl Into<String>)` —  A chip with a colour (status chip in the top bar, badges on the open-file screen). |
 | fn | `label_caps` | `kit.rs:65` | `pub fn label_caps(ui: &mut Ui, text: &str, hint: &str)` —  "RUNNING" style section label with an optional grey hint after it. |
-| enum | `State` | `kit.rs:77` | variants: `Done`, `Running`, `Waiting`, `Failed`, `Idle` —  What a workflow, a run or the solver is doing. Colour is never the only channel: every state has its own glyph (drawn, so it needs no font) |
-| fn | `glyph` | `kit.rs:104` | `pub fn glyph(ui: &mut Ui, state: State) -> Response` —  The glyph of a state, 14 px square. |
-| fn | `paint_glyph` | `kit.rs:111` | `pub fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State)` |
-| fn | `status` | `kit.rs:139` | `pub fn status(ui: &mut Ui, state: State, label: impl Into<String>)` —  A state with its word (or `label` instead of the word): glyph, then text in the colour that reads on the page. |
-| struct | `TabHit` | `kit.rs:155` | fields: `select`, `close` —  What `tab` reports: a click on the tab and a click on its close target. |
-| fn | `tab` | `kit.rs:162` | `pub fn tab(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, title: &str, selected: bool, state: Option<State>, closable: bool) -> TabHit` —  One tab of the top bar: 28 px high, a state glyph, the title, and (when `closable`) a 24 x 24 close target. Selected = tint and a 2 px accent |
-| fn | `mono` | `kit.rs:211` | `pub fn mono(text: impl Into<String>) -> RichText` |
-| fn | `muted` | `kit.rs:215` | `pub fn muted(ui: &Ui, text: impl Into<String>) -> RichText` |
-| fn | `title` | `kit.rs:219` | `pub fn title(text: impl Into<String>, size: f32) -> RichText` |
-| fn | `sparkline` | `kit.rs:224` | `pub fn sparkline(ui: &mut Ui, values: &[f64], color: Color32, size: Vec2)` —  A line of values as a polyline in a box (dashboard cards). |
-| fn | `bar` | `kit.rs:241` | `pub fn bar(ui: &mut Ui, fraction: Option<f32>, width: f32)` —  A determinate progress bar in plum on a pale track; `None` shows a sliding block (no percentage reported). |
-| fn | `modal` | `kit.rs:271` | `pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui)) -> bool` —  A modal sheet: dims the page, swallows clicks outside and shows `f` in a centred card. Returns `true` when it should close |
-| fn | `State::word` | `kit.rs:92` | `pub fn word(self) -> &'static str` |
+| enum | `State` | `kit.rs:77` | variants: `Done`, `Running`, `Waiting`, `Failed`, `Idle`, `Checked`, `Exploratory`, `NotAffordable` —  What a workflow, a run or the solver is doing. Colour is never the only channel: every state has its own glyph (drawn, so it needs no font) |
+| fn | `glyph` | `kit.rs:113` | `pub fn glyph(ui: &mut Ui, state: State) -> Response` —  The glyph of a state, 14 px square. |
+| fn | `paint_glyph` | `kit.rs:120` | `pub fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State)` |
+| fn | `status` | `kit.rs:170` | `pub fn status(ui: &mut Ui, state: State, label: impl Into<String>)` —  A state with its word (or `label` instead of the word): glyph, then text in the colour that reads on the page. |
+| struct | `TabHit` | `kit.rs:186` | fields: `select`, `close` —  What `tab` reports: a click on the tab and a click on its close target. |
+| fn | `tab` | `kit.rs:193` | `pub fn tab(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, title: &str, selected: bool, state: Option<State>, closable: bool) -> TabHit` —  One tab of the top bar: 28 px high, a state glyph, the title, and (when `closable`) a 24 x 24 close target. Selected = tint and a 2 px accent |
+| fn | `mono` | `kit.rs:242` | `pub fn mono(text: impl Into<String>) -> RichText` |
+| fn | `muted` | `kit.rs:246` | `pub fn muted(ui: &Ui, text: impl Into<String>) -> RichText` |
+| fn | `title` | `kit.rs:250` | `pub fn title(text: impl Into<String>, size: f32) -> RichText` |
+| fn | `sparkline` | `kit.rs:255` | `pub fn sparkline(ui: &mut Ui, values: &[f64], color: Color32, size: Vec2)` —  A line of values as a polyline in a box (dashboard cards). |
+| fn | `bar` | `kit.rs:272` | `pub fn bar(ui: &mut Ui, fraction: Option<f32>, width: f32)` —  A determinate progress bar in plum on a pale track; `None` shows a sliding block (no percentage reported). |
+| fn | `modal` | `kit.rs:302` | `pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui)) -> bool` —  A modal sheet: dims the page, swallows clicks outside and shows `f` in a centred card. Returns `true` when it should close |
+| fn | `State::word` | `kit.rs:98` | `pub fn word(self) -> &'static str` |
 | fn | `title_family` | `theme.rs:11` | `pub fn title_family() -> FontFamily` —  The serif italic family of page titles. |
 | fn | `title` | `theme.rs:15` | `pub fn title(size: f32) -> FontId` |
 | fn | `rgb` | `theme.rs:20` | `pub fn rgb(c: Rgb) -> Color32` —  A token colour as an egui colour. |

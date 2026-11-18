@@ -86,6 +86,12 @@ pub enum State {
     Failed,
     /// nothing to report, or not saved yet: a hollow grey ring
     Idle,
+    /// a result a convergence check passed on: a green ring with a check mark inside (productivity plan P6)
+    Checked,
+    /// a result nobody has checked: a ring, its left half filled, in the muted text colour
+    Exploratory,
+    /// a result whose check would not fit this machine: an amber ring with a slash
+    NotAffordable,
 }
 
 impl State {
@@ -96,6 +102,9 @@ impl State {
             State::Waiting => "Queued",
             State::Failed => "Failed",
             State::Idle => "Idle",
+            State::Checked => "Checked",
+            State::Exploratory => "Exploratory",
+            State::NotAffordable => "Check not affordable",
         }
     }
 }
@@ -132,6 +141,28 @@ pub fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State) {
         State::Idle => {
             p.circle_stroke(c, 4.5, Stroke::new(1.5, theme::edge(ctx)));
         }
+        State::Checked => {
+            let col = theme::success(ctx);
+            p.circle_stroke(c, 6.0, Stroke::new(1.5, col));
+            p.add(egui::Shape::line(vec![c + Vec2::new(-3.0, 0.5), c + Vec2::new(-1.0, 2.5), c + Vec2::new(3.0, -2.5)], Stroke::new(1.5, col)));
+        }
+        State::Exploratory => {
+            // the ring whole and the left half of the disc filled: "partly there", told without a colour
+            let col = theme::muted(ctx);
+            p.circle_stroke(c, 5.5, Stroke::new(1.5, col));
+            let half: Vec<egui::Pos2> = (0..=12)
+                .map(|i| {
+                    let a = std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 12.0;
+                    c + Vec2::new(a.cos(), -a.sin()) * 5.5
+                })
+                .collect();
+            p.add(egui::Shape::convex_polygon(half, col, Stroke::NONE));
+        }
+        State::NotAffordable => {
+            let col = theme::activity_text(ctx);
+            p.circle_stroke(c, 6.0, Stroke::new(1.5, col));
+            p.line_segment([c + Vec2::new(-4.2, 4.2), c + Vec2::new(4.2, -4.2)], Stroke::new(1.5, col));
+        }
     }
 }
 
@@ -139,10 +170,10 @@ pub fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State) {
 pub fn status(ui: &mut Ui, state: State, label: impl Into<String>) {
     let ctx = ui.ctx().clone();
     let color = match state {
-        State::Done => theme::success(&ctx),
+        State::Done | State::Checked => theme::success(&ctx),
         State::Failed => theme::danger(&ctx),
-        State::Running | State::Waiting => theme::activity_text(&ctx),
-        State::Idle => theme::muted(&ctx),
+        State::Running | State::Waiting | State::NotAffordable => theme::activity_text(&ctx),
+        State::Idle | State::Exploratory => theme::muted(&ctx),
     };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;

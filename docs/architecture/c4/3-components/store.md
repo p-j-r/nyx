@@ -68,7 +68,7 @@ graph TB
 | [Workspace](../4-code/store/workspace.md) | 2 | 306 | 14 | The folder behind the dashboard: settings, the list of workflows (manifests only) and the sections of the dashboard. |
 | [Workflow folder](../4-code/store/flow.md) | 1 | 483 | 14, 59 | One workflow folder: workflow.json, history.jsonl, notes, specs and one folder per experiment. |
 | [Versions](../4-code/store/versions.md) | 1 | 200 | 14, 59 | Every change to an experiment's set-up kept in history.jsonl with the hash of its spec. |
-| [Runs](../4-code/store/runs.md) | 1 | 400 | 64 | Append-only run records in runs.jsonl, the digest derived from them and the filter language of the runs table. |
+| [Runs](../4-code/store/runs.md) | 1 | 448 | 64 | Append-only run records in runs.jsonl, the digest derived from them and the filter language of the runs table. |
 | [Search](../4-code/store/search.md) | 1 | 253 | 14 | Search over the manifests: plain words with a synonym table and numbers with units matched against card dimensions. |
 | [Archives](../4-code/store/archive.md) | 1 | 703 | 14 | .nyx files: a workflow as one deterministic ZIP and the safe way back in. |
 | [Utilities](../4-code/store/util.md) | 1 | 171 | 14 | UTC time without a time crate, time-ordered ids, atomic file writes, hashes and slugs. |

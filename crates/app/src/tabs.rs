@@ -629,6 +629,8 @@ impl App {
                 }
             });
         }
+        // what the check left the result on show as (it is the engine's state, so a check of another problem does not count)
+        self.validated_line(ui);
         if spec != spec0 {
             self.set_problem(&active, &spec);
         }
@@ -648,6 +650,7 @@ impl App {
         };
         ui.heading("Results");
         self.stale_band(ui);
+        self.validated_line(ui);
         if self.results.len() > 1 {
             let stale: Vec<bool> = (0..self.results.len()).map(|i| self.stale_reason(i).is_some()).collect();
             let label = |i: usize, name: &str| if stale[i] { format!("{name} (stale)") } else { name.to_string() };

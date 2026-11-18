@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Analyses** (`engine.analyse`) in the contai
 > Runs the analyses of nyx-analysis on the latest result of a physics.
 
 **Decisions:** [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 1 file, 82 lines.
+**Size:** 1 file, 83 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/analyse.rs` | 82 | Analyses of results as engine commands: a result is solved once, an analysis is a function of it and of the mesh it was solved on (`nyx-analysis`, ADR 56). The window draws the typed `ModeAnalysis`; the MCP server gets the same through `... |
+| `crates/nyx-engine/src/analyse.rs` | 83 | Analyses of results as engine commands: a result is solved once, an analysis is a function of it and of the mesh it was solved on (`nyx-analysis`, ADR 56). The window draws the typed `ModeAnalysis`; the MCP server gets the same through `... |
 
 ## What it uses
 

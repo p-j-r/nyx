@@ -3,7 +3,7 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: app.rs, main.rs, state.rs"
-        "lines" "2208"
+        "lines" "2274"
         "codeDiagram" "4-code/app/window.md"
     }
 }
@@ -11,7 +11,7 @@ shell = component "Shell and dashboard" "The tab bar, the native menu and the ta
     properties {
         "adr" "14, 23, 87, 88"
         "code" "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs"
-        "lines" "4309"
+        "lines" "4394"
         "codeDiagram" "4-code/app/shell.md"
     }
 }
@@ -19,7 +19,7 @@ inspector = component "Inspector tabs" "The tabs beside the viewport: geometry e
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: forms.rs, geomui.rs, tabs.rs"
-        "lines" "2182"
+        "lines" "2185"
         "codeDiagram" "4-code/app/inspector.md"
     }
 }
@@ -27,7 +27,7 @@ viewport = component "Viewport" "The 2D/3D viewport: camera, drawing of meshes a
     properties {
         "adr" "23, 88"
         "code" "crates/app/src: colormap.rs, regions.rs, scene.rs, viewport.rs"
-        "lines" "1589"
+        "lines" "1590"
         "codeDiagram" "4-code/app/viewport.md"
     }
 }
@@ -35,7 +35,7 @@ style = component "Look and widgets" "The nyx look (the colour tokens as data, f
     properties {
         "adr" "23, 88"
         "code" "crates/app/src: cvd.rs, fmt.rs, kit.rs, theme.rs, tokens.rs"
-        "lines" "1221"
+        "lines" "1252"
         "codeDiagram" "4-code/app/style.md"
     }
 }
@@ -43,7 +43,7 @@ headless = component "Scripts and batch" "Runs without a person at the window: s
     properties {
         "adr" "23, 89"
         "code" "crates/app/src: apicmd.rs, batch.rs, pyscript.rs, runfile.rs, script.rs"
-        "lines" "602"
+        "lines" "621"
         "codeDiagram" "4-code/app/headless.md"
     }
 }

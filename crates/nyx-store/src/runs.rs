@@ -28,6 +28,22 @@ pub struct Artifact {
     pub bytes: u64,
 }
 
+/// What a mesh-convergence check said about the problem a run solved (ADR 91, productivity plan P6). Plain data: the store knows nothing of a project.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Convergence {
+    /// the ratio of the finer element size to the run's own
+    pub factor: f64,
+    /// the largest relative difference accepted
+    pub tolerance: f64,
+    /// what was compared and how the solutions were matched, in words ("every eigenvalue, value and numeric scalar (4), solutions matched by index")
+    pub observable: String,
+    /// every compared quantity was within the tolerance
+    pub passed: bool,
+    /// the largest relative difference found
+    #[serde(default)]
+    pub worst_relative: f64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunRecord {
     pub id: String,
@@ -52,6 +68,9 @@ pub struct RunRecord {
     pub artifacts: Vec<Artifact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// the convergence check of the problem this run solved, when one was made (optional: runs written before it existed load without it)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convergence: Option<Convergence>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -62,6 +81,8 @@ pub struct RunPatch {
     pub tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convergence: Option<Convergence>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -107,6 +128,9 @@ pub fn parse(text: &str) -> (Vec<RunRecord>, usize) {
                 }
                 if let Some(n) = p.patch.note {
                     r.note = n;
+                }
+                if let Some(c) = p.patch.convergence {
+                    r.convergence = Some(c);
                 }
             }
         } else if let Ok(r) = serde_json::from_str::<RunRecord>(line) {
@@ -380,7 +404,7 @@ mod tests {
         a.version = 3;
         append(&path, &a).unwrap();
         append(&path, &run("r0002_def", 5.1e-7, 2.41)).unwrap();
-        append_patch(&path, "r0001_abc", RunPatch { star: Some(true), tags: Some(vec!["good".into()]), note: Some("keep".into()) }).unwrap();
+        append_patch(&path, "r0001_abc", RunPatch { star: Some(true), tags: Some(vec!["good".into()]), note: Some("keep".into()), ..Default::default() }).unwrap();
         // a crash in the middle of a line
         std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"{\"id\":\"r0003_x\",\"t\":\"20").unwrap();
         let (runs, bad) = read(&path);
@@ -394,6 +418,30 @@ mod tests {
         assert_eq!(d.params["w"].n, 2);
         assert!((d.metrics["neff_re"].max - 2.41).abs() < 1e-12);
         assert!(to_csv(&runs.iter().collect::<Vec<_>>()).starts_with("run,time,status,version,star,seconds,params.w,metrics.neff_re\n"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_convergence_verdict_is_a_patch_and_old_lines_load_without_it() {
+        let dir = std::env::temp_dir().join(format!("nyx-store-conv-{}", crate::util::short_id()));
+        let path = dir.join("runs.jsonl");
+        append(&path, &run("r0001_a", 5e-7, 2.4)).unwrap();
+        append(&path, &run("r0002_b", 5e-7, 2.4)).unwrap();
+        let c = Convergence { factor: 0.6, tolerance: 1e-3, observable: "eigenvalues, matched by index".into(), passed: true, worst_relative: 2.5e-4 };
+        append_patch(&path, "r0001_a", RunPatch { convergence: Some(c.clone()), ..Default::default() }).unwrap();
+        // a later check of the same problem replaces the earlier verdict; a star patch afterwards leaves it alone
+        let failed = Convergence { passed: false, worst_relative: 0.02, ..c.clone() };
+        append_patch(&path, "r0001_a", RunPatch { convergence: Some(failed.clone()), ..Default::default() }).unwrap();
+        append_patch(&path, "r0001_a", RunPatch { star: Some(true), ..Default::default() }).unwrap();
+        let (runs, bad) = read(&path);
+        assert_eq!(bad, 0);
+        assert_eq!(runs[0].convergence, Some(failed));
+        assert!(runs[0].star);
+        assert_eq!(runs[1].convergence, None);
+        // a record without a verdict does not write the key, so every earlier line and exemplar is unchanged
+        assert!(!serde_json::to_string(&runs[1]).unwrap().contains("convergence"));
+        let old = r#"{"id":"r1","t":"2026-10-31T00:00:00Z","sec":1.0,"status":"ok","spec":"b3:1","femcore":"0.1.0","params":{},"metrics":{}}"#;
+        assert!(parse(old).0[0].convergence.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

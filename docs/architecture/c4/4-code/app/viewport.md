@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Viewport** (`app.viewport`) in the containe
 > The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 4 files, 1589 lines.
+**Size:** 4 files, 1590 lines.
 
 ## Files
 
@@ -14,7 +14,7 @@ C4 level 4 (code) of the component **Viewport** (`app.viewport`) in the containe
 | `crates/app/src/colormap.rs` | 156 | Colour maps for field plots (Viridis, Cividis, Turbo, Inferno, cool-warm, gray) as functions of a value in [0, 1], and the palette used to tell boundary conditions apart (the eight region colours of `tokens.rs`). |
 | `crates/app/src/regions.rs` | 194 | Which colour a region gets on the canvas (ADR 88, plan U4, section 5 of docs/ux/UX_MERGED_PLAN.md). The colour follows the entity, not the rank: a region is keyed by its material when it has one (regions of the same material share a colo... |
 | `crates/app/src/scene.rs` | 277 | What the viewport draws, kept between frames. |
-| `crates/app/src/viewport.rs` | 962 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking. |
+| `crates/app/src/viewport.rs` | 963 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking. |
 
 ## What it uses
 
@@ -135,6 +135,7 @@ classDiagram
         <<struct>>
         +picked Option~i32~
         +probe Option~String~
+        +rect Rect
     }
     class Viewport {
         <<struct>>
@@ -187,16 +188,16 @@ classDiagram
 | fn | `Scene::visible_tris` | `scene.rs:201` | `pub fn visible_tris(&self, tris: &[[u32; 3]], lo: Pos2, hi: Pos2, limit: usize) -> Vec<usize>` —  Triangles that touch the rectangle `[lo, hi]` on the screen, at most `limit` of them (for drawing edges). |
 | struct | `Camera` | `viewport.rs:15` | fields: `yaw`, `pitch`, `zoom`, `pan`, `center`, `base_scale`, `is3d` |
 | enum | `Content` | `viewport.rs:94` | variants: `Mesh`, `Field`, `Empty` —  What to draw. |
-| struct | `ViewOutput` | `viewport.rs:121` | fields: `picked`, `probe` |
-| struct | `Viewport` | `viewport.rs:127` | fields: `cam`, `fit_token`, `isolate` |
-| fn | `shade` | `viewport.rs:173` | `pub(crate) fn shade(c: Color32, k: f32) -> Color32` —  Shades a colour by the cosine `k` between the face normal and the view direction. |
-| fn | `point_in_tri` | `viewport.rs:178` | `pub(crate) fn point_in_tri(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> Option<[f32` |
-| fn | `hatch_triangle` | `viewport.rs:622` | `pub(crate) fn hatch_triangle(painter: &egui::Painter, tri: [Pos2; 3], spacing: f32, stroke: Stroke)` —  1 px lines at 45 degrees, `spacing` apart on one grid for the whole canvas (so neighbouring triangles join their lines), clipped to the triangle. |
-| fn | `format_value` | `viewport.rs:773` | `pub fn format_value(v: f32) -> String` |
+| struct | `ViewOutput` | `viewport.rs:120` | fields: `picked`, `probe`, `rect` |
+| struct | `Viewport` | `viewport.rs:128` | fields: `cam`, `fit_token`, `isolate` |
+| fn | `shade` | `viewport.rs:174` | `pub(crate) fn shade(c: Color32, k: f32) -> Color32` —  Shades a colour by the cosine `k` between the face normal and the view direction. |
+| fn | `point_in_tri` | `viewport.rs:179` | `pub(crate) fn point_in_tri(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> Option<[f32` |
+| fn | `hatch_triangle` | `viewport.rs:623` | `pub(crate) fn hatch_triangle(painter: &egui::Painter, tri: [Pos2; 3], spacing: f32, stroke: Stroke)` —  1 px lines at 45 degrees, `spacing` apart on one grid for the whole canvas (so neighbouring triangles join their lines), clipped to the triangle. |
+| fn | `format_value` | `viewport.rs:774` | `pub fn format_value(v: f32) -> String` |
 | fn | `Camera::fit` | `viewport.rs:32` | `pub fn fit(&mut self, bbox: ([f32; 3], [f32; 3]), size: Vec2, is3d: bool, margin_right: f32)` |
 | fn | `Camera::project` | `viewport.rs:61` | `pub fn project(&self, p: [f32; 3], c: Pos2) -> (Pos2, f32)` |
 | fn | `Camera::unproject_2d` | `viewport.rs:74` | `pub fn unproject_2d(&self, s: Pos2, c: Pos2) -> [f32` —  World (x, y) under a screen position in 2D mode. |
 | fn | `Camera::view_normal_z` | `viewport.rs:79` | `pub(crate) fn view_normal_z(&self, a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> f32` |
-| fn | `Viewport::show` | `viewport.rs:237` | `pub fn show(&mut self, ui: &mut Ui, content: Content<'_>, picking: bool, ink: &Ink) -> ViewOutput` |
+| fn | `Viewport::show` | `viewport.rs:238` | `pub fn show(&mut self, ui: &mut Ui, content: Content<'_>, picking: bool, ink: &Ink) -> ViewOutput` |
 
 Trait implementations in this component: `Scene: Default`, `Camera: Default`, `Viewport: Default`

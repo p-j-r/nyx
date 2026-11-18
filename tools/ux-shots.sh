@@ -35,6 +35,8 @@ for size in 1440x900 1100x700; do
       # a job that waits (the queue is paused) with the queue popover open; resumed, the job runs and the script waits for it again
       s="$s; wait off; queue pause; compute; shot $p-queued.png; queue open; shot $p-queue.png; queue close; queue resume; wait on"
       s="$s; compute; shot $p-results.png; canvas theme; shot $p-results-canvas-theme.png; canvas dark; section analysis; shot $p-analysis.png"
+      # P6: the trust state of a result on the field page: exploratory, then checked by a check that passes, then exploratory again by one that fails (the cantilever's numbers move with the mesh)
+      s="$s; wf example 1; compute; section analysis; view field; shot $p-validated-exploratory.png; check 0.5; shot $p-validated-checked.png; check 1e-9; shot $p-validated-failed.png"
       # a workflow that was saved and is marked done moves to the Earlier table of the Dashboard
       s="$s; done 0; page dashboard; shot $p-earlier.png"
       # a sweep of one parameter: the points running and waiting (the chip and the queue popover), the finished table and chart, and the runs on the Analysis page with ticked runs ringed
@@ -62,7 +64,7 @@ for f in "$out"/*.png; do
   [ -s "$f" ] || { echo "FAIL: empty or missing $f" >&2; fail=1; }
 done
 n=$(ls "$out"/*.png 2>/dev/null | wc -l)
-[ -n "${UX_SHOTS_FAST:-}" ] && want=53 || want=96
+[ -n "${UX_SHOTS_FAST:-}" ] && want=53 || want=108
 [ "$n" -ge "$want" ] || { echo "FAIL: $n shots, expected $want" >&2; fail=1; }
 echo "$n shots in $out"
 exit $fail

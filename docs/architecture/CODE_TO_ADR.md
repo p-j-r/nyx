@@ -168,12 +168,14 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/worker.rs` | 86 | a worker gives the numbers of the same solve in this process to the bit (five examples, a coupled chain), its stage log is the job log, a cancel kills it at once, what cannot be isolated says so, sweep points in workers |
 | `crates/nyx-engine/tests/admission.rs` | 86 | estimates from worker runs, no estimate without two sizes, a solve waits for memory and says why, refusal unless forced, a cancel ends the wait, the history survives in a file |
 | `crates/nyx-engine/tests/worker_crash.rs` | 86 | a worker that dies fails its job only and the next job runs |
+| `crates/nyx-engine/tests/validated.rs` | 91 | the three states of a result, a stale result never checked, the verdict kept by problem key, check not affordable from the memory estimate, the verdict in the run record |
 | `crates/nyx-engine/tests/reduce.rs` | 90 | the reductions against closed forms and against loops on the raw arrays, to the bit, for any thread count, on a worker's result and on real physics |
 | `crates/nyx-engine/tests/stale.rs` | 84, 64 | staleness per physics, late jobs, the `stale` fields of the replies |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |
 | `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |
 | `crates/nyx-engine/tests/golden/*` | 10, 42 | `solid_static_thermal_from_heat`, moved unchanged from femcore |
 | `crates/nyx-engine/examples/*` | 41, 9 | benchmarks and logs that drive every physics |
+| `crates/nyx-engine/src/validated.rs` | 91 | the validated state (exploratory, checked, check not affordable), the checks kept by problem key and the verdict written into the run record |
 | `crates/nyx-engine/src/reduce.rs` | 90 | field handles and the reductions `integrate`, `extremum`, `probe`, `line_cut`, `overlap`, `confinement`: the quadrature rule, the order of the sums, the cell locator |
 | `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
 <!-- map:end -->

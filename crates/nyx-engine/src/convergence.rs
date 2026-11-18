@@ -181,11 +181,15 @@ fn check(
         let (a, b) = (coarse.numbers.clone(), numbers(&fine));
         let mut rows = vec![];
         let mut worst = 0.0f64;
+        let mut worst_name = String::new();
         let mut all = true;
         for (name, x) in &a {
             let Some((_, y)) = b.iter().find(|(n, _)| n == name) else { continue };
             let scale = x.abs().max(y.abs()).max(1e-300);
             let rel = (x - y).abs() / if scale < 1e-12 { 1.0 } else { scale };
+            if rel > worst || worst_name.is_empty() {
+                worst_name = name.clone();
+            }
             worst = worst.max(rel);
             let pass = tolerance.map(|t| rel <= t);
             all &= pass.unwrap_or(true);
@@ -201,6 +205,9 @@ fn check(
             "coarse_reused": self_reused,
             "seconds": t0.elapsed().as_secs_f64(),
             "worst_relative": worst,
+            "worst_quantity": worst_name,
+            "quantities": rows.len(),
+            "matching": "index",
             "converged": tolerance.map(|_| all),
             "rows": rows,
             "note": "the project was not changed; compare with a smaller factor if the difference is still falling",

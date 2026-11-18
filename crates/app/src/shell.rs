@@ -10,7 +10,7 @@
 use crate::app::App;
 use crate::theme;
 use eframe::egui::{self, RichText, Vec2};
-use nyx_engine::facade::store::runs::{RunRecord, RunStatus};
+use nyx_engine::facade::store::runs::{RunPatch, RunRecord, RunStatus};
 use nyx_engine::facade::store::util::{hash_bytes, now_secs};
 use nyx_engine::facade::store::{Entry, Settings, Workspace, WorkflowDir};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -156,6 +156,15 @@ impl OpenWf {
 }
 
 /// The run that is being solved, so its record can be written whatever the window shows when it ends.
+/// The run record whose result is on show: where it lives, and the physics it holds the result of (a convergence verdict is written into it, P6).
+#[derive(Clone, Debug)]
+pub struct LiveRun {
+    pub wf_id: String,
+    pub exp: String,
+    pub run: String,
+    pub physics: String,
+}
+
 pub struct RunCtx {
     pub wf_id: String,
     pub exp: String,
@@ -189,7 +198,7 @@ pub struct Shell {
     pub loaded: Option<(String, String)>,
     pub run: Option<RunCtx>,
     /// the id of the run whose fields are still in `App::results`
-    pub live_run: Option<String>,
+    pub live_run: Option<LiveRun>,
     pub sheet: Sheet,
     pub new: NewState,
     pub palette_q: String,
@@ -600,10 +609,29 @@ impl App {
     }
 
     /// A solve finished well: writes its run record and keeps the log with it. Returns the run id.
-    pub fn record_ok(&mut self, res: &nyx_engine::facade::physics::SolveResult) -> Option<String> {
+    pub fn record_ok(&mut self, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun> {
         let rc = self.shell.run.take()?;
+        let (wf_id, exp) = (rc.wf_id.clone(), rc.exp.clone());
         let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: nyx_engine::store_link::metrics_of(res), ..Default::default() };
-        self.write_run(rc, rec, Some(res.log.join("\n")))
+        self.write_run(rc, rec, Some(res.log.join("\n"))).map(|run| LiveRun { wf_id, exp, run, physics: res.physics.clone() })
+    }
+
+    /// A convergence check of the result on show has finished: when the engine says the result now rests on a check, the verdict goes into the
+    /// run record that solved it (an appended patch line, like a star), so the runs table and a later session know the run was checked.
+    pub fn note_check_in_run(&mut self) {
+        let Some(live) = self.shell.live_run.clone() else { return };
+        let Some(check) = self.engine.validated(&live.physics).check else { return };
+        let patch = RunPatch { convergence: Some(check.to_record()), ..Default::default() };
+        let Some(w) = self.shell.open.get_mut(&live.wf_id) else { return };
+        let Some(d) = w.dir.as_mut() else { return };
+        match d.patch_run(&live.exp, &live.run, patch) {
+            Ok(()) => {
+                if w.exp == live.exp {
+                    w.reload_runs();
+                }
+            }
+            Err(e) => self.set_error(format!("Could not record the check in the run: {e}")),
+        }
     }
 
     /// A solve failed or was cancelled.

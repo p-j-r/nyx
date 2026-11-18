@@ -75,6 +75,7 @@ impl Engine {
             o.insert("physics".into(), json!(physics));
             o.insert("stale".into(), json!(self.is_stale(physics)));
             o.insert("age_s".into(), json!(self.result_age(physics)));
+            o.insert("validated".into(), self.validated_json(physics));
         }
         Ok(v)
     }

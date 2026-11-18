@@ -63,6 +63,17 @@ impl App {
                 }
             }
             "compute" => self.shell_compute(),
+            // `check TOLERANCE [FACTOR]`: a mesh-convergence check of the active physics (the script waits for it); the state it leaves is drawn under Results
+            "check" => {
+                let mut words = arg.split_whitespace().filter_map(|w| w.parse::<f64>().ok());
+                if let Some(t) = words.next() {
+                    self.conv_tol = t;
+                }
+                if let Some(f) = words.next() {
+                    self.conv_factor = f;
+                }
+                self.check_convergence();
+            }
             // shell layout: `wf example N`, `page dashboard|settings|N`, `section concept|build|analysis`, `sheet new|palette|versions|share|about|none`; looks for a shot (not saved): `theme light|dark|system`, `contrast standard|high|auto`, `motion on|off`
             "wf" => {
                 if let Some(e) = arg.strip_prefix("example ").and_then(|n| n.trim().parse::<usize>().ok()).and_then(|i| crate::examples::list().into_iter().nth(i)) {
@@ -208,7 +219,15 @@ impl App {
                     self.status = format!("Saved {arg}");
                 }
             }
-            "view" => self.show_results = arg == "result",
+            "view" => {
+                self.show_results = arg == "result" || arg == "field";
+                // `view field`: the page of the result's fields (where the Results tab, with its validated state, is laid out)
+                if arg == "field" {
+                    if let Some(w) = self.shell.current_mut() {
+                        w.sub = crate::shell::Sub::Field;
+                    }
+                }
+            }
             // camera moves, for timing and screenshots: `rotate DYAW DPITCH` (radians), `pan DX DY` (pixels), `zoom FACTOR`
             "rotate" => {
                 let v: Vec<f32> = arg.split_whitespace().filter_map(|x| x.parse().ok()).collect();

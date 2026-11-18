@@ -29,6 +29,8 @@ pub(crate) struct Stored {
     pub at: Instant,
     /// the mesh it was solved on: the reductions (ADR 90) read its fields on exactly these cells, whatever the project's mesh is now
     pub model: Arc<MeshedModel>,
+    /// the run record that holds this result's solve, when the engine wrote one (the verdict of a convergence check goes into it, P6)
+    pub run: Option<String>,
 }
 
 /// What a solve job is for: the engine's own project, or one point of a sweep.
@@ -55,7 +57,11 @@ pub(crate) enum Pending {
         index: usize,
         project: Box<Project>,
     },
-    Convergence,
+    /// the physics checked and the problem key it was checked for (a verdict belongs to a problem, not to a result, ADR 91)
+    Convergence {
+        physics: String,
+        key: String,
+    },
     Open,
     Export,
 }
@@ -95,6 +101,8 @@ pub struct Engine {
     /// what solves of this machine have cost, learned from the workers (`estimate.rs`), and how the engine asks the machine about its memory
     pub(crate) history: Arc<crate::estimate::History>,
     pub(crate) memory_probe: crate::estimate::MemoryProbe,
+    /// what the mesh-convergence checks of this session found, by the problem key they were made for (`validated.rs`)
+    pub(crate) checks: BTreeMap<String, crate::validated::Check>,
 }
 
 /// What a worker reported, in words for the log of the run.
@@ -147,6 +155,7 @@ impl Engine {
             isolable: false,
             history: Arc::new(crate::estimate::History::default()),
             memory_probe: Arc::new(crate::process::system_memory),
+            checks: BTreeMap::new(),
         }
     }
 
@@ -556,13 +565,14 @@ impl Engine {
         // the coarse solve of the check is the solve of this physics alone on the present mesh: its key is the problem key and that chain
         job.reuse = self.problem_key(physics).map(|k| (self.stages.clone(), solve_key(&k, &[physics.to_string()])));
         let physics = physics.to_string();
+        let key = self.problem_key(&physics).unwrap_or_default();
         let submit =
             self.submission(&format!("convergence {physics}"), Lane::Heavy, opts, &format!("convergence {physics}"));
         let name = physics.clone();
         let id = self.jobs.submit(submit, move |progress| {
             job.run_with(&progress, &physics, factor, tolerance).map(JobOutput::Convergence)
         });
-        self.pending.insert(id, Pending::Convergence);
+        self.pending.insert(id, Pending::Convergence { physics: name.clone(), key });
         self.note_job(id, "convergence", vec![name]);
         Ok(id)
     }
@@ -674,6 +684,7 @@ impl Engine {
                                 job: id,
                                 at: Instant::now(),
                                 model: solved_on.clone(),
+                                run: None,
                             },
                         );
                     }
@@ -695,6 +706,13 @@ impl Engine {
                 }
                 self.learn(&results, cells, dim, &worker);
                 let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
+                if let Some(rid) = run["id"].as_str() {
+                    for r in &results {
+                        if let Some(s) = self.results.get_mut(&r.physics).filter(|s| s.job == id) {
+                            s.run = Some(rid.to_string());
+                        }
+                    }
+                }
                 let mut answer =
                     json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds });
                 if let Some(w) = worker {
@@ -705,7 +723,9 @@ impl Engine {
             (Pending::Point { sweep, index, project }, outcome) => {
                 self.apply_point(id, sweep, index, *project, outcome)
             }
-            (Pending::Convergence, Ok(JobOutput::Convergence(v))) => Ok(v),
+            (Pending::Convergence { physics, key }, Ok(JobOutput::Convergence(v))) => {
+                self.checked_answer(&physics, &key, v)
+            }
             (Pending::Export, Ok(JobOutput::Exported(v))) => Ok(v),
             (Pending::Open, Ok(JobOutput::Opened(o))) => {
                 let Opened { project, model, results, path } = *o;
@@ -724,7 +744,14 @@ impl Engine {
                     let k = keys.get(&code).cloned().unwrap_or_default();
                     self.results.insert(
                         code,
-                        Stored { result: Arc::new(r), key: k, job: id, at: Instant::now(), model: model.clone() },
+                        Stored {
+                            result: Arc::new(r),
+                            key: k,
+                            job: id,
+                            at: Instant::now(),
+                            model: model.clone(),
+                            run: None,
+                        },
                     );
                 }
                 Ok(json!({ "title": self.project.title, "path": path, "cells": cells, "results": physics }))

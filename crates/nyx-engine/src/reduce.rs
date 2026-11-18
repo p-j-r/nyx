@@ -381,6 +381,7 @@ impl Engine {
         v["physics"] = json!(physics);
         v["stale"] = json!(stale);
         v["age_s"] = json!(age);
+        v["validated"] = self.validated_of(physics);
     }
 
     /// The names of the regions of the mesh a result was solved on (what the Results tab offers to reduce over).

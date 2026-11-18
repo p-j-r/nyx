@@ -117,11 +117,12 @@ pub enum Content<'a> {
     Empty,
 }
 
-#[derive(Default)]
 pub struct ViewOutput {
     /// boundary number clicked (in picking mode)
     pub picked: Option<i32>,
     pub probe: Option<String>,
+    /// where the plot was drawn (overlays that belong to it are placed from here)
+    pub rect: eframe::egui::Rect,
 }
 
 pub struct Viewport {
@@ -239,7 +240,7 @@ impl Viewport {
         let (resp, painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let rect = resp.rect;
         painter.rect_filled(rect, 0.0, ink.bg);
-        let mut out = ViewOutput::default();
+        let mut out = ViewOutput { picked: None, probe: None, rect };
         let (bbox, is3d, has_content) = match &content {
             Content::Mesh { view, .. } | Content::Field { view, .. } => (view.bbox, view.dim == 3, true),
             Content::Empty => (([0.0; 3], [1.0; 3]), false, false),

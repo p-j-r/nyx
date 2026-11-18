@@ -46,26 +46,26 @@ graph TB
     9-. "<div>uses fmt, theme</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     9-. "<div>uses colormap</div><div style='font-size: 70%'>[Rust paths]</div>" .->10
     9-. "<div>uses app, state</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
-    8-. "<div>uses engine: crate root,<br />engine +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    8-. "<div>uses engine: crate root,<br />engine +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
     8-. "<div>uses fmt, kit +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     8-. "<div>uses app, state</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
     10-. "<div>uses engine: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
     10-. "<div>uses fmt, theme +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     7-. "<div>uses connect: config, env +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->16
-    7-. "<div>uses engine: crate root,<br />engine +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    7-. "<div>uses engine: crate root,<br />engine +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
     7-. "<div>uses pyscript</div><div style='font-size: 70%'>[Rust paths]</div>" .->12
     7-. "<div>uses geomui</div><div style='font-size: 70%'>[Rust paths]</div>" .->9
     7-. "<div>uses activity, examples +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
-    7-. "<div>uses cvd, theme</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
+    7-. "<div>uses cvd, kit +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     7-. "<div>uses colormap, regions +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->10
 
   end```
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Window](../4-code/app/window.md) | 3 | 2208 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
-| [Shell and dashboard](../4-code/app/shell.md) | 8 | 4309 | 14, 23, 87, 88 | The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
-| [Inspector tabs](../4-code/app/inspector.md) | 3 | 2182 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
-| [Viewport](../4-code/app/viewport.md) | 4 | 1589 | 23, 88 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames. |
-| [Look and widgets](../4-code/app/style.md) | 5 | 1221 | 23, 88 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written. |
-| [Scripts and batch](../4-code/app/headless.md) | 5 | 602 | 23, 89 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script. |
+| [Window](../4-code/app/window.md) | 3 | 2274 | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
+| [Shell and dashboard](../4-code/app/shell.md) | 8 | 4394 | 14, 23, 87, 88 | The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
+| [Inspector tabs](../4-code/app/inspector.md) | 3 | 2185 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
+| [Viewport](../4-code/app/viewport.md) | 4 | 1590 | 23, 88 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames. |
+| [Look and widgets](../4-code/app/style.md) | 5 | 1252 | 23, 88 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written. |
+| [Scripts and batch](../4-code/app/headless.md) | 5 | 621 | 23, 89 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script. |
