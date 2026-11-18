@@ -135,6 +135,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
 | `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88 | colour tokens as data, the looks built from them, the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
+| `crates/app/src/{feedback,spans}.rs` | 92 | the problem and size lines of an edit, the polarization thread, and the timing spans of the frame log |
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |
 | `crates/app/src/*` | 23 | |
 | `crates/app/*` | 23 | |
@@ -168,6 +169,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/worker.rs` | 86 | a worker gives the numbers of the same solve in this process to the bit (five examples, a coupled chain), its stage log is the job log, a cancel kills it at once, what cannot be isolated says so, sweep points in workers |
 | `crates/nyx-engine/tests/admission.rs` | 86 | estimates from worker runs, no estimate without two sizes, a solve waits for memory and says why, refusal unless forced, a cancel ends the wait, the history survives in a file |
 | `crates/nyx-engine/tests/worker_crash.rs` | 86 | a worker that dies fails its job only and the next job runs |
+| `crates/nyx-engine/tests/preview.rs` | 92 | the problem of an edit, the trial mesh and its estimate, the polarization task: none of them changes the engine |
+| `crates/nyx-engine/src/preview.rs` | 92 | feedback while editing: check an edit, size and cost from a trial mesh, the polarization as a function that owns its inputs |
 | `crates/nyx-engine/tests/validated.rs` | 91 | the three states of a result, a stale result never checked, the verdict kept by problem key, check not affordable from the memory estimate, the verdict in the run record |
 | `crates/nyx-engine/tests/reduce.rs` | 90 | the reductions against closed forms and against loops on the raw arrays, to the bit, for any thread count, on a worker's result and on real physics |
 | `crates/nyx-engine/tests/stale.rs` | 84, 64 | staleness per physics, late jobs, the `stale` fields of the replies |

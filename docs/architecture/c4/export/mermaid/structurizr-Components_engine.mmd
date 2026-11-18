@@ -22,7 +22,7 @@ graph TB
         style 27 fill:#85bbf0,stroke:#5d82a8,color:#000000
         28["<div style='font-weight: bold'>API reference</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One Markdown page per engine<br />command and an index,<br />generated from<br />Engine::catalog() (arguments<br />flattened from the schema, an<br />example that passes the<br />check); docs/api is compared<br />with it by a test.</div>"]
         style 28 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        29["<div style='font-weight: bold'>Meshing seam</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshRequest to MeshedModel<br />(mesh, names, label<br />resolver); the only caller of<br />the femcore mesher; absorbing<br />layers across the two halves<br />of a project.</div>"]
+        29["<div style='font-weight: bold'>Meshing seam</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshRequest to MeshedModel<br />(mesh, names, label<br />resolver); the only caller of<br />the femcore mesher; absorbing<br />layers across the two halves<br />of a project; trial meshes<br />and edit checks for the<br />feedback while editing (ADR<br />92).</div>"]
         style 29 fill:#85bbf0,stroke:#5d82a8,color:#000000
         30["<div style='font-weight: bold'>Materials</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The material library plus the<br />materials a project carries,<br />resolved at the study<br />wavelength.</div>"]
         style 30 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -107,10 +107,12 @@ graph TB
     30-. "<div>uses femcore: material,<br />material::spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     30-. "<div>uses physics: desc, error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
     30-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    29-. "<div>uses analysis: modes,<br />polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
     29-. "<div>uses femcore: mesh,<br />meshing::geomdrive +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     29-. "<div>uses geom: eval, labels +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    29-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
+    29-. "<div>uses physics: crate root,<br />error +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
     29-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    29-. "<div>uses estimate</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     29-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
     29-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
     24-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->103

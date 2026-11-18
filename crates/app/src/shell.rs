@@ -612,7 +612,7 @@ impl App {
     pub fn record_ok(&mut self, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun> {
         let rc = self.shell.run.take()?;
         let (wf_id, exp) = (rc.wf_id.clone(), rc.exp.clone());
-        let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: nyx_engine::store_link::metrics_of(res), ..Default::default() };
+        let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: crate::spans::span("metrics_of", || nyx_engine::store_link::metrics_of(res)), ..Default::default() };
         self.write_run(rc, rec, Some(res.log.join("\n"))).map(|run| LiveRun { wf_id, exp, run, physics: res.physics.clone() })
     }
 
@@ -648,7 +648,7 @@ impl App {
             #[cfg(feature = "hdf5")]
             rec.artifacts.push(nyx_engine::facade::store::runs::Artifact { kind: "result".into(), path: "results.h5".into(), bytes: 0 });
         }
-        let res = w.dir.as_mut()?.record_run(&rc.exp, rec, &rc.spec_json);
+        let res = crate::spans::span("record_run", || w.dir.as_mut().map(|d| d.record_run(&rc.exp, rec, &rc.spec_json)))?;
         match res {
             Ok(r) => {
                 let d = w.dir.as_mut()?;
@@ -660,7 +660,7 @@ impl App {
                     #[cfg(feature = "hdf5")]
                     {
                         let target = dir.join("results.h5").to_string_lossy().into_owned();
-                        match self.engine.start_export_results(&target, false) {
+                        match crate::spans::span("start_export", || self.engine.start_export_results(&target, false)) {
                             Ok(job) => {
                                 self.exports.insert(job, target);
                             }
@@ -670,13 +670,13 @@ impl App {
                 }
                 if let Some(ws) = &self.shell.ws {
                     // housekeeping after each run, by the person's own settings (the defaults delete nothing)
-                    let _ = ws.housekeeping(d, now_secs());
+                    let _ = crate::spans::span("housekeeping", || ws.housekeeping(d, now_secs()));
                 }
                 if w.exp == rc.exp {
-                    w.reload_runs();
+                    crate::spans::span("reload_runs", || w.reload_runs());
                 }
                 w.saved_at = Some(Instant::now());
-                self.refresh_entries();
+                crate::spans::span("refresh_entries", || self.refresh_entries());
                 Some(r.id)
             }
             Err(e) => {

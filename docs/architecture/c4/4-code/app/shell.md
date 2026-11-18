@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 |---|---|---|
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, store_link, validated | Active, Artifact, Done, Engine, Entry, ExportOptions, FeatureList, Filter, Inspection, Limits +38 |
 | [Look and widgets](./style.md) | fmt, kit, theme | State, card, danger, ellipsize, key_label, modal, muted, plural, primary, tab +1 |
-| [Window](./window.md) | app, state | App, JobKind, Tab |
+| [Window](./window.md) | app, spans, state | App, JobKind, Tab, span |
 
 ## Used by
 

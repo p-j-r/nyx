@@ -29,7 +29,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [Inspector tabs](./inspector.md) | fmt, theme | accent, activity_text, danger, on_accent, plural, raised, success, text |
 | [Shell and dashboard](./shell.md) | fmt, kit, theme | State, card, danger, ellipsize, key_label, modal, muted, plural +3 |
 | [Viewport](./viewport.md) | fmt, theme, tokens | Ink, Mode, ellipsize, rgb, with_alpha |
-| [Window](./window.md) | cvd, kit, theme | Kind, accent, activity_text, apply, card, danger, edge, ink +5 |
+| [Window](./window.md) | cvd, fmt, kit, theme | Kind, State, accent, activity_text, apply, card, danger, edge +9 |
 
 ## Class diagram
 

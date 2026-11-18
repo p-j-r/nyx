@@ -41,6 +41,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 |---|---|---|
 | [app: Window](../app/window.md) | process, queue, worker | QueueOpts, opt_out_of_power_throttling, serve |
 | [Commands](./commands.md) | estimate, jobs, process, queue, solve, sweep +1 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, MemoryProbe +17 |
+| [Meshing seam](./meshing.md) | estimate | Estimate, History, chain_key |
 | [Registry and facade](./registry.md) | estimate, jobs, queue | Estimate, History, JobId, JobInfo, JobOutput, JobRunner, JobState, Lane +3 |
 | [Results files](./resultsIO.md) | jobs | Opened |
 

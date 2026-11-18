@@ -34,6 +34,7 @@ Public types with their public fields (or variants) and methods, free functions 
 classDiagram
   class Engine {
       <<impl block>>
+      ~analysis_inputs(physics) Result
       +polarization(physics) Result
       +polarization_applies(physics) bool
       +list_analyses() Value
@@ -50,6 +51,7 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | fn | `analyses` | `analyse.rs:10` | `pub fn analyses() -> Vec<Box<dyn Analysis>>` —  The analyses of this build. |
+| fn | `Engine::analysis_inputs` | `analyse.rs:16` | `pub(crate) fn analysis_inputs( &self, physics: &str, ) -> Result<(std::sync::Arc<crate::meshing::MeshedModel>, std::sync::Arc<nyx_physics::SolveResult>), Error>` —  The mesh a result was solved on, or why there is none (the geometry or mesh settings changed since). |
 | fn | `Engine::polarization` | `analyse.rs:33` | `pub fn polarization(&self, physics: &str) -> Result<ModeAnalysis, Error>` —  The polarization analysis of the modes of `physics`, typed (what the Analysis tab draws). |
 | fn | `Engine::polarization_applies` | `analyse.rs:39` | `pub fn polarization_applies(&self, physics: &str) -> bool` —  Whether the polarization applies to the latest result of `physics`. |
 | fn | `Engine::list_analyses` | `analyse.rs:44` | `pub fn list_analyses(&self) -> Value` —  Lists the analyses and says which apply to which result. |

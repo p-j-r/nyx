@@ -28,6 +28,8 @@ for size in 1440x900 1100x700; do
     s="$s; sheet palette; shot $p-palette.png; sheet new; shot $p-new.png; sheet about; shot $p-about.png; sheet none"
     s="$s; contrast high; page settings; shot $p-settings-high.png; contrast standard; page dashboard"
     s="$s; wf example 1; section concept; shot $p-concept.png; section build; shot $p-build.png"
+    # P3: the size and cost of an edit from a trial mesh, and the problem line of an edit that cannot be built (the edit is then taken back)
+    s="$s; section concept; edit h x0.6; shot $p-concept-size.png; edit h -1; shot $p-concept-problem.png; edit h reset; section build"
     # the region colours: the other canvas, one legend row isolated, and colouring by region
     s="$s; canvas theme; shot $p-build-canvas-theme.png; isolate 1; shot $p-build-isolate.png; isolate none; colour region; shot $p-build-by-region.png; colour material; canvas dark"
     # views that show a result: wait for the solve (the script waits while the job runs)
@@ -64,7 +66,7 @@ for f in "$out"/*.png; do
   [ -s "$f" ] || { echo "FAIL: empty or missing $f" >&2; fail=1; }
 done
 n=$(ls "$out"/*.png 2>/dev/null | wc -l)
-[ -n "${UX_SHOTS_FAST:-}" ] && want=53 || want=108
+[ -n "${UX_SHOTS_FAST:-}" ] && want=61 || want=116
 [ "$n" -ge "$want" ] || { echo "FAIL: $n shots, expected $want" >&2; fail=1; }
 echo "$n shots in $out"
 exit $fail

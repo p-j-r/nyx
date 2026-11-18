@@ -177,6 +177,9 @@ impl App {
         });
         ui.checkbox(&mut m.structured_pml, "structured absorbing layers").on_hover_text("Rebuild the absorbing layers of the model as structured layers (quadrilaterals, prisms, hexahedra) cut into simplices.");
         sweep_editor(ui, &mut m.sweep);
+        // as you type: the problem of the edits, or their size and cost from a trial mesh (nothing is built: `feedback.rs`); right under the
+        // controls it answers, not below the feature list (the lines show the state of the frame before, which is the edit being typed)
+        self.feedback_lines(ui);
         ui.add_space(4.0);
         crate::geomui::show(ui, &mut self.geom_ui, &mut g);
         ui.add_space(6.0);
@@ -185,7 +188,11 @@ impl App {
         self.mesh_edit = m;
         if changed {
             self.geometry_dirty = true;
+            let ctx = ui.ctx().clone();
+            self.edits_changed(&ctx);
         }
+        let ctx = ui.ctx().clone();
+        self.feedback_tick(&ctx);
         ui.add_space(6.0);
         let dirty = self.geometry_dirty || self.geom_edit != self.engine.project().geometry || self.mesh_edit != self.engine.project().mesh;
         ui.horizontal(|ui| {
@@ -649,8 +656,8 @@ impl App {
             return;
         };
         ui.heading("Results");
-        self.stale_band(ui);
-        self.validated_line(ui);
+        crate::spans::span("stale_band", || self.stale_band(ui));
+        crate::spans::span("validated_line", || self.validated_line(ui));
         if self.results.len() > 1 {
             let stale: Vec<bool> = (0..self.results.len()).map(|i| self.stale_reason(i).is_some()).collect();
             let label = |i: usize, name: &str| if stale[i] { format!("{name} (stale)") } else { name.to_string() };
@@ -769,15 +776,17 @@ impl App {
             }
         });
         ui.weak(format!("{} unknowns, solved in {:.2} s", rv.result.dofs, rv.result.seconds));
-        egui::CollapsingHeader::new(format!("What the solver did ({} lines)", rv.result.log.len())).default_open(true).show(ui, |ui| {
-            egui::ScrollArea::vertical().max_height(260.0).id_salt("solver_log").show(ui, |ui| {
-                for l in &rv.result.log {
-                    ui.add(egui::Label::new(RichText::new(l).monospace().weak().size(11.0)).wrap());
-                }
+        crate::spans::span("solver_log", || {
+            egui::CollapsingHeader::new(format!("What the solver did ({} lines)", rv.result.log.len())).default_open(true).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(260.0).id_salt("solver_log").show(ui, |ui| {
+                    for l in &rv.result.log {
+                        ui.add(egui::Label::new(RichText::new(l).monospace().weak().size(11.0)).wrap());
+                    }
+                });
             });
         });
         ui.add_space(6.0);
-        self.reductions(ui, cur);
+        crate::spans::span("reductions", || self.reductions(ui, cur));
         ui.add_space(6.0);
         if ui.button("Export CSV...").clicked() {
             self.export_csv();

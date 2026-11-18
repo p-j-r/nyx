@@ -74,3 +74,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 89 | [Command lists are a front-end: checked, planned and run](adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md) | `nyx-engine::commandlist`, `app::runfile` |
 | 90 | [Whole-array operations on results are engine commands over a typed expression tree evaluated in Rust](adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md) | `nyx-engine::{reduce,engine}`, `femcore::fieldexpr`, `app::tabs` |
 | 91 | [Validated is a state: a result is checked only by a convergence check on its own problem key](adr/0091-validated-is-a-state-checked-against-the-problem-key.md) | `nyx-engine::{validated,convergence,engine}`, `nyx-store::runs`, `app::{activity,kit}` |
+| 92 | [Feedback while editing is a value, never a job](adr/0092-feedback-while-editing-is-a-value-never-a-job.md) | `nyx-engine::preview`, `app::{feedback,spans}` |

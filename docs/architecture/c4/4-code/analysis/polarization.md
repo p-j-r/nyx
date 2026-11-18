@@ -24,6 +24,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [Mode report](./modes.md) | polarization |  |
 | [Field samples](./samples.md) | polarization | Cx, Sample, TimeConvention |
 | [engine: Analyses](../engine/analyse.md) | polarization |  |
+| [engine: Meshing seam](../engine/meshing.md) | polarization |  |
 
 ## Class diagram
 

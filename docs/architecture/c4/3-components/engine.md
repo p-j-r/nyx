@@ -29,7 +29,7 @@ graph TB
         style 27 fill:#85bbf0,stroke:#5d82a8,color:#000000
         28["<div style='font-weight: bold'>API reference</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One Markdown page per engine<br />command and an index,<br />generated from<br />Engine::catalog() (arguments<br />flattened from the schema, an<br />example that passes the<br />check); docs/api is compared<br />with it by a test.</div>"]
         style 28 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        29["<div style='font-weight: bold'>Meshing seam</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshRequest to MeshedModel<br />(mesh, names, label<br />resolver); the only caller of<br />the femcore mesher; absorbing<br />layers across the two halves<br />of a project.</div>"]
+        29["<div style='font-weight: bold'>Meshing seam</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshRequest to MeshedModel<br />(mesh, names, label<br />resolver); the only caller of<br />the femcore mesher; absorbing<br />layers across the two halves<br />of a project; trial meshes<br />and edit checks for the<br />feedback while editing (ADR<br />92).</div>"]
         style 29 fill:#85bbf0,stroke:#5d82a8,color:#000000
         30["<div style='font-weight: bold'>Materials</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The material library plus the<br />materials a project carries,<br />resolved at the study<br />wavelength.</div>"]
         style 30 fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -114,10 +114,12 @@ graph TB
     30-. "<div>uses femcore: material,<br />material::spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     30-. "<div>uses physics: desc, error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
     30-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    29-. "<div>uses analysis: modes,<br />polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
     29-. "<div>uses femcore: mesh,<br />meshing::geomdrive +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     29-. "<div>uses geom: eval, labels +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    29-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
+    29-. "<div>uses physics: crate root,<br />error +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
     29-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    29-. "<div>uses estimate</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     29-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
     29-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
     24-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
@@ -156,15 +158,15 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Commands](../4-code/engine/commands.md) | 5 | 2906 | 57, 38, 15, 90, 91 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries. |
+| [Commands](../4-code/engine/commands.md) | 5 | 2916 | 57, 38, 15, 90, 91 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries. |
 | [Project](../4-code/engine/project.md) | 1 | 197 | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary. |
 | [Geometry operations](../4-code/engine/geometry.md) | 2 | 730 | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only). |
 | [Job runner and queue](../4-code/engine/jobs.md) | 9 | 2350 | 61, 85, 87, 86, 11 | Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |
 | [Command lists](../4-code/engine/commandlist.md) | 1 | 581 | 89 | A JSON-lines list of engine commands is parsed, checked against the catalog and its schemas, planned on a scratch engine (what would be meshed and solved, nothing run) and run in order through Engine::call. |
 | [API reference](../4-code/engine/apiref.md) | 1 | 291 | 89, 57 | One Markdown page per engine command and an index, generated from Engine::catalog() (arguments flattened from the schema, an example that passes the check); docs/api is compared with it by a test. |
-| [Meshing seam](../4-code/engine/meshing.md) | 2 | 345 | 54, 50 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project. |
+| [Meshing seam](../4-code/engine/meshing.md) | 3 | 465 | 54, 50, 92 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92). |
 | [Materials](../4-code/engine/materials.md) | 1 | 155 | 58 | The material library plus the materials a project carries, resolved at the study wavelength. |
 | [Analyses](../4-code/engine/analyse.md) | 1 | 83 | 56 | Runs the analyses of nyx-analysis on the latest result of a physics. |
 | [Results files](../4-code/engine/resultsIO.md) | 3 | 985 | 62, 63 | HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results. |
 | [Store link](../4-code/engine/storeLink.md) | 1 | 298 | 39, 59 | Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here). |
-| [Registry and facade](../4-code/engine/registry.md) | 1 | 95 | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with. |
+| [Registry and facade](../4-code/engine/registry.md) | 1 | 96 | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with. |

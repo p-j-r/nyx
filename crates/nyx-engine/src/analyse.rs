@@ -13,7 +13,7 @@ pub fn analyses() -> Vec<Box<dyn Analysis>> {
 
 impl Engine {
     /// The mesh a result was solved on, or why there is none (the geometry or mesh settings changed since).
-    fn analysis_inputs(
+    pub(crate) fn analysis_inputs(
         &self,
         physics: &str,
     ) -> Result<(std::sync::Arc<crate::meshing::MeshedModel>, std::sync::Arc<nyx_physics::SolveResult>), Error> {

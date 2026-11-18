@@ -32,6 +32,7 @@ pub mod apiref;
 pub mod commandlist;
 pub mod meshing;
 pub mod pml;
+pub mod preview;
 pub mod process;
 pub mod project;
 pub mod queue;

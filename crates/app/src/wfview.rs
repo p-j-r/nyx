@@ -520,7 +520,7 @@ impl App {
                 });
             }
             egui::Frame::new().corner_radius(12).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).show(ui, |ui| {
-                self.viewport_ui(ui);
+                crate::spans::span("viewport_ui", || self.viewport_ui(ui));
             });
         });
     }
@@ -1051,7 +1051,7 @@ impl App {
             ui.add_space(6.0);
             if live {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    self.inspector_tab(ui, Tab::Results);
+                    crate::spans::span("inspector_tab", || self.inspector_tab(ui, Tab::Results));
                     if self.has_analysis() {
                         ui.separator();
                         self.inspector_tab(ui, Tab::Analysis);
@@ -1072,7 +1072,7 @@ impl App {
             if live {
                 self.show_results = true;
             }
-            self.viewport_ui(ui);
+            crate::spans::span("viewport_ui", || self.viewport_ui(ui));
         });
     }
 }

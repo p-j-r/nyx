@@ -63,6 +63,18 @@ impl App {
                 }
             }
             "compute" => self.shell_compute(),
+            // `edit h xFACTOR | VALUE | reset`: the element size of the Geometry form, as typed (not applied); the script then waits long enough for
+            // the check and the trial mesh of the edit (`feedback.rs`), so a shot after it shows the problem line or the size line
+            "edit" => {
+                let words: Vec<&str> = arg.split_whitespace().collect();
+                if let ["h", v] = words.as_slice() {
+                    let now = self.engine.project().mesh.h;
+                    self.mesh_edit.h = if *v == "reset" { now } else if let Some(f) = v.strip_prefix('x').and_then(|f| f.parse::<f64>().ok()) { self.mesh_edit.h * f } else { v.parse().unwrap_or(now) };
+                    self.geometry_dirty = self.mesh_edit != self.engine.project().mesh || self.geom_edit != self.engine.project().geometry;
+                    self.edits_changed(ctx);
+                    self.settle = 40;
+                }
+            }
             // `check TOLERANCE [FACTOR]`: a mesh-convergence check of the active physics (the script waits for it); the state it leaves is drawn under Results
             "check" => {
                 let mut words = arg.split_whitespace().filter_map(|w| w.parse::<f64>().ok());

@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, reduce.rs, validated.rs"
-        "lines" "2906"
+        "lines" "2916"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -47,11 +47,11 @@ apiref = component "API reference" "One Markdown page per engine command and an 
         "codeDiagram" "4-code/engine/apiref.md"
     }
 }
-meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project." "Rust modules" {
+meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92)." "Rust modules" {
     properties {
-        "adr" "54, 50"
-        "code" "crates/nyx-engine/src: meshing.rs, pml.rs"
-        "lines" "345"
+        "adr" "54, 50, 92"
+        "code" "crates/nyx-engine/src: meshing.rs, pml.rs, preview.rs"
+        "lines" "465"
         "codeDiagram" "4-code/engine/meshing.md"
     }
 }
@@ -91,7 +91,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "95"
+        "lines" "96"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

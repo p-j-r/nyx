@@ -58,6 +58,10 @@ pub struct WinJob {
 /// A message from a helper thread (the optional Python script) to the window.
 pub enum Msg {
     Script(Result<String, String>),
+    /// the trial mesh of an edit (the number in the tuple is the edit it was made for, `Feedback::generation`)
+    Size(Result<nyx_engine::preview::SizePreview, String>),
+    /// the polarization of a result, with the result it was computed from
+    Polarization { physics: String, result: Arc<SolveResult>, analysis: Result<nyx_engine::analysis::ModeAnalysis, String> },
 }
 
 pub struct App {
@@ -140,6 +144,8 @@ pub struct App {
     pub connect_status: Vec<HostInfo>,
     pub connect_note: Option<String>,
     pub ctx: egui::Context,
+    /// the problem and the size of the edits in the Geometry tab, and what a trial mesh said (`feedback.rs`)
+    pub feedback: crate::feedback::Feedback,
 }
 
 impl App {
@@ -183,6 +189,7 @@ impl App {
             geometry_dirty: false,
             geom_edit: FeatureList::new(2),
             mesh_edit: MeshSettings::default(),
+            feedback: Default::default(),
             geom_ui: Default::default(),
             rule_errors: HashMap::new(),
             bc_labels: vec![],
@@ -254,6 +261,7 @@ impl App {
     pub fn adopt(&mut self) {
         self.geom_edit = self.engine.project().geometry.clone();
         self.mesh_edit = self.engine.project().mesh.clone();
+        self.feedback.reset();
         self.geometry_dirty = false;
         self.picking = None;
         self.picked.clear();
@@ -418,7 +426,7 @@ impl App {
         let log = LOG.get_or_init(|| {
             let path = std::env::var("NYX_FRAME_LOG").ok().filter(|p| p.to_lowercase().ends_with(".csv"))?;
             let mut f = std::fs::File::create(path).ok()?;
-            let _ = writeln!(f, "t_s,frame_dt_ms,ui_ms,viewport_ms,busy,job_kind,stage,stage_s,job_s,convergence,show_results");
+            let _ = writeln!(f, "t_s,frame_dt_ms,ui_ms,viewport_ms,busy,job_kind,stage,stage_s,job_s,convergence,show_results,spans");
             Some(Mutex::new((f, Instant::now())))
         });
         let Some(log) = log else { return };
@@ -444,10 +452,11 @@ impl App {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() % 100000.0).unwrap_or(0.0);
         let _ = writeln!(
             g.0,
-            "{t:.3},{dt:.2},{ui_ms:.2},{viewport_ms:.2},{},{kind},{stage},{stage_s:.2},{job_s:.2},{},{}",
+            "{t:.3},{dt:.2},{ui_ms:.2},{viewport_ms:.2},{},{kind},{stage},{stage_s:.2},{job_s:.2},{},{},{}",
             self.busy.is_some() as u8,
             self.convergence_running() as u8,
-            self.show_results as u8
+            self.show_results as u8,
+            crate::spans::take()
         );
         let _ = g.0.flush();
     }
@@ -543,13 +552,15 @@ impl App {
 
     fn poll(&mut self) {
         self.poll_sweep();
-        while let Ok((_, msg)) = self.rx.try_recv() {
+        while let Ok((generation, msg)) = self.rx.try_recv() {
             match msg {
                 Msg::Script(Ok(t)) => self.script_output = Some(t),
                 Msg::Script(Err(e)) => self.set_error(e),
+                Msg::Size(out) => self.take_size(generation, out),
+                Msg::Polarization { physics, result, analysis } => self.take_polarization(&physics, &result, analysis),
             }
         }
-        let finished = self.engine.poll();
+        let finished = crate::spans::span("engine_poll", || self.engine.poll());
         for (id, outcome) in finished {
             // a results file written on a job: it never held the window, only a failure is shown
             if let Some(path) = self.exports.remove(&id) {
@@ -639,7 +650,7 @@ impl App {
 
     /// A solve came back: the mesh it used, and one result view per physics it solved.
     pub(crate) fn take_solved(&mut self, summary: &Value) {
-        self.take_model();
+        crate::spans::span("take_model", || self.take_model());
         let Some(mesh) = self.doc.mesh.clone() else { return };
         // a job that finished after the project changed again, or after a newer job, can come back with results the engine did not keep (`stored`
         // false): they are not shown and not recorded as the run on screen
@@ -658,17 +669,17 @@ impl App {
             let result = result.clone();
             let name = self.physics_name(id);
             last_secs = result.seconds;
-            let mut rv = ResultView::new(name, Some(id.clone()), result.clone(), &mesh);
-            if self.engine.polarization_applies(id) {
-                rv.analysis = self.engine.polarization(id).ok();
-            }
+            let rv = crate::spans::span("result_view", || ResultView::new(name, Some(id.clone()), result.clone(), &mesh));
+            // the polarization is computed beside the frame and arrives through the channel (`feedback.rs`): the cost grows with the cells
+            // (8 to 9 ms at 9,500 cells in 3D, 41 ms for the 8,000 cells of the silicon-on-sapphire example) and the frame has 33 ms
+            self.start_polarization(id);
             if active.as_deref() == Some(id.as_str()) {
                 live = Some(result);
             }
             self.push_result(rv);
         }
         if let Some(r) = live {
-            self.shell.live_run = self.record_ok(&r);
+            self.shell.live_run = crate::spans::span("record_ok", || self.record_ok(&r));
         }
         // the result on show is the active physics' one
         if let Some(i) = active.and_then(|a| self.results.iter().position(|r| r.physics.as_deref() == Some(a.as_str()))) {
@@ -1301,13 +1312,13 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll();
-        self.run_queued();
+        crate::spans::span("poll", || self.poll());
+        crate::spans::span("run_queued", || self.run_queued());
         if self.rules_dirty {
-            self.sync_rules();
+            crate::spans::span("sync_rules", || self.sync_rules());
         }
         let c = ctx.clone();
-        self.script_step(&c);
+        crate::spans::span("script", || self.script_step(&c));
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         if let Some(p) = dropped.into_iter().next() {
             self.open_path(p);
@@ -1328,9 +1339,9 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let t_ui = Instant::now();
-        self.queue_panel(ui.ctx());
+        crate::spans::span("queue_panel", || self.queue_panel(ui.ctx()));
         if self.shell.active() {
-            self.shell_ui(ui);
+            crate::spans::span("shell_ui", || self.shell_ui(ui));
             self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, f64::NAN);
             return;
         }
@@ -1906,6 +1917,163 @@ mod tests {
         assert!(a.convergence.is_none(), "a cancelled check gives no answer");
         assert!(a.status.contains("cancelled"), "{}", a.status);
         assert!(a.error.is_none(), "{:?}", a.error);
+    }
+
+    /// Draws `n` frames of the shell (the workflow page on show), polling between them, for as long as `secs` at least.
+    fn frames(a: &mut App, n: usize, secs: f64) {
+        let ctx = a.ctx.clone();
+        let t0 = Instant::now();
+        for _ in 0..n {
+            let _ = ctx.run_ui(Default::default(), |ui| a.shell_ui(ui));
+            a.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        while t0.elapsed().as_secs_f64() < secs {
+            let _ = ctx.run_ui(Default::default(), |ui| a.shell_ui(ui));
+            a.poll();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Productivity plan P3: nothing starts a mesh, a solve or a run on its own. A workflow with a result is edited in every form the window has
+    /// that buffers an edit (the Geometry tab's element size, sizing, adaptive, absorbing layers and sweep of the mesh, and the sweep form of the
+    /// Build page) and frames are drawn long enough for every trial mesh and check to run: the engine holds the same mesh, no job was submitted,
+    /// no run was recorded, the result on show is still there, and nothing is busy. Run sweep and Compute are the only things that submit.
+    #[test]
+    fn editing_every_form_starts_nothing() {
+        let mut a = app();
+        let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("02_cantilever")).unwrap().path;
+        a.new_draft("Fresh", crate::shell::Start::Example(path));
+        wait_idle(&mut a, 30);
+        a.shell_compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        assert!(!a.results.is_empty());
+        {
+            let w = a.shell.current_mut().expect("a workflow is open");
+            w.part = crate::shell::Part::Build;
+            w.sub = crate::shell::Sub::Main;
+            // the Concept page has the Geometry form (element size, sizing, adaptive, absorbing layers, sweep of the mesh); the Sweep form of
+            // the Build page comes last
+            w.sweep.shown = false;
+            w.part = crate::shell::Part::Concept;
+            w.concept_tab = Tab::Geometry;
+        }
+        frames(&mut a, 3, 0.0);
+
+        let jobs = a.engine.jobs().list().len();
+        let mesh_key = a.engine.mesh_key();
+        let model = a.engine.model().cloned().expect("the solve left a mesh");
+        let project = a.engine.project().clone().to_json();
+        let runs = a.shell.current_mut().unwrap().runs.len();
+        let results = a.results.len();
+
+        // every buffered edit of the Geometry tab, one after the other, each followed by frames that let the trial mesh and the check run
+        type Edit = Box<dyn Fn(&mut App)>;
+        let edits: Vec<Edit> = vec![
+            Box::new(|a| a.mesh_edit.h *= 0.5),
+            Box::new(|a| a.mesh_edit.physics_sizing = !a.mesh_edit.physics_sizing),
+            Box::new(|a| a.mesh_edit.adapt_scale = Some(0.8)),
+            Box::new(|a| a.mesh_edit.structured_pml = !a.mesh_edit.structured_pml),
+            Box::new(|a| a.mesh_edit.sweep = Some(vec![nyx_engine::SweepLayer { thickness: 1.0, n: 4, domain_offset: 0 }])),
+            Box::new(|a| a.mesh_edit.h = -1.0),
+            Box::new(|a| a.mesh_edit.h = 0.02),
+        ];
+        for edit in &edits {
+            edit(&mut a);
+            a.geometry_dirty = true;
+            let ctx = a.ctx.clone();
+            a.edits_changed(&ctx);
+            frames(&mut a, 3, crate::feedback::REST.as_secs_f64() + 0.15);
+            assert_eq!(a.engine.jobs().list().len(), jobs, "an edit submitted a job");
+            assert_eq!(a.engine.mesh_key(), mesh_key, "an edit that was not applied moved the mesh key");
+            assert!(a.engine.model().is_some_and(|m| Arc::ptr_eq(m, &model)), "an edit replaced the mesh");
+            assert_eq!(a.engine.project().clone().to_json(), project, "an edit reached the project without being applied");
+            assert!(a.busy.is_none() && a.job.is_none(), "an edit made the window busy");
+            assert_eq!(a.results.len(), results, "an edit cleared the result on show");
+        }
+
+        // the frames really drew the Geometry tab and the trial mesh really ran (otherwise "nothing started" would prove nothing)
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Ready(_)), "the last edit's trial mesh did not come back: {:?}", a.feedback.size);
+
+        // the sweep form of the Build page: its values and its count changed, the plan redrawn; only Run sweep submits
+        {
+            let w = a.shell.current_mut().unwrap();
+            w.part = crate::shell::Part::Build;
+            w.sweep.shown = true;
+            w.sweep.n = 9;
+            w.sweep.from = "1e-3".into();
+            w.sweep.to = "5e-3".into();
+        }
+        frames(&mut a, 5, 0.1);
+        assert!(a.sweep.is_none(), "the sweep form started a sweep");
+        assert_eq!(a.engine.jobs().list().len(), jobs);
+        assert_eq!(a.shell.current_mut().unwrap().runs.len(), runs, "no run was recorded");
+    }
+
+    /// The trial mesh of an edit comes back to the window, says how many cells the edit would mesh to, and is dropped when the edit moved on.
+    #[test]
+    fn the_size_of_an_edit_arrives_from_a_trial_mesh() {
+        let mut a = app();
+        a.load_example(example("02_cantilever"));
+        wait_idle(&mut a, 30);
+        a.mesh_edit.h *= 0.6;
+        a.geometry_dirty = true;
+        let ctx = a.ctx.clone();
+        a.edits_changed(&ctx);
+        assert!(a.feedback.problem.is_none());
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Pending));
+        a.start_size_preview();
+        let t0 = Instant::now();
+        while matches!(a.feedback.size, crate::feedback::SizeView::Pending) {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(10), "no answer from the trial mesh");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let crate::feedback::SizeView::Ready(p) = a.feedback.size.clone() else { panic!("{:?}", a.feedback.size) };
+        assert!(p.cells > a.doc.mesh.as_ref().unwrap().n_cells() as u64, "a finer h means more cells: {p:?}");
+        assert!(crate::feedback::size_line(&p).contains("cells"));
+        assert!(crate::feedback::cost_line(&p).contains("No cost estimate"), "no solve history in a test: {}", crate::feedback::cost_line(&p));
+
+        // an answer for an edit that has been replaced is dropped
+        let old = a.feedback.generation;
+        a.mesh_edit.h *= 0.9;
+        let ctx = a.ctx.clone();
+        a.edits_changed(&ctx);
+        a.take_size(old, Ok(p));
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Pending), "{:?}", a.feedback.size);
+
+        // a problem is shown at once, and no trial mesh is made of it
+        a.mesh_edit.h = -1.0;
+        a.edits_changed(&ctx);
+        assert!(a.feedback.problem.as_deref().is_some_and(|p| p.contains("element size")), "{:?}", a.feedback.problem);
+    }
+
+    /// The polarization of a new result is computed beside the frame and lands in the result view that holds that very result.
+    #[test]
+    fn the_polarization_arrives_after_the_result_and_only_for_the_result_it_was_made_from() {
+        let mut a = app();
+        a.load_example(example("06_wr90"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        let t0 = Instant::now();
+        while !a.has_analysis() {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(30), "the polarization never arrived: {:?}", a.status);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let want = a.engine.polarization("ems").unwrap().csv();
+        let got = a.results[a.current.unwrap()].analysis.as_ref().unwrap().csv();
+        assert_eq!(got, want, "the window shows exactly what the engine command computes");
+
+        // an analysis that was made for another result is not put on this one
+        let other = a.results[a.current.unwrap()].result.clone();
+        a.results[a.current.unwrap()].analysis = None;
+        let mut stale = (*other).clone();
+        stale.seconds += 1.0;
+        a.take_polarization("ems", &Arc::new(stale), a.engine.polarization("ems").map_err(|e| e.to_string()));
+        assert!(!a.has_analysis(), "an analysis of another result must not be taken");
     }
 
     #[test]
