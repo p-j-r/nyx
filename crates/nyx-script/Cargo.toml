@@ -1,0 +1,14 @@
+[package]
+name = "nyx-script"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Scripts as a front-end of the nyx engine (productivity plan S4): an embedded script language calls engine commands, with host limits and no I/O"
+
+[dependencies]
+nyx-engine = { path = "../nyx-engine" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# S4 spike: both candidates, the one Paul does not choose is removed afterwards
+starlark = "0.14"
+anyhow = "1"
+rhai = { version = "1", features = ["no_time"] }

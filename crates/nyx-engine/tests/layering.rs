@@ -24,6 +24,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("nyx-engine", &["nyx-physics", "nyx-dfs", "nyx-sms", "nyx-ems", "nyx-analysis", "nyx-store", "femcore", "geom"]),
     ("nyx-connect", &[]),
     ("nyx-mcp", &["nyx-engine"]),
+    ("nyx-script", &["nyx-engine"]), // a third front-end (S4): scripts over Engine::call
     ("nyx", &["nyx-engine", "nyx-connect"]), // crates/app
 ];
 
