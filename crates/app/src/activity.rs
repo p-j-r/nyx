@@ -188,6 +188,7 @@ impl App {
                     if activity.is_idle() {
                         ui.label(kit::muted(ui, "Nothing is running or waiting."));
                     }
+                    egui::ScrollArea::vertical().max_height(340.0).auto_shrink([false, true]).show(ui, |ui| {
                     for r in &activity.rows {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 8.0;
@@ -230,6 +231,7 @@ impl App {
                         }
                         ui.add_space(4.0);
                     }
+                    });
                     ui.separator();
                     ui.horizontal(|ui| {
                         if ui.button(if activity.paused { "Resume the queue" } else { "Pause the queue" }).on_hover_text("A paused queue starts nothing new; what runs finishes").clicked() {

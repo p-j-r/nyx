@@ -23,6 +23,7 @@ pub enum Act {
     Fork,
     Link(String, String, String),
     Compute,
+    Sweep(crate::sweepui::Form),
     Cancel,
     Star(String, bool),
     Title(String),
@@ -85,7 +86,7 @@ impl App {
     }
 
     /// Makes sure the workflow of the tab has a folder (a draft gets one on its first change). `false` when that failed.
-    fn ensure_dir(&mut self, id: &str) -> bool {
+    pub(crate) fn ensure_dir(&mut self, id: &str) -> bool {
         if self.shell.open.get(id).is_some_and(|w| w.dir.is_some()) {
             return true;
         }
@@ -152,6 +153,7 @@ impl App {
                 self.refresh_entries();
             }
             Act::Compute => self.shell_compute(),
+            Act::Sweep(f) => self.start_sweep(id, &f),
             Act::Cancel => self.shell.confirm_cancel = true,
             Act::Star(rid, star) => {
                 let r = self.shell.open.get_mut(id).and_then(|w| {
@@ -549,17 +551,25 @@ impl App {
             return;
         }
         egui::Panel::right("wf_build_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 for (t, l) in [(Tab::Physics, "Boundaries and conditions"), (Tab::Study, "Study and solver")] {
-                    if kit::pill(ui, w.build_tab == t, l).clicked() {
+                    if kit::pill(ui, !w.sweep.shown && w.build_tab == t, l).clicked() {
                         w.build_tab = t;
+                        w.sweep.shown = false;
                     }
+                }
+                if kit::pill(ui, w.sweep.shown, "Sweep").clicked() {
+                    w.sweep.shown = true;
                 }
             });
             ui.separator();
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                self.tab = w.build_tab;
-                self.inspector_tab(ui, w.build_tab);
+                if w.sweep.shown {
+                    self.sweep_section(ui, w, acts);
+                } else {
+                    self.tab = w.build_tab;
+                    self.inspector_tab(ui, w.build_tab);
+                }
             });
         });
         let strip = match &self.doc.mesh {
@@ -635,7 +645,18 @@ impl App {
         let mut mk: Vec<&String> = ok.iter().flat_map(|r| r.metrics.keys()).filter(|k| !matches!(k.as_str(), "dofs" | "n_solutions")).collect();
         mk.sort();
         mk.dedup();
-        let y = if !w.plot_y.is_empty() { w.plot_y.clone() } else if mk.iter().any(|k| *k == "neff_re") { "neff_re".into() } else { mk.first().map(|k| k.to_string()).unwrap_or_default() };
+        // the default metric is the first that varies between the runs (never a constant such as an imaginary part that is zero, nor the run time)
+        let mvaries = |k: &str| {
+            let v: Vec<f64> = ok.iter().filter_map(|r| r.metrics.get(k).copied()).collect();
+            v.windows(2).any(|p| (p[0] - p[1]).abs() > 1e-9 * p[0].abs().max(p[1].abs()).max(1e-300))
+        };
+        let y = if !w.plot_y.is_empty() {
+            w.plot_y.clone()
+        } else if mk.iter().any(|k| *k == "neff_re") {
+            "neff_re".into()
+        } else {
+            mk.iter().find(|k| k.as_str() != "seconds" && mvaries(k)).or(mk.first()).map(|k| k.to_string()).unwrap_or_default()
+        };
         (x, y)
     }
 
@@ -655,16 +676,46 @@ impl App {
         (xk, yk, pts)
     }
 
+    /// The runs plot of the Analysis page and of the live run screen (UX plan B5): the line joins the runs in order of the parameter, **a marker
+    /// shape tells the versions of the set-up apart** (colour is never the only channel; a legend names them when there are two or more), **the
+    /// last run is labelled at the end of the line**, and **the runs ticked in the table carry a ring** in the text colour.
     fn runs_plot(&mut self, ui: &mut egui::Ui, w: &OpenWf, h: f32) {
+        use egui_plot::MarkerShape as M;
+        const SHAPES: [M; 5] = [M::Circle, M::Square, M::Diamond, M::Up, M::Cross];
         let (xk, yk, pts) = Self::series(w, false, &Filter::default());
         let scale = if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { 1e9 } else { 1.0 };
-        let xs = pts.iter().map(|p| [p.1 * scale, p.2]).collect::<Vec<_>>();
         let c = theme::accent(ui.ctx());
-        egui_plot::Plot::new(("runs_plot", &w.id)).height(h).x_axis_label(if scale == 1e9 { format!("{xk} (nm)") } else { xk }).y_axis_label(yk).allow_scroll(false).show(ui, |p| {
-            if xs.len() > 1 {
-                p.line(egui_plot::Line::new("runs", egui_plot::PlotPoints::from(xs.clone())).color(c));
+        let ring = theme::text(ui.ctx());
+        let version_of = |id: &str| w.runs.iter().find(|r| r.id == id).map(|r| r.version).unwrap_or(0);
+        let mut versions: Vec<u32> = pts.iter().map(|p| version_of(&p.0)).collect();
+        versions.sort_unstable();
+        versions.dedup();
+        let line: Vec<[f64; 2]> = pts.iter().map(|p| [p.1 * scale, p.2]).collect();
+        let selected: Vec<[f64; 2]> = pts.iter().filter(|p| w.selected.contains(&p.0)).map(|p| [p.1 * scale, p.2]).collect();
+        let end = pts.last().map(|p| (egui_plot::PlotPoint::new(p.1 * scale, p.2), format!("{}  {}", p.0.split('_').next().unwrap_or(&p.0), fmt_value(&yk, p.2))));
+        let mut plot = egui_plot::Plot::new(("runs_plot", &w.id)).height(h).x_axis_label(if scale == 1e9 { format!("{xk} (nm)") } else { xk }).y_axis_label(yk).allow_scroll(false);
+        // headroom above the highest point, so the end label is not cut by the frame of the plot
+        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| (a.min(p.2), b.max(p.2)));
+        if hi.is_finite() && lo.is_finite() {
+            plot = plot.include_y(hi + 0.18 * (hi - lo).max(hi.abs() * 1e-3));
+        }
+        if versions.len() > 1 {
+            plot = plot.legend(egui_plot::Legend::default());
+        }
+        plot.show(ui, |p| {
+            if line.len() > 1 {
+                p.line(egui_plot::Line::new("runs", egui_plot::PlotPoints::from(line.clone())).color(c));
             }
-            p.points(egui_plot::Points::new("runs", egui_plot::PlotPoints::from(xs)).radius(4.0).color(c));
+            for (k, v) in versions.iter().enumerate() {
+                let of_v: Vec<[f64; 2]> = pts.iter().filter(|q| version_of(&q.0) == *v).map(|q| [q.1 * scale, q.2]).collect();
+                p.points(egui_plot::Points::new(format!("v{v}"), egui_plot::PlotPoints::from(of_v)).radius(4.5).color(c).shape(SHAPES[k % SHAPES.len()]));
+            }
+            if !selected.is_empty() {
+                p.points(egui_plot::Points::new("ticked", egui_plot::PlotPoints::from(selected)).radius(9.0).color(ring).filled(false).shape(M::Circle));
+            }
+            if let Some((at, text)) = end {
+                p.text(egui_plot::Text::new("last run", at, text).anchor(egui::Align2::RIGHT_BOTTOM).color(ring));
+            }
         });
     }
 

@@ -65,7 +65,7 @@ graph TB
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
 | [Data model and card](../4-code/store/model.md) | 2 | 223 | 14, 39 | The workflow manifest, experiments, run digest and the concept card generated from an experiment's spec. |
-| [Workspace](../4-code/store/workspace.md) | 2 | 291 | 14 | The folder behind the dashboard: settings, the list of workflows (manifests only) and the sections of the dashboard. |
+| [Workspace](../4-code/store/workspace.md) | 2 | 306 | 14 | The folder behind the dashboard: settings, the list of workflows (manifests only) and the sections of the dashboard. |
 | [Workflow folder](../4-code/store/flow.md) | 1 | 483 | 14, 59 | One workflow folder: workflow.json, history.jsonl, notes, specs and one folder per experiment. |
 | [Versions](../4-code/store/versions.md) | 1 | 200 | 14, 59 | Every change to an experiment's set-up kept in history.jsonl with the hash of its spec. |
 | [Runs](../4-code/store/runs.md) | 1 | 400 | 64 | Append-only run records in runs.jsonl, the digest derived from them and the filter language of the runs table. |

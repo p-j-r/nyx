@@ -307,6 +307,9 @@ impl Engine {
     ) -> Result<Value, Error> {
         let seconds = self.jobs.info(id).map(|i| i.seconds).unwrap_or(0.0);
         let mut log = self.jobs.log(id);
+        // what a recorded run of the same solve carries as its metrics (the keys the runs table and its plots use), so a front-end that
+        // records the point itself (the window, which has no workspace link in the engine) records the same numbers a Compute would
+        let mut metrics = Map::new();
         let (state, error, run, numbers, dofs, cells) = match outcome {
             Ok(JobOutput::Solved { model, results, failed, worker }) => {
                 let mesh = model.solver_mesh();
@@ -322,6 +325,11 @@ impl Engine {
                     dofs.insert(r.physics.clone(), json!(r.dofs));
                 }
                 let cells = model.mesh().n_cells();
+                if let Some(r) = results.last() {
+                    for (k, v) in crate::store_link::metrics_of(r) {
+                        metrics.insert(k, json!(v));
+                    }
+                }
                 match failed {
                     Some(e) => {
                         log.push(format!("stopped: {e}"));
@@ -361,7 +369,7 @@ impl Engine {
         };
         let row = json!({
             "index": index, "label": label, "edits": edits, "job": id, "state": state, "error": error,
-            "numbers": numbers, "unknowns": dofs, "cells": cells, "seconds": seconds, "run": run,
+            "numbers": numbers, "metrics": metrics, "unknowns": dofs, "cells": cells, "seconds": seconds, "run": run,
         });
         if let Some(p) = self.sweeps.get_mut(&sweep).and_then(|s| s.points.get_mut(index)) {
             p.row = Some(row.clone());

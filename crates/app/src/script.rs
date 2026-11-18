@@ -22,7 +22,7 @@ impl App {
             self.cancel_at = None;
             self.cancel_job();
         }
-        if (self.busy.is_some() && !self.script_free) || self.shot_pending.load(Ordering::SeqCst) {
+        if ((self.busy.is_some() || self.sweep.as_ref().is_some_and(|a| !a.complete())) && !self.script_free) || self.shot_pending.load(Ordering::SeqCst) {
             return;
         }
         if self.settle > 0 {
@@ -124,6 +124,38 @@ impl App {
             // `wait off|on`: with `off` the script carries on while a job runs, so that a running job and the queue can be shot (`on`, the default,
             // waits for the job to end before the next command); `queue pause|resume|open|close`: the engine's queue and its popover
             "wait" => self.script_free = arg == "off",
+            // `cvd protan|deutan|tritan|none`: the shots that follow show the window as a person with that colour-vision difference sees it (cvd.rs);
+            // `scale F`: the interface scale (1.5 and 2.0 are the 150 and 200 percent of Windows), not saved
+            "cvd" => self.shot_cvd = crate::cvd::Kind::parse(&arg),
+            "scale" => {
+                if let Ok(f) = arg.parse::<f32>() {
+                    ctx.set_zoom_factor(f.clamp(0.5, 3.0));
+                }
+            }
+            // `tick N M ...`: ticks those runs (1-based, in the order of the table's data) in the Analysis table, for a shot of the ringed runs
+            "tick" => {
+                if let Some(w) = self.shell.current_mut() {
+                    for n in arg.split_whitespace().filter_map(|x| x.parse::<usize>().ok()) {
+                        if let Some(r) = n.checked_sub(1).and_then(|i| w.runs.get(i)) {
+                            w.selected.insert(r.id.clone());
+                        }
+                    }
+                }
+            }
+            // `sweep show` opens the Sweep section of the Build page; `sweep run PARAM FROM TO N` fills it in and starts the sweep (for shots)
+            "sweep" => {
+                let words: Vec<&str> = arg.split_whitespace().collect();
+                let Some(w) = self.shell.current_mut() else { return };
+                w.sweep.shown = true;
+                if let ["run", param, from, to, n] = words.as_slice() {
+                    w.sweep.param = param.to_string();
+                    w.sweep.from = from.to_string();
+                    w.sweep.to = to.to_string();
+                    w.sweep.n = n.parse().unwrap_or(5);
+                    let (id, form) = (w.id.clone(), w.sweep.clone());
+                    self.start_sweep(&id, &form);
+                }
+            }
             "queue" => match arg.as_str() {
                 "pause" => self.engine.jobs().pause(),
                 "resume" => self.engine.jobs().resume(),
@@ -215,6 +247,7 @@ impl App {
             "shot" => {
                 let path = arg.clone();
                 let flag = self.shot_pending.clone();
+                let cvd = self.shot_cvd;
                 flag.store(true, Ordering::SeqCst);
                 let t_shot = Instant::now();
                 ctx.request_screenshot(move |img| {
@@ -225,6 +258,9 @@ impl App {
                     let mut raw = Vec::with_capacity(w * h * 4);
                     for p in &img.pixels {
                         raw.extend_from_slice(&[p.r(), p.g(), p.b(), p.a()]);
+                    }
+                    if let Some(k) = cvd {
+                        crate::cvd::simulate_rgba(&mut raw, k);
                     }
                     if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, raw) {
                         let _ = buf.save(&path);

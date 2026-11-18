@@ -34,11 +34,11 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 
 | Component | Modules | Items |
 |---|---|---|
-| [app: Scripts and batch](../app/headless.md) | crate root | Scalar |
+| [app: Scripts and batch](../app/headless.md) | crate root | Done, Scalar |
 | [app: Inspector tabs](../app/inspector.md) | crate root | Applies, BcSpec, Both, Env, Evaluated, Expr, FeatureList, LabelMap +21 |
-| [app: Shell and dashboard](../app/shell.md) | crate root | Active, Artifact, Done, Entry, ExportOptions, Filter, Inspection, Limits +33 |
+| [app: Shell and dashboard](../app/shell.md) | crate root | Active, Artifact, Done, Entry, ExportOptions, FeatureList, Filter, Inspection +35 |
 | [app: Viewport](../app/viewport.md) | crate root | Display, ViewMesh |
-| [app: Window](../app/window.md) | crate root | Cancelled, Display, Domain, Failed, FeatureList, LabelResolver, ModeAnalysis, ProblemSpec +7 |
+| [app: Window](../app/window.md) | crate root | Cancelled, Display, Domain, Failed, FeatureList, LabelResolver, MaterialAssign, ModeAnalysis +9 |
 | [Commands](./commands.md) | crate root | physics_for, registry |
 | [Job runner and queue](./jobs.md) | crate root | physics_for, registry |
 | [Meshing seam](./meshing.md) | crate root | physics_for |

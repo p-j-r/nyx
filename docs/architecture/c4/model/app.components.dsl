@@ -3,15 +3,15 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: app.rs, main.rs, state.rs"
-        "lines" "2110"
+        "lines" "2159"
         "codeDiagram" "4-code/app/window.md"
     }
 }
-shell = component "Shell and dashboard" "The tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points." "Rust modules" {
+shell = component "Shell and dashboard" "The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points." "Rust modules" {
     properties {
-        "adr" "14, 23"
-        "code" "crates/app/src: dashboard.rs, examples.rs, sheets.rs, shell.rs, wfview.rs"
-        "lines" "3271"
+        "adr" "14, 23, 87, 88"
+        "code" "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs"
+        "lines" "4284"
         "codeDiagram" "4-code/app/shell.md"
     }
 }
@@ -23,19 +23,19 @@ inspector = component "Inspector tabs" "The tabs beside the viewport: geometry e
         "codeDiagram" "4-code/app/inspector.md"
     }
 }
-viewport = component "Viewport" "The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, and what is kept between frames." "Rust modules" {
+viewport = component "Viewport" "The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames." "Rust modules" {
     properties {
-        "adr" "23"
-        "code" "crates/app/src: colormap.rs, scene.rs, viewport.rs"
-        "lines" "991"
+        "adr" "23, 88"
+        "code" "crates/app/src: colormap.rs, regions.rs, scene.rs, viewport.rs"
+        "lines" "1589"
         "codeDiagram" "4-code/app/viewport.md"
     }
 }
-style = component "Look and widgets" "The nyx look (palette, fonts, egui visuals, light and dark) and the small brand widgets (cards, chips, buttons, sparklines, sheets)." "Rust modules" {
+style = component "Look and widgets" "The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written." "Rust modules" {
     properties {
-        "adr" "23"
-        "code" "crates/app/src: kit.rs, theme.rs"
-        "lines" "326"
+        "adr" "23, 88"
+        "code" "crates/app/src: cvd.rs, fmt.rs, kit.rs, theme.rs, tokens.rs"
+        "lines" "1221"
         "codeDiagram" "4-code/app/style.md"
     }
 }
@@ -43,7 +43,7 @@ headless = component "Scripts and batch" "Runs without a person at the window: s
     properties {
         "adr" "23, 89"
         "code" "crates/app/src: apicmd.rs, batch.rs, pyscript.rs, runfile.rs, script.rs"
-        "lines" "514"
+        "lines" "602"
         "codeDiagram" "4-code/app/headless.md"
     }
 }

@@ -81,6 +81,9 @@ fn a_sweep_gives_one_row_per_point_with_the_numbers_of_a_solve_made_by_hand() {
         assert_eq!(row["edits"][0]["args"]["value"], json!(w));
         let n = row["numbers"]["ems"]["eigenvalue[0].re"].as_f64().unwrap();
         assert_eq!(n, by_hand(w), "width {w}: the sweep and a hand-made solve differ");
+        // the metrics are what a recorded run of the solve carries (the runs table keys), for a front-end that records the point itself
+        assert_eq!(row["metrics"]["eigenvalue_re"].as_f64(), Some(n), "{row}");
+        assert!(row["metrics"]["dofs"].as_f64().is_some_and(|d| d > 0.0), "{row}");
     }
     let (a, c) = (&rows[0]["numbers"]["ems"]["eigenvalue[0].re"], &rows[2]["numbers"]["ems"]["eigenvalue[0].re"]);
     assert_ne!(a, c, "the widths differ, so the test can see a mix-up");

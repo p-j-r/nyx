@@ -10,10 +10,10 @@
 
 [app | app | nyx]
 window    | Window | main.rs app.rs state.rs | 23, 57 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
-shell     | Shell and dashboard | shell.rs dashboard.rs wfview.rs sheets.rs examples.rs | 14, 23 | The tab bar, the dashboard of workflows with live status, the workflow view (concept, build, analysis), the sheets (new, search, versions, share, settings) and the example starting points.
+shell     | Shell and dashboard | shell.rs dashboard.rs wfview.rs sheets.rs examples.rs menu.rs activity.rs sweepui.rs | 14, 23, 87, 88 | The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points.
 inspector | Inspector tabs | tabs.rs forms.rs geomui.rs | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
-viewport  | Viewport | viewport.rs scene.rs colormap.rs | 23 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, and what is kept between frames.
-style     | Look and widgets | theme.rs kit.rs | 23 | The nyx look (palette, fonts, egui visuals, light and dark) and the small brand widgets (cards, chips, buttons, sparklines, sheets).
+viewport  | Viewport | viewport.rs scene.rs colormap.rs regions.rs | 23, 88 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames.
+style     | Look and widgets | theme.rs kit.rs tokens.rs fmt.rs cvd.rs | 23, 88 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
 headless  | Scripts and batch | batch.rs runfile.rs apicmd.rs script.rs pyscript.rs | 23, 89 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
 [mcp | nyx-mcp | nyx_mcp]

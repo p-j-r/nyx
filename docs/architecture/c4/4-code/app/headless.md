@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 > Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md)  
-**Size:** 5 files, 514 lines.
+**Size:** 5 files, 602 lines.
 
 ## Files
 
@@ -15,14 +15,15 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 | `crates/app/src/batch.rs` | 56 | Headless runs without a window, for workstations and clusters: |
 | `crates/app/src/pyscript.rs` | 53 | Runs an optional user Python script: `python script.py project.json [result.csv]`. Python is never needed by the application itself. The script runs on its own thread; its output comes back to the window as a message. |
 | `crates/app/src/runfile.rs` | 144 | Command lists from the command line (productivity plan S1), without a window: |
-| `crates/app/src/script.rs` | 197 | Scripted runs for testing and screenshots: `nyx --script "example 1; compute; shot out.png; quit"`. |
+| `crates/app/src/script.rs` | 285 | Scripted runs for testing and screenshots: `nyx --script "example 1; compute; shot out.png; quit"`. |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `engine` (nyx-engine)](../../3-components/engine.md) | apiref, commandlist, crate root, engine | Engine, Problem, Scalar |
+| [container `engine` (nyx-engine)](../../3-components/engine.md) | apiref, commandlist, crate root, engine | Done, Engine, Problem, Scalar |
 | [Shell and dashboard](./shell.md) | examples, shell | Page, Part, Sheet, Start, Sub, list |
+| [Look and widgets](./style.md) | cvd | Kind, simulate_rgba |
 | [Window](./window.md) | app, state | App, Msg |
 
 ## Used by

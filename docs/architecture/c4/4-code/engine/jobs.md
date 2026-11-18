@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 9 files, 2298 lines.
+**Size:** 9 files, 2343 lines.
 
 ## Files
 
@@ -13,13 +13,13 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 |---|---:|---|
 | `crates/nyx-engine/src/bin/nyx-worker.rs` | 8 | nyx-worker: solves one frozen project in its own process and writes the results file (productivity plan P4, ADR 86). It is started by the window or the MCP server (`Engine::set_worker`), never by hand: see `nyx_engine::worker` for what i... |
 | `crates/nyx-engine/src/convergence.rs` | 210 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
-| `crates/nyx-engine/src/estimate.rs` | 236 | What a solve will cost, learned from what solves cost (productivity plan Q2, ADR 86). Every solve that runs in a worker process measures its own peak memory exactly (`process::peak_memory`); the engine keeps one row per such run (the phy... |
+| `crates/nyx-engine/src/estimate.rs` | 253 | What a solve will cost, learned from what solves cost (productivity plan Q2, ADR 86). Every solve that runs in a worker process measures its own peak memory exactly (`process::peak_memory`); the engine keeps one row per such run (the phy... |
 | `crates/nyx-engine/src/jobs.rs` | 577 | The job runner and its queue (productivity plan P2 and Q1, ADR 85 and 87): a mesh build, a solve, a convergence check, opening or writing a results file is a job with a `Progress` handle, so it can be watched (stage, elapsed) and cancell... |
 | `crates/nyx-engine/src/process.rs` | 164 | Process-wide settings of the program that hosts the engine. Today one: on Windows, opt the process out of power throttling. |
 | `crates/nyx-engine/src/queue.rs` | 294 | The queue of the engine (productivity plan Q1, ADR 87): what a front-end sees of the job runner's lanes (`queue_*` commands), the options a request is submitted with, and the stage caches that let queued requests share work. A request th... |
 | `crates/nyx-engine/src/solve.rs` | 93 | Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then solved with the fields it imports from the physics before it. Everything goes through `Physics`, so ... |
-| `crates/nyx-engine/src/sweep.rs` | 393 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
-| `crates/nyx-engine/src/worker.rs` | 323 | Solving in a child process (productivity plan P4, ADR 86). A solve that needs more memory than the machine has, or a factorisation that nobody can interrupt, must not take the window or the MCP server with it. A *worker* is a small progr... |
+| `crates/nyx-engine/src/sweep.rs` | 401 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
+| `crates/nyx-engine/src/worker.rs` | 343 | Solving in a child process (productivity plan P4, ADR 86). A solve that needs more memory than the machine has, or a factorisation that nobody can interrupt, must not take the window or the MCP server with it. A *worker* is a small progr... |
 
 ## What it uses
 
@@ -33,7 +33,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | [Project](./project.md) | project | Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
 | [Results files](./resultsIO.md) | h5io | read_results, write_results |
-| [Store link](./storeLink.md) | store_link | RunOutcome |
+| [Store link](./storeLink.md) | store_link | RunOutcome, metrics_of |
 
 ## Used by
 
@@ -320,15 +320,15 @@ classDiagram
 | struct | `Row` | `estimate.rs:17` | fields: `chain`, `dim`, `cells`, `dofs`, `peak_working_set`, `peak_commit`, `seconds` —  One finished worker run. |
 | struct | `Estimate` | `estimate.rs:31` | fields: `bytes`, `bytes_with_margin`, `seconds`, `runs`, `extrapolated`, `exponent` —  An estimate with its basis. |
 | fn | `estimate` | `estimate.rs:61` | `pub fn estimate(rows: &[Row], chain: &str, dim: u8, cells: u64) -> Option<Estimate>` —  The estimate for a solve of `chain` in `dim` dimensions on `cells` cells from `rows`, or `None` when the rows do not support one. |
-| struct | `History` | `estimate.rs:91` |  The rows an engine has learned from, in memory and, when a file is set, appended to it as JSON lines (one `write` per line, like the run |
-| type | `MemoryProbe` | `estimate.rs:130` |  What the machine says about its memory: `(total, available)` in bytes. Replaceable, so a test can play a machine that is full. |
-| const | `REFUSE_ABOVE` | `estimate.rs:134` | `f64` —  How much of the machine's memory a solve may be expected to take at most: above this fraction of the physical memory a solve is refused, |
-| fn | `admit` | `estimate.rs:144` | `pub fn admit(est: &Estimate, force: bool, probe: &MemoryProbe, progress: &std::sync::Arc<femcore::progress::Progress>) -> Result<(), nyx_physics::Error>` —  Lets a solve start only when its estimate fits. Above `REFUSE_ABOVE` of the physical memory it fails at once, unless `force`: it cannot be |
-| fn | `chain_key` | `estimate.rs:182` | `pub fn chain_key(targets: &[String]) -> String` —  The chain's key: codes sorted and joined. |
-| fn | `History::set_file` | `estimate.rs:98` | `pub fn set_file(&self, path: &Path)` —  Keeps the rows in `path` from now on and reads the ones it holds; a line that cannot be read is skipped. |
-| fn | `History::rows` | `estimate.rs:107` | `pub fn rows(&self) -> Vec<Row>` |
-| fn | `History::add` | `estimate.rs:111` | `pub fn add(&self, row: Row)` |
-| fn | `History::estimate` | `estimate.rs:124` | `pub fn estimate(&self, chain: &str, dim: u8, cells: u64) -> Option<Estimate>` |
+| struct | `History` | `estimate.rs:92` |  The rows an engine has learned from, in memory and, when a file is set, appended to it as JSON lines (one `write` per line, like the run |
+| type | `MemoryProbe` | `estimate.rs:131` |  What the machine says about its memory: `(total, available)` in bytes. Replaceable, so a test can play a machine that is full. |
+| const | `REFUSE_ABOVE` | `estimate.rs:135` | `f64` —  How much of the machine's memory a solve may be expected to take at most: above this fraction of the physical memory a solve is refused, |
+| fn | `admit` | `estimate.rs:145` | `pub fn admit( est: &Estimate, force: bool, probe: &MemoryProbe, progress: &std::sync::Arc<femcore::progress::Progress>, ) -> Result<(), nyx_physics::Error>` —  Lets a solve start only when its estimate fits. Above `REFUSE_ABOVE` of the physical memory it fails at once, unless `force`: it cannot be |
+| fn | `chain_key` | `estimate.rs:188` | `pub fn chain_key(targets: &[String]) -> String` —  The chain's key: codes sorted and joined. |
+| fn | `History::set_file` | `estimate.rs:99` | `pub fn set_file(&self, path: &Path)` —  Keeps the rows in `path` from now on and reads the ones it holds; a line that cannot be read is skipped. |
+| fn | `History::rows` | `estimate.rs:108` | `pub fn rows(&self) -> Vec<Row>` |
+| fn | `History::add` | `estimate.rs:112` | `pub fn add(&self, row: Row)` |
+| fn | `History::estimate` | `estimate.rs:125` | `pub fn estimate(&self, chain: &str, dim: u8, cells: u64) -> Option<Estimate>` |
 | type | `JobId` | `jobs.rs:20` |  |
 | enum | `JobOutput` | `jobs.rs:23` | variants: `Mesh`, `Solved`, `Convergence`, `Opened`, `Exported` —  What a finished job hands back. The engine applies it to its state (`Engine::apply`). |
 | struct | `WorkerRun` | `jobs.rs:45` | fields: `peak_working_set`, `peak_commit` —  What a worker process measured of its own solve: the most memory it used, in bytes (the in-process job cannot know: the process is shared). |
@@ -399,8 +399,8 @@ classDiagram
 | struct | `RemoteDone` | `worker.rs:39` | fields: `results`, `mesh`, `failed`, `run` —  What a worker handed back. |
 | fn | `material_texts` | `worker.rs:51` | `pub fn material_texts(lib: &femcore::material::Library) -> BTreeMap<String, String>` —  The materials of a library as TOML by name, what a worker rebuilds the library from. |
 | fn | `serve` | `worker.rs:70` | `pub fn serve(args: &[String]) -> i32` —  The worker program: `nyx-worker --job FOLDER`. Returns the exit code (0 when it ran, whatever the solve's outcome: the outcome is in the |
-| fn | `run_remote` | `worker.rs:208` | `pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error>` —  Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once. |
-| fn | `run_remote` | `worker.rs:309` | `pub(crate) fn run_remote(_spec: &RemoteSpec, _progress: &Arc<Progress>) -> Result<RemoteDone, Error>` |
-| fn | `same_mesh` | `worker.rs:315` | `pub(crate) fn same_mesh(a: &femcore::mesh::SimplexMesh, b: &femcore::mesh::SimplexMesh) -> bool` —  True when the mesh a worker stored is the mesh the parent holds (meshing is deterministic, ADR 55): the check that parent and worker solved |
+| fn | `run_remote` | `worker.rs:220` | `pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error>` —  Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once. |
+| fn | `run_remote` | `worker.rs:326` | `pub(crate) fn run_remote(_spec: &RemoteSpec, _progress: &Arc<Progress>) -> Result<RemoteDone, Error>` |
+| fn | `same_mesh` | `worker.rs:335` | `pub(crate) fn same_mesh(a: &femcore::mesh::SimplexMesh, b: &femcore::mesh::SimplexMesh) -> bool` —  True when the mesh a worker stored is the mesh the parent holds (meshing is deterministic, ADR 55): the check that parent and worker solved |
 
 Trait implementations in this component: `JobRunner: Default`, `JobDir: Drop`

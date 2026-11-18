@@ -4,7 +4,7 @@
 # It builds the release binary, then drives `nyx --script` for every view x light/dark x size, ALWAYS in a scratch NYX_WORKSPACE that is
 # deleted afterwards: the first run of the UX review wrote into the real workspace (docs/UX_STATUS.md), so this script refuses to run without
 # one. It fails when a run exits non-zero or a shot is missing or empty.
-# The shots of the build view include the other canvas, an isolated legend row and colouring by region (plan U4), and a job that waits with the queue popover open (plan U5).
+# The shots of the build view include the other canvas, an isolated legend row and colouring by region (plan U4), and a job that waits with the queue popover open (plan U5), and a sweep of one parameter with its running points, queue, table and chart (plan U5).
 # UX_SHOTS_FAST=1 skips the views that need a solve (results, analysis). The shots show example data and the home path of the machine:
 # do not commit them (docs/ux/shots holds the few that were reviewed).
 set -eu
@@ -37,6 +37,8 @@ for size in 1440x900 1100x700; do
       s="$s; compute; shot $p-results.png; canvas theme; shot $p-results-canvas-theme.png; canvas dark; section analysis; shot $p-analysis.png"
       # a workflow that was saved and is marked done moves to the Earlier table of the Dashboard
       s="$s; done 0; page dashboard; shot $p-earlier.png"
+      # a sweep of one parameter: the points running and waiting (the chip and the queue popover), the finished table and chart, and the runs on the Analysis page with ticked runs ringed
+      s="$s; wf example 14; section build; wait off; sweep run w 4e-7 6e-7 24; shot $p-sweep-running.png; queue open; shot $p-sweep-queue.png; queue close; wait on; shot $p-sweep-done.png; section analysis; tick 1 12 24; shot $p-sweep-analysis.png"
     fi
     s="$s; quit"
     if ! "$exe" --size "$size" --script "$s"; then echo "FAIL: $look $size: nyx exited non-zero" >&2; fail=1; fi
@@ -46,7 +48,7 @@ for f in "$out"/*.png; do
   [ -s "$f" ] || { echo "FAIL: empty or missing $f" >&2; fail=1; }
 done
 n=$(ls "$out"/*.png 2>/dev/null | wc -l)
-[ -n "${UX_SHOTS_FAST:-}" ] && want=44 || want=68
+[ -n "${UX_SHOTS_FAST:-}" ] && want=44 || want=84
 [ "$n" -ge "$want" ] || { echo "FAIL: $n shots, expected $want" >&2; fail=1; }
 echo "$n shots in $out"
 exit $fail

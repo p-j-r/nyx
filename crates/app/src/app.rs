@@ -115,6 +115,10 @@ pub struct App {
     pub settle: u32,
     /// a script with `wait off` carries on while a job runs (to shoot a running job and the queue); by default it waits for the job
     pub script_free: bool,
+    /// the sweep started from the window, if any (sweepui.rs)
+    pub sweep: Option<crate::sweepui::Active>,
+    /// colour-vision simulation applied to the screenshots of a script (`cvd protan|deutan|tritan|none`)
+    pub shot_cvd: Option<crate::cvd::Kind>,
     pub shot_pending: Arc<AtomicBool>,
     pub shell: crate::shell::Shell,
     pub colormap: Colormap,
@@ -186,6 +190,8 @@ impl App {
             script: VecDeque::new(),
             settle: 6,
             script_free: false,
+            sweep: None,
+            shot_cvd: None,
             shot_pending: Arc::new(AtomicBool::new(false)),
             shell: crate::shell::Shell::detached(),
             colormap: Colormap::Viridis,
@@ -530,6 +536,7 @@ impl App {
     }
 
     fn poll(&mut self) {
+        self.poll_sweep();
         while let Ok((_, msg)) = self.rx.try_recv() {
             match msg {
                 Msg::Script(Ok(t)) => self.script_output = Some(t),
@@ -1588,6 +1595,47 @@ mod tests {
         assert_eq!(b.stale_reason(j), None);
         b.cmd("set_study", json!({ "physics": "ems", "kind": "modes", "params": { "freq": 190.0e12, "n_modes": 2, "n_target": 2.75 } }));
         assert_eq!(b.stale_reason(j), Some("the model changed since this solve"));
+    }
+
+    /// A sweep started from a workflow (UX plan U5): the points are jobs of the engine's queue that the chip and the popover show, each finished
+    /// point is recorded as a run of the experiment with the metrics of a Compute, and the window's own project is not touched.
+    #[test]
+    fn a_sweep_from_a_workflow_queues_its_points_and_records_each_as_a_run() {
+        let mut a = app();
+        let root = std::env::temp_dir().join(format!("nyx-sweep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        a.attach_workspace(root.clone());
+        assert!(a.shell.active(), "a workspace is attached");
+        let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("15_soi_wire")).unwrap().path;
+        a.new_draft("Sweep", crate::shell::Start::Example(path));
+        wait_idle(&mut a, 60);
+        let wid = a.shell.current_mut().expect("the workflow is open").id.clone();
+        let before = a.engine.project().clone().to_json();
+        let mut form = crate::sweepui::Form::default();
+        (form.param, form.from, form.to, form.n) = ("w".into(), "4.5e-7".into(), "5.5e-7".into(), 3);
+        a.start_sweep(&wid, &form);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        // the engine's queue holds the points: the activity the chip draws is not idle, and says what runs
+        let act = a.activity();
+        assert!(!act.is_idle() && act.rows.len() <= 3, "{act:?}");
+        assert!(act.chip_text().contains("point"), "{}", act.chip_text());
+        let t0 = Instant::now();
+        while a.sweep.as_ref().is_some_and(|s| !(s.complete() && s.points.iter().all(|p| p.recorded))) {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(120), "the sweep did not finish: {:?}", a.sweep.as_ref().map(|s| s.finished()));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let s = a.sweep.as_ref().expect("the sweep");
+        assert!(s.points.iter().all(|p| p.state == "done"), "{:?}", s.points);
+        let runs = &a.shell.open[&wid].runs;
+        assert_eq!(runs.len(), 3, "one run per point");
+        let first = runs[0].metrics["eigenvalue_re"];
+        let last = runs[2].metrics["eigenvalue_re"];
+        assert!(runs.iter().all(|r| r.status == nyx_engine::facade::store::runs::RunStatus::Ok && r.metrics.contains_key("dofs")));
+        assert!((first - last).abs() > 1e-6, "the widths differ, so the numbers do: {first} {last}");
+        assert!(a.activity().is_idle());
+        assert_eq!(a.engine.project().clone().to_json(), before, "a sweep never changes the window's project");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Review I-9: a result that was just computed is never stale, whichever way it was asked for (the plain window or a workflow, which

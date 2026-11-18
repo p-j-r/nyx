@@ -11,7 +11,7 @@ workspace = component "Workspace" "The folder behind the dashboard: settings, th
     properties {
         "adr" "14"
         "code" "crates/nyx-store/src: lib.rs, workspace.rs"
-        "lines" "291"
+        "lines" "306"
         "codeDiagram" "4-code/store/workspace.md"
     }
 }

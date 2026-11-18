@@ -94,6 +94,7 @@ pub struct OpenWf {
     pub focus: Option<String>,
     pub card_for: String,
     pub card_summary: String,
+    pub sweep: crate::sweepui::Form,
 }
 
 impl OpenWf {
@@ -131,6 +132,7 @@ impl OpenWf {
             focus: None,
             card_for: String::new(),
             card_summary: String::new(),
+            sweep: Default::default(),
         }
     }
 
