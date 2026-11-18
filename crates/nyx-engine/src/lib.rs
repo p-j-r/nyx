@@ -31,6 +31,7 @@ pub mod xdmf;
 pub mod apiref;
 pub mod commandlist;
 pub mod meshing;
+pub mod path_guard;
 pub mod pml;
 pub mod preview;
 pub mod process;

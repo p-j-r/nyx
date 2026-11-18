@@ -249,7 +249,10 @@ impl Engine {
 
     /// Runs the command `name` with JSON arguments and returns its JSON reply.
     pub fn call(&mut self, name: &str, args: &Value) -> R {
-        let a = args_obj(args)?;
+        let mut a = args_obj(args)?.clone();
+        if let Some(root) = &self.path_root {
+            crate::path_guard::confine_args(root, name, &mut a)?;
+        }
         let args = &Value::Object(a.clone());
         if let Some(kind) = geom_kind(name) {
             let mut fields = a.clone();

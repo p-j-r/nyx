@@ -103,6 +103,8 @@ pub struct Engine {
     pub(crate) memory_probe: crate::estimate::MemoryProbe,
     /// what the mesh-convergence checks of this session found, by the problem key they were made for (`validated.rs`)
     pub(crate) checks: BTreeMap<String, crate::validated::Check>,
+    /// when set, every file or folder argument of a command must lie inside this folder (`path_guard.rs`); a script host turns it on
+    pub(crate) path_root: Option<PathBuf>,
 }
 
 /// What a worker reported, in words for the log of the run.
@@ -156,7 +158,24 @@ impl Engine {
             history: Arc::new(crate::estimate::History::default()),
             memory_probe: Arc::new(crate::process::system_memory),
             checks: BTreeMap::new(),
+            path_root: None,
         }
+    }
+
+    /// Keeps every file and folder argument of the commands inside `root` (S4, ADR [89]): a relative path is taken from `root`, a path that
+    /// leaves it (by `..`, an absolute path or a link) makes the command fail before it runs. `None` turns the guard off. A front-end that
+    /// runs a script turns it on for the run; the window and the MCP server do not use it.
+    pub fn set_path_root(&mut self, root: Option<&std::path::Path>) -> Result<(), String> {
+        self.path_root = match root {
+            Some(r) => Some(crate::path_guard::absolute_root(r)?),
+            None => None,
+        };
+        Ok(())
+    }
+
+    /// The folder the path guard keeps commands in, when it is on.
+    pub fn path_root(&self) -> Option<&std::path::Path> {
+        self.path_root.as_deref()
     }
 
     /// Keeps what solves cost in `path` (JSON lines, appended to) and learns from what it holds: the memory and time estimates of later solves

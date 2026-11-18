@@ -1,4 +1,4 @@
-# strip_sweep.monty -- SAMPLE for the Monty binding (a Python-syntax interpreter in pure Rust; no CPython).
+# strip_sweep.nys -- a nyx script (Python syntax, run by Monty in a worker process; no CPython).
 #
 # What the host gives the script (generated from Engine::catalog()):
 #   nyx.add_rect(name=..., min=..., max=...), nyx.set_material(...), ...   one function per engine command, keyword arguments
