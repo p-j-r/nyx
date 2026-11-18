@@ -4298,6 +4298,7 @@ dependencies = [
  "muda",
  "nyx-connect",
  "nyx-engine",
+ "nyx-script",
  "raw-window-handle",
  "rayon",
  "rfd",

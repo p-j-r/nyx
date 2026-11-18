@@ -277,6 +277,49 @@ for row in pol["rows"]:
     assert_eq!(out.value["tm"].as_f64().unwrap().to_bits(), tm.to_bits(), "TM0 differs");
 }
 
+/// A run made by a script keeps the script's text, with its hash in the file name, beside its results.
+#[test]
+fn a_run_made_by_a_script_keeps_the_script_and_its_hash() {
+    let r = root("record");
+    let src = r#"
+nyx.project_new(dim=2, title="recorded")
+nyx.set_param(name="w", value=5e-7)
+nyx.add_rect(name="box", min=[-2.0e-6, -2.0e-6], max=[2.0e-6, 0.0])
+nyx.add_rect(name="core", min=["-w/2", 0.0], max=["w/2", 2.2e-7])
+nyx.add_overlay(regions=[{"name": "BOX", "input": "box"}, {"name": "Si", "input": "core"}])
+nyx.add_physics(physics="ems", study="modes", study_params={"freq": 299792458.0 / 1.55e-6, "n_target": 2.9, "n_modes": 2})
+nyx.set_material(physics="ems", region="BOX", material="silica")
+nyx.set_material(physics="ems", region="Si", material="silicon")
+nyx.set_mesh(h=6e-7, adapt_scale=0.4)
+nyx.store_save(workspace=".")
+nyx.solve_run(physics="ems", wait=True)
+nyx.store_runs()
+"#;
+    let mut e = Engine::new();
+    let out = host::run(&mut e, "recorded.nys", src, &Limits::default(), &opts(&r)).unwrap();
+    assert!(out.value.to_string().contains("script"), "the run lists a script artifact: {}", out.value);
+    let mut found = Vec::new();
+    let mut stack = vec![r.clone()];
+    while let Some(d) = stack.pop() {
+        for f in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = f.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.file_name().unwrap().to_string_lossy().starts_with("script-") {
+                found.push(p);
+            }
+        }
+    }
+    assert_eq!(found.len(), 1, "{found:?}");
+    let text = std::fs::read_to_string(&found[0]).unwrap();
+    assert_eq!(text, src);
+    // the file name holds the hash of the text: `script-` + 32 hex digits (blake3, as the store hashes everything) + `.nys`
+    let name = found[0].file_name().unwrap().to_string_lossy().to_string();
+    let hash = name.strip_prefix("script-").and_then(|n| n.strip_suffix(".nys")).unwrap_or("");
+    assert!(hash.len() == 32 && hash.chars().all(|c| c.is_ascii_hexdigit()), "{name}");
+    let _ = std::fs::remove_dir_all(&r);
+}
+
 /// The whole sample (mesh convergence, then a width sweep: 36 solves, about five minutes in release): the numbers recorded from the same workflow sent
 /// as plain engine commands (S4 spike, 2026-11-18). Run with `-- --ignored`.
 #[test]

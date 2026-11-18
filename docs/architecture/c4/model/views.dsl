@@ -7,6 +7,10 @@ component nyx.mcp "Components_mcp" "The components of nyx-mcp and what they use.
     include *
     autolayout tb
 }
+component nyx.script "Components_script" "The components of nyx-script and what they use." {
+    include *
+    autolayout tb
+}
 component nyx.connect "Components_connect" "The components of nyx-connect and what they use." {
     include *
     autolayout tb

@@ -4,17 +4,17 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 
 > Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md)  
-**Size:** 5 files, 633 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md)  
+**Size:** 5 files, 723 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/apicmd.rs` | 64 | The API reference from the command line (productivity plan S2): `nyx api list [--json]` lists the engine commands and `nyx api show COMMAND [--json]` prints one command's page, the same text as `docs/api/COMMAND.md`. Both are generated f... |
+| `crates/app/src/apicmd.rs` | 69 | The API reference from the command line (productivity plan S2): `nyx api list [--json]` lists the engine commands and `nyx api show COMMAND [--json]` prints one command's page, the same text as `docs/api/COMMAND.md`. Both are generated f... |
 | `crates/app/src/batch.rs` | 56 | Headless runs without a window, for workstations and clusters: |
 | `crates/app/src/pyscript.rs` | 53 | Runs an optional user Python script: `python script.py project.json [result.csv]`. Python is never needed by the application itself. The script runs on its own thread; its output comes back to the window as a message. |
-| `crates/app/src/runfile.rs` | 144 | Command lists from the command line (productivity plan S1), without a window: |
+| `crates/app/src/runfile.rs` | 229 | Command lists from the command line (productivity plan S1), without a window: |
 | `crates/app/src/script.rs` | 316 | Scripted runs for testing and screenshots: `nyx --script "example 1; compute; shot out.png; quit"`. |
 
 ## What it uses
@@ -22,6 +22,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 | Target | Modules | Items |
 |---|---|---|
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | apiref, commandlist, crate root, engine | Done, Engine, Problem, Scalar |
+| [container `script` (nyx-script)](../../3-components/script.md) | crate root, host, stubs | Limits, Options, check, nyx_pyi, run |
 | [Shell and dashboard](./shell.md) | examples, shell | Page, Part, Sheet, Start, Sub, list |
 | [Look and widgets](./style.md) | cvd | Kind, simulate_rgba |
 | [Window](./window.md) | app, state | App, Msg |
@@ -81,7 +82,7 @@ classDiagram
 | fn | `run` | `apicmd.rs:16` | `pub fn run(args: &[String]) -> Result<(), Exit>` |
 | fn | `run` | `batch.rs:14` | `pub fn run(args: &[String]) -> Result<(), String>` |
 | fn | `spawn` | `pyscript.rs:9` | `pub fn spawn(script: PathBuf, project_json: String, csv: Option<String>, tx: Sender<(u64, Msg)>, ctx: egui::Context)` |
-| type | `Exit` | `runfile.rs:18` |  |
-| fn | `check` | `runfile.rs:67` | `pub fn check(args: &[String]) -> Result<(), Exit>` —  `nyx check FILE`. |
-| fn | `run` | `runfile.rs:95` | `pub fn run(args: &[String]) -> Result<(), Exit>` —  `nyx run FILE`. |
+| type | `Exit` | `runfile.rs:23` |  |
+| fn | `check` | `runfile.rs:146` | `pub fn check(args: &[String]) -> Result<(), Exit>` —  `nyx check FILE`. |
+| fn | `run` | `runfile.rs:177` | `pub fn run(args: &[String]) -> Result<(), Exit>` —  `nyx run FILE`. |
 | fn | `App::script_step` | `script.rs:16` | `pub fn script_step(&mut self, ctx: &egui::Context)` |

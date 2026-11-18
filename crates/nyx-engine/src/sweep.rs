@@ -385,12 +385,16 @@ impl Engine {
         log: &[String],
         mesh: Option<std::sync::Arc<femcore::mesh::SimplexMesh>>,
     ) -> Value {
+        let script = self.script.clone();
         match self.link.as_mut() {
             None => Value::Null,
-            Some(l) => match l.record_point(project, outcome, seconds, log, mesh.as_deref()) {
-                Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
-                Err(e) => json!({ "error": e.to_string() }),
-            },
+            Some(l) => {
+                l.script = script;
+                match l.record_point(project, outcome, seconds, log, mesh.as_deref()) {
+                    Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
+                    Err(e) => json!({ "error": e.to_string() }),
+                }
+            }
         }
     }
 }

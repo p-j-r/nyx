@@ -105,6 +105,8 @@ pub struct Engine {
     pub(crate) checks: BTreeMap<String, crate::validated::Check>,
     /// when set, every file or folder argument of a command must lie inside this folder (`path_guard.rs`); a script host turns it on
     pub(crate) path_root: Option<PathBuf>,
+    /// the script (name, text) driving this engine, when one does: the runs it makes keep the text and its hash (`store_link.rs`)
+    pub(crate) script: Option<(String, String)>,
 }
 
 /// What a worker reported, in words for the log of the run.
@@ -159,7 +161,14 @@ impl Engine {
             memory_probe: Arc::new(crate::process::system_memory),
             checks: BTreeMap::new(),
             path_root: None,
+            script: None,
         }
+    }
+
+    /// Names the script that drives this engine (`name`, `text`): every run recorded while it is set keeps the text, with its hash in the file name,
+    /// beside the results. A script host sets it for the run of the script and clears it after; `None` clears it.
+    pub fn set_script(&mut self, script: Option<(String, String)>) {
+        self.script = script;
     }
 
     /// Keeps every file and folder argument of the commands inside `root` (S4, ADR [89]): a relative path is taken from `root`, a path that
@@ -841,12 +850,16 @@ impl Engine {
         log: &[String],
         mesh: Option<Arc<femcore::mesh::SimplexMesh>>,
     ) -> Value {
+        let script = self.script.clone();
         match self.link.as_mut() {
             None => Value::Null,
-            Some(l) => match l.record(project, outcome, seconds, log, mesh.as_deref()) {
-                Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
-                Err(e) => json!({ "error": e.to_string() }),
-            },
+            Some(l) => {
+                l.script = script;
+                match l.record(project, outcome, seconds, log, mesh.as_deref()) {
+                    Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
+                    Err(e) => json!({ "error": e.to_string() }),
+                }
+            }
         }
     }
 

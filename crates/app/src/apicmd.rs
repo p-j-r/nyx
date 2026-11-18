@@ -56,6 +56,11 @@ pub fn run(args: &[String]) -> Result<(), Exit> {
             }
             Ok(())
         }
+        Some("stubs") if rest.len() == 1 => {
+            // the type stub of the `nyx` object of scripts, for an editor (save it as nyx.pyi next to the script) and for `nyx check`
+            print!("{}", nyx_script::stubs::nyx_pyi(&Engine::new()));
+            Ok(())
+        }
         Some("list") | Some("show") => Err(usage("wrong number of arguments")),
         Some(other) => Err(usage(&format!("unknown subcommand '{other}'"))),
         None => Err(usage("no subcommand")),

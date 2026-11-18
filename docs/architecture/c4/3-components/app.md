@@ -31,28 +31,32 @@ graph TB
         style 9 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      16("<div style='font-weight: bold'>nyx-connect</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library and binary]</div><div style='font-size: 80%; margin-top:10px'>Finds Claude Code and Claude<br />Desktop installs and<br />registers nyx-mcp with them;<br />the Connect menu and its<br />command-line twin.</div>")
+      16("<div style='font-weight: bold'>nyx-script</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library and worker binary]</div><div style='font-size: 80%; margin-top:10px'>Scripts, a third front-end of<br />the engine: Python-syntax<br />text (*.nys) run by Monty in<br />a worker process; each<br />nyx.<command>(...) is one<br />Engine::call. Limits, no<br />ambient access, the engine's<br />path guard.</div>")
       style 16 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      22["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
-      style 22 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      20("<div style='font-weight: bold'>nyx-connect</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library and binary]</div><div style='font-size: 80%; margin-top:10px'>Finds Claude Code and Claude<br />Desktop installs and<br />registers nyx-mcp with them;<br />the Connect menu and its<br />command-line twin.</div>")
+      style 20 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      26["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
+      style 26 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    12-. "<div>uses engine: apiref,<br />commandlist +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    16-. "<div>One engine command per script<br />call; the path guard</div><div style='font-size: 70%'>[Rust API]</div>" .->26
+    12-. "<div>uses engine: apiref,<br />commandlist +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    12-. "<div>uses script: crate root, host<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->16
     12-. "<div>uses examples, shell</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
     12-. "<div>uses cvd</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     12-. "<div>uses app, state</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
-    9-. "<div>uses engine: crate root,<br />project</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    9-. "<div>uses engine: crate root,<br />project</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     9-. "<div>uses examples</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
     9-. "<div>uses fmt, theme</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     9-. "<div>uses colormap</div><div style='font-size: 70%'>[Rust paths]</div>" .->10
     9-. "<div>uses app, spans +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
-    8-. "<div>uses engine: crate root,<br />engine +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    8-. "<div>uses engine: crate root,<br />engine +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     8-. "<div>uses fmt, kit +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     8-. "<div>uses app, spans +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
-    10-. "<div>uses engine: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    10-. "<div>uses engine: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     10-. "<div>uses fmt, theme +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
-    7-. "<div>uses connect: config, env +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->16
-    7-. "<div>uses engine: crate root,<br />engine +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
+    7-. "<div>uses connect: config, env +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->20
+    7-. "<div>uses engine: crate root,<br />engine +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
     7-. "<div>uses pyscript</div><div style='font-size: 70%'>[Rust paths]</div>" .->12
     7-. "<div>uses geomui</div><div style='font-size: 70%'>[Rust paths]</div>" .->9
     7-. "<div>uses activity, examples +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
@@ -68,4 +72,4 @@ graph TB
 | [Inspector tabs](../4-code/app/inspector.md) | 3 | 2196 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
 | [Viewport](../4-code/app/viewport.md) | 4 | 1590 | 23, 88 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames. |
 | [Look and widgets](../4-code/app/style.md) | 5 | 1252 | 23, 88 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written. |
-| [Scripts and batch](../4-code/app/headless.md) | 5 | 633 | 23, 89 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script. |
+| [Scripts and batch](../4-code/app/headless.md) | 5 | 723 | 23, 89, 93 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script. |

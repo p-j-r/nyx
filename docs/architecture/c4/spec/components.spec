@@ -14,13 +14,21 @@ shell     | Shell and dashboard | shell.rs dashboard.rs wfview.rs sheets.rs exam
 inspector | Inspector tabs | tabs.rs forms.rs geomui.rs | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 viewport  | Viewport | viewport.rs scene.rs colormap.rs regions.rs | 23, 88 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames.
 style     | Look and widgets | theme.rs kit.rs tokens.rs fmt.rs cvd.rs | 23, 88 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
-headless  | Scripts and batch | batch.rs runfile.rs apicmd.rs script.rs pyscript.rs | 23, 89 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
+headless  | Scripts and batch | batch.rs runfile.rs apicmd.rs script.rs pyscript.rs | 23, 89, 93 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
 [mcp | nyx-mcp | nyx_mcp]
 protocol  | Protocol loop | main.rs#main,usage,serve,at_least,session_id,default_dir,NAME,VERSION,PROTOCOLS,Server,Server::new,Server::header,Server::initialize,Server::handle | 15, 57 | Newline-delimited JSON-RPC 2.0 over stdin/stdout: initialize with protocol negotiation, method dispatch, notifications, logs on stderr. No async runtime and no SDK.
 tools     | Tool bridge | main.rs#tool_list,destructive,render,Server::run,Server::tools_call | 15, 57 | The tool list is the engine's command catalog (with annotations: read-only, destructive); a tool call is Engine::call, its reply rendered as text.
 edge mcp.tools -> engine.commands | One tool per command: catalog and call
 edge mcp.protocol -> engine.registry | Server instructions text
+
+[script | nyx-script | nyx_script]
+host      | Script host | lib.rs host.rs convert.rs | 93, 57 | Runs a script (Python syntax, `*.nys`) through a worker process and answers each `nyx.<command>(...)` it makes with Engine::call; the limits, the clock and random policy, the path guard turned on for the run, the script kept with the runs it makes; `check` parses and type-checks without running. JSON to and from script values.
+stubs     | Type stub | stubs.rs | 93 | The `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads.
+worker    | Worker program | bin/nyx-script-worker.rs | 93, 86 | The only place the Monty interpreter runs: Monty's worker mode over stdin and stdout, with the allocator that bounds its memory. A script that exhausts memory or the stack ends this process, not the engine's.
+edge script.host -> engine.commands | One engine command per script call, and the path guard
+edge script.host -> script.worker | Frames over a pipe: the script pauses at each command and the host answers
+edge script.stubs -> engine.commands | Reads the catalog
 
 [connect | nyx-connect | nyx_connect]
 hosts     | Host table | hosts.rs env.rs | 28 | Where each AI host (Claude Code, Claude Desktop, ...) keeps its MCP config and what an entry looks like; the home folder, application-data folders and the operating system.
@@ -30,7 +38,7 @@ report    | Report | report.rs lib.rs | 28, 19 | The machine-readable form of wh
 cli       | Command line | main.rs | 28 | The command-line twin of the Connect menu: list, connect, disconnect, test, optionally as JSON.
 
 [engine | nyx-engine | nyx_engine]
-commands  | Commands | commands.rs engine.rs guide.rs reduce.rs validated.rs | 57, 38, 15, 90, 91 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries.
+commands  | Commands | commands.rs engine.rs guide.rs path_guard.rs reduce.rs validated.rs | 57, 38, 15, 90, 91, 93 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries.
 project   | Project | project.rs | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary.
 geometry  | Geometry operations | geometry.rs geomdesc.rs | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only).
 jobs      | Job runner and queue | jobs.rs queue.rs sweep.rs process.rs worker.rs estimate.rs bin/nyx-worker.rs solve.rs convergence.rs | 61, 85, 87, 86, 11 | Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.

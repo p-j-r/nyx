@@ -41,9 +41,9 @@ style = component "Look and widgets" "The nyx look (the colour tokens as data, f
 }
 headless = component "Scripts and batch" "Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script." "Rust modules" {
     properties {
-        "adr" "23, 89"
+        "adr" "23, 89, 93"
         "code" "crates/app/src: apicmd.rs, batch.rs, pyscript.rs, runfile.rs, script.rs"
-        "lines" "633"
+        "lines" "723"
         "codeDiagram" "4-code/app/headless.md"
     }
 }

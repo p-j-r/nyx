@@ -174,7 +174,10 @@ pub fn run(engine: &mut Engine, name: &str, src: &str, limits: &Limits, opts: &O
     let worker = worker_of(opts)?;
     let before = engine.path_root().map(std::path::Path::to_path_buf);
     engine.set_path_root(Some(&opts.root))?;
+    // the runs the script makes keep its text and hash (S4)
+    engine.set_script(Some((name.to_string(), src.to_string())));
     let r = with_runtime(drive(engine, name, src, limits, worker, true));
+    engine.set_script(None);
     let _ = engine.set_path_root(before.as_deref());
     r?
 }

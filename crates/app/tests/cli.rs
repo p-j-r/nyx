@@ -172,3 +172,69 @@ fn the_program_answers_job_as_a_worker_and_never_opens_a_window() {
     assert_eq!(done["has_results"], true);
     assert!(dir.join("results.h5").is_file());
 }
+
+// ------------------------------------------------------------------------------------------------------------------------ scripts (S4, ADR 93)
+
+/// The script worker is built with the workspace and sits next to `nyx`; a run of `-p nyx` alone may not have built it.
+fn need_worker() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_nyx"));
+    let w = exe.parent().unwrap().join(format!("nyx-script-worker{}", std::env::consts::EXE_SUFFIX));
+    assert!(w.is_file(), "{} is missing: build it with `cargo build --release -p nyx-script` (a workspace test run builds it)", w.display());
+}
+
+#[test]
+fn a_script_is_checked_against_the_commands_before_it_runs() {
+    need_worker();
+    let dir = tmp("script-check");
+    let good = dir.join("good.nys");
+    std::fs::write(&good, "nyx.project_new(dim=2, title='t')\nnyx.set_param(name='w', value=5e-7)\n").unwrap();
+    let o = nyx(&["check", good.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    assert!(text(&o.stdout).contains("nothing was run"));
+
+    let bad = dir.join("bad.nys");
+    std::fs::write(&bad, "nyx.project_new(dim=2)\nnyx.solve_runn(physics='ems')\n").unwrap();
+    let o = nyx(&["check", bad.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(2));
+    let err = text(&o.stderr);
+    assert!(err.contains("solve_runn") && err.contains("bad.nys:2"), "{err}");
+    // `run` checks first: the script fails the static check (exit 2) and nothing ran
+    let o = nyx(&["run", bad.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o.stderr));
+}
+
+#[test]
+fn a_script_runs_prints_returns_and_is_stopped_by_its_limits() {
+    need_worker();
+    let dir = tmp("script-run");
+    let f = dir.join("ok.nys");
+    std::fs::write(&f, "nyx.project_new(dim=3, title='t')\nprint('hello from a script')\nnyx.project_info()['dim']\n").unwrap();
+    let o = nyx(&["run", f.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let out = text(&o.stdout);
+    assert!(out.contains("hello from a script") && out.contains("3") && out.contains("2 engine commands"), "{out}");
+    let j = nyx(&["run", f.to_str().unwrap(), "--json"]);
+    let v: serde_json::Value = serde_json::from_str(text(&j.stdout).lines().last().unwrap()).expect("a JSON result");
+    assert_eq!(v["value"], 3);
+    assert_eq!(v["calls"], 2);
+
+    let spin = dir.join("spin.nys");
+    std::fs::write(&spin, "while True:\n    pass\n").unwrap();
+    let o = nyx(&["run", spin.to_str().unwrap(), "--seconds", "1"]);
+    assert_eq!(o.status.code(), Some(1));
+    // a script cannot write outside its folder: the guard answers with the command and the argument
+    let esc = dir.join("escape.nys");
+    std::fs::write(&esc, "nyx.project_new(dim=2)\nnyx.project_save(path='../escaped.nyx.json')\n").unwrap();
+    let o = nyx(&["run", esc.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(text(&o.stderr).contains("project_save"), "{}", text(&o.stderr));
+    assert!(!dir.parent().unwrap().join("escaped.nyx.json").exists());
+}
+
+#[test]
+fn api_stubs_prints_the_type_stub_of_the_nyx_object() {
+    let o = nyx(&["api", "stubs"]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let out = text(&o.stdout);
+    assert!(out.contains("class _Nyx:") && out.contains("def solve_run(self") && out.contains("nyx: _Nyx"), "{}", &out[..out.len().min(400)]);
+}

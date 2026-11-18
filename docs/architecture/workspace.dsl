@@ -51,6 +51,15 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                 !include c4/model/mcp.components.dsl
             }
 
+            script = container "nyx-script" "Scripts, a third front-end of the engine: Python-syntax text (*.nys) run by Monty in a worker process; each nyx.<command>(...) is one Engine::call. Limits, no ambient access, the engine's path guard." "Rust library and worker binary" "Executable" {
+                properties {
+                    "adr" "0093, 0057"
+                    "code" "crates/nyx-script/src"
+                    "contract" "contracts/script_api.v1.json"
+                }
+                !include c4/model/script.components.dsl
+            }
+
             connect = container "nyx-connect" "Finds Claude Code and Claude Desktop installs and registers nyx-mcp with them; the Connect menu and its command-line twin." "Rust library and binary" "Executable" {
                 properties {
                     "adr" "0028"
@@ -169,6 +178,8 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
         nyx.app -> nyx.engine "Calls commands, polls jobs, draws results" "Rust API"
         nyx.app -> nyx.connect "Connect menu" "Rust API"
         nyx.mcp -> nyx.engine "One tool per command" "Rust API"
+        nyx.script -> nyx.engine "One engine command per script call; the path guard" "Rust API"
+        nyx.app -> nyx.script "nyx check and nyx run on a script" "Rust API"
         nyx.engine -> nyx.physics "Registry, ProblemSpec, SolveResult" "Rust API"
         nyx.engine -> nyx.dfs "Compiled-in physics (feature dfs)" "Rust API"
         nyx.engine -> nyx.sms "Compiled-in physics (feature sms)" "Rust API"

@@ -181,6 +181,13 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/src/validated.rs` | 91 | the validated state (exploratory, checked, check not affordable), the checks kept by problem key and the verdict written into the run record |
 | `crates/nyx-engine/src/reduce.rs` | 90 | field handles and the reductions `integrate`, `extremum`, `probe`, `line_cut`, `overlap`, `confinement`: the quadrature rule, the order of the sums, the cell locator |
 | `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
+| `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 57 | scripts: the host (run and check a script through a worker process), JSON to and from script values, the `nyx` stub generated from the catalog |
+| `crates/nyx-script/src/bin/nyx-script-worker.rs` | 93, 86 | the script worker program: Monty's worker mode, the only place the interpreter runs |
+| `crates/nyx-script/{Cargo.toml,tests/script.rs,tests/contract.rs}` | 93 | the nyx-script package, its tests (limits, the path guard, determinism, the static check, same numbers as plain commands) and the `script_api.v1` exemplar test |
+| `crates/nyx-engine/src/path_guard.rs` | 93 | the path guard: file and folder arguments of commands kept inside one folder |
+| `crates/nyx-engine/tests/path_guard.rs` | 93 | the path guard: every path-like argument of the catalog is guarded, no command writes or reads outside the root |
+| `docs/scripting-samples/*` | 93 | a sample script (the strip sweep) |
+| `docs/architecture/contracts/script_api.v1.json` | 93, 19 | what a script can rely on (the binding's rules; the commands are `engine_commands`) |
 <!-- map:end -->
 
 ## Gaps this index shows

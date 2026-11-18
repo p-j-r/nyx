@@ -132,6 +132,8 @@ pub enum RunOutcome<'a> {
 pub struct StoreLink {
     pub dir: WorkflowDir,
     pub experiment: String,
+    /// the script (name, text) the runs recorded now are made by, when a script drives the engine: its text is kept with each run (S4)
+    pub script: Option<(String, String)>,
 }
 
 impl StoreLink {
@@ -140,7 +142,7 @@ impl StoreLink {
         let dir = WorkflowDir::create_with(workspace, None, &project.title, origin, &project.to_json(), card_of)
             .map_err(store_err)?;
         let experiment = dir.wf.experiments[0].id.clone();
-        Ok(StoreLink { dir, experiment })
+        Ok(StoreLink { dir, experiment, script: None })
     }
 
     /// Opens a workflow folder and reads the project of its first experiment (or of `experiment`).
@@ -161,7 +163,7 @@ impl StoreLink {
         };
         let text = dir.read_spec(&experiment).map_err(store_err)?;
         let project = Project::from_json(&text)?;
-        Ok((StoreLink { dir, experiment }, project))
+        Ok((StoreLink { dir, experiment, script: None }, project))
     }
 
     /// Stores the project when it differs from the saved one; returns the new version number, `None` when nothing changed.
@@ -283,6 +285,11 @@ impl StoreLink {
         }
         if !log.is_empty() {
             write("log.txt", "log", format!("{}\n", log.join("\n")).into_bytes())?;
+        }
+        // the script that made this run, with its hash in the file name (`script-b3:...` would not be a Windows file name: the hash is hex)
+        if let Some((_, text)) = &self.script {
+            let hash = nyx_store::util::hash_bytes(text.as_bytes());
+            write(&format!("script-{}.nys", hash.trim_start_matches("b3:")), "script", text.clone().into_bytes())?;
         }
         artifacts.extend(extra);
         rec.artifacts = artifacts;

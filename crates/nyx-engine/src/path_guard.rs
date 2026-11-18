@@ -60,7 +60,9 @@ pub fn confine(root: &Path, requested: &str) -> Result<PathBuf, String> {
     for n in rest.iter().rev() {
         real.push(n);
     }
-    let inside = real.strip_prefix(&real_root).map_err(|_| format!("{requested} is outside the folder scripts may use ({})", root.display()))?;
+    let inside = real
+        .strip_prefix(&real_root)
+        .map_err(|_| format!("{requested} is outside the folder scripts may use ({})", root.display()))?;
     Ok(root.join(inside))
 }
 
@@ -140,7 +142,12 @@ mod tests {
         // a directory junction needs no privilege on Windows: `mklink /J`
         let root = temp_root("junction");
         let out = temp_root("junction-target");
-        let status = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(root.join("escape")).arg(&out).output().unwrap();
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(root.join("escape"))
+            .arg(&out)
+            .output()
+            .unwrap();
         assert!(status.status.success(), "mklink failed: {}", String::from_utf8_lossy(&status.stdout));
         assert!(confine(&root, "escape/secret.json").is_err());
         let _ = std::fs::remove_dir_all(&root);

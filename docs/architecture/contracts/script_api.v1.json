@@ -1,0 +1,47 @@
+{
+  "calls": [
+    "nyx.<command>(name=value, ...)",
+    "nyx.call(name, **args)",
+    "nyx.call(name, {...})",
+    "nyx.<command>({...})"
+  ],
+  "determinism": {
+    "clock": "refused (RuntimeError)",
+    "random": "seed 0",
+    "sleep": "returns at once"
+  },
+  "engine_error": "RuntimeError('<command>: <message>'), catchable",
+  "extension": ".nys",
+  "files": "open, pathlib and os raise PermissionError",
+  "format": "script_api.v1",
+  "language": "Python syntax, run by Monty 1.6.0 in a worker process (no CPython)",
+  "limits": {
+    "calls": 20000,
+    "depth": 100,
+    "memory_bytes": 268435456,
+    "output_bytes": 1048576,
+    "seconds": 30.0,
+    "seconds_counts": "script time only; the time the engine takes to answer a command is not counted"
+  },
+  "object": "nyx",
+  "output": "print() lines, up to the output limit",
+  "path_guard": {
+    "arguments": [
+      "path",
+      "folder",
+      "workspace"
+    ],
+    "root": "the workspace given to the run, else the folder of the script; relative paths are taken from it"
+  },
+  "run_record": {
+    "artifact_kind": "script",
+    "file": "script-<blake3, 32 hex digits>.nys"
+  },
+  "static_check": "names and required-ness of commands and arguments, against the stub of nyx api stubs; value types are not checked",
+  "value": "the last expression of the script, as JSON",
+  "worker": {
+    "argument": "subprocess",
+    "environment": "NYX_SCRIPT_WORKER",
+    "program": "nyx-script-worker"
+  }
+}

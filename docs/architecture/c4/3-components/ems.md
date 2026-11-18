@@ -14,66 +14,66 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 56 ["nyx-ems"]
-        style 56 fill:#ffffff,stroke:#205723,color:#205723
+      subgraph 60 ["nyx-ems"]
+        style 60 fill:#ffffff,stroke:#205723,color:#205723
 
-        57["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />ems: descriptors, validation,<br />solve entry.</div>"]
-        style 57 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        58["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed ems problem the<br />kernels read, decoded from<br />the envelope.</div>"]
-        style 58 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        59["<div style='font-weight: bold'>Mode kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Full-vector mode analysis of<br />a 2D waveguide cross-section<br />(inhomogeneous media<br />allowed).</div>"]
-        style 59 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        60["<div style='font-weight: bold'>Complex-mode kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Complex-valued mode analysis:<br />lossy media and perfectly<br />matched layers.</div>"]
-        style 60 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        61["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Electromagnetic eigenmodes of<br />a body of revolution (rings,<br />disks, coaxial cavities).</div>"]
+        61["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />ems: descriptors, validation,<br />solve entry.</div>"]
         style 61 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        62["<div style='font-weight: bold'>3D cavity kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Electromagnetic eigenmodes of<br />3D cavities and resonators.</div>"]
+        62["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed ems problem the<br />kernels read, decoded from<br />the envelope.</div>"]
         style 62 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        63["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The mode solvers' results as<br />an OpticalSet, with the<br />material data needed to<br />evaluate their fields.</div>"]
+        63["<div style='font-weight: bold'>Mode kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Full-vector mode analysis of<br />a 2D waveguide cross-section<br />(inhomogeneous media<br />allowed).</div>"]
         style 63 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        64["<div style='font-weight: bold'>Complex-mode kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Complex-valued mode analysis:<br />lossy media and perfectly<br />matched layers.</div>"]
+        style 64 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        65["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Electromagnetic eigenmodes of<br />a body of revolution (rings,<br />disks, coaxial cavities).</div>"]
+        style 65 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        66["<div style='font-weight: bold'>3D cavity kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Electromagnetic eigenmodes of<br />3D cavities and resonators.</div>"]
+        style 66 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        67["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The mode solvers' results as<br />an OpticalSet, with the<br />material data needed to<br />evaluate their fields.</div>"]
+        style 67 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      35["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
-      style 35 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      78["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 78 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      39["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
+      style 39 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      82["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 82 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    35-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->78
-    57-. "<div>uses femcore: material,<br />material::spec +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    57-. "<div>uses physics: crate root,<br />decode</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    57-. "<div>uses axisym</div><div style='font-size: 70%'>[Rust paths]</div>" .->61
-    57-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->62
-    57-. "<div>uses crate root, modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
-    57-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->60
-    57-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
-    57-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    61-. "<div>uses femcore: edge, fem +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    61-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    61-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
-    61-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    62-. "<div>uses femcore: fem, fields +11</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    62-. "<div>uses physics: crate root,<br />frame +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    62-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
-    62-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    59-. "<div>uses femcore: edge, fem +9</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    59-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    59-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->60
-    59-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
-    59-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    60-. "<div>uses femcore: edge, fem +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    60-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    60-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
-    60-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
-    60-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    63-. "<div>uses femcore:<br />linalg::csr::assembly,<br />optical +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    63-. "<div>uses physics: crate root,<br />frame</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    63-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
-    63-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->60
-    63-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    58-. "<div>uses femcore: props</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    58-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    58-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->57
+    39-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->82
+    61-. "<div>uses femcore: material,<br />material::spec +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    61-. "<div>uses physics: crate root,<br />decode</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    61-. "<div>uses axisym</div><div style='font-size: 70%'>[Rust paths]</div>" .->65
+    61-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->66
+    61-. "<div>uses crate root, modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
+    61-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
+    61-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
+    61-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->62
+    65-. "<div>uses femcore: edge, fem +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    65-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    65-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
+    65-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->62
+    66-. "<div>uses femcore: fem, fields +11</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    66-. "<div>uses physics: crate root,<br />frame +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    66-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
+    66-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->62
+    63-. "<div>uses femcore: edge, fem +9</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    63-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    63-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
+    63-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
+    63-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->62
+    64-. "<div>uses femcore: edge, fem +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    64-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    64-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
+    64-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
+    64-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->62
+    67-. "<div>uses femcore:<br />linalg::csr::assembly,<br />optical +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    67-. "<div>uses physics: crate root,<br />frame</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    67-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->63
+    67-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
+    67-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->62
+    62-. "<div>uses femcore: props</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    62-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    62-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->61
 
   end```
 

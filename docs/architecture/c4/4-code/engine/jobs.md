@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 9 files, 2410 lines.
+**Size:** 9 files, 2415 lines.
 
 ## Files
 
@@ -13,12 +13,12 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 |---|---:|---|
 | `crates/nyx-engine/src/bin/nyx-worker.rs` | 8 | nyx-worker: solves one frozen project in its own process and writes the results file (productivity plan P4, ADR 86). It is started by the window or the MCP server (`Engine::set_worker`), never by hand: see `nyx_engine::worker` for what i... |
 | `crates/nyx-engine/src/convergence.rs` | 217 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
-| `crates/nyx-engine/src/estimate.rs` | 313 | What a solve will cost, learned from what solves cost (productivity plan Q2, ADR 86). Every solve that runs in a worker process measures its own peak memory exactly (`process::peak_memory`); the engine keeps one row per such run (the phy... |
+| `crates/nyx-engine/src/estimate.rs` | 314 | What a solve will cost, learned from what solves cost (productivity plan Q2, ADR 86). Every solve that runs in a worker process measures its own peak memory exactly (`process::peak_memory`); the engine keeps one row per such run (the phy... |
 | `crates/nyx-engine/src/jobs.rs` | 577 | The job runner and its queue (productivity plan P2 and Q1, ADR 85 and 87): a mesh build, a solve, a convergence check, opening or writing a results file is a job with a `Progress` handle, so it can be watched (stage, elapsed) and cancell... |
 | `crates/nyx-engine/src/process.rs` | 164 | Process-wide settings of the program that hosts the engine. Today one: on Windows, opt the process out of power throttling. |
 | `crates/nyx-engine/src/queue.rs` | 294 | The queue of the engine (productivity plan Q1, ADR 87): what a front-end sees of the job runner's lanes (`queue_*` commands), the options a request is submitted with, and the stage caches that let queued requests share work. A request th... |
 | `crates/nyx-engine/src/solve.rs` | 93 | Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then solved with the fields it imports from the physics before it. Everything goes through `Physics`, so ... |
-| `crates/nyx-engine/src/sweep.rs` | 401 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
+| `crates/nyx-engine/src/sweep.rs` | 405 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
 | `crates/nyx-engine/src/worker.rs` | 343 | Solving in a child process (productivity plan P4, ADR 86). A solve that needs more memory than the machine has, or a factorisation that nobody can interrupt, must not take the window or the MCP server with it. A *worker* is a small progr... |
 
 ## What it uses

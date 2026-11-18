@@ -24,7 +24,9 @@ fn every_path_like_argument_of_the_catalog_is_guarded() {
             let doc = def.get("description").and_then(|d| d.as_str()).unwrap_or("").to_lowercase();
             // whole words of the name (`profile` is not a file), and words in the description that say a file or a folder is meant
             let words: Vec<String> = key.to_lowercase().split('_').map(str::to_string).collect();
-            let pathlike = ["path", "file", "folder", "dir", "directory", "filename", "workspace"].iter().any(|w| words.iter().any(|k| k == w))
+            let pathlike = ["path", "file", "folder", "dir", "directory", "filename", "workspace"]
+                .iter()
+                .any(|w| words.iter().any(|k| k == w))
                 || doc.contains("file path")
                 || doc.contains("folder")
                 || doc.contains("directory");
@@ -33,12 +35,21 @@ fn every_path_like_argument_of_the_catalog_is_guarded() {
             }
         }
     }
-    assert!(unguarded.is_empty(), "path-like arguments the guard does not know: {unguarded:?}; add the name to PATH_ARGS");
+    assert!(
+        unguarded.is_empty(),
+        "path-like arguments the guard does not know: {unguarded:?}; add the name to PATH_ARGS"
+    );
     // and the listed names are really used
     let named: Vec<String> = e
         .catalog()
         .iter()
-        .flat_map(|c| c.schema.get("properties").and_then(|p| p.as_object()).map(|p| p.keys().cloned().collect::<Vec<_>>()).unwrap_or_default())
+        .flat_map(|c| {
+            c.schema
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .map(|p| p.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
         .collect();
     for k in PATH_ARGS {
         assert!(named.iter().any(|n| n == k), "PATH_ARGS names `{k}` but no command takes it");

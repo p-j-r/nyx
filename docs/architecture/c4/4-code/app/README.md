@@ -9,4 +9,4 @@ One page per component, C4 level 4. [Component view](../../3-components/app.md) 
 | [Inspector tabs](./inspector.md) | 3 | 2196 | 13 | 2 |
 | [Viewport](./viewport.md) | 4 | 1590 | 36 | 12 |
 | [Look and widgets](./style.md) | 5 | 1252 | 101 | 7 |
-| [Scripts and batch](./headless.md) | 5 | 633 | 8 | 1 |
+| [Scripts and batch](./headless.md) | 5 | 723 | 8 | 1 |

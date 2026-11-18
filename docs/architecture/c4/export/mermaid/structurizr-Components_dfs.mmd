@@ -7,45 +7,45 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 41 ["nyx-dfs"]
-        style 41 fill:#ffffff,stroke:#205723,color:#205723
+      subgraph 45 ["nyx-dfs"]
+        style 45 fill:#ffffff,stroke:#205723,color:#205723
 
-        42["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />dfs: descriptors, validation,<br />solve entry.</div>"]
-        style 42 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        43["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed dfs problem the<br />kernels read, decoded from<br />the ProblemSpec envelope.</div>"]
-        style 43 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        44["<div style='font-weight: bold'>Heat kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Heat transfer on P1/P2<br />simplices, stationary and<br />transient.</div>"]
-        style 44 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        45["<div style='font-weight: bold'>Electrostatics kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Electrostatics on P1/P2<br />simplices with<br />fixed-potential and<br />surface-charge conditions.</div>"]
-        style 45 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        46["<div style='font-weight: bold'>Shared helpers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Per-cell gradients and values<br />shared by the heat and<br />electrostatics kernels.</div>"]
+        46["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />dfs: descriptors, validation,<br />solve entry.</div>"]
         style 46 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        47["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed dfs problem the<br />kernels read, decoded from<br />the ProblemSpec envelope.</div>"]
+        style 47 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        48["<div style='font-weight: bold'>Heat kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Heat transfer on P1/P2<br />simplices, stationary and<br />transient.</div>"]
+        style 48 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        49["<div style='font-weight: bold'>Electrostatics kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Electrostatics on P1/P2<br />simplices with<br />fixed-potential and<br />surface-charge conditions.</div>"]
+        style 49 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        50["<div style='font-weight: bold'>Shared helpers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Per-cell gradients and values<br />shared by the heat and<br />electrostatics kernels.</div>"]
+        style 50 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      35["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
-      style 35 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      78["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 78 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      39["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
+      style 39 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      82["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 82 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    35-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->78
-    42-. "<div>uses femcore: material::spec,<br />progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    42-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    42-. "<div>uses electro</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
-    42-. "<div>uses heat</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
-    42-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
-    46-. "<div>uses femcore: fields,<br />material +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    46-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    45-. "<div>uses femcore: fem, fields +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    45-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    45-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
-    45-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
-    44-. "<div>uses femcore: expr, fem +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    44-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    44-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
-    44-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
-    43-. "<div>uses femcore: props</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    43-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    43-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
+    39-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->82
+    46-. "<div>uses femcore: material::spec,<br />progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    46-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    46-. "<div>uses electro</div><div style='font-size: 70%'>[Rust paths]</div>" .->49
+    46-. "<div>uses heat</div><div style='font-size: 70%'>[Rust paths]</div>" .->48
+    46-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->47
+    50-. "<div>uses femcore: fields,<br />material +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    50-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    49-. "<div>uses femcore: fem, fields +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    49-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    49-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
+    49-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->47
+    48-. "<div>uses femcore: expr, fem +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    48-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    48-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
+    48-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->47
+    47-. "<div>uses femcore: props</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    47-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    47-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
 
   end

@@ -58,13 +58,13 @@ hide stereotype
 
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "femcore\n<size:16>[Container: Rust library]</size>" <<Boundary-ZmVtY29yZQ==>> {
+    rectangle "==Finite-element basics\n<size:16>[Component: Rust modules]</size>\n\nLagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Finiteelementbasics
+    rectangle "==Material specification\n<size:16>[Component: Rust modules]</size>\n\nTOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Materialspecification
+    rectangle "==Optical mode sets\n<size:16>[Component: Rust modules]</size>\n\nOptical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Opticalmodesets
     rectangle "==Frame and sections\n<size:16>[Component: Rust modules]</size>\n\nThe one place that knows the wafer axes (x lateral, z normal, waves along +y)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Frameandsections
     rectangle "==Expressions\n<size:16>[Component: Rust modules]</size>\n\nA small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate (ADR 90)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Expressions
     rectangle "==Runtime services\n<size:16>[Component: Rust modules]</size>\n\nThe shared worker pool, stage log and cancel, and refusal of NaN and infinity." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Runtimeservices
     rectangle "==Mesh\n<size:16>[Component: Rust modules]</size>\n\nThe native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Mesh
-    rectangle "==Finite-element basics\n<size:16>[Component: Rust modules]</size>\n\nLagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Finiteelementbasics
-    rectangle "==Material specification\n<size:16>[Component: Rust modules]</size>\n\nTOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Materialspecification
-    rectangle "==Optical mode sets\n<size:16>[Component: Rust modules]</size>\n\nOptical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Opticalmodesets
   }
 
 }

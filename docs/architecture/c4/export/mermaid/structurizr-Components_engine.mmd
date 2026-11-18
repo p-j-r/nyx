@@ -7,144 +7,144 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 22 ["nyx-engine"]
-        style 22 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 26 ["nyx-engine"]
+        style 26 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        23["<div style='font-weight: bold'>Commands</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Engine and its catalog:<br />every action by name with<br />JSON arguments, JSON Schema<br />and JSON reply; the<br />dispatcher; the guide cards a<br />host reads on demand; the<br />reductions of results (field<br />handles, integrals, extrema,<br />probes, overlaps). The window<br />and the MCP server use the<br />same entries.</div>"]
-        style 23 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        24["<div style='font-weight: bold'>Project</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The saved state: feature<br />list, mesh settings, one<br />ProblemSpec per physics,<br />project materials. The format<br />key is checked at the file<br />boundary.</div>"]
-        style 24 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        25["<div style='font-weight: bold'>Geometry operations</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Every edit of a geom feature<br />list as a function that does<br />it or says why not, and the<br />descriptors of the geom<br />operations (they live here<br />because geom depends on serde<br />only).</div>"]
-        style 25 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        26["<div style='font-weight: bold'>Job runner and queue</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Mesh, solve, convergence and<br />file jobs on their own<br />threads with progress and<br />cancel, queued in lanes<br />(priority, owners in turn,<br />stages shared by content),<br />solves in a worker process<br />(killed on cancel, its stage<br />log mirrored, results read<br />back from a file), memory<br />estimates learned from the<br />workers and admission by free<br />memory, solving physics in<br />the order of the one-way<br />couplings, mesh convergence<br />on a scratch engine.</div>"]
-        style 26 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        27["<div style='font-weight: bold'>Command lists</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A JSON-lines list of engine<br />commands is parsed, checked<br />against the catalog and its<br />schemas, planned on a scratch<br />engine (what would be meshed<br />and solved, nothing run) and<br />run in order through<br />Engine::call.</div>"]
+        27["<div style='font-weight: bold'>Commands</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Engine and its catalog:<br />every action by name with<br />JSON arguments, JSON Schema<br />and JSON reply; the<br />dispatcher; the guide cards a<br />host reads on demand; the<br />reductions of results (field<br />handles, integrals, extrema,<br />probes, overlaps). The window<br />and the MCP server use the<br />same entries.</div>"]
         style 27 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        28["<div style='font-weight: bold'>API reference</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One Markdown page per engine<br />command and an index,<br />generated from<br />Engine::catalog() (arguments<br />flattened from the schema, an<br />example that passes the<br />check); docs/api is compared<br />with it by a test.</div>"]
+        28["<div style='font-weight: bold'>Project</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The saved state: feature<br />list, mesh settings, one<br />ProblemSpec per physics,<br />project materials. The format<br />key is checked at the file<br />boundary.</div>"]
         style 28 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        29["<div style='font-weight: bold'>Meshing seam</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshRequest to MeshedModel<br />(mesh, names, label<br />resolver); the only caller of<br />the femcore mesher; absorbing<br />layers across the two halves<br />of a project; trial meshes<br />and edit checks for the<br />feedback while editing (ADR<br />92).</div>"]
+        29["<div style='font-weight: bold'>Geometry operations</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Every edit of a geom feature<br />list as a function that does<br />it or says why not, and the<br />descriptors of the geom<br />operations (they live here<br />because geom depends on serde<br />only).</div>"]
         style 29 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        30["<div style='font-weight: bold'>Materials</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The material library plus the<br />materials a project carries,<br />resolved at the study<br />wavelength.</div>"]
+        30["<div style='font-weight: bold'>Job runner and queue</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Mesh, solve, convergence and<br />file jobs on their own<br />threads with progress and<br />cancel, queued in lanes<br />(priority, owners in turn,<br />stages shared by content),<br />solves in a worker process<br />(killed on cancel, its stage<br />log mirrored, results read<br />back from a file), memory<br />estimates learned from the<br />workers and admission by free<br />memory, solving physics in<br />the order of the one-way<br />couplings, mesh convergence<br />on a scratch engine.</div>"]
         style 30 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        31["<div style='font-weight: bold'>Analyses</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Runs the analyses of<br />nyx-analysis on the latest<br />result of a physics.</div>"]
+        31["<div style='font-weight: bold'>Command lists</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A JSON-lines list of engine<br />commands is parsed, checked<br />against the catalog and its<br />schemas, planned on a scratch<br />engine (what would be meshed<br />and solved, nothing run) and<br />run in order through<br />Engine::call.</div>"]
         style 31 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        32["<div style='font-weight: bold'>Results files</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>HDF5 results (serial or<br />MPI-IO), the XDMF<br />description, and opening a<br />results file as a project<br />with its results.</div>"]
+        32["<div style='font-weight: bold'>API reference</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One Markdown page per engine<br />command and an index,<br />generated from<br />Engine::catalog() (arguments<br />flattened from the schema, an<br />example that passes the<br />check); docs/api is compared<br />with it by a test.</div>"]
         style 32 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        33["<div style='font-weight: bold'>Store link</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Binds the project to a<br />workflow of the workspace,<br />commits versions, records<br />runs (card and metrics made<br />here).</div>"]
+        33["<div style='font-weight: bold'>Meshing seam</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshRequest to MeshedModel<br />(mesh, names, label<br />resolver); the only caller of<br />the femcore mesher; absorbing<br />layers across the two halves<br />of a project; trial meshes<br />and edit checks for the<br />feedback while editing (ADR<br />92).</div>"]
         style 33 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        34["<div style='font-weight: bold'>Registry and facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The physics compiled in<br />(cargo features dfs, sms,<br />ems) and the facade that<br />re-exports what a front-end<br />draws with.</div>"]
+        34["<div style='font-weight: bold'>Materials</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The material library plus the<br />materials a project carries,<br />resolved at the study<br />wavelength.</div>"]
         style 34 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        35["<div style='font-weight: bold'>Analyses</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Runs the analyses of<br />nyx-analysis on the latest<br />result of a physics.</div>"]
+        style 35 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        36["<div style='font-weight: bold'>Results files</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>HDF5 results (serial or<br />MPI-IO), the XDMF<br />description, and opening a<br />results file as a project<br />with its results.</div>"]
+        style 36 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        37["<div style='font-weight: bold'>Store link</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Binds the project to a<br />workflow of the workspace,<br />commits versions, records<br />runs (card and metrics made<br />here).</div>"]
+        style 37 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        38["<div style='font-weight: bold'>Registry and facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The physics compiled in<br />(cargo features dfs, sms,<br />ems) and the facade that<br />re-exports what a front-end<br />draws with.</div>"]
+        style 38 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      103["<div style='font-weight: bold'>geom</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Lean CSG-over-B-rep geometry<br />kernel: feature lists, named<br />regions and boundaries,<br />selectors, exact projection<br />oracles. Depends on serde and<br />optional rayon only.</div>"]
-      style 103 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      111[("<div style='font-weight: bold'>Project file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .nyx.json]</div><div style='font-size: 80%; margin-top:10px'>Everything saved for one<br />model: geometry, materials,<br />boundary conditions, studies.<br />JSON with a format key.</div>")]
-      style 111 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      112[("<div style='font-weight: bold'>Results file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .h5 and .xdmf]</div><div style='font-size: 80%; margin-top:10px'>Project, mesh and every<br />solution of every solved<br />physics, compressed, exact;<br />with an XDMF description next<br />to it.</div>")]
-      style 112 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      114[("<div style='font-weight: bold'>Material library</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files]</div><div style='font-size: 80%; margin-top:10px'>materials/*.toml next to the<br />program: silicon, silica,<br />sapphire, metals, nitrides,<br />niobate and more, with<br />sources.</div>")]
-      style 114 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      35["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
-      style 35 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      41["<div style='font-weight: bold'>nyx-dfs</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Diffusion physics: heat and<br />electrostatics. Typed<br />problem, three-stage kernels,<br />descriptors, goldens.</div>"]
-      style 41 fill:#2e7d32,stroke:#205723,color:#ffffff
-      47["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric.</div>"]
-      style 47 fill:#2e7d32,stroke:#205723,color:#ffffff
-      56["<div style='font-weight: bold'>nyx-ems</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>EM waves: waveguide modes<br />(real and complex),<br />axisymmetric, cavity in 3D.</div>"]
-      style 56 fill:#2e7d32,stroke:#205723,color:#ffffff
-      64["<div style='font-weight: bold'>nyx-analysis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Analyses of results: the<br />polarization (Stokes<br />parameters, Poincare sphere,<br />classes, degenerate groups)<br />as a function of a<br />SolveResult and its mesh.</div>"]
-      style 64 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      69["<div style='font-weight: bold'>nyx-store</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Workspace, workflow,<br />experiment and run storage:<br />manifests, append-only run<br />log, versions, search, .nyx<br />archives. Knows nothing of a<br />project.</div>"]
-      style 69 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      78["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 78 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      107["<div style='font-weight: bold'>geom</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Lean CSG-over-B-rep geometry<br />kernel: feature lists, named<br />regions and boundaries,<br />selectors, exact projection<br />oracles. Depends on serde and<br />optional rayon only.</div>"]
+      style 107 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      115[("<div style='font-weight: bold'>Project file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .nyx.json]</div><div style='font-size: 80%; margin-top:10px'>Everything saved for one<br />model: geometry, materials,<br />boundary conditions, studies.<br />JSON with a format key.</div>")]
+      style 115 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      116[("<div style='font-weight: bold'>Results file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .h5 and .xdmf]</div><div style='font-size: 80%; margin-top:10px'>Project, mesh and every<br />solution of every solved<br />physics, compressed, exact;<br />with an XDMF description next<br />to it.</div>")]
+      style 116 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      118[("<div style='font-weight: bold'>Material library</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files]</div><div style='font-size: 80%; margin-top:10px'>materials/*.toml next to the<br />program: silicon, silica,<br />sapphire, metals, nitrides,<br />niobate and more, with<br />sources.</div>")]
+      style 118 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      39["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
+      style 39 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      45["<div style='font-weight: bold'>nyx-dfs</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Diffusion physics: heat and<br />electrostatics. Typed<br />problem, three-stage kernels,<br />descriptors, goldens.</div>"]
+      style 45 fill:#2e7d32,stroke:#205723,color:#ffffff
+      51["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric.</div>"]
+      style 51 fill:#2e7d32,stroke:#205723,color:#ffffff
+      60["<div style='font-weight: bold'>nyx-ems</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>EM waves: waveguide modes<br />(real and complex),<br />axisymmetric, cavity in 3D.</div>"]
+      style 60 fill:#2e7d32,stroke:#205723,color:#ffffff
+      68["<div style='font-weight: bold'>nyx-analysis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Analyses of results: the<br />polarization (Stokes<br />parameters, Poincare sphere,<br />classes, degenerate groups)<br />as a function of a<br />SolveResult and its mesh.</div>"]
+      style 68 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      73["<div style='font-weight: bold'>nyx-store</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Workspace, workflow,<br />experiment and run storage:<br />manifests, append-only run<br />log, versions, search, .nyx<br />archives. Knows nothing of a<br />project.</div>"]
+      style 73 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      82["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 82 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    41-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->35
-    47-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->35
-    56-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->35
-    41-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->78
-    47-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->78
-    56-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->78
-    64-. "<div>Reads SolveResult</div><div style='font-size: 70%'>[Rust API]</div>" .->35
-    64-. "<div>Mesh geometry, quadrature</div><div style='font-size: 70%'>[Rust API]</div>" .->78
-    35-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->78
-    78-. "<div>Evaluates models, reads<br />selectors and labels</div><div style='font-size: 70%'>[Rust API]</div>" .->103
-    31-. "<div>uses analysis: crate root,<br />modes +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
-    31-. "<div>uses physics: error, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    31-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    31-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
-    28-. "<div>uses physics: spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    28-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    28-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    27-. "<div>uses physics: error</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    27-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    27-. "<div>uses apiref</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
-    27-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    23-. "<div>uses femcore: fem, fieldexpr<br />+5</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    23-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    23-. "<div>uses physics: contract, crate<br />root +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    23-. "<div>uses store: runs, util</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    23-. "<div>uses geomdesc, geometry</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
-    23-. "<div>uses estimate, jobs +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
-    23-. "<div>uses materials</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
-    23-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
-    23-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    23-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
-    23-. "<div>uses results_file</div><div style='font-size: 70%'>[Rust paths]</div>" .->32
-    23-. "<div>uses store_link</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
-    25-. "<div>uses geom: error, eval +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    25-. "<div>uses physics: error</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    26-. "<div>uses femcore: material::spec,<br />mesh +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    26-. "<div>uses physics: error, physics<br />+3</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    26-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    26-. "<div>uses materials</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
-    26-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
-    26-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    26-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
-    26-. "<div>uses h5io</div><div style='font-size: 70%'>[Rust paths]</div>" .->32
-    26-. "<div>uses store_link</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
-    30-. "<div>uses femcore: material,<br />material::spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    30-. "<div>uses physics: desc, error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    30-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    29-. "<div>uses analysis: modes,<br />polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
-    29-. "<div>uses femcore: mesh,<br />meshing::geomdrive +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    29-. "<div>uses geom: eval, labels +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    29-. "<div>uses physics: crate root,<br />error +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    29-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    29-. "<div>uses estimate</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
-    29-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    29-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
-    24-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    24-. "<div>uses physics: error, registry<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    24-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
-    34-. "<div>uses analysis: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->64
-    34-. "<div>uses dfs: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    34-. "<div>uses ems: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->56
-    34-. "<div>uses femcore: fields, mesh +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    34-. "<div>uses geom: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    34-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    34-. "<div>uses sms: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->47
-    34-. "<div>uses store: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    34-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    34-. "<div>uses estimate, jobs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
-    34-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
-    34-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    32-. "<div>uses femcore: material::spec,<br />mesh +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    32-. "<div>uses physics: error, registry<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    32-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    32-. "<div>uses jobs</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
-    32-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
-    32-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    33-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
-    33-. "<div>uses geom: expr, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
-    33-. "<div>uses physics: error, result<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->35
-    33-. "<div>uses store: flow, model +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
-    33-. "<div>uses geomdesc</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
-    33-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    33-. "<div>uses h5io, xdmf</div><div style='font-size: 70%'>[Rust paths]</div>" .->32
-    30-. "<div>Loads</div><div style='font-size: 70%'>[declared in spec]</div>" .->114
-    24-. "<div>Saves and loads</div><div style='font-size: 70%'>[declared in spec]</div>" .->111
-    32-. "<div>Writes and opens</div><div style='font-size: 70%'>[declared in spec]</div>" .->112
+    45-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->39
+    51-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->39
+    60-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->39
+    45-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->82
+    51-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->82
+    60-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->82
+    68-. "<div>Reads SolveResult</div><div style='font-size: 70%'>[Rust API]</div>" .->39
+    68-. "<div>Mesh geometry, quadrature</div><div style='font-size: 70%'>[Rust API]</div>" .->82
+    39-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->82
+    82-. "<div>Evaluates models, reads<br />selectors and labels</div><div style='font-size: 70%'>[Rust API]</div>" .->107
+    35-. "<div>uses analysis: crate root,<br />modes +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
+    35-. "<div>uses physics: error, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    35-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    35-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    32-. "<div>uses physics: spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    32-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
+    32-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    31-. "<div>uses physics: error</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    31-. "<div>uses store: util</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
+    31-. "<div>uses apiref</div><div style='font-size: 70%'>[Rust paths]</div>" .->32
+    31-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    27-. "<div>uses femcore: fem, fieldexpr<br />+5</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    27-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    27-. "<div>uses physics: contract, crate<br />root +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    27-. "<div>uses store: runs, util</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
+    27-. "<div>uses geomdesc, geometry</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
+    27-. "<div>uses estimate, jobs +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
+    27-. "<div>uses materials</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
+    27-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    27-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    27-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    27-. "<div>uses results_file</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
+    27-. "<div>uses store_link</div><div style='font-size: 70%'>[Rust paths]</div>" .->37
+    29-. "<div>uses geom: error, eval +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    29-. "<div>uses physics: error</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    30-. "<div>uses femcore: material::spec,<br />mesh +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    30-. "<div>uses physics: error, physics<br />+3</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    30-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    30-. "<div>uses materials</div><div style='font-size: 70%'>[Rust paths]</div>" .->34
+    30-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    30-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    30-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    30-. "<div>uses h5io</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
+    30-. "<div>uses store_link</div><div style='font-size: 70%'>[Rust paths]</div>" .->37
+    34-. "<div>uses femcore: material,<br />material::spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    34-. "<div>uses physics: desc, error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    34-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    33-. "<div>uses analysis: modes,<br />polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
+    33-. "<div>uses femcore: mesh,<br />meshing::geomdrive +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    33-. "<div>uses geom: eval, labels +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    33-. "<div>uses physics: crate root,<br />error +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    33-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    33-. "<div>uses estimate</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
+    33-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    33-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    28-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    28-. "<div>uses physics: error, registry<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    28-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->38
+    38-. "<div>uses analysis: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
+    38-. "<div>uses dfs: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
+    38-. "<div>uses ems: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->60
+    38-. "<div>uses femcore: fields, mesh +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    38-. "<div>uses geom: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    38-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    38-. "<div>uses sms: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->51
+    38-. "<div>uses store: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
+    38-. "<div>uses commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    38-. "<div>uses estimate, jobs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
+    38-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    38-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    36-. "<div>uses femcore: material::spec,<br />mesh +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    36-. "<div>uses physics: error, registry<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    36-. "<div>uses engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    36-. "<div>uses jobs</div><div style='font-size: 70%'>[Rust paths]</div>" .->30
+    36-. "<div>uses meshing</div><div style='font-size: 70%'>[Rust paths]</div>" .->33
+    36-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    37-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
+    37-. "<div>uses geom: expr, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    37-. "<div>uses physics: error, result<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
+    37-. "<div>uses store: flow, model +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
+    37-. "<div>uses geomdesc</div><div style='font-size: 70%'>[Rust paths]</div>" .->29
+    37-. "<div>uses project</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    37-. "<div>uses h5io, xdmf</div><div style='font-size: 70%'>[Rust paths]</div>" .->36
+    34-. "<div>Loads</div><div style='font-size: 70%'>[declared in spec]</div>" .->118
+    28-. "<div>Saves and loads</div><div style='font-size: 70%'>[declared in spec]</div>" .->115
+    36-. "<div>Writes and opens</div><div style='font-size: 70%'>[declared in spec]</div>" .->116
 
   end
