@@ -312,8 +312,9 @@ impl WorkflowDir {
         }
         r.version = self.wf.version;
         runs::append(&self.runs_path(eid), &r)?;
+        // one manifest write for the digest and the touch (each write is a temporary file and a rename: 2 to 5 ms on a machine with a scanner)
+        self.wf.touched = iso(now_secs());
         self.rebuild_digest(eid)?;
-        self.touch()?;
         Ok(r)
     }
 

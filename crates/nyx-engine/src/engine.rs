@@ -667,6 +667,9 @@ impl Engine {
                 // this job started later (jobs are numbered in start order)
                 let now = self.problem_keys();
                 let mut summary = vec![];
+                // which results replace the stored ones (with the key they are stored under); they are moved into the store after the run is
+                // recorded, not copied: a result holds every field of every solution, and a copy on the thread that draws cost 6 ms (plan P3)
+                let mut keep: Vec<Option<String>> = vec![];
                 for r in &results {
                     let current = keys.contains_key(&r.physics) && keys.get(&r.physics) == now.get(&r.physics);
                     let replace = current
@@ -674,20 +677,7 @@ impl Engine {
                             None => true,
                             Some(old) => Some(&old.key) != now.get(&r.physics) && id > old.job,
                         };
-                    if replace {
-                        let key = keys.get(&r.physics).cloned().unwrap_or_default();
-                        self.results.insert(
-                            r.physics.clone(),
-                            Stored {
-                                result: Arc::new(r.clone()),
-                                key,
-                                job: id,
-                                at: Instant::now(),
-                                model: solved_on.clone(),
-                                run: None,
-                            },
-                        );
-                    }
+                    keep.push(replace.then(|| keys.get(&r.physics).cloned().unwrap_or_default()));
                     summary.push(json!({
                         "physics": r.physics, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(),
                         "scalars": r.scalars, "current": current, "stored": replace,
@@ -702,17 +692,13 @@ impl Engine {
                     // problem), the run is recorded as failed and the caller gets the error
                     log.push(format!("stopped: {e}"));
                     let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log, Some(mesh));
+                    self.store_results(results, keep, id, &solved_on, None);
                     return Err(e);
                 }
                 self.learn(&results, cells, dim, &worker);
                 let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
-                if let Some(rid) = run["id"].as_str() {
-                    for r in &results {
-                        if let Some(s) = self.results.get_mut(&r.physics).filter(|s| s.job == id) {
-                            s.run = Some(rid.to_string());
-                        }
-                    }
-                }
+                let run_id = run["id"].as_str().map(str::to_string);
+                self.store_results(results, keep, id, &solved_on, run_id);
                 let mut answer =
                     json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds });
                 if let Some(w) = worker {
@@ -769,6 +755,32 @@ impl Engine {
             }
             (_, Err(e)) => Err(e),
             _ => Err(Error::invalid("a job returned something its kind does not produce")),
+        }
+    }
+
+    /// Moves the results of job `id` that replace the stored ones (`keep` holds, per result, the key it is stored under) into the store, each
+    /// with the run that recorded it. Nothing is copied.
+    fn store_results(
+        &mut self,
+        results: Vec<SolveResult>,
+        keep: Vec<Option<String>>,
+        id: JobId,
+        solved_on: &Arc<MeshedModel>,
+        run: Option<String>,
+    ) {
+        for (r, key) in results.into_iter().zip(keep) {
+            let Some(key) = key else { continue };
+            self.results.insert(
+                r.physics.clone(),
+                Stored {
+                    result: Arc::new(r),
+                    key,
+                    job: id,
+                    at: Instant::now(),
+                    model: solved_on.clone(),
+                    run: run.clone(),
+                },
+            );
         }
     }
 

@@ -164,8 +164,46 @@ fn a_worker_run_teaches_the_next_estimate_and_the_history_survives_in_a_file() {
     let predicted = est["bytes"].as_f64().unwrap();
     assert!(predicted / actual > 0.5 && predicted / actual < 2.0, "predicted {predicted}, measured {actual}");
     // a new engine reads what was learned
+    e.history().flush();
     let again = Engine::new();
     again.history().set_file(&file);
     assert_eq!(again.history().rows().len(), 3);
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+/// A line of the history is written by a thread of the history (the file open and write took 10 ms on the thread that draws, plan P3): the rows in
+/// memory are there at once, the file once `flush` returns or the history is dropped, and in the order the rows were added.
+#[test]
+fn the_history_file_is_written_beside_the_caller_in_order() {
+    use nyx_engine::estimate::{History, Row};
+    let dir = std::env::temp_dir().join(format!("nyx-history-writer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("solve_history.jsonl");
+    let row = |cells: u64| Row {
+        chain: "sms".into(),
+        dim: 2,
+        cells,
+        dofs: cells * 2,
+        peak_working_set: 1 << 20,
+        peak_commit: 1 << 20,
+        seconds: 0.1,
+    };
+    let h = History::default();
+    h.set_file(&file);
+    for n in 1..=50 {
+        h.add(row(n * 100));
+    }
+    assert_eq!(h.rows().len(), 50, "the rows an estimate reads are in memory at once");
+    h.flush();
+    let text = std::fs::read_to_string(&file).unwrap();
+    let cells: Vec<u64> = text.lines().map(|l| serde_json::from_str::<Row>(l).unwrap().cells).collect();
+    assert_eq!(cells, (1..=50).map(|n| n * 100).collect::<Vec<_>>(), "every line, in order");
+    // dropping flushes: a row added just before the end of the program is not lost
+    h.add(row(9_999));
+    drop(h);
+    let again = History::default();
+    again.set_file(&file);
+    assert_eq!(again.rows().len(), 51);
+    assert_eq!(again.rows().last().unwrap().cells, 9_999);
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -86,17 +86,69 @@ pub fn estimate(rows: &[Row], chain: &str, dim: u8, cells: u64) -> Option<Estima
     })
 }
 
+/// What the writer thread of a history is asked to do.
+enum Write {
+    Line(PathBuf, String),
+    Flush(std::sync::mpsc::Sender<()>),
+}
+
+/// The thread that appends lines for a `History`, one at a time in the order they were added.
+struct Writer {
+    tx: std::sync::mpsc::Sender<Write>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Writer {
+    fn start() -> Writer {
+        let (tx, rx) = std::sync::mpsc::channel::<Write>();
+        let handle = std::thread::spawn(move || {
+            while let Ok(w) = rx.recv() {
+                match w {
+                    Write::Line(p, line) => {
+                        use std::io::Write as _;
+                        if let Some(d) = p.parent() {
+                            let _ = std::fs::create_dir_all(d);
+                        }
+                        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+                            let _ = f.write_all(line.as_bytes());
+                        }
+                    }
+                    Write::Flush(ack) => {
+                        let _ = ack.send(());
+                    }
+                }
+            }
+        });
+        Writer { tx, handle: Some(handle) }
+    }
+}
+
 /// The rows an engine has learned from, in memory and, when a file is set, appended to it as JSON lines (one `write` per line, like the run
-/// table, so two programs can append to one file).
+/// table, so two programs can append to one file). The append is made by a thread of the history, not by the caller: a file open and write
+/// took 10 ms on the thread that draws (productivity plan P3), and the rows in memory, which the estimates read, are updated at once.
+/// `flush` waits until every line added so far is in the file; dropping the history flushes too.
 #[derive(Default)]
 pub struct History {
     rows: Mutex<Vec<Row>>,
     file: Mutex<Option<PathBuf>>,
+    writer: Mutex<Option<Writer>>,
+}
+
+impl Drop for History {
+    fn drop(&mut self) {
+        if let Some(mut w) = self.writer.lock().ok().and_then(|mut g| g.take()) {
+            drop(w.tx);
+            if let Some(h) = w.handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
 }
 
 impl History {
     /// Keeps the rows in `path` from now on and reads the ones it holds; a line that cannot be read is skipped.
     pub fn set_file(&self, path: &Path) {
+        self.flush();
         let mut rows = vec![];
         if let Ok(text) = std::fs::read_to_string(path) {
             rows.extend(text.lines().filter_map(|l| serde_json::from_str::<Row>(l).ok()));
@@ -109,15 +161,23 @@ impl History {
         self.rows.lock().expect("history").clone()
     }
 
+    /// Waits until every line added so far has been written to the file.
+    pub fn flush(&self) {
+        let tx = self.writer.lock().expect("history").as_ref().map(|w| w.tx.clone());
+        if let Some(tx) = tx {
+            let (ack, done) = std::sync::mpsc::channel();
+            if tx.send(Write::Flush(ack)).is_ok() {
+                let _ = done.recv();
+            }
+        }
+    }
+
     pub fn add(&self, row: Row) {
-        if let Some(p) = self.file.lock().expect("history").as_ref() {
-            use std::io::Write;
-            if let Some(d) = p.parent() {
-                let _ = std::fs::create_dir_all(d);
-            }
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
-                let _ = f.write_all(format!("{}\n", json!(row)).as_bytes());
-            }
+        let file = self.file.lock().expect("history").clone();
+        if let Some(p) = file {
+            let line = format!("{}\n", json!(row));
+            let mut w = self.writer.lock().expect("history");
+            let _ = w.get_or_insert_with(Writer::start).tx.send(Write::Line(p, line));
         }
         self.rows.lock().expect("history").push(row);
     }
@@ -243,6 +303,7 @@ mod tests {
         h.set_file(&file);
         h.add(row(1000, 0.1));
         h.add(row(4000, 0.5));
+        h.flush(); // the file is written by a thread (the frame that takes a result never waits for it)
         let again = History::default();
         again.set_file(&file);
         assert_eq!(again.rows().len(), 2);

@@ -165,6 +165,15 @@ pub struct LiveRun {
     pub physics: String,
 }
 
+/// Work that follows a solve and is not needed to show its result, done one piece per frame so that no frame holds more than one piece (the
+/// frame that takes a result was 53 to 63 ms: the run record is 9 to 17 ms of file writes and the dashboard refresh 4 to 6 ms; plan P3).
+pub enum Deferred {
+    /// the run record of a solve that was just taken
+    Record { rc: RunCtx, result: std::sync::Arc<nyx_engine::facade::physics::SolveResult> },
+    /// the dashboard's list of workflows, after a run was written
+    RefreshEntries,
+}
+
 pub struct RunCtx {
     pub wf_id: String,
     pub exp: String,
@@ -608,9 +617,8 @@ impl App {
         }
     }
 
-    /// A solve finished well: writes its run record and keeps the log with it. Returns the run id.
-    pub fn record_ok(&mut self, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun> {
-        let rc = self.shell.run.take()?;
+    /// A solve finished well: writes its run record (the context `rc` was taken when the solve was taken) and keeps the log with it. Returns the run.
+    pub fn record_ok(&mut self, rc: RunCtx, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun> {
         let (wf_id, exp) = (rc.wf_id.clone(), rc.exp.clone());
         let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: crate::spans::span("metrics_of", || nyx_engine::store_link::metrics_of(res)), ..Default::default() };
         self.write_run(rc, rec, Some(res.log.join("\n"))).map(|run| LiveRun { wf_id, exp, run, physics: res.physics.clone() })
@@ -631,6 +639,25 @@ impl App {
                 }
             }
             Err(e) => self.set_error(format!("Could not record the check in the run: {e}")),
+        }
+    }
+
+    /// Puts work after a solve in the queue of pieces (a refresh is not queued twice).
+    pub fn defer(&mut self, d: Deferred) {
+        if matches!(d, Deferred::RefreshEntries) && self.deferred.iter().any(|x| matches!(x, Deferred::RefreshEntries)) {
+            return;
+        }
+        self.deferred.push_back(d);
+    }
+
+    /// Does the next piece of work that followed a solve; one piece per call, and `poll` is called once per frame.
+    pub fn run_deferred(&mut self) {
+        match self.deferred.pop_front() {
+            Some(Deferred::Record { rc, result }) => {
+                self.shell.live_run = crate::spans::span("record_ok", || self.record_ok(rc, &result));
+            }
+            Some(Deferred::RefreshEntries) => crate::spans::span("refresh_entries", || self.refresh_entries()),
+            None => {}
         }
     }
 
@@ -676,7 +703,7 @@ impl App {
                     crate::spans::span("reload_runs", || w.reload_runs());
                 }
                 w.saved_at = Some(Instant::now());
-                crate::spans::span("refresh_entries", || self.refresh_entries());
+                self.defer(Deferred::RefreshEntries);
                 Some(r.id)
             }
             Err(e) => {

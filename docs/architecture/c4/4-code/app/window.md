@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 5 files, 2697 lines.
+**Size:** 5 files, 2746 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 2094 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
+| `crates/app/src/app.rs` | 2143 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
 | `crates/app/src/feedback.rs` | 214 | Feedback while editing and while a result arrives (productivity plan P3, ADR 92): the project checked with the edits that are not applied yet, the size and cost of those edits from a trial mesh, and the polarization of a new result compu... |
 | `crates/app/src/main.rs` | 117 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
 | `crates/app/src/spans.rs` | 40 | Named timing spans for the frame log (productivity plan P3). `NYX_FRAME_LOG=<file>.csv` writes one row per frame; with spans, the row also says where the frame's time went (`poll=48.2;script=0.0;shell_ui=31.1`). A span is a name and the ... |
@@ -25,7 +25,7 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, preview, process, project, queue, validated +1 | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MaterialAssign, MeshSettings, MeshedModel +15 |
 | [Scripts and batch](./headless.md) | pyscript | spawn |
 | [Inspector tabs](./inspector.md) | geomui | State |
-| [Shell and dashboard](./shell.md) | activity, examples, shell, sweepui | Active, Shell, Start, band_colours, validation_state |
+| [Shell and dashboard](./shell.md) | activity, examples, shell, sweepui | Active, Deferred, Shell, Start, band_colours, validation_state |
 | [Look and widgets](./style.md) | cvd, fmt, kit, theme | Kind, State, accent, activity_text, apply, card, danger, edge, ink, install_fonts +7 |
 | [Viewport](./viewport.md) | colormap, regions, viewport | Colormap, Content, Paint, Viewport, assign, keys_by_material, palette |
 
@@ -84,7 +84,7 @@ classDiagram
         +current Option~usize~
         +show_results bool
         +reduce ReduceForm
-        +more_47_fields
+        +more_48_fields
         +new(cc) Self
         +with_context(ctx) Self
         +cmd(name, args) Option~Value~
@@ -214,39 +214,39 @@ classDiagram
 | struct | `WinJob` | `app.rs:51` | fields: `id`, `kind`, `label`, `cancellable` —  A job of this window that waits in the engine's queue behind the running one (ADR 87). |
 | enum | `Msg` | `app.rs:59` | variants: `Script`, `Size`, `Polarization` —  A message from a helper thread (the optional Python script) to the window. |
 | struct | `App` | `app.rs:67` | fields: `engine`, `doc`, `tab`, `vp`, `results`, `current`, `show_results`, `reduce`, `tx`, `rx`, `busy`, `job`, ... |
-| fn | `App::new` | `app.rs:152` | `pub fn new(cc: &eframe::CreationContext<'_>) -> Self` |
-| fn | `App::with_context` | `app.rs:161` | `pub fn with_context(ctx: egui::Context) -> Self` —  The application state on an egui context; no window is needed (tests use a default context). It opens with the first example. |
-| fn | `App::cmd` | `app.rs:239` | `pub fn cmd(&mut self, name: &str, args: Value) -> Option<Value>` —  Runs an engine command and reports its error in the status bar. `None` after an error. |
-| fn | `App::active` | `app.rs:250` | `pub fn active(&self) -> Option<String>` —  The code of the active physics, if the project has one. |
-| fn | `App::physics_name` | `app.rs:256` | `pub fn physics_name(&self, id: &str) -> String` —  The display name of a physics from its descriptor. |
-| fn | `App::adopt` | `app.rs:261` | `pub fn adopt(&mut self)` —  The window's copies of what is edited (geometry, mesh settings) are taken from the engine's project: after a project was opened or made. |
-| fn | `App::push_edits` | `app.rs:272` | `pub fn push_edits(&mut self) -> bool` —  Hands the geometry and mesh settings being edited to the engine. False (and an error shown) when the engine refuses them. |
-| fn | `App::set_error` | `app.rs:306` | `pub fn set_error(&mut self, e: impl Into<String>)` |
-| fn | `App::started` | `app.rs:313` | `pub(crate) fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool)` —  A job was submitted to the engine. With nothing running it is the running job; otherwise it waits in the queue behind it. |
-| fn | `App::cancel_waiting` | `app.rs:346` | `pub fn cancel_waiting(&mut self, id: u64)` —  Cancels a job that waits in the queue (it never runs). |
-| fn | `App::check_convergence` | `app.rs:356` | `pub fn check_convergence(&mut self)` —  Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first). |
-| fn | `App::can_queue_compute` | `app.rs:376` | `pub fn can_queue_compute(&self) -> bool` —  Whether a Compute can be asked for now: not while a results file is opened (it replaces the project), and in a workspace only when nothing |
-| fn | `App::convergence_running` | `app.rs:391` | `pub fn convergence_running(&self) -> bool` —  True while a mesh convergence check runs. |
-| fn | `App::stale_reason` | `app.rs:398` | `pub fn stale_reason(&self, i: usize) -> Option<&'static str>` —  Why the result at `i` is not up to date, in words, or `None` when it is current (productivity plan P1, ADR 84). It is stale when the engine |
-| fn | `App::cancel_job` | `app.rs:464` | `pub fn cancel_job(&mut self)` |
-| fn | `App::rebuild_mesh` | `app.rs:480` | `pub fn rebuild_mesh(&mut self)` |
-| fn | `App::solve_in_child_processes` | `app.rs:497` | `pub fn solve_in_child_processes(&mut self)` —  Solves run in a child process (this program started with `--job`, see `nyx_engine::worker`), so a solve that runs out of memory or crashes |
-| fn | `App::open_path` | `app.rs:504` | `pub fn open_path(&mut self, path: PathBuf)` |
-| fn | `App::compute` | `app.rs:523` | `pub fn compute(&mut self)` —  Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed. |
-| fn | `App::take_solved` | `app.rs:652` | `pub(crate) fn take_solved(&mut self, summary: &Value)` —  A solve came back: the mesh it used, and one result view per physics it solved. |
-| fn | `App::sync_rules` | `app.rs:729` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
-| fn | `App::save_project` | `app.rs:753` | `pub fn save_project(&mut self, as_new: bool)` |
-| fn | `App::load_project` | `app.rs:769` | `pub fn load_project(&mut self, path: &std::path::Path)` |
-| fn | `App::load_example` | `app.rs:782` | `pub fn load_example(&mut self, i: usize)` |
-| fn | `App::result_csv` | `app.rs:797` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
-| fn | `App::export_csv` | `app.rs:825` | `pub fn export_csv(&mut self)` |
-| fn | `App::export_analysis` | `app.rs:838` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
-| fn | `App::run_python_script` | `app.rs:854` | `pub fn run_python_script(&mut self)` |
-| fn | `App::new_project` | `app.rs:874` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
-| fn | `App::region_paint` | `app.rs:1173` | `pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint` —  The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions |
-| fn | `App::viewport_ui` | `app.rs:1203` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
-| fn | `App::set_condition_on` | `app.rs:1295` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
-| fn | `App::set_problem` | `app.rs:1305` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
+| fn | `App::new` | `app.rs:154` | `pub fn new(cc: &eframe::CreationContext<'_>) -> Self` |
+| fn | `App::with_context` | `app.rs:163` | `pub fn with_context(ctx: egui::Context) -> Self` —  The application state on an egui context; no window is needed (tests use a default context). It opens with the first example. |
+| fn | `App::cmd` | `app.rs:242` | `pub fn cmd(&mut self, name: &str, args: Value) -> Option<Value>` —  Runs an engine command and reports its error in the status bar. `None` after an error. |
+| fn | `App::active` | `app.rs:253` | `pub fn active(&self) -> Option<String>` —  The code of the active physics, if the project has one. |
+| fn | `App::physics_name` | `app.rs:259` | `pub fn physics_name(&self, id: &str) -> String` —  The display name of a physics from its descriptor. |
+| fn | `App::adopt` | `app.rs:264` | `pub fn adopt(&mut self)` —  The window's copies of what is edited (geometry, mesh settings) are taken from the engine's project: after a project was opened or made. |
+| fn | `App::push_edits` | `app.rs:275` | `pub fn push_edits(&mut self) -> bool` —  Hands the geometry and mesh settings being edited to the engine. False (and an error shown) when the engine refuses them. |
+| fn | `App::set_error` | `app.rs:309` | `pub fn set_error(&mut self, e: impl Into<String>)` |
+| fn | `App::started` | `app.rs:316` | `pub(crate) fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool)` —  A job was submitted to the engine. With nothing running it is the running job; otherwise it waits in the queue behind it. |
+| fn | `App::cancel_waiting` | `app.rs:349` | `pub fn cancel_waiting(&mut self, id: u64)` —  Cancels a job that waits in the queue (it never runs). |
+| fn | `App::check_convergence` | `app.rs:359` | `pub fn check_convergence(&mut self)` —  Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first). |
+| fn | `App::can_queue_compute` | `app.rs:379` | `pub fn can_queue_compute(&self) -> bool` —  Whether a Compute can be asked for now: not while a results file is opened (it replaces the project), and in a workspace only when nothing |
+| fn | `App::convergence_running` | `app.rs:394` | `pub fn convergence_running(&self) -> bool` —  True while a mesh convergence check runs. |
+| fn | `App::stale_reason` | `app.rs:401` | `pub fn stale_reason(&self, i: usize) -> Option<&'static str>` —  Why the result at `i` is not up to date, in words, or `None` when it is current (productivity plan P1, ADR 84). It is stale when the engine |
+| fn | `App::cancel_job` | `app.rs:467` | `pub fn cancel_job(&mut self)` |
+| fn | `App::rebuild_mesh` | `app.rs:483` | `pub fn rebuild_mesh(&mut self)` |
+| fn | `App::solve_in_child_processes` | `app.rs:500` | `pub fn solve_in_child_processes(&mut self)` —  Solves run in a child process (this program started with `--job`, see `nyx_engine::worker`), so a solve that runs out of memory or crashes |
+| fn | `App::open_path` | `app.rs:507` | `pub fn open_path(&mut self, path: PathBuf)` |
+| fn | `App::compute` | `app.rs:526` | `pub fn compute(&mut self)` —  Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed. |
+| fn | `App::take_solved` | `app.rs:660` | `pub(crate) fn take_solved(&mut self, summary: &Value)` —  A solve came back: the mesh it used, and one result view per physics it solved. |
+| fn | `App::sync_rules` | `app.rs:741` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
+| fn | `App::save_project` | `app.rs:765` | `pub fn save_project(&mut self, as_new: bool)` |
+| fn | `App::load_project` | `app.rs:781` | `pub fn load_project(&mut self, path: &std::path::Path)` |
+| fn | `App::load_example` | `app.rs:794` | `pub fn load_example(&mut self, i: usize)` |
+| fn | `App::result_csv` | `app.rs:809` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
+| fn | `App::export_csv` | `app.rs:837` | `pub fn export_csv(&mut self)` |
+| fn | `App::export_analysis` | `app.rs:850` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
+| fn | `App::run_python_script` | `app.rs:866` | `pub fn run_python_script(&mut self)` |
+| fn | `App::new_project` | `app.rs:886` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
+| fn | `App::region_paint` | `app.rs:1185` | `pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint` —  The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions |
+| fn | `App::viewport_ui` | `app.rs:1215` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::set_condition_on` | `app.rs:1307` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
+| fn | `App::set_problem` | `app.rs:1317` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
 | const | `REST` | `feedback.rs:16` | `Duration` —  An edit rests this long before a trial mesh is made of it. |
 | const | `SLOW` | `feedback.rs:18` | `f64` —  A trial mesh that takes longer than this (seconds) turns the automatic preview off: the rule of plan question 2 (about 100 ms). |
 | enum | `SizeView` | `feedback.rs:22` | variants: `None`, `Pending`, `Ready`, `Refused`, `Slow` —  What the size line shows. |

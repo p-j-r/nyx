@@ -777,7 +777,9 @@ impl App {
         });
         ui.weak(format!("{} unknowns, solved in {:.2} s", rv.result.dofs, rv.result.seconds));
         crate::spans::span("solver_log", || {
-            egui::CollapsingHeader::new(format!("What the solver did ({} lines)", rv.result.log.len())).default_open(true).show(ui, |ui| {
+            // closed until opened: drawing eleven short monospace lines for the first time cost 14 ms in the frame after a result arrives (P3
+            // frame log; neither one label for the whole log nor laying the glyphs out beforehand made it cheaper), and the header says how many
+            egui::CollapsingHeader::new(format!("What the solver did ({} lines)", rv.result.log.len())).default_open(false).show(ui, |ui| {
                 egui::ScrollArea::vertical().max_height(260.0).id_salt("solver_log").show(ui, |ui| {
                     for l in &rv.result.log {
                         ui.add(egui::Label::new(RichText::new(l).monospace().weak().size(11.0)).wrap());

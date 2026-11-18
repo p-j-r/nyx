@@ -37,8 +37,19 @@ The plan applies the paper's point (a response inside a second keeps the train o
 
 ## Code
 
-`crates/nyx-engine/src/preview.rs`, `analyse.rs` (`analysis_inputs` is crate-visible), `crates/app/src/{feedback,spans,app,tabs,script,shell,wfview}.rs`, `crates/nyx-engine/examples/p3measure.rs`, `tools/ux-shots.sh` (two more shots). Tests: `crates/nyx-engine/tests/preview.rs` and the window tests `editing_every_form_starts_nothing`, `the_size_of_an_edit_arrives_from_a_trial_mesh` and `the_polarization_arrives_after_the_result_and_only_for_the_result_it_was_made_from`.
+`crates/nyx-engine/src/preview.rs`, `analyse.rs` (`analysis_inputs` is crate-visible), `engine.rs` (`store_results`), `estimate.rs` (the history writer), `crates/nyx-store/src/flow.rs` (one manifest write per run), `crates/app/src/{feedback,spans,app,tabs,script,shell,wfview}.rs`, `crates/nyx-engine/examples/p3measure.rs`, `tools/ux-shots.sh` (two more shots). Tests: `crates/nyx-engine/tests/preview.rs` and the window tests `editing_every_form_starts_nothing`, `the_size_of_an_edit_arrives_from_a_trial_mesh` and `the_polarization_arrives_after_the_result_and_only_for_the_result_it_was_made_from`.
 
 ## Contract
 
 None changed: no command was added and no answer changed, so `engine_commands`, `mcp_tools` and the exemplars keep their versions.
+
+## Addendum: the frame that takes a result (same step, second commit)
+
+The first commit left one stutter per solve: the frame that takes a result was 53 to 63 ms and the next one, which draws the Results tab for the first time, 37 to 45 ms. A frame log with spans attributed them, and each part was dealt with by what it is:
+
+* **The engine's apply step copied every result** (`Arc::new(r.clone())`, 6 ms for 56,226 unknowns). Results are now moved into the store after the run is recorded (`Engine::store_results`); what is stored, and under which key, is unchanged. The failed-chain path stores what was solved as before.
+* **The history appended to its file on the calling thread** (10 ms for an open and a write on this machine). `History::add` updates the rows in memory at once, which is what estimates read, and a thread of the history writes the line; lines are written in order, `flush` waits for them, and dropping the history flushes. The format of the file is unchanged.
+* **The run record is 9 to 17 ms of file operations** (freeze the spec, read the run table twice, append, write the digest and the manifest). The store now writes the manifest once instead of twice per run, and the window writes the record **on the frame after the result is taken**, and the dashboard refresh (4 to 6 ms) on the one after that (`shell::Deferred`, one piece per `poll`, never in the frame that took a result). A solve's run context is taken with its result, so a second solve cannot be recorded under the first one's. Scripts and the test helper wait for the queue to be empty before going on.
+* **The solver log starts closed.** Drawing its eleven short monospace lines for the first time cost 13 to 14 ms (one label for the whole log, and laying the glyphs out beforehand, both measured the same or worse and were dropped); the header still says how many lines it holds. This is a visible default changed on purpose, and `default_open` is the one place to change it back.
+
+Measured again with the same 3D case, every frame around a result is now at most 31 ms (the worst: the first Results draw 30.6 ms, the run record 28.8 ms), against 53 to 63 and 37 to 45 ms.

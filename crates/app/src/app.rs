@@ -146,6 +146,8 @@ pub struct App {
     pub ctx: egui::Context,
     /// the problem and the size of the edits in the Geometry tab, and what a trial mesh said (`feedback.rs`)
     pub feedback: crate::feedback::Feedback,
+    /// work that follows a solve, one piece per frame (`shell::Deferred`)
+    pub deferred: VecDeque<crate::shell::Deferred>,
 }
 
 impl App {
@@ -190,6 +192,7 @@ impl App {
             geom_edit: FeatureList::new(2),
             mesh_edit: MeshSettings::default(),
             feedback: Default::default(),
+            deferred: VecDeque::new(),
             geom_ui: Default::default(),
             rule_errors: HashMap::new(),
             bc_labels: vec![],
@@ -561,6 +564,7 @@ impl App {
             }
         }
         let finished = crate::spans::span("engine_poll", || self.engine.poll());
+        let n_finished = finished.len();
         for (id, outcome) in finished {
             // a results file written on a job: it never held the window, only a failure is shown
             if let Some(path) = self.exports.remove(&id) {
@@ -636,6 +640,10 @@ impl App {
             self.promote_waiting();
         }
         self.promote_waiting();
+        // one piece of the work that follows a solve, never in the frame that took a result (that frame has enough to do)
+        if n_finished == 0 {
+            self.run_deferred();
+        }
     }
 
     /// Takes the mesh the engine has now (a new mesh clears the results of the old one).
@@ -679,7 +687,11 @@ impl App {
             self.push_result(rv);
         }
         if let Some(r) = live {
-            self.shell.live_run = crate::spans::span("record_ok", || self.record_ok(&r));
+            // the run record is written on a later frame (`run_deferred`): file writes, 9 to 17 ms, are not part of showing the result
+            self.shell.live_run = None;
+            if let Some(rc) = self.shell.run.take() {
+                self.defer(crate::shell::Deferred::Record { rc, result: r });
+            }
         }
         // the result on show is the active physics' one
         if let Some(i) = active.and_then(|a| self.results.iter().position(|r| r.physics.as_deref() == Some(a.as_str()))) {
@@ -1403,7 +1415,7 @@ mod tests {
         loop {
             a.poll();
             a.run_queued();
-            if a.busy.is_none() && a.queued.is_none() && a.exports.is_empty() {
+            if a.busy.is_none() && a.queued.is_none() && a.exports.is_empty() && a.deferred.is_empty() {
                 return;
             }
             assert!(t0.elapsed() < Duration::from_secs(secs), "still busy after {secs} s: {:?}", a.busy);
@@ -2074,6 +2086,42 @@ mod tests {
         stale.seconds += 1.0;
         a.take_polarization("ems", &Arc::new(stale), a.engine.polarization("ems").map_err(|e| e.to_string()));
         assert!(!a.has_analysis(), "an analysis of another result must not be taken");
+    }
+
+    /// Plan P3: the frame that takes a solve's result shows it and does nothing else that waits on a disk. The run record is written on a later
+    /// frame, one piece per frame (the record, then the dashboard refresh), the result on show is the one that is recorded, and a second solve
+    /// taken before the first record is written cannot be recorded under the first one's context.
+    #[test]
+    fn the_run_record_is_written_on_a_frame_after_the_result() {
+        let mut a = app();
+        let root = std::env::temp_dir().join(format!("nyx-deferred-record-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        a.attach_workspace(root.clone());
+        let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("02_cantilever")).unwrap().path;
+        a.new_draft("Fresh", crate::shell::Start::Example(path));
+        wait_idle(&mut a, 30);
+        a.shell_compute();
+        let t0 = Instant::now();
+        while a.results.is_empty() {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(60), "no result");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // the frame that took the result queued the record and did not write it
+        assert!(matches!(a.deferred.front(), Some(crate::shell::Deferred::Record { .. })), "the record waits for a later frame (queued: {}, run ctx kept: {}, error {:?}, status {})", a.deferred.len(), a.shell.run.is_some(), a.error, a.status);
+        assert!(a.shell.live_run.is_none() && a.shell.run.is_none(), "its context was taken with the result");
+        let runs = a.shell.current_mut().unwrap().runs.len();
+        assert_eq!(runs, 0, "nothing written yet");
+        // the next frames: the record, then the refresh of the dashboard (queued by the record), one piece each
+        a.poll();
+        assert!(a.shell.live_run.is_some(), "the record was written by the next poll");
+        assert!(matches!(a.deferred.front(), Some(crate::shell::Deferred::RefreshEntries)), "the refresh is the next piece");
+        a.poll();
+        assert!(a.deferred.is_empty());
+        wait_idle(&mut a, 30);
+        assert_eq!(a.shell.current_mut().unwrap().runs.len(), 1, "exactly one run");
+        assert!(a.error.is_none(), "{:?}", a.error);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

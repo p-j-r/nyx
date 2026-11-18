@@ -19,7 +19,7 @@ flow = component "Workflow folder" "One workflow folder: workflow.json, history.
     properties {
         "adr" "14, 59"
         "code" "crates/nyx-store/src: flow.rs"
-        "lines" "483"
+        "lines" "484"
         "codeDiagram" "4-code/store/flow.md"
     }
 }

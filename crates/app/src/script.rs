@@ -22,7 +22,7 @@ impl App {
             self.cancel_at = None;
             self.cancel_job();
         }
-        if ((self.busy.is_some() || self.sweep.as_ref().is_some_and(|a| !a.complete())) && !self.script_free) || self.shot_pending.load(Ordering::SeqCst) {
+        if ((self.busy.is_some() || !self.deferred.is_empty() || self.sweep.as_ref().is_some_and(|a| !a.complete())) && !self.script_free) || self.shot_pending.load(Ordering::SeqCst) {
             return;
         }
         if self.settle > 0 {

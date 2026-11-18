@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Workflow folder** (`store.flow`) in the con
 > One workflow folder: workflow.json, history.jsonl, notes, specs and one folder per experiment.
 
 **Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 59](../../../adr/0059-the-store-knows-nothing-of-a-project.md)  
-**Size:** 1 file, 483 lines.
+**Size:** 1 file, 484 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-store/src/flow.rs` | 483 | One workflow folder: `workflow.json`, `history.jsonl`, `notes.md`, `specs/` and one folder per experiment. |
+| `crates/nyx-store/src/flow.rs` | 484 | One workflow folder: `workflow.json`, `history.jsonl`, `notes.md`, `specs/` and one folder per experiment. |
 
 ## What it uses
 
@@ -93,14 +93,14 @@ classDiagram
 | fn | `WorkflowDir::restore` | `flow.rs:275` | `pub fn restore(&mut self, n: u32) -> Result<(String, String), String>` —  Makes version `n`'s spec the current one of its experiment, as a new version ("Restore this version (adds v13)"). |
 | fn | `WorkflowDir::runs` | `flow.rs:296` | `pub fn runs(&self, eid: &str) -> (Vec<RunRecord>, usize)` |
 | fn | `WorkflowDir::record_run` | `flow.rs:301` | `pub fn record_run(&mut self, eid: &str, mut r: RunRecord, spec_json: &str) -> Result<RunRecord, String>` —  Adds a run to `eid`: freezes the spec it solved, appends the line and refreshes the digest. |
-| fn | `WorkflowDir::patch_run` | `flow.rs:320` | `pub fn patch_run(&mut self, eid: &str, rid: &str, p: RunPatch) -> Result<(), String>` |
-| fn | `WorkflowDir::rebuild_digest` | `flow.rs:326` | `pub fn rebuild_digest(&mut self, eid: &str) -> Result<(), String>` |
-| fn | `WorkflowDir::digest_is_stale` | `flow.rs:334` | `pub fn digest_is_stale(&self) -> bool` —  True when the digest of any experiment no longer matches `runs.jsonl` (a crash between the append and the manifest write). |
-| fn | `WorkflowDir::sparkline` | `flow.rs:339` | `pub fn sparkline(&self, eid: &str) -> Vec<f64>` —  The main metric of an experiment as a series over its ok runs, for the dashboard sparkline: `neff_re` or the first metric. |
-| fn | `WorkflowDir::set_title` | `flow.rs:352` | `pub fn set_title(&mut self, t: &str) -> Result<(), String>` |
-| fn | `WorkflowDir::set_tags` | `flow.rs:356` | `pub fn set_tags(&mut self, tags: Vec<String>) -> Result<(), String>` |
-| fn | `WorkflowDir::set_experiment_title` | `flow.rs:360` | `pub fn set_experiment_title(&mut self, eid: &str, t: &str) -> Result<(), String>` |
-| fn | `WorkflowDir::set_pinned` | `flow.rs:365` | `pub fn set_pinned(&mut self, p: bool) -> Result<(), String>` —  Pinning and marking done are bookkeeping: they do not restart the three-day clock. |
-| fn | `WorkflowDir::set_status` | `flow.rs:369` | `pub fn set_status(&mut self, s: Status) -> Result<(), String>` |
-| fn | `WorkflowDir::notes` | `flow.rs:373` | `pub fn notes(&self) -> String` |
-| fn | `WorkflowDir::set_notes` | `flow.rs:376` | `pub fn set_notes(&mut self, text: &str) -> Result<(), String>` |
+| fn | `WorkflowDir::patch_run` | `flow.rs:321` | `pub fn patch_run(&mut self, eid: &str, rid: &str, p: RunPatch) -> Result<(), String>` |
+| fn | `WorkflowDir::rebuild_digest` | `flow.rs:327` | `pub fn rebuild_digest(&mut self, eid: &str) -> Result<(), String>` |
+| fn | `WorkflowDir::digest_is_stale` | `flow.rs:335` | `pub fn digest_is_stale(&self) -> bool` —  True when the digest of any experiment no longer matches `runs.jsonl` (a crash between the append and the manifest write). |
+| fn | `WorkflowDir::sparkline` | `flow.rs:340` | `pub fn sparkline(&self, eid: &str) -> Vec<f64>` —  The main metric of an experiment as a series over its ok runs, for the dashboard sparkline: `neff_re` or the first metric. |
+| fn | `WorkflowDir::set_title` | `flow.rs:353` | `pub fn set_title(&mut self, t: &str) -> Result<(), String>` |
+| fn | `WorkflowDir::set_tags` | `flow.rs:357` | `pub fn set_tags(&mut self, tags: Vec<String>) -> Result<(), String>` |
+| fn | `WorkflowDir::set_experiment_title` | `flow.rs:361` | `pub fn set_experiment_title(&mut self, eid: &str, t: &str) -> Result<(), String>` |
+| fn | `WorkflowDir::set_pinned` | `flow.rs:366` | `pub fn set_pinned(&mut self, p: bool) -> Result<(), String>` —  Pinning and marking done are bookkeeping: they do not restart the three-day clock. |
+| fn | `WorkflowDir::set_status` | `flow.rs:370` | `pub fn set_status(&mut self, s: Status) -> Result<(), String>` |
+| fn | `WorkflowDir::notes` | `flow.rs:374` | `pub fn notes(&self) -> String` |
+| fn | `WorkflowDir::set_notes` | `flow.rs:377` | `pub fn set_notes(&mut self, text: &str) -> Result<(), String>` |

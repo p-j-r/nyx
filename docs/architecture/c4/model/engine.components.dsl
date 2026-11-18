@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, reduce.rs, validated.rs"
-        "lines" "2916"
+        "lines" "2928"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -27,7 +27,7 @@ jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs 
     properties {
         "adr" "61, 85, 87, 86, 11"
         "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (9 files)"
-        "lines" "2350"
+        "lines" "2410"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
