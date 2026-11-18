@@ -13,11 +13,19 @@ rhai = { version = "1", features = ["no_time"] }
 # of geom, nyx-physics and the physics crates fail (untagged enums stop reading numbers). See docs/PRODUCTIVITY_STATUS.md, S4 spike.
 starlark = { version = "0.14", optional = true }
 anyhow = { version = "1", optional = true }
+# S4 spike candidate 3: a Python-syntax interpreter in pure Rust (MIT, 2026-11-11). No serde_json in its normal dependencies.
+monty = { version = "1.6", optional = true }
+monty-types = { version = "1.6", optional = true }
 
 [features]
 default = []
 starlark = ["dep:starlark", "dep:anyhow"]
+monty = ["dep:monty", "dep:monty-types"]
 
 [[example]]
 name = "spike"
 required-features = ["starlark"]
+
+[[example]]
+name = "monty_spike"
+required-features = ["monty"]

@@ -1,0 +1,100 @@
+# strip_sweep.monty -- SAMPLE for the Monty binding (a Python-syntax interpreter in pure Rust; no CPython).
+#
+# What the host gives the script (generated from Engine::catalog()):
+#   nyx.add_rect(name=..., min=..., max=...), nyx.set_material(...), ...   one function per engine command, keyword arguments
+#   nyx.call(name, **args)                                                  any command by name
+# An engine error is raised as RuntimeError, so try/except works. print() output and the last expression come back to the caller.
+# No file, network, clock or random access.
+#
+# Workflow: a silicon strip on oxide at 1550 nm.
+#   1. build the model with a parameter `w` (strip width)
+#   2. mesh convergence on TE0: refine until neff changes by less than 2e-3
+#   3. sweep the width at the converged mesh size, print a small table
+
+C0 = 299792458.0
+LAMBDA = 1.55e-6
+TOL = 2e-3
+
+# ---------- 1. model ----------
+nyx.project_new(dim=2, title="SOI strip width sweep")
+
+nyx.set_param(name="w", value=500e-9)
+nyx.set_param(name="t", value=220e-9)
+
+nyx.add_rect(name="box", min=[-2.0e-6, -2.0e-6], max=[2.0e-6, 0.0])
+nyx.add_rect(name="clad", min=[-2.0e-6, 0.0], max=[2.0e-6, 2.0e-6])
+nyx.add_rect(name="core", min=["-w/2", 0.0], max=["w/2", "t"])  # fields may be parameter expressions
+nyx.add_overlay(regions=[
+    {"name": "BOX", "input": "box"},
+    {"name": "Clad", "input": "clad"},
+    {"name": "Si", "input": "core"},  # painter order: the core wins
+])
+
+nyx.add_physics(
+    physics="ems",
+    study="modes",
+    study_params={"freq": C0 / LAMBDA, "n_target": 2.9, "n_modes": 4},
+)
+for region, material in [("BOX", "silica"), ("Clad", "silica"), ("Si", "silicon")]:
+    nyx.set_material(physics="ems", region=region, material=material)
+
+
+# ---------- helpers ----------
+def solve_modes():
+    nyx.solve_run(physics="ems", wait=True)
+    res = nyx.result_info(physics="ems")[0]
+    if res["stale"]:
+        raise RuntimeError("result is stale")
+    pol = nyx.analyse(analysis="polarization", physics="ems")
+    # shape of the polarization rows: { label, value:[re,im] (the effective index), report:{ class: "quasi-TE (x)", te_fraction, ... } }
+    te = None
+    tm = None
+    for row in pol["rows"]:
+        cls = row["report"]["class"]
+        if cls.startswith("quasi-TE") and te is None:
+            te = row["value"][0]
+        if cls.startswith("quasi-TM") and tm is None:
+            tm = row["value"][0]
+    return {"te0": te, "tm0": tm, "dofs": res["dofs"], "seconds": res["seconds"]}
+
+
+# ---------- 2. mesh convergence ----------
+h = 200e-9
+nyx.set_mesh(h=h, adapt_scale=0.4)
+prev = solve_modes()
+converged = False
+
+while h > 25e-9:  # the host's time limit stops a runaway loop
+    h /= 2
+    nyx.set_mesh(h=h, adapt_scale=0.4)
+    cur = solve_modes()
+    d = abs(cur["te0"] - prev["te0"])
+    print(f"h = {h * 1e9:.1f} nm  TE0 = {cur['te0']:.6f}  change = {d:.6f}  dofs = {cur['dofs']}")
+    prev = cur
+    if d < TOL:
+        converged = True
+        break
+if not converged:
+    raise RuntimeError(f"TE0 not converged to {TOL} above h = 25 nm")
+h_conv = h * 2  # the coarser of the last pair already met the tolerance
+nyx.set_mesh(h=h_conv, adapt_scale=0.4)
+
+# ---------- 3. width sweep ----------
+rows = []
+for w_nm in range(400, 701, 100):
+    nyx.set_param(name="w", value=w_nm * 1e-9)
+    try:
+        r = solve_modes()
+        rows.append({"w_nm": w_nm, "te0": r["te0"], "tm0": r["tm0"]})
+    except RuntimeError as err:
+        rows.append({"w_nm": w_nm, "error": str(err)})  # keep the other points
+
+# Only what is printed or returned goes back to the agent; fields stay in the engine.
+print(f"converged h = {h_conv * 1e9:.1f} nm")
+print("w_nm  TE0       TM0")
+for r in rows:
+    if "error" in r:
+        print(f"{r['w_nm']}  failed: {r['error']}")
+    else:
+        print(f"{r['w_nm']}   {r['te0']:.5f}   {r['tm0']:.5f}")
+rows  # the script's value: returned to the caller as JSON

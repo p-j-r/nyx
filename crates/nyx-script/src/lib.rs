@@ -8,6 +8,8 @@
 
 use serde_json::Value;
 
+#[cfg(feature = "monty")]
+pub mod monty_host;
 pub mod rhai_host;
 #[cfg(feature = "starlark")]
 pub mod star;
@@ -21,11 +23,15 @@ pub struct Limits {
     pub heap_bytes: usize,
     /// nested calls
     pub depth: usize,
+    /// seconds the script itself may compute, not counting the time the engine takes to answer its commands (Monty)
+    pub seconds: f64,
+    /// engine commands a script may send (Monty)
+    pub calls: usize,
 }
 
 impl Default for Limits {
     fn default() -> Limits {
-        Limits { steps: 50_000_000, heap_bytes: 256 << 20, depth: 50 }
+        Limits { steps: 50_000_000, heap_bytes: 256 << 20, depth: 50, seconds: 60.0, calls: 100_000 }
     }
 }
 

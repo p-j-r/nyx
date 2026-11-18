@@ -83,7 +83,7 @@ fn bench() {
 }
 
 fn limits_demo() {
-    let tight = Limits { steps: 2_000_000, heap_bytes: 64 << 20, depth: 50 };
+    let tight = Limits { steps: 2_000_000, heap_bytes: 64 << 20, depth: 50, ..Limits::default() };
     let mut e = fresh();
     for (label, lang, src) in [
         ("starlark: huge loop", "star", "def go():\n    s = 0\n    for i in range(100000000):\n        s += i\n    return s\nresult = go()\n"),
