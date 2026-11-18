@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, and refusal of NaN and infinity.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 4 files, 536 lines.
+**Size:** 4 files, 537 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/lib.rs` | 45 | femcore: finite elements for the nyx application, in pure Rust. docs/HOW_IT_WORKS.md explains the whole chain in plain language; this is the map of the modules. |
+| `crates/femcore/src/lib.rs` | 46 | femcore: finite elements for the nyx application, in pure Rust. docs/HOW_IT_WORKS.md explains the whole chain in plain language; this is the map of the modules. |
 | `crates/femcore/src/par.rs` | 150 | The one shared pool of worker threads used by every parallel loop of the solvers. |
 | `crates/femcore/src/progress.rs` | 295 | What a running solve is doing, and a way to stop it. |
 | `crates/femcore/src/validate.rs` | 46 |  |
@@ -29,7 +29,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads_up_to |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
-| [engine: Commands](../engine/commands.md) | progress | install, note, stage |
+| [engine: Commands](../engine/commands.md) | par, progress | install, note, stage, threads |
 | [engine: Job runner and queue](../engine/jobs.md) | progress | Progress, install, stage |
 | [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, stage |
 | [engine: Registry and facade](../engine/registry.md) | progress | Progress |

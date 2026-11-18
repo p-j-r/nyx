@@ -1,0 +1,1042 @@
+//! Whole-array operations on results (productivity plan N1, ADR 90): `field`, `field_op`, `integrate`, `extremum`, `probe`, `line_cut`,
+//! `overlap` and `confinement` as engine commands. A script, the MCP server and the window's Results tab call these same commands.
+//!
+//! **Handles are values.** A handle is a small JSON tree, not an id the engine keeps: a leaf `{"field": "Ex", "physics": "ems", "solution": 0}`
+//! (what `field` returns), a number, or `{"op": "mul", "args": [a, b]}` with the operations `add sub mul div neg abs abs2 re im conj sqrt pow`
+//! (`pow` takes `"n"`, a whole number 1 to 16). A bare string stands for a leaf of the request's `physics` and `solution`. The tree is parsed
+//! into `femcore::fieldexpr::Tree` and evaluated there, so a formula of N2 and a handle are one request with one evaluator. Because nothing is
+//! kept, a handle cannot go stale in the engine; it is resolved against the stored results each time it is used, and the answer says whether
+//! the result it read is `stale`.
+//!
+//! **What a leaf reads.** The un-averaged per-cell fields of a solution (`cell_fields`: `Ex`, `uz`, ..., complex when the solve is) when one has
+//! the name; else a node-averaged field by its flat name (`T`, `V`, `|E|`; real, one value per dof). Both are Lagrange P1 or P2 interpolants
+//! on the cells of the mesh the result was solved on (the result keeps that mesh, so a result is read on its own cells whatever the project's
+//! mesh is now).
+//!
+//! **Quadrature (the rule S5 must reproduce bit for bit).** Integrals use the degree-4 symmetric rule of `femcore::fem::quad_rule` (6 points
+//! on a triangle, 14 on a tetrahedron), exact for the product of two P2 fields, so `|E|^2` of a P2 field is exact up to rounding; an
+//! integrand of higher degree (a product of three fields, `sqrt`, a quotient) carries the quadrature error. At each point every leaf is the
+//! interpolant `sum_a N_a(q) v_a` (a in local node order, starting from 0.0) and the tree is evaluated on those values. A cell adds
+//! `vol * sum_q (w_q * f_q)`; cells are summed in blocks of `BLOCK` consecutive cell numbers in cell order and the blocks in block order, so the
+//! sum has the same bits for any thread count. With `revolution` the integrand at each point is multiplied by `2 pi r` (r is mesh axis 0; the
+//! mesh must be 2D); the default is the plane measure, and an answer says which was used.
+//!
+//! **Maxima** are taken over the values at the nodes of the cells (the vertices, and the edge midpoints of a P2 mesh), not over the interpolant:
+//! the true maximum of a P2 field between nodes can be larger. A node shared by cells has one value per cell (the fields are not averaged);
+//! all of them count. **Points** (`probe`, `line_cut`) are in mesh axes (a 2D mesh: x then z of the wafer; 3D: x, y, z); a point outside the
+//! mesh gives `inside: false` and a null value, not an error; a point on the face between cells is read in the cell with the lowest number.
+
+use crate::engine::Engine;
+use femcore::fem::{geometry, quad_rule, shape, RefElement};
+use femcore::fieldexpr::{Fun, Op, Tree, MAX_POWER};
+use femcore::linalg::csr::C;
+use femcore::mesh::SimplexMesh;
+use nyx_physics::{Error, LabelResolver, SolveResult};
+use rayon::prelude::*;
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+use crate::meshing::MeshedModel;
+
+type R = Result<Value, Error>;
+
+/// Consecutive cells summed together before the blocks are added in order.
+pub const BLOCK: usize = 2048;
+/// Barycentric slack for "the point is inside the cell".
+const INSIDE: f64 = 1e-10;
+const MAX_DEPTH: usize = 64;
+const MAX_POINTS: usize = 200_000;
+
+/// One leaf of an expression: a named field of one solution of one physics.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Spec {
+    pub physics: String,
+    pub solution: usize,
+    pub name: String,
+}
+
+/// Where the arguments say a bare name comes from.
+pub(crate) struct Defaults {
+    physics: Option<String>,
+    solution: usize,
+}
+
+enum Kind {
+    /// index into `Solution::cell_fields`
+    Cell(usize),
+    /// the node-averaged values of the field, one per dof
+    Dof(Vec<f64>),
+}
+
+struct Leaf {
+    res: Arc<SolveResult>,
+    sol: usize,
+    kind: Kind,
+    complex: bool,
+    unit: String,
+}
+
+/// The leaves of one request resolved against the stored results, and the mesh they live on.
+pub(crate) struct Prep {
+    leaves: Vec<Leaf>,
+    model: Arc<MeshedModel>,
+    mesh: Arc<SimplexMesh>,
+    order: usize,
+    nloc: usize,
+    physics: Vec<String>,
+}
+
+fn invalid<T>(text: impl Into<String>) -> Result<T, Error> {
+    Err(Error::invalid(text))
+}
+
+fn slot(specs: &mut Vec<Spec>, s: Spec) -> usize {
+    match specs.iter().position(|x| *x == s) {
+        Some(i) => i,
+        None => {
+            specs.push(s);
+            specs.len() - 1
+        }
+    }
+}
+
+fn same_mesh(a: &SimplexMesh, b: &SimplexMesh) -> bool {
+    a.dim == b.dim && a.points == b.points && a.cells == b.cells && a.cell_labels == b.cell_labels
+}
+
+fn interp(n: &[f64], loc: &[C]) -> C {
+    let (mut re, mut im) = (0.0, 0.0);
+    for a in 0..n.len() {
+        re += n[a] * loc[a].re;
+        im += n[a] * loc[a].im;
+    }
+    C::new(re, im)
+}
+
+// ------------------------------------------------------------------------------------------------------------- the engine side
+
+impl Engine {
+    fn defaults(&self, args: &Value) -> Result<Defaults, Error> {
+        let physics = match args.get("physics") {
+            None | Some(Value::Null) => {
+                (self.results.len() == 1).then(|| self.results.keys().next().cloned()).flatten()
+            }
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(o) => return invalid(format!("`physics` must be text, not {o}")),
+        };
+        let solution = match args.get("solution") {
+            None | Some(Value::Null) => 0,
+            Some(v) => v.as_u64().ok_or_else(|| Error::invalid("`solution` must be a whole number"))? as usize,
+        };
+        Ok(Defaults { physics, solution })
+    }
+
+    fn parse_expr(&self, v: &Value, d: &Defaults, specs: &mut Vec<Spec>, depth: usize) -> Result<Tree, Error> {
+        if depth > MAX_DEPTH {
+            return invalid("the expression is nested too deeply");
+        }
+        let leaf = |name: &str, physics: Option<&str>, solution: usize, specs: &mut Vec<Spec>| -> Result<Tree, Error> {
+            let physics = physics.ok_or_else(|| {
+                Error::invalid(format!(
+                    "the field '{name}' needs a physics: give `physics` (the results are: {})",
+                    self.results.keys().cloned().collect::<Vec<_>>().join(", ")
+                ))
+            })?;
+            Ok(Tree::Leaf(slot(specs, Spec { physics: physics.to_string(), solution, name: name.to_string() })))
+        };
+        match v {
+            Value::Number(n) => Ok(Tree::num(n.as_f64().ok_or_else(|| Error::invalid("a number is out of range"))?)),
+            Value::String(s) => leaf(s, d.physics.as_deref(), d.solution, specs),
+            Value::Object(m) => {
+                if let Some(f) = m.get("field") {
+                    let name = f.as_str().ok_or_else(|| Error::invalid("`field` must be the name of a field"))?;
+                    let physics = match m.get("physics") {
+                        Some(Value::String(p)) => Some(p.as_str()),
+                        _ => d.physics.as_deref(),
+                    };
+                    let solution = match m.get("solution") {
+                        Some(s) => {
+                            s.as_u64().ok_or_else(|| Error::invalid("`solution` must be a whole number"))? as usize
+                        }
+                        None => d.solution,
+                    };
+                    return leaf(name, physics, solution, specs);
+                }
+                if let Some(n) = m.get("num") {
+                    return match n {
+                        Value::Number(x) => Ok(Tree::num(x.as_f64().unwrap_or(f64::NAN))),
+                        Value::Array(a) if a.len() == 2 => match (a[0].as_f64(), a[1].as_f64()) {
+                            (Some(re), Some(im)) => Ok(Tree::Num(C::new(re, im))),
+                            _ => invalid("`num` pairs are [re, im] numbers"),
+                        },
+                        _ => invalid("`num` is a number or a pair [re, im]"),
+                    };
+                }
+                let op = m
+                    .get("op")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| Error::invalid("an expression object has `field`, `num` or `op`"))?;
+                let args: &[Value] = m
+                    .get("args")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .ok_or_else(|| Error::invalid(format!("the operation '{op}' needs `args`, a list")))?;
+                let mut sub = Vec::with_capacity(args.len());
+                for a in args {
+                    sub.push(self.parse_expr(a, d, specs, depth + 1)?);
+                }
+                let one = |sub: Vec<Tree>| -> Result<Tree, Error> {
+                    if sub.len() != 1 {
+                        return invalid(format!("'{op}' takes one argument, not {}", sub.len()));
+                    }
+                    Ok(sub.into_iter().next().expect("one argument"))
+                };
+                let two = |sub: Vec<Tree>| -> Result<(Tree, Tree), Error> {
+                    if sub.len() != 2 {
+                        return invalid(format!("'{op}' takes two arguments, not {}", sub.len()));
+                    }
+                    let mut it = sub.into_iter();
+                    Ok((it.next().expect("two arguments"), it.next().expect("two arguments")))
+                };
+                let fold = |op_: Op, sub: Vec<Tree>| -> Result<Tree, Error> {
+                    if sub.len() < 2 {
+                        return invalid(format!("'{op}' takes at least two arguments"));
+                    }
+                    let mut it = sub.into_iter();
+                    let first = it.next().expect("an argument");
+                    Ok(it.fold(first, |acc, t| Tree::Bin(op_, Box::new(acc), Box::new(t))))
+                };
+                match op {
+                    "add" => fold(Op::Add, sub),
+                    "mul" => fold(Op::Mul, sub),
+                    "sub" | "div" => {
+                        let (a, b) = two(sub)?;
+                        Ok(Tree::Bin(if op == "sub" { Op::Sub } else { Op::Div }, Box::new(a), Box::new(b)))
+                    }
+                    "neg" => Ok(Tree::Neg(Box::new(one(sub)?))),
+                    "abs" | "abs2" | "re" | "im" | "conj" | "sqrt" => {
+                        let f = match op {
+                            "abs" => Fun::Abs,
+                            "abs2" => Fun::Abs2,
+                            "re" => Fun::Re,
+                            "im" => Fun::Im,
+                            "conj" => Fun::Conj,
+                            _ => Fun::Sqrt,
+                        };
+                        Ok(Tree::Call(f, Box::new(one(sub)?)))
+                    }
+                    "pow" => {
+                        let n = m
+                            .get("n")
+                            .and_then(Value::as_u64)
+                            .filter(|n| (1..=MAX_POWER as u64).contains(n))
+                            .ok_or_else(|| {
+                                Error::invalid(format!("`pow` needs `n`, a whole number from 1 to {MAX_POWER}"))
+                            })?;
+                        Ok(Tree::Pow(Box::new(one(sub)?), n as u32))
+                    }
+                    other => invalid(format!(
+                        "no operation '{other}' (they are: add, sub, mul, div, neg, abs, abs2, re, im, conj, sqrt, pow)"
+                    )),
+                }
+            }
+            other => invalid(format!("an expression is a field name, a number or an object, not {other}")),
+        }
+    }
+
+    /// The names a solution offers: its cell fields and its flat fields.
+    fn field_names(sol: &nyx_physics::Solution) -> Vec<String> {
+        let mut v: Vec<String> = sol.cell_fields.iter().map(|f| f.name.clone()).collect();
+        for (n, _, _) in sol.flat_fields() {
+            if !v.contains(&n) {
+                v.push(n);
+            }
+        }
+        v
+    }
+
+    /// Resolves the leaves against the stored results.
+    pub(crate) fn prepare(&self, specs: &[Spec]) -> Result<Prep, Error> {
+        let mut base: Option<(Arc<MeshedModel>, Arc<SimplexMesh>, usize)> = None;
+        let mut leaves = Vec::with_capacity(specs.len());
+        let mut physics: Vec<String> = vec![];
+        for s in specs {
+            let stored = self.results.get(&s.physics).ok_or_else(|| {
+                Error::invalid(format!(
+                    "there is no result for '{}' yet; solve first{}",
+                    s.physics,
+                    if self.results.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (the results are: {})", self.results.keys().cloned().collect::<Vec<_>>().join(", "))
+                    }
+                ))
+            })?;
+            if !physics.contains(&s.physics) {
+                physics.push(s.physics.clone());
+            }
+            let res = &stored.result;
+            let sol = res.solutions.get(s.solution).ok_or_else(|| {
+                Error::invalid(format!(
+                    "the result of '{}' has {} solutions; there is no {}",
+                    s.physics,
+                    res.solutions.len(),
+                    s.solution
+                ))
+            })?;
+            let mesh = stored.model.solver_mesh();
+            let order = res.order as usize;
+            let nloc = mesh.nloc(order);
+            let (kind, complex, unit) = if let Some(i) = sol.cell_fields.iter().position(|f| f.name == s.name) {
+                let f = &sol.cell_fields[i];
+                if f.nloc != nloc
+                    || f.re.len() != mesh.n_cells() * nloc
+                    || (!f.im.is_empty() && f.im.len() != f.re.len())
+                {
+                    return invalid(format!(
+                        "the field '{}' of '{}' does not fit its mesh ({} values for {} cells of {} nodes)",
+                        s.name,
+                        s.physics,
+                        f.re.len(),
+                        mesh.n_cells(),
+                        nloc
+                    ));
+                }
+                (Kind::Cell(i), !f.im.is_empty(), f.unit.clone())
+            } else if let Some((_, unit, vals)) = sol.flat_fields().into_iter().find(|(n, _, _)| *n == s.name) {
+                if vals.len() != mesh.n_dofs(order) {
+                    return invalid(format!(
+                        "the field '{}' of '{}' has {} values for {} dofs",
+                        s.name,
+                        s.physics,
+                        vals.len(),
+                        mesh.n_dofs(order)
+                    ));
+                }
+                (Kind::Dof(vals), false, unit)
+            } else {
+                return invalid(format!(
+                    "'{}' has no field '{}' in solution {} (the fields are: {})",
+                    s.physics,
+                    s.name,
+                    s.solution,
+                    Self::field_names(sol).join(", ")
+                ));
+            };
+            match &base {
+                None => base = Some((stored.model.clone(), mesh, order)),
+                Some((m, b, o)) => {
+                    if *o != order {
+                        return invalid(format!(
+                            "'{}' is solved at order {order} and an earlier field at order {o}; an expression reads fields of one order",
+                            s.physics
+                        ));
+                    }
+                    if !Arc::ptr_eq(m, &stored.model) && !same_mesh(b, &mesh) {
+                        return invalid(format!(
+                            "'{}' was solved on a different mesh from the other fields of the expression; solve them on one mesh",
+                            s.physics
+                        ));
+                    }
+                }
+            }
+            leaves.push(Leaf { res: res.clone(), sol: s.solution, kind, complex, unit });
+        }
+        let (model, mesh, order) = base.ok_or_else(|| Error::invalid("the expression reads no field"))?;
+        let nloc = mesh.nloc(order);
+        Ok(Prep { leaves, model, mesh, order, nloc, physics })
+    }
+
+    /// Parses expressions that share one leaf table (each a handle, a name or a number), resolved against the stored results.
+    pub(crate) fn expressions(&self, args: &Value, exprs: &[&Value]) -> Result<(Vec<Tree>, Prep), Error> {
+        let d = self.defaults(args)?;
+        let mut specs = vec![];
+        let mut trees = vec![];
+        for e in exprs {
+            trees.push(self.parse_expr(e, &d, &mut specs, 0)?);
+        }
+        let prep = self.prepare(&specs)?;
+        Ok((trees, prep))
+    }
+
+    fn one_expr(&self, args: &Value, key: &str) -> Result<(Tree, Prep), Error> {
+        let e = args
+            .get(key)
+            .ok_or_else(|| Error::invalid(format!("`{key}` is required: a field name, a number or an expression")))?;
+        let (mut t, p) = self.expressions(args, &[e])?;
+        Ok((t.remove(0), p))
+    }
+
+    /// Adds the staleness of what an answer read.
+    fn decorate(&self, v: &mut Value, p: &Prep) {
+        self.decorate_physics(v, &p.physics);
+    }
+
+    fn decorate_physics(&self, v: &mut Value, physics: &[String]) {
+        let stale = physics.iter().any(|k| self.is_stale(k));
+        let age = physics
+            .iter()
+            .filter_map(|k| self.result_age(k))
+            .fold(None, |m: Option<f64>, a| Some(m.map_or(a, |m| m.max(a))));
+        v["physics"] = json!(physics);
+        v["stale"] = json!(stale);
+        v["age_s"] = json!(age);
+    }
+
+    /// The names of the regions of the mesh a result was solved on (what the Results tab offers to reduce over).
+    pub fn result_regions(&self, physics: &str) -> Vec<String> {
+        self.results.get(physics).map(|s| s.model.regions().into_iter().map(|(_, n)| n).collect()).unwrap_or_default()
+    }
+    // ------------------------------------------------------------------------------------------------------------- commands
+
+    /// `field`: a handle to a field of a solution, with what it holds. A vector name (`E` when `Ex`, `Ez` exist) answers one handle per component.
+    pub(crate) fn cmd_field(&self, args: &Value) -> R {
+        let d = self.defaults(args)?;
+        let name = args
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::invalid("`name` is required: the field, e.g. \"Ex\""))?;
+        let physics = d.physics.clone().ok_or_else(|| {
+            Error::invalid(format!(
+                "give `physics` (the results are: {})",
+                self.results.keys().cloned().collect::<Vec<_>>().join(", ")
+            ))
+        })?;
+        let handle = |n: &str| json!({ "field": n, "physics": physics, "solution": d.solution });
+        let describe = |n: &str| -> Result<Value, Error> {
+            let spec = Spec { physics: physics.clone(), solution: d.solution, name: n.to_string() };
+            let p = self.prepare(std::slice::from_ref(&spec))?;
+            let l = &p.leaves[0];
+            Ok(json!({
+                "handle": handle(n), "name": n, "unit": l.unit, "complex": l.complex,
+                "source": match l.kind { Kind::Cell(_) => "cell", Kind::Dof(_) => "dof" },
+                "order": p.order, "cells": p.mesh.n_cells(), "nodes_per_cell": p.nloc,
+            }))
+        };
+        let stored = self
+            .results
+            .get(&physics)
+            .ok_or_else(|| Error::invalid(format!("there is no result for '{physics}' yet; solve first")))?;
+        let sol = stored.result.solutions.get(d.solution).ok_or_else(|| {
+            Error::invalid(format!(
+                "the result has {} solutions; there is no {}",
+                stored.result.solutions.len(),
+                d.solution
+            ))
+        })?;
+        let names = Self::field_names(sol);
+        let mut out = if names.iter().any(|n| n == name) {
+            describe(name)?
+        } else {
+            let comps: Vec<(String, String)> = ["x", "y", "z"]
+                .iter()
+                .map(|c| (c.to_string(), format!("{name}{c}")))
+                .filter(|(_, n)| sol.cell_fields.iter().any(|f| f.name == *n))
+                .collect();
+            if comps.len() < 2 {
+                return invalid(format!(
+                    "'{physics}' has no field '{name}' in solution {} (the fields are: {})",
+                    d.solution,
+                    names.join(", ")
+                ));
+            }
+            let mut m = serde_json::Map::new();
+            for (c, n) in &comps {
+                m.insert(c.clone(), describe(n)?);
+            }
+            json!({ "name": name, "components": Value::Object(m) })
+        };
+        self.decorate_physics(&mut out, std::slice::from_ref(&physics));
+        Ok(out)
+    }
+
+    /// `field_op`: arithmetic on handles. The operation is checked against the results (every leaf must resolve) and the handle comes back.
+    pub(crate) fn cmd_field_op(&self, args: &Value) -> R {
+        let op = args.get("op").cloned().ok_or_else(|| Error::invalid("`op` is required"))?;
+        let list = args.get("args").cloned().ok_or_else(|| Error::invalid("`args` is required: the operands"))?;
+        let mut e = json!({ "op": op, "args": list });
+        if let Some(n) = args.get("n") {
+            e["n"] = n.clone();
+        }
+        let (tree, prep) = self.expressions(args, &[&e])?;
+        let flags: Vec<bool> = prep.leaves.iter().map(|l| l.complex).collect();
+        let mut out = json!({ "handle": e, "complex": !tree[0].is_real_valued(&flags) });
+        self.decorate(&mut out, &prep);
+        Ok(out)
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------------- evaluation
+
+struct Region {
+    mask: Vec<bool>,
+    cells: usize,
+}
+
+struct Sum {
+    re: f64,
+    im: f64,
+    measure: f64,
+}
+
+impl Prep {
+    fn region(&self, region: Option<&str>) -> Result<Region, Error> {
+        let n = self.mesh.n_cells();
+        let Some(text) = region.filter(|r| !r.trim().is_empty()) else {
+            return Ok(Region { mask: vec![true; n], cells: n });
+        };
+        let labels = self.model.domains(text)?;
+        let mask: Vec<bool> = self.mesh.cell_labels.iter().map(|l| labels.contains(l)).collect();
+        let cells = mask.iter().filter(|m| **m).count();
+        if cells == 0 {
+            return invalid(format!("the region '{text}' has no cells"));
+        }
+        Ok(Region { mask, cells })
+    }
+
+    /// The values of every leaf at the nodes of cell `c`: `loc[i * nloc + a]`.
+    fn gather(&self, c: usize, dofs: &mut Vec<usize>, loc: &mut [C]) {
+        let nloc = self.nloc;
+        let need_dofs = self.leaves.iter().any(|l| matches!(l.kind, Kind::Dof(_)));
+        if need_dofs {
+            self.mesh.cell_dofs(c, self.order, dofs);
+        }
+        for (i, l) in self.leaves.iter().enumerate() {
+            let out = &mut loc[i * nloc..(i + 1) * nloc];
+            match &l.kind {
+                Kind::Cell(k) => {
+                    let f = &l.res.solutions[l.sol].cell_fields[*k];
+                    let re = &f.re[c * nloc..(c + 1) * nloc];
+                    if f.im.is_empty() {
+                        for a in 0..nloc {
+                            out[a] = C::new(re[a], 0.0);
+                        }
+                    } else {
+                        let im = &f.im[c * nloc..(c + 1) * nloc];
+                        for a in 0..nloc {
+                            out[a] = C::new(re[a], im[a]);
+                        }
+                    }
+                }
+                Kind::Dof(vals) => {
+                    for a in 0..nloc {
+                        out[a] = C::new(vals[dofs[a]], 0.0);
+                    }
+                }
+            }
+        }
+    }
+
+    fn at_point(&self, tree: &Tree, loc: &[C], n: &[f64], work: &mut Vec<C>) -> C {
+        work.clear();
+        for i in 0..self.leaves.len() {
+            work.push(interp(n, &loc[i * self.nloc..(i + 1) * self.nloc]));
+        }
+        tree.eval(work)
+    }
+
+    fn complex_flags(&self) -> Vec<bool> {
+        self.leaves.iter().map(|l| l.complex).collect()
+    }
+
+    /// `sum over the region of tree dV` (see the module comment for the rule and the order of the sums).
+    fn integrate(&self, tree: &Tree, region: &Region, revolution: bool) -> Result<Sum, Error> {
+        let dim = self.mesh.dim;
+        if revolution && dim != 2 {
+            return invalid("`revolution` applies to a 2D (r, z) mesh");
+        }
+        femcore::par::threads();
+        let el = RefElement::new(dim, self.order, 4);
+        let quad = quad_rule(dim, 4);
+        let geo = geometry(&self.mesh);
+        let nq = el.w.len();
+        let nloc = self.nloc;
+        let nb = self.mesh.n_cells().div_ceil(BLOCK);
+        let block = |b: usize| -> Sum {
+            let mut s = Sum { re: 0.0, im: 0.0, measure: 0.0 };
+            let mut loc = vec![C::new(0.0, 0.0); self.leaves.len() * nloc];
+            let mut dofs = vec![];
+            let mut work = Vec::with_capacity(self.leaves.len());
+            for c in b * BLOCK..((b + 1) * BLOCK).min(self.mesh.n_cells()) {
+                if !region.mask[c] {
+                    continue;
+                }
+                self.gather(c, &mut dofs, &mut loc);
+                let (mut cre, mut cim, mut cm) = (0.0, 0.0, 0.0);
+                let v = self.mesh.cell(c);
+                for q in 0..nq {
+                    let mut f = self.at_point(tree, &loc, &el.n[q], &mut work);
+                    let mut w = el.w[q];
+                    if revolution {
+                        let mut r = 0.0;
+                        for (k, &vk) in v.iter().enumerate() {
+                            r += quad.lam[q][k] * self.mesh.point(vk as usize)[0];
+                        }
+                        let rho = 2.0 * std::f64::consts::PI * r;
+                        f = C::new(f.re * rho, f.im * rho);
+                        w *= rho;
+                    }
+                    cre += el.w[q] * f.re;
+                    cim += el.w[q] * f.im;
+                    cm += w;
+                }
+                s.re += geo.vol[c] * cre;
+                s.im += geo.vol[c] * cim;
+                s.measure += geo.vol[c] * cm;
+            }
+            s
+        };
+        let parts: Vec<Sum> = (0..nb).into_par_iter().map(block).collect();
+        let mut t = Sum { re: 0.0, im: 0.0, measure: 0.0 };
+        for p in parts {
+            t.re += p.re;
+            t.im += p.im;
+            t.measure += p.measure;
+        }
+        if !(t.re.is_finite() && t.im.is_finite()) {
+            return Err(Error::NonFinite(
+                "the integral is not finite (a division by zero, or a field with NaN)".into(),
+            ));
+        }
+        Ok(t)
+    }
+
+    /// The coordinates of local node `a` of cell `c`.
+    fn node_point(&self, c: usize, a: usize) -> Vec<f64> {
+        let dim = self.mesh.dim;
+        let v = self.mesh.cell(c);
+        if a <= dim {
+            return self.mesh.point(v[a] as usize).to_vec();
+        }
+        let mut k = dim + 1;
+        for i in 0..=dim {
+            for j in i + 1..=dim {
+                if k == a {
+                    let (p, q) = (self.mesh.point(v[i] as usize), self.mesh.point(v[j] as usize));
+                    return (0..dim).map(|d| 0.5 * (p[d] + q[d])).collect();
+                }
+                k += 1;
+            }
+        }
+        unreachable!("local node {a} of a cell with {} nodes", self.nloc)
+    }
+
+    /// The largest or smallest value at the nodes of the cells of the region: (value, cell, local node).
+    fn extremum(&self, tree: &Tree, region: &Region, max: bool) -> Result<(f64, usize, usize), Error> {
+        let nloc = self.nloc;
+        let nb = self.mesh.n_cells().div_ceil(BLOCK);
+        let better = |a: f64, b: f64| if max { a > b } else { a < b };
+        let block = |b: usize| -> Option<(f64, usize, usize)> {
+            let mut best: Option<(f64, usize, usize)> = None;
+            let mut loc = vec![C::new(0.0, 0.0); self.leaves.len() * nloc];
+            let mut dofs = vec![];
+            let mut at = vec![C::new(0.0, 0.0); self.leaves.len()];
+            for c in b * BLOCK..((b + 1) * BLOCK).min(self.mesh.n_cells()) {
+                if !region.mask[c] {
+                    continue;
+                }
+                self.gather(c, &mut dofs, &mut loc);
+                for a in 0..nloc {
+                    for (i, x) in at.iter_mut().enumerate() {
+                        *x = loc[i * nloc + a];
+                    }
+                    let v = tree.eval(&at).re;
+                    if v.is_nan() {
+                        return Some((f64::NAN, c, a));
+                    }
+                    if best.is_none_or(|(bv, _, _)| better(v, bv)) {
+                        best = Some((v, c, a));
+                    }
+                }
+            }
+            best
+        };
+        let parts: Vec<Option<(f64, usize, usize)>> = (0..nb).into_par_iter().map(block).collect();
+        let mut best: Option<(f64, usize, usize)> = None;
+        for p in parts.into_iter().flatten() {
+            if p.0.is_nan() {
+                return Err(Error::NonFinite("the expression is NaN at a node".into()));
+            }
+            if best.is_none_or(|(bv, _, _)| better(p.0, bv)) {
+                best = Some(p);
+            }
+        }
+        best.ok_or_else(|| Error::invalid("there is nothing to compare"))
+    }
+}
+
+/// A uniform grid of the cells' bounding boxes, to find the cell that holds a point.
+struct Locator {
+    dim: usize,
+    lo: [f64; 3],
+    h: [f64; 3],
+    n: [usize; 3],
+    start: Vec<u32>,
+    items: Vec<u32>,
+}
+
+impl Locator {
+    fn new(mesh: &SimplexMesh) -> Locator {
+        let dim = mesh.dim;
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for p in mesh.points.chunks(dim) {
+            for k in 0..dim {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        let nc = mesh.n_cells();
+        let per_axis =
+            (((nc as f64) / 2.0).powf(1.0 / dim as f64).ceil() as usize).clamp(1, if dim == 3 { 160 } else { 2048 });
+        let mut n = [1usize; 3];
+        let mut h = [1.0f64; 3];
+        for k in 0..dim {
+            n[k] = per_axis;
+            let ext = hi[k] - lo[k];
+            h[k] = if ext > 0.0 { ext / per_axis as f64 } else { 1.0 };
+        }
+        let total: usize = n.iter().product();
+        let range = |c: usize| -> ([usize; 3], [usize; 3]) {
+            let (mut a, mut b) = ([0usize; 3], [0usize; 3]);
+            let (mut cl, mut ch) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+            for &v in mesh.cell(c) {
+                let p = mesh.point(v as usize);
+                for k in 0..dim {
+                    cl[k] = cl[k].min(p[k]);
+                    ch[k] = ch[k].max(p[k]);
+                }
+            }
+            for k in 0..dim {
+                a[k] = (((cl[k] - lo[k]) / h[k]).floor().max(0.0) as usize).min(n[k] - 1);
+                b[k] = (((ch[k] - lo[k]) / h[k]).floor().max(0.0) as usize).min(n[k] - 1);
+            }
+            (a, b)
+        };
+        let bins_of = |a: [usize; 3], b: [usize; 3], f: &mut dyn FnMut(usize)| {
+            for i in a[0]..=b[0] {
+                for j in a[1]..=b[1] {
+                    for l in a[2]..=b[2] {
+                        f((i * n[1] + j) * n[2] + l);
+                    }
+                }
+            }
+        };
+        let mut count = vec![0u32; total + 1];
+        for c in 0..nc {
+            let (a, b) = range(c);
+            bins_of(a, b, &mut |bin| count[bin + 1] += 1);
+        }
+        for i in 0..total {
+            count[i + 1] += count[i];
+        }
+        let mut cursor = count.clone();
+        let mut items = vec![0u32; count[total] as usize];
+        for c in 0..nc {
+            let (a, b) = range(c);
+            bins_of(a, b, &mut |bin| {
+                items[cursor[bin] as usize] = c as u32;
+                cursor[bin] += 1;
+            });
+        }
+        Locator { dim, lo, h, n, start: count, items }
+    }
+
+    /// The cells whose boxes touch the bin of `p` (ascending), empty when `p` is outside the grid.
+    fn candidates(&self, p: &[f64]) -> &[u32] {
+        let mut idx = [0usize; 3];
+        for k in 0..self.dim {
+            let t = (p[k] - self.lo[k]) / self.h[k];
+            let top = self.n[k] as f64;
+            if t < -1e-9 || t > top + 1e-9 {
+                return &[];
+            }
+            idx[k] = (t.floor().max(0.0) as usize).min(self.n[k] - 1);
+        }
+        let bin = (idx[0] * self.n[1] + idx[1]) * self.n[2] + idx[2];
+        &self.items[self.start[bin] as usize..self.start[bin + 1] as usize]
+    }
+}
+
+/// Barycentric coordinates of `p` in cell `c`.
+fn barycentric(mesh: &SimplexMesh, c: usize, p: &[f64]) -> Option<[f64; 4]> {
+    let dim = mesh.dim;
+    let v = mesh.cell(c);
+    let p0 = mesh.point(v[0] as usize);
+    let mut t = [[0.0f64; 3]; 3];
+    for j in 0..dim {
+        let pj = mesh.point(v[j + 1] as usize);
+        for k in 0..dim {
+            t[k][j] = pj[k] - p0[k];
+        }
+    }
+    let mut d = [0.0f64; 3];
+    for k in 0..dim {
+        d[k] = p[k] - p0[k];
+    }
+    let l = if dim == 2 {
+        let det = t[0][0] * t[1][1] - t[0][1] * t[1][0];
+        if det == 0.0 {
+            return None;
+        }
+        [(t[1][1] * d[0] - t[0][1] * d[1]) / det, (t[0][0] * d[1] - t[1][0] * d[0]) / det, 0.0]
+    } else {
+        let det3 = |m: &[[f64; 3]; 3]| {
+            m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+        };
+        let det = det3(&t);
+        if det == 0.0 {
+            return None;
+        }
+        let mut out = [0.0; 3];
+        for j in 0..3 {
+            let mut m = t;
+            for k in 0..3 {
+                m[k][j] = d[k];
+            }
+            out[j] = det3(&m) / det;
+        }
+        out
+    };
+    let mut lam = [0.0; 4];
+    lam[0] = 1.0 - l[..dim].iter().sum::<f64>();
+    lam[1..=dim].copy_from_slice(&l[..dim]);
+    Some(lam)
+}
+
+struct Located {
+    cell: usize,
+    lam: Vec<f64>,
+}
+
+fn locate(mesh: &SimplexMesh, loc: &Locator, p: &[f64]) -> Option<Located> {
+    for &c in loc.candidates(p) {
+        if let Some(l) = barycentric(mesh, c as usize, p) {
+            if l[..=mesh.dim].iter().all(|x| *x >= -INSIDE) {
+                return Some(Located { cell: c as usize, lam: l[..=mesh.dim].to_vec() });
+            }
+        }
+    }
+    None
+}
+
+// ------------------------------------------------------------------------------------------------------------- the commands
+
+fn number_array(v: &Value, key: &str, dim: usize) -> Result<Vec<f64>, Error> {
+    let a = v.as_array().ok_or_else(|| Error::invalid(format!("`{key}` is a list of {dim} numbers")))?;
+    if a.len() != dim {
+        return invalid(format!("`{key}` has {} numbers; this is a {dim}D mesh (x then z; 3D: x, y, z)", a.len()));
+    }
+    a.iter()
+        .map(|x| {
+            x.as_f64()
+                .filter(|f| f.is_finite())
+                .ok_or_else(|| Error::invalid(format!("`{key}` holds a number that is not finite")))
+        })
+        .collect()
+}
+
+fn pair(re: f64, im: f64) -> Value {
+    json!([re, im])
+}
+
+impl Engine {
+    fn revolution(args: &Value) -> bool {
+        args.get("revolution").and_then(Value::as_bool).unwrap_or(false)
+    }
+
+    fn region_arg(args: &Value) -> Option<&str> {
+        args.get("region").and_then(Value::as_str)
+    }
+
+    /// A note when a result of a study named `axisymmetric...` is integrated without the revolution weight.
+    fn axisym_note(&self, p: &Prep, revolution: bool, out: &mut Value) {
+        if !revolution
+            && p.physics.iter().any(|k| self.results.get(k).is_some_and(|s| s.result.study.contains("axisym")))
+        {
+            out["note"] = json!(
+                "this is an axisymmetric result: pass `revolution: true` for the 2 pi r weight of a body of revolution"
+            );
+        }
+    }
+
+    pub(crate) fn cmd_integrate(&self, args: &Value) -> R {
+        let (tree, p) = self.one_expr(args, "expr")?;
+        let region = p.region(Self::region_arg(args))?;
+        let rev = Self::revolution(args);
+        let s = p.integrate(&tree, &region, rev)?;
+        let real = tree.is_real_valued(&p.complex_flags());
+        let mut out = json!({
+            "value": if real { json!(s.re) } else { pair(s.re, s.im) }, "complex": !real,
+            "measure": s.measure, "cells": region.cells, "revolution": rev, "region": Self::region_arg(args),
+        });
+        self.axisym_note(&p, rev, &mut out);
+        self.decorate(&mut out, &p);
+        Ok(out)
+    }
+
+    pub(crate) fn cmd_extremum(&self, args: &Value) -> R {
+        let (tree, p) = self.one_expr(args, "expr")?;
+        if !tree.is_real_valued(&p.complex_flags()) {
+            return invalid("the expression is complex and has no order: wrap it in abs, abs2, re or im");
+        }
+        let op = args.get("op").and_then(Value::as_str).unwrap_or("max");
+        if op != "max" && op != "min" {
+            return invalid("`op` is \"max\" or \"min\"");
+        }
+        let region = p.region(Self::region_arg(args))?;
+        let (v, c, a) = p.extremum(&tree, &region, op == "max")?;
+        let mut out = json!({
+            "op": op, "value": v, "cell": c, "node": a, "point": p.node_point(c, a), "region": Self::region_arg(args),
+            "at": "the nodes of the cells (not between them)",
+        });
+        self.decorate(&mut out, &p);
+        Ok(out)
+    }
+
+    fn sample(&self, p: &Prep, tree: &Tree, points: &[Vec<f64>]) -> Value {
+        let loc = Locator::new(&p.mesh);
+        let nloc = p.nloc;
+        let flags = p.complex_flags();
+        let real = tree.is_real_valued(&flags);
+        let (mut re, mut im, mut inside, mut cells) = (vec![], vec![], vec![], vec![]);
+        let mut local = vec![C::new(0.0, 0.0); p.leaves.len() * nloc];
+        let mut dofs = vec![];
+        let mut work = Vec::with_capacity(p.leaves.len());
+        for pt in points {
+            match locate(&p.mesh, &loc, pt) {
+                Some(l) => {
+                    p.gather(l.cell, &mut dofs, &mut local);
+                    let (n, _) = shape(&l.lam, p.order);
+                    let v = p.at_point(tree, &local, &n, &mut work);
+                    re.push(json!(v.re));
+                    im.push(json!(v.im));
+                    inside.push(true);
+                    cells.push(json!(l.cell));
+                }
+                None => {
+                    re.push(Value::Null);
+                    im.push(Value::Null);
+                    inside.push(false);
+                    cells.push(Value::Null);
+                }
+            }
+        }
+        let mut out = json!({ "values": re, "inside": inside, "cells": cells, "complex": !real });
+        if !real {
+            out["im"] = json!(im);
+        }
+        out
+    }
+
+    pub(crate) fn cmd_probe(&self, args: &Value) -> R {
+        let (tree, p) = self.one_expr(args, "expr")?;
+        let dim = p.mesh.dim;
+        let pts = args
+            .get("points")
+            .and_then(Value::as_array)
+            .ok_or_else(|| Error::invalid("`points` is required: a list of points"))?;
+        if pts.is_empty() || pts.len() > MAX_POINTS {
+            return invalid(format!("`points` holds 1 to {MAX_POINTS} points"));
+        }
+        let points: Vec<Vec<f64>> = pts.iter().map(|x| number_array(x, "points", dim)).collect::<Result<_, _>>()?;
+        let mut out = self.sample(&p, &tree, &points);
+        out["points"] = json!(points);
+        self.decorate(&mut out, &p);
+        Ok(out)
+    }
+
+    pub(crate) fn cmd_line_cut(&self, args: &Value) -> R {
+        let (tree, p) = self.one_expr(args, "expr")?;
+        let dim = p.mesh.dim;
+        let from = number_array(args.get("from").unwrap_or(&Value::Null), "from", dim)?;
+        let to = number_array(args.get("to").unwrap_or(&Value::Null), "to", dim)?;
+        let n = args.get("n").and_then(Value::as_u64).unwrap_or(101) as usize;
+        if !(2..=MAX_POINTS).contains(&n) {
+            return invalid(format!("`n`, the number of points, is 2 to {MAX_POINTS}"));
+        }
+        let length = (0..dim).map(|k| (to[k] - from[k]) * (to[k] - from[k])).sum::<f64>().sqrt();
+        let mut s = Vec::with_capacity(n);
+        let points: Vec<Vec<f64>> = (0..n)
+            .map(|i| {
+                let t = i as f64 / (n - 1) as f64;
+                s.push(length * t);
+                (0..dim).map(|k| from[k] + (to[k] - from[k]) * t).collect()
+            })
+            .collect();
+        let mut out = self.sample(&p, &tree, &points);
+        out["s"] = json!(s);
+        out["from"] = json!(from);
+        out["to"] = json!(to);
+        self.decorate(&mut out, &p);
+        Ok(out)
+    }
+
+    /// The expressions of a list argument (`a`, `b`, `fields`): one expression, or a list of components.
+    fn components<'a>(args: &'a Value, key: &str) -> Result<Vec<&'a Value>, Error> {
+        match args.get(key) {
+            None | Some(Value::Null) => invalid(format!("`{key}` is required: a field, or a list of components")),
+            Some(Value::Array(a)) if a.is_empty() => invalid(format!("`{key}` is empty")),
+            Some(Value::Array(a)) => Ok(a.iter().collect()),
+            Some(v) => Ok(vec![v]),
+        }
+    }
+
+    pub(crate) fn cmd_overlap(&self, args: &Value) -> R {
+        let (a, b) = (Self::components(args, "a")?, Self::components(args, "b")?);
+        if a.len() != b.len() {
+            return invalid(format!("`a` has {} components and `b` {}; they must match", a.len(), b.len()));
+        }
+        let all: Vec<&Value> = a.iter().chain(b.iter()).copied().collect();
+        let (trees, p) = self.expressions(args, &all)?;
+        let (ta, tb) = trees.split_at(a.len());
+        let sum = |mut it: Vec<Tree>| -> Tree {
+            let first = it.remove(0);
+            it.into_iter().fold(first, |acc, t| Tree::Bin(Op::Add, Box::new(acc), Box::new(t)))
+        };
+        let cross = sum(ta
+            .iter()
+            .zip(tb)
+            .map(|(x, y)| Tree::Bin(Op::Mul, Box::new(Tree::Call(Fun::Conj, Box::new(x.clone()))), Box::new(y.clone())))
+            .collect());
+        let na = sum(ta.iter().map(|x| Tree::Call(Fun::Abs2, Box::new(x.clone()))).collect());
+        let nb = sum(tb.iter().map(|x| Tree::Call(Fun::Abs2, Box::new(x.clone()))).collect());
+        let region = p.region(Self::region_arg(args))?;
+        let rev = Self::revolution(args);
+        let x = p.integrate(&cross, &region, rev)?;
+        let (xa, xb) = (p.integrate(&na, &region, rev)?, p.integrate(&nb, &region, rev)?);
+        let coefficient = (x.re * x.re + x.im * x.im) / (xa.re * xb.re);
+        let mut out = json!({
+            "overlap": pair(x.re, x.im), "norm_a": xa.re, "norm_b": xb.re, "coefficient": coefficient,
+            "cells": region.cells, "revolution": rev, "region": Self::region_arg(args),
+            "meaning": "overlap = the integral of sum_k conj(a_k) b_k; norm = the integral of sum_k |c_k|^2; coefficient = |overlap|^2 / (norm_a norm_b), 0 to 1",
+        });
+        self.axisym_note(&p, rev, &mut out);
+        self.decorate(&mut out, &p);
+        Ok(out)
+    }
+
+    pub(crate) fn cmd_confinement(&self, args: &Value) -> R {
+        let key = if args.get("fields").is_some() { "fields" } else { "expr" };
+        let comps = Self::components(args, key)?;
+        let (trees, p) = self.expressions(args, &comps)?;
+        let mut it = trees.into_iter().map(|t| Tree::Call(Fun::Abs2, Box::new(t)));
+        let first = it.next().expect("a component");
+        let power = it.fold(first, |acc, t| Tree::Bin(Op::Add, Box::new(acc), Box::new(t)));
+        let rev = Self::revolution(args);
+        let all = p.region(None)?;
+        let part = p.region(Some(
+            Self::region_arg(args)
+                .ok_or_else(|| Error::invalid("`region` is required: the region the fraction is of"))?,
+        ))?;
+        let (inside, total) = (p.integrate(&power, &part, rev)?, p.integrate(&power, &all, rev)?);
+        let mut out = json!({
+            "fraction": inside.re / total.re, "inside": inside.re, "total": total.re, "cells": part.cells,
+            "revolution": rev, "region": Self::region_arg(args),
+            "meaning": "the integral of sum_k |c_k|^2 over the region divided by the same over the whole mesh (no material weight)",
+        });
+        self.axisym_note(&p, rev, &mut out);
+        self.decorate(&mut out, &p);
+        Ok(out)
+    }
+}

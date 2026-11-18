@@ -30,7 +30,7 @@ report    | Report | report.rs lib.rs | 28, 19 | The machine-readable form of wh
 cli       | Command line | main.rs | 28 | The command-line twin of the Connect menu: list, connect, disconnect, test, optionally as JSON.
 
 [engine | nyx-engine | nyx_engine]
-commands  | Commands | commands.rs engine.rs guide.rs | 57, 38, 15 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries.
+commands  | Commands | commands.rs engine.rs guide.rs reduce.rs | 57, 38, 15, 90 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries.
 project   | Project | project.rs | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary.
 geometry  | Geometry operations | geometry.rs geomdesc.rs | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only).
 jobs      | Job runner and queue | jobs.rs queue.rs sweep.rs process.rs worker.rs estimate.rs bin/nyx-worker.rs solve.rs convergence.rs | 61, 85, 87, 86, 11 | Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine.
@@ -129,7 +129,7 @@ fem         | Finite-element basics | fem.rs edge.rs fields.rs pml.rs periodic.r
 material    | Material specification | material/ | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader.
 optical     | Optical mode sets | optical.rs | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them.
 section     | Frame and sections | section.rs | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y).
-expr        | Expressions | expr.rs | 65, 2 | A small safe expression evaluator for user input; a copy of geom's kept equal by a corpus test.
+expr        | Expressions | expr.rs fieldexpr.rs | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate (ADR 90).
 runtime     | Runtime services | par.rs progress.rs validate.rs lib.rs | 9, 11 | The shared worker pool, stage log and cancel, and refusal of NaN and infinity.
 view femcore | meshing | Meshing and adaptation | mesh meshio fixtures meshing meshing3d structpml meshcheck metric adaptops adaptdrive estimators
 view femcore | linalg | Linear algebra | lacore ladriver ladirect laksp laeigen laprecond laother

@@ -3206,6 +3206,7 @@ dependencies = [
  "nyx-sms",
  "nyx-store",
  "quick-xml",
+ "rayon",
  "serde",
  "serde_json",
 ]

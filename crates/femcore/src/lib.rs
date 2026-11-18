@@ -26,6 +26,7 @@
 pub mod optical;
 pub mod edge;
 pub mod expr;
+pub mod fieldexpr;
 pub mod fem;
 pub mod fields;
 pub mod material;

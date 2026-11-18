@@ -478,6 +478,13 @@
       "id" : "9",
       "status" : "Accepted",
       "title" : "Every kernel is three stages behind one entry point"
+    }, {
+      "content" : "# 90. Whole-array operations on results are engine commands over a typed expression tree evaluated in Rust\n\nDate: 2026-11-17\n\n## Status\n\nAccepted as step S3 (plan item N1) of the productivity plan (`docs/NYX2_PRODUCTIVITY_PLAN.md`, section 3b). **The number 90 is the one the plan reserves for \"per-element numerics are formulas evaluated in Rust\" and is provisional**: take the next free ADR number at merge and renumber this file, the index row and the code comments. This record covers level N1 (whole-array operations) and the tree that levels N2 to N4 build on; N2 (text formulas, material values, `where`), N3 (tracing script functions) and N4 (a code generator) amend it when they land.\n\n## Context\n\nA researcher or an agent wants numbers computed from a field: the integral of `|E|^2` over the core, the confinement factor, the largest stress, the field along a line, the overlap of two modes. Before this step the only way was `result_field`, which returns up to 2000 sampled node-averaged values, and a loop of arithmetic written by the caller. In an interpreted script such a loop is 10 to 100 times slower than Rust and, worse, it reads values that were averaged over the cells and sampled, so the number it gets is not the integral of the field the solver made.\n\n## Decision\n\n* **Eight commands, one implementation** (`nyx_engine::reduce`): `field`, `field_op`, `integrate`, `extremum`, `probe`, `line_cut`, `overlap` and `confinement`. They are ordinary engine commands (read access), so the MCP server lists them as tools, a script (S4) calls them, and the window's Reduce form in the Results tab calls the very same commands (`App::reduce_now`; the test compares the line it shows with the command's number).\n* **A handle is a value, not an id.** `field` returns `{\"field\": \"Ex\", \"physics\": \"ems\", \"solution\": 0}`; arithmetic builds `{\"op\": \"mul\", \"args\": [a, b]}` (`add sub mul div neg abs abs2 re im conj sqrt pow`); numbers are `{\"num\": x}` or `{\"num\": [re, im]}`; a bare string is a field of the request's `physics` and `solution`. The engine keeps no handle table, so a handle has no lifetime and cannot go stale in the engine: it is read against the stored result each time and the answer says `stale` and `age_s` (as `result_field` does). The tree is `femcore::fieldexpr::Tree` (complex values, leaves are numbered slots, every operation written out so the order of the floating-point operations is fixed by that file).\n* **A leaf reads the field the solver made.** A name is first looked up among the per-cell fields of the solution (`cell_fields`: `Ex`, `uz`, ..., complex when the solve is, not averaged over cells), then among the node-averaged flat fields of `result_info` (`T`, `|E|`: real, one value per dof). Both are Lagrange P1 or P2 interpolants on the cells of the mesh the result was solved on. **A stored result keeps that mesh** (`Stored.model`), so a result is read on its own cells whatever the project's mesh is now (a changed element size makes the result stale, not unreadable).\n* **The rule (what N2, N3 and N4 must reproduce bit for bit).** Integrals use the degree-4 symmetric rule of `femcore::fem::quad_rule` (6 points on a triangle, 14 on a tetrahedron), exact for the product of two P2 fields; an integrand of higher degree carries the quadrature error. At each point every leaf is `sum_a N_a(q) v_a` (local node order, starting from 0.0) and the tree is evaluated on those values. A cell adds `vol * sum_q (w_q * f_q)`; cells are summed in blocks of 2048 consecutive cell numbers in cell order and the blocks in block order, so the sum has the same bits for any thread count (`tests/reduce.rs` runs it on 1, 3 and the pool's threads). The reference loops in `tests/reduce.rs` are written on the raw arrays of the result and agree **to the bit** with the commands; the closed forms (polynomials of degree 2 integrated by Gauss-Legendre over boxes) agree to 1e-9.\n* **Measure.** The plane measure (area in 2D, volume in 3D) is the default. `revolution: true` multiplies the integrand at each quadrature point by `2 pi r` (r is mesh axis 0, the mesh must be 2D) for bodies of revolution. It is an explicit argument, echoed in every answer, because the engine does not know which physics is axisymmetric; when a result's study name says `axisym` and the argument is absent, the answer carries a note.\n* **Maxima are nodal.** `extremum` takes the largest or smallest real value at the nodes of the cells of a region (vertices, and edge midpoints of a P2 mesh), not over the interpolant; it says so, and returns the cell, the local node and the point. A complex expression has no order and is refused with the advice to wrap it in `abs`, `abs2`, `re` or `im`.\n* **`probe` and `line_cut`** find the cell of a point with a uniform grid of the cells' boxes and interpolate in that cell. Points are in mesh axes (a 2D mesh: x then z of the wafer; 3D: x, y, z). A point outside the mesh answers `inside: false` and a null value, not an error; a point on the face between two cells is read in the cell with the lowest number (the fields are not averaged, so the two cells can differ by the discretisation error).\n* **`overlap` and `confinement` have no material weight.** `overlap` returns the complex integral of `sum_k conj(a_k) b_k` over a region, the two norms and the coefficient `|overlap|^2 / (norm_a norm_b)` (0 to 1, Cauchy-Schwarz); `a` and `b` are a field or a list of components. `confinement` returns the integral of `sum_k |c_k|^2` over a region divided by the same over the whole mesh. The energy or power fraction needs the permittivity at each point, which is N2 (material values in formulas); until then the commands say what they computed in `meaning`.\n* **Where the tree lives.** The plan says N1's handle arithmetic builds the formula tree of N2, extending `femcore::expr`. That evaluator is real-valued and has no fields; making it complex and giving it field leaves is the substance of N2. So S3 adds the typed tree `femcore::fieldexpr` (complex, field leaves) and N2 adds a text parser that produces the same tree and moves `expr::Expr` (initial values from `x y z`) onto it. Until then there are two small evaluators in `femcore`; the gate for N2 is that a formula and a handle give the same bits.\n\n## Not in this decision\n\n* Material values (`eps`, `rho`) at each point, text formulas, `where`, vectors and dot products (N2); tracing a script function into the tree (N3); a code generator (N4).\n* Convergence of an integral under refinement (a reduction reads one result on one mesh).\n* Reductions in a worker process: they read the result the parent holds and take about as long as reading it.\n* Maxima of the interpolant between nodes; surface and line integrals along boundaries (`integrate` is over cells).\n\n## Consequences\n\n* `engine_commands` gains eight commands and `result_info` gains `cell_fields` (additive); `mcp_tools` gains eight tools (additive). Provisional versions 1.12 and 2.8.\n* `Stored` holds the mesh model of its result, so a result keeps its mesh alive until it is replaced.\n* `nyx check` treats the eight commands as readers of a result.\n\n## Code\n\n* `crates/femcore/src/fieldexpr.rs` (the tree and its evaluator), `crates/nyx-engine/src/reduce.rs` (the commands), `crates/nyx-engine/src/engine.rs` (`Stored.model`), `crates/app/src/tabs.rs` (the Reduce form).\n* Tests: `crates/nyx-engine/tests/reduce.rs` (closed forms, loops to the bit, thread counts, a worker result, a real mode and a real thermal field), `crates/app/src/app.rs` (the form shows the engine's numbers).\n",
+      "date" : "2026-11-16T23:00:00Z",
+      "format" : "Markdown",
+      "id" : "90",
+      "status" : "Accepted",
+      "title" : "Whole-array operations on results are engine commands over a typed expression tree evaluated in Rust"
     } ]
   },
   "id" : 0,
@@ -578,7 +585,7 @@
             "structurizr.dsl.identifier" : "nyx.app.window",
             "codeDiagram" : "4-code/app/window.md",
             "code" : "crates/app/src: app.rs, main.rs, state.rs",
-            "lines" : "2159",
+            "lines" : "2208",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -642,7 +649,7 @@
             "structurizr.dsl.identifier" : "nyx.app.shell",
             "codeDiagram" : "4-code/app/shell.md",
             "code" : "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs",
-            "lines" : "4284",
+            "lines" : "4309",
             "adr" : "14, 23, 87, 88"
           },
           "relationships" : [ {
@@ -678,7 +685,7 @@
             "structurizr.dsl.identifier" : "nyx.app.inspector",
             "codeDiagram" : "4-code/app/inspector.md",
             "code" : "crates/app/src: forms.rs, geomui.rs, tabs.rs",
-            "lines" : "2034",
+            "lines" : "2182",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -854,7 +861,7 @@
           "relationships" : [ {
             "description" : "Server instructions text",
             "destinationId" : "22",
-            "id" : "487",
+            "id" : "488",
             "sourceId" : "14",
             "tags" : "Relationship",
             "technology" : "declared in spec"
@@ -876,7 +883,7 @@
           "relationships" : [ {
             "description" : "One tool per command: catalog and call",
             "destinationId" : "22",
-            "id" : "488",
+            "id" : "489",
             "sourceId" : "15",
             "tags" : "Relationship",
             "technology" : "declared in spec"
@@ -1064,19 +1071,19 @@
         "technology" : "Rust library and binary"
       }, {
         "components" : [ {
-          "description" : "The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand. The window and the MCP server use the same entries.",
+          "description" : "The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries.",
           "documentation" : { },
           "id" : "23",
           "name" : "Commands",
           "properties" : {
             "structurizr.dsl.identifier" : "nyx.engine.commands",
             "codeDiagram" : "4-code/engine/commands.md",
-            "code" : "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs",
-            "lines" : "1569",
-            "adr" : "57, 38, 15"
+            "code" : "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, reduce.rs",
+            "lines" : "2653",
+            "adr" : "57, 38, 15, 90"
           },
           "relationships" : [ {
-            "description" : "uses femcore: material::spec, mesh +1",
+            "description" : "uses femcore: fem, fieldexpr +5",
             "destinationId" : "78",
             "id" : "251",
             "sourceId" : "23",
@@ -1090,7 +1097,7 @@
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
-            "description" : "uses physics: contract, crate root +5",
+            "description" : "uses physics: contract, crate root +6",
             "destinationId" : "35",
             "id" : "253",
             "sourceId" : "23",
@@ -1198,7 +1205,7 @@
           }, {
             "description" : "Saves and loads",
             "destinationId" : "111",
-            "id" : "485",
+            "id" : "486",
             "sourceId" : "24",
             "tags" : "Relationship",
             "technology" : "declared in spec"
@@ -1321,7 +1328,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.commandlist",
             "codeDiagram" : "4-code/engine/commandlist.md",
             "code" : "crates/nyx-engine/src: commandlist.rs",
-            "lines" : "567",
+            "lines" : "581",
             "adr" : "89"
           },
           "relationships" : [ {
@@ -1484,7 +1491,7 @@
           }, {
             "description" : "Loads",
             "destinationId" : "114",
-            "id" : "484",
+            "id" : "485",
             "sourceId" : "30",
             "tags" : "Relationship",
             "technology" : "declared in spec"
@@ -1591,7 +1598,7 @@
           }, {
             "description" : "Writes and opens",
             "destinationId" : "112",
-            "id" : "486",
+            "id" : "487",
             "sourceId" : "32",
             "tags" : "Relationship",
             "technology" : "declared in spec"
@@ -1671,7 +1678,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.registry",
             "codeDiagram" : "4-code/engine/registry.md",
             "code" : "crates/nyx-engine/src: lib.rs",
-            "lines" : "93",
+            "lines" : "94",
             "adr" : "25"
           },
           "relationships" : [ {
@@ -1868,28 +1875,28 @@
           "relationships" : [ {
             "description" : "uses femcore: material::spec, mesh +2",
             "destinationId" : "78",
-            "id" : "429",
+            "id" : "430",
             "sourceId" : "36",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses crate root, desc",
             "destinationId" : "38",
-            "id" : "430",
+            "id" : "431",
             "sourceId" : "36",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses spec, validate",
             "destinationId" : "37",
-            "id" : "431",
+            "id" : "432",
             "sourceId" : "36",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses frame, result",
             "destinationId" : "39",
-            "id" : "432",
+            "id" : "433",
             "sourceId" : "36",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -1911,28 +1918,28 @@
           "relationships" : [ {
             "description" : "uses femcore: material, material::elastic +2",
             "destinationId" : "78",
-            "id" : "419",
+            "id" : "420",
             "sourceId" : "37",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses desc",
             "destinationId" : "38",
-            "id" : "420",
+            "id" : "421",
             "sourceId" : "37",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses result",
             "destinationId" : "39",
-            "id" : "421",
+            "id" : "422",
             "sourceId" : "37",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses error, physics",
             "destinationId" : "36",
-            "id" : "422",
+            "id" : "423",
             "sourceId" : "37",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -1954,14 +1961,14 @@
           "relationships" : [ {
             "description" : "uses femcore: meshing::sizing",
             "destinationId" : "78",
-            "id" : "417",
+            "id" : "418",
             "sourceId" : "38",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics",
             "destinationId" : "36",
-            "id" : "418",
+            "id" : "419",
             "sourceId" : "38",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -1983,7 +1990,7 @@
           "relationships" : [ {
             "description" : "uses femcore: adapt, fields",
             "destinationId" : "78",
-            "id" : "423",
+            "id" : "424",
             "sourceId" : "39",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2005,35 +2012,35 @@
           "relationships" : [ {
             "description" : "uses femcore: fields",
             "destinationId" : "78",
-            "id" : "424",
+            "id" : "425",
             "sourceId" : "40",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses schema",
             "destinationId" : "38",
-            "id" : "425",
+            "id" : "426",
             "sourceId" : "40",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses spec",
             "destinationId" : "37",
-            "id" : "426",
+            "id" : "427",
             "sourceId" : "40",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses result",
             "destinationId" : "39",
-            "id" : "427",
+            "id" : "428",
             "sourceId" : "40",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses crate root, physics",
             "destinationId" : "36",
-            "id" : "428",
+            "id" : "429",
             "sourceId" : "40",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2307,35 +2314,35 @@
           "relationships" : [ {
             "description" : "uses femcore: material, material::spec +2",
             "destinationId" : "78",
-            "id" : "433",
+            "id" : "434",
             "sourceId" : "48",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: crate root, decode",
             "destinationId" : "35",
-            "id" : "434",
+            "id" : "435",
             "sourceId" : "48",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses cross_section",
             "destinationId" : "51",
-            "id" : "435",
+            "id" : "436",
             "sourceId" : "48",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses problem",
             "destinationId" : "49",
-            "id" : "436",
+            "id" : "437",
             "sourceId" : "48",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses solid",
             "destinationId" : "50",
-            "id" : "437",
+            "id" : "438",
             "sourceId" : "48",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2357,21 +2364,21 @@
           "relationships" : [ {
             "description" : "uses femcore: props, validate",
             "destinationId" : "78",
-            "id" : "457",
+            "id" : "458",
             "sourceId" : "49",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: decode, error +2",
             "destinationId" : "35",
-            "id" : "458",
+            "id" : "459",
             "sourceId" : "49",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses crate root",
             "destinationId" : "48",
-            "id" : "459",
+            "id" : "460",
             "sourceId" : "49",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2393,42 +2400,42 @@
           "relationships" : [ {
             "description" : "uses femcore: fem, fields +9",
             "destinationId" : "78",
-            "id" : "460",
+            "id" : "461",
             "sourceId" : "50",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: crate root, result",
             "destinationId" : "35",
-            "id" : "461",
+            "id" : "462",
             "sourceId" : "50",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses floquet",
             "destinationId" : "53",
-            "id" : "462",
+            "id" : "463",
             "sourceId" : "50",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses lrb",
             "destinationId" : "55",
-            "id" : "463",
+            "id" : "464",
             "sourceId" : "50",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses pml",
             "destinationId" : "54",
-            "id" : "464",
+            "id" : "465",
             "sourceId" : "50",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses problem",
             "destinationId" : "49",
-            "id" : "465",
+            "id" : "466",
             "sourceId" : "50",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2450,35 +2457,35 @@
           "relationships" : [ {
             "description" : "uses femcore: fem, fields +6",
             "destinationId" : "78",
-            "id" : "440",
+            "id" : "441",
             "sourceId" : "51",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: crate root, result",
             "destinationId" : "35",
-            "id" : "441",
+            "id" : "442",
             "sourceId" : "51",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses axisym",
             "destinationId" : "52",
-            "id" : "442",
+            "id" : "443",
             "sourceId" : "51",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses lrb",
             "destinationId" : "55",
-            "id" : "443",
+            "id" : "444",
             "sourceId" : "51",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses problem",
             "destinationId" : "49",
-            "id" : "444",
+            "id" : "445",
             "sourceId" : "51",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2500,14 +2507,14 @@
           "relationships" : [ {
             "description" : "uses femcore: fem, linalg::csr +2",
             "destinationId" : "78",
-            "id" : "438",
+            "id" : "439",
             "sourceId" : "52",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: crate root",
             "destinationId" : "35",
-            "id" : "439",
+            "id" : "440",
             "sourceId" : "52",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2529,28 +2536,28 @@
           "relationships" : [ {
             "description" : "uses femcore: linalg::csr, linalg::csr::assembly +2",
             "destinationId" : "78",
-            "id" : "445",
+            "id" : "446",
             "sourceId" : "53",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: crate root, result",
             "destinationId" : "35",
-            "id" : "446",
+            "id" : "447",
             "sourceId" : "53",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses problem",
             "destinationId" : "49",
-            "id" : "447",
+            "id" : "448",
             "sourceId" : "53",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses solid",
             "destinationId" : "50",
-            "id" : "448",
+            "id" : "449",
             "sourceId" : "53",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2572,28 +2579,28 @@
           "relationships" : [ {
             "description" : "uses femcore: fem, linalg::csr +3",
             "destinationId" : "78",
-            "id" : "453",
+            "id" : "454",
             "sourceId" : "54",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: crate root, result",
             "destinationId" : "35",
-            "id" : "454",
+            "id" : "455",
             "sourceId" : "54",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses problem",
             "destinationId" : "49",
-            "id" : "455",
+            "id" : "456",
             "sourceId" : "54",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses solid",
             "destinationId" : "50",
-            "id" : "456",
+            "id" : "457",
             "sourceId" : "54",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -2615,28 +2622,28 @@
           "relationships" : [ {
             "description" : "uses femcore: fem, linalg::csr +3",
             "destinationId" : "78",
-            "id" : "449",
+            "id" : "450",
             "sourceId" : "55",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses physics: crate root, result",
             "destinationId" : "35",
-            "id" : "450",
+            "id" : "451",
             "sourceId" : "55",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses problem",
             "destinationId" : "49",
-            "id" : "451",
+            "id" : "452",
             "sourceId" : "55",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses solid",
             "destinationId" : "50",
-            "id" : "452",
+            "id" : "453",
             "sourceId" : "55",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3202,7 +3209,7 @@
           "relationships" : [ {
             "description" : "uses util",
             "destinationId" : "77",
-            "id" : "474",
+            "id" : "475",
             "sourceId" : "70",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3224,28 +3231,28 @@
           "relationships" : [ {
             "description" : "uses flow",
             "destinationId" : "72",
-            "id" : "480",
+            "id" : "481",
             "sourceId" : "71",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses model",
             "destinationId" : "70",
-            "id" : "481",
+            "id" : "482",
             "sourceId" : "71",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses runs",
             "destinationId" : "74",
-            "id" : "482",
+            "id" : "483",
             "sourceId" : "71",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses util",
             "destinationId" : "77",
-            "id" : "483",
+            "id" : "484",
             "sourceId" : "71",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3267,42 +3274,42 @@
           "relationships" : [ {
             "description" : "uses archive",
             "destinationId" : "76",
-            "id" : "469",
+            "id" : "470",
             "sourceId" : "72",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses card, model",
             "destinationId" : "70",
-            "id" : "470",
+            "id" : "471",
             "sourceId" : "72",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses runs",
             "destinationId" : "74",
-            "id" : "471",
+            "id" : "472",
             "sourceId" : "72",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses util",
             "destinationId" : "77",
-            "id" : "472",
+            "id" : "473",
             "sourceId" : "72",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses versions",
             "destinationId" : "73",
-            "id" : "473",
+            "id" : "474",
             "sourceId" : "72",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "Reads and writes workflow folders",
             "destinationId" : "113",
-            "id" : "489",
+            "id" : "490",
             "sourceId" : "72",
             "tags" : "Relationship",
             "technology" : "declared in spec"
@@ -3338,21 +3345,21 @@
           "relationships" : [ {
             "description" : "uses model",
             "destinationId" : "70",
-            "id" : "475",
+            "id" : "476",
             "sourceId" : "74",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses util",
             "destinationId" : "77",
-            "id" : "476",
+            "id" : "477",
             "sourceId" : "74",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "Appends runs.jsonl",
             "destinationId" : "113",
-            "id" : "490",
+            "id" : "491",
             "sourceId" : "74",
             "tags" : "Relationship",
             "technology" : "declared in spec"
@@ -3374,21 +3381,21 @@
           "relationships" : [ {
             "description" : "uses model",
             "destinationId" : "70",
-            "id" : "477",
+            "id" : "478",
             "sourceId" : "75",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses runs",
             "destinationId" : "74",
-            "id" : "478",
+            "id" : "479",
             "sourceId" : "75",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses workspace",
             "destinationId" : "71",
-            "id" : "479",
+            "id" : "480",
             "sourceId" : "75",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3410,21 +3417,21 @@
           "relationships" : [ {
             "description" : "uses flow",
             "destinationId" : "72",
-            "id" : "466",
+            "id" : "467",
             "sourceId" : "76",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses model",
             "destinationId" : "70",
-            "id" : "467",
+            "id" : "468",
             "sourceId" : "76",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses util",
             "destinationId" : "77",
-            "id" : "468",
+            "id" : "469",
             "sourceId" : "76",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3481,14 +3488,14 @@
           "relationships" : [ {
             "description" : "uses adapt::metric, adapt::work",
             "destinationId" : "86",
-            "id" : "357",
+            "id" : "358",
             "sourceId" : "79",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses par",
             "destinationId" : "102",
-            "id" : "358",
+            "id" : "359",
             "sourceId" : "79",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3510,7 +3517,7 @@
           "relationships" : [ {
             "description" : "uses mesh::cells",
             "destinationId" : "79",
-            "id" : "378",
+            "id" : "379",
             "sourceId" : "80",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3532,28 +3539,28 @@
           "relationships" : [ {
             "description" : "uses geom: model, select",
             "destinationId" : "103",
-            "id" : "333",
+            "id" : "334",
             "sourceId" : "81",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses mesh, mesh::cells",
             "destinationId" : "79",
-            "id" : "334",
+            "id" : "335",
             "sourceId" : "81",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses meshing, meshing::geomdrive +1",
             "destinationId" : "82",
-            "id" : "335",
+            "id" : "336",
             "sourceId" : "81",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::metric, adapt::work",
             "destinationId" : "86",
-            "id" : "336",
+            "id" : "337",
             "sourceId" : "81",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3575,63 +3582,63 @@
           "relationships" : [ {
             "description" : "uses geom: diff, eval +4",
             "destinationId" : "103",
-            "id" : "362",
+            "id" : "363",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::drive, adapt::drive3 +1",
             "destinationId" : "88",
-            "id" : "363",
+            "id" : "364",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::ops3, adapt::topo +1",
             "destinationId" : "87",
-            "id" : "364",
+            "id" : "365",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses props",
             "destinationId" : "97",
-            "id" : "365",
+            "id" : "366",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses material",
             "destinationId" : "98",
-            "id" : "366",
+            "id" : "367",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses mesh",
             "destinationId" : "79",
-            "id" : "367",
+            "id" : "368",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses meshing::geomdrive3",
             "destinationId" : "83",
-            "id" : "368",
+            "id" : "369",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt, adapt::field +3",
             "destinationId" : "86",
-            "id" : "369",
+            "id" : "370",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses meshing::pml_geom",
             "destinationId" : "84",
-            "id" : "370",
+            "id" : "371",
             "sourceId" : "82",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3653,49 +3660,49 @@
           "relationships" : [ {
             "description" : "uses geom: eval, labels +3",
             "destinationId" : "103",
-            "id" : "371",
+            "id" : "372",
             "sourceId" : "83",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::drive, adapt::drive3 +1",
             "destinationId" : "88",
-            "id" : "372",
+            "id" : "373",
             "sourceId" : "83",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::ops3, adapt::topo +1",
             "destinationId" : "87",
-            "id" : "373",
+            "id" : "374",
             "sourceId" : "83",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses mesh, mesh::cells",
             "destinationId" : "79",
-            "id" : "374",
+            "id" : "375",
             "sourceId" : "83",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses meshing, meshing::geomdrive",
             "destinationId" : "82",
-            "id" : "375",
+            "id" : "376",
             "sourceId" : "83",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::field3, adapt::metric +1",
             "destinationId" : "86",
-            "id" : "376",
+            "id" : "377",
             "sourceId" : "83",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses par, progress",
             "destinationId" : "102",
-            "id" : "377",
+            "id" : "378",
             "sourceId" : "83",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3717,42 +3724,42 @@
           "relationships" : [ {
             "description" : "uses geom: eval, model",
             "destinationId" : "103",
-            "id" : "388",
+            "id" : "389",
             "sourceId" : "84",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses props",
             "destinationId" : "97",
-            "id" : "389",
+            "id" : "390",
             "sourceId" : "84",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses mesh, mesh::cells +1",
             "destinationId" : "79",
-            "id" : "390",
+            "id" : "391",
             "sourceId" : "84",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses meshing::geomdrive",
             "destinationId" : "82",
-            "id" : "391",
+            "id" : "392",
             "sourceId" : "84",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses meshing::adapt3d",
             "destinationId" : "83",
-            "id" : "392",
+            "id" : "393",
             "sourceId" : "84",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::work",
             "destinationId" : "86",
-            "id" : "393",
+            "id" : "394",
             "sourceId" : "84",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3774,21 +3781,21 @@
           "relationships" : [ {
             "description" : "uses mesh::cells",
             "destinationId" : "79",
-            "id" : "359",
+            "id" : "360",
             "sourceId" : "85",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses adapt::work",
             "destinationId" : "86",
-            "id" : "360",
+            "id" : "361",
             "sourceId" : "85",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses meshing::pml_box",
             "destinationId" : "84",
-            "id" : "361",
+            "id" : "362",
             "sourceId" : "85",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3810,14 +3817,14 @@
           "relationships" : [ {
             "description" : "uses mesh",
             "destinationId" : "79",
-            "id" : "379",
+            "id" : "380",
             "sourceId" : "86",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses par",
             "destinationId" : "102",
-            "id" : "380",
+            "id" : "381",
             "sourceId" : "86",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -3982,7 +3989,7 @@
           "relationships" : [ {
             "description" : "uses par",
             "destinationId" : "102",
-            "id" : "337",
+            "id" : "338",
             "sourceId" : "90",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4004,28 +4011,28 @@
           "relationships" : [ {
             "description" : "uses linalg::basis, linalg::csr +5",
             "destinationId" : "90",
-            "id" : "339",
+            "id" : "340",
             "sourceId" : "91",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::direct, linalg::ordering",
             "destinationId" : "92",
-            "id" : "340",
+            "id" : "341",
             "sourceId" : "91",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::arnoldi_real, linalg::eps +1",
             "destinationId" : "94",
-            "id" : "341",
+            "id" : "342",
             "sourceId" : "91",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses par, progress",
             "destinationId" : "102",
-            "id" : "342",
+            "id" : "343",
             "sourceId" : "91",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4047,7 +4054,7 @@
           "relationships" : [ {
             "description" : "uses linalg::csr, linalg::faer_glue +3",
             "destinationId" : "90",
-            "id" : "338",
+            "id" : "339",
             "sourceId" : "92",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4069,7 +4076,7 @@
           "relationships" : [ {
             "description" : "uses linalg::basis, linalg::dense +4",
             "destinationId" : "90",
-            "id" : "348",
+            "id" : "349",
             "sourceId" : "93",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4091,35 +4098,35 @@
           "relationships" : [ {
             "description" : "uses linalg::basis, linalg::csr +7",
             "destinationId" : "90",
-            "id" : "343",
+            "id" : "344",
             "sourceId" : "94",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::direct",
             "destinationId" : "92",
-            "id" : "344",
+            "id" : "345",
             "sourceId" : "94",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::driver",
             "destinationId" : "91",
-            "id" : "345",
+            "id" : "346",
             "sourceId" : "94",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::ksp, linalg::ksp::gmres",
             "destinationId" : "93",
-            "id" : "346",
+            "id" : "347",
             "sourceId" : "94",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses par, progress",
             "destinationId" : "102",
-            "id" : "347",
+            "id" : "348",
             "sourceId" : "94",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4141,28 +4148,28 @@
           "relationships" : [ {
             "description" : "uses linalg::csr, linalg::csr::assembly +3",
             "destinationId" : "90",
-            "id" : "353",
+            "id" : "354",
             "sourceId" : "95",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::direct",
             "destinationId" : "92",
-            "id" : "354",
+            "id" : "355",
             "sourceId" : "95",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::driver",
             "destinationId" : "91",
-            "id" : "355",
+            "id" : "356",
             "sourceId" : "95",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses par, progress",
             "destinationId" : "102",
-            "id" : "356",
+            "id" : "357",
             "sourceId" : "95",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4184,28 +4191,28 @@
           "relationships" : [ {
             "description" : "uses linalg::csr, linalg::dense +5",
             "destinationId" : "90",
-            "id" : "349",
+            "id" : "350",
             "sourceId" : "96",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::direct",
             "destinationId" : "92",
-            "id" : "350",
+            "id" : "351",
             "sourceId" : "96",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::nep",
             "destinationId" : "94",
-            "id" : "351",
+            "id" : "352",
             "sourceId" : "96",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::ksp, linalg::ksp::gmres",
             "destinationId" : "93",
-            "id" : "352",
+            "id" : "353",
             "sourceId" : "96",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4227,49 +4234,49 @@
           "relationships" : [ {
             "description" : "uses linalg::csr, linalg::csr::assembly",
             "destinationId" : "90",
-            "id" : "326",
+            "id" : "327",
             "sourceId" : "97",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::driver",
             "destinationId" : "91",
-            "id" : "327",
+            "id" : "328",
             "sourceId" : "97",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::amg_elastic",
             "destinationId" : "95",
-            "id" : "328",
+            "id" : "329",
             "sourceId" : "97",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses material",
             "destinationId" : "98",
-            "id" : "329",
+            "id" : "330",
             "sourceId" : "97",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses mesh",
             "destinationId" : "79",
-            "id" : "330",
+            "id" : "331",
             "sourceId" : "97",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses par, progress",
             "destinationId" : "102",
-            "id" : "331",
+            "id" : "332",
             "sourceId" : "97",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses section",
             "destinationId" : "100",
-            "id" : "332",
+            "id" : "333",
             "sourceId" : "97",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4305,28 +4312,28 @@
           "relationships" : [ {
             "description" : "uses edge, fem +2",
             "destinationId" : "97",
-            "id" : "381",
+            "id" : "382",
             "sourceId" : "99",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses linalg::csr, linalg::csr::assembly",
             "destinationId" : "90",
-            "id" : "382",
+            "id" : "383",
             "sourceId" : "99",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses mesh",
             "destinationId" : "79",
-            "id" : "383",
+            "id" : "384",
             "sourceId" : "99",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses section",
             "destinationId" : "100",
-            "id" : "384",
+            "id" : "385",
             "sourceId" : "99",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4348,21 +4355,21 @@
           "relationships" : [ {
             "description" : "uses props",
             "destinationId" : "97",
-            "id" : "385",
+            "id" : "386",
             "sourceId" : "100",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses material",
             "destinationId" : "98",
-            "id" : "386",
+            "id" : "387",
             "sourceId" : "100",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses mesh",
             "destinationId" : "79",
-            "id" : "387",
+            "id" : "388",
             "sourceId" : "100",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4370,21 +4377,28 @@
           "tags" : "Element,Component",
           "technology" : "Rust modules"
         }, {
-          "description" : "A small safe expression evaluator for user input; a copy of geom's kept equal by a corpus test.",
+          "description" : "A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate (ADR 90).",
           "documentation" : { },
           "id" : "101",
           "name" : "Expressions",
           "properties" : {
             "structurizr.dsl.identifier" : "nyx.femcore.expr",
             "codeDiagram" : "4-code/femcore/expr.md",
-            "code" : "crates/femcore/src: expr.rs",
-            "lines" : "286",
-            "adr" : "65, 2"
+            "code" : "crates/femcore/src: expr.rs, fieldexpr.rs",
+            "lines" : "465",
+            "adr" : "65, 2, 90"
           },
           "relationships" : [ {
+            "description" : "uses linalg::csr::assembly",
+            "destinationId" : "90",
+            "id" : "325",
+            "sourceId" : "101",
+            "tags" : "Relationship",
+            "technology" : "Rust paths"
+          }, {
             "description" : "uses section",
             "destinationId" : "100",
-            "id" : "325",
+            "id" : "326",
             "sourceId" : "101",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4400,7 +4414,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.runtime",
             "codeDiagram" : "4-code/femcore/runtime.md",
             "code" : "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs",
-            "lines" : "536",
+            "lines" : "537",
             "adr" : "9, 11"
           },
           "tags" : "Element,Component",
@@ -4441,7 +4455,7 @@
           "relationships" : [ {
             "description" : "uses select",
             "destinationId" : "108",
-            "id" : "399",
+            "id" : "400",
             "sourceId" : "104",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4463,35 +4477,35 @@
           "relationships" : [ {
             "description" : "uses error, expr +1",
             "destinationId" : "104",
-            "id" : "394",
+            "id" : "395",
             "sourceId" : "105",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses arrange, complex +1",
             "destinationId" : "106",
-            "id" : "395",
+            "id" : "396",
             "sourceId" : "105",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses planar, stack",
             "destinationId" : "107",
-            "id" : "396",
+            "id" : "397",
             "sourceId" : "105",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses math",
             "destinationId" : "110",
-            "id" : "397",
+            "id" : "398",
             "sourceId" : "105",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses sim",
             "destinationId" : "108",
-            "id" : "398",
+            "id" : "399",
             "sourceId" : "105",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4513,28 +4527,28 @@
           "relationships" : [ {
             "description" : "uses scene",
             "destinationId" : "105",
-            "id" : "400",
+            "id" : "401",
             "sourceId" : "106",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses error, model",
             "destinationId" : "104",
-            "id" : "401",
+            "id" : "402",
             "sourceId" : "106",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses stack",
             "destinationId" : "107",
-            "id" : "402",
+            "id" : "403",
             "sourceId" : "106",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses math",
             "destinationId" : "110",
-            "id" : "403",
+            "id" : "404",
             "sourceId" : "106",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4556,35 +4570,35 @@
           "relationships" : [ {
             "description" : "uses eval, scene",
             "destinationId" : "105",
-            "id" : "404",
+            "id" : "405",
             "sourceId" : "107",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses error, expr +1",
             "destinationId" : "104",
-            "id" : "405",
+            "id" : "406",
             "sourceId" : "107",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses arrange, complex +2",
             "destinationId" : "106",
-            "id" : "406",
+            "id" : "407",
             "sourceId" : "107",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses math",
             "destinationId" : "110",
-            "id" : "407",
+            "id" : "408",
             "sourceId" : "107",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses tess",
             "destinationId" : "109",
-            "id" : "408",
+            "id" : "409",
             "sourceId" : "107",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4606,28 +4620,28 @@
           "relationships" : [ {
             "description" : "uses eval, scene",
             "destinationId" : "105",
-            "id" : "409",
+            "id" : "410",
             "sourceId" : "108",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses error, expr +1",
             "destinationId" : "104",
-            "id" : "410",
+            "id" : "411",
             "sourceId" : "108",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses complex, curve",
             "destinationId" : "106",
-            "id" : "411",
+            "id" : "412",
             "sourceId" : "108",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses math",
             "destinationId" : "110",
-            "id" : "412",
+            "id" : "413",
             "sourceId" : "108",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4649,28 +4663,28 @@
           "relationships" : [ {
             "description" : "uses eval",
             "destinationId" : "105",
-            "id" : "413",
+            "id" : "414",
             "sourceId" : "109",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses complex",
             "destinationId" : "106",
-            "id" : "414",
+            "id" : "415",
             "sourceId" : "109",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses math",
             "destinationId" : "110",
-            "id" : "415",
+            "id" : "416",
             "sourceId" : "109",
             "tags" : "Relationship",
             "technology" : "Rust paths"
           }, {
             "description" : "uses query",
             "destinationId" : "108",
-            "id" : "416",
+            "id" : "417",
             "sourceId" : "109",
             "tags" : "Relationship",
             "technology" : "Rust paths"
@@ -4901,9 +4915,9 @@
       "name" : "Component View: nyx - nyx-mcp",
       "order" : 4,
       "relationships" : [ {
-        "id" : "487"
-      }, {
         "id" : "488"
+      }, {
+        "id" : "489"
       } ]
     }, {
       "automaticLayout" : {
@@ -5235,11 +5249,11 @@
       }, {
         "id" : "310"
       }, {
-        "id" : "484"
-      }, {
         "id" : "485"
       }, {
         "id" : "486"
+      }, {
+        "id" : "487"
       } ]
     }, {
       "automaticLayout" : {
@@ -5283,8 +5297,6 @@
       "name" : "Component View: nyx - nyx-physics",
       "order" : 7,
       "relationships" : [ {
-        "id" : "417"
-      }, {
         "id" : "418"
       }, {
         "id" : "419"
@@ -5314,6 +5326,8 @@
         "id" : "431"
       }, {
         "id" : "432"
+      }, {
+        "id" : "433"
       } ]
     }, {
       "automaticLayout" : {
@@ -5459,8 +5473,6 @@
       "relationships" : [ {
         "id" : "143"
       }, {
-        "id" : "433"
-      }, {
         "id" : "434"
       }, {
         "id" : "435"
@@ -5524,6 +5536,8 @@
         "id" : "464"
       }, {
         "id" : "465"
+      }, {
+        "id" : "466"
       } ]
     }, {
       "automaticLayout" : {
@@ -5763,8 +5777,6 @@
       "name" : "Component View: nyx - nyx-store",
       "order" : 12,
       "relationships" : [ {
-        "id" : "466"
-      }, {
         "id" : "467"
       }, {
         "id" : "468"
@@ -5799,9 +5811,11 @@
       }, {
         "id" : "483"
       }, {
-        "id" : "489"
+        "id" : "484"
       }, {
         "id" : "490"
+      }, {
+        "id" : "491"
       } ]
     }, {
       "automaticLayout" : {
@@ -5849,8 +5863,6 @@
       "name" : "Component View: nyx - geom",
       "order" : 13,
       "relationships" : [ {
-        "id" : "394"
-      }, {
         "id" : "395"
       }, {
         "id" : "396"
@@ -5894,6 +5906,8 @@
         "id" : "415"
       }, {
         "id" : "416"
+      }, {
+        "id" : "417"
       } ]
     }, {
       "automaticLayout" : {
@@ -6178,6 +6192,8 @@
         "id" : "392"
       }, {
         "id" : "393"
+      }, {
+        "id" : "394"
       } ]
     }, {
       "automaticLayout" : {
@@ -6261,25 +6277,23 @@
       }, {
         "id" : "324"
       }, {
-        "id" : "334"
-      }, {
         "id" : "335"
       }, {
         "id" : "336"
       }, {
-        "id" : "357"
+        "id" : "337"
       }, {
-        "id" : "359"
+        "id" : "358"
       }, {
         "id" : "360"
       }, {
         "id" : "361"
       }, {
-        "id" : "363"
+        "id" : "362"
       }, {
         "id" : "364"
       }, {
-        "id" : "367"
+        "id" : "365"
       }, {
         "id" : "368"
       }, {
@@ -6287,7 +6301,7 @@
       }, {
         "id" : "370"
       }, {
-        "id" : "372"
+        "id" : "371"
       }, {
         "id" : "373"
       }, {
@@ -6297,17 +6311,19 @@
       }, {
         "id" : "376"
       }, {
-        "id" : "378"
+        "id" : "377"
       }, {
         "id" : "379"
       }, {
-        "id" : "390"
+        "id" : "380"
       }, {
         "id" : "391"
       }, {
         "id" : "392"
       }, {
         "id" : "393"
+      }, {
+        "id" : "394"
       } ]
     }, {
       "automaticLayout" : {
@@ -6355,15 +6371,13 @@
       "name" : "Component View: nyx - femcore",
       "order" : 16,
       "relationships" : [ {
-        "id" : "338"
-      }, {
         "id" : "339"
       }, {
         "id" : "340"
       }, {
         "id" : "341"
       }, {
-        "id" : "343"
+        "id" : "342"
       }, {
         "id" : "344"
       }, {
@@ -6371,7 +6385,7 @@
       }, {
         "id" : "346"
       }, {
-        "id" : "348"
+        "id" : "347"
       }, {
         "id" : "349"
       }, {
@@ -6386,6 +6400,8 @@
         "id" : "354"
       }, {
         "id" : "355"
+      }, {
+        "id" : "356"
       } ]
     }, {
       "automaticLayout" : {
@@ -6433,9 +6449,7 @@
       "name" : "Component View: nyx - femcore",
       "order" : 17,
       "relationships" : [ {
-        "id" : "325"
-      }, {
-        "id" : "329"
+        "id" : "326"
       }, {
         "id" : "330"
       }, {
@@ -6443,11 +6457,11 @@
       }, {
         "id" : "332"
       }, {
-        "id" : "358"
+        "id" : "333"
       }, {
-        "id" : "381"
+        "id" : "359"
       }, {
-        "id" : "383"
+        "id" : "382"
       }, {
         "id" : "384"
       }, {
@@ -6456,6 +6470,8 @@
         "id" : "386"
       }, {
         "id" : "387"
+      }, {
+        "id" : "388"
       } ]
     } ],
     "configuration" : {

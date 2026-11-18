@@ -13,6 +13,8 @@ nyx-ems = { path = "../nyx-ems", optional = true }
 nyx-analysis = { path = "../nyx-analysis" }
 nyx-store = { path = "../nyx-store" }
 femcore = { path = "../femcore" }
+# the same pool the solvers use: the blocks of a reduction run on it (ADR 90)
+rayon = "1"
 geom = { path = "../geom" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

@@ -3,7 +3,7 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: app.rs, main.rs, state.rs"
-        "lines" "2159"
+        "lines" "2208"
         "codeDiagram" "4-code/app/window.md"
     }
 }
@@ -11,7 +11,7 @@ shell = component "Shell and dashboard" "The tab bar, the native menu and the ta
     properties {
         "adr" "14, 23, 87, 88"
         "code" "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs"
-        "lines" "4284"
+        "lines" "4309"
         "codeDiagram" "4-code/app/shell.md"
     }
 }
@@ -19,7 +19,7 @@ inspector = component "Inspector tabs" "The tabs beside the viewport: geometry e
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: forms.rs, geomui.rs, tabs.rs"
-        "lines" "2034"
+        "lines" "2182"
         "codeDiagram" "4-code/app/inspector.md"
     }
 }

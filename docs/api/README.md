@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:f1634f3cb0d8ba0068e7a1121280d1b8` · 91 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:aca2521fcb380a70d007e00220301167` · 99 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -35,16 +35,22 @@ Catalog hash: `b3:f1634f3cb0d8ba0068e7a1121280d1b8` · 91 commands. `nyx api lis
 | [`add_union`](add_union.md) | edit | Union |
 | [`analyse`](analyse.md) | read | Analyse a result |
 | [`check_project`](check_project.md) | read | Check the project |
+| [`confinement`](confinement.md) | read | Fraction of a field in a region |
 | [`convergence_check`](convergence_check.md) | expensive | Check mesh convergence |
 | [`describe_material`](describe_material.md) | read | Describe a material |
 | [`describe_physics`](describe_physics.md) | read | Describe a physics |
 | [`export_results`](export_results.md) | expensive | Write the results to an HDF5 file |
+| [`extremum`](extremum.md) | read | Largest or smallest value of an expression |
+| [`field`](field.md) | read | A handle to a field |
+| [`field_op`](field_op.md) | read | Arithmetic on handles |
 | [`geometry_names`](geometry_names.md) | read | Evaluate the geometry and list its names |
 | [`get_guide`](get_guide.md) | read | Read a nyx guide |
+| [`integrate`](integrate.md) | read | Integrate an expression over a region |
 | [`job_cancel`](job_cancel.md) | expensive | Cancel a job |
 | [`job_list`](job_list.md) | read | List the jobs |
 | [`job_status`](job_status.md) | read | Status of a job |
 | [`job_wait`](job_wait.md) | expensive | Wait for a job |
+| [`line_cut`](line_cut.md) | read | Values of an expression along a line |
 | [`list_analyses`](list_analyses.md) | read | List the analyses |
 | [`list_commands`](list_commands.md) | read | List the commands |
 | [`list_features`](list_features.md) | read | List the features |
@@ -53,7 +59,9 @@ Catalog hash: `b3:f1634f3cb0d8ba0068e7a1121280d1b8` · 91 commands. `nyx api lis
 | [`list_physics`](list_physics.md) | read | List the physics of this build |
 | [`mesh_build`](mesh_build.md) | expensive | Mesh the geometry |
 | [`open_results`](open_results.md) | edit | Open an HDF5 results file |
+| [`overlap`](overlap.md) | read | Overlap of two fields |
 | [`poll_jobs`](poll_jobs.md) | read | Apply finished jobs |
+| [`probe`](probe.md) | read | Value of an expression at points |
 | [`project_info`](project_info.md) | read | Project summary |
 | [`project_json`](project_json.md) | read | Project as JSON |
 | [`project_load`](project_load.md) | edit | Load a project from JSON |

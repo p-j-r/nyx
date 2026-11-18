@@ -416,7 +416,21 @@ impl Engine {
                 }
                 name => {
                     // a command that reads a result has to have one to read
-                    if matches!(name, "result_info" | "result_field" | "analyse" | "export_results") && !results_unknown
+                    if matches!(
+                        name,
+                        "result_info"
+                            | "result_field"
+                            | "analyse"
+                            | "export_results"
+                            | "field"
+                            | "field_op"
+                            | "integrate"
+                            | "extremum"
+                            | "probe"
+                            | "line_cut"
+                            | "overlap"
+                            | "confinement"
+                    ) && !results_unknown
                     {
                         if let Some(ps) = physics_arg(&l.args) {
                             if let Some(p) = ps.iter().find(|p| !solved.contains(*p)) {

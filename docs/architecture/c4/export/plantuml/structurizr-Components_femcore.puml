@@ -71,7 +71,7 @@ hide stereotype
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "femcore\n<size:16>[Container: Rust library]</size>" <<Boundary-ZmVtY29yZQ==>> {
     rectangle "==Frame and sections\n<size:16>[Component: Rust modules]</size>\n\nThe one place that knows the wafer axes (x lateral, z normal, waves along +y)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Frameandsections
-    rectangle "==Expressions\n<size:16>[Component: Rust modules]</size>\n\nA small safe expression evaluator for user input; a copy of geom's kept equal by a corpus test." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Expressions
+    rectangle "==Expressions\n<size:16>[Component: Rust modules]</size>\n\nA small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate (ADR 90)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Expressions
     rectangle "==Runtime services\n<size:16>[Component: Rust modules]</size>\n\nThe shared worker pool, stage log and cancel, and refusal of NaN and infinity." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Runtimeservices
     rectangle "==Mesh\n<size:16>[Component: Rust modules]</size>\n\nThe native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Mesh
     rectangle "==Mesh files\n<size:16>[Component: Rust modules]</size>\n\nThe compact lossless .fmsh format for meshes and results and its entropy coder." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Meshfiles
@@ -113,6 +113,7 @@ nyx.femcore.Errorestimators --> nyx.femcore.Matricesandvectors <<Relationship-Um
 nyx.femcore.Errorestimators --> nyx.femcore.Mesh <<Relationship-UmVsYXRpb25zaGlw>> : "uses mesh\n<size:16>[Rust paths]</size>"
 nyx.femcore.Errorestimators --> nyx.femcore.Meshingfacade <<Relationship-UmVsYXRpb25zaGlw>> : "uses meshing, meshing::geomdrive\n<size:16>[Rust paths]</size>"
 nyx.femcore.Errorestimators --> nyx.femcore.Metricfields <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt, adapt::field +3\n<size:16>[Rust paths]</size>"
+nyx.femcore.Expressions --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::csr::assembly\n<size:16>[Rust paths]</size>"
 nyx.femcore.Expressions --> nyx.femcore.Frameandsections <<Relationship-UmVsYXRpb25zaGlw>> : "uses section\n<size:16>[Rust paths]</size>"
 nyx.femcore.Finiteelementbasics --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::csr, linalg::csr::assembly\n<size:16>[Rust paths]</size>"
 nyx.femcore.Finiteelementbasics --> nyx.femcore.Linearalgebradriver <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::driver\n<size:16>[Rust paths]</size>"

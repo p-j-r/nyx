@@ -27,6 +27,8 @@ pub(crate) struct Stored {
     pub job: JobId,
     /// when it was stored
     pub at: Instant,
+    /// the mesh it was solved on: the reductions (ADR 90) read its fields on exactly these cells, whatever the project's mesh is now
+    pub model: Arc<MeshedModel>,
 }
 
 /// What a solve job is for: the engine's own project, or one point of a sweep.
@@ -648,6 +650,7 @@ impl Engine {
             (Pending::Solve { key, keys, project, .. }, Ok(JobOutput::Solved { model, results, failed, worker })) => {
                 let (cells, dim) = (model.mesh().n_cells() as u64, model.mesh().dim() as u8);
                 let mesh = model.solver_mesh();
+                let solved_on = model.clone();
                 self.install_model(key, model);
                 // a job that finishes after the project changed, or after a newer job of the same physics, must not replace a result that is
                 // current: it replaces the stored one only when its key is the one the physics has now, or when the stored one is stale and
@@ -665,7 +668,13 @@ impl Engine {
                         let key = keys.get(&r.physics).cloned().unwrap_or_default();
                         self.results.insert(
                             r.physics.clone(),
-                            Stored { result: Arc::new(r.clone()), key, job: id, at: Instant::now() },
+                            Stored {
+                                result: Arc::new(r.clone()),
+                                key,
+                                job: id,
+                                at: Instant::now(),
+                                model: solved_on.clone(),
+                            },
                         );
                     }
                     summary.push(json!({
@@ -704,7 +713,7 @@ impl Engine {
                 self.set_project(project);
                 let key = self.mesh_key();
                 let cells = model.mesh().n_cells();
-                self.model = Some((key, model));
+                self.model = Some((key, model.clone()));
                 let keys = self.problem_keys();
                 let mut physics = vec![];
                 for (code, r) in results {
@@ -713,7 +722,10 @@ impl Engine {
                         "scalars": r.scalars, "current": true, "stored": true,
                     }));
                     let k = keys.get(&code).cloned().unwrap_or_default();
-                    self.results.insert(code, Stored { result: Arc::new(r), key: k, job: id, at: Instant::now() });
+                    self.results.insert(
+                        code,
+                        Stored { result: Arc::new(r), key: k, job: id, at: Instant::now(), model: model.clone() },
+                    );
                 }
                 Ok(json!({ "title": self.project.title, "path": path, "cells": cells, "results": physics }))
             }
