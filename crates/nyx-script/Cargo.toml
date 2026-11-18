@@ -8,7 +8,16 @@ description = "Scripts as a front-end of the nyx engine (productivity plan S4): 
 [dependencies]
 nyx-engine = { path = "../nyx-engine" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-# S4 spike: both candidates, the one Paul does not choose is removed afterwards
-starlark = "0.14"
-anyhow = "1"
 rhai = { version = "1", features = ["no_time"] }
+# S4 spike candidate. Off by default: `starlark` turns on serde_json's `arbitrary_precision` for every crate of the build, which makes 9 tests
+# of geom, nyx-physics and the physics crates fail (untagged enums stop reading numbers). See docs/PRODUCTIVITY_STATUS.md, S4 spike.
+starlark = { version = "0.14", optional = true }
+anyhow = { version = "1", optional = true }
+
+[features]
+default = []
+starlark = ["dep:starlark", "dep:anyhow"]
+
+[[example]]
+name = "spike"
+required-features = ["starlark"]

@@ -101,7 +101,7 @@ fn limits_demo() {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| if lang == "star" { star::run(&mut e, "x.star", src, &tight) } else { rhai_host::run(&mut e, "x.rhai", src, &tight) })).unwrap_or_else(|_| Err("PANIC inside the interpreter".into()));
         let msg = match r {
             Ok(o) => format!("NOT STOPPED, value {}", o.value),
-            Err(m) => m.lines().filter(|l| !l.trim().is_empty() && !l.contains("Traceback") && !l.starts_with(" ")).last().unwrap_or("").chars().take(110).collect(),
+            Err(m) => m.lines().rfind(|l| !l.trim().is_empty() && !l.contains("Traceback") && !l.starts_with(" ")).unwrap_or("").chars().take(110).collect(),
         };
         println!("{label:<30} stopped in {:>6.2} s: {msg}", t.elapsed().as_secs_f64());
     }

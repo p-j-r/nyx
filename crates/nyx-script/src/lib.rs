@@ -9,6 +9,7 @@
 use serde_json::Value;
 
 pub mod rhai_host;
+#[cfg(feature = "starlark")]
 pub mod star;
 
 /// What the host allows a script to use. The defaults are strict; a run may raise them (S4 decision).
