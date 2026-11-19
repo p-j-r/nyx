@@ -1437,6 +1437,13 @@ mod tests {
         App::with_context(egui::Context::default())
     }
 
+    /// One headless frame. The texture changes of the frame (the font atlas) are cleared on purpose: egui asserts when a frame's output is
+    /// dropped with unapplied texture deltas, and no window is there to apply them.
+    fn frame(ctx: &egui::Context, run: impl FnMut(&mut egui::Ui)) {
+        let mut out = ctx.run_ui(Default::default(), run);
+        out.textures_delta.clear();
+    }
+
     /// Processes finished jobs until nothing runs (or panics after `secs`).
     fn wait_idle(a: &mut App, secs: u64) {
         let t0 = Instant::now();
@@ -1568,7 +1575,7 @@ mod tests {
         // the Queue panel lists what runs and what waits, and draws on a headless context
         a.show_queue = true;
         let ctx = a.ctx.clone();
-        let _ = ctx.run_ui(Default::default(), |ui| a.queue_panel(ui.ctx()));
+        frame(&ctx, |ui| a.queue_panel(ui.ctx()));
         a.engine.jobs().resume();
         wait_idle(&mut a, 120);
         assert!(a.doc.mesh.is_some() && a.queued.is_none() && a.waiting.is_empty());
@@ -1702,7 +1709,7 @@ mod tests {
         assert_eq!(a.stale_reason(i), Some("the model changed since this solve"));
         // the band is drawn on a headless context without a panic, with the button to solve again
         let ctx = a.ctx.clone();
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        frame(&ctx, |ui| {
             a.results_panel(ui);
             a.viewport_ui(ui);
         });
@@ -1788,7 +1795,7 @@ mod tests {
             // whatever the frames do after the solve (saving the workflow, the run record, the page itself) must not move a key
             let ctx = b.ctx.clone();
             for _ in 0..12 {
-                let _ = ctx.run_ui(Default::default(), |ui| b.shell_ui(ui));
+                frame(&ctx, |ui| b.shell_ui(ui));
                 b.poll();
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -1817,7 +1824,7 @@ mod tests {
         assert!(b.error.is_none(), "{:?}", b.error);
         assert_eq!(b.engine.validated("sms").state, Validation::Exploratory);
         let ctx = b.ctx.clone();
-        let _ = ctx.run_ui(Default::default(), |ui| b.validated_line(ui));
+        frame(&ctx, |ui| b.validated_line(ui));
 
         // a tolerance the cantilever misses: still exploratory, and the reason says the check did not pass
         b.conv_tol = 1e-9;
@@ -1832,7 +1839,7 @@ mod tests {
         b.check_convergence();
         wait_idle(&mut b, 120);
         assert_eq!(b.engine.validated("sms").state, Validation::Checked);
-        let _ = ctx.run_ui(Default::default(), |ui| b.validated_line(ui));
+        frame(&ctx, |ui| b.validated_line(ui));
 
         let live = b.shell.live_run.clone().expect("the run whose result is on show");
         let runs = b.shell.open[&live.wf_id].dir.as_ref().expect("a workflow folder").runs(&live.exp).0;
@@ -1904,7 +1911,7 @@ mod tests {
                     continue;
                 }
                 let ctx = a.ctx.clone();
-                let _ = ctx.run_ui(Default::default(), |ui| {
+                frame(&ctx, |ui| {
                     a.inspector(ui);
                     a.toolbar(ui);
                     a.status_bar(ui);
@@ -1919,7 +1926,7 @@ mod tests {
             a.show_results = false;
             a.picking = if a.bc_labels.is_empty() { None } else { Some(0) };
             let ctx = a.ctx.clone();
-            let _ = ctx.run_ui(Default::default(), |ui| {
+            frame(&ctx, |ui| {
                 a.inspector(ui);
                 a.viewport_ui(ui);
             });
@@ -1944,7 +1951,7 @@ mod tests {
         assert_eq!(a.convergence.as_ref().map(|c| c["converged"].clone()), Some(json!(true)), "{:?} {:?}", a.convergence, a.error);
         a.tab = Tab::Study;
         let ctx = a.ctx.clone();
-        let _ = ctx.run_ui(Default::default(), |ui| a.inspector(ui));
+        frame(&ctx, |ui| a.inspector(ui));
     }
 
     /// A convergence check is a job of the window: it is the busy job, it can be cancelled and it leaves the results as they were.
@@ -1976,12 +1983,12 @@ mod tests {
         let ctx = a.ctx.clone();
         let t0 = Instant::now();
         for _ in 0..n {
-            let _ = ctx.run_ui(Default::default(), |ui| a.shell_ui(ui));
+            frame(&ctx, |ui| a.shell_ui(ui));
             a.poll();
             std::thread::sleep(Duration::from_millis(5));
         }
         while t0.elapsed().as_secs_f64() < secs {
-            let _ = ctx.run_ui(Default::default(), |ui| a.shell_ui(ui));
+            frame(&ctx, |ui| a.shell_ui(ui));
             a.poll();
             std::thread::sleep(Duration::from_millis(10));
         }
