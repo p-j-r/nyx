@@ -215,6 +215,28 @@ impl Namer<'_> {
             .map(|p| p.properties().into_iter().map(|d| d.name).collect())
             .unwrap_or_default()
     }
+
+    /// `eps_r_xz` and the like: a component of a tensor property of this physics, as the canonical name (`eps_r_xz`; `eps_zx` is the same).
+    fn component(&self, physics: &str, name: &str) -> Option<String> {
+        let (base, i, j) = tensor_component(name)?;
+        let base = prop_name(base);
+        self.props_of(physics).iter().any(|p| p == base).then(|| format!("{base}_{}{}", AXES[i.min(j)], AXES[i.max(j)]))
+    }
+}
+
+const AXES: [&str; 3] = ["x", "y", "z"];
+
+/// `eps_r_xz`: the property `eps_r` and the wafer axes of the entry, 0 x, 1 y, 2 z (the tensor is symmetric, so the order of the two letters
+/// does not matter to the value). Only the tensor properties have components: the caller checks the base against the physics.
+fn tensor_component(name: &str) -> Option<(&str, usize, usize)> {
+    let (base, ij) = name.rsplit_once('_')?;
+    let mut it = ij.chars();
+    let (a, b) = (it.next()?, it.next()?);
+    if it.next().is_some() {
+        return None;
+    }
+    let axis = |c: char| "xyz".find(c);
+    Some((base, axis(a)?, axis(b)?)).filter(|(b, _, _)| matches!(prop_name(b), "eps_r" | "k" | "alpha"))
 }
 
 impl Names for Namer<'_> {
@@ -242,6 +264,9 @@ impl Names for Namer<'_> {
         if self.props_of(&physics).iter().any(|p| p == prop) {
             return Ok(Some(Named::Scalar(self.slot(&physics, solution, prop, What::Material))));
         }
+        if let Some(c) = self.component(&physics, &name) {
+            return Ok(Some(Named::Scalar(self.slot(&physics, solution, &c, What::Material))));
+        }
         self.unknown = true;
         Ok(None)
     }
@@ -250,6 +275,9 @@ impl Names for Namer<'_> {
         let (physics, solution, name) = self.target(text)?;
         let prop = prop_name(&name).to_string();
         let props = self.props_of(&physics);
+        if let Some(c) = self.component(&physics, &name) {
+            return Ok(self.slot(&physics, solution, &c, What::Material));
+        }
         if !props.contains(&prop) {
             return Err(format!("'{physics}' has no material property '{name}' (it has: {})", props.join(", ")));
         }
@@ -273,7 +301,13 @@ impl Names for Namer<'_> {
             v.extend(Engine::field_names(sol));
         }
         if let Some(p) = self.d.physics.as_deref() {
-            v.extend(self.props_of(p));
+            for n in self.props_of(p) {
+                if matches!(n.as_str(), "eps_r" | "k" | "alpha") {
+                    v.push(format!("{n} ({n}_xx ... {n}_zz for the tensor)"));
+                } else {
+                    v.push(n);
+                }
+            }
         }
         v.join(", ")
     }
@@ -474,7 +508,9 @@ impl Engine {
             Error::invalid(format!("the project has no problem for '{}', so its materials are not known", s.physics))
         })?;
         let props = p.properties();
-        let desc = props.iter().find(|d| d.name == s.name).ok_or_else(|| {
+        let component = tensor_component(&s.name);
+        let base = component.map_or(s.name.as_str(), |(b, _, _)| b);
+        let desc = props.iter().find(|d| d.name == base).ok_or_else(|| {
             Error::invalid(format!(
                 "'{}' has no material property '{}' (it has: {})",
                 s.physics,
@@ -486,6 +522,17 @@ impl Engine {
         ctx.library = Some(self.library()?);
         ctx.wavelength = crate::materials::study_wavelength(p, spec);
         let m = nyx_physics::decode::materials_by_label(spec, &ctx, &props)?;
+        let kind = match base {
+            "eps_r" => Some(femcore::props::TensorKind::Permittivity),
+            "k" => Some(femcore::props::TensorKind::Conductivity),
+            "alpha" => Some(femcore::props::TensorKind::Expansion),
+            _ => None,
+        };
+        if let (Some((_, i, j)), Some(kind)) = (component, kind) {
+            // the tensor the solver used, in wafer axes (x, y, z) with the crystal orientation applied; an isotropic material is `v I`
+            let t = m.cell_tensor(mesh, kind, desc.default).map_err(Error::invalid)?;
+            return Ok((t.iter().map(|c| c[i][j]).collect(), desc.unit.clone()));
+        }
         let tensor = |a: &femcore::material::Anisotropy| match s.name.as_str() {
             "eps_r" => a.permittivity.is_some(),
             "k" => a.conductivity.is_some(),
@@ -494,8 +541,8 @@ impl Engine {
         };
         if mesh.domain_labels().iter().any(|l| m.aniso.get(l).is_some_and(tensor)) {
             return invalid(format!(
-                "'{}' is a tensor in a material of this mesh (an anisotropic or rotated crystal); a formula reads scalar values",
-                s.name
+                "'{n}' is a tensor in a material of this mesh (an anisotropic or rotated crystal): read its entries {n}_xx, {n}_yy, {n}_zz, {n}_xy, {n}_xz, {n}_yz (wafer axes)",
+                n = s.name
             ));
         }
         let v = m.cell_values(mesh, &s.name, desc.default).map_err(Error::invalid)?;

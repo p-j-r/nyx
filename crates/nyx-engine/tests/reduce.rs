@@ -921,3 +921,48 @@ fn the_permittivity_of_a_real_mode_comes_from_its_materials() {
     let msg = err(&mut e, "integrate", json!({ "expr": "material(\"rho\")", "physics": "ems" }));
     assert!(msg.contains("no material property 'rho'") && msg.contains("eps_r"), "{msg}");
 }
+
+#[test]
+fn the_entries_of_a_rotated_crystal_are_read_in_wafer_axes() {
+    // r-plane sapphire under a silicon strip (example 13): the c axis is tilted 57.6 degrees in the y-z plane, so the permittivity has a
+    // non-zero yz entry. A swapped index or a frame change would show in that entry, which a diagonal crystal could not.
+    let mut e = Engine::new();
+    call(&mut e, "project_open", json!({ "path": example("13_silicon_on_sapphire") }));
+    call(&mut e, "solve_run", json!({ "physics": "ems" }));
+    let area = num(&call(&mut e, "integrate", json!({ "expr": 1.0, "physics": "ems", "region": "sapphire*" }))["value"]);
+    let t = 57.6f64.to_radians();
+    let euler = femcore::material::euler_from_rotation(&[[1.0, 0.0, 0.0], [0.0, t.cos(), -t.sin()], [0.0, t.sin(), t.cos()]]);
+    let lib = femcore::material::Library::load_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../materials")).unwrap();
+    let lambda = 299792458.0 / (299792458.0 / 1550e-9);
+    let want = lib.get("sapphire").unwrap().optical_permittivity(lambda, None, euler).unwrap();
+    let axes = ["x", "y", "z"];
+    for i in 0..3 {
+        for j in 0..3 {
+            let got = call(&mut e, "integrate", json!({ "expr": format!("eps_r_{}{}", axes[i], axes[j]), "physics": "ems", "region": "sapphire*" }));
+            close(num(&got["value"]), want[i][j].re * area, 1e-9);
+        }
+    }
+    assert!(want[1][2].re.abs() > 1e-3,"the crystal is tilted, so yz is not zero: {}", want[1][2].re);
+    // eps_r_zy is the same entry as eps_r_yz, and `eps_xy` is `eps_r_xy`
+    let yz = call(&mut e, "integrate", json!({ "expr": "eps_r_yz", "physics": "ems", "region": "sapphire*" }));
+    let zy = call(&mut e, "integrate", json!({ "expr": "eps_r_zy", "physics": "ems", "region": "sapphire*" }));
+    assert_eq!(yz["value"], zy["value"]);
+    let a = call(&mut e, "integrate", json!({ "expr": "eps_xy", "physics": "ems", "region": "sapphire*" }));
+    let b = call(&mut e, "integrate", json!({ "expr": "eps_r_xy", "physics": "ems", "region": "sapphire*" }));
+    assert_eq!(a["value"], b["value"]);
+    // an isotropic region of the same mesh gives v I: silicon has the same value on the diagonal and zero off it
+    let sxx = call(&mut e, "integrate", json!({ "expr": "eps_r_xx", "physics": "ems", "region": "silicon" }));
+    let szz = call(&mut e, "integrate", json!({ "expr": "eps_r_zz", "physics": "ems", "region": "silicon" }));
+    let sxy = call(&mut e, "integrate", json!({ "expr": "eps_r_xy", "physics": "ems", "region": "silicon" }));
+    assert_eq!(sxx["value"], szz["value"]);
+    assert_eq!(num(&sxy["value"]), 0.0);
+    assert!(num(&sxx["value"]) > 0.0);
+    // the plain name is refused on this mesh, and the message names the entries; so does a formula that combines the entries with a field
+    let msg = err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems" }));
+    assert!(msg.contains("eps_r_xx") && msg.contains("tensor"), "{msg}");
+    let msg = err(&mut e, "integrate", json!({ "expr": "eps_r_xq * 1", "physics": "ems" }));
+    assert!(msg.contains("eps_r_xx"), "the names of the tensor are listed: {msg}");
+    // a field with a tensor entry: the permittivity-weighted intensity along the propagation, as a formula
+    let w = call(&mut e, "integrate", json!({ "expr": "eps_r_zz * abs2(Ey)", "physics": "ems", "region": "sapphire*" }));
+    assert!(num(&w["value"]).is_finite());
+}
