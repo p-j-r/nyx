@@ -854,6 +854,12 @@
         },
         "solution": {
           "type": "integer"
+        },
+        "wavelength": {
+          "type": "number"
+        },
+        "weight": {
+          "type": "string"
         }
       },
       "name": "confinement",
@@ -996,6 +1002,9 @@
         },
         "solution": {
           "type": "integer"
+        },
+        "wavelength": {
+          "type": "number"
         }
       },
       "name": "extremum",
@@ -1060,6 +1069,9 @@
         },
         "solution": {
           "type": "integer"
+        },
+        "wavelength": {
+          "type": "number"
         }
       },
       "name": "field_op",
@@ -1111,6 +1123,9 @@
         "title": "Integrate an expression over a region"
       },
       "arguments": {
+        "boundary": {
+          "type": "string"
+        },
         "expr": {
           "type": [
             "string",
@@ -1133,8 +1148,14 @@
         "revolution": {
           "type": "boolean"
         },
+        "side": {
+          "type": "string"
+        },
         "solution": {
           "type": "integer"
+        },
+        "wavelength": {
+          "type": "number"
         }
       },
       "name": "integrate",
@@ -1247,6 +1268,9 @@
         },
         "to": {
           "type": "array"
+        },
+        "wavelength": {
+          "type": "number"
         }
       },
       "name": "line_cut",
@@ -1406,6 +1430,9 @@
         },
         "solution": {
           "type": "integer"
+        },
+        "wavelength": {
+          "type": "number"
         }
       },
       "name": "overlap",
@@ -1456,6 +1483,9 @@
         },
         "solution": {
           "type": "integer"
+        },
+        "wavelength": {
+          "type": "number"
         }
       },
       "name": "probe",

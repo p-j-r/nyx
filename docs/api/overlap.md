@@ -14,6 +14,7 @@ The overlap integral of two fields (or two lists of components, e.g. [Ex, Ey, Ez
 | `region` | text | no |  | region name(s); default all |
 | `revolution` | true or false | no |  | weight by 2 pi r, default false |
 | `solution` | integer | no |  | default 0 |
+| `wavelength` | number | no |  | metres: where the material values of a formula (eps_r of a dispersive model) are read; default the wavelength of the study. The fields stay those of the solve |
 
 Lengths are in metres and every unit is SI unless the argument says otherwise.
 

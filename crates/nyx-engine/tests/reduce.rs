@@ -929,20 +929,27 @@ fn the_entries_of_a_rotated_crystal_are_read_in_wafer_axes() {
     let mut e = Engine::new();
     call(&mut e, "project_open", json!({ "path": example("13_silicon_on_sapphire") }));
     call(&mut e, "solve_run", json!({ "physics": "ems" }));
-    let area = num(&call(&mut e, "integrate", json!({ "expr": 1.0, "physics": "ems", "region": "sapphire*" }))["value"]);
+    let area =
+        num(&call(&mut e, "integrate", json!({ "expr": 1.0, "physics": "ems", "region": "sapphire*" }))["value"]);
     let t = 57.6f64.to_radians();
-    let euler = femcore::material::euler_from_rotation(&[[1.0, 0.0, 0.0], [0.0, t.cos(), -t.sin()], [0.0, t.sin(), t.cos()]]);
-    let lib = femcore::material::Library::load_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../materials")).unwrap();
+    let euler =
+        femcore::material::euler_from_rotation(&[[1.0, 0.0, 0.0], [0.0, t.cos(), -t.sin()], [0.0, t.sin(), t.cos()]]);
+    let lib = femcore::material::Library::load_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../materials"))
+        .unwrap();
     let lambda = 299792458.0 / (299792458.0 / 1550e-9);
     let want = lib.get("sapphire").unwrap().optical_permittivity(lambda, None, euler).unwrap();
     let axes = ["x", "y", "z"];
     for i in 0..3 {
         for j in 0..3 {
-            let got = call(&mut e, "integrate", json!({ "expr": format!("eps_r_{}{}", axes[i], axes[j]), "physics": "ems", "region": "sapphire*" }));
+            let got = call(
+                &mut e,
+                "integrate",
+                json!({ "expr": format!("eps_r_{}{}", axes[i], axes[j]), "physics": "ems", "region": "sapphire*" }),
+            );
             close(num(&got["value"]), want[i][j].re * area, 1e-9);
         }
     }
-    assert!(want[1][2].re.abs() > 1e-3,"the crystal is tilted, so yz is not zero: {}", want[1][2].re);
+    assert!(want[1][2].re.abs() > 1e-3, "the crystal is tilted, so yz is not zero: {}", want[1][2].re);
     // eps_r_zy is the same entry as eps_r_yz, and `eps_xy` is `eps_r_xy`
     let yz = call(&mut e, "integrate", json!({ "expr": "eps_r_yz", "physics": "ems", "region": "sapphire*" }));
     let zy = call(&mut e, "integrate", json!({ "expr": "eps_r_zy", "physics": "ems", "region": "sapphire*" }));
@@ -963,7 +970,8 @@ fn the_entries_of_a_rotated_crystal_are_read_in_wafer_axes() {
     let msg = err(&mut e, "integrate", json!({ "expr": "eps_r_xq * 1", "physics": "ems" }));
     assert!(msg.contains("eps_r_xx"), "the names of the tensor are listed: {msg}");
     // a field with a tensor entry: the permittivity-weighted intensity along the propagation, as a formula
-    let w = call(&mut e, "integrate", json!({ "expr": "eps_r_zz * abs2(Ey)", "physics": "ems", "region": "sapphire*" }));
+    let w =
+        call(&mut e, "integrate", json!({ "expr": "eps_r_zz * abs2(Ey)", "physics": "ems", "region": "sapphire*" }));
     assert!(num(&w["value"]).is_finite());
 }
 
@@ -972,7 +980,8 @@ fn the_wavelength_argument_moves_the_material_values_and_nothing_else() {
     let mut e = Engine::new();
     call(&mut e, "project_open", json!({ "path": example("15_soi_wire") }));
     call(&mut e, "solve_run", json!({}));
-    let lib = femcore::material::Library::load_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../materials")).unwrap();
+    let lib = femcore::material::Library::load_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../materials"))
+        .unwrap();
     let area = num(&call(&mut e, "integrate", json!({ "expr": 1.0, "physics": "ems", "region": "Si" }))["value"]);
     let eps_at = |e: &mut Engine, w: Option<f64>| {
         let mut args = json!({ "expr": "eps_r", "physics": "ems", "region": "Si" });
@@ -993,11 +1002,18 @@ fn the_wavelength_argument_moves_the_material_values_and_nothing_else() {
     assert!((eps_at(&mut e, Some(1.31e-6)) - study).abs() > 1e-4, "silicon is dispersive here");
     // the fields are those of the solve whatever the wavelength: a formula without a material value does not move
     let a = call(&mut e, "integrate", json!({ "expr": "abs2(Ex)", "physics": "ems", "region": "Si" }));
-    let b = call(&mut e, "integrate", json!({ "expr": "abs2(Ex)", "physics": "ems", "region": "Si", "wavelength": 1.31e-6 }));
+    let b = call(
+        &mut e,
+        "integrate",
+        json!({ "expr": "abs2(Ex)", "physics": "ems", "region": "Si", "wavelength": 1.31e-6 }),
+    );
     assert_eq!(a["value"], b["value"]);
     // outside the range of the table the material says so; a bad value is refused
-    assert!(err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": 5e-7 })).contains("range"));
-    assert!(err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": -1.0 })).contains("wavelength"));
+    assert!(
+        err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": 5e-7 })).contains("range")
+    );
+    assert!(err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": -1.0 }))
+        .contains("wavelength"));
 }
 
 #[test]
@@ -1035,6 +1051,178 @@ fn a_weight_makes_the_confinement_the_energy_fraction() {
     assert_eq!(num(&one["fraction"]).to_bits(), num(&plain["fraction"]).to_bits());
     // a complex weight is refused (the stand-in physics has a complex Ex; the real mode above has none)
     let mut s = strip();
-    let msg = err(&mut s, "confinement", json!({ "fields": ["Ex"], "physics": "fld", "region": "silicon", "weight": "Ex" }));
+    let msg =
+        err(&mut s, "confinement", json!({ "fields": ["Ex"], "physics": "fld", "region": "silicon", "weight": "Ex" }));
     assert!(msg.contains("weight") && msg.contains("real"), "{msg}");
+}
+
+const OUTER_2D: [&str; 6] = ["window.top", "window.left", "window.right", "box.left", "box.right", "box.bottom"];
+
+#[test]
+fn a_line_integral_follows_the_boundary_with_its_normal() {
+    let mut e = strip();
+    let line = |e: &mut Engine, expr: Value, boundary: &str, side: Option<&str>| -> Value {
+        let mut a = json!({ "expr": expr, "physics": "fld", "boundary": boundary });
+        if let Some(s) = side {
+            a["side"] = json!(s);
+        }
+        call(e, "integrate", a)
+    };
+    // the length of known boundaries (expr 1): an outer edge, an interface read from one side, the edges of the core
+    let top = line(&mut e, json!(1.0), "window.top", None);
+    close(num(&top["value"]), 4e-6, 1e-12);
+    close(num(&top["measure"]), 4e-6, 1e-12);
+    assert!(top["facets"].as_u64().unwrap() >= 60);
+    close(num(&line(&mut e, json!(1.0), "oxide|silicon", Some("silicon"))["value"]), 0.5e-6, 1e-12);
+    close(num(&line(&mut e, json!(1.0), "air|silicon", Some("silicon"))["value"]), 0.5e-6 + 2.0 * 0.22e-6, 1e-12);
+    close(num(&line(&mut e, json!(1.0), "air|oxide", Some("oxide"))["value"]), 4e-6 - 0.5e-6, 1e-12);
+    // the normal points out of the cell each facet is read in: up on top, and either way at an interface by the side
+    close(num(&line(&mut e, json!("nz"), "window.top", None)["value"]), 4e-6, 1e-12);
+    close(num(&line(&mut e, json!("nx"), "window.left", None)["value"]), -1.5e-6, 1e-12);
+    close(num(&line(&mut e, json!("nz"), "air|oxide", Some("oxide"))["value"]), 3.5e-6, 1e-12);
+    close(num(&line(&mut e, json!("nz"), "air|oxide", Some("air"))["value"]), -3.5e-6, 1e-12);
+    assert!(
+        num(&line(&mut e, json!("ny"), "window.top", None)["value"]).abs() < 1e-18,
+        "a cross-section has no y normal"
+    );
+    // a closed form: the integral of the quadratic p along the top edge is exact in the rule
+    let want = exact(&[-2e-6], &[2e-6], &|x| polys(&[x[0] * 1e6, 1.5]).0);
+    close(num(&line(&mut e, json!("p"), "window.top", None)["value"]), want, 1e-9);
+    // the divergence theorem: the flux of F = (Im Ex, p) through the closed outer boundary equals the area integral of div F
+    let flux: f64 = OUTER_2D.iter().map(|b| num(&line(&mut e, json!("im(Ex) * nx + p * nz"), b, None)["value"])).sum();
+    let (lo, hi) = WINDOW;
+    let div = exact(&lo, &hi, &|x| {
+        let a = x[0] * 1e6;
+        let c = x[1] * 1e6;
+        1e6 * (2.0 * a + (-3.0 + a - 2.0 * c))
+    });
+    close(flux, div, 1e-9);
+    // the same by the engine's own area integral of the divergence, written as a formula of the coordinates
+    let area = call(
+        &mut e,
+        "integrate",
+        json!({ "expr": "1e6 * (2 * x * 1e6 + (-3 + x * 1e6 - 2 * z * 1e6))", "physics": "fld" }),
+    );
+    close(num(&area["value"]), div, 1e-9);
+    // a field and a material differ across an interface: each side reads its own
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "oxide", "material": { "rho": 2200.0 } }));
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "silicon", "material": { "rho": 2330.0 } }));
+    call(&mut e, "solve_run", json!({}));
+    close(num(&line(&mut e, json!("rho"), "oxide|silicon", Some("silicon"))["value"]), 2330.0 * 0.5e-6, 1e-12);
+    close(num(&line(&mut e, json!("rho"), "oxide|silicon", Some("oxide"))["value"]), 2200.0 * 0.5e-6, 1e-12);
+    // an interface without a side is an error that names both regions; so is the wrong side, and a region next to a boundary
+    let msg = err(&mut e, "integrate", json!({ "expr": 1.0, "physics": "fld", "boundary": "oxide|silicon" }));
+    assert!(
+        msg.contains("interface") && msg.contains("oxide") && msg.contains("silicon") && msg.contains("side"),
+        "{msg}"
+    );
+    let msg =
+        err(&mut e, "integrate", json!({ "expr": 1.0, "physics": "fld", "boundary": "oxide|silicon", "side": "air" }));
+    assert!(msg.contains("side"), "{msg}");
+    let msg =
+        err(&mut e, "integrate", json!({ "expr": 1.0, "physics": "fld", "boundary": "window.top", "region": "air" }));
+    assert!(msg.contains("not both"), "{msg}");
+    assert!(err(&mut e, "integrate", json!({ "expr": 1.0, "physics": "fld", "side": "air" })).contains("boundary"));
+    assert!(
+        err(&mut e, "integrate", json!({ "expr": 1.0, "physics": "fld", "boundary": "nowhere" })).contains("nowhere")
+    );
+    // the normal is a boundary's: elsewhere it is refused, in a plain integral and in a probe
+    let msg = err(&mut e, "integrate", json!({ "expr": "nx", "physics": "fld" }));
+    assert!(msg.contains("normal") && msg.contains("boundary"), "{msg}");
+    assert!(
+        err(&mut e, "probe", json!({ "expr": "nz", "physics": "fld", "points": [[0.0, 0.0]] })).contains("boundary")
+    );
+    // the boundary of the world has one cell per facet: the answer does not depend on a side being given for it
+    let some = line(&mut e, json!(1.0), "window.top", Some("air"));
+    assert_eq!(some["value"], top["value"]);
+}
+
+#[test]
+fn a_surface_integral_in_3d_and_a_revolution_weight() {
+    let mut e = engine(1.0);
+    call(&mut e, "project_new", json!({ "dim": 3, "h": 0.12 }));
+    call(&mut e, "add_box", json!({ "name": "b", "min": [0.0, 0.0, 0.0], "max": [1.0, 2.0, 0.5] }));
+    call(&mut e, "add_overlay", json!({ "regions": [{ "name": "b", "input": "b" }] }));
+    call(&mut e, "add_physics", json!({ "physics": "fld", "study": "poly", "order": 2 }));
+    call(&mut e, "solve_run", json!({}));
+    let face = |e: &mut Engine, expr: &str, b: &str| {
+        num(&call(e, "integrate", json!({ "expr": expr, "physics": "fld", "boundary": b }))["value"])
+    };
+    // areas and signed normals of the six faces
+    close(face(&mut e, "1", "b.zmax"), 2.0, 1e-12);
+    close(face(&mut e, "nz", "b.zmax"), 2.0, 1e-12);
+    close(face(&mut e, "nz", "b.zmin"), -2.0, 1e-12);
+    close(face(&mut e, "nx", "b.xmin"), -1.0, 1e-12);
+    close(face(&mut e, "ny", "b.ymax"), 0.5, 1e-12);
+    assert!(face(&mut e, "nx", "b.zmax").abs() < 1e-12, "the top face has no x normal");
+    // a closed form: p over the top face (z = 0.5)
+    close(face(&mut e, "p", "b.zmax"), exact(&[0.0, 0.0], &[1.0, 2.0], &|x| polys(&[x[0], x[1], 0.5]).0), 1e-9);
+    // the divergence theorem for F = (p, 2p, p): the flux through the six faces equals the integral of div F = -0.5 + 2a - c over the box
+    let flux: f64 = ["b.xmax", "b.xmin", "b.ymax", "b.ymin", "b.zmax", "b.zmin"]
+        .iter()
+        .map(|b| face(&mut e, "p * (nx + 2 * ny + nz)", b))
+        .sum();
+    let div = exact(&[0.0, 0.0, 0.0], &[1.0, 2.0, 0.5], &|x| -0.5 + 2.0 * x[0] - x[2]);
+    close(flux, div, 1e-9);
+    // `revolution` is for a (r, z) mesh
+    assert!(err(
+        &mut e,
+        "integrate",
+        json!({ "expr": 1.0, "physics": "fld", "boundary": "b.zmax", "revolution": true })
+    )
+    .contains("2D"));
+}
+
+#[test]
+fn a_boundary_integral_of_revolution_weights_by_two_pi_r() {
+    let mut e = strip();
+    // read as an (r, z) mesh: the edge at x = 2e-6 above the oxide, weighted by 2 pi r (z from 0 to 1.5e-6)
+    let got = call(
+        &mut e,
+        "integrate",
+        json!({ "expr": 1.0, "physics": "fld", "boundary": "window.right", "revolution": true }),
+    );
+    let want = 2.0 * std::f64::consts::PI * 2e-6 * 1.5e-6;
+    close(num(&got["value"]), want, 1e-12);
+    close(num(&got["measure"]), want, 1e-12);
+    assert_eq!(got["revolution"], json!(true));
+}
+
+#[test]
+fn an_interface_in_3d_needs_a_side_and_has_the_area_of_the_contact() {
+    let mut e = engine(1.0);
+    call(&mut e, "project_new", json!({ "dim": 3, "h": 0.12 }));
+    call(&mut e, "add_box", json!({ "name": "lo", "min": [0.0, 0.0, 0.0], "max": [1.0, 2.0, 0.25] }));
+    call(&mut e, "add_box", json!({ "name": "hi", "min": [0.0, 0.0, 0.25], "max": [1.0, 2.0, 0.5] }));
+    call(
+        &mut e,
+        "add_overlay",
+        json!({ "regions": [{ "name": "lo", "input": "lo" }, { "name": "hi", "input": "hi" }] }),
+    );
+    call(&mut e, "add_physics", json!({ "physics": "fld", "study": "poly", "order": 2 }));
+    call(&mut e, "solve_run", json!({}));
+    let names = call(&mut e, "geometry_names", json!({}));
+    let name = ["lo|hi", "hi|lo"]
+        .into_iter()
+        .find(|n| names["boundaries"].as_array().unwrap().iter().any(|b| b == n))
+        .unwrap_or_else(|| panic!("the contact has a name: {}", names["boundaries"]));
+    let at = |e: &mut Engine, expr: &str, side: Option<&str>| -> Result<Value, String> {
+        let mut a = json!({ "expr": expr, "physics": "fld", "boundary": name });
+        if let Some(s) = side {
+            a["side"] = json!(s);
+        }
+        e.call("integrate", &a).map_err(|x| x.to_string())
+    };
+    // two cells share each face: without a side it is an error that says so
+    let msg = at(&mut e, "1", None).unwrap_err();
+    assert!(msg.contains("interface") && msg.contains("side"), "{msg}");
+    // the contact is the square 1 x 2 at z = 0.25; the normal points out of the side read: up out of `lo`, down out of `hi`
+    close(num(&at(&mut e, "1", Some("lo")).unwrap()["value"]), 2.0, 1e-12);
+    close(num(&at(&mut e, "nz", Some("lo")).unwrap()["value"]), 2.0, 1e-12);
+    close(num(&at(&mut e, "nz", Some("hi")).unwrap()["value"]), -2.0, 1e-12);
+    close(
+        num(&at(&mut e, "p", Some("lo")).unwrap()["value"]),
+        exact(&[0.0, 0.0], &[1.0, 2.0], &|x| polys(&[x[0], x[1], 0.25]).0),
+        1e-9,
+    );
 }

@@ -32,22 +32,37 @@ A string in an `expr` is now a formula: `abs(Ex)^2 * eps_r`, `where(z > 0, p, 0)
 * **Material values are what the solver read.** They come from the problem of the physics as `nyx_physics::decode::materials_by_label` builds them for the solve (library materials, inline numbers, the optical model at the wavelength of the study), one scalar per cell, **constant over the cell** (not interpolated, so a region indicator or a material is the same number at every quadrature point). They are read from the project's current problem and the result's own mesh: if the materials changed since the solve the answer carries `stale: true`. A property that is a tensor in some material of the mesh (an anisotropic or rotated `eps_r`) is refused rather than read as its scalar default. `region("name")` is 1 in the cells of the region and 0 elsewhere.
 * **An expression of numbers only** (`1`, for an area) uses the mesh of the default result.
 * **`femcore::expr` is unchanged.** The plan says N2 moves `expr::Expr` onto the new tree. It does not: `expr` is the real grammar of geometry and initial fields that `geom::expr` copies (ROUGH_SPOTS R06), the two are held equal by `tests/expr_grammar.rs`, and moving one side would break that test or force `geom` onto `femcore`. The formula grammar is a superset kept separate, and the gate "the existing `expr_grammar` tests unchanged" holds because the file is untouched. Two evaluators remain in `femcore`: the real one for geometry and initial fields, the typed one for results.
-* **Not done:** line and surface integrals; a formula inside a worker; tensor material values; a material dispersion evaluated at a wavelength other than the study's.
+* **Not done in S5, built in N2b below:** line and surface integrals; tensor material values; a material dispersion at another wavelength. Still not done: a formula inside a worker.
+
+## N2b: tensor entries, a wavelength, a weight, boundary integrals (step S5b, 2026-11-19)
+
+What S5 left out, built on the same tree. The formula box of the Reduce form (Results tab) is a text field whose content goes to `integrate` and `extremum` unchanged, so the window and a script give the same number.
+
+* **Tensor entries.** A tensor property has plain names for its entries in wafer axes: `eps_r_xx`, `eps_r_yy`, `eps_r_zz`, `eps_r_xy`, `eps_r_xz`, `eps_r_yz` (and `k_*`, `alpha_*`; `eps_zy` is `eps_r_yz`; `eps` and `mu` keep meaning `eps_r` and `mu_r`). The entries come from `Materials::cell_tensor`, the call the solvers make, with the crystal orientation applied, so an isotropic material is `v I` and a mesh with both kinds reads correctly. The frame is the global (wafer x, y, z) one of `cell_tensor`; `section::local_tensor`, which reorders to (x, z, y) for the kernels, is not used. The plain `eps_r` is still refused on a mesh where some material is a tensor, and its message names the entries. Gate: r-plane sapphire at 57.6 degrees (a non-zero yz entry), every one of the nine entries equals the library's `optical_permittivity` for the same angles to 1e-9 of the area-weighted value.
+* **`wavelength`** (metres), an optional argument of every reduction: where the material values of a dispersive model are read, default the study's. The fields stay those of the solve; it is an explicit what-if on the materials, not a re-solve. The leaf records it, so two wavelengths in one formula are two leaves.
+* **`weight`** of `confinement`: a real formula that multiplies the integrand (`eps_r` gives the energy fraction). Without it the tree, and so the bits, are those of S3; with it the answer equals the ratio of two `integrate` calls to the bit.
+* **Boundary integrals** (`integrate` with `boundary`, in place of `region`). Decisions:
+  * Only named boundaries: an outer boundary (the labelled facets of the solver mesh, edges in 2D and triangles in 3D, by `LabelResolver::boundaries`, the same text the conditions use), or an interface `a|b` between two regions. The solver mesh keeps no facets for an interface, so for a name that reads `a|b`, has no facets and whose two parts are regions, the faces are those shared by a cell of `a` and a cell of `b`, which is what the geometry names `a|b` (all its pieces). An arbitrary path or surface is not integrated; `line_cut` samples a line.
+  * **An interface has two sides and the fields are discontinuous across it** (`Ex`, `eps_r` at Si/SiO2). A facet with two adjacent cells needs `side`, a region name: the facet is read in its cell that belongs to the region, and the answer says which side. A facet with one cell (an outer boundary) needs none; a facet with two cells and no `side`, or with both cells in `side`, is an error that names the boundary. Nothing picks the lowest-numbered cell.
+  * **The normal** `nx`, `ny`, `nz` (wafer axes, unit length, constant on a facet) points out of the chosen cell. These names exist only in a boundary integral and are an error elsewhere. A flux is `dot(F, [nx, ny, nz])`.
+  * Rule: the facet rule of `fem::facet_rule` (3-point Gauss on an edge, degree 5; the degree-4 triangle rule on a face); each point is mapped to the barycentric coordinates of the chosen cell, where the leaves are interpolated exactly as in a volume integral. A facet adds `measure * sum_q (w_q f_q)`; facets are summed in blocks of `BLOCK` consecutive facets in facet order, so the bits do not depend on the thread count.
+  * `revolution` is supported on a 2D (r, z) mesh: the integrand and the measure are multiplied by `2 pi r` at each point. The answer reports `measure` (length, area; with `revolution` the surface of revolution) and the number of facets.
+  * Gates: the length of a known boundary (expr `1`) and the area of one in 3D; a closed form on a uniform field (flux through a face is `F . n A`); the divergence theorem on a smooth field: the integral of `dot(F, n)` over the whole outer boundary equals the area integral of `div F`.
 
 ## Not in this decision
 
 * Tracing a script function into the tree (N3); a code generator (N4).
 * Convergence of an integral under refinement (a reduction reads one result on one mesh).
 * Reductions in a worker process: they read the result the parent holds and take about as long as reading it.
-* Maxima of the interpolant between nodes; surface and line integrals along boundaries (`integrate` is over cells).
+* Maxima of the interpolant between nodes.
 
 ## Consequences
 
-* `engine_commands` gains eight commands and `result_info` gains `cell_fields` (additive); `mcp_tools` gains eight tools (additive). Provisional versions 1.12 and 2.8. N2 changes only descriptions (provisional 1.14 and 2.10).
+* `engine_commands` gains eight commands and `result_info` gains `cell_fields` (additive); `mcp_tools` gains eight tools (additive). Provisional versions 1.12 and 2.8. N2 changes only descriptions (provisional 1.14 and 2.10). N2b adds arguments (`boundary`, `side`, `wavelength`, `weight`) and so is 1.15 and 2.11, still provisional; nothing is removed.
 * `Stored` holds the mesh model of its result, so a result keeps its mesh alive until it is replaced.
 * `nyx check` treats the eight commands as readers of a result.
 
 ## Code
 
-* `crates/femcore/src/fieldexpr.rs` (the tree and its evaluator), `crates/femcore/src/formula.rs` (the formula parser), `crates/nyx-engine/src/reduce.rs` (the commands and the names of a formula), `crates/nyx-engine/src/engine.rs` (`Stored.model`), `crates/app/src/tabs.rs` (the Reduce form).
-* Tests: `crates/nyx-engine/tests/reduce.rs` (closed forms, loops to the bit, thread counts, a worker result, a real mode and a real thermal field), `crates/app/src/app.rs` (the form shows the engine's numbers).
+* `crates/femcore/src/fieldexpr.rs` (the tree and its evaluator), `crates/femcore/src/formula.rs` (the formula parser), `crates/nyx-engine/src/reduce.rs` (the commands and the names of a formula), `crates/nyx-engine/src/engine.rs` (`Stored.model`), `crates/app/src/tabs.rs` (the Reduce form). N2b: `Namer::component`, `Prep::boundary_faces`, `integrate_boundary` in `reduce.rs`; the formula box in `tabs.rs`.
+* Tests: `crates/nyx-engine/tests/reduce.rs` (the sapphire tensor, the wavelength, the energy fraction, line and surface integrals against closed forms and the divergence theorem, closed forms, loops to the bit, thread counts, a worker result, a real mode and a real thermal field), `crates/app/src/app.rs` (the form shows the engine's numbers).

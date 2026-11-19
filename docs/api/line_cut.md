@@ -14,6 +14,7 @@ The value of an expression at `n` equally spaced points from `from` to `to` (inc
 | `physics` | text: `dfs`, `ems`, `sms` | no |  | the three-letter code of the physics |
 | `solution` | integer | no |  | default 0 |
 | `to` | list of number | yes |  | end point |
+| `wavelength` | number | no |  | metres: where the material values of a formula (eps_r of a dispersive model) are read; default the wavelength of the study. The fields stay those of the solve |
 
 Lengths are in metres and every unit is SI unless the argument says otherwise.
 

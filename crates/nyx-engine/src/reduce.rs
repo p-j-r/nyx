@@ -21,13 +21,18 @@
 //! sum has the same bits for any thread count. With `revolution` the integrand at each point is multiplied by `2 pi r` (r is mesh axis 0; the
 //! mesh must be 2D); the default is the plane measure, and an answer says which was used.
 //!
+//! **Boundary integrals (N2b).** `integrate` with `boundary` sums over the faces of a named boundary instead of the cells: the facet rule of
+//! `fem::facet_rule` (3-point Gauss on an edge, the degree-4 triangle rule on a face) at points mapped into the barycentric coordinates of the
+//! cell each face is read in, `measure * sum_q (w_q f_q)` per face, in blocks of `BLOCK` faces in face order. A face next to two cells (an
+//! interface) is read in the cell of the region `side`; the normal `nx ny nz` points out of that cell. See ADR 90, N2b.
+//!
 //! **Maxima** are taken over the values at the nodes of the cells (the vertices, and the edge midpoints of a P2 mesh), not over the interpolant:
 //! the true maximum of a P2 field between nodes can be larger. A node shared by cells has one value per cell (the fields are not averaged);
 //! all of them count. **Points** (`probe`, `line_cut`) are in mesh axes (a 2D mesh: x then z of the wafer; 3D: x, y, z); a point outside the
 //! mesh gives `inside: false` and a null value, not an error; a point on the face between cells is read in the cell with the lowest number.
 
 use crate::engine::Engine;
-use femcore::fem::{geometry, quad_rule, shape, RefElement};
+use femcore::fem::{facet_rule, facets_with, geometry, quad_rule, shape, RefElement};
 use femcore::fieldexpr::{Fun, Op, Tree, MAX_POWER};
 use femcore::formula::{self, Named, Names};
 use femcore::linalg::csr::C;
@@ -58,6 +63,8 @@ pub(crate) enum What {
     Material(Option<f64>),
     /// 1 in the cells of the region `name`, else 0
     Region,
+    /// a component of the unit normal of a boundary facet (wafer axis 0 x, 1 y, 2 z); only in an `integrate` over a `boundary`
+    Normal(usize),
 }
 
 /// One leaf of an expression: a named field of one solution of one physics (or, with `what`, a coordinate, a material value, a region).
@@ -75,6 +82,8 @@ pub(crate) struct Defaults {
     solution: usize,
     /// `wavelength` of the request: where the materials are read for a dispersive model (m); None is the wavelength of the study
     wavelength: Option<f64>,
+    /// the request integrates over a `boundary`, so `nx ny nz` mean something
+    boundary: bool,
 }
 
 enum Kind {
@@ -86,6 +95,8 @@ enum Kind {
     Coord(usize),
     /// one value per cell, the same at every point of the cell (a material value, a region indicator): not interpolated
     Const(Vec<f64>),
+    /// a component of the normal of the facet being integrated (set per facet by the boundary integral, 0 elsewhere)
+    Normal(usize),
 }
 
 struct Leaf {
@@ -94,6 +105,12 @@ struct Leaf {
     kind: Kind,
     complex: bool,
     unit: String,
+}
+
+/// A face of a boundary: its vertices (the first `dim` used) and the cells next to it as (cell, local number of its vertex opposite the face).
+struct Face {
+    v: [u32; 3],
+    cells: Vec<(usize, usize)>,
 }
 
 /// The leaves of one request resolved against the stored results, and the mesh they live on.
@@ -251,6 +268,14 @@ impl Names for Namer<'_> {
         if Engine::field_names(sol).contains(&name) {
             return Ok(Some(Named::Scalar(self.slot(&physics, solution, &name, What::Field))));
         }
+        if let Some(axis) = ["nx", "ny", "nz"].iter().position(|a| *a == name) {
+            if !self.d.boundary {
+                return Err(format!(
+                    "'{name}' is a component of the normal of a boundary: it exists in `integrate` with `boundary`"
+                ));
+            }
+            return Ok(Some(Named::Scalar(self.slot(&physics, solution, &name, What::Normal(axis)))));
+        }
         let comps: Vec<(usize, String)> = ["x", "y", "z"]
             .iter()
             .enumerate()
@@ -337,7 +362,8 @@ impl Engine {
                 _ => return invalid("`wavelength` must be a positive number of metres"),
             },
         };
-        Ok(Defaults { physics, solution, wavelength })
+        let boundary = args.get("boundary").is_some_and(|v| !v.is_null());
+        Ok(Defaults { physics, solution, wavelength, boundary })
     }
 
     fn parse_expr(&self, v: &Value, d: &Defaults, specs: &mut Vec<Spec>, depth: usize) -> Result<Tree, Error> {
@@ -604,6 +630,7 @@ impl Engine {
             let nloc = mesh.nloc(order);
             let (kind, complex, unit) = match &s.what {
                 What::Coord(a) => (Kind::Coord(*a), false, "m".to_string()),
+                What::Normal(a) => (Kind::Normal(*a), false, String::new()),
                 What::Region => {
                     let labels = stored.model.domains(&s.name)?;
                     let v: Vec<f64> =
@@ -880,16 +907,21 @@ impl Prep {
                         *o = C::new(vals[c], 0.0);
                     }
                 }
+                Kind::Normal(_) => out.fill(C::new(0.0, 0.0)),
             }
         }
     }
 
     /// The value of every leaf at one point of the cell: the interpolant of its nodal values, or the cell's own value for a constant one.
-    fn at_point(&self, tree: &Tree, loc: &[C], n: &[f64], work: &mut Vec<C>) -> C {
+    fn at_point(&self, tree: &Tree, loc: &[C], n: &[f64], normal: Option<&[f64; 3]>, work: &mut Vec<C>) -> C {
         work.clear();
         for (i, l) in self.leaves.iter().enumerate() {
             let nodes = &loc[i * self.nloc..(i + 1) * self.nloc];
-            work.push(if matches!(l.kind, Kind::Const(_)) { nodes[0] } else { interp(n, nodes) });
+            work.push(match &l.kind {
+                Kind::Const(_) => nodes[0],
+                Kind::Normal(a) => C::new(normal.map_or(f64::NAN, |v| v[*a]), 0.0),
+                _ => interp(n, nodes),
+            });
         }
         tree.eval(work)
     }
@@ -925,6 +957,7 @@ impl Prep {
 
     /// `sum over the region of tree dV` (see the module comment for the rule and the order of the sums).
     fn integrate(&self, tree: &Tree, region: &Region, revolution: bool) -> Result<Sum, Error> {
+        self.reject_normal()?;
         let dim = self.mesh.dim;
         if revolution && dim != 2 {
             return invalid("`revolution` applies to a 2D (r, z) mesh");
@@ -949,7 +982,7 @@ impl Prep {
                 let (mut cre, mut cim, mut cm) = (0.0, 0.0, 0.0);
                 let v = self.mesh.cell(c);
                 for q in 0..nq {
-                    let mut f = self.at_point(tree, &loc, &el.n[q], &mut work);
+                    let mut f = self.at_point(tree, &loc, &el.n[q], None, &mut work);
                     let mut w = el.w[q];
                     if revolution {
                         let mut r = 0.0;
@@ -967,6 +1000,220 @@ impl Prep {
                 s.re += geo.vol[c] * cre;
                 s.im += geo.vol[c] * cim;
                 s.measure += geo.vol[c] * cm;
+            }
+            s
+        };
+        let parts: Vec<Sum> = (0..nb).into_par_iter().map(block).collect();
+        let mut t = Sum { re: 0.0, im: 0.0, measure: 0.0 };
+        for p in parts {
+            t.re += p.re;
+            t.im += p.im;
+            t.measure += p.measure;
+        }
+        if !(t.re.is_finite() && t.im.is_finite()) {
+            return Err(Error::NonFinite(
+                "the integral is not finite (a division by zero, or a field with NaN)".into(),
+            ));
+        }
+        Ok(t)
+    }
+
+    /// A leaf that is the normal of a boundary has no meaning in a volume integral, an extremum or a probe.
+    fn reject_normal(&self) -> Result<(), Error> {
+        if self.leaves.iter().any(|l| matches!(l.kind, Kind::Normal(_))) {
+            return invalid(
+                "`nx`, `ny` and `nz` are the normal of a boundary: they exist in `integrate` with `boundary`",
+            );
+        }
+        Ok(())
+    }
+    /// The faces of a boundary, each read in one cell. `labels` are the boundary numbers of the name; the facets of the solver mesh that carry
+    /// them are the outer boundaries. An interface between two regions (`"oxide|silicon"`) has no facets in the solver mesh, so when the name
+    /// carries none and reads `a|b` with `a` and `b` regions, the faces are those shared by a cell of `a` and a cell of `b`, which is what the
+    /// geometry names `a|b`. A face with one cell is read there. A face with two cells is read in the one whose domain is in `side`; with no
+    /// `side`, or with both cells in it, that is an error, because the fields and the materials are not continuous across an interface.
+    fn boundary_faces(&self, labels: &[i32], side: Option<&[i32]>, name: &str) -> Result<Vec<Face>, Error> {
+        use std::collections::HashMap;
+        let dim = self.mesh.dim;
+        let key = |v: &[u32]| -> [u32; 3] {
+            let mut k = [u32::MAX; 3];
+            k[..v.len()].copy_from_slice(v);
+            k[..v.len()].sort_unstable();
+            k
+        };
+        let pair: Option<(Vec<i32>, Vec<i32>)> = match name.split_once('|') {
+            Some((a, b)) if facets_with(&self.mesh, labels).next().is_none() && !b.contains('|') => {
+                match (self.model.domains(a.trim()), self.model.domains(b.trim())) {
+                    (Ok(a), Ok(b)) if !a.is_empty() && !b.is_empty() => Some((a, b)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        // every face of the cells that may belong to the boundary, with the cells next to it, in the order the faces are first met
+        let mut faces: Vec<Face> = vec![];
+        let mut index: HashMap<[u32; 3], usize> = HashMap::new();
+        if pair.is_none() {
+            let chosen: Vec<usize> = facets_with(&self.mesh, labels).collect();
+            if chosen.is_empty() {
+                return invalid(format!(
+                    "the boundary '{name}' has no facets in the mesh of this result: an outer boundary, or an interface `a|b` between two regions, can be integrated over"
+                ));
+            }
+            for f in chosen {
+                let v = self.mesh.facet(f);
+                let mut vs = [0u32; 3];
+                vs[..dim].copy_from_slice(v);
+                if index.insert(key(v), faces.len()).is_none() {
+                    faces.push(Face { v: vs, cells: vec![] });
+                }
+            }
+        }
+        let mut face = [0u32; 3];
+        for c in 0..self.mesh.n_cells() {
+            let v = self.mesh.cell(c);
+            for m in 0..=dim {
+                let mut n = 0;
+                for (a, &va) in v.iter().enumerate() {
+                    if a != m {
+                        face[n] = va;
+                        n += 1;
+                    }
+                }
+                let k = key(&face[..dim]);
+                match index.get(&k) {
+                    Some(&i) => faces[i].cells.push((c, m)),
+                    None if pair.is_some() => {
+                        index.insert(k, faces.len());
+                        faces.push(Face { v: face, cells: vec![(c, m)] });
+                    }
+                    None => {}
+                }
+            }
+        }
+        if let Some((a, b)) = &pair {
+            let label = |c: usize| self.mesh.cell_labels[c];
+            faces.retain(|f| match f.cells.as_slice() {
+                [(c, _), (d, _)] => {
+                    (a.contains(&label(*c)) && b.contains(&label(*d)))
+                        || (b.contains(&label(*c)) && a.contains(&label(*d)))
+                }
+                _ => false,
+            });
+            if faces.is_empty() {
+                return invalid(format!("the regions of '{name}' do not touch in the mesh of this result"));
+            }
+        }
+        let regions = self.model.regions();
+        let domain =
+            |l: i32| regions.iter().find(|(id, _)| *id == l).map_or_else(|| format!("domain {l}"), |(_, n)| n.clone());
+        let mut out = Vec::with_capacity(faces.len());
+        for f in faces {
+            let near = || -> String {
+                f.cells.iter().map(|(c, _)| domain(self.mesh.cell_labels[*c])).collect::<Vec<_>>().join(" and ")
+            };
+            let picked = match side {
+                None if f.cells.len() == 1 => f.cells[0],
+                None => {
+                    return invalid(format!(
+                        "the boundary '{name}' is an interface between {}: the fields and the materials differ across it, so give `side`, the region to read them in (the normal points out of it)",
+                        near()
+                    ))
+                }
+                Some(s) => {
+                    let pick: Vec<(usize, usize)> = f.cells.iter().copied().filter(|(c, _)| s.contains(&self.mesh.cell_labels[*c])).collect();
+                    match pick.as_slice() {
+                        [one] => *one,
+                        [] => {
+                            return invalid(format!(
+                                "the boundary '{name}' has a face next to {} only, not to the `side` region you gave",
+                                near()
+                            ))
+                        }
+                        _ => {
+                            return invalid(format!(
+                                "the boundary '{name}' has a face with {} both in `side`: name the region on one side only",
+                                near()
+                            ))
+                        }
+                    }
+                }
+            };
+            out.push(Face { v: f.v, cells: vec![picked] });
+        }
+        Ok(out)
+    }
+
+    /// The measure of a face (an edge's length in 2D, a triangle's area in 3D) and its unit normal in wafer axes, pointing out of the cell
+    /// whose vertex `opposite` (local number) is not on the face.
+    fn face_geometry(&self, v: &[u32; 3], cell: usize, opposite: usize) -> (f64, [f64; 3]) {
+        let dim = self.mesh.dim;
+        let p0 = self.mesh.point(v[0] as usize);
+        let n = if dim == 2 {
+            let p1 = self.mesh.point(v[1] as usize);
+            [p1[1] - p0[1], -(p1[0] - p0[0]), 0.0]
+        } else {
+            let (p1, p2) = (self.mesh.point(v[1] as usize), self.mesh.point(v[2] as usize));
+            let a = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+            let b = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+            [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        };
+        let len = n[..dim].iter().map(|x| x * x).sum::<f64>().sqrt();
+        let far = self.mesh.point(self.mesh.cell(cell)[opposite] as usize);
+        let toward: f64 = (0..dim).map(|k| n[k] * (far[k] - p0[k])).sum();
+        let s = if toward > 0.0 { -1.0 } else { 1.0 } / len;
+        let m = [n[0] * s, n[1] * s, n[2] * s];
+        let measure = if dim == 2 { len } else { 0.5 * len };
+        (measure, femcore::section::wafer_point(&m[..dim], dim))
+    }
+
+    /// `sum over the faces of tree dS` (module comment, "Boundary integrals"): the facet rule at points mapped into the barycentric
+    /// coordinates of the cell each face is read in; blocks of `BLOCK` faces in face order, so the bits do not depend on the threads.
+    fn integrate_boundary(&self, tree: &Tree, faces: &[Face], revolution: bool) -> Result<Sum, Error> {
+        let dim = self.mesh.dim;
+        if revolution && dim != 2 {
+            return invalid("`revolution` applies to a 2D (r, z) mesh");
+        }
+        femcore::par::threads();
+        let rule = facet_rule(dim - 1);
+        let nloc = self.nloc;
+        let nb = faces.len().div_ceil(BLOCK);
+        let block = |b: usize| -> Sum {
+            let mut s = Sum { re: 0.0, im: 0.0, measure: 0.0 };
+            let mut loc = vec![C::new(0.0, 0.0); self.leaves.len() * nloc];
+            let mut dofs = vec![];
+            let mut work = Vec::with_capacity(self.leaves.len());
+            let mut lam = vec![0.0; dim + 1];
+            for face in &faces[b * BLOCK..((b + 1) * BLOCK).min(faces.len())] {
+                let (c, opposite) = face.cells[0];
+                self.gather(c, &mut dofs, &mut loc);
+                let (measure, normal) = self.face_geometry(&face.v, c, opposite);
+                let fv = &face.v[..dim];
+                let v = self.mesh.cell(c);
+                let (mut cre, mut cim, mut cm) = (0.0, 0.0, 0.0);
+                for (q, lf) in rule.lam.iter().enumerate() {
+                    lam.fill(0.0);
+                    for (j, &vj) in fv.iter().enumerate() {
+                        let at = v.iter().position(|&x| x == vj).expect("a face vertex is a vertex of its cell");
+                        lam[at] = lf[j];
+                    }
+                    let (n, _) = shape(&lam, self.order);
+                    let mut g = self.at_point(tree, &loc, &n, Some(&normal), &mut work);
+                    let mut w = rule.w[q];
+                    if revolution {
+                        let r: f64 =
+                            fv.iter().enumerate().map(|(j, &vj)| lf[j] * self.mesh.point(vj as usize)[0]).sum();
+                        let rho = 2.0 * std::f64::consts::PI * r;
+                        g = C::new(g.re * rho, g.im * rho);
+                        w *= rho;
+                    }
+                    cre += rule.w[q] * g.re;
+                    cim += rule.w[q] * g.im;
+                    cm += w;
+                }
+                s.re += measure * cre;
+                s.im += measure * cim;
+                s.measure += measure * cm;
             }
             s
         };
@@ -1007,6 +1254,7 @@ impl Prep {
 
     /// The largest or smallest value at the nodes of the cells of the region: (value, cell, local node).
     fn extremum(&self, tree: &Tree, region: &Region, max: bool) -> Result<(f64, usize, usize), Error> {
+        self.reject_normal()?;
         let nloc = self.nloc;
         let nb = self.mesh.n_cells().div_ceil(BLOCK);
         let better = |a: f64, b: f64| if max { a > b } else { a < b };
@@ -1246,8 +1494,14 @@ impl Engine {
 
     pub(crate) fn cmd_integrate(&self, args: &Value) -> R {
         let (tree, p) = self.one_expr(args, "expr")?;
-        let region = p.region(Self::region_arg(args))?;
         let rev = Self::revolution(args);
+        if let Some(b) = args.get("boundary").filter(|v| !v.is_null()) {
+            return self.integrate_over_boundary(args, &tree, &p, b, rev);
+        }
+        if args.get("side").is_some_and(|v| !v.is_null()) {
+            return invalid("`side` goes with `boundary`: the region an interface is read in");
+        }
+        let region = p.region(Self::region_arg(args))?;
         let s = p.integrate(&tree, &region, rev)?;
         let real = tree.is_real_valued(&p.complex_flags());
         let mut out = json!({
@@ -1256,6 +1510,37 @@ impl Engine {
         });
         self.axisym_note(&p, rev, &mut out);
         self.decorate(&mut out, &p);
+        Ok(out)
+    }
+
+    /// `integrate` over the facets of a named boundary (ADR 90, N2b): a line integral on a 2D mesh, a surface integral on a 3D one.
+    fn integrate_over_boundary(&self, args: &Value, tree: &Tree, p: &Prep, boundary: &Value, rev: bool) -> R {
+        let name = boundary.as_str().filter(|s| !s.trim().is_empty()).ok_or_else(|| {
+            Error::invalid("`boundary` is the name of a boundary, or a selector that picks boundaries (e.g. \"outer & plane(z = 0)\")")
+        })?;
+        if Self::region_arg(args).is_some_and(|r| !r.trim().is_empty()) {
+            return invalid(
+                "give `boundary` or `region`, not both: a boundary integral has no region (an interface takes `side`)",
+            );
+        }
+        let labels = p.model.boundaries(name)?;
+        let side_arg = match args.get("side") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) if !s.trim().is_empty() => Some(s.as_str()),
+            Some(_) => return invalid("`side` is the name of a region"),
+        };
+        let side = side_arg.map(|s| p.model.domains(s)).transpose()?;
+        let facets = p.boundary_faces(&labels, side.as_deref(), name)?;
+        let s = p.integrate_boundary(tree, &facets, rev)?;
+        let real = tree.is_real_valued(&p.complex_flags());
+        let mut out = json!({
+            "value": if real { json!(s.re) } else { pair(s.re, s.im) }, "complex": !real,
+            "measure": s.measure, "facets": facets.len(), "revolution": rev, "boundary": name, "side": side_arg,
+            "on": if p.mesh.dim == 2 { "a line (the edges of the boundary)" } else { "a surface (the faces of the boundary)" },
+            "normal": "nx, ny, nz: the unit normal in wafer axes, out of the cell each facet is read in",
+        });
+        self.axisym_note(p, rev, &mut out);
+        self.decorate(&mut out, p);
         Ok(out)
     }
 
@@ -1292,7 +1577,7 @@ impl Engine {
                 Some(l) => {
                     p.gather(l.cell, &mut dofs, &mut local);
                     let (n, _) = shape(&l.lam, p.order);
-                    let v = p.at_point(tree, &local, &n, &mut work);
+                    let v = p.at_point(tree, &local, &n, None, &mut work);
                     re.push(json!(v.re));
                     im.push(json!(v.im));
                     inside.push(true);
@@ -1315,6 +1600,7 @@ impl Engine {
 
     pub(crate) fn cmd_probe(&self, args: &Value) -> R {
         let (tree, p) = self.one_expr(args, "expr")?;
+        p.reject_normal()?;
         let dim = p.mesh.dim;
         let pts = args
             .get("points")
@@ -1332,6 +1618,7 @@ impl Engine {
 
     pub(crate) fn cmd_line_cut(&self, args: &Value) -> R {
         let (tree, p) = self.one_expr(args, "expr")?;
+        p.reject_normal()?;
         let dim = p.mesh.dim;
         let from = number_array(args.get("from").unwrap_or(&Value::Null), "from", dim)?;
         let to = number_array(args.get("to").unwrap_or(&Value::Null), "to", dim)?;
