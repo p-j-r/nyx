@@ -1402,11 +1402,23 @@ impl Engine {
 
     pub(crate) fn cmd_confinement(&self, args: &Value) -> R {
         let key = if args.get("fields").is_some() { "fields" } else { "expr" };
-        let comps = Self::components(args, key)?;
-        let (trees, p) = self.expressions(args, &comps)?;
+        let mut comps = Self::components(args, key)?;
+        // an optional real weight (a formula: `eps_r` for the energy fraction) multiplies the integrand at every point; without one the tree is as it always was
+        let weight_arg = args.get("weight").filter(|v| !v.is_null());
+        if let Some(w) = weight_arg {
+            comps.push(w);
+        }
+        let (mut trees, p) = self.expressions(args, &comps)?;
+        let weight = weight_arg.map(|_| trees.pop().expect("the weight"));
+        if weight.as_ref().is_some_and(|w| !w.is_real_valued(&p.complex_flags())) {
+            return invalid("`weight` must be real: wrap a complex formula in abs, abs2, re or im");
+        }
         let mut it = trees.into_iter().map(|t| Tree::Call(Fun::Abs2, Box::new(t)));
         let first = it.next().expect("a component");
-        let power = it.fold(first, |acc, t| Tree::Bin(Op::Add, Box::new(acc), Box::new(t)));
+        let mut power = it.fold(first, |acc, t| Tree::Bin(Op::Add, Box::new(acc), Box::new(t)));
+        if let Some(w) = weight {
+            power = Tree::Bin(Op::Mul, Box::new(w), Box::new(power));
+        }
         let rev = Self::revolution(args);
         let all = p.region(None)?;
         let part = p.region(Some(
@@ -1417,7 +1429,12 @@ impl Engine {
         let mut out = json!({
             "fraction": inside.re / total.re, "inside": inside.re, "total": total.re, "cells": part.cells,
             "revolution": rev, "region": Self::region_arg(args),
-            "meaning": "the integral of sum_k |c_k|^2 over the region divided by the same over the whole mesh (no material weight)",
+            "weighted": weight_arg.is_some(),
+            "meaning": if weight_arg.is_some() {
+                "the integral of weight * sum_k |c_k|^2 over the region divided by the same over the whole mesh"
+            } else {
+                "the integral of sum_k |c_k|^2 over the region divided by the same over the whole mesh (no material weight)"
+            },
         });
         self.axisym_note(&p, rev, &mut out);
         self.decorate(&mut out, &p);

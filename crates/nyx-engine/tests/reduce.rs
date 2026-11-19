@@ -999,3 +999,42 @@ fn the_wavelength_argument_moves_the_material_values_and_nothing_else() {
     assert!(err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": 5e-7 })).contains("range"));
     assert!(err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": -1.0 })).contains("wavelength"));
 }
+
+#[test]
+fn a_weight_makes_the_confinement_the_energy_fraction() {
+    let mut e = Engine::new();
+    call(&mut e, "project_open", json!({ "path": example("15_soi_wire") }));
+    call(&mut e, "solve_run", json!({}));
+    let power = json!({ "op": "add", "args": [{ "op": "add", "args": [{ "op": "abs2", "args": ["Ex"] }, { "op": "abs2", "args": ["Ey"] }] }, { "op": "abs2", "args": ["Ez"] }] });
+    let ratio = |e: &mut Engine, expr: Value| -> f64 {
+        let inside = num(&call(e, "integrate", json!({ "expr": expr, "physics": "ems", "region": "Si" }))["value"]);
+        let total = num(&call(e, "integrate", json!({ "expr": expr, "physics": "ems" }))["value"]);
+        inside / total
+    };
+    let conf = |e: &mut Engine, weight: Option<&str>| -> Value {
+        let mut a = json!({ "fields": ["Ex", "Ey", "Ez"], "physics": "ems", "region": "Si" });
+        if let Some(w) = weight {
+            a["weight"] = json!(w);
+        }
+        call(e, "confinement", a)
+    };
+    // no weight: the ratio of the integrals of the sum of squared moduli, to the bit, as before
+    let plain = conf(&mut e, None);
+    assert_eq!(num(&plain["fraction"]).to_bits(), ratio(&mut e, power.clone()).to_bits());
+    assert_eq!(plain["weighted"], json!(false));
+    // a weight: the ratio of the integrals of weight * power, the energy fraction of the plan, to the bit
+    let weighted = conf(&mut e, Some("eps_r"));
+    let by_hand = ratio(&mut e, json!({ "op": "mul", "args": ["eps_r", power] }));
+    assert_eq!(num(&weighted["fraction"]).to_bits(), by_hand.to_bits());
+    assert_eq!(weighted["weighted"], json!(true));
+    // silicon is the dense material, so weighting by the permittivity raises the fraction of the core
+    assert!(num(&weighted["fraction"]) > num(&plain["fraction"]));
+    assert!(num(&weighted["fraction"]) < 1.0);
+    // a weight with a region: 1 inside the region is the same as no weight
+    let one = conf(&mut e, Some("1"));
+    assert_eq!(num(&one["fraction"]).to_bits(), num(&plain["fraction"]).to_bits());
+    // a complex weight is refused (the stand-in physics has a complex Ex; the real mode above has none)
+    let mut s = strip();
+    let msg = err(&mut s, "confinement", json!({ "fields": ["Ex"], "physics": "fld", "region": "silicon", "weight": "Ex" }));
+    assert!(msg.contains("weight") && msg.contains("real"), "{msg}");
+}
