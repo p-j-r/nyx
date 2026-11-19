@@ -142,7 +142,7 @@ nyx.nyxengine.Commandlists --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> 
 nyx.nyxengine.Commandlists --> nyx.nyxstore <<Relationship-UmVsYXRpb25zaGlw>> : "uses store: util\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commandlists --> nyx.nyxengine.APIreference <<Relationship-UmVsYXRpb25zaGlw>> : "uses apiref\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commandlists --> nyx.nyxengine.Commands <<Relationship-UmVsYXRpb25zaGlw>> : "uses commands, engine\n<size:16>[Rust paths]</size>"
-nyx.nyxengine.Commands --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fieldexpr +8\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.Commands --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fieldexpr +9\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commands --> nyx.geom <<Relationship-UmVsYXRpb25zaGlw>> : "uses geom: model\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commands --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: contract, crate root +7\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Commands --> nyx.nyxstore <<Relationship-UmVsYXRpb25zaGlw>> : "uses store: runs, util\n<size:16>[Rust paths]</size>"

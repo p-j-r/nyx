@@ -23,12 +23,12 @@ graph TB
         style 15 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      26["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
-      style 26 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      27["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
+      style 27 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    14-. "<div>Server instructions text</div><div style='font-size: 70%'>[declared in spec]</div>" .->26
-    15-. "<div>One tool per command: catalog<br />and call</div><div style='font-size: 70%'>[declared in spec]</div>" .->26
+    14-. "<div>Server instructions text</div><div style='font-size: 70%'>[declared in spec]</div>" .->27
+    15-. "<div>One tool per command: catalog<br />and call</div><div style='font-size: 70%'>[declared in spec]</div>" .->27
 
   end```
 

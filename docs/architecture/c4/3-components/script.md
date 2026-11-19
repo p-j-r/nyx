@@ -21,23 +21,29 @@ graph TB
         style 17 fill:#85bbf0,stroke:#5d82a8,color:#000000
         18["<div style='font-weight: bold'>Type stub</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The `nyx` object written as<br />Python declarations from<br />Engine::catalog(): the static<br />check, and the file an editor<br />reads.</div>"]
         style 18 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        19["<div style='font-weight: bold'>Worker program</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The only place the Monty<br />interpreter runs: Monty's<br />worker mode over stdin and<br />stdout, with the allocator<br />that bounds its memory. A<br />script that exhausts memory<br />or the stack ends this<br />process, not the engine's.</div>"]
+        19["<div style='font-weight: bold'>Tracing of script functions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A Python function given as a<br />formula is called once with a<br />symbolic point and becomes<br />formula text (N3): the<br />prelude the worker is fed<br />(the symbolic value, the<br />formula functions, the `nyx`<br />wrapper), the names the stub<br />declares for it, and the<br />static guard that refuses a<br />branch or comparison on a<br />value of the point with its<br />line (Monty does not call<br />`__bool__` or `__lt__`).</div>"]
         style 19 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        20["<div style='font-weight: bold'>Worker program</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The only place the Monty<br />interpreter runs: Monty's<br />worker mode over stdin and<br />stdout, with the allocator<br />that bounds its memory. A<br />script that exhausts memory<br />or the stack ends this<br />process, not the engine's.</div>"]
+        style 20 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      26["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
-      style 26 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      27["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
+      style 27 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    17-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    17-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
     17-. "<div>uses stubs</div><div style='font-size: 70%'>[Rust paths]</div>" .->18
-    18-. "<div>uses engine: commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
-    17-. "<div>Frames over a pipe: the<br />script pauses at each command<br />and the host answers</div><div style='font-size: 70%'>[declared in spec]</div>" .->19
+    17-. "<div>uses trace</div><div style='font-size: 70%'>[Rust paths]</div>" .->19
+    18-. "<div>uses engine: commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    18-. "<div>uses trace</div><div style='font-size: 70%'>[Rust paths]</div>" .->19
+    19-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
+    17-. "<div>Frames over a pipe: the<br />script pauses at each command<br />and the host answers</div><div style='font-size: 70%'>[declared in spec]</div>" .->20
 
   end```
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Script host](../4-code/script/host.md) | 3 | 334 | 93, 57 | Runs a script (Python syntax, `*.nys`) through a worker process and answers each `nyx.<command>(...)` it makes with Engine::call; the limits, the clock and random policy, the path guard turned on for the run, the script kept with the runs it makes; `check` parses and type-checks without running. JSON to and from script values. |
-| [Type stub](../4-code/script/stubs.md) | 1 | 72 | 93 | The `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads. |
+| [Script host](../4-code/script/host.md) | 3 | 345 | 93, 57 | Runs a script (Python syntax, `*.nys`) through a worker process and answers each `nyx.<command>(...)` it makes with Engine::call; the limits, the clock and random policy, the path guard turned on for the run, the script kept with the runs it makes; `check` parses and type-checks without running. JSON to and from script values. |
+| [Type stub](../4-code/script/stubs.md) | 1 | 73 | 93 | The `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads. |
+| [Tracing of script functions](../4-code/script/tracing.md) | 1 | 409 | 90, 93 | A Python function given as a formula is called once with a symbolic point and becomes formula text (N3): the prelude the worker is fed (the symbolic value, the formula functions, the `nyx` wrapper), the names the stub declares for it, and the static guard that refuses a branch or comparison on a value of the point with its line (Monty does not call `__bool__` or `__lt__`). |
 | [Worker program](../4-code/script/worker.md) | 1 | 118 | 93, 86 | The only place the Monty interpreter runs: Monty's worker mode over stdin and stdout, with the allocator that bounds its memory. A script that exhausts memory or the stack ends this process, not the engine's. |

@@ -67,5 +67,6 @@ pub fn nyx_pyi(engine: &Engine) -> String {
         s.push_str(&method(&c));
     }
     s.push_str("\nnyx: _Nyx\n");
+    s.push_str(&crate::trace::stub());
     s
 }

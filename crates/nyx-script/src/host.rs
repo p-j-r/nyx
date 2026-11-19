@@ -22,7 +22,7 @@ use nyx_engine::Engine;
 use serde_json::Value;
 
 use crate::convert::{args_json, from_object, to_object};
-use crate::{find_worker, stubs, Limits, Options, Outcome};
+use crate::{find_worker, stubs, trace, Limits, Options, Outcome};
 
 /// The clock is refused, `random` is seeded, sleeping returns at once: a run gives the same numbers every time.
 fn os_policy() -> OsPolicy {
@@ -96,6 +96,8 @@ fn refuse(kind: ExcType, text: impl Into<String>) -> ResumeValue {
 }
 
 async fn drive(engine: &mut Engine, name: &str, src: &str, limits: &Limits, worker: std::path::PathBuf, execute: bool) -> Result<Outcome, String> {
+    // a branch on a value of the point in a function given as a formula (S6): refused before anything runs, with the line
+    trace::guard(name, src)?;
     let mut cfg = PoolConfig::subprocess(worker);
     cfg.min_processes = 0;
     cfg.max_processes = 1;
@@ -116,9 +118,15 @@ async fn drive(engine: &mut Engine, name: &str, src: &str, limits: &Limits, work
         }
     });
 
+    // the prelude (S6): the symbolic values and the `nyx` object that traces a function given as a formula. It makes no engine command, is not
+    // type-checked (the stub declares its names) and is a feed of its own, so the script's tracebacks keep the script's line numbers.
+    match session.feed(trace::prelude(engine), nyx_module(engine), vec![], true, &mut on_print).await.map_err(|e| explain(e, limits))? {
+        TurnEvent::Complete(_) => {}
+        _ => return Err("internal error: the script prelude paused".to_string()),
+    }
     // `execute` false: the type check is the point and the script must not run. The check happens before the first instruction; a script that
-    // passes it is stopped at its first engine command, which `check` never answers.
-    let mut event = session.feed(src, nyx_module(engine), vec![], false, &mut on_print).await.map_err(|e| explain(e, limits))?;
+    // passes it is stopped at its first engine command, which `check` never answers. The prelude bound `nyx`, so no input is given again.
+    let mut event = session.feed(src, NamedValues::new(), vec![], false, &mut on_print).await.map_err(|e| explain(e, limits))?;
     let mut calls = 0u64;
     let result = loop {
         match event {

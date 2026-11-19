@@ -1,0 +1,188 @@
+# prelude.nys -- fed to the script worker before every script (nyx_script::trace, productivity plan S6, ADR 90 N3). Not written by hand:
+# `trace::prelude` appends the functions (where, sqrt, ...) and the `nyx` object, one method per engine command, to this text.
+#
+# A script function given where a formula is expected (`nyx.integrate(expr=f, ...)`) is called ONCE with a point `p`. `p["E"]`, `p["eps_r"]`,
+# `p.x` are values of class Sym that remember the formula text they stand for; `+ - * / **`, `abs` and the functions below build the text of a
+# bigger formula. The text goes to the engine, which parses it with the one formula parser. Every operation is parenthesised and keeps its
+# operand order, so the parsed tree is the tree of the formula written by hand.
+
+_nyx_host = nyx
+_NYX_FORMULA_ARGS = ["expr", "a", "b", "fields", "weight"]
+_NYX_NO_BRANCH = "a branch or comparison on a value of the point cannot be traced: the function runs once, not at every point. Write where(cond, a, b) with the conditions lt, gt, le, ge, eq, ne, land, lor, lnot"
+_NYX_NO_NUMBER = "a value of the point is not a number here: the function runs once, not at every point. Build the formula with its operators and the functions sqrt, exp, sin, cos, where, ... of nyx scripts"
+
+
+def _nyx_t(o):
+    if isinstance(o, Sym):
+        return o.t
+    k = type(o).__name__
+    if k == "bool":
+        if o:
+            return "1"
+        return "0"
+    if k == "int" or k == "float":
+        r = repr(o)
+        if r == "inf" or r == "-inf" or r == "nan":
+            raise ValueError("a number in a traced formula must be finite, not " + r)
+        if r[0] == "-":
+            return "(" + r + ")"
+        return r
+    raise TypeError("a traced function computes with numbers and with values of the point (p[\"E\"], p.x, ...), not with a " + k)
+
+
+def _nyx_name(name):
+    if type(name).__name__ != "str" or name == "":
+        raise TypeError("a name of the point is text: p[\"E\"]")
+    if name.isidentifier():
+        return name
+    if "`" in name:
+        raise ValueError("a name of the point cannot contain a backtick")
+    return "`" + name + "`"
+
+
+def _nyx_fn(name, *args):
+    return Sym(name + "(" + ", ".join([_nyx_t(a) for a in args]) + ")")
+
+
+class Sym:
+    def __init__(self, t, parts=False):
+        self.t = t
+        if parts:
+            self.x = Sym(t + ".x")
+            self.y = Sym(t + ".y")
+            self.z = Sym(t + ".z")
+
+    def __repr__(self):
+        return self.t
+
+    def __add__(self, o):
+        return Sym("(" + self.t + " + " + _nyx_t(o) + ")")
+
+    def __radd__(self, o):
+        return Sym("(" + _nyx_t(o) + " + " + self.t + ")")
+
+    def __sub__(self, o):
+        return Sym("(" + self.t + " - " + _nyx_t(o) + ")")
+
+    def __rsub__(self, o):
+        return Sym("(" + _nyx_t(o) + " - " + self.t + ")")
+
+    def __mul__(self, o):
+        return Sym("(" + self.t + " * " + _nyx_t(o) + ")")
+
+    def __rmul__(self, o):
+        return Sym("(" + _nyx_t(o) + " * " + self.t + ")")
+
+    def __truediv__(self, o):
+        return Sym("(" + self.t + " / " + _nyx_t(o) + ")")
+
+    def __rtruediv__(self, o):
+        return Sym("(" + _nyx_t(o) + " / " + self.t + ")")
+
+    def __pow__(self, o):
+        return Sym("(" + self.t + " ^ " + _nyx_t(o) + ")")
+
+    def __rpow__(self, o):
+        return Sym("(" + _nyx_t(o) + " ^ " + self.t + ")")
+
+    def __neg__(self):
+        return Sym("(-" + self.t + ")")
+
+    def __pos__(self):
+        return self
+
+    def __abs__(self):
+        return Sym("abs(" + self.t + ")")
+
+    # what Monty calls on an instance and would otherwise answer with a number or a truth value
+    def __eq__(self, o):
+        raise TypeError(_NYX_NO_BRANCH)
+
+    def __bool__(self):
+        raise TypeError(_NYX_NO_BRANCH)
+
+    def __float__(self):
+        raise TypeError(_NYX_NO_NUMBER)
+
+    def __int__(self):
+        raise TypeError(_NYX_NO_NUMBER)
+
+    def __index__(self):
+        raise TypeError(_NYX_NO_NUMBER)
+
+    def __round__(self, n=None):
+        raise TypeError(_NYX_NO_NUMBER)
+
+    def __iter__(self):
+        raise TypeError("a value of the point cannot be iterated; a vector is p[\"E\"] with .x .y .z, or dot(a, b), norm2(a), ...")
+
+
+class _NyxPoint:
+    def __init__(self):
+        self.x = Sym("x")
+        self.y = Sym("y")
+        self.z = Sym("z")
+
+    def __getitem__(self, name):
+        return Sym(_nyx_name(name), True)
+
+
+def _nyx_trace(f):
+    try:
+        r = f(_NyxPoint())
+    except TypeError as ex:
+        m = str(ex)
+        if "positional argument" in m:
+            raise TypeError("a function given as a formula takes one argument, the point: def f(p): return abs(p[\"Ex\"]) ** 2  (" + m + ")")
+        raise
+    return _nyx_t(r)
+
+
+def trace(f):
+    """The formula text a function of the point stands for (it is called once)."""
+    return _nyx_trace(f)
+
+
+def _nyx_conv(v):
+    k = type(v).__name__
+    if k == "function":
+        return _nyx_trace(v)
+    if isinstance(v, Sym):
+        return v.t
+    if k == "list" or k == "tuple":
+        return [_nyx_conv(i) for i in v]
+    return v
+
+
+def _nyx_kw(kw):
+    out = {}
+    for k in kw:
+        if k in _NYX_FORMULA_ARGS:
+            out[k] = _nyx_conv(kw[k])
+        else:
+            out[k] = kw[k]
+    return out
+
+
+def _nyx_pos(a):
+    if len(a) == 1 and type(a[0]).__name__ == "dict":
+        return [_nyx_kw(a[0])]
+    return a
+
+
+def where(cond, a, b):
+    return _nyx_fn("where", cond, a, b)
+
+
+def _nyx_quoted(name):
+    if type(name).__name__ != "str" or "\"" in name or "'" in name:
+        raise ValueError("a material or region name is text without quotes")
+    return "\"" + name + "\""
+
+
+def material(name):
+    return Sym("material(" + _nyx_quoted(name) + ")")
+
+
+def region(name):
+    return Sym("region(" + _nyx_quoted(name) + ")")

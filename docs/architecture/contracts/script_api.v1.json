@@ -38,6 +38,68 @@
     "file": "script-<blake3, 32 hex digits>.nys"
   },
   "static_check": "names and required-ness of commands and arguments, against the stub of nyx api stubs; value types are not checked",
+  "traced_function": {
+    "branch_rule": "if, while, a if c else b, and, or, not, assert, a comparison, math.f and min/max on a value that depends on the point are refused before the script runs, with the line; write where(cond, a, b)",
+    "called": "once per command, with a symbolic point; the text it builds is the engine formula of the same words (parsed by femcore::formula)",
+    "conditions": [
+      "lt",
+      "gt",
+      "le",
+      "ge",
+      "eq",
+      "ne",
+      "land",
+      "lor",
+      "lnot"
+    ],
+    "form": "nyx.<command>(expr=f, ...) with f a def or a lambda of one argument, the point p; also trace(f) for its text",
+    "formula_arguments": [
+      "expr",
+      "a",
+      "b",
+      "fields",
+      "weight"
+    ],
+    "functions_of_one_value": [
+      "sqrt",
+      "exp",
+      "sin",
+      "cos",
+      "arg",
+      "log",
+      "log10",
+      "tan",
+      "sinh",
+      "cosh",
+      "tanh",
+      "atan",
+      "step",
+      "re",
+      "im",
+      "conj",
+      "abs2",
+      "norm",
+      "norm2"
+    ],
+    "functions_of_two_values": [
+      "atan2",
+      "minimum",
+      "maximum",
+      "dot",
+      "inner",
+      "cross"
+    ],
+    "guard_limit": "syntactic: a value the guard cannot follow (a function chosen at run time) is not seen, and then `if sym:` takes the true branch",
+    "numbers": "written with repr: finite int or float; an integer stays an integer",
+    "other": [
+      "where(cond, a, b)",
+      "material(name)",
+      "region(name)",
+      "abs(x)",
+      "+ - * / ** and unary minus"
+    ],
+    "point": "p[\"E\"] (a vector, with .x .y .z), p[\"eps_r\"], p[\"Ex\"], p[\"nx\"]: a name of a formula; p.x p.y p.z the coordinates"
+  },
   "value": "the last expression of the script, as JSON",
   "worker": {
     "argument": "subprocess",

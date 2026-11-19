@@ -3,7 +3,7 @@ host = component "Script host" "Runs a script (Python syntax, `*.nys`) through a
     properties {
         "adr" "93, 57"
         "code" "crates/nyx-script/src: convert.rs, host.rs, lib.rs"
-        "lines" "334"
+        "lines" "345"
         "codeDiagram" "4-code/script/host.md"
     }
 }
@@ -11,8 +11,16 @@ stubs = component "Type stub" "The `nyx` object written as Python declarations f
     properties {
         "adr" "93"
         "code" "crates/nyx-script/src: stubs.rs"
-        "lines" "72"
+        "lines" "73"
         "codeDiagram" "4-code/script/stubs.md"
+    }
+}
+tracing = component "Tracing of script functions" "A Python function given as a formula is called once with a symbolic point and becomes formula text (N3): the prelude the worker is fed (the symbolic value, the formula functions, the `nyx` wrapper), the names the stub declares for it, and the static guard that refuses a branch or comparison on a value of the point with its line (Monty does not call `__bool__` or `__lt__`)." "Rust modules" {
+    properties {
+        "adr" "90, 93"
+        "code" "crates/nyx-script/src: trace.rs"
+        "lines" "409"
+        "codeDiagram" "4-code/script/tracing.md"
     }
 }
 worker = component "Worker program" "The only place the Monty interpreter runs: Monty's worker mode over stdin and stdout, with the allocator that bounds its memory. A script that exhausts memory or the stack ends this process, not the engine's." "Rust modules" {

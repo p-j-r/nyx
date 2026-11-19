@@ -4,7 +4,7 @@ One page per component of every container: the files, what the component uses an
 
 * **[app](./app/README.md)**: [Window](./app/window.md), [Shell and dashboard](./app/shell.md), [Inspector tabs](./app/inspector.md), [Viewport](./app/viewport.md), [Look and widgets](./app/style.md), [Scripts and batch](./app/headless.md)
 * **[nyx-mcp](./mcp/README.md)**: [Protocol loop](./mcp/protocol.md), [Tool bridge](./mcp/tools.md)
-* **[nyx-script](./script/README.md)**: [Script host](./script/host.md), [Type stub](./script/stubs.md), [Worker program](./script/worker.md)
+* **[nyx-script](./script/README.md)**: [Script host](./script/host.md), [Type stub](./script/stubs.md), [Tracing of script functions](./script/tracing.md), [Worker program](./script/worker.md)
 * **[nyx-connect](./connect/README.md)**: [Host table](./connect/hosts.md), [Host config](./connect/config.md), [Server probe](./connect/server.md), [Report](./connect/report.md), [Command line](./connect/cli.md)
 * **[nyx-engine](./engine/README.md)**: [Commands](./engine/commands.md), [Project](./engine/project.md), [Geometry operations](./engine/geometry.md), [Job runner and queue](./engine/jobs.md), [Command lists](./engine/commandlist.md), [API reference](./engine/apiref.md), [Meshing seam](./engine/meshing.md), [Materials](./engine/materials.md), [Analyses](./engine/analyse.md), [Results files](./engine/resultsIO.md), [Store link](./engine/storeLink.md), [Registry and facade](./engine/registry.md)
 * **[nyx-physics](./physics/README.md)**: [Physics trait and registry](./physics/trait.md), [Problem envelope](./physics/envelope.md), [Descriptors and schemas](./physics/descriptors.md), [Result and frame](./physics/result.md), [Test support](./physics/testsupport.md)

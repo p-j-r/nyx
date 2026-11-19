@@ -9,6 +9,8 @@
 //! * `host`: `run` (execute a script against an engine) and `check` (parse and type-check it against the catalog without running anything)
 //! * `stubs`: the `nyx` module's type stub generated from `Engine::catalog()`: the static check and the file an editor reads
 //! * `convert`: JSON to and from script values
+//! * `trace`: a script function given as a formula is called once with a symbolic point and becomes formula text (N3, ADR 90); the prelude the
+//!   worker is fed, its stub, and the static guard against a branch on a value of the point
 //!
 //! The worker program is `nyx-script-worker` (built from this package); it has to be found next to the running program, or named by the
 //! environment variable `NYX_SCRIPT_WORKER`.
@@ -18,6 +20,7 @@ use std::path::PathBuf;
 pub mod convert;
 pub mod host;
 pub mod stubs;
+pub mod trace;
 
 /// What the host allows a script to use. The defaults are strict; a run may raise them (S4 decision).
 #[derive(Clone, Debug)]

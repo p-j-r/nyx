@@ -25,6 +25,7 @@ edge mcp.protocol -> engine.registry | Server instructions text
 [script | nyx-script | nyx_script]
 host      | Script host | lib.rs host.rs convert.rs | 93, 57 | Runs a script (Python syntax, `*.nys`) through a worker process and answers each `nyx.<command>(...)` it makes with Engine::call; the limits, the clock and random policy, the path guard turned on for the run, the script kept with the runs it makes; `check` parses and type-checks without running. JSON to and from script values.
 stubs     | Type stub | stubs.rs | 93 | The `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads.
+tracing   | Tracing of script functions | trace.rs | 90, 93 | A Python function given as a formula is called once with a symbolic point and becomes formula text (N3): the prelude the worker is fed (the symbolic value, the formula functions, the `nyx` wrapper), the names the stub declares for it, and the static guard that refuses a branch or comparison on a value of the point with its line (Monty does not call `__bool__` or `__lt__`).
 worker    | Worker program | bin/nyx-script-worker.rs | 93, 86 | The only place the Monty interpreter runs: Monty's worker mode over stdin and stdout, with the allocator that bounds its memory. A script that exhausts memory or the stack ends this process, not the engine's.
 edge script.host -> engine.commands | One engine command per script call, and the path guard
 edge script.host -> script.worker | Frames over a pipe: the script pauses at each command and the host answers

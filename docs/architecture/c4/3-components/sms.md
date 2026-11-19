@@ -14,67 +14,67 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 51 ["nyx-sms"]
-        style 51 fill:#ffffff,stroke:#205723,color:#205723
+      subgraph 52 ["nyx-sms"]
+        style 52 fill:#ffffff,stroke:#205723,color:#205723
 
-        52["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />sms: descriptors, validation,<br />solve entry.</div>"]
-        style 52 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        53["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed sms problem the<br />kernels read, decoded from<br />the envelope.</div>"]
+        53["<div style='font-weight: bold'>Physics adapter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Physics implementation of<br />sms: descriptors, validation,<br />solve entry.</div>"]
         style 53 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        54["<div style='font-weight: bold'>Solid kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Linear elastic solid<br />mechanics on P1/P2 triangles<br />and tetrahedra: static solve<br />and eigenfrequencies.</div>"]
+        54["<div style='font-weight: bold'>Typed problem</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The typed sms problem the<br />kernels read, decoded from<br />the envelope.</div>"]
         style 54 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        55["<div style='font-weight: bold'>Cross-section kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Stiffness and mass on a 2D<br />mesh with three displacement<br />components (the shared kernel<br />of the elastic cross-section<br />models).</div>"]
+        55["<div style='font-weight: bold'>Solid kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Linear elastic solid<br />mechanics on P1/P2 triangles<br />and tetrahedra: static solve<br />and eigenfrequencies.</div>"]
         style 55 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        56["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Elastic modes of a body of<br />revolution on its half-plane<br />cross-section.</div>"]
+        56["<div style='font-weight: bold'>Cross-section kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Stiffness and mass on a 2D<br />mesh with three displacement<br />components (the shared kernel<br />of the elastic cross-section<br />models).</div>"]
         style 56 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        57["<div style='font-weight: bold'>Floquet kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Eigenfrequencies of a solid<br />with Floquet-periodic<br />boundaries (phononic<br />crystals).</div>"]
+        57["<div style='font-weight: bold'>Axisymmetric kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Elastic modes of a body of<br />revolution on its half-plane<br />cross-section.</div>"]
         style 57 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        58["<div style='font-weight: bold'>Absorbing-layer kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Eigenfrequencies of elastic<br />bodies with perfectly matched<br />layers.</div>"]
+        58["<div style='font-weight: bold'>Floquet kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Eigenfrequencies of a solid<br />with Floquet-periodic<br />boundaries (phononic<br />crystals).</div>"]
         style 58 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        59["<div style='font-weight: bold'>Low-reflecting boundary</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Low-reflecting boundaries for<br />solid mechanics.</div>"]
+        59["<div style='font-weight: bold'>Absorbing-layer kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Eigenfrequencies of elastic<br />bodies with perfectly matched<br />layers.</div>"]
         style 59 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        60["<div style='font-weight: bold'>Low-reflecting boundary</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Low-reflecting boundaries for<br />solid mechanics.</div>"]
+        style 60 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      39["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
-      style 39 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      82["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 82 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      40["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
+      style 40 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      83["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 83 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    39-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->82
-    52-. "<div>uses femcore: material,<br />material::spec +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    52-. "<div>uses physics: crate root,<br />decode</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    52-. "<div>uses cross_section</div><div style='font-size: 70%'>[Rust paths]</div>" .->55
-    52-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
-    52-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
-    56-. "<div>uses femcore: fem,<br />linalg::csr +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    56-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    55-. "<div>uses femcore: fem, fields +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    55-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    55-. "<div>uses axisym</div><div style='font-size: 70%'>[Rust paths]</div>" .->56
-    55-. "<div>uses lrb</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
-    55-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
-    57-. "<div>uses femcore: linalg::csr,<br />linalg::csr::assembly +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    57-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    57-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
-    57-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
-    59-. "<div>uses femcore: fem,<br />linalg::csr +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    59-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    59-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
-    59-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
-    58-. "<div>uses femcore: fem,<br />linalg::csr +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    58-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    58-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
-    58-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
-    53-. "<div>uses femcore: props, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    53-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    53-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->52
-    54-. "<div>uses femcore: fem, fields +9</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
-    54-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->39
-    54-. "<div>uses floquet</div><div style='font-size: 70%'>[Rust paths]</div>" .->57
-    54-. "<div>uses lrb</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
-    54-. "<div>uses pml</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    54-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
+    40-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->83
+    53-. "<div>uses femcore: material,<br />material::spec +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    53-. "<div>uses physics: crate root,<br />decode</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    53-. "<div>uses cross_section</div><div style='font-size: 70%'>[Rust paths]</div>" .->56
+    53-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
+    53-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->55
+    57-. "<div>uses femcore: fem,<br />linalg::csr +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    57-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    56-. "<div>uses femcore: fem, fields +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    56-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    56-. "<div>uses axisym</div><div style='font-size: 70%'>[Rust paths]</div>" .->57
+    56-. "<div>uses lrb</div><div style='font-size: 70%'>[Rust paths]</div>" .->60
+    56-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
+    58-. "<div>uses femcore: linalg::csr,<br />linalg::csr::assembly +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    58-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    58-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
+    58-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->55
+    60-. "<div>uses femcore: fem,<br />linalg::csr +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    60-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    60-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
+    60-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->55
+    59-. "<div>uses femcore: fem,<br />linalg::csr +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    59-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    59-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
+    59-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->55
+    54-. "<div>uses femcore: props, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    54-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    54-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
+    55-. "<div>uses femcore: fem, fields +9</div><div style='font-size: 70%'>[Rust paths]</div>" .->83
+    55-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->40
+    55-. "<div>uses floquet</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
+    55-. "<div>uses lrb</div><div style='font-size: 70%'>[Rust paths]</div>" .->60
+    55-. "<div>uses pml</div><div style='font-size: 70%'>[Rust paths]</div>" .->59
+    55-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
 
   end```
 

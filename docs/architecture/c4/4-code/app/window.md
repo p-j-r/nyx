@@ -5,17 +5,17 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 5 files, 2746 lines.
+**Size:** 5 files, 2760 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 2143 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
+| `crates/app/src/app.rs` | 2155 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
 | `crates/app/src/feedback.rs` | 214 | Feedback while editing and while a result arrives (productivity plan P3, ADR 92): the project checked with the edits that are not applied yet, the size and cost of those edits from a trial mesh, and the polarization of a new result compu... |
 | `crates/app/src/main.rs` | 117 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
 | `crates/app/src/spans.rs` | 40 | Named timing spans for the frame log (productivity plan P3). `NYX_FRAME_LOG=<file>.csv` writes one row per frame; with spans, the row also says where the frame's time went (`poll=48.2;script=0.0;shell_ui=31.1`). A span is a name and the ... |
-| `crates/app/src/state.rs` | 232 | The run-time state of the window around the engine's project: the mesh on show (`Doc`) and a result on show with its plot settings (`ResultView`). The project itself, with its geometry, mesh settings and one problem per physics, is `nyx_... |
+| `crates/app/src/state.rs` | 234 | The run-time state of the window around the engine's project: the mesh on show (`Doc`) and a result on show with its plot settings (`ResultView`). The project itself, with its geometry, mesh settings and one problem per physics, is `nyx_... |
 
 ## What it uses
 
@@ -191,6 +191,7 @@ classDiagram
         +field usize
         +quantity usize
         +region usize
+        +formula String
         +lines Vec~String~
     }
   }
@@ -270,7 +271,7 @@ classDiagram
 | struct | `ViewField` | `state.rs:65` | fields: `name`, `unit`, `values` —  A field in the flat form the window reads: scalars keep their name, a vector `E` is `\|E\|`, `Ex`, `Ez`. |
 | struct | `ViewSolution` | `state.rs:73` | fields: `label`, `fields`, `disp`, `value`, `neff` —  One solution of a result in the form the window reads. |
 | struct | `ResultView` | `state.rs:113` | fields: `name`, `physics`, `result`, `sols`, `display`, `sol`, `field`, `manual_range`, `warp`, `auto_warp`, `values_cache`, `disp_cache`, ... —  One result on display, with the plot settings. |
-| struct | `ReduceForm` | `state.rs:226` | fields: `field`, `quantity`, `region`, `lines` —  What the Reduce form of the Results tab remembers: the field, the quantity (the value, its modulus or its squared modulus), the region |
+| struct | `ReduceForm` | `state.rs:226` | fields: `field`, `quantity`, `region`, `formula`, `lines` —  What the Reduce form of the Results tab remembers: the field, the quantity (the value, its modulus or its squared modulus), the region |
 | fn | `Tab::name` | `state.rs:24` | `pub fn name(self) -> &'static str` |
 | fn | `Doc::dim` | `state.rs:49` | `pub fn dim(&self) -> usize` |
 | fn | `Doc::set_model` | `state.rs:53` | `pub fn set_model(&mut self, model: Arc<MeshedModel>, source: &str)` |

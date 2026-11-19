@@ -1,0 +1,43 @@
+# traced_formulas.nys -- a Python function as a formula (productivity plan N3, ADR 90).
+#
+# Where a command takes a formula (`expr`, `a`, `b`, `fields`, `weight`) a function of one argument can be given instead of a text. nyx calls it
+# ONCE with a symbolic point `p` and sends the formula it builds to the engine, which evaluates it at every element in Rust, so the function
+# is not run per element. `p["E"]` is a vector field (`.x .y .z`), `p["eps_r"]` a material value, `p["Ex"]` a field, `p.x p.y p.z` the
+# coordinates. Use + - * / ** and abs(), the formula functions (sqrt, exp, norm2, dot, ...), and where(cond, a, b) for a condition.
+#
+# What a function cannot do: `if`, `while`, `and`, `or`, `not` or a comparison on a value of the point (the function runs once, not at every
+# point), so a condition is where(gt(p.z, 0), a, b) with lt gt le ge eq ne land lor lnot. `nyx check` refuses such a branch with its line.
+# A branch on something that is not the point (a loop bound, a constant) is fine.
+#
+# Run it from the repository root, which is the folder the script may use: nyx run docs/scripting-samples/traced_formulas.nys --workspace .
+
+nyx.project_open(path="examples/15_soi_wire.nyx.json")
+nyx.solve_run()
+
+
+def power(p):
+    e = p["E"]
+    return p["eps_r"] * (abs(e.x) ** 2 + abs(e.y) ** 2 + abs(e.z) ** 2)
+
+
+# a helper that is called with the point is traced too
+def above_the_oxide(p):
+    return where(gt(p.z, 0), power(p), 0)
+
+
+# the plan's confinement factor, from a function
+core = nyx.integrate(expr=power, physics="ems", region="Si")["value"]
+total = nyx.integrate(expr=power, physics="ems")["value"]
+print("energy confinement in Si: %.4f" % (core / total))
+
+# a condition inside, and a lambda for a one-liner
+above = nyx.integrate(expr=above_the_oxide, physics="ems")["value"]
+print("power above z = 0: %.4f" % (above / total))
+long_part = nyx.integrate(expr=lambda p: p["eps_r"] * abs2(p["Ey"]), physics="ems")["value"]
+print("longitudinal fraction: %.4f" % (long_part / total))
+
+# the weight of a confinement factor is a function too
+print("same, by confinement: %.4f" % nyx.confinement(fields=["Ex", "Ey", "Ez"], weight=lambda p: p["eps_r"], region="Si", physics="ems")["fraction"])
+
+# the formula text a function stands for: send it as a string, or save it
+print(trace(power))

@@ -3,6 +3,7 @@
 //! do that only together with a line in `docs/architecture/contracts/VERSIONS.md`.
 
 use nyx_engine::path_guard::PATH_ARGS;
+use nyx_script::trace::{CONDS, FORMULA_ARGS, FUNCS_1, FUNCS_2};
 use nyx_script::Limits;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -32,6 +33,19 @@ fn current() -> Value {
         "files": "open, pathlib and os raise PermissionError",
         "run_record": { "artifact_kind": "script", "file": "script-<blake3, 32 hex digits>.nys" },
         "worker": { "program": "nyx-script-worker", "environment": "NYX_SCRIPT_WORKER", "argument": "subprocess" },
+        "traced_function": {
+            "form": "nyx.<command>(expr=f, ...) with f a def or a lambda of one argument, the point p; also trace(f) for its text",
+            "formula_arguments": FORMULA_ARGS,
+            "point": "p[\"E\"] (a vector, with .x .y .z), p[\"eps_r\"], p[\"Ex\"], p[\"nx\"]: a name of a formula; p.x p.y p.z the coordinates",
+            "functions_of_one_value": FUNCS_1,
+            "functions_of_two_values": FUNCS_2.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            "conditions": CONDS.iter().map(|(n, _)| *n).chain(["lnot"]).collect::<Vec<_>>(),
+            "other": ["where(cond, a, b)", "material(name)", "region(name)", "abs(x)", "+ - * / ** and unary minus"],
+            "called": "once per command, with a symbolic point; the text it builds is the engine formula of the same words (parsed by femcore::formula)",
+            "branch_rule": "if, while, a if c else b, and, or, not, assert, a comparison, math.f and min/max on a value that depends on the point are refused before the script runs, with the line; write where(cond, a, b)",
+            "guard_limit": "syntactic: a value the guard cannot follow (a function chosen at run time) is not seen, and then `if sym:` takes the true branch",
+            "numbers": "written with repr: finite int or float; an integer stays an integer",
+        },
     })
 }
 

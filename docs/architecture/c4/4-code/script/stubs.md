@@ -5,19 +5,20 @@ C4 level 4 (code) of the component **Type stub** (`script.stubs`) in the contain
 > The `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads.
 
 **Decisions:** [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md)  
-**Size:** 1 file, 72 lines.
+**Size:** 1 file, 73 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-script/src/stubs.rs` | 72 | The type stub of the `nyx` module (S4): `Engine::catalog()` written as Python declarations. Monty type-checks a script against it before the script runs, so a misspelled command, a misspelled or missing argument fails in milliseconds wit... |
+| `crates/nyx-script/src/stubs.rs` | 73 | The type stub of the `nyx` module (S4): `Engine::catalog()` written as Python declarations. Monty type-checks a script against it before the script runs, so a misspelled command, a misspelled or missing argument fails in milliseconds wit... |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | commands, engine | CommandDesc, Engine |
+| [Tracing of script functions](./tracing.md) | trace | stub |
 
 ## Used by
 

@@ -4,7 +4,7 @@ One page per component, C4 level 4. [Component view](../../3-components/engine.m
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Commands](./commands.md) | 6 | 3446 | 88 | 14 |
+| [Commands](./commands.md) | 6 | 3808 | 88 | 14 |
 | [Project](./project.md) | 1 | 197 | 13 | 3 |
 | [Geometry operations](./geometry.md) | 2 | 730 | 23 | 4 |
 | [Job runner and queue](./jobs.md) | 9 | 2415 | 93 | 23 |
