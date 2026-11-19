@@ -34,8 +34,9 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [ems: Complex-mode kernel](../ems/modescx.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Optical mode sets](../ems/optical.md) | frame | FieldFrame |
 | [engine: Analyses](../engine/analyse.md) | result | SolveResult |
-| [engine: Commands](../engine/commands.md) | result | SolveResult |
-| [engine: Job runner](../engine/jobs.md) | result | Scalar, SolveResult |
+| [engine: Commands](../engine/commands.md) | result | Solution, SolveResult |
+| [engine: Job runner and queue](../engine/jobs.md) | result | Scalar, SolveResult |
+| [engine: Meshing seam](../engine/meshing.md) | result | SolveResult |
 | [engine: Results files](../engine/resultsIO.md) | result | CellField, Field, Scalar, Solution, SolveResult |
 | [engine: Store link](../engine/storeLink.md) | result | Scalar, SolveResult |
 | [Problem envelope](./envelope.md) | result | SolveResult |

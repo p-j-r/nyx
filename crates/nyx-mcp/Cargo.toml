@@ -3,7 +3,7 @@ name = "nyx-mcp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Model Context Protocol server (stdio) for nyx: every tool is one command of the nyx engine, so a host can do everything the window does"
+description = "Model Context Protocol server (stdio) for nyx: four script tools (script_run, script_wait, script_check, api) over one script kernel, so a host writes Python that calls the engine commands and only what it prints comes back"
 
 [[bin]]
 name = "nyx-mcp"
@@ -11,4 +11,5 @@ path = "src/main.rs"
 
 [dependencies]
 nyx-engine = { path = "../nyx-engine" }
+nyx-script = { path = "../nyx-script" }
 serde_json = { version = "1", features = ["float_roundtrip"] }

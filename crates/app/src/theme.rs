@@ -1,23 +1,11 @@
-//! The nyx look: the brand palette, fonts and the egui visuals. Light by default, dark on request; every colour of the shell comes from here.
-//!
-//! Brand: amber #FFBD59, plum #820C4F, shadow #531F55, ink #24102A, surface #F7F6F7, line #E6E4E6. Body text is Inter, numbers JetBrains Mono and
-//! titles EB Garamond italic when they are installed (next to the executable in `fonts/`, or on the system); otherwise Segoe UI, Cascadia/Consolas and
-//! Georgia italic are used, and finally egui's own fonts.
+//! The nyx look: every colour of the shell comes from `tokens.rs` (ADR 88) through the functions here, in a light and a dark look, both installed
+//! once (`apply_mode`) so a switch of the theme only changes which one is active. Body text is Inter, numbers JetBrains Mono and titles EB Garamond
+//! italic when they are installed (next to the executable in `fonts/`, or on the system); otherwise Segoe UI, Cascadia/Consolas and Georgia italic
+//! are used, and finally egui's own fonts.
 
-use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, TextStyle};
+use crate::tokens::{self, Mode, Pair, Rgb};
+use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Theme, Visuals};
 use std::sync::Arc;
-
-pub const AMBER: Color32 = Color32::from_rgb(0xFF, 0xBD, 0x59);
-pub const PLUM: Color32 = Color32::from_rgb(0x82, 0x0C, 0x4F);
-pub const INK: Color32 = Color32::from_rgb(0x24, 0x10, 0x2A);
-pub const SURFACE: Color32 = Color32::from_rgb(0xF7, 0xF6, 0xF7);
-pub const LINE: Color32 = Color32::from_rgb(0xE6, 0xE4, 0xE6);
-/// derived tints
-pub const PLUM_TINT: Color32 = Color32::from_rgb(0xF2, 0xE6, 0xEE);
-pub const AMBER_TINT: Color32 = Color32::from_rgb(0xFF, 0xF1, 0xDC);
-pub const MUTED: Color32 = Color32::from_rgb(0x6E, 0x62, 0x73);
-pub const GREEN: Color32 = Color32::from_rgb(0x2E, 0x7D, 0x52);
-pub const RED: Color32 = Color32::from_rgb(0xB4, 0x2B, 0x2B);
 
 /// The serif italic family of page titles.
 pub fn title_family() -> FontFamily {
@@ -28,81 +16,257 @@ pub fn title(size: f32) -> FontId {
     FontId::new(size, title_family())
 }
 
+/// A token colour as an egui colour.
+pub fn rgb(c: Rgb) -> Color32 {
+    Color32::from_rgb(c[0], c[1], c[2])
+}
+
 /// True when the colours are the dark ones (`apply_mode`).
 pub fn is_dark(ctx: &egui::Context) -> bool {
     ctx.global_style().visuals.dark_mode
 }
 
-/// Colours that depend on the mode: (page, card, line, text, muted text).
-pub fn page(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0x17, 0x0E, 0x1B) } else { SURFACE }
-}
-pub fn card(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0x21, 0x15, 0x27) } else { Color32::WHITE }
-}
-pub fn line(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0x3A, 0x2B, 0x42) } else { LINE }
-}
-pub fn text(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0xF1, 0xEA, 0xF3) } else { INK }
-}
-pub fn muted(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0xA8, 0x9B, 0xAD) } else { MUTED }
-}
-pub fn accent(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0xD9, 0x6A, 0xA4) } else { PLUM }
-}
-pub fn tint(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0x3A, 0x1B, 0x3B) } else { PLUM_TINT }
-}
-pub fn warm(ctx: &egui::Context) -> Color32 {
-    if is_dark(ctx) { Color32::from_rgb(0x3D, 0x2D, 0x1A) } else { AMBER_TINT }
+pub fn mode(ctx: &egui::Context) -> Mode {
+    if is_dark(ctx) { Mode::Dark } else { Mode::Light }
 }
 
-/// Light visuals with the brand palette (what tests and the first frame use).
+/// The value of a token in the look that is active.
+pub fn role(ctx: &egui::Context, p: Pair) -> Color32 {
+    rgb(p.get(mode(ctx)))
+}
+
+pub fn page(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::PAGE)
+}
+pub fn card(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::CARD)
+}
+/// hover and pressed neutral fills, popups, chips
+pub fn raised(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::RAISED)
+}
+/// Dividers and card outlines. Never the edge of a control: that is `edge`.
+pub fn line(ctx: &egui::Context) -> Color32 {
+    if look(ctx).high_contrast { edge(ctx) } else { role(ctx, tokens::SEPARATOR) }
+}
+/// The edge of buttons, fields and checkboxes (3:1 against the page and the card).
+pub fn edge(ctx: &egui::Context) -> Color32 {
+    role(ctx, if look(ctx).high_contrast { tokens::CONTROL_EDGE_HIGH } else { tokens::CONTROL_EDGE })
+}
+pub fn text(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::TEXT)
+}
+pub fn muted(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::MUTED)
+}
+pub fn accent(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::ACCENT)
+}
+/// Text on an accent fill: white on the plum, ink on the dark pink.
+pub fn on_accent(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::ON_ACCENT)
+}
+pub fn tint(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::TINT)
+}
+/// Amber: time and attention (running, queued, stale) and nothing else.
+pub fn activity(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::ACTIVITY)
+}
+pub fn on_activity(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::ON_ACTIVITY)
+}
+/// The activity colour as text (on `warm`).
+pub fn activity_text(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::ACTIVITY_TEXT)
+}
+/// Background of the busy chip and the stale band.
+pub fn warm(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::ACTIVITY_TINT)
+}
+pub fn success(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::SUCCESS)
+}
+pub fn danger(ctx: &egui::Context) -> Color32 {
+    role(ctx, tokens::DANGER)
+}
+/// The black scrim behind a sheet and under a shadow (a veil, not a palette colour).
+pub fn scrim(alpha: u8) -> Color32 {
+    Color32::from_black_alpha(alpha)
+}
+
+/// The settings of the look that are not the light or dark colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Look {
+    pub dark: bool,
+    /// control edges at 4.5:1 and 1.5 px, separators as strong as edges
+    pub high_contrast: bool,
+    /// no easing, no sliding progress block
+    pub reduce_motion: bool,
+}
+
+fn look_id() -> egui::Id {
+    egui::Id::unique("nyx-look")
+}
+
+/// The look that was installed last (`apply_look`).
+pub fn look(ctx: &egui::Context) -> Look {
+    ctx.data(|d| d.get_temp::<Look>(look_id())).unwrap_or_default()
+}
+
+pub fn reduce_motion(ctx: &egui::Context) -> bool {
+    look(ctx).reduce_motion
+}
+
+/// The mode of the canvas that is drawn: dark by default also in a light window, the mode of the look when `follow_theme`.
+pub fn canvas_mode(ctx: &egui::Context, follow_theme: bool) -> Mode {
+    if follow_theme { mode(ctx) } else { Mode::Dark }
+}
+
+/// Everything drawn on the canvas, in the colours of the canvas and not of the window (a light window can hold a dark canvas): the viewport and the
+/// plots read their background, ink, chips and region colours from here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ink {
+    pub mode: Mode,
+    pub bg: Color32,
+    pub text: Color32,
+    pub muted: Color32,
+    /// background of a region number chip (the canvas colour, so the chip does not depend on the region it sits on)
+    pub chip: Color32,
+    /// the outline of the selected region and the hatch lines
+    pub line: Color32,
+    /// mesh edges: the text colour at low opacity, so they show on either canvas
+    pub edge: Color32,
+}
+
+pub fn ink(ctx: &egui::Context, follow_theme: bool) -> Ink {
+    ink_of(canvas_mode(ctx, follow_theme))
+}
+
+pub fn ink_of(m: Mode) -> Ink {
+    let (text, edge) = (rgb(tokens::TEXT.get(m)), rgb(tokens::TEXT.get(m)));
+    Ink { mode: m, bg: rgb(tokens::CANVAS.get(m)), text, muted: rgb(tokens::MUTED.get(m)), chip: rgb(tokens::CHIP.get(m)), line: text, edge: with_alpha(edge, 70) }
+}
+
+/// A colour with the given opacity (0 to 255), not premultiplied.
+pub fn with_alpha(c: Color32, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+}
+
+/// True when the system asks for High Contrast: read from Windows (`SPI_GETHIGHCONTRAST`); other platforms have no such flag we read yet.
+pub fn system_high_contrast() -> bool {
+    platform_high_contrast()
+}
+
+#[cfg(not(windows))]
+fn platform_high_contrast() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn platform_high_contrast() -> bool {
+    {
+        #[repr(C)]
+        struct HighContrastW {
+            size: u32,
+            flags: u32,
+            default_scheme: *mut u16,
+        }
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn SystemParametersInfoW(action: u32, param: u32, data: *mut HighContrastW, win_ini: u32) -> i32;
+        }
+        const SPI_GETHIGHCONTRAST: u32 = 0x0042;
+        const HCF_HIGHCONTRASTON: u32 = 0x0000_0001;
+        let mut hc = HighContrastW { size: std::mem::size_of::<HighContrastW>() as u32, flags: 0, default_scheme: std::ptr::null_mut() };
+        // SAFETY: `hc` is a valid HIGHCONTRASTW with its size set; the call only writes into it.
+        let ok = unsafe { SystemParametersInfoW(SPI_GETHIGHCONTRAST, hc.size, &mut hc, 0) };
+        ok != 0 && hc.flags & HCF_HIGHCONTRASTON != 0
+    }
+}
+
+/// The High contrast setting ("auto", "standard", "high") as a yes or no.
+pub fn resolve_contrast(setting: &str) -> bool {
+    match setting {
+        "high" => true,
+        "standard" => false,
+        _ => system_high_contrast(),
+    }
+}
+
+/// Light visuals (what tests and the first frame use).
 pub fn apply(ctx: &egui::Context) {
     apply_mode(ctx, false);
 }
 
-pub fn apply_mode(ctx: &egui::Context, dark: bool) {
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
-    let (page, card, line, text, accent) = if dark {
-        (Color32::from_rgb(0x17, 0x0E, 0x1B), Color32::from_rgb(0x21, 0x15, 0x27), Color32::from_rgb(0x3A, 0x2B, 0x42), Color32::from_rgb(0xF1, 0xEA, 0xF3), Color32::from_rgb(0xD9, 0x6A, 0xA4))
-    } else {
-        (SURFACE, Color32::WHITE, LINE, INK, PLUM)
-    };
+/// The full `Visuals` of one look. Neutral fills come from the tokens, the focus ring is the 2 px accent stroke of `widgets.active` (egui draws
+/// a focused widget with the active visuals), every control has a 3:1 edge and dividers use the separator colour only.
+fn build_visuals(m: Mode, high: bool) -> Visuals {
+    let g = |p: Pair| rgb(p.get(m));
+    let mut v = if m == Mode::Dark { Visuals::dark() } else { Visuals::light() };
+    let edge_role = if high { tokens::CONTROL_EDGE_HIGH } else { tokens::CONTROL_EDGE };
+    let (page, card, raised, line, edge, text, accent, tint) = (g(tokens::PAGE), g(tokens::CARD), g(tokens::RAISED), if high { g(edge_role) } else { g(tokens::SEPARATOR) }, g(edge_role), g(tokens::TEXT), g(tokens::ACCENT), g(tokens::TINT));
     v.panel_fill = page;
     v.window_fill = card;
-    v.extreme_bg_color = if dark { Color32::from_rgb(0x10, 0x09, 0x13) } else { Color32::WHITE };
-    v.faint_bg_color = if dark { Color32::from_rgb(0x1C, 0x12, 0x21) } else { Color32::from_rgb(0xFB, 0xFA, 0xFB) };
+    v.extreme_bg_color = card;
+    v.faint_bg_color = page.lerp_to_gamma(raised, 0.5);
     v.override_text_color = Some(text);
-    v.selection.bg_fill = if dark { Color32::from_rgb(0x6B, 0x25, 0x57) } else { Color32::from_rgb(0xE9, 0xCF, 0xDF) };
-    v.selection.stroke = egui::Stroke::new(1.0, accent);
+    v.selection.bg_fill = card.lerp_to_gamma(accent, 0.30);
+    v.selection.stroke = Stroke::new(1.0, accent);
     v.hyperlink_color = accent;
-    v.window_stroke = egui::Stroke::new(1.0, line);
+    v.warn_fg_color = g(tokens::ACTIVITY_TEXT);
+    v.error_fg_color = g(tokens::DANGER);
+    v.window_stroke = Stroke::new(1.0, line);
     v.window_corner_radius = CornerRadius::same(14);
     let r = CornerRadius::same(8);
     for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
         w.corner_radius = r;
+        w.fg_stroke = Stroke::new(1.0, text);
     }
-    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, line);
+    v.widgets.noninteractive.bg_fill = page;
+    v.widgets.noninteractive.weak_bg_fill = page;
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, line);
     v.widgets.inactive.bg_fill = card;
     v.widgets.inactive.weak_bg_fill = card;
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, line);
-    v.widgets.hovered.weak_bg_fill = if dark { Color32::from_rgb(0x30, 0x20, 0x38) } else { PLUM_TINT };
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent);
-    v.widgets.active.weak_bg_fill = if dark { Color32::from_rgb(0x42, 0x28, 0x4A) } else { Color32::from_rgb(0xE9, 0xCF, 0xDF) };
-    ctx.set_visuals(v);
-    let mut style = (*ctx.global_style()).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(12.0, 5.0);
-    style.spacing.interact_size.y = 26.0;
-    style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
-    style.text_styles.insert(TextStyle::Button, FontId::new(14.0, FontFamily::Proportional));
-    style.text_styles.insert(TextStyle::Heading, FontId::new(17.0, FontFamily::Proportional));
-    style.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
-    style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
-    ctx.set_global_style(style);
+    v.widgets.inactive.bg_stroke = Stroke::new(if high { 1.5 } else { 1.0 }, edge);
+    v.widgets.hovered.bg_fill = raised;
+    v.widgets.hovered.weak_bg_fill = raised;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent);
+    v.widgets.active.bg_fill = tint;
+    v.widgets.active.weak_bg_fill = tint;
+    v.widgets.active.bg_stroke = Stroke::new(2.0, accent);
+    v.widgets.open.bg_fill = raised;
+    v.widgets.open.weak_bg_fill = raised;
+    v.widgets.open.bg_stroke = Stroke::new(1.0, edge);
+    v
+}
+
+/// Light or dark with the other options of the look as they were last set (`apply_look`).
+pub fn apply_mode(ctx: &egui::Context, dark: bool) {
+    apply_look(ctx, Look { dark, ..look(ctx) });
+}
+
+/// Installs the light and the dark look and makes `look.dark` the active one. Both are installed every time (it is cheap) so nothing depends on
+/// which was installed first. The window decides light or dark itself (Settings: follow the system, light, dark) and pins the theme here, so egui
+/// never switches on its own.
+pub fn apply_look(ctx: &egui::Context, look: Look) {
+    ctx.data_mut(|d| d.insert_temp(look_id(), look));
+    ctx.set_visuals_of(Theme::Light, build_visuals(Mode::Light, look.high_contrast));
+    ctx.set_visuals_of(Theme::Dark, build_visuals(Mode::Dark, look.high_contrast));
+    let (dark, motion) = (look.dark, look.reduce_motion);
+    // spacing and fonts belong to the style of each theme: set them on both, or a switch of theme would lose them
+    ctx.all_styles_mut(|style| {
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(12.0, 5.0);
+        style.spacing.interact_size.y = 28.0;
+        style.animation_time = if motion { 0.0 } else { 1.0 / 12.0 };
+        style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Button, FontId::new(14.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Heading, FontId::new(18.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
+    });
+    ctx.set_theme(if dark { Theme::Dark } else { Theme::Light });
 }
 
 fn first_font(paths: &[&str]) -> Option<Vec<u8>> {

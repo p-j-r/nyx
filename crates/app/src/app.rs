@@ -15,7 +15,7 @@ use nyx_connect::{Env, HostInfo, Status};
 use nyx_engine::facade::geom::model::FeatureList;
 use nyx_engine::facade::physics::SolveResult;
 use nyx_engine::facade::Progress;
-use nyx_engine::{Engine, MeshSettings};
+use nyx_engine::{Engine, MeshSettings, QueueOpts};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -41,13 +41,27 @@ pub enum Queued {
 pub enum JobKind {
     Mesh,
     Solve,
+    /// the two solves of a mesh convergence check
+    Convergence,
+    /// reading a results file, meshing its project again and checking the mesh (the draft workflow is made when it ends)
+    Open,
+}
+
+/// A job of this window that waits in the engine's queue behind the running one (ADR 87).
+pub struct WinJob {
+    pub id: u64,
+    pub kind: JobKind,
+    pub label: String,
+    pub cancellable: bool,
 }
 
 /// A message from a helper thread (the optional Python script) to the window.
 pub enum Msg {
     Script(Result<String, String>),
-    /// the answer of a convergence check run on its own thread
-    Convergence(Result<Value, String>),
+    /// the trial mesh of an edit (the number in the tuple is the edit it was made for, `Feedback::generation`)
+    Size(Result<nyx_engine::preview::SizePreview, String>),
+    /// the polarization of a result, with the result it was computed from
+    Polarization { physics: String, result: Arc<SolveResult>, analysis: Result<nyx_engine::analysis::ModeAnalysis, String> },
 }
 
 pub struct App {
@@ -58,12 +72,19 @@ pub struct App {
     pub results: Vec<ResultView>,
     pub current: Option<usize>,
     pub show_results: bool,
+    /// the Reduce form of the Results tab (integrals, extremes and fractions of the field on show: the engine commands of ADR 90)
+    pub reduce: crate::state::ReduceForm,
     pub tx: Sender<(u64, Msg)>,
     pub rx: Receiver<(u64, Msg)>,
     pub busy: Option<(String, Instant)>,
     /// the running engine job: its number, its progress/cancel handle and whether it can be cancelled
     pub job: Option<(u64, Arc<Progress>, bool)>,
     pub job_kind: Option<JobKind>,
+    /// solves and convergence checks asked for while another job runs: they wait in the engine's queue in this order and become the running job
+    /// one after the other
+    pub waiting: Vec<WinJob>,
+    /// the Queue panel is open
+    pub show_queue: bool,
     /// scripted runs: cancel the running job at this time (`cancel_after SECONDS`)
     pub cancel_at: Option<Instant>,
     /// a mesh build or file open asked for while another job was running; it starts when that job is done
@@ -98,12 +119,23 @@ pub struct App {
     pub script_output: Option<String>,
     pub script: VecDeque<String>,
     pub settle: u32,
+    /// a script with `wait off` carries on while a job runs (to shoot a running job and the queue); by default it waits for the job
+    pub script_free: bool,
+    /// the sweep started from the window, if any (sweepui.rs)
+    pub sweep: Option<crate::sweepui::Active>,
+    /// colour-vision simulation applied to the screenshots of a script (`cvd protan|deutan|tritan|none`)
+    pub shot_cvd: Option<crate::cvd::Kind>,
     pub shot_pending: Arc<AtomicBool>,
     pub shell: crate::shell::Shell,
     pub colormap: Colormap,
     /// the last convergence check: its answer, whether one is running, and the settings of the next
     pub convergence: Option<Value>,
-    pub convergence_running: bool,
+    /// the validated state of a physics as the engine last said it (the plot asks every frame; the state changes only with a solve, a check or an edit)
+    pub validated_cache: std::cell::RefCell<Option<(std::time::Instant, String, nyx_engine::validated::Validated)>>,
+    /// the results files being written on engine jobs (job id, path): they do not make the window busy, a failure is shown when they end
+    pub exports: HashMap<u64, String>,
+    /// the title of the results file being opened on a job, `Some` from the request until the draft workflow is made
+    pub opening: Option<String>,
     pub conv_factor: f64,
     pub conv_tol: f64,
     /// the `nyx-mcp` program the Connect menu registers with Claude (found at start, or picked by the user)
@@ -112,6 +144,10 @@ pub struct App {
     pub connect_status: Vec<HostInfo>,
     pub connect_note: Option<String>,
     pub ctx: egui::Context,
+    /// the problem and the size of the edits in the Geometry tab, and what a trial mesh said (`feedback.rs`)
+    pub feedback: crate::feedback::Feedback,
+    /// work that follows a solve, one piece per frame (`shell::Deferred`)
+    pub deferred: VecDeque<crate::shell::Deferred>,
 }
 
 impl App {
@@ -135,11 +171,14 @@ impl App {
             results: vec![],
             current: None,
             show_results: false,
+            reduce: Default::default(),
             tx,
             rx,
             busy: None,
             job: None,
             job_kind: None,
+            waiting: vec![],
+            show_queue: false,
             cancel_at: None,
             queued: None,
             status: "Ready".into(),
@@ -152,6 +191,8 @@ impl App {
             geometry_dirty: false,
             geom_edit: FeatureList::new(2),
             mesh_edit: MeshSettings::default(),
+            feedback: Default::default(),
+            deferred: VecDeque::new(),
             geom_ui: Default::default(),
             rule_errors: HashMap::new(),
             bc_labels: vec![],
@@ -163,11 +204,16 @@ impl App {
             script_output: None,
             script: VecDeque::new(),
             settle: 6,
+            script_free: false,
+            sweep: None,
+            shot_cvd: None,
             shot_pending: Arc::new(AtomicBool::new(false)),
             shell: crate::shell::Shell::detached(),
             colormap: Colormap::Viridis,
             convergence: None,
-            convergence_running: false,
+            validated_cache: std::cell::RefCell::new(None),
+            exports: HashMap::new(),
+            opening: None,
             conv_factor: 0.6,
             conv_tol: 1e-3,
             mcp_server: nyx_connect::find_server(),
@@ -175,6 +221,7 @@ impl App {
             connect_note: None,
             ctx,
         };
+        app.engine.set_owner("gui"); // a person's requests run before an agent's (ADR 87)
         app.refresh_connect();
         let first = examples::list().into_iter().next();
         let started = match first {
@@ -217,6 +264,7 @@ impl App {
     pub fn adopt(&mut self) {
         self.geom_edit = self.engine.project().geometry.clone();
         self.mesh_edit = self.engine.project().mesh.clone();
+        self.feedback.reset();
         self.geometry_dirty = false;
         self.picking = None;
         self.picked.clear();
@@ -225,6 +273,18 @@ impl App {
 
     /// Hands the geometry and mesh settings being edited to the engine. False (and an error shown) when the engine refuses them.
     pub fn push_edits(&mut self) -> bool {
+        // both edits are checked before either is applied, so a mesh edit that is refused cannot leave the geometry edit applied (a half-pushed
+        // project); each command checks its own argument again when it runs
+        if self.geom_edit != self.engine.project().geometry {
+            if let Err(e) = self.geom_edit.validate() {
+                self.set_error(format!("geometry: {e}"));
+                return false;
+            }
+        }
+        if self.mesh_edit != self.engine.project().mesh && !(self.mesh_edit.h > 0.0 && self.mesh_edit.h.is_finite()) {
+            self.set_error("mesh: the element size must be a positive finite number");
+            return false;
+        }
         if self.geom_edit != self.engine.project().geometry {
             let g = serde_json::to_value(&self.geom_edit).unwrap_or(Value::Null);
             if self.cmd("set_geometry", json!({ "geometry": g })).is_none() {
@@ -252,12 +312,45 @@ impl App {
         self.error = Some(e);
     }
 
-    fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool) {
-        let progress = self.engine.jobs().progress(id).unwrap_or_else(Progress::new);
-        self.busy = Some((label, Instant::now()));
-        self.job = Some((id, progress, cancellable));
-        self.job_kind = Some(kind);
+    /// A job was submitted to the engine. With nothing running it is the running job; otherwise it waits in the queue behind it.
+    pub(crate) fn started(&mut self, id: u64, kind: JobKind, label: String, cancellable: bool) {
+        let job = WinJob { id, kind, label, cancellable };
+        if self.job.is_some() {
+            self.status = format!("{} is queued behind the running job ({} waiting)", job.label, self.waiting.len() + 1);
+            self.error = None;
+            self.waiting.push(job);
+        } else {
+            self.make_front(job);
+        }
+    }
+
+    /// `job` is the running job: the busy label, the progress handle and the run it will record.
+    fn make_front(&mut self, job: WinJob) {
+        let progress = self.engine.jobs().progress(job.id).unwrap_or_else(Progress::new);
+        self.busy = Some((job.label, Instant::now()));
+        self.job = Some((job.id, progress, job.cancellable));
+        self.job_kind = Some(job.kind);
         self.error = None;
+    }
+
+    /// The next waiting job becomes the running one (the engine started it by itself when the lane freed).
+    fn promote_waiting(&mut self) {
+        if self.job.is_none() {
+            // a job held in the queue does not start, so it is not the running one until it is released
+            let held = |id: u64| self.engine.jobs().info(id).is_some_and(|i| i.held);
+            if let Some(i) = self.waiting.iter().position(|w| !held(w.id)) {
+                let next = self.waiting.remove(i);
+                self.make_front(next);
+            }
+        }
+    }
+
+    /// Cancels a job that waits in the queue (it never runs).
+    pub fn cancel_waiting(&mut self, id: u64) {
+        if self.engine.jobs().cancel(id) {
+            self.waiting.retain(|w| w.id != id);
+            self.status = "A queued job was cancelled before it started".into();
+        }
     }
 
     /// Asks the running solve to stop (it does so at its next check; a factorisation in progress has to finish first).
@@ -265,23 +358,116 @@ impl App {
     /// arrives as a message and is shown in the Study tab.
     pub fn check_convergence(&mut self) {
         let Some(active) = self.active() else { return };
-        if self.convergence_running || !self.push_edits() {
+        if self.refuse_unless_queueable() || !self.push_edits() {
             return;
         }
-        let (job, factor, tol, tx, ctx) = (self.engine.convergence_job(), self.conv_factor, self.conv_tol, self.tx.clone(), self.ctx.clone());
-        self.convergence_running = true;
-        self.convergence = None;
-        std::thread::spawn(move || {
-            let r = job.run(&active, factor, Some(tol)).map_err(|e| e.to_string());
-            let _ = tx.send((0, Msg::Convergence(r)));
-            ctx.request_repaint();
+        // an engine job: it shows in the job list, reports its two solves as stages and can be cancelled; behind a running job it waits in the
+        // queue and replaces a check that has not started
+        let opts = QueueOpts { supersede: true, ..Default::default() };
+        match self.engine.start_convergence_with(&active, self.conv_factor, Some(self.conv_tol), &opts) {
+            Ok(id) => {
+                self.waiting.retain(|w| w.kind != JobKind::Convergence);
+                self.convergence = None;
+                self.started(id, JobKind::Convergence, "Checking convergence".into(), true);
+            }
+            Err(e) => self.set_error(format!("convergence: {e}")),
+        }
+    }
+
+    /// Whether a Compute can be asked for now: not while a results file is opened (it replaces the project), and in a workspace only when nothing
+    /// runs (each Compute there is one run record and the page is locked while it runs).
+    pub fn can_queue_compute(&self) -> bool {
+        self.job_kind != Some(JobKind::Open) && (!self.shell.active() || self.busy.is_none())
+    }
+
+    /// True (and a message in the status bar) when a solve or a check cannot be submitted now: while a results file is being opened, which
+    /// replaces the project the request would have been made for. Behind any other job the request waits in the queue.
+    fn refuse_unless_queueable(&mut self) -> bool {
+        if self.job_kind == Some(JobKind::Open) {
+            self.status = "Opening a results file: it replaces the project; wait for it to finish or cancel it".into();
+            return true;
+        }
+        false
+    }
+
+    /// True while a mesh convergence check runs.
+    pub fn convergence_running(&self) -> bool {
+        self.job_kind == Some(JobKind::Convergence)
+    }
+
+    /// Why the result at `i` is not up to date, in words, or `None` when it is current (productivity plan P1, ADR 84). It is stale when the engine
+    /// says what it was solved from has changed (the problem key of its physics, so an edit of another physics does not count), when a newer result
+    /// of the physics replaced it, or when the Geometry or Mesh tab holds edits that were not applied to the engine yet.
+    pub fn stale_reason(&self, i: usize) -> Option<&'static str> {
+        let rv = self.results.get(i)?;
+        if let Some(id) = &rv.physics {
+            match self.engine.result(id) {
+                None => return Some("this result is no longer the engine's"),
+                Some((r, stale)) => {
+                    if !Arc::ptr_eq(r, &rv.result) {
+                        return Some("a newer result of this physics replaced it");
+                    }
+                    if stale {
+                        return Some("the model changed since this solve");
+                    }
+                }
+            }
+        }
+        if self.geom_edit != self.engine.project().geometry || self.mesh_edit != self.engine.project().mesh {
+            return Some("Geometry or Mesh edits are not applied yet");
+        }
+        None
+    }
+
+    /// Diagnostics only (productivity plan P0): when `NYX_FRAME_LOG` names a file ending in `.csv`, appends one row per frame: wall time of the
+    /// frame since the previous row, our layout and drawing time, the viewport time, and what the engine is doing (job kind, stage, seconds in
+    /// the stage and in the job). Nothing is written, and nothing is read from the engine, when the variable is unset or is not such a path.
+    fn frame_csv(&self, ui_ms: f64, viewport_ms: f64) {
+        use std::io::Write;
+        use std::sync::{Mutex, OnceLock};
+        static LOG: OnceLock<Option<Mutex<(std::fs::File, Instant)>>> = OnceLock::new();
+        let log = LOG.get_or_init(|| {
+            let path = std::env::var("NYX_FRAME_LOG").ok().filter(|p| p.to_lowercase().ends_with(".csv"))?;
+            let mut f = std::fs::File::create(path).ok()?;
+            let _ = writeln!(f, "t_s,frame_dt_ms,ui_ms,viewport_ms,busy,job_kind,stage,stage_s,job_s,convergence,show_results,spans");
+            Some(Mutex::new((f, Instant::now())))
         });
+        let Some(log) = log else { return };
+        let Ok(mut g) = log.lock() else { return };
+        let now = Instant::now();
+        let dt = now.duration_since(g.1).as_secs_f64() * 1e3;
+        g.1 = now;
+        let kind = match self.job_kind {
+            Some(JobKind::Mesh) => "mesh",
+            Some(JobKind::Solve) => "solve",
+            Some(JobKind::Convergence) => "convergence",
+            Some(JobKind::Open) => "open",
+            None => "",
+        };
+        let (stage, stage_s) = match &self.job {
+            Some((_, p, _)) => {
+                let st = p.status();
+                (st.stage.replace([',', '\n'], " "), st.stage_seconds)
+            }
+            None => (String::new(), 0.0),
+        };
+        let job_s = self.busy.as_ref().map(|(_, t)| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() % 100000.0).unwrap_or(0.0);
+        let _ = writeln!(
+            g.0,
+            "{t:.3},{dt:.2},{ui_ms:.2},{viewport_ms:.2},{},{kind},{stage},{stage_s:.2},{job_s:.2},{},{},{}",
+            self.busy.is_some() as u8,
+            self.convergence_running() as u8,
+            self.show_results as u8,
+            crate::spans::take()
+        );
+        let _ = g.0.flush();
     }
 
     pub fn cancel_job(&mut self) {
         if let Some((id, _, true)) = &self.job {
             self.engine.jobs().cancel(*id);
-            self.status = "Cancelling: the solver stops at its next check (a factorisation in progress has to finish first)".into();
+            self.status = "Cancel requested: the job stops at its next check (a factorisation in progress has to finish first)".into();
         }
     }
 
@@ -303,9 +489,21 @@ impl App {
             return;
         }
         match self.engine.start_mesh() {
-            Ok(id) => self.started(id, JobKind::Mesh, "Building mesh".into(), false),
+            Ok(id) => self.started(id, JobKind::Mesh, "Building mesh".into(), true),
             Err(e) => self.set_error(format!("Geometry: {e}")),
         }
+    }
+
+    /// Solves run in a child process (this program started with `--job`, see `nyx_engine::worker`), so a solve that runs out of memory or crashes
+    /// fails its job and not the window, and a cancel stops it at once (productivity plan P4, ADR 86). Called by `main`, not by `App::new`: a test
+    /// binary must not be its own worker.
+    pub fn solve_in_child_processes(&mut self) {
+        self.engine.set_self_as_worker(true);
+        // what solves cost on this machine is learned in the workspace folder, for the memory estimates of later solves (ADR 86)
+        let root = std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_engine::facade::store::workspace::default_root);
+        self.engine.set_history_file(&root.join("solve_history.jsonl"));
+        // the queue of the workspace is shared with the MCP server and `nyx queue`; closing the window leaves its items running (Q3, ADR 95)
+        self.engine.set_shared_queue(&root, true);
     }
 
     pub fn open_path(&mut self, path: PathBuf) {
@@ -328,7 +526,9 @@ impl App {
 
     /// Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed.
     pub fn compute(&mut self) {
-        if self.refuse_while_busy() {
+        // in a workspace every Compute is one run record and the workflow page is locked while it runs, so the shell keeps one solve at a time;
+        // without one a Compute behind a running job waits in the queue
+        if self.refuse_unless_queueable() || (self.shell.active() && self.refuse_while_busy()) {
             return;
         }
         self.sync_rules();
@@ -343,8 +543,11 @@ impl App {
             self.set_error("The project has no physics: add one in the Physics tab.");
             return;
         };
-        match self.engine.start_solve(None) {
+        // behind a running job the solve waits in the engine's queue; a Compute that has not started yet is replaced by this one
+        let opts = QueueOpts { supersede: true, ..Default::default() };
+        match self.engine.start_solve_with(None, &opts) {
             Ok(id) => {
+                self.waiting.retain(|w| w.kind != JobKind::Solve);
                 let label = format!("Solving {}", self.physics_name(&active));
                 self.started(id, JobKind::Solve, label, true);
             }
@@ -353,21 +556,36 @@ impl App {
     }
 
     fn poll(&mut self) {
-        while let Ok((_, msg)) = self.rx.try_recv() {
+        self.poll_sweep();
+        while let Ok((generation, msg)) = self.rx.try_recv() {
             match msg {
                 Msg::Script(Ok(t)) => self.script_output = Some(t),
                 Msg::Script(Err(e)) => self.set_error(e),
-                Msg::Convergence(r) => {
-                    self.convergence_running = false;
-                    match r {
-                        Ok(v) => self.convergence = Some(v),
-                        Err(e) => self.set_error(format!("convergence: {e}")),
-                    }
-                }
+                Msg::Size(out) => self.take_size(generation, out),
+                Msg::Polarization { physics, result, analysis } => self.take_polarization(&physics, &result, analysis),
             }
         }
-        let finished = self.engine.poll();
+        let finished = crate::spans::span("engine_poll", || self.engine.poll());
+        let n_finished = finished.len();
         for (id, outcome) in finished {
+            // a results file written on a job: it never held the window, only a failure is shown
+            if let Some(path) = self.exports.remove(&id) {
+                if let Err(e) = outcome {
+                    self.error = Some(format!("Results file {path}: {e}"));
+                }
+                continue;
+            }
+            // a job that waited in the queue and is already over (the engine started it when the one before it ended) is the running one now; a
+            // job that is none of ours (replaced by a newer request, or cancelled in the queue) has nothing to show
+            if self.job.as_ref().map(|j| j.0) != Some(id) {
+                match self.waiting.iter().position(|w| w.id == id) {
+                    Some(i) if self.job.is_none() => {
+                        let w = self.waiting.remove(i);
+                        self.make_front(w);
+                    }
+                    _ => continue,
+                }
+            }
             // only the job that is running clears the busy state
             let started = if self.job.as_ref().map(|j| j.0) == Some(id) {
                 self.job = None;
@@ -375,6 +593,7 @@ impl App {
             } else {
                 None
             };
+            self.forget_validated();
             let kind = self.job_kind.take();
             let took = started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
             match (kind, outcome) {
@@ -384,7 +603,30 @@ impl App {
                     self.status = format!("Mesh built: {c} cells, {f} boundary facets ({took:.2} s)");
                     self.geometry_dirty = false;
                 }
+                (Some(JobKind::Mesh), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
+                    self.error = None;
+                    self.status = format!("Mesh build cancelled after {took:.1} s; the previous mesh is unchanged");
+                }
                 (Some(JobKind::Mesh), Err(e)) => self.set_error(format!("Geometry: {e}")),
+                (Some(JobKind::Convergence), Ok(v)) => {
+                    self.convergence = Some(v);
+                    self.note_check_in_run();
+                    self.status = format!("Convergence checked ({took:.1} s)");
+                }
+                (Some(JobKind::Convergence), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
+                    self.error = None;
+                    self.status = format!("Convergence check cancelled after {took:.1} s");
+                }
+                (Some(JobKind::Convergence), Err(e)) => self.set_error(format!("convergence: {e}")),
+                (Some(JobKind::Open), Ok(summary)) => self.finish_open(&summary),
+                (Some(JobKind::Open), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
+                    self.opening = None;
+                    self.status = "Opening the results file cancelled; nothing was changed".into();
+                }
+                (Some(JobKind::Open), Err(e)) => {
+                    self.opening = None;
+                    self.set_error(e.to_string());
+                }
                 (Some(JobKind::Solve), Ok(summary)) => self.take_solved(&summary),
                 (Some(JobKind::Solve), Err(nyx_engine::facade::physics::Error::Cancelled)) => {
                     self.error = None;
@@ -397,6 +639,12 @@ impl App {
                 }
                 (None, _) => {}
             }
+            self.promote_waiting();
+        }
+        self.promote_waiting();
+        // one piece of the work that follows a solve, never in the frame that took a result (that frame has enough to do)
+        if n_finished == 0 {
+            self.run_deferred();
         }
     }
 
@@ -412,9 +660,17 @@ impl App {
 
     /// A solve came back: the mesh it used, and one result view per physics it solved.
     pub(crate) fn take_solved(&mut self, summary: &Value) {
-        self.take_model();
+        crate::spans::span("take_model", || self.take_model());
         let Some(mesh) = self.doc.mesh.clone() else { return };
-        let solved: Vec<String> = summary["results"].as_array().into_iter().flatten().filter_map(|r| r["physics"].as_str().map(str::to_string)).collect();
+        // a job that finished after the project changed again, or after a newer job, can come back with results the engine did not keep (`stored`
+        // false): they are not shown and not recorded as the run on screen
+        let all: Vec<&Value> = summary["results"].as_array().into_iter().flatten().collect();
+        let solved: Vec<String> = all.iter().filter(|r| r["stored"] != json!(false)).filter_map(|r| r["physics"].as_str().map(str::to_string)).collect();
+        if solved.is_empty() && !all.is_empty() {
+            self.shell.run = None;
+            self.status = "A solve finished after the model changed again; its result was not kept (solve again)".into();
+            return;
+        }
         let active = self.active();
         let mut last_secs = 0.0;
         let mut live: Option<Arc<SolveResult>> = None;
@@ -423,17 +679,21 @@ impl App {
             let result = result.clone();
             let name = self.physics_name(id);
             last_secs = result.seconds;
-            let mut rv = ResultView::new(name, Some(id.clone()), result.clone(), &mesh);
-            if self.engine.polarization_applies(id) {
-                rv.analysis = self.engine.polarization(id).ok();
-            }
+            let rv = crate::spans::span("result_view", || ResultView::new(name, Some(id.clone()), result.clone(), &mesh));
+            // the polarization is computed beside the frame and arrives through the channel (`feedback.rs`): the cost grows with the cells
+            // (8 to 9 ms at 9,500 cells in 3D, 41 ms for the 8,000 cells of the silicon-on-sapphire example) and the frame has 33 ms
+            self.start_polarization(id);
             if active.as_deref() == Some(id.as_str()) {
                 live = Some(result);
             }
             self.push_result(rv);
         }
         if let Some(r) = live {
-            self.shell.live_run = self.record_ok(&r);
+            // the run record is written on a later frame (`run_deferred`): file writes, 9 to 17 ms, are not part of showing the result
+            self.shell.live_run = None;
+            if let Some(rc) = self.shell.run.take() {
+                self.defer(crate::shell::Deferred::Record { rc, result: r });
+            }
         }
         // the result on show is the active physics' one
         if let Some(i) = active.and_then(|a| self.results.iter().position(|r| r.physics.as_deref() == Some(a.as_str()))) {
@@ -517,6 +777,30 @@ impl App {
         if self.cmd("project_save", json!({ "path": path.to_str().unwrap_or_default() })).is_some() {
             self.status = format!("Saved {}", path.display());
             self.project_path = Some(path);
+        }
+    }
+
+
+    /// File > Export as script: the project as a script that rebuilds it (`project_script`, ADR 94), written where an agent finds it by name, the
+    /// MCP server's `scripts` folder. The window's buffered edits are pushed first, as Save does, so the script is what the person sees.
+    pub fn export_script(&mut self) {
+        if !self.push_edits() {
+            return;
+        }
+        let Some(r) = self.cmd("project_script", json!({})) else { return };
+        let (Some(text), form) = (r["script"].as_str(), r["form"].as_str().unwrap_or("commands")) else { return };
+        // a name an agent can give to `script_run path=...`: letters, digits, - and _
+        let stem: String = self.engine.project().title.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '_' }).collect();
+        let stem = if stem.trim_matches('_').is_empty() { "project".to_string() } else { stem.trim_matches('_').chars().take(60).collect() };
+        let dir = nyx_script::mcp_dir().join("scripts");
+        let _ = std::fs::create_dir_all(&dir);
+        let Some(path) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).set_directory(&dir).set_file_name(format!("{stem}.nys")).save_file() else { return };
+        match std::fs::write(&path, text) {
+            Ok(()) => {
+                let how = if form == "commands" { "" } else { " (one block, not command by command)" };
+                self.status = format!("Exported {}{how}. An agent runs it with script_run path \"{stem}\" and allow_destructive.", path.display());
+            }
+            Err(e) => self.set_error(format!("Could not write the file: {e}")),
         }
     }
 
@@ -661,6 +945,10 @@ impl App {
                     self.save_project(true);
                 }
                 ui.separator();
+                if ui.button("Export as script...").clicked() {
+                    ui.close();
+                    self.export_script();
+                }
                 if ui.button("Export current result as CSV...").clicked() {
                     ui.close();
                     self.export_csv();
@@ -727,7 +1015,7 @@ impl App {
         ui.weak("Registers the nyx MCP server with the app, so Claude can set up and solve simulations here.");
         ui.separator();
         let Some(server) = self.mcp_server.clone() else {
-            ui.colored_label(Color32::from_rgb(200, 120, 20), "nyx-mcp was not found next to nyx.");
+            ui.colored_label(crate::theme::activity_text(ui.ctx()), "nyx-mcp was not found next to nyx.");
             ui.weak("Build it (cargo build --release -p nyx-mcp) or point to it:");
             if ui.button("Locate nyx-mcp...").clicked() {
                 ui.close();
@@ -739,7 +1027,7 @@ impl App {
             return;
         };
         let Ok(env) = Env::detect() else {
-            ui.colored_label(Color32::from_rgb(200, 60, 60), "cannot find the home folder");
+            ui.colored_label(crate::theme::danger(ui.ctx()), "cannot find the home folder");
             return;
         };
         if self.connect_status.is_empty() {
@@ -750,9 +1038,9 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(host.name).strong());
                 match &status {
-                    Status::Connected => ui.colored_label(Color32::from_rgb(40, 150, 70), "connected"),
-                    Status::Stale { .. } => ui.colored_label(Color32::from_rgb(200, 120, 20), "points to another nyx-mcp"),
-                    Status::Unreadable { .. } => ui.colored_label(Color32::from_rgb(200, 60, 60), "config unreadable"),
+                    Status::Connected => ui.colored_label(crate::theme::success(ui.ctx()), "connected"),
+                    Status::Stale { .. } => ui.colored_label(crate::theme::activity_text(ui.ctx()), "points to another nyx-mcp"),
+                    Status::Unreadable { .. } => ui.colored_label(crate::theme::danger(ui.ctx()), "config unreadable"),
                     Status::NotConnected | Status::NotInstalled => ui.weak("not connected"),
                 };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -776,7 +1064,7 @@ impl App {
             });
             ui.weak(host.config.display().to_string());
             if let Status::Unreadable { why } = &status {
-                ui.colored_label(Color32::from_rgb(200, 60, 60), why);
+                ui.colored_label(crate::theme::danger(ui.ctx()), why);
             }
             ui.add_space(4.0);
         }
@@ -857,9 +1145,10 @@ impl App {
                 self.picking = None;
                 self.rules_dirty = true;
             }
-            let busy = self.busy.is_some();
             let has_mesh = self.doc.mesh.is_some();
-            let b = ui.add_enabled(!busy && has_mesh, egui::Button::new(RichText::new("  Compute  ").strong()).fill(Color32::from_rgb(38, 110, 70)));
+            // behind a running job a Compute waits in the queue (without a workspace; a workspace keeps one run at a time)
+            let queue_label = if self.busy.is_some() { format!("  Queue · position {}  ", self.waiting.len() + 1) } else { "  Compute  ".to_string() };
+            let b = ui.add_enabled(self.can_queue_compute() && has_mesh, egui::Button::new(RichText::new(queue_label).strong().color(crate::theme::on_accent(ui.ctx()))).fill(crate::theme::accent(ui.ctx())));
             if b.on_hover_text("Solve the active physics on the current mesh (F5)").clicked() {
                 self.compute();
             }
@@ -871,9 +1160,19 @@ impl App {
                 ui.label(format!("{what}{stage}{pct}  [{:.1} s in this stage, {:.1} s in all]", st.stage_seconds, t.elapsed().as_secs_f64()));
                 if self.job.as_ref().is_some_and(|j| j.2) {
                     let cancelled = st.cancelled;
-                    if ui.add_enabled(!cancelled, egui::Button::new("Cancel")).on_hover_text("Stop the solve at the next safe point (Esc). A factorisation in progress has to finish first. Earlier results stay as they are.").clicked() {
+                    if cancelled {
+                        // what the person waits for is the stage, not an estimate: how long it has been running
+                        ui.colored_label(crate::theme::activity_text(ui.ctx()), format!("Cancel requested: waiting for the stage to end ({:.1} s so far; it stops at its next check)", st.stage_seconds));
+                    }
+                    if ui.add_enabled(!cancelled, egui::Button::new("Cancel")).on_hover_text("Stop the job at the next safe point (Esc). A factorisation in progress has to finish first. Earlier results stay as they are.").clicked() {
                         self.cancel_job();
                     }
+                }
+                if !self.waiting.is_empty() {
+                    ui.label(format!("+{} queued", self.waiting.len()));
+                }
+                if ui.small_button("Queue").on_hover_text("What runs and what waits, with cancel, hold and pause").clicked() {
+                    self.show_queue = !self.show_queue;
                 }
                 ui.ctx().request_repaint();
             }
@@ -893,7 +1192,7 @@ impl App {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if let Some(e) = self.error.clone() {
-                ui.colored_label(Color32::from_rgb(235, 110, 100), format!("⚠ {e}"));
+                ui.colored_label(crate::theme::danger(ui.ctx()), format!("⚠ {e}"));
                 if ui.small_button("dismiss").clicked() {
                     self.error = None;
                 }
@@ -911,12 +1210,45 @@ impl App {
         });
     }
 
+    /// The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions
+    /// by), the surfaces of a 3D mesh by boundary number (a surface has no region; the materials belong to the volume).
+    pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint {
+        use crate::regions::{assign, keys_by_material};
+        use nyx_engine::facade::physics::{LabelResolver, MaterialAssign};
+        if view.dim == 3 {
+            let labels = if view.boundary_labels.is_empty() { &view.tri_label } else { &view.boundary_labels };
+            return assign(labels, |l| l.to_string(), false);
+        }
+        let labels = if view.domain_labels.is_empty() { &view.tri_label } else { &view.domain_labels };
+        let name_of = |l: i32| self.domain_names.iter().find(|(i, _)| *i == l).map_or_else(|| l.to_string(), |(_, n)| n.clone());
+        let key: HashMap<i32, String> = match (self.shell.settings().region_colouring == "region", self.doc.model.as_ref(), self.active().and_then(|a| self.engine.project().spec(&a).cloned())) {
+            (false, Some(model), Some(spec)) => {
+                let materials = spec
+                    .materials
+                    .iter()
+                    .map(|(region, m)| {
+                        let material = match m {
+                            MaterialAssign::Named(n) => Some(n.clone()),
+                            MaterialAssign::Oriented { material, .. } => Some(material.clone()),
+                            MaterialAssign::Props(_) => None,
+                        };
+                        (region.clone(), material)
+                    })
+                    .collect();
+                keys_by_material(&self.domain_names, &materials, |p| LabelResolver::domains(model.as_ref(), p).unwrap_or_default())
+            }
+            _ => HashMap::new(),
+        };
+        assign(labels, |l| key.get(&l).cloned().unwrap_or_else(|| name_of(l)), true)
+    }
+
     pub fn viewport_ui(&mut self, ui: &mut egui::Ui) {
-        let bg = Color32::from_rgb(24, 26, 30);
+        // everything on the canvas uses the colours of the canvas: dark by default, also in a light window (Settings: Canvas)
+        let ink = crate::theme::ink(ui.ctx(), self.shell.settings().canvas == "theme");
         let mut bc_colors: HashMap<i32, Color32> = HashMap::new();
         for (i, labels) in self.bc_labels.iter().enumerate() {
             for &l in labels {
-                bc_colors.insert(l, crate::colormap::palette(i + 3));
+                bc_colors.insert(l, crate::colormap::palette(i + 3, ink.mode));
             }
         }
         let selected: Vec<i32> = if self.picking.is_some() { self.picked.clone() } else { vec![] };
@@ -928,6 +1260,7 @@ impl App {
         let show_results = show_results && preview.is_none();
         let view = preview.or_else(|| self.doc.view.clone());
 
+        let stale = if show_results { self.current.and_then(|i| self.stale_reason(i)) } else { None };
         let out = match (self.current, view) {
             (Some(i), Some(view)) if show_results => {
                 let rv = &mut self.results[i];
@@ -953,12 +1286,38 @@ impl App {
                         show_edges,
                     },
                     false,
-                    bg,
+                    &ink,
                 )
             }
-            (_, Some(view)) => self.vp.show(ui, Content::Mesh { view: &view, bc_colors: &bc_colors, selected: &selected, show_edges, show_numbers }, picking, bg),
-            _ => self.vp.show(ui, Content::Empty, false, bg),
+            (_, Some(view)) => {
+                let paint = self.region_paint(&view);
+                self.vp.show(ui, Content::Mesh { view: &view, bc_colors: &bc_colors, selected: &selected, show_edges, show_numbers, paint: &paint }, picking, &ink)
+            }
+            _ => self.vp.show(ui, Content::Empty, false, &ink),
         };
+        if let Some(why) = stale {
+            // on the plot itself, so a stale field is never read as current; the button to solve again is in the Results tab and its panel
+            let at = ui.max_rect().left_top() + egui::vec2(10.0, 10.0);
+            let text = format!("Stale: {why}");
+            let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(14.0), crate::activity::band_colours(ui.ctx()).1);
+            let rect = egui::Rect::from_min_size(at, galley.size() + egui::vec2(12.0, 6.0));
+            ui.painter().rect_filled(rect, 4.0, crate::activity::band_colours(ui.ctx()).0);
+            ui.painter().galley(rect.min + egui::vec2(6.0, 3.0), galley, crate::activity::band_colours(ui.ctx()).1);
+        } else if show_results {
+            // the trust state of the field on show (P6): a chip on the plot, in the colours of the window, so it reads on either canvas and does not
+            // depend on the side panel being wide enough to show the same line
+            if let Some(physics) = self.current.and_then(|i| self.results.get(i)).and_then(|r| r.physics.clone()) {
+                let v = self.validated_of(&physics);
+                let state = crate::activity::validation_state(v.state);
+                let ctx = ui.ctx().clone();
+                let at = out.rect.left_top() + egui::vec2(10.0, 10.0);
+                let galley = ui.painter().layout_no_wrap(state.word().to_string(), egui::FontId::proportional(14.0), crate::theme::text(&ctx));
+                let rect = egui::Rect::from_min_size(at, egui::vec2(galley.size().x + 36.0, galley.size().y + 8.0));
+                ui.painter().rect(rect, 4.0, crate::theme::card(&ctx), egui::Stroke::new(1.0, crate::theme::edge(&ctx)), egui::StrokeKind::Inside);
+                crate::kit::paint_glyph(ui, rect.left_center() + egui::vec2(14.0, 0.0), state);
+                ui.painter().galley(rect.left_top() + egui::vec2(28.0, 4.0), galley, crate::theme::text(&ctx));
+            }
+        }
         if let (Some(label), Some(i)) = (out.picked, self.picking) {
             if let Some(p) = self.picked.iter().position(|&l| l == label) {
                 self.picked.remove(p);
@@ -995,13 +1354,13 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll();
-        self.run_queued();
+        crate::spans::span("poll", || self.poll());
+        crate::spans::span("run_queued", || self.run_queued());
         if self.rules_dirty {
-            self.sync_rules();
+            crate::spans::span("sync_rules", || self.sync_rules());
         }
         let c = ctx.clone();
-        self.script_step(&c);
+        crate::spans::span("script", || self.script_step(&c));
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         if let Some(p) = dropped.into_iter().next() {
             self.open_path(p);
@@ -1022,8 +1381,10 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let t_ui = Instant::now();
+        crate::spans::span("queue_panel", || self.queue_panel(ui.ctx()));
         if self.shell.active() {
-            self.shell_ui(ui);
+            crate::spans::span("shell_ui", || self.shell_ui(ui));
+            self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, f64::NAN);
             return;
         }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
@@ -1064,6 +1425,7 @@ impl eframe::App for App {
             // diagnostics: time (s, wrapping every 1000) of the frame, our own layout and drawing code, whole viewport, state
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() % 1000.0).unwrap_or(0.0);
             eprintln!("FRAME t={now:.3} ui_ms={:.2} viewport_ms={:.2} busy={} show_results={}", t_ui.elapsed().as_secs_f64() * 1e3, t_vp.elapsed().as_secs_f64() * 1e3, self.busy.is_some(), self.show_results);
+            self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, t_vp.elapsed().as_secs_f64() * 1e3);
         }
     }
 }
@@ -1077,13 +1439,20 @@ mod tests {
         App::with_context(egui::Context::default())
     }
 
+    /// One headless frame. The texture changes of the frame (the font atlas) are cleared on purpose: egui asserts when a frame's output is
+    /// dropped with unapplied texture deltas, and no window is there to apply them.
+    fn frame(ctx: &egui::Context, run: impl FnMut(&mut egui::Ui)) {
+        let mut out = ctx.run_ui(Default::default(), run);
+        out.textures_delta.clear();
+    }
+
     /// Processes finished jobs until nothing runs (or panics after `secs`).
     fn wait_idle(a: &mut App, secs: u64) {
         let t0 = Instant::now();
         loop {
             a.poll();
             a.run_queued();
-            if a.busy.is_none() && a.queued.is_none() {
+            if a.busy.is_none() && a.queued.is_none() && a.exports.is_empty() && a.deferred.is_empty() {
                 return;
             }
             assert!(t0.elapsed() < Duration::from_secs(secs), "still busy after {secs} s: {:?}", a.busy);
@@ -1139,19 +1508,118 @@ mod tests {
         assert!(a.results[0].result.log.iter().any(|l| l.contains("solving")), "{:?}", a.results[0].result.log);
     }
 
+
     #[test]
-    fn a_second_job_is_refused_while_one_runs_and_a_mesh_build_waits_its_turn() {
+    fn the_reduce_form_shows_the_numbers_of_the_engine_commands() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 60);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        assert_eq!(a.results.len(), 1);
+        let physics = a.results[0].physics.clone().unwrap();
+        let sol = a.results[0].result.solutions[0].clone();
+        let names: Vec<String> = sol.cell_fields.iter().map(|f| f.name.clone()).collect();
+        let ex = names.iter().position(|n| n == "Ex").expect("a field Ex");
+        let regions = a.engine.result_regions(&physics);
+        let si = regions.iter().position(|r| r == "Si").expect("a region Si") + 1;
+        // the integral of |Ex|^2 over the silicon: the line of the form carries the engine's number
+        a.reduce.field = ex;
+        a.reduce.quantity = 2;
+        a.reduce.region = si;
+        a.reduce_now("integrate");
+        let want = a.engine.call("integrate", &json!({ "expr": { "op": "abs2", "args": ["Ex"] }, "physics": physics, "region": "Si" })).unwrap();
+        assert_eq!(a.reduce.lines[0], format!("integral of |Ex|² over Si = {}", crate::tabs::reduce_number(&want["value"])));
+        // the share of the whole vector in the silicon is the engine's `confinement` over the components `field` finds (Ex, Ey, Ez: a mode has the propagation component too)
+        a.reduce_now("fraction");
+        let conf = a.engine.call("confinement", &json!({ "fields": ["Ex", "Ey", "Ez"], "physics": physics, "region": "Si" })).unwrap();
+        assert_eq!(a.reduce.lines[0], format!("share of |Ex, Ey, Ez|² in Si = {:.6}", conf["fraction"].as_f64().unwrap()));
+        // the largest squared modulus over the whole mesh, then the largest plain value (the mode of this example is real, so it has an order)
+        a.reduce.region = 0;
+        a.reduce_now("max");
+        assert!(a.reduce.lines[0].starts_with("max of |Ex|² in the whole mesh = "), "{:?}", a.reduce.lines);
+        a.reduce.quantity = 0;
+        a.reduce_now("min");
+        assert!(a.reduce.lines[0].starts_with("min of Ex in the whole mesh = "), "{:?}", a.reduce.lines);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        // a formula in the box replaces the field and quantity: the line carries the number of the engine for the same text
+        a.reduce.region = si;
+        a.reduce.formula = "  eps_r * norm2(E)  ".into();
+        a.reduce_now("integrate");
+        let want = a.engine.call("integrate", &json!({ "expr": "eps_r * norm2(E)", "physics": physics, "region": "Si" })).unwrap();
+        assert_eq!(a.reduce.lines[0], format!("integral of `eps_r * norm2(E)` over Si = {}", crate::tabs::reduce_number(&want["value"])));
+        // a formula that cannot be read is an error that names it, and no line is added
+        let before = a.reduce.lines.len();
+        a.reduce.formula = "abs2(Ex) +".into();
+        a.reduce_now("integrate");
+        assert!(a.error.is_some(), "a broken formula is reported");
+        assert_eq!(a.reduce.lines.len(), before);
+    }
+    #[test]
+    fn a_compute_behind_a_running_job_waits_its_turn_and_a_newer_one_replaces_it() {
         let mut a = app();
         a.load_example(example("05_block"));
         assert!(a.busy.is_some());
-        a.compute(); // nothing to solve on yet and a job is running: refused with a message, not started
-        assert!(a.status.starts_with("Busy"), "{}", a.status);
         let first = a.job.as_ref().map(|j| j.0);
-        a.rebuild_mesh(); // queued
-        assert!(a.queued.is_some());
+        a.engine.jobs().pause(); // the mesh job may be over already: nothing new starts, so the queue can be looked at
+        a.compute(); // a job is running: the solve waits in the engine's queue behind it
+        assert_eq!(a.waiting.len(), 1, "{} / {:?}", a.status, a.error);
+        assert!(a.status.contains("queued"), "{}", a.status);
+        let queued = a.waiting[0].id;
+        assert_eq!(a.engine.jobs().info(queued).unwrap().position, Some(1));
         assert_eq!(a.job.as_ref().map(|j| j.0), first, "the running job is not replaced");
+        a.compute(); // a Compute that has not started is replaced by the newer one
+        assert_eq!(a.waiting.len(), 1);
+        assert_ne!(a.waiting[0].id, queued);
+        a.rebuild_mesh(); // a mesh build still has its one slot
+        assert!(a.queued.is_some());
+        // the Queue panel lists what runs and what waits, and draws on a headless context
+        a.show_queue = true;
+        let ctx = a.ctx.clone();
+        frame(&ctx, |ui| a.queue_panel(ui.ctx()));
+        a.engine.jobs().resume();
+        wait_idle(&mut a, 120);
+        assert!(a.doc.mesh.is_some() && a.queued.is_none() && a.waiting.is_empty());
+        assert!(!a.results.is_empty(), "the queued Compute ran when the first job ended and its result is on show");
+    }
+
+    #[test]
+    fn a_refused_mesh_edit_cannot_leave_the_geometry_edit_applied() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
         wait_idle(&mut a, 30);
-        assert!(a.doc.mesh.is_some() && a.queued.is_none());
+        let before = a.engine.project().clone();
+        nyx_engine::geometry::set_param(&mut a.geom_edit, "w", &json!(6.0e-7)).unwrap();
+        a.mesh_edit.h = -1.0;
+        assert!(!a.push_edits(), "a negative element size is refused");
+        assert_eq!(*a.engine.project(), before, "neither edit was applied");
+        // every mesh field the window sends is accepted by the engine
+        a.mesh_edit.h = 2.0e-7;
+        a.mesh_edit.max_dev = Some(1.0e-9);
+        a.mesh_edit.points_per_wavelength = Some(10.0);
+        a.mesh_edit.structured_pml = true;
+        assert!(a.push_edits(), "{:?}", a.error);
+        assert_eq!(a.engine.project().mesh, a.mesh_edit);
+        assert_eq!(a.engine.project().geometry, a.geom_edit);
+    }
+
+    #[test]
+    fn a_compute_that_waits_in_the_queue_can_be_cancelled_and_never_runs() {
+        let mut a = app();
+        a.load_example(example("05_block"));
+        let running = a.job.as_ref().map(|j| j.0).unwrap();
+        a.engine.jobs().pause(); // nothing new starts while the queue is looked at
+        a.compute();
+        let queued = a.waiting[0].id;
+        a.cancel_waiting(queued);
+        assert!(a.waiting.is_empty());
+        assert_eq!(a.engine.jobs().info(queued).unwrap().state, nyx_engine::JobState::Cancelled);
+        assert_eq!(a.job.as_ref().map(|j| j.0), Some(running), "the running job goes on");
+        a.engine.jobs().resume();
+        wait_idle(&mut a, 60);
+        assert!(a.results.is_empty(), "the cancelled Compute never ran");
+        assert!(a.engine.jobs().log(queued).is_empty());
     }
 
     #[test]
@@ -1216,6 +1684,191 @@ mod tests {
     }
 
     /// A results file written by one window opens in another: the project, the mesh and the stored results are on show, with no solve.
+    /// A result on show says when it is stale (productivity plan P1): an unapplied edit of the Geometry tab, an edit the engine has taken, a
+    /// Study edit; looking at it differently (colormap, camera, field) is not a change of the model.
+    #[test]
+    fn a_result_on_show_says_when_the_model_changed() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        let i = a.current.expect("a result on show");
+        assert_eq!(a.stale_reason(i), None);
+        // the way it is drawn is not in the project, so no key moves
+        let keys = a.engine.problem_keys();
+        a.colormap = Colormap::Gray;
+        a.vp.fit_token += 1;
+        a.results[i].field = a.results[i].field.saturating_sub(1);
+        assert_eq!(a.engine.problem_keys(), keys);
+        assert_eq!(a.stale_reason(i), None);
+        // an edit of the Geometry tab that was not applied: the engine does not know it yet, the window does
+        nyx_engine::geometry::set_param(&mut a.geom_edit, "w", &json!(6.0e-7)).unwrap();
+        assert_eq!(a.stale_reason(i), Some("Geometry or Mesh edits are not applied yet"));
+        // applied: now the engine says so
+        assert!(a.push_edits(), "{:?}", a.error);
+        assert_eq!(a.stale_reason(i), Some("the model changed since this solve"));
+        // the band is drawn on a headless context without a panic, with the button to solve again
+        let ctx = a.ctx.clone();
+        frame(&ctx, |ui| {
+            a.results_panel(ui);
+            a.viewport_ui(ui);
+        });
+        // a Study edit (a wavelength) is a change of the problem of its physics
+        let mut b = app();
+        b.load_example(example("15_soi_wire"));
+        wait_idle(&mut b, 30);
+        b.compute();
+        wait_idle(&mut b, 120);
+        let j = b.current.expect("a result on show");
+        assert_eq!(b.stale_reason(j), None);
+        b.cmd("set_study", json!({ "physics": "ems", "kind": "modes", "params": { "freq": 190.0e12, "n_modes": 2, "n_target": 2.75 } }));
+        assert_eq!(b.stale_reason(j), Some("the model changed since this solve"));
+    }
+
+    /// A sweep started from a workflow (UX plan U5): the points are jobs of the engine's queue that the chip and the popover show, each finished
+    /// point is recorded as a run of the experiment with the metrics of a Compute, and the window's own project is not touched.
+    #[test]
+    fn a_sweep_from_a_workflow_queues_its_points_and_records_each_as_a_run() {
+        let mut a = app();
+        let root = std::env::temp_dir().join(format!("nyx-sweep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        a.attach_workspace(root.clone());
+        assert!(a.shell.active(), "a workspace is attached");
+        let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("15_soi_wire")).unwrap().path;
+        a.new_draft("Sweep", crate::shell::Start::Example(path));
+        wait_idle(&mut a, 60);
+        let wid = a.shell.current_mut().expect("the workflow is open").id.clone();
+        let before = a.engine.project().clone().to_json();
+        let mut form = crate::sweepui::Form::default();
+        (form.param, form.from, form.to, form.n) = ("w".into(), "4.5e-7".into(), "5.5e-7".into(), 3);
+        a.start_sweep(&wid, &form);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        // the engine's queue holds the points: the activity the chip draws is not idle, and says what runs
+        let act = a.activity();
+        assert!(!act.is_idle() && act.rows.len() <= 3, "{act:?}");
+        assert!(act.chip_text().contains("point"), "{}", act.chip_text());
+        let t0 = Instant::now();
+        while a.sweep.as_ref().is_some_and(|s| !(s.complete() && s.points.iter().all(|p| p.recorded))) {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(120), "the sweep did not finish: {:?}", a.sweep.as_ref().map(|s| s.finished()));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let s = a.sweep.as_ref().expect("the sweep");
+        assert!(s.points.iter().all(|p| p.state == "done"), "{:?}", s.points);
+        let runs = &a.shell.open[&wid].runs;
+        assert_eq!(runs.len(), 3, "one run per point");
+        let first = runs[0].metrics["eigenvalue_re"];
+        let last = runs[2].metrics["eigenvalue_re"];
+        assert!(runs.iter().all(|r| r.status == nyx_engine::facade::store::runs::RunStatus::Ok && r.metrics.contains_key("dofs")));
+        assert!((first - last).abs() > 1e-6, "the widths differ, so the numbers do: {first} {last}");
+        assert!(a.activity().is_idle());
+        assert_eq!(a.engine.project().clone().to_json(), before, "a sweep never changes the window's project");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Review I-9: a result that was just computed is never stale, whichever way it was asked for (the plain window or a workflow, which
+    /// records the run and saves the model around the solve), for the physics of the examples that solve fast.
+    #[test]
+    fn a_result_just_computed_is_not_stale() {
+        for name in ["03_heated_plate", "04_thermal_bar", "02_cantilever", "01_capacitor", "05_block_cantilever"] {
+            // the plain window
+            let mut a = app();
+            a.load_example(example(name));
+            wait_idle(&mut a, 30);
+            a.compute();
+            wait_idle(&mut a, 120);
+            assert!(a.error.is_none(), "{name}: {:?}", a.error);
+            for i in 0..a.results.len() {
+                assert_eq!(a.stale_reason(i), None, "{name}: result {i} of the plain window");
+            }
+            // a workflow, as the scripted shots of the review ran it (`wf example N; compute; view result`)
+            let mut b = app();
+            let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains(name)).unwrap().path;
+            b.new_draft("Fresh", crate::shell::Start::Example(path));
+            wait_idle(&mut b, 30);
+            b.shell_compute();
+            wait_idle(&mut b, 120);
+            assert!(b.error.is_none(), "{name}: {:?}", b.error);
+            assert!(!b.results.is_empty(), "{name}: the workflow solved");
+            b.show_results = true;
+            let keys = b.engine.problem_keys();
+            // whatever the frames do after the solve (saving the workflow, the run record, the page itself) must not move a key
+            let ctx = b.ctx.clone();
+            for _ in 0..12 {
+                frame(&ctx, |ui| b.shell_ui(ui));
+                b.poll();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(b.engine.problem_keys(), keys, "{name}: a frame after the solve moved a problem key");
+            for i in 0..b.results.len() {
+                assert_eq!(b.stale_reason(i), None, "{name}: result {i} of a workflow, after twelve frames");
+            }
+        }
+    }
+
+    /// P6: a result starts as exploratory, a passed convergence check makes it checked, the window draws the state, and the verdict is
+    /// written into the run record that solved it (the cantilever: its scalars move with the mesh, so a tight tolerance fails and a loose one
+    /// passes).
+    #[test]
+    fn the_window_shows_the_validated_state_and_a_check_goes_into_the_run() {
+        use nyx_engine::validated::Validation;
+        let mut b = app();
+        let root = std::env::temp_dir().join(format!("nyx-validated-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        b.attach_workspace(root.clone());
+        let path =examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("02_cantilever")).unwrap().path;
+        b.new_draft("Checked", crate::shell::Start::Example(path));
+        wait_idle(&mut b, 30);
+        b.shell_compute();
+        wait_idle(&mut b, 120);
+        assert!(b.error.is_none(), "{:?}", b.error);
+        assert_eq!(b.engine.validated("sms").state, Validation::Exploratory);
+        let ctx = b.ctx.clone();
+        frame(&ctx, |ui| b.validated_line(ui));
+
+        // a tolerance the cantilever misses: still exploratory, and the reason says the check did not pass
+        b.conv_tol = 1e-9;
+        b.check_convergence();
+        wait_idle(&mut b, 120);
+        assert!(b.error.is_none(), "{:?}", b.error);
+        let v = b.engine.validated("sms");
+        assert_eq!(v.state, Validation::Exploratory, "{v:?}");
+        assert!(v.reason.contains("did not pass"), "{v:?}");
+
+        b.conv_tol = 0.5;
+        b.check_convergence();
+        wait_idle(&mut b, 120);
+        assert_eq!(b.engine.validated("sms").state, Validation::Checked);
+        frame(&ctx, |ui| b.validated_line(ui));
+
+        let live = b.shell.live_run.clone().expect("the run whose result is on show");
+        let runs = b.shell.open[&live.wf_id].dir.as_ref().expect("a workflow folder").runs(&live.exp).0;
+        let run = runs.iter().find(|r| r.id == live.run).expect("the run");
+        let c = run.convergence.as_ref().expect("the verdict is in the run record");
+        assert!(c.passed && c.tolerance == 0.5 && c.factor == 0.6, "{c:?}");
+
+        // a mesh edit makes the result stale: nothing is claimed for it
+        b.cmd("set_mesh", json!({ "h": 0.015 }));
+        assert_eq!(b.engine.validated("sms").state, Validation::Exploratory);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A solve that comes back after the project changed again and was not kept by the engine is not shown as the run on screen.
+    #[test]
+    fn a_result_the_engine_did_not_keep_is_not_put_on_show() {
+        let mut a = app();
+        a.load_example(example("15_soi_wire"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        let before = a.results.len();
+        a.take_solved(&json!({ "results": [{ "physics": "ems", "current": false, "stored": false }] }));
+        assert_eq!(a.results.len(), before);
+        assert!(a.status.contains("not kept"), "{}", a.status);
+    }
+
     #[test]
     fn a_results_file_opens_with_its_results_on_show() {
         let mut a = app();
@@ -1229,6 +1882,9 @@ mod tests {
         assert!(v.is_some(), "{:?}", a.error);
         let mut b = app();
         b.open_path(path.clone());
+        // opening returns at once: reading, meshing again and checking run on a job, nothing is on show yet
+        assert!(b.busy.is_some(), "{} / {:?}", b.status, b.error);
+        assert!(b.doc.mesh.is_none() && b.results.is_empty(), "the file is not opened yet when open_path returns");
         wait_idle(&mut b, 30);
         assert!(b.error.is_none(), "{:?}", b.error);
         assert!(b.doc.mesh.is_some() && !b.results.is_empty(), "the results of the file are on show: mesh {} results {} status {}", b.doc.mesh.is_some(), b.results.len(), b.status);
@@ -1257,7 +1913,7 @@ mod tests {
                     continue;
                 }
                 let ctx = a.ctx.clone();
-                let _ = ctx.run_ui(Default::default(), |ui| {
+                frame(&ctx, |ui| {
                     a.inspector(ui);
                     a.toolbar(ui);
                     a.status_bar(ui);
@@ -1272,7 +1928,7 @@ mod tests {
             a.show_results = false;
             a.picking = if a.bc_labels.is_empty() { None } else { Some(0) };
             let ctx = a.ctx.clone();
-            let _ = ctx.run_ui(Default::default(), |ui| {
+            frame(&ctx, |ui| {
                 a.inspector(ui);
                 a.viewport_ui(ui);
             });
@@ -1286,9 +1942,10 @@ mod tests {
         wait_idle(&mut a, 30);
         a.conv_tol = 5e-3;
         a.check_convergence();
-        assert!(a.convergence_running);
+        assert!(a.convergence_running());
+        assert!(a.busy.is_some(), "the check is the running job");
         let t0 = Instant::now();
-        while a.convergence_running {
+        while a.convergence_running() {
             a.poll();
             assert!(t0.elapsed() < Duration::from_secs(60), "no answer");
             std::thread::sleep(Duration::from_millis(10));
@@ -1296,7 +1953,224 @@ mod tests {
         assert_eq!(a.convergence.as_ref().map(|c| c["converged"].clone()), Some(json!(true)), "{:?} {:?}", a.convergence, a.error);
         a.tab = Tab::Study;
         let ctx = a.ctx.clone();
-        let _ = ctx.run_ui(Default::default(), |ui| a.inspector(ui));
+        frame(&ctx, |ui| a.inspector(ui));
+    }
+
+    /// A convergence check is a job of the window: it is the busy job, it can be cancelled and it leaves the results as they were.
+    #[test]
+    fn the_window_cancels_a_convergence_check() {
+        let mut a = app();
+        a.load_example(example("14_box_cavity"));
+        wait_idle(&mut a, 30);
+        a.cmd("set_mesh", json!({ "h": 0.003, "sweep": [{ "domain_offset": 0, "n": 8, "thickness": 0.03 }] }));
+        a.mesh_edit = a.engine.project().mesh.clone();
+        a.check_convergence();
+        assert!(a.convergence_running());
+        let t0 = Instant::now();
+        while a.job.as_ref().is_some_and(|j| j.1.status().stage.is_empty()) {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(60), "the check never reported a stage");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        a.cancel_job();
+        assert!(a.job.as_ref().is_some_and(|j| j.1.status().cancelled), "the cancel is requested while the stage runs");
+        wait_idle(&mut a, 60);
+        assert!(a.convergence.is_none(), "a cancelled check gives no answer");
+        assert!(a.status.contains("cancelled"), "{}", a.status);
+        assert!(a.error.is_none(), "{:?}", a.error);
+    }
+
+    /// Draws `n` frames of the shell (the workflow page on show), polling between them, for as long as `secs` at least.
+    fn frames(a: &mut App, n: usize, secs: f64) {
+        let ctx = a.ctx.clone();
+        let t0 = Instant::now();
+        for _ in 0..n {
+            frame(&ctx, |ui| a.shell_ui(ui));
+            a.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        while t0.elapsed().as_secs_f64() < secs {
+            frame(&ctx, |ui| a.shell_ui(ui));
+            a.poll();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Productivity plan P3: nothing starts a mesh, a solve or a run on its own. A workflow with a result is edited in every form the window has
+    /// that buffers an edit (the Geometry tab's element size, sizing, adaptive, absorbing layers and sweep of the mesh, and the sweep form of the
+    /// Build page) and frames are drawn long enough for every trial mesh and check to run: the engine holds the same mesh, no job was submitted,
+    /// no run was recorded, the result on show is still there, and nothing is busy. Run sweep and Compute are the only things that submit.
+    #[test]
+    fn editing_every_form_starts_nothing() {
+        let mut a = app();
+        let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("02_cantilever")).unwrap().path;
+        a.new_draft("Fresh", crate::shell::Start::Example(path));
+        wait_idle(&mut a, 30);
+        a.shell_compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        assert!(!a.results.is_empty());
+        {
+            let w = a.shell.current_mut().expect("a workflow is open");
+            w.part = crate::shell::Part::Build;
+            w.sub = crate::shell::Sub::Main;
+            // the Concept page has the Geometry form (element size, sizing, adaptive, absorbing layers, sweep of the mesh); the Sweep form of
+            // the Build page comes last
+            w.sweep.shown = false;
+            w.part = crate::shell::Part::Concept;
+            w.concept_tab = Tab::Geometry;
+        }
+        frames(&mut a, 3, 0.0);
+
+        let jobs = a.engine.jobs().list().len();
+        let mesh_key = a.engine.mesh_key();
+        let model = a.engine.model().cloned().expect("the solve left a mesh");
+        let project = a.engine.project().clone().to_json();
+        let runs = a.shell.current_mut().unwrap().runs.len();
+        let results = a.results.len();
+
+        // every buffered edit of the Geometry tab, one after the other, each followed by frames that let the trial mesh and the check run
+        type Edit = Box<dyn Fn(&mut App)>;
+        let edits: Vec<Edit> = vec![
+            Box::new(|a| a.mesh_edit.h *= 0.5),
+            Box::new(|a| a.mesh_edit.physics_sizing = !a.mesh_edit.physics_sizing),
+            Box::new(|a| a.mesh_edit.adapt_scale = Some(0.8)),
+            Box::new(|a| a.mesh_edit.structured_pml = !a.mesh_edit.structured_pml),
+            Box::new(|a| a.mesh_edit.sweep = Some(vec![nyx_engine::SweepLayer { thickness: 1.0, n: 4, domain_offset: 0, fill: None }])),
+            Box::new(|a| a.mesh_edit.h = -1.0),
+            Box::new(|a| a.mesh_edit.h = 0.02),
+        ];
+        for edit in &edits {
+            edit(&mut a);
+            a.geometry_dirty = true;
+            let ctx = a.ctx.clone();
+            a.edits_changed(&ctx);
+            frames(&mut a, 3, crate::feedback::REST.as_secs_f64() + 0.15);
+            assert_eq!(a.engine.jobs().list().len(), jobs, "an edit submitted a job");
+            assert_eq!(a.engine.mesh_key(), mesh_key, "an edit that was not applied moved the mesh key");
+            assert!(a.engine.model().is_some_and(|m| Arc::ptr_eq(m, &model)), "an edit replaced the mesh");
+            assert_eq!(a.engine.project().clone().to_json(), project, "an edit reached the project without being applied");
+            assert!(a.busy.is_none() && a.job.is_none(), "an edit made the window busy");
+            assert_eq!(a.results.len(), results, "an edit cleared the result on show");
+        }
+
+        // the frames really drew the Geometry tab and the trial mesh really ran (otherwise "nothing started" would prove nothing)
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Ready(_)), "the last edit's trial mesh did not come back: {:?}", a.feedback.size);
+
+        // the sweep form of the Build page: its values and its count changed, the plan redrawn; only Run sweep submits
+        {
+            let w = a.shell.current_mut().unwrap();
+            w.part = crate::shell::Part::Build;
+            w.sweep.shown = true;
+            w.sweep.n = 9;
+            w.sweep.from = "1e-3".into();
+            w.sweep.to = "5e-3".into();
+        }
+        frames(&mut a, 5, 0.1);
+        assert!(a.sweep.is_none(), "the sweep form started a sweep");
+        assert_eq!(a.engine.jobs().list().len(), jobs);
+        assert_eq!(a.shell.current_mut().unwrap().runs.len(), runs, "no run was recorded");
+    }
+
+    /// The trial mesh of an edit comes back to the window, says how many cells the edit would mesh to, and is dropped when the edit moved on.
+    #[test]
+    fn the_size_of_an_edit_arrives_from_a_trial_mesh() {
+        let mut a = app();
+        a.load_example(example("02_cantilever"));
+        wait_idle(&mut a, 30);
+        a.mesh_edit.h *= 0.6;
+        a.geometry_dirty = true;
+        let ctx = a.ctx.clone();
+        a.edits_changed(&ctx);
+        assert!(a.feedback.problem.is_none());
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Pending));
+        a.start_size_preview();
+        let t0 = Instant::now();
+        while matches!(a.feedback.size, crate::feedback::SizeView::Pending) {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(10), "no answer from the trial mesh");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let crate::feedback::SizeView::Ready(p) = a.feedback.size.clone() else { panic!("{:?}", a.feedback.size) };
+        assert!(p.cells > a.doc.mesh.as_ref().unwrap().n_cells() as u64, "a finer h means more cells: {p:?}");
+        assert!(crate::feedback::size_line(&p).contains("cells"));
+        assert!(crate::feedback::cost_line(&p).contains("No cost estimate"), "no solve history in a test: {}", crate::feedback::cost_line(&p));
+
+        // an answer for an edit that has been replaced is dropped
+        let old = a.feedback.generation;
+        a.mesh_edit.h *= 0.9;
+        let ctx = a.ctx.clone();
+        a.edits_changed(&ctx);
+        a.take_size(old, Ok(p));
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Pending), "{:?}", a.feedback.size);
+
+        // a problem is shown at once, and no trial mesh is made of it
+        a.mesh_edit.h = -1.0;
+        a.edits_changed(&ctx);
+        assert!(a.feedback.problem.as_deref().is_some_and(|p| p.contains("element size")), "{:?}", a.feedback.problem);
+    }
+
+    /// The polarization of a new result is computed beside the frame and lands in the result view that holds that very result.
+    #[test]
+    fn the_polarization_arrives_after_the_result_and_only_for_the_result_it_was_made_from() {
+        let mut a = app();
+        a.load_example(example("06_wr90"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        let t0 = Instant::now();
+        while !a.has_analysis() {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(30), "the polarization never arrived: {:?}", a.status);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let want = a.engine.polarization("ems").unwrap().csv();
+        let got = a.results[a.current.unwrap()].analysis.as_ref().unwrap().csv();
+        assert_eq!(got, want, "the window shows exactly what the engine command computes");
+
+        // an analysis that was made for another result is not put on this one
+        let other = a.results[a.current.unwrap()].result.clone();
+        a.results[a.current.unwrap()].analysis = None;
+        let mut stale = (*other).clone();
+        stale.seconds += 1.0;
+        a.take_polarization("ems", &Arc::new(stale), a.engine.polarization("ems").map_err(|e| e.to_string()));
+        assert!(!a.has_analysis(), "an analysis of another result must not be taken");
+    }
+
+    /// Plan P3: the frame that takes a solve's result shows it and does nothing else that waits on a disk. The run record is written on a later
+    /// frame, one piece per frame (the record, then the dashboard refresh), the result on show is the one that is recorded, and a second solve
+    /// taken before the first record is written cannot be recorded under the first one's context.
+    #[test]
+    fn the_run_record_is_written_on_a_frame_after_the_result() {
+        let mut a = app();
+        let root = std::env::temp_dir().join(format!("nyx-deferred-record-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        a.attach_workspace(root.clone());
+        let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("02_cantilever")).unwrap().path;
+        a.new_draft("Fresh", crate::shell::Start::Example(path));
+        wait_idle(&mut a, 30);
+        a.shell_compute();
+        let t0 = Instant::now();
+        while a.results.is_empty() {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(60), "no result");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // the frame that took the result queued the record and did not write it
+        assert!(matches!(a.deferred.front(), Some(crate::shell::Deferred::Record { .. })), "the record waits for a later frame (queued: {}, run ctx kept: {}, error {:?}, status {})", a.deferred.len(), a.shell.run.is_some(), a.error, a.status);
+        assert!(a.shell.live_run.is_none() && a.shell.run.is_none(), "its context was taken with the result");
+        let runs = a.shell.current_mut().unwrap().runs.len();
+        assert_eq!(runs, 0, "nothing written yet");
+        // the next frames: the record, then the refresh of the dashboard (queued by the record), one piece each
+        a.poll();
+        assert!(a.shell.live_run.is_some(), "the record was written by the next poll");
+        assert!(matches!(a.deferred.front(), Some(crate::shell::Deferred::RefreshEntries)), "the refresh is the next piece");
+        a.poll();
+        assert!(a.deferred.is_empty());
+        wait_idle(&mut a, 30);
+        assert_eq!(a.shell.current_mut().unwrap().runs.len(), 1, "exactly one run");
+        assert!(a.error.is_none(), "{:?}", a.error);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

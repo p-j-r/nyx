@@ -17,6 +17,7 @@ pub mod analyse;
 pub mod commands;
 pub mod convergence;
 pub mod engine;
+pub mod estimate;
 pub mod geomdesc;
 pub mod geometry;
 pub mod guide;
@@ -27,18 +28,33 @@ pub mod materials;
 #[cfg(feature = "hdf5")]
 pub mod xdmf;
 
+pub mod apiref;
+pub mod commandlist;
 pub mod meshing;
+pub mod path_guard;
 pub mod pml;
+pub mod preview;
+pub mod process;
 pub mod project;
+pub mod queue;
+pub mod reduce;
 pub mod results_file;
+pub mod reuse;
+pub mod scriptout;
+pub mod shared_queue;
 pub mod solve;
 pub mod store_link;
+pub mod sweep;
+pub mod validated;
+pub mod worker;
 
 pub use commands::{Access, CommandDesc};
 pub use engine::Engine;
-pub use jobs::{JobId, JobInfo, JobOutput, JobRunner, JobState};
+pub use estimate::{Estimate, History};
+pub use jobs::{JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, Submit, WorkerRun};
 pub use meshing::{FemcoreMesher, MeshedModel, Mesher};
 pub use project::{MeshSettings, Project, SweepLayer};
+pub use queue::QueueOpts;
 
 use nyx_physics::{Error, Registry};
 #[allow(unused_imports)]

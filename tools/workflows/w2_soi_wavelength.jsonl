@@ -1,0 +1,33 @@
+# Workflow 2 (P0): the same wire, ten wavelengths 1500 to 1590 nm by hand, one physics: set the study, solve, read neff.
+# The geometry does not change, so the mesh is the cached one after the first solve; what a sweep could reuse beyond that is not.
+{"cmd":"project_open","args":{"path":"examples/15_soi_wire.nyx.json"},"note":"open the SOI wire"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":199861638666666.66,"n_modes":2,"n_target":2.75}},"note":"wavelength 1500 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":198538051655629.16,"n_modes":2,"n_target":2.75}},"note":"wavelength 1510 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":197231880263157.88,"n_modes":2,"n_target":2.75}},"note":"wavelength 1520 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":195942783006535.94,"n_modes":2,"n_target":2.75}},"note":"wavelength 1530 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":194670427272727.25,"n_modes":2,"n_target":2.75}},"note":"wavelength 1540 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":193414489032258.06,"n_modes":2,"n_target":2.75}},"note":"wavelength 1550 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":192174652564102.56,"n_modes":2,"n_target":2.75}},"note":"wavelength 1560 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":190950610191082.8,"n_modes":2,"n_target":2.75}},"note":"wavelength 1570 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":189742062025316.44,"n_modes":2,"n_target":2.75}},"note":"wavelength 1580 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}
+{"cmd":"set_study","args":{"physics":"ems","kind":"modes","params":{"freq":188548715723270.44,"n_modes":2,"n_target":2.75}},"note":"wavelength 1590 nm"}
+{"cmd":"solve_run","note":"mesh (cached) + solve"}
+{"cmd":"result_info","args":{"physics":"ems"},"note":"read neff"}

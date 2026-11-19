@@ -1,20 +1,36 @@
 nyx: finite-element photonics and phononics. Use it for numbers (effective indices, modes, frequencies, fields); do not estimate them from memory.
 
+How you work: write short Python scripts and run them with script_run. Only what a script prints or returns comes back; fields stay in the engine, you print numbers.
+- Every engine command is nyx.<command>(name=value, ...), e.g. nyx.set_param(name="w", value=5e-7); it returns a dict or list. An engine error is a RuntimeError you can catch. api lists the commands (topic "commands"), api command="add_rect" shows one with its arguments, topics "geometry", "optical-modes", "troubleshooting" are guides.
+- script_check only checks (milliseconds): a misspelled command or argument is refused with its line. script_run checks first.
+- Variables and functions stay from one script_run to the next. params is the dict you gave script_run; script_run path="soi_wire" runs a script saved in the workspace and save_as stores one, so a model written once is run again with params={"w": 3e-7} and nothing is resent.
+- A solve can take a while: after wait_s script_run answers status "running" with what was printed so far; script_wait continues it (script_wait cancel abandons it).
+- project_new, project_load, project_open, store_open and remove_* are refused unless script_run has allow_destructive true: ask the person first.
+
 Conventions
 - SI units everywhere (metres, hertz, kelvin). Wafer frame: x lateral, y propagation, z surface normal. A 2D model is the x-z cross-section.
-- Regions and boundaries have names (Si, BOX, "BOX|Si", clad.top); you never see or pass integer labels. Conditions use selectors over the geometry or those names.
-- Every result carries nyx.{session, revision, project_hash}. If project_hash is not the one you last saw, the project changed: call project_info.
+- Regions and boundaries have names (Si, BOX, "BOX|Si", clad.top); you never see integer labels.
 
-How to work (one project is open; every tool is a command)
-1. Geometry: add_rect / add_circle / add_polygon ... (list_operations shows all with fields), then add_overlay to name the regions in painter order (a later region wins where they overlap). geometry_names lists regions and boundaries. get_guide topic "geometry".
-2. Physics: list_physics, describe_physics, then add_physics (ems = EM waves, sms = solid mechanics, dfs = diffusion) with its study. Materials: list_materials, then set_material per region (a library name, a name placed at an angle, or numbers). add_material writes your own as TOML.
-2b. Bodies of revolution (disks, posts, rings): a 2D model whose x is the radius r (the axis is x = 0, a body may touch it), set_study sms axisymmetric_eigenfrequency {n_modes, f_search, azimuthal_order} or ems axisymmetric_modes. For anchor loss add_pml on the sides XMax and ZMin (never towards the axis), then add_pml_conditions; result scalars fN (Hz), QN and `layer fraction N` (pick modes with a small fraction; modes of the layers have Q near 1), numeric `f re N (Hz)` and `f im N (Hz)`, and the energy shares `radial share N`, `axial share N`, `azimuthal share N`, `share in <region> N` that tell the families apart (m = 0 includes torsional modes, azimuthal share 1). Q converges slower than f; refine at re-entrant corners (add_size on a small region around the corner) and solve again with a smaller size: convergence_check refines the global size only, not add_size sizes. Use its `match` "nearest" or `track` {f} for complex modes, whose order changes between meshes.
-3. Conditions: add_condition (kind and parameters from describe_physics). Mesh: set_mesh (h, adapt_scale, physics_sizing, max_dev, curved), mesh_build. In 3D, `curved` true gives the cells on a curved surface (a sphere, say) quadratic geometry so the surface error falls as h^3 instead of h^2; only the `ems` `cavity` study uses it, and `add_size` on a face or `max_dev` refines the mesh next to a curved face.
-4. solve_run (a 2D section takes about a second). convergence_check repeats it on a finer mesh and compares: run it before you quote a number. result_info lists solutions, fields and scalars; result_field reads values; analyse gives the polarization of optical modes.
-5. store_save binds the project to a workspace folder; every later solve is a row in its run table, so the person sees your work in the dashboard.
+A model in a script
+  nyx.project_new(dim=2, title="SOI wire")
+  nyx.set_param(name="w", value=params.get("w", 5e-7))
+  nyx.add_rect(name="box", min=[-2e-6, -2e-6], max=[2e-6, 0])          # more add_* in api topic "geometry"
+  nyx.add_rect(name="core", min=["-w/2", 0], max=["w/2", 2.2e-7])
+  nyx.add_overlay(regions=[{"name": "BOX", "input": "box"}, {"name": "Si", "input": "core"}])   # a later region wins where they overlap
+  nyx.add_physics(physics="ems", study="modes", study_params={"freq": 193.4e12, "n_target": 2.9, "n_modes": 2})
+  nyx.set_material(physics="ems", region="Si", material="silicon")   # and BOX: list_materials
+  nyx.set_mesh(h=4e-7, adapt_scale=0.4)
+  nyx.solve_run(physics="ems")
+  print(nyx.result_info(physics="ems")[0]["solutions"][0]["eigenvalue"][0])
+Physics: ems = EM waves, sms = solid mechanics, dfs = diffusion (describe_physics).
+Bodies of revolution (disks, posts) and curved 3D cells: api topic "geometry".
 
-Answering
-- Quote the number with its assumptions: the geometry you built, the materials, the mesh size, the wavelength. Say which values the person did not give.
-- Do not report a mode whose class does not match what was asked: check analyse. A result is stale when the project changed after it (result_info says so).
+Numbers from a field: use the reductions, which run in the engine: integrate, extremum, probe, line_cut, overlap, confinement. A formula is a text or a function of the point, called once: nyx.integrate(expr=lambda p: p["eps_r"] * abs2(p["Ex"]), physics="ems", region="Si"). A project opened with project_open can be read as a script with project_script.
 
-More: get_guide topics "geometry", "optical-modes" (reading mode tables), "troubleshooting" (errors).
+Before you quote a number
+- convergence_check repeats the solve on a finer mesh with a `tolerance`; the answer says `validated: checked` (`exploratory` if nobody checked it).
+- A result is stale when what it was made from changed after it (result_info, analyse say `stale`): do not quote a stale number.
+- Do not report a mode whose class does not match what was asked: check analyse.
+- Quote the number with its assumptions (geometry, materials, mesh size, wavelength) and say which values the person did not give.
+
+Several solves: sweep_run does a parameter sweep as one request; await nyx.aio.solve_run(...) with asyncio.gather overlaps waiting with other work.

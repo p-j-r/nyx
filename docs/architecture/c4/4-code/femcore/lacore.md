@@ -46,7 +46,9 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [ems: Mode kernel](../ems/modes.md) | linalg::csr, linalg::csr::assembly | Coo, RCsr |
 | [ems: Complex-mode kernel](../ems/modescx.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [ems: Optical mode sets](../ems/optical.md) | linalg::csr::assembly | c |
+| [engine: Commands](../engine/commands.md) | linalg::csr::assembly | C |
 | [Error estimators](./estimators.md) | linalg::csr::assembly | C |
+| [Expressions](./expr.md) | linalg::csr::assembly | C |
 | [Finite-element basics](./fem.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
 | [Direct solvers](./ladirect.md) | linalg::csr, linalg::faer_glue, linalg::linop, linalg::scalar, linalg::vecops | C64, Csr, FaerScalar, LinearOperator, Preconditioner, Scalar, axpy, clear_upper_vector_state +6 |
 | [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar +1 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +3 |
@@ -55,6 +57,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [Time, nonlinear, sweeps](./laother.md) | linalg::csr, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar +1 | C64, Csr, Dense, FaerScalar, FnOperator, Identity, LinearOperator, Preconditioner +7 |
 | [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar | C64, Csr, FaerScalar, Preconditioner, RCsr, Scalar |
 | [Optical mode sets](./optical.md) | linalg::csr, linalg::csr::assembly | C, c |
+| [Runtime services](./runtime.md) | linalg::scalar | C64, Scalar |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [sms: Axisymmetric study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
 | [sms: Floquet kernel](../sms/floquet.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |

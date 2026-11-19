@@ -44,14 +44,15 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [ems: Optical mode sets](../ems/optical.md) | crate root | Discretisation |
 | [ems: Typed problem](../ems/problem.md) | error, physics | Ctx, Error, Physics |
 | [engine: Analyses](../engine/analyse.md) | error | Error |
-| [engine: Commands](../engine/commands.md) | crate root, error, registry | Error, Registry, Sizing |
+| [engine: Command lists](../engine/commandlist.md) | error | Error |
+| [engine: Commands](../engine/commands.md) | crate root, error, physics, registry | Ctx, Error, LabelResolver, Registry, Sizing |
 | [engine: Geometry operations](../engine/geometry.md) | error | Error |
-| [engine: Job runner](../engine/jobs.md) | error, physics, registry | Ctx, Error, Registry |
+| [engine: Job runner and queue](../engine/jobs.md) | error, physics, registry | Ctx, Error, Registry |
 | [engine: Materials](../engine/materials.md) | error, physics | Error, Physics |
 | [engine: Meshing seam](../engine/meshing.md) | crate root, error, physics | Error, LabelResolver, Mesh, Sizing |
 | [engine: Project](../engine/project.md) | error, registry | Error, Registry |
 | [engine: Registry and facade](../engine/registry.md) | crate root, error, physics, registry | Error, Physics, Registry |
-| [engine: Results files](../engine/resultsIO.md) | error | Error |
+| [engine: Results files](../engine/resultsIO.md) | error, registry | Error, Registry |
 | [engine: Store link](../engine/storeLink.md) | error | Error |
 | [Descriptors and schemas](./descriptors.md) | physics | Physics |
 | [Problem envelope](./envelope.md) | error, physics | Ctx, Error, LabelResolver, Physics |

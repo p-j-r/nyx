@@ -9,8 +9,8 @@
 
 use crate::app::App;
 use crate::theme;
-use eframe::egui::{self, Color32, RichText, Sense, Vec2};
-use nyx_engine::facade::store::runs::{RunRecord, RunStatus};
+use eframe::egui::{self, RichText, Vec2};
+use nyx_engine::facade::store::runs::{RunPatch, RunRecord, RunStatus};
 use nyx_engine::facade::store::util::{hash_bytes, now_secs};
 use nyx_engine::facade::store::{Entry, Settings, Workspace, WorkflowDir};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -46,7 +46,6 @@ pub enum Sub {
     Main,
     Compare,
     Field,
-    Model,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +56,8 @@ pub enum Sheet {
     Versions,
     Share,
     Open,
+    /// the version, the licences of the fonts and the tagline
+    About,
 }
 
 pub struct OpenWf {
@@ -93,6 +94,7 @@ pub struct OpenWf {
     pub focus: Option<String>,
     pub card_for: String,
     pub card_summary: String,
+    pub sweep: crate::sweepui::Form,
 }
 
 impl OpenWf {
@@ -130,6 +132,7 @@ impl OpenWf {
             focus: None,
             card_for: String::new(),
             card_summary: String::new(),
+            sweep: Default::default(),
         }
     }
 
@@ -153,6 +156,24 @@ impl OpenWf {
 }
 
 /// The run that is being solved, so its record can be written whatever the window shows when it ends.
+/// The run record whose result is on show: where it lives, and the physics it holds the result of (a convergence verdict is written into it, P6).
+#[derive(Clone, Debug)]
+pub struct LiveRun {
+    pub wf_id: String,
+    pub exp: String,
+    pub run: String,
+    pub physics: String,
+}
+
+/// Work that follows a solve and is not needed to show its result, done one piece per frame so that no frame holds more than one piece (the
+/// frame that takes a result was 53 to 63 ms: the run record is 9 to 17 ms of file writes and the dashboard refresh 4 to 6 ms; plan P3).
+pub enum Deferred {
+    /// the run record of a solve that was just taken
+    Record { rc: RunCtx, result: std::sync::Arc<nyx_engine::facade::physics::SolveResult> },
+    /// the dashboard's list of workflows, after a run was written
+    RefreshEntries,
+}
+
 pub struct RunCtx {
     pub wf_id: String,
     pub exp: String,
@@ -186,7 +207,7 @@ pub struct Shell {
     pub loaded: Option<(String, String)>,
     pub run: Option<RunCtx>,
     /// the id of the run whose fields are still in `App::results`
-    pub live_run: Option<String>,
+    pub live_run: Option<LiveRun>,
     pub sheet: Sheet,
     pub new: NewState,
     pub palette_q: String,
@@ -203,6 +224,11 @@ pub struct Shell {
     pub open_file: Option<(PathBuf, nyx_engine::facade::store::archive::Inspection)>,
     pub classic: bool,
     pub dark: bool,
+    /// the zoom factor last seen: a change is Ctrl +/- (or the View menu) and is saved
+    pub last_zoom: f32,
+    /// the native menu bar (Windows)
+    #[cfg(windows)]
+    pub native_menu: Option<crate::menu::Native>,
     pub logo: Option<egui::TextureHandle>,
     pub last_tick: Instant,
     pub last_refresh: Instant,
@@ -243,6 +269,9 @@ impl Shell {
             open_file: None,
             classic: true,
             dark: false,
+            last_zoom: 1.0,
+            #[cfg(windows)]
+            native_menu: None,
             logo: None,
             last_tick: Instant::now(),
             last_refresh: Instant::now() - Duration::from_secs(60),
@@ -277,10 +306,12 @@ impl App {
     pub fn attach_workspace(&mut self, root: PathBuf) {
         match Workspace::open(&root) {
             Ok(ws) => {
-                self.shell.dark = ws.settings.theme == "dark";
+                let zoom = ws.settings.zoom.clamp(0.5, 3.0);
                 self.shell.ws = Some(ws);
                 self.shell.classic = false;
-                theme::apply_mode(&self.ctx, self.shell.dark);
+                self.ctx.set_zoom_factor(zoom);
+                self.shell.last_zoom = zoom;
+                self.sync_look(&self.ctx.clone());
                 self.refresh_entries();
                 let tabs = self.shell.settings().open_tabs;
                 for id in tabs {
@@ -465,25 +496,31 @@ impl App {
     /// A new draft workflow from a project (nothing is written until the first change).
     pub fn new_draft(&mut self, title: &str, start: Start) {
         self.flush();
+        if let Start::Results(path) = &start {
+            // reading the file, meshing its project again and checking the mesh run on a job; the draft workflow is made when it ends (`finish_open`)
+            match self.engine.start_open_results(path.to_str().unwrap_or_default()) {
+                Ok(job) => {
+                    self.opening = Some(title.to_string());
+                    self.started(job, crate::app::JobKind::Open, format!("Opening {title}"), true);
+                    self.status = format!("Opening {title}: reading the file, meshing its project and checking the mesh");
+                }
+                Err(e) => self.set_error(e.to_string()),
+            }
+            return;
+        }
         let id = nyx_engine::facade::store::util::short_id();
         let mut w = OpenWf::new(id.clone());
         w.draft_title = title.trim().to_string();
         self.shell.open.insert(id.clone(), w);
         self.shell.tabs.push(id.clone());
-        let mut shown = false;
+        let shown = false;
         match start {
             Start::Example(path) => {
                 if self.cmd("project_open", serde_json::json!({ "path": path.to_str().unwrap_or_default() })).is_none() {
                     return;
                 }
             }
-            Start::Results(path) => {
-                let Some(v) = self.cmd("open_results", serde_json::json!({ "path": path.to_str().unwrap_or_default() })) else { return };
-                self.adopt();
-                self.project_path = None;
-                self.take_solved(&v);
-                shown = true;
-            }
+            Start::Results(_) => return,
             Start::Blank { physics, three_d } => {
                 if let Err(e) = crate::examples::blank(&mut self.engine, &physics, three_d) {
                     self.set_error(e);
@@ -494,6 +531,27 @@ impl App {
         if !shown {
             self.adopt_project();
         }
+        self.finish_draft(&id, title, shown);
+    }
+
+    /// The results file the window was opening on a job is in: its project is the engine's, so the draft workflow is made around it and the
+    /// stored results are put on show.
+    pub(crate) fn finish_open(&mut self, summary: &serde_json::Value) {
+        let title = self.opening.take().unwrap_or_else(|| "Results".into());
+        let id = nyx_engine::facade::store::util::short_id();
+        let mut w = OpenWf::new(id.clone());
+        w.draft_title = title.trim().to_string();
+        self.shell.open.insert(id.clone(), w);
+        self.shell.tabs.push(id.clone());
+        self.adopt();
+        self.project_path = None;
+        self.take_solved(summary);
+        self.finish_draft(&id, &title, true);
+    }
+
+    /// The end of making a draft workflow: remembers its first spec, makes it the loaded one and shows it.
+    fn finish_draft(&mut self, id: &str, title: &str, shown: bool) {
+        let id = id.to_string();
         let spec = self.spec_json().unwrap_or_default();
         if let Some(w) = self.shell.open.get_mut(&id) {
             w.spec0 = spec.clone();
@@ -559,11 +617,48 @@ impl App {
         }
     }
 
-    /// A solve finished well: writes its run record and keeps the log with it. Returns the run id.
-    pub fn record_ok(&mut self, res: &nyx_engine::facade::physics::SolveResult) -> Option<String> {
-        let rc = self.shell.run.take()?;
-        let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: nyx_engine::store_link::metrics_of(res), ..Default::default() };
-        self.write_run(rc, rec, Some(res.log.join("\n")))
+    /// A solve finished well: writes its run record (the context `rc` was taken when the solve was taken) and keeps the log with it. Returns the run.
+    pub fn record_ok(&mut self, rc: RunCtx, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun> {
+        let (wf_id, exp) = (rc.wf_id.clone(), rc.exp.clone());
+        let rec = RunRecord { sec: res.seconds, status: RunStatus::Ok, params: rc.params.clone(), metrics: crate::spans::span("metrics_of", || nyx_engine::store_link::metrics_of(res)), ..Default::default() };
+        self.write_run(rc, rec, Some(res.log.join("\n"))).map(|run| LiveRun { wf_id, exp, run, physics: res.physics.clone() })
+    }
+
+    /// A convergence check of the result on show has finished: when the engine says the result now rests on a check, the verdict goes into the
+    /// run record that solved it (an appended patch line, like a star), so the runs table and a later session know the run was checked.
+    pub fn note_check_in_run(&mut self) {
+        let Some(live) = self.shell.live_run.clone() else { return };
+        let Some(check) = self.engine.validated(&live.physics).check else { return };
+        let patch = RunPatch { convergence: Some(check.to_record()), ..Default::default() };
+        let Some(w) = self.shell.open.get_mut(&live.wf_id) else { return };
+        let Some(d) = w.dir.as_mut() else { return };
+        match d.patch_run(&live.exp, &live.run, patch) {
+            Ok(()) => {
+                if w.exp == live.exp {
+                    w.reload_runs();
+                }
+            }
+            Err(e) => self.set_error(format!("Could not record the check in the run: {e}")),
+        }
+    }
+
+    /// Puts work after a solve in the queue of pieces (a refresh is not queued twice).
+    pub fn defer(&mut self, d: Deferred) {
+        if matches!(d, Deferred::RefreshEntries) && self.deferred.iter().any(|x| matches!(x, Deferred::RefreshEntries)) {
+            return;
+        }
+        self.deferred.push_back(d);
+    }
+
+    /// Does the next piece of work that followed a solve; one piece per call, and `poll` is called once per frame.
+    pub fn run_deferred(&mut self) {
+        match self.deferred.pop_front() {
+            Some(Deferred::Record { rc, result }) => {
+                self.shell.live_run = crate::spans::span("record_ok", || self.record_ok(rc, &result));
+            }
+            Some(Deferred::RefreshEntries) => crate::spans::span("refresh_entries", || self.refresh_entries()),
+            None => {}
+        }
     }
 
     /// A solve failed or was cancelled.
@@ -580,7 +675,7 @@ impl App {
             #[cfg(feature = "hdf5")]
             rec.artifacts.push(nyx_engine::facade::store::runs::Artifact { kind: "result".into(), path: "results.h5".into(), bytes: 0 });
         }
-        let res = w.dir.as_mut()?.record_run(&rc.exp, rec, &rc.spec_json);
+        let res = crate::spans::span("record_run", || w.dir.as_mut().map(|d| d.record_run(&rc.exp, rec, &rc.spec_json)))?;
         match res {
             Ok(r) => {
                 let d = w.dir.as_mut()?;
@@ -588,20 +683,27 @@ impl App {
                     let dir = d.run_dir(&rc.exp, &r.id);
                     let _ = std::fs::create_dir_all(&dir);
                     let _ = std::fs::write(dir.join("log.txt"), text);
+                    // written on an engine job, from a snapshot of what the engine holds now: the window does not wait for the file
                     #[cfg(feature = "hdf5")]
-                    if let Err(e) = self.engine.export_results(&dir.join("results.h5").to_string_lossy(), false) {
-                        self.error = Some(format!("Results file: {e}"));
+                    {
+                        let target = dir.join("results.h5").to_string_lossy().into_owned();
+                        match crate::spans::span("start_export", || self.engine.start_export_results(&target, false)) {
+                            Ok(job) => {
+                                self.exports.insert(job, target);
+                            }
+                            Err(e) => self.error = Some(format!("Results file: {e}")),
+                        }
                     }
                 }
                 if let Some(ws) = &self.shell.ws {
                     // housekeeping after each run, by the person's own settings (the defaults delete nothing)
-                    let _ = ws.housekeeping(d, now_secs());
+                    let _ = crate::spans::span("housekeeping", || ws.housekeeping(d, now_secs()));
                 }
                 if w.exp == rc.exp {
-                    w.reload_runs();
+                    crate::spans::span("reload_runs", || w.reload_runs());
                 }
                 w.saved_at = Some(Instant::now());
-                self.refresh_entries();
+                self.defer(Deferred::RefreshEntries);
                 Some(r.id)
             }
             Err(e) => {
@@ -616,6 +718,14 @@ impl App {
     /// The whole window in the shell layout.
     pub fn shell_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.sync_look(&ctx);
+        #[cfg(windows)]
+        {
+            let clicked = self.shell.native_menu.as_ref().map(|m| m.take()).unwrap_or_default();
+            for act in clicked {
+                self.do_act(&ctx, act);
+            }
+        }
         self.shell_shortcuts(&ctx);
         if self.shell.logo.is_none() {
             self.shell.logo = load_logo(&ctx);
@@ -633,9 +743,9 @@ impl App {
         self.cancel_dialog(&ctx);
         if let Some(n) = self.shell.notice.clone() {
             egui::Area::new(egui::Id::unique("notice")).order(egui::Order::Tooltip).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0]).show(&ctx, |ui| {
-                crate::kit::card(ui, theme::INK, theme::INK, 12, |ui| {
+                crate::kit::card(ui, theme::text(&ctx), theme::text(&ctx), 12, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(n).color(Color32::WHITE));
+                        ui.label(RichText::new(n).color(theme::page(&ctx)));
                         if ui.button("OK").clicked() {
                             self.shell.notice = None;
                         }
@@ -693,12 +803,13 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             if let Some(tex) = &self.shell.logo {
-                ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(34.0)).corner_radius(6));
+                // the whole mark, not clipped: it is a square with its own offset shadow, and a rounded clip cut its corners
+                ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(38.0)));
             } else {
                 ui.label(RichText::new("Nyx").font(theme::title(24.0)).color(theme::accent(&ctx)));
             }
             let on_dash = self.shell.page == Page::Dashboard;
-            let dash = ui.add(egui::Button::new(RichText::new("Dashboard").color(if on_dash { Color32::WHITE } else { theme::text(&ctx) }).strong()).fill(if on_dash { theme::accent(&ctx) } else { Color32::TRANSPARENT }).stroke(egui::Stroke::NONE).min_size(Vec2::new(0.0, 34.0)));
+            let dash = crate::kit::tab(ui, "dashboard", "Dashboard", on_dash, None, false).select;
             if dash.clicked() {
                 self.flush();
                 self.shell.page = Page::Dashboard;
@@ -709,26 +820,22 @@ impl App {
             for id in self.shell.tabs.clone() {
                 let Some(w) = self.shell.open.get(&id) else { continue };
                 let on = self.shell.page == Page::Workflow(id.clone());
-                let mut title = w.title();
-                if title.chars().count() > 22 {
-                    title = title.chars().take(21).collect::<String>() + "…";
-                }
+                let title = crate::fmt::ellipsize(&w.title(), 22);
                 let running = running_wf.as_deref() == Some(&id);
-                let (fill, stroke) = if on { (theme::tint(&ctx), theme::accent(&ctx)) } else { (Color32::TRANSPARENT, Color32::TRANSPARENT) };
-                egui::Frame::new().fill(fill).stroke(egui::Stroke::new(1.0, stroke)).corner_radius(10).inner_margin(egui::Margin::symmetric(10, 5)).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    crate::kit::dot(ui, if running { theme::AMBER } else if w.dir.is_none() { theme::line(&ctx) } else { theme::GREEN });
-                    let r = ui.add(egui::Label::new(RichText::new(title).color(if on { theme::accent(&ctx) } else { theme::text(&ctx) }).strong()).sense(Sense::click()));
-                    if r.clicked() {
-                        show = Some(id.clone());
-                    }
-                    if r.middle_clicked() {
+                let state = if running { crate::kit::State::Running } else if w.dir.is_none() { crate::kit::State::Idle } else { crate::kit::State::Done };
+                let hit = crate::kit::tab(ui, ("tab", &id), &title, on, Some(state), true);
+                hit.select.clone().on_hover_text(state.word());
+                if hit.select.clicked() {
+                    show = Some(id.clone());
+                }
+                if hit.select.middle_clicked() {
+                    close = Some(id.clone());
+                }
+                if let Some(c) = hit.close {
+                    if c.on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
                         close = Some(id.clone());
                     }
-                    if ui.add(egui::Label::new(RichText::new("×").size(16.0).color(theme::muted(&ctx))).sense(Sense::click())).on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
-                        close = Some(id.clone());
-                    }
-                });
+                }
             }
             if ui.add(egui::Button::new(RichText::new("+").size(18.0)).min_size(Vec2::new(34.0, 34.0))).on_hover_text("New workflow (Ctrl+N)").clicked() {
                 self.shell.sheet = Sheet::New;
@@ -745,31 +852,14 @@ impl App {
                     self.flush();
                     self.shell.page = Page::Settings;
                 }
-                if ui.add(egui::Button::new(if self.shell.dark { "Light" } else { "Dark" }).min_size(Vec2::new(0.0, 32.0))).on_hover_text("Switch between the light and the dark look").clicked() {
-                    self.shell.dark = !self.shell.dark;
-                    theme::apply_mode(&ctx, self.shell.dark);
-                    if let Some(ws) = &mut self.shell.ws {
-                        ws.settings.theme = if self.shell.dark { "dark".into() } else { "light".into() };
-                        let _ = ws.save_settings();
-                    }
-                }
                 let search = ui.add(egui::Button::new(RichText::new("Search or run anything        Ctrl K").color(theme::muted(&ctx))).min_size(Vec2::new(250.0, 32.0)));
                 if search.clicked() {
                     self.shell.sheet = Sheet::Palette;
                     self.shell.palette_q.clear();
                 }
-                // the status chip follows the one job that can run
-                let (text, dot) = match &self.busy {
-                    Some((what, _)) if self.shell.run.is_some() => (format!("1 running · {what}"), theme::AMBER),
-                    Some((what, _)) => (what.clone(), theme::AMBER),
-                    None => ("Idle".to_string(), theme::line(&ctx)),
-                };
-                let fill = if self.busy.is_some() { theme::warm(&ctx) } else { Color32::TRANSPARENT };
-                egui::Frame::new().fill(fill).corner_radius(16).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
-                    crate::kit::dot(ui, dot);
-                    ui.label(RichText::new(text).color(theme::text(&ctx)));
-                });
+                // the busy chip and its queue popover (activity.rs): only while something runs or waits (review I-12: an always-on "Idle" is noise)
+                let activity = self.activity();
+                self.busy_chip(ui, &activity);
             });
         });
     }
@@ -814,7 +904,9 @@ pub fn params_of(json: &str) -> BTreeMap<String, f64> {
 
 fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let bytes = include_bytes!("../../../docs/brand/nyx-mark.png");
+    // the mark is 286 px and drawn at about 38: scale it once with a good filter, or the small drawing shimmers
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let img = image::imageops::resize(&img, 96, 96, image::imageops::FilterType::Lanczos3);
     let size = [img.width() as usize, img.height() as usize];
     Some(ctx.load_texture("nyx-mark", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR))
 }
@@ -848,6 +940,33 @@ impl App {
         }
         if stop || keep || esc_closed {
             self.shell.confirm_cancel = false;
+        }
+    }
+}
+
+impl App {
+    /// Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs),
+    /// High contrast, reduced motion, and the zoom (a change made with Ctrl +/- or the View menu is saved).
+    pub fn sync_look(&mut self, ctx: &egui::Context) {
+        let Some(ws) = &self.shell.ws else { return };
+        let s = &ws.settings;
+        let dark = match s.theme.as_str() {
+            "dark" => true,
+            "light" => false,
+            _ => ctx.system_theme() == Some(egui::Theme::Dark),
+        };
+        let want = theme::Look { dark, high_contrast: theme::resolve_contrast(&s.contrast), reduce_motion: s.reduce_motion };
+        if theme::look(ctx) != want {
+            theme::apply_look(ctx, want);
+        }
+        self.shell.dark = dark;
+        let z = ctx.zoom_factor();
+        if (z - self.shell.last_zoom).abs() > 1e-4 {
+            self.shell.last_zoom = z;
+            if let Some(ws) = &mut self.shell.ws {
+                ws.settings.zoom = z;
+                let _ = ws.save_settings();
+            }
         }
     }
 }

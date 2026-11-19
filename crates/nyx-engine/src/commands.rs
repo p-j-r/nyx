@@ -7,6 +7,7 @@ use crate::engine::Engine;
 use crate::geomdesc as gd;
 use crate::geometry;
 use crate::project::{MeshSettings, Project};
+use crate::queue::QueueOpts;
 use nyx_physics::{contract, BcSpec, Error, MaterialAssign, ProblemSpec, StudySpec};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -48,6 +49,10 @@ fn int(doc: &str) -> Value {
 }
 fn boolean(doc: &str) -> Value {
     json!({ "type": "boolean", "description": doc })
+}
+/// An expression of fields (ADR 90): a field name, a number, a handle or an operation object; `overlap` and `confinement` also take a list of them.
+fn expr_schema(doc: &str) -> Value {
+    json!({ "type": ["string", "number", "object", "array"], "description": doc })
 }
 fn object(doc: &str) -> Value {
     json!({ "type": "object", "description": doc })
@@ -106,12 +111,14 @@ impl Engine {
         use Access::*;
         let ids: Vec<&str> = self.registry.ids();
         let phys = || json!({ "type": "string", "enum": ids, "description": "the three-letter code of the physics" });
+        let wl = || json!({ "type": "number", "description": "metres: where the material values of a formula (eps_r of a dispersive model) are read; default the wavelength of the study. The fields stay those of the solve" });
         let mut c = vec![
             cmd("list_commands", "List the commands", "Every command with its title, access and schema.", Read, schema(vec![], &[])),
             cmd("project_new", "New project", "Starts an empty project (dropping the current one, its mesh and results).", Edit,
                 schema(vec![("title", text("project title")), ("dim", int("2 (x-z cross-section, the default) or 3")), ("h", number("global element size in metres"))], &[])),
             cmd("project_info", "Project summary", "Title, geometry size, the problem of each physics, the mesh, the results (and whether they are stale), the store binding and the jobs.", Read, schema(vec![], &[])),
             cmd("project_json", "Project as JSON", "The whole project as JSON text (the file that is saved).", Read, schema(vec![], &[])),
+            cmd("project_script", "Project as a script", "The project as a script (Python, `.nys`) that rebuilds it: project_new, set_param (each parameter reads `params`), one add_* per feature, set_mesh, add_material, set_problem, set_active. It does not solve. It is replayed on a scratch engine and offered only when it gives the same project; `form` says how it is written: `commands`, `geometry_json` (the geometry as one set_geometry, for ids and pins that must be kept) or `project_json` (one project_load of the whole project: exact, not readable). Starts with project_new, so over MCP it needs allow_destructive.", Read, schema(vec![], &[])),
             cmd("project_load", "Load a project from JSON", "Replaces the project by JSON text, after checking it.", Edit, schema(vec![("json", text("project JSON text"))], &["json"])),
             cmd("project_open", "Open a project file", "Reads a project JSON file.", Edit, schema(vec![("path", text("file path"))], &["path"])),
             cmd("project_save", "Save the project to a file", "Writes the project as a JSON file.", Expensive, schema(vec![("path", text("file path"))], &["path"])),
@@ -130,7 +137,7 @@ impl Engine {
             cmd("tag_feature", "Tag a feature", "Adds (or removes) a tag of a feature.", Edit,
                 schema(vec![("name", text("feature name")), ("tag", text("tag")), ("remove", boolean("true removes the tag"))], &["name", "tag"])),
             cmd("set_param", "Set a model parameter", "Sets (or creates) a named parameter that expressions in the features can use. A number, or an expression over other parameters.", Edit,
-                schema(vec![("name", text("parameter name")), ("value", json!({ "oneOf": [{ "type": "number" }, { "type": "string" }] }))], &["name", "value"])),
+                schema(vec![("name", text("parameter name")), ("value", json!({ "oneOf": [{ "type": "number" }, { "type": "string" }], "description": "a number in metres (or the unit the features give it), or an expression over other parameters" }))], &["name", "value"])),
             cmd("remove_param", "Remove a model parameter", "", Edit, schema(vec![("name", text("parameter name"))], &["name"])),
             cmd("geometry_names", "Evaluate the geometry and list its names", "Evaluates the model and returns the region and boundary names a problem can use, and the bounding box. Instant; it reports a geometry that does not evaluate.", Read, schema(vec![], &[])),
             cmd("list_physics", "List the physics of this build", "The physics compiled in, their studies, and which the project loads.", Read, schema(vec![], &[])),
@@ -149,21 +156,62 @@ impl Engine {
             cmd("set_active", "Set the active physics", "The one solved by default.", Edit, schema(vec![("physics", phys())], &["physics"])),
             cmd("check_project", "Check the project", "Checks the geometry, the element size and every problem against the descriptors of its physics, without meshing.", Read, schema(vec![], &[])),
             cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale` or `sweep` set to null return to the simple mesher / a 2D mesh.", Edit,
-                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"] })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"] })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity study, default false")),
-                    ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number" }, "n": { "type": "integer" }, "domain_offset": { "type": "integer" }, "fill": { "type": "string", "description": "region name: every cell of the layer belongs to it" } }, "required": ["thickness", "n"] }, "description": "layers to sweep the 2D mesh along y" }))], &[])),
+                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"], "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher" })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"], "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2" })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity study, default false")),
+                    ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number", "description": "thickness of the layer along y, metres" }, "n": { "type": "integer", "description": "cells across the thickness" }, "domain_offset": { "type": "integer", "description": "added to the domain numbers of the layer's cells" }, "fill": { "type": "string", "description": "region name: every cell of the layer belongs to it" } }, "required": ["thickness", "n"] }, "description": "layers to sweep the 2D mesh along y" }))], &[])),
             cmd("mesh_build", "Mesh the geometry", "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.", Expensive, schema(vec![("wait", boolean("wait for the mesh, default true"))], &[])),
             cmd("solve_run", "Solve", "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.", Expensive,
-                schema(vec![("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("wait", boolean("wait for the result, default true"))], &[])),
+                schema(vec![("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("wait", boolean("wait for the result, default true")), ("isolate", boolean("run the solve in a worker process: running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
             cmd("job_status", "Status of a job", "State, current stage, fraction done and elapsed time.", Read, schema(vec![("id", int("job id"))], &["id"])),
             cmd("job_list", "List the jobs", "", Read, schema(vec![], &[])),
             cmd("job_cancel", "Cancel a job", "The solver notices at its next check; a factorisation in progress finishes first.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
-            cmd("job_wait", "Wait for a job", "Blocks until the job has finished and applies its outcome.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
+            cmd("job_wait", "Wait for a job", "Blocks until the job has finished and applies its outcome. With `timeout_s` it gives up after that many seconds and returns the job's entry with `waiting: true` (the job goes on; wait again).", Expensive,
+                schema(vec![("id", int("job id")), ("timeout_s", number("longest wait in seconds; omit to wait until the job has finished"))], &["id"])),
+            cmd("queue_submit", "Submit work to the queue", "Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a mesh `convergence` check (`physics`, `factor`, `tolerance`) and returns its entry at once. The heavy lane runs one job at a time in order of priority (1 a person's request, 2 an agent's, the default, 3 sweeps and batches; a waiting job rises one level after a minute), then in turns between owners, then in order of submission. The job carries a frozen copy of the project: later edits do not change it (`project_changed` says they happened). `supersede` replaces a queued request of the same kind and targets; `hold` keeps it from starting until `queue_release`. A job that comes after another of the same project reuses the mesh the first built.", Expensive,
+                schema(vec![("kind", json!({ "type": "string", "enum": ["solve", "mesh", "convergence"], "description": "default solve" })), ("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("factor", number("convergence: finer/present element size, default 0.6")), ("tolerance", number("convergence: largest accepted relative difference")),
+                    ("priority", int("1, 2 or 3; lower runs first")), ("supersede", boolean("replace a queued request of the same kind and targets")), ("hold", boolean("start held")),
+                    ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("detached", boolean("solve only, with `shared`: write the item into the queue and return at once, with nothing of this session waiting for it; the answer is the item (`shared_id`, and `results`, the file that `open_results` reads once its state is `done`). Closing the program leaves it running")),
+                    ("isolate", boolean("solve in a worker process (only for kind solve): running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
+            cmd("queue_list", "List the queue", "Every job of this session and every item that another program wrote into the workspace queue (`foreign`, with a `shared_id`), oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.", Read,
+                schema(vec![("owner", text("only this owner: gui, ai or cli")), ("state", text("only this state"))], &[])),
+            cmd("queue_get", "One job of the queue", "The entry of `queue_list` for one job and the last lines of its stage log. Give `id` (a job of this session) or `shared_id` (an item of the workspace queue).", Read, schema(vec![("id", int("job id")), ("shared_id", text("an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote"))], &[])),
+            cmd("queue_cancel", "Cancel a queued or running job", "A queued job never runs. A running one stops at its next check (a factorisation in progress finishes first; a solve in a worker process is stopped at once); `cancel_requested` says so until it stops. Give `id` or `shared_id`.", Expensive, schema(vec![("id", int("job id")), ("shared_id", text("an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote"))], &[])),
+            cmd("queue_hold", "Hold a queued job", "Keeps a queued job from starting until `queue_release`. Give `id` or `shared_id`.", Expensive, schema(vec![("id", int("job id")), ("shared_id", text("an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote"))], &[])),
+            cmd("queue_release", "Release a held job", "Give `id` or `shared_id`.", Expensive, schema(vec![("id", int("job id")), ("shared_id", text("an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote"))], &[])),
+            cmd("queue_set_priority", "Change the priority of a queued job", "1 runs first, 3 last. Give `id` or `shared_id`.", Expensive, schema(vec![("id", int("job id")), ("shared_id", text("an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote")), ("priority", int("1, 2 or 3"))], &["priority"])),
+            cmd("queue_pause", "Pause the queue", "Nothing new starts; what runs finishes.", Expensive, schema(vec![], &[])),
+            cmd("queue_resume", "Resume the queue", "", Expensive, schema(vec![], &[])),
+            cmd("queue_wait", "Wait for a job, at most a while", "Waits for the job up to `timeout_s` seconds (required: a tool call must not block for ever) and applies its outcome. At the timeout it returns the job's entry with `waiting: true`, state and stage, and the job goes on.", Expensive,
+                schema(vec![("id", int("job id")), ("timeout_s", number("longest wait in seconds"))], &["id", "timeout_s"])),
+            cmd("sweep_run", "Run a sweep: one recorded run per point", "Queues one solve per point and returns the sweep's number at once. A point is a list of edits (`{ \"cmd\": \"set_param\", \"args\": { \"name\": \"w\", \"value\": 4e-7 } }`: any command that changes the project except those that replace it or start work), applied to a copy of the project: what varies, a geometry parameter, the wavelength in the study, a material, a mesh setting, is the case's to decide. Give `points` (each `{ label, edits }`) or `series` (`{ cmd, args, field, values }`: the command repeated with `field` set to each value). `physics` is the code or list solved at every point (default: what a solve would solve). The points are queued at priority 3 (sweeps and batches) so a person's request and a single request of an agent go before them, and run on the same mesh and solve caches as any request. Every point's edits are applied and checked first: a bad point fails the request with its number and nothing runs. The project, the mesh and the results of the engine are not touched; each point is recorded in the run table when the project is bound to a workflow. Read the table with `sweep_table`.", Expensive,
+                schema(vec![("name", text("a name for the table")), ("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "code or list of codes to solve at every point" })),
+                    ("points", json!({ "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string", "description": "a name for the point in the table; default `point N`" }, "edits": { "type": "array", "description": "the edits that make this point, applied in order to a copy of the project", "items": { "type": "object", "properties": { "cmd": { "type": "string", "description": "a command that changes the project" }, "args": { "type": "object", "description": "its arguments" } }, "required": ["cmd"] } } }, "required": ["edits"] }, "description": "the points, each a list of edits" })),
+                    ("series", json!({ "type": "object", "properties": { "cmd": { "type": "string", "description": "the edit command repeated at every point" }, "args": { "type": "object", "description": "its arguments that stay the same" }, "field": { "type": "string", "description": "the argument that takes each value" }, "values": { "type": "array", "description": "the values, one point each" } }, "required": ["cmd", "field", "values"], "description": "one command repeated with `field` set to each value" })),
+                    ("priority", int("1, 2 or 3; default 3")), ("hold", boolean("queue the points held; release each with queue_release")), ("reuse", json!({ "type": "string", "enum": ["none", "warm"], "description": "`warm`: each point starts its eigensolves from the modes of the previous point instead of a random block (the first point only records them), which shortens the iterations of a sweep that keeps its mesh (a material, a study value, a boundary condition, a frequency with the mesh not sized by the physics; a point whose mesh or number of unknowns differs starts cold). The numbers agree to the solver's tolerance but not bit for bit with a cold solve, so a warm point is marked `exploratory` in its row and run (`reuse`) until it is solved cold. Default `none`: every point is a cold solve" })), ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("isolate", boolean("solve every point in a worker process, as for solve_run")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
+            cmd("sweep_table", "The table of a sweep", "Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.", Read,
+                schema(vec![("sweep", int("the sweep's number")), ("wait_s", number("longest wait in seconds, default 0"))], &[])),
+            cmd("sweep_cancel", "Cancel the points of a sweep that have not finished", "Queued points never run; a running one stops at its next check.", Expensive, schema(vec![("sweep", int("the sweep's number"))], &["sweep"])),
             cmd("poll_jobs", "Apply finished jobs", "Applies every job that has finished since the last call and returns what each came to.", Read, schema(vec![], &[])),
-            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields and scalars, and whether the project changed since.", Read, schema(vec![("physics", phys())], &[])),
-            cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`).", Read,
+            cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not) and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored), and `validated`: `{state, reason, check?}` where `state` is `exploratory` (no mesh-convergence check with a tolerance has passed on this problem), `checked` (one did: `check` says factor, tolerance, what was compared and the worst difference) or `check_not_affordable` (not checked, and a check is expected not to fit this machine). A stale result is never checked; every answer that carries `stale` carries `validated`.", Read, schema(vec![("physics", phys())], &[])),
+            cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`), with `stale` and `age_s` of the result it was read from.", Read,
                 schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("field", text("field name")), ("max_values", int("default 2000"))], &["physics", "field"])),
             cmd("get_guide", "Read a nyx guide", "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).", Read,
                 schema(vec![("topic", json!({ "type": "string", "enum": crate::guide::TOPICS, "description": "which card; omit for nyx-instructions" }))], &[])),
+            cmd("field", "A handle to a field", "A handle to a field of a solution, to compute with (`integrate`, `extremum`, `probe`, `line_cut`, `overlap`, `confinement`, `field_op`). A handle is a small value, not the field: it names the physics, the solution and the field, and is read from the stored result each time it is used. A name is a per-cell field of the solution (`Ex`, `uz`, ...: complex when the solve is) or else a flat field of `result_info` (`T`, `|E|`: real). A vector name (`E` when `Ex` and `Ez` exist) answers one handle per component.", Read,
+                schema(vec![("physics", phys()), ("solution", int("solution number from 0, default 0")), ("name", text("field name, e.g. Ex, or a vector name such as E"))], &["name"])),
+            cmd("field_op", "Arithmetic on handles", "Combines handles: `add`, `mul` (two or more operands), `sub`, `div`, `neg`, `abs`, `abs2` (|z|^2 with no square root), `re`, `im`, `conj`, `sqrt` and `pow` (with `n`, a whole number 1 to 16). An operand is a handle, a field name of `physics`/`solution`, a number, or another operation `{op, args}`. The operation is checked against the results and returned as one handle.", Read,
+                schema(vec![("op", text("add, sub, mul, div, neg, abs, abs2, re, im, conj, sqrt or pow")), ("args", json!({ "type": "array", "description": "the operands" })), ("n", int("the power, for pow")), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["op", "args"])),
+            cmd("integrate", "Integrate an expression over a region", "The integral of an expression of fields over a region (a region name, comma list or `name*`; default the whole mesh), with the degree-4 rule of the finite elements (exact for the product of two P2 fields). A real expression answers a number, a complex one [re, im]. `measure` is the area or volume of the region. `revolution: true` weights by 2 pi r for a body of revolution (a 2D r-z mesh). Answers `stale` and `age_s` of what it read. FORMULAS (every `expr` of the reductions takes one): a text such as `abs(Ex)^2 * eps_r` or `where(x > 0, T, 0)`, parsed once and evaluated at each point in Rust. Numbers (`2j` is imaginary), `pi`, `e`, `+ - * / ^`, comparisons, `and or not`; functions `abs abs2 re im conj sqrt exp sin cos arg log log10 tan sinh cosh tanh atan step min max atan2` and `where(cond, a, b)` (only the branch that applies is evaluated, so `where(x != 0, 1/x, 0)` is safe). Names: the coordinates `x y z`; the fields of the result (`Ex`, `T`; in backticks when the name is not an identifier, `` `|E|` ``; `` `ems:Ex` `` or `` `ems:1:Ex` `` in backticks for another physics or solution); material values by their descriptor name (`eps_r`, `rho`; `eps` means `eps_r`; `material(\"rho\")` to be explicit); `region(\"Si\")` is 1 inside the region and 0 outside. A name like `E` stands for the vector (Ex, Ey, Ez) when the solution has those components: `dot(a, b)`, `inner(a, b)` (conjugates a), `cross`, `norm(v)`, `norm2(v)`, `E.x`. Orders, comparisons, `log` and `tan` read real values: wrap a complex one in `abs`, `re` or `im`. A material value is the one the solver saw in each cell. A tensor property (`eps_r`, `k`, `alpha`) has its entries as `eps_r_xx`, `eps_r_yy`, `eps_r_zz`, `eps_r_xy`, `eps_r_xz`, `eps_r_yz` in wafer axes with the crystal orientation applied (an isotropic material is the scalar times the identity); the plain `eps_r` is refused on a mesh where some material is a tensor. BOUNDARY INTEGRALS: with `boundary` (an outer boundary such as \"window.top\", or an interface \"oxide|silicon\" between two regions) the sum is over the facets of the boundary instead of the cells: a line integral on a 2D mesh, a surface integral on a 3D one, with `revolution` weighting by 2 pi r. The formula may use `nx`, `ny`, `nz`, the unit normal in wafer axes, so the flux of a vector F is `dot(F, [nx, ny, nz])`. At an interface the fields and materials differ on the two sides, so give `side`, the region to read them in; the normal points out of it. On an outer boundary no `side` is needed. `wavelength` (m) reads the material values at that wavelength, not the study's; the fields stay those of the solve.", Read,
+                schema(vec![("expr", expr_schema("a formula text such as \"abs(Ex)^2 * eps_r\" (see integrate), a handle, a field name, a number or {op, args}")), ("region", text("region name(s); default all")), ("boundary", text("integrate over the facets of this boundary (an outer boundary name, or an interface \"a|b\" between two regions) instead of over cells: a line integral on a 2D mesh, a surface integral on 3D. The formula may use nx, ny, nz, the unit normal. Not with region")), ("side", text("with boundary: the region an interface is read in (the fields and materials differ across it); the normal points out of it. Not needed on an outer boundary")), ("revolution", boolean("weight by 2 pi r, default false")), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["expr"])),
+            cmd("extremum", "Largest or smallest value of an expression", "The largest (`op: max`, default) or smallest (`min`) real value of an expression at the nodes of the cells of a region, with the cell and the point. It is the maximum over the nodes, not over the interpolant between them. A complex expression has no order: wrap it in `abs`, `abs2`, `re` or `im`.", Read,
+                schema(vec![("expr", expr_schema("a formula text such as \"abs(Ex)^2 * eps_r\" (see integrate), a handle, a field name, a number or {op, args}")), ("op", json!({ "type": "string", "enum": ["max", "min"], "description": "default max" })), ("region", text("region name(s); default all")), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["expr"])),
+            cmd("probe", "Value of an expression at points", "The value of an expression at points, interpolated in the cell that holds each point. Points are in mesh axes: [x, z] on a 2D mesh, [x, y, z] on a 3D one. A point outside the mesh answers `inside: false` and a null value.", Read,
+                schema(vec![("expr", expr_schema("a formula text such as \"abs(Ex)^2 * eps_r\" (see integrate), a handle, a field name, a number or {op, args}")), ("points", json!({ "type": "array", "description": "a list of points, each a list of coordinates", "items": { "type": "array", "items": { "type": "number" } } })), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["expr", "points"])),
+            cmd("line_cut", "Values of an expression along a line", "The value of an expression at `n` equally spaced points from `from` to `to` (inclusive), with the distance `s` along the line. Points outside the mesh answer `inside: false`.", Read,
+                schema(vec![("expr", expr_schema("a formula text such as \"abs(Ex)^2 * eps_r\" (see integrate), a handle, a field name, a number or {op, args}")), ("from", json!({ "type": "array", "items": { "type": "number" }, "description": "start point: [x, z] on a 2D mesh, [x, y, z] on a 3D one" })), ("to", json!({ "type": "array", "items": { "type": "number" }, "description": "end point" })), ("n", int("number of points, default 101")), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["expr", "from", "to"])),
+            cmd("overlap", "Overlap of two fields", "The overlap integral of two fields (or two lists of components, e.g. [Ex, Ey, Ez]) over a region: the complex integral of sum_k conj(a_k) b_k, the two norms (integrals of sum_k |c_k|^2) and the coefficient |overlap|^2 / (norm_a norm_b), a number from 0 to 1.", Read,
+                schema(vec![("a", expr_schema("a field, a formula, an expression, or a list of components")), ("b", expr_schema("a field, a formula, an expression, or a list of components")), ("region", text("region name(s); default all")), ("revolution", boolean("weight by 2 pi r, default false")), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["a", "b"])),
+            cmd("confinement", "Fraction of a field in a region", "The integral of sum_k |c_k|^2 over a region divided by the same over the whole mesh, for the components `fields` (e.g. [Ex, Ey, Ez]). Without `weight` it has no material weight; give `weight` a real formula such as \"eps_r\" for the energy fraction (the integrand is weight * sum_k |c_k|^2, in the region and over the whole mesh).", Read,
+                schema(vec![("fields", expr_schema("a field, a formula, an expression, or a list of components")), ("weight", text("a real formula that multiplies the integrand at each point, e.g. eps_r; default none")), ("region", text("the region the fraction is of")), ("revolution", boolean("weight by 2 pi r, default false")), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["fields", "region"])),
             cmd("add_pml_conditions", "Add the absorbing-layer conditions", "Adds a `pml` condition for every absorbing piece the geometry made with add_pml (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. `strength` is the imaginary stretch at the outer edge (default 3).", Edit,
                 schema(vec![("physics", phys()), ("strength", number("imaginary stretch at the outer edge, default 3"))], &["physics"])),
             cmd("list_materials", "List the materials", "The materials a problem can name: those of the library (material files) and those the project carries.", Read, schema(vec![], &[])),
@@ -171,15 +219,16 @@ impl Engine {
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
                 schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
             cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
-            cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner. Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.", Expensive,
+            cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.", Expensive,
                 schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report")),
                     ("match", json!({ "type": "string", "enum": ["index", "nearest"], "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner" })),
-                    ("track", json!({ "type": "object", "description": "follow one mode: { f } is a value (Hz for a vibration study); the mode whose eigenvalue is nearest it is compared with the nearest eigenvalue of the finer mesh", "properties": { "f": { "type": "number" } }, "required": ["f"], "additionalProperties": false }))], &["physics"])),
-            cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)"))], &["path"])),
+                    ("track", json!({ "type": "object", "description": "follow one mode: { f } is a value (Hz for a vibration study); the mode whose eigenvalue is nearest it is compared with the nearest eigenvalue of the finer mesh", "properties": { "f": { "type": "number" } }, "required": ["f"], "additionalProperties": false })),
+                    ("wait", boolean("wait for the answer, default true; false starts a job that job_list, job_status and job_cancel see and job_wait answers"))], &["physics"])),
+            cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)")), ("wait", boolean("wait for the file, default true; false starts a job that writes what the engine holds now, under its name only when complete"))], &["path"])),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
-            cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support.", Edit, schema(vec![("path", text("file path, .h5"))], &["path"])),
-            cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes) and which solved physics each applies to.", Read, schema(vec![], &[])),
-            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups.", Read,
+            cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support. With `wait` false it starts a job (reading and meshing happen on it; the project is replaced when job_wait or poll_jobs applies it).", Edit, schema(vec![("path", text("file path, .h5")), ("wait", boolean("wait for it, default true"))], &["path"])),
+            cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
+            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups. The reply carries `stale` and `age_s` of the result it was run on.", Read,
                 schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys())], &["analysis", "physics"])),
             cmd("store_save", "Save into a workspace", "Binds the project to a workflow folder (created in `workspace` the first time) or stores a new version of it. Later solves are recorded in the run table.", Expensive,
                 schema(vec![("workspace", text("workspace folder, needed the first time"))], &[])),
@@ -206,7 +255,10 @@ impl Engine {
 
     /// Runs the command `name` with JSON arguments and returns its JSON reply.
     pub fn call(&mut self, name: &str, args: &Value) -> R {
-        let a = args_obj(args)?;
+        let mut a = args_obj(args)?.clone();
+        if let Some(root) = &self.path_root {
+            crate::path_guard::confine_args(root, name, &mut a)?;
+        }
         let args = &Value::Object(a.clone());
         if let Some(kind) = geom_kind(name) {
             let mut fields = a.clone();
@@ -235,6 +287,10 @@ impl Engine {
             }
             "project_info" => Ok(self.info()),
             "project_json" => Ok(json!({ "json": self.project.to_json() })),
+            "project_script" => {
+                let e = crate::scriptout::export(&self.project)?;
+                Ok(json!({ "script": e.script, "form": e.form, "commands": e.commands }))
+            }
             "project_load" => self.load(Project::from_json(get_str(args, "json")?)?),
             "project_open" => {
                 let path = get_str(args, "path")?;
@@ -391,10 +447,17 @@ impl Engine {
                     Some(Value::Array(a)) => Some(a.iter().filter_map(|x| x.as_str().map(String::from)).collect()),
                     Some(_) => return Err(Error::invalid("`physics` is a code or a list of codes")),
                 };
+                let opts = QueueOpts {
+                    isolate: args.get("isolate").and_then(Value::as_bool),
+                    force: opt_bool(args, "force", false),
+                    shared: args.get("shared").and_then(Value::as_bool),
+                    ..Default::default()
+                };
+                let id = self.start_solve_with(targets, &opts)?;
                 if opt_bool(args, "wait", true) {
-                    self.solve_now(targets)
+                    self.wait(id)
                 } else {
-                    Ok(json!({ "job": self.start_solve(targets)? }))
+                    Ok(json!({ "job": id }))
                 }
             }
             "job_status" => {
@@ -403,7 +466,14 @@ impl Engine {
             }
             "job_list" => Ok(json!(self.jobs.list())),
             "job_cancel" => Ok(json!({ "cancelled": self.jobs.cancel(get_u64(args, "id")?) })),
-            "job_wait" => self.wait(get_u64(args, "id")?),
+            "job_wait" => match args.get("timeout_s").and_then(Value::as_f64) {
+                Some(t) if t >= 0.0 && t.is_finite() => self.wait_timeout(get_u64(args, "id")?, std::time::Duration::from_secs_f64(t)),
+                Some(_) => Err(Error::invalid("`timeout_s` is a number of seconds, zero or more")),
+                None => self.wait(get_u64(args, "id")?),
+            },
+            "queue_submit" | "queue_list" | "queue_get" | "queue_cancel" | "queue_hold" | "queue_release" | "queue_set_priority" | "queue_pause"
+            | "queue_resume" | "queue_wait" => self.queue_command(name, args),
+            "sweep_run" | "sweep_table" | "sweep_cancel" => self.sweep_command(name, args),
             "poll_jobs" => Ok(json!(self
                 .poll()
                 .into_iter()
@@ -414,6 +484,14 @@ impl Engine {
                 .collect::<Vec<_>>())),
             "result_info" => self.result_info(opt_str(args, "physics")),
             "result_field" => self.result_field(args),
+            "field" => self.cmd_field(args),
+            "field_op" => self.cmd_field_op(args),
+            "integrate" => self.cmd_integrate(args),
+            "extremum" => self.cmd_extremum(args),
+            "probe" => self.cmd_probe(args),
+            "line_cut" => self.cmd_line_cut(args),
+            "overlap" => self.cmd_overlap(args),
+            "confinement" => self.cmd_confinement(args),
             "get_guide" => {
                 let topic = opt_str(args, "topic").unwrap_or("nyx-instructions");
                 let text = crate::guide::card(topic).ok_or_else(|| {
@@ -429,15 +507,40 @@ impl Engine {
                 self.remove_material(get_str(args, "name")?)?;
                 ok()
             }
-            "convergence_check" => self.convergence_check_matched(
-                get_str(args, "physics")?,
-                args.get("factor").and_then(Value::as_f64).unwrap_or(0.6),
-                args.get("tolerance").and_then(Value::as_f64),
-                &crate::convergence::Matching::from_args(args)?,
-            ),
-            "export_results" => self.export_results(get_str(args, "path")?, args.get("parallel").and_then(Value::as_bool).unwrap_or(false)),
+            "convergence_check" => {
+                let (physics, factor, tolerance) = (
+                    get_str(args, "physics")?,
+                    args.get("factor").and_then(Value::as_f64).unwrap_or(0.6),
+                    args.get("tolerance").and_then(Value::as_f64),
+                );
+                let matching = crate::convergence::Matching::from_args(args)?;
+                let start = |e: &mut Engine| {
+                    e.start_convergence_matched(physics, factor, tolerance, &matching, &crate::queue::QueueOpts::default())
+                };
+                if opt_bool(args, "wait", true) {
+                    // through the queue, like a solve: it waits for the heavy lane and reuses the coarse solve of an earlier request
+                    let id = start(self)?;
+                    self.wait(id)
+                } else {
+                    Ok(json!({ "job": start(self)? }))
+                }
+            }
+            "export_results" => {
+                let parallel = args.get("parallel").and_then(Value::as_bool).unwrap_or(false);
+                if opt_bool(args, "wait", true) {
+                    self.export_results(get_str(args, "path")?, parallel)
+                } else {
+                    Ok(json!({ "job": self.start_export_results(get_str(args, "path")?, parallel)? }))
+                }
+            }
             "results_file_info" => self.results_file_info(get_str(args, "path")?),
-            "open_results" => self.open_results(get_str(args, "path")?),
+            "open_results" => {
+                if opt_bool(args, "wait", true) {
+                    self.open_results(get_str(args, "path")?)
+                } else {
+                    Ok(json!({ "job": self.start_open_results(get_str(args, "path")?)? }))
+                }
+            }
             "list_analyses" => Ok(self.list_analyses()),
             "analyse" => self.analyse(get_str(args, "analysis")?, get_str(args, "physics")?),
             "store_save" => self.save_to_workspace(opt_str(args, "workspace").map(Into::into)),
@@ -475,7 +578,7 @@ impl Engine {
                 "physics": s.physics, "study": s.study.kind, "order": s.order,
                 "materials": s.materials.keys().collect::<Vec<_>>(), "conditions": s.bcs,
             })).collect::<Vec<_>>(),
-            "results": self.results.iter().map(|(k, v)| json!({ "physics": k, "stale": v.stamp != self.stamp() })).collect::<Vec<_>>(),
+            "results": self.results.keys().map(|k| json!({ "physics": k, "stale": self.is_stale(k), "age_s": self.result_age(k), "validated": self.validated_json(k) })).collect::<Vec<_>>(),
             "store": self.link.as_ref().map(|l| json!({ "workflow": l.dir.wf.id, "folder": l.dir.root, "experiment": l.experiment, "version": l.dir.wf.version })),
             "jobs_running": self.jobs.running(),
         })
@@ -589,7 +692,6 @@ impl Engine {
     }
 
     fn result_info(&self, physics: Option<&str>) -> R {
-        let stamp = self.stamp();
         let rows: Vec<Value> = self
             .results
             .iter()
@@ -598,10 +700,11 @@ impl Engine {
                 let r = &v.result;
                 json!({
                     "physics": k, "study": r.study, "order": r.order, "dim": r.dim, "dofs": r.dofs, "seconds": r.seconds,
-                    "stale": v.stamp != stamp,
+                    "stale": self.is_stale(k), "age_s": self.result_age(k), "validated": self.validated_json(k),
                     "solutions": r.solutions.iter().enumerate().map(|(i, s)| json!({
                         "index": i, "label": s.label, "value": s.value, "eigenvalue": s.eigenvalue,
                         "fields": s.fields.iter().map(|f| json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len() })).collect::<Vec<_>>(),
+                        "cell_fields": s.cell_fields.iter().map(|f| json!({ "name": f.name, "unit": f.unit, "complex": !f.im.is_empty() })).collect::<Vec<_>>(),
                     })).collect::<Vec<_>>(),
                     "scalars": r.scalars,
                 })
@@ -637,7 +740,7 @@ impl Engine {
         let stride = f.values.len().div_ceil(max).max(1);
         let values: Vec<f64> = f.values.iter().step_by(stride).copied().collect();
         Ok(
-            json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values }),
+            json!({ "name": f.name, "unit": f.unit, "components": f.components, "n": f.values.len(), "stride": stride, "values": values, "stale": self.is_stale(p), "age_s": self.result_age(p), "validated": self.validated_json(p) }),
         )
     }
 }

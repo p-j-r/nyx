@@ -31,8 +31,9 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 | [dfs: Typed problem](../dfs/problem.md) | decode, spec | Params, ProblemSpec, materials_by_label, resolve_conditions |
 | [ems: Physics adapter](../ems/adapter.md) | decode | Params, materials_by_region |
 | [ems: Typed problem](../ems/problem.md) | decode, spec | Params, ProblemSpec, materials_by_label, resolve_conditions |
-| [engine: Commands](../engine/commands.md) | spec, validate | BcSpec, MaterialAssign, ProblemSpec, StudySpec, canonical_json, validate_spec |
-| [engine: Job runner](../engine/jobs.md) | validate | validate_spec |
+| [engine: API reference](../engine/apiref.md) | spec | canonical_json |
+| [engine: Commands](../engine/commands.md) | decode, spec, validate | BcSpec, MaterialAssign, ProblemSpec, StudySpec, canonical_json, materials_by_label, validate_spec |
+| [engine: Job runner and queue](../engine/jobs.md) | validate | validate_spec |
 | [engine: Materials](../engine/materials.md) | spec | ProblemSpec |
 | [engine: Meshing seam](../engine/meshing.md) | spec | BcSpec |
 | [engine: Project](../engine/project.md) | spec, validate | FORMAT, ProblemSpec, canonical_json, validate_spec |

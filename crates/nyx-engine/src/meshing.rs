@@ -177,6 +177,15 @@ pub trait Mesher: Send + Sync {
     ) -> Result<MeshedModel, Error>;
 }
 
+/// A message of the mesher as an error: the text of a cancelled job is `Cancelled`, anything else an invalid model.
+fn mesh_error(message: String) -> Error {
+    if message == femcore::progress::CANCELLED {
+        Error::Cancelled
+    } else {
+        Error::Invalid(message)
+    }
+}
+
 /// The mesher of `femcore`, driven by a `MeshRequest` (ADR 54): 2D and 3D models, simple or adaptive, inline or structured absorbing
 /// layers, element sizes from the waves of the study. A 2D model with `sweep` layers is extruded along y into a 3D mesh afterwards.
 pub struct FemcoreMesher;
@@ -213,7 +222,9 @@ impl Mesher for FemcoreMesher {
             waves,
             curved: s.curved,
         };
-        let (g, report) = mesh_request(geometry, &req).map_err(Error::Invalid)?;
+        // the stage a job reports while it meshes (its log gets the mesher's laps below it)
+        let _stage = femcore::progress::stage(format!("meshing the geometry (element size {} m)", s.h));
+        let (g, report) = mesh_request(geometry, &req).map_err(mesh_error)?;
         let (mut mesh, eval, labels) = (g.mesh, g.eval, g.labels);
         if let Some(layers) = &s.sweep {
             let mut ls = Vec::with_capacity(layers.len());
@@ -237,7 +248,7 @@ impl Mesher for FemcoreMesher {
             // numbered in the order of their coordinates, so that opposite side walls of a periodic cell are cut the same way
             // and a Floquet condition can pair them (`sort_nodes`)
             mesh = femcore::meshing::geomdrive::sort_nodes(&mesh);
-            mesh = femcore::meshing::mesher::extrude_y(&mesh, &ls, 0.0).map_err(Error::Invalid)?;
+            mesh = femcore::meshing::mesher::extrude_y(&mesh, &ls, 0.0).map_err(mesh_error)?;
             return MeshedModel::new(mesh, eval, labels, true);
         }
         Ok(MeshedModel::new(mesh, eval, labels, false)?.with_report(report))

@@ -1,0 +1,17 @@
+# w1_soi_width.nys -- the P0 workflow 1 as one script (productivity plan S7, ADR 94): the 2D SOI wire, six widths, solve, read the effective index.
+#
+# Over MCP this is ONE script_run. tools/workflows/w1_soi_width.jsonl is the 20 tool calls (and their answers) it replaces; the numbers are the same.
+# `params` lets a caller change the widths without resending the script: script_run path="w1_soi_width" params={"widths": [3e-7, 4e-7]}.
+#
+# Run it from the repository root, which is the folder the script may use:  nyx run docs/scripting-samples/w1_soi_width.nys --workspace .
+
+widths = params.get("widths", [5e-7, 4e-7, 4.5e-7, 5.5e-7, 6e-7, 6.5e-7])
+nyx.project_open(path="examples/15_soi_wire.nyx.json")
+rows = []
+for w in widths:
+    nyx.set_param(name="w", value=w)
+    nyx.solve_run()
+    neff = nyx.result_info(physics="ems")[0]["solutions"][0]["eigenvalue"][0]
+    print("w = %3.0f nm   neff = %.5f" % (w * 1e9, neff))
+    rows.append([w, neff])
+rows

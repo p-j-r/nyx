@@ -23,8 +23,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("nyx-store", &[]),
     ("nyx-engine", &["nyx-physics", "nyx-dfs", "nyx-sms", "nyx-ems", "nyx-analysis", "nyx-store", "femcore", "geom"]),
     ("nyx-connect", &[]),
-    ("nyx-mcp", &["nyx-engine"]),
-    ("nyx", &["nyx-engine", "nyx-connect"]), // crates/app
+    ("nyx-mcp", &["nyx-engine", "nyx-script"]), // the script tools (S7, ADR 94)
+    ("nyx-script", &["nyx-engine"]),            // a third front-end (S4): scripts over Engine::call
+    ("nyx", &["nyx-engine", "nyx-connect", "nyx-script"]), // crates/app
 ];
 
 /// edges that exist today and the phase that removes each

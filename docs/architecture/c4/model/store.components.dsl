@@ -11,7 +11,7 @@ workspace = component "Workspace" "The folder behind the dashboard: settings, th
     properties {
         "adr" "14"
         "code" "crates/nyx-store/src: lib.rs, workspace.rs"
-        "lines" "291"
+        "lines" "306"
         "codeDiagram" "4-code/store/workspace.md"
     }
 }
@@ -19,7 +19,7 @@ flow = component "Workflow folder" "One workflow folder: workflow.json, history.
     properties {
         "adr" "14, 59"
         "code" "crates/nyx-store/src: flow.rs"
-        "lines" "483"
+        "lines" "484"
         "codeDiagram" "4-code/store/flow.md"
     }
 }
@@ -35,7 +35,7 @@ runs = component "Runs" "Append-only run records in runs.jsonl, the digest deriv
     properties {
         "adr" "64"
         "code" "crates/nyx-store/src: runs.rs"
-        "lines" "400"
+        "lines" "452"
         "codeDiagram" "4-code/store/runs.md"
     }
 }

@@ -26,6 +26,8 @@
 pub mod optical;
 pub mod edge;
 pub mod expr;
+pub mod fieldexpr;
+pub mod formula;
 pub mod fem;
 pub mod fields;
 pub mod material;
@@ -37,6 +39,7 @@ pub mod periodic;
 pub mod pml;
 pub mod props;
 pub mod progress;
+pub mod warm;
 pub mod section;
 pub mod testkit;
 pub mod linalg;

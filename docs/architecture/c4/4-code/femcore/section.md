@@ -32,6 +32,7 @@ C4 level 4 (code) of the component **Frame and sections** (`femcore.section`) in
 | [ems: Mode kernel](../ems/modes.md) | section | local_component, local_tensor |
 | [ems: Complex-mode kernel](../ems/modescx.md) | section | local_component |
 | [ems: Optical mode sets](../ems/optical.md) | section | PROP_SIGN, is_left_handed, local_tensor_signed |
+| [engine: Commands](../engine/commands.md) | section | wafer_point |
 | [Expressions](./expr.md) | section | wafer_point |
 | [Finite-element basics](./fem.md) | section | mesh_pml_dirs |
 | [Optical mode sets](./optical.md) | section | PROP_SIGN, local_tensor_signed |

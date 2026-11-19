@@ -4,6 +4,8 @@ Date: 2026-11-05
 
 ## Status
 
+**Amended by ADR 94** (provisional number, productivity plan S7): the MCP server offers four script tools, `script_run`, `script_wait`, `script_check` and `api`, instead of one tool per engine command, after Paul's answer to Q9 (2026-11-19); the engine commands themselves are unchanged.
+
 Accepted. Implements restructure phase 7. Supersedes the parts of ADR 15 (AI interface: separate workspace, stdio MCP) that describe the `nyx-session` tools, handles and recipes, and the parts of ADR 23 (the app is a shell over one `Project`) that describe `app/state.rs` and `worker.rs`. ADR 41's legacy bridge is deleted.
 
 ## Context

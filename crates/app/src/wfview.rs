@@ -23,6 +23,7 @@ pub enum Act {
     Fork,
     Link(String, String, String),
     Compute,
+    Sweep(crate::sweepui::Form),
     Cancel,
     Star(String, bool),
     Title(String),
@@ -39,19 +40,7 @@ pub enum Act {
 
 /// A length shown in nm, other numbers with four significant digits.
 pub fn fmt_value(key: &str, v: f64) -> String {
-    let lengthy = v != 0.0 && v.abs() < 1e-3 && (key.contains("width") || key.contains("height") || key.contains("thick") || key.contains("diam") || key.contains("wavelength") || key.contains("layer") || key.contains("box") || key.starts_with("l") || key.contains("gap"));
-    if lengthy {
-        format!("{} nm", trim(v * 1e9))
-    } else if v != 0.0 && (v.abs() < 1e-3 || v.abs() >= 1e6) {
-        format!("{v:.3e}")
-    } else {
-        format!("{v:.4}")
-    }
-}
-
-fn trim(x: f64) -> String {
-    let s = format!("{x:.3}");
-    s.trim_end_matches('0').trim_end_matches('.').to_string()
+    crate::fmt::value(key, v)
 }
 
 impl App {
@@ -72,7 +61,6 @@ impl App {
         self.wf_sectionbar(ui, &mut w, &mut acts, locked);
         match (w.sub, w.part) {
             (Sub::Compare, _) => self.wf_compare(ui, &mut w, &mut acts),
-            (Sub::Model, _) => self.wf_model(ui, &mut w, &mut acts),
             (Sub::Field, _) => self.wf_field(ui, &mut w, &mut acts),
             (Sub::Main, Part::Concept) => self.wf_concept(ui, &mut w, locked),
             (Sub::Main, Part::Build) => self.wf_build(ui, &mut w, &mut acts, locked),
@@ -98,7 +86,7 @@ impl App {
     }
 
     /// Makes sure the workflow of the tab has a folder (a draft gets one on its first change). `false` when that failed.
-    fn ensure_dir(&mut self, id: &str) -> bool {
+    pub(crate) fn ensure_dir(&mut self, id: &str) -> bool {
         if self.shell.open.get(id).is_some_and(|w| w.dir.is_some()) {
             return true;
         }
@@ -165,6 +153,7 @@ impl App {
                 self.refresh_entries();
             }
             Act::Compute => self.shell_compute(),
+            Act::Sweep(f) => self.start_sweep(id, &f),
             Act::Cancel => self.shell.confirm_cancel = true,
             Act::Star(rid, star) => {
                 let r = self.shell.open.get_mut(id).and_then(|w| {
@@ -254,7 +243,7 @@ impl App {
         let name = format!("{}-runs.csv", nyx_engine::facade::store::util::slug(&w.title()));
         let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name(name).save_file() else { return };
         match std::fs::write(&path, csv) {
-            Ok(()) => self.status = format!("Exported {} runs to {}", rows.len(), path.display()),
+            Ok(()) => self.status = format!("Exported {} to {}", crate::fmt::plural(rows.len(), "run"), path.display()),
             Err(e) => self.set_error(format!("Could not write the file: {e}")),
         }
     }
@@ -328,13 +317,15 @@ impl App {
                             ui.close();
                         }
                     });
-                    let text = match (&w.dir, w.saved_at) {
-                        (None, _) => "Draft: nothing is saved until you change something".to_string(),
-                        (Some(_), Some(t)) => format!("Saved automatically · {}", ago(now_secs() - t.elapsed().as_secs() as i64, now_secs())),
-                        (Some(d), None) => format!("Saved · {}", ago(d.wf.touched_secs(), now_secs())),
+                    let (text, short) = match (&w.dir, w.saved_at) {
+                        (None, _) => ("Draft: nothing is saved until you change something".to_string(), "Draft"),
+                        (Some(_), Some(t)) => (format!("Saved automatically · {}", ago(now_secs() - t.elapsed().as_secs() as i64, now_secs())), "Saved"),
+                        (Some(d), None) => (format!("Saved · {}", ago(d.wf.touched_secs(), now_secs())), "Saved"),
                     };
-                    ui.label(kit::muted(ui, text));
-                    kit::dot(ui, if w.dir.is_some() { theme::GREEN } else { theme::line(&ctx) });
+                    // the short word when the title and the tags leave too little room (a narrow window, a scaled interface)
+                    let wide = ui.painter().layout_no_wrap(text.clone(), egui::TextStyle::Body.resolve(ui.style()), theme::muted(&ctx)).size().x;
+                    ui.label(kit::muted(ui, if wide + 24.0 <= ui.available_width() { text } else { short.to_string() }));
+                    kit::glyph(ui, if w.dir.is_some() { kit::State::Done } else { kit::State::Idle });
                 });
             });
         });
@@ -391,8 +382,8 @@ impl App {
                             ui.set_width(ui.available_width());
                             ui.label(RichText::new(&title).strong());
                             let sub = match &parent {
-                                Some(p) => format!("fork of {p} · {runs} runs"),
-                                None => format!("{runs} runs · {what}"),
+                                Some(p) => format!("fork of {p} · {}", crate::fmt::plural(runs, "run")),
+                                None => format!("{} · {what}", crate::fmt::plural(runs, "run")),
                             };
                             ui.label(kit::muted(ui, sub));
                             for (to, label) in &links {
@@ -406,11 +397,6 @@ impl App {
                 }
                 ui.add_space(8.0);
                 ui.separator();
-                let n_runs: usize = w.dir.as_ref().map(|d| d.wf.experiments.iter().map(|e| e.runs.count).sum()).unwrap_or(0);
-                let m = ui.selectable_label(w.sub == Sub::Model, RichText::new(format!("Model m1  (not yet functional)\n{n_runs} runs recorded")).size(13.0));
-                if m.clicked() {
-                    acts.push(Act::Sub(if w.sub == Sub::Model { Sub::Main } else { Sub::Model }));
-                }
                 if ui.selectable_label(w.notes_open, "Notes").clicked() {
                     w.notes_open = !w.notes_open;
                 }
@@ -437,18 +423,21 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 ui.add_space(8.0);
                 if locked {
-                    kit::dot(ui, theme::AMBER);
+                    kit::glyph(ui, kit::State::Running);
                     ui.label(RichText::new("Running").strong());
                     ui.label(kit::muted(ui, "editing is locked until it finishes or you cancel"));
                 } else {
-                    ui.label(kit::muted(
-                        ui,
-                        match w.part {
-                            Part::Concept => "What are we simulating? Geometry, materials and the essential physics.",
-                            Part::Build => "How is it computed? Mesh, boundaries, study and solver.",
-                            Part::Analysis => "What came out? Runs, plots, comparisons and fields.",
-                        },
-                    ));
+                    // the hint gives way (and is cut with an ellipsis) when the window is narrow or the interface is scaled: Compute keeps its place
+                    let hint = match w.part {
+                        Part::Concept => "What are we simulating? Geometry, materials and the essential physics.",
+                        Part::Build => "How is it computed? Mesh, boundaries, study and solver.",
+                        Part::Analysis => "What came out? Runs, plots, comparisons and fields.",
+                    };
+                    let room = (ui.available_width() - 330.0).max(40.0);
+                    ui.scope(|ui| {
+                        ui.set_max_width(room);
+                        ui.add(egui::Label::new(kit::muted(ui, hint)).truncate());
+                    });
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if locked {
@@ -466,7 +455,7 @@ impl App {
                         if w.part == Part::Build {
                             let ok: Vec<f64> = w.runs.iter().filter(|r| r.status == RunStatus::Ok).map(|r| r.sec).collect();
                             if !ok.is_empty() {
-                                ui.label(kit::muted(ui, format!("{} runs · about {:.1} s each · no mesh stored", ok.len(), ok.iter().sum::<f64>() / ok.len() as f64)));
+                                ui.label(kit::muted(ui, format!("{} · about {:.1} s each · no mesh stored", crate::fmt::plural(ok.len(), "run"), ok.iter().sum::<f64>() / ok.len() as f64)));
                             }
                         }
                     }
@@ -487,6 +476,7 @@ impl App {
             });
         });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
+            let narrow = ui.available_width() < 480.0;
             ui.horizontal(|ui| {
                 if kit::pill(ui, !self.show_edges, "Geometry").clicked() {
                     self.show_edges = false;
@@ -496,22 +486,41 @@ impl App {
                     self.show_edges = true;
                     self.show_results = false;
                 }
-                if let Some(m) = &self.doc.mesh {
-                    ui.label(kit::muted(ui, format!("{}D · {} cells · {} points", m.dim, m.n_cells(), m.n_points())));
-                } else if let Some(e) = &self.doc.mesh_error {
-                    ui.colored_label(theme::RED, e);
-                } else {
-                    ui.label(kit::muted(ui, "meshing..."));
+                // the counts give way (cut with an ellipsis) before the Fit button and the checkbox on the right do
+                let room = (ui.available_width() - 250.0).max(0.0);
+                ui.scope(|ui| {
+                    ui.set_max_width(room);
+                    if room < 60.0 {
+                        return;
+                    }
+                    if let Some(m) = &self.doc.mesh {
+                        ui.add(egui::Label::new(kit::muted(ui, format!("{}D · {} cells · {} points", m.dim, m.n_cells(), m.n_points()))).truncate());
+                    } else if let Some(e) = &self.doc.mesh_error {
+                        ui.add(egui::Label::new(RichText::new(e.to_string()).color(theme::danger(ui.ctx()))).truncate());
+                    } else {
+                        ui.label(kit::muted(ui, "meshing..."));
+                    }
+                });
+                if !narrow {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.checkbox(&mut self.show_numbers, "Boundary numbers");
+                        if ui.small_button("Fit").clicked() {
+                            self.vp.fit_token += 1;
+                        }
+                    });
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.checkbox(&mut self.show_numbers, "Boundary numbers");
+            });
+            if narrow {
+                // a narrow viewport (a small window, a scaled interface): the two controls go to a row of their own
+                ui.horizontal(|ui| {
                     if ui.small_button("Fit").clicked() {
                         self.vp.fit_token += 1;
                     }
+                    ui.checkbox(&mut self.show_numbers, "Boundary numbers");
                 });
-            });
+            }
             egui::Frame::new().corner_radius(12).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).show(ui, |ui| {
-                self.viewport_ui(ui);
+                crate::spans::span("viewport_ui", || self.viewport_ui(ui));
             });
         });
     }
@@ -566,27 +575,26 @@ impl App {
             self.wf_live(ui, w, acts);
             return;
         }
-        egui::Panel::right("wf_build_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            ui.horizontal(|ui| {
+        egui::Panel::right("wf_build_inspector").default_size((ui.available_width() * 0.42).clamp(300.0, 440.0)).size_range(300.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
                 for (t, l) in [(Tab::Physics, "Boundaries and conditions"), (Tab::Study, "Study and solver")] {
-                    if kit::pill(ui, w.build_tab == t, l).clicked() {
+                    if kit::pill(ui, !w.sweep.shown && w.build_tab == t, l).clicked() {
                         w.build_tab = t;
+                        w.sweep.shown = false;
                     }
+                }
+                if kit::pill(ui, w.sweep.shown, "Sweep").clicked() {
+                    w.sweep.shown = true;
                 }
             });
             ui.separator();
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                self.tab = w.build_tab;
-                self.inspector_tab(ui, w.build_tab);
-                ui.add_space(12.0);
-                kit::card(ui, theme::tint(&ctx), theme::accent(&ctx), 12, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Sweep").strong().size(16.0));
-                        ui.label(kit::muted(ui, "coming soon"));
-                    });
-                    ui.label(kit::muted(ui, "One run per parameter point needs the shared parameter table (see docs/SWEEP_CACHING_PROPOSAL.md). Today one Compute is one run, recorded in Analysis.").size(12.5));
-                });
+                if w.sweep.shown {
+                    self.sweep_section(ui, w, acts);
+                } else {
+                    self.tab = w.build_tab;
+                    self.inspector_tab(ui, w.build_tab);
+                }
             });
         });
         let strip = match &self.doc.mesh {
@@ -605,11 +613,11 @@ impl App {
             None => (Default::default(), vec![]),
         };
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(16))).show(ui, |ui| {
-            kit::card(ui, theme::warm(&ctx), theme::AMBER, 16, |ui| {
+            kit::card(ui, theme::warm(&ctx), theme::activity(&ctx), 16, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     if self.doc.mesh.is_some() {
-                        ui.label(RichText::new("Mesh ready").color(theme::GREEN).strong());
+                        ui.label(RichText::new("Mesh ready").color(theme::success(ui.ctx())).strong());
                     }
                     ui.label(kit::muted(ui, "›"));
                     ui.label(RichText::new(if status.stage.is_empty() { "Starting".to_string() } else { status.stage.clone() }).strong().size(16.0));
@@ -662,7 +670,18 @@ impl App {
         let mut mk: Vec<&String> = ok.iter().flat_map(|r| r.metrics.keys()).filter(|k| !matches!(k.as_str(), "dofs" | "n_solutions")).collect();
         mk.sort();
         mk.dedup();
-        let y = if !w.plot_y.is_empty() { w.plot_y.clone() } else if mk.iter().any(|k| *k == "neff_re") { "neff_re".into() } else { mk.first().map(|k| k.to_string()).unwrap_or_default() };
+        // the default metric is the first that varies between the runs (never a constant such as an imaginary part that is zero, nor the run time)
+        let mvaries = |k: &str| {
+            let v: Vec<f64> = ok.iter().filter_map(|r| r.metrics.get(k).copied()).collect();
+            v.windows(2).any(|p| (p[0] - p[1]).abs() > 1e-9 * p[0].abs().max(p[1].abs()).max(1e-300))
+        };
+        let y = if !w.plot_y.is_empty() {
+            w.plot_y.clone()
+        } else if mk.iter().any(|k| *k == "neff_re") {
+            "neff_re".into()
+        } else {
+            mk.iter().find(|k| k.as_str() != "seconds" && mvaries(k)).or(mk.first()).map(|k| k.to_string()).unwrap_or_default()
+        };
         (x, y)
     }
 
@@ -682,16 +701,46 @@ impl App {
         (xk, yk, pts)
     }
 
+    /// The runs plot of the Analysis page and of the live run screen (UX plan B5): the line joins the runs in order of the parameter, **a marker
+    /// shape tells the versions of the set-up apart** (colour is never the only channel; a legend names them when there are two or more), **the
+    /// last run is labelled at the end of the line**, and **the runs ticked in the table carry a ring** in the text colour.
     fn runs_plot(&mut self, ui: &mut egui::Ui, w: &OpenWf, h: f32) {
+        use egui_plot::MarkerShape as M;
+        const SHAPES: [M; 5] = [M::Circle, M::Square, M::Diamond, M::Up, M::Cross];
         let (xk, yk, pts) = Self::series(w, false, &Filter::default());
         let scale = if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { 1e9 } else { 1.0 };
-        let xs = pts.iter().map(|p| [p.1 * scale, p.2]).collect::<Vec<_>>();
         let c = theme::accent(ui.ctx());
-        egui_plot::Plot::new(("runs_plot", &w.id)).height(h).x_axis_label(if scale == 1e9 { format!("{xk} (nm)") } else { xk }).y_axis_label(yk).allow_scroll(false).show(ui, |p| {
-            if xs.len() > 1 {
-                p.line(egui_plot::Line::new("runs", egui_plot::PlotPoints::from(xs.clone())).color(c));
+        let ring = theme::text(ui.ctx());
+        let version_of = |id: &str| w.runs.iter().find(|r| r.id == id).map(|r| r.version).unwrap_or(0);
+        let mut versions: Vec<u32> = pts.iter().map(|p| version_of(&p.0)).collect();
+        versions.sort_unstable();
+        versions.dedup();
+        let line: Vec<[f64; 2]> = pts.iter().map(|p| [p.1 * scale, p.2]).collect();
+        let selected: Vec<[f64; 2]> = pts.iter().filter(|p| w.selected.contains(&p.0)).map(|p| [p.1 * scale, p.2]).collect();
+        let end = pts.last().map(|p| (egui_plot::PlotPoint::new(p.1 * scale, p.2), format!("{}  {}", p.0.split('_').next().unwrap_or(&p.0), fmt_value(&yk, p.2))));
+        let mut plot = egui_plot::Plot::new(("runs_plot", &w.id)).height(h).x_axis_label(if scale == 1e9 { format!("{xk} (nm)") } else { xk }).y_axis_label(yk).allow_scroll(false);
+        // headroom above the highest point, so the end label is not cut by the frame of the plot
+        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| (a.min(p.2), b.max(p.2)));
+        if hi.is_finite() && lo.is_finite() {
+            plot = plot.include_y(hi + 0.18 * (hi - lo).max(hi.abs() * 1e-3));
+        }
+        if versions.len() > 1 {
+            plot = plot.legend(egui_plot::Legend::default());
+        }
+        plot.show(ui, |p| {
+            if line.len() > 1 {
+                p.line(egui_plot::Line::new("runs", egui_plot::PlotPoints::from(line.clone())).color(c));
             }
-            p.points(egui_plot::Points::new("runs", egui_plot::PlotPoints::from(xs)).radius(4.0).color(c));
+            for (k, v) in versions.iter().enumerate() {
+                let of_v: Vec<[f64; 2]> = pts.iter().filter(|q| version_of(&q.0) == *v).map(|q| [q.1 * scale, q.2]).collect();
+                p.points(egui_plot::Points::new(format!("v{v}"), egui_plot::PlotPoints::from(of_v)).radius(4.5).color(c).shape(SHAPES[k % SHAPES.len()]));
+            }
+            if !selected.is_empty() {
+                p.points(egui_plot::Points::new("ticked", egui_plot::PlotPoints::from(selected)).radius(9.0).color(ring).filled(false).shape(M::Circle));
+            }
+            if let Some((at, text)) = end {
+                p.text(egui_plot::Text::new("last run", at, text).anchor(egui::Align2::RIGHT_BOTTOM).color(ring));
+            }
         });
     }
 
@@ -699,7 +748,7 @@ impl App {
         let ctx = ui.ctx().clone();
         let filter = Filter::parse(&w.filter_text);
         let active_filter = filter.clone().unwrap_or_default();
-        egui::Panel::right("wf_analysis_side").exact_size(400.0).resizable(false).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::right("wf_analysis_side").exact_size((ui.available_width() * 0.42).clamp(300.0, 400.0)).resizable(false).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 kit::plain_card(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -742,7 +791,6 @@ impl App {
                     if ui.add_enabled(has_pol, egui::Button::new("Polarization on the Poincaré sphere")).on_disabled_hover_text("Needs a result with a polarization analysis in this session: compute a mode study first.").clicked() {
                         acts.push(Act::Field(String::new()));
                     }
-                    kit::soon(ui, "Group velocity and dispersion", "needs a wavelength sweep");
                     if ui.add(egui::Button::new("Your script...")).on_hover_text("Runs a Python script on the project and the result on show").clicked() {
                         acts.push(Act::Script);
                     }
@@ -752,13 +800,13 @@ impl App {
                 let out = match w.function.as_str() {
                     "Best run" => pts.iter().max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal)).map(|p| format!("Highest {yk}: {} at {xk} = {} ({:.6})", p.0, fmt_value(&xk, p.1), p.2)).unwrap_or_else(|| "No runs to rank.".into()),
                     "Sensitivity" => match slope(&pts) {
-                        Some(s) => format!("d {yk} / d {xk} ≈ {:.4e} per {} (least squares over {} runs)", if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { s * 1e-9 } else { s }, if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { "nm" } else { "unit" }, pts.len()),
+                        Some(s) => format!("d {yk} / d {xk} ≈ {:.4e} per {} (least squares over {})", if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { s * 1e-9 } else { s }, if xk != "run" && pts.iter().all(|p| p.1.abs() < 1e-3) { "nm" } else { "unit" }, crate::fmt::plural(pts.len(), "run")),
                         None => "Needs at least two runs with different values of the parameter.".into(),
                     },
                     "Difference of two runs" => {
                         if w.selected.len() == 2 { "Open Compare selected for the table of differences.".into() } else { "Tick two runs in the table, then Compare.".into() }
                     }
-                    _ => format!("{} runs plotted.", pts.len()),
+                    _ => format!("{} plotted.", crate::fmt::plural(pts.len(), "run")),
                 };
                 ui.label(RichText::new(out).size(13.0));
                 ui.add_space(6.0);
@@ -769,7 +817,7 @@ impl App {
             ui.horizontal(|ui| {
                 let hint = "params.w between 450 nm and 550 nm and metrics.neff_re > 2.4";
                 let bad = filter.is_err();
-                ui.add_sized([(ui.available_width() - 330.0).max(180.0), 30.0], egui::TextEdit::singleline(&mut w.filter_text).hint_text(hint).font(egui::TextStyle::Monospace).text_color(if bad { theme::RED } else { theme::text(&ctx) }));
+                ui.add_sized([(ui.available_width() - 330.0).max(180.0), 30.0], egui::TextEdit::singleline(&mut w.filter_text).hint_text(hint).font(egui::TextStyle::Monospace).text_color(if bad { theme::danger(ui.ctx()) } else { theme::text(&ctx) }));
                 let cols_changed = &mut w.hidden_cols;
                 let mut keys: Vec<String> = w.runs.iter().flat_map(|r| r.params.keys().map(|k| format!("params.{k}")).chain(r.metrics.keys().map(|k| format!("metrics.{k}")))).collect();
                 keys.sort();
@@ -792,7 +840,7 @@ impl App {
                 }
             });
             if let Err(e) = &filter {
-                ui.colored_label(theme::RED, e);
+                ui.colored_label(theme::danger(ui.ctx()), e);
             }
             ui.add_space(6.0);
             self.runs_table(ui, w, &active_filter, acts);
@@ -832,16 +880,16 @@ impl App {
                 ui.label(RichText::new("No runs yet").strong().size(16.0));
                 ui.label(kit::muted(ui, "Press Compute (F5). Every Compute is recorded here with its parameters, results and the version of the set-up it used."));
                 if w.runs_bad > 0 {
-                    ui.colored_label(theme::RED, format!("{} lines of runs.jsonl could not be read and were skipped.", w.runs_bad));
+                    ui.colored_label(theme::danger(ui.ctx()), format!("{} lines of runs.jsonl could not be read and were skipped.", w.runs_bad));
                 }
             });
             return;
         }
-        let widths = |_k: &str| 96.0;
+        let widths = |_k: &str| 124.0;
         let head = |ui: &mut egui::Ui, w: &mut OpenWf, label: &str, key: &str, width: f32| {
             let on = w.sort == key;
-            let t = format!("{}{}", label.to_uppercase().replace('_', " "), if on { if w.desc { " ▾" } else { " ▴" } } else { "" });
-            if ui.add_sized([width, 22.0], egui::Label::new(RichText::new(t).size(12.0).strong().color(theme::muted(&ctx))).sense(Sense::click())).clicked() {
+            let t = format!("{}{}", crate::fmt::key_label(label), if on { if w.desc { " ▾" } else { " ▴" } } else { "" });
+            if ui.add_sized([width, 22.0], egui::Label::new(RichText::new(t).size(12.0).strong().color(theme::muted(&ctx))).truncate().sense(Sense::click())).on_hover_text(label).clicked() {
                 if on { w.desc = !w.desc } else { w.sort = key.into(); w.desc = true }
             }
         };
@@ -873,10 +921,10 @@ impl App {
                             if ui.checkbox(&mut s, "").changed() {
                                 if s { w.selected.insert(r.id.clone()); } else { w.selected.remove(&r.id); }
                             }
-                            if ui.add(egui::Label::new(RichText::new(if r.star { "*" } else { "·" }).strong().size(16.0).color(if r.star { theme::AMBER } else { theme::muted(&ctx) })).sense(Sense::click())).on_hover_text("Star: kept forever, never cleaned up").clicked() {
+                            if ui.add(egui::Label::new(RichText::new(if r.star { "*" } else { "·" }).strong().size(16.0).color(if r.star { theme::activity_text(ui.ctx()) } else { theme::muted(&ctx) })).sense(Sense::click())).on_hover_text("Star: kept forever, never cleaned up").clicked() {
                                 acts.push(Act::Star(r.id.clone(), !r.star));
                             }
-                            let id_text = if r.status == RunStatus::Ok { kit::mono(r.id.split('_').next().unwrap_or(&r.id)) } else { kit::mono(format!("{} ({:?})", r.id.split('_').next().unwrap_or(&r.id), r.status).to_lowercase()).color(theme::RED) };
+                            let id_text = if r.status == RunStatus::Ok { kit::mono(r.id.split('_').next().unwrap_or(&r.id)) } else { kit::mono(format!("{} ({:?})", r.id.split('_').next().unwrap_or(&r.id), r.status).to_lowercase()).color(theme::danger(ui.ctx())) };
                             let open = ui.add_sized([120.0, h - 4.0], egui::Label::new(id_text).sense(Sense::click()));
                             if open.clicked() {
                                 acts.push(Act::Field(r.id.clone()));
@@ -895,7 +943,7 @@ impl App {
                 }
             });
         });
-        ui.label(kit::muted(ui, format!("{} of {} runs match · {} hidden by the filter{}", n_rows, w.runs.len(), hidden, if w.show_failed { "" } else { " · failed and cancelled runs are hidden unless you ask for them" })).size(12.5));
+        ui.label(kit::muted(ui, format!("{} of {} match · {} hidden by the filter{}", n_rows, crate::fmt::plural(w.runs.len(), "run"), hidden, if w.show_failed { "" } else { " · failed and cancelled runs are hidden unless you ask for them" })).size(12.5));
     }
 
     // ------------------------------------------------------------------------------------------------------ compare, fields, model
@@ -903,7 +951,7 @@ impl App {
     fn wf_compare(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
         let ctx = ui.ctx().clone();
         let runs: Vec<RunRecord> = w.runs.iter().filter(|r| w.selected.contains(&r.id)).cloned().collect();
-        let colors = [theme::PLUM, theme::AMBER, Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0x2F, 0x7A, 0x66), Color32::from_rgb(0x9B, 0x3A, 0x3A)];
+        let colors = [theme::accent(ui.ctx()), theme::activity(ui.ctx()), Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0x2F, 0x7A, 0x66), Color32::from_rgb(0x9B, 0x3A, 0x3A)];
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(18))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(kit::title("Compare runs", 30.0).color(theme::accent(&ctx)));
@@ -968,12 +1016,6 @@ impl App {
                     });
                     ui.label(kit::muted(ui, "Values that are the same in every run are greyed.").size(12.5));
                 });
-                kit::plain_card(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new("REPRODUCE").size(12.5).strong());
-                    ui.label(kit::muted(ui, "Re-mesh and re-solve these runs on this machine and check the numbers against the recorded ones."));
-                    kit::soon(ui, format!("Reproduce {} runs", runs.len()), "needs a re-run queue");
-                });
                 let ui = &mut cols[1];
                 kit::plain_card(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -993,7 +1035,7 @@ impl App {
                             }
                         }
                     });
-                    ui.label(kit::muted(ui, "Field profiles of past runs are not stored yet (coming soon with stored results), so only recorded numbers are compared. Export PNG: coming soon.").size(12.5));
+                    ui.label(kit::muted(ui, "Only the recorded numbers of each run are compared; field profiles of past runs are not stored.").size(12.5));
                 });
             });
         });
@@ -1009,7 +1051,7 @@ impl App {
             ui.add_space(6.0);
             if live {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    self.inspector_tab(ui, Tab::Results);
+                    crate::spans::span("inspector_tab", || self.inspector_tab(ui, Tab::Results));
                     if self.has_analysis() {
                         ui.separator();
                         self.inspector_tab(ui, Tab::Analysis);
@@ -1021,7 +1063,7 @@ impl App {
                 });
             } else {
                 ui.label(RichText::new("Fields of this run are not stored").strong());
-                ui.label(kit::muted(ui, "Heavy results are kept for the session only; stored fields need the HDF5 build and a results setting (coming soon). Compute again to see the fields."));
+                ui.label(kit::muted(ui, "Heavy results are kept for the session only. Compute again to see the fields."));
             }
         });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
@@ -1030,77 +1072,7 @@ impl App {
             if live {
                 self.show_results = true;
             }
-            self.viewport_ui(ui);
-        });
-    }
-
-    fn wf_model(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
-        let ctx = ui.ctx().clone();
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(24))).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(kit::title("Model m1", 38.0).color(theme::accent(&ctx)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if kit::ghost(ui, "Back").clicked() {
-                            acts.push(Act::Sub(Sub::Main));
-                        }
-                        kit::soon(ui, "Retrain", "no surrogate trainer exists yet");
-                        kit::soon(ui, "Export model", "no model to export");
-                    });
-                });
-                ui.label(kit::muted(ui, "A fast stand-in for the solver, learned from every run in this workflow."));
-                ui.add_space(8.0);
-                kit::card(ui, theme::warm(&ctx), theme::AMBER, 12, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new("Not functional yet").strong());
-                    ui.label("nyx has no surrogate trainer in this version. This screen shows what your recorded runs would hand to one; nothing below is a prediction.");
-                });
-                ui.add_space(10.0);
-                ui.columns(2, |cols| {
-                    let ui = &mut cols[0];
-                    kit::plain_card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.label(RichText::new("INPUTS (parameters seen in the runs)").size(12.5).strong());
-                        let mut n_runs = 0;
-                        let mut n_exp = 0;
-                        if let Some(d) = &w.dir {
-                            for e in &d.wf.experiments {
-                                if e.runs.count > 0 {
-                                    n_exp += 1;
-                                    n_runs += e.runs.count;
-                                }
-                                for (k, r) in &e.runs.params {
-                                    ui.label(kit::mono(format!("{k:<26}{} – {}", fmt_value(k, r.min), fmt_value(k, r.max))));
-                                }
-                            }
-                            ui.add_space(4.0);
-                            ui.label(RichText::new("OUTPUTS (metrics recorded)").size(12.5).strong());
-                            for e in &d.wf.experiments {
-                                for (k, r) in &e.runs.metrics {
-                                    ui.label(kit::mono(format!("{k:<26}{:.4} – {:.4}", r.min, r.max)));
-                                }
-                            }
-                        }
-                        ui.add_space(4.0);
-                        ui.label(kit::mono(format!("FROM  {n_exp} experiments, {n_runs} runs")));
-                    });
-                    ui.horizontal(|ui| {
-                        for m in ["Gaussian process", "Radial basis", "Small network"] {
-                            kit::soon(ui, m, "no model code exists yet");
-                        }
-                    });
-                    let ui = &mut cols[1];
-                    kit::plain_card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.label(RichText::new("Predicted against solved, held-out runs").strong().size(16.0));
-                        ui.add_space(70.0);
-                        ui.label(kit::muted(ui, "Appears once a model has been trained."));
-                        ui.add_space(70.0);
-                    });
-                });
-                ui.add_space(8.0);
-                ui.label(kit::muted(ui, "Models will only answer inside the ranges above. Outside them nyx will say so instead of guessing."));
-            });
+            crate::spans::span("viewport_ui", || self.viewport_ui(ui));
         });
     }
 }

@@ -4,6 +4,8 @@ Date: 2026-11-01
 
 ## Status
 
+**Amended by ADR 94** (provisional number, productivity plan S7): the MCP server offers four script tools, `script_run`, `script_wait`, `script_check` and `api`, instead of one tool per engine command, after Paul's answer to Q9 (2026-11-19); the engine commands themselves are unchanged.
+
 **Superseded in part by ADR 26, 28 and 57 (see ADR 65).** Accepted (`docs/MCP_ASSISTANT_PLAN.md` sections 18 to 20; code brought under version control in `36f6b3d`; Connect menu `839efa1`).
 
 Superseded in part by ADR 26: `ai/` is no longer a separate workspace; its crates are in `crates/` and the root workspace.

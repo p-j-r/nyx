@@ -219,3 +219,15 @@ fn bbox_of(d: &Display) -> ([f32; 3], [f32; 3]) {
     }
     (lo, hi)
 }
+
+/// What the Reduce form of the Results tab remembers: the field, the quantity (the value, its modulus or its squared modulus), the region
+/// (0 is the whole mesh) and the answers so far, newest first.
+#[derive(Default)]
+pub struct ReduceForm {
+    pub field: usize,
+    pub quantity: usize,
+    pub region: usize,
+    /// a formula (ADR 90, N2); when it is not empty, the integral and the extremes read it instead of the field and quantity above
+    pub formula: String,
+    pub lines: Vec<String>,
+}

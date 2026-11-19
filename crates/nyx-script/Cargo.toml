@@ -1,0 +1,27 @@
+[package]
+name = "nyx-script"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Scripts as a front-end of the nyx engine (productivity plan S4): Python-syntax scripts run by Monty in a worker process call engine commands, with host limits and no I/O"
+
+[dependencies]
+nyx-engine = { path = "../nyx-engine" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# Monty: a Python-syntax interpreter in pure Rust (MIT, from Pydantic), pinned exactly. The interpreter runs only in the worker program
+# (src/bin/nyx-script-worker.rs); this library talks to it through monty-pool, so a script that aborts the process (memory, stack) ends one
+# worker and not the engine.
+monty-pool = "=1.6.0"
+monty-types = "=1.6.0"
+tokio = { version = "1", features = ["rt", "time"] }
+# the parser Monty uses, pinned the same: the static guard of trace.rs reads a script without running it
+ruff_python_ast = "=0.0.14"
+ruff_python_parser = "=0.0.14"
+ruff_text_size = "=0.0.14"
+# the worker program only
+monty-alloc = { version = "=1.6.0", features = ["exit-code"] }
+monty-proto = { version = "=1.6.0", features = ["worker"] }
+
+[[bin]]
+name = "nyx-script-worker"
+path = "src/bin/nyx-script-worker.rs"

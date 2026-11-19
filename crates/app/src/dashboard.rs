@@ -23,7 +23,7 @@ pub fn physics_label(p: &str) -> &'static str {
 
 impl App {
     /// Changes a workflow's pin or status on disk (open tabs are updated too).
-    fn edit_workflow(&mut self, id: &str, f: impl FnOnce(&mut WorkflowDir) -> Result<(), String>) {
+    pub(crate) fn edit_workflow(&mut self, id: &str, f: impl FnOnce(&mut WorkflowDir) -> Result<(), String>) {
         let res = if let Some(d) = self.shell.open.get_mut(id).and_then(|w| w.dir.as_mut()) {
             f(d)
         } else if let Some(e) = self.shell.entries.iter().find(|e| e.wf.id == id) {
@@ -83,8 +83,6 @@ impl App {
                 } else {
                     self.dashboard_sections(ui);
                 }
-                ui.add_space(30.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| ui.label(kit::title("creative chaos.", 20.0).color(theme::muted(&ctx))));
             });
         });
     }
@@ -177,19 +175,19 @@ impl App {
 
         if !sec.running.is_empty() {
             ui.horizontal(|ui| {
-                kit::dot(ui, theme::AMBER);
+                kit::glyph(ui, kit::State::Running);
                 kit::label_caps(ui, "Running", "follow along without opening anything");
             });
             ui.add_space(6.0);
             for &i in &sec.running {
                 let e = &entries[i];
                 let mut cancel = false;
-                kit::card(ui, theme::warm(&ctx), theme::AMBER, 16, |ui| {
+                kit::card(ui, theme::warm(&ctx), theme::activity(&ctx), 16, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&e.wf.title).strong().size(18.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.link("Cancel").clicked() {
+                            if kit::danger(ui, "Cancel").clicked() {
                                 cancel = true;
                             }
                         });
@@ -255,51 +253,60 @@ impl App {
             if ui.add(egui::Label::new(RichText::new(arrow).strong()).sense(Sense::click())).clicked() {
                 self.shell.earlier_open = !self.shell.earlier_open;
             }
-            kit::label_caps(ui, "Earlier", &format!("{} workflows · untouched for {} days or marked done · never deleted", sec.earlier.len(), self.shell.settings().hide_after_days));
+            kit::label_caps(ui, "Earlier", &format!("{} · untouched for {} or marked done · never deleted", crate::fmt::plural(sec.earlier.len(), "workflow"), crate::fmt::plural(self.shell.settings().hide_after_days as usize, "day")));
         });
         if head.response.clicked() {
             self.shell.earlier_open = !self.shell.earlier_open;
         }
         if self.shell.earlier_open {
             ui.add_space(4.0);
-            let line = theme::line(&ctx);
-            for &i in &sec.earlier {
-                let e = &entries[i];
-                let r = egui::Frame::new().inner_margin(egui::Margin::symmetric(2, 9)).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add_sized([ui.available_width() * 0.28, 20.0], egui::Label::new(RichText::new(&e.wf.title).strong()).truncate());
-                        ui.add_sized([ui.available_width() * 0.62, 20.0], egui::Label::new(kit::muted(ui, e.wf.summary())).truncate());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(kit::muted(ui, ago(e.wf.touched_secs(), now_secs())));
-                            ui.add_space(14.0);
-                            ui.label(kit::muted(ui, if e.wf.status == Status::Done { "done" } else { "active" }));
-                        });
+            // a table, one row per workflow: name, setup, state (glyph and word), when it was last touched
+            let aw = ui.available_width();
+            let gap = 18.0;
+            let (w_name, w_setup, w_state) = (aw * 0.26, aw * 0.38, 110.0);
+            let w_time = (aw - w_name - w_setup - w_state - 3.0 * gap - 4.0).max(60.0);
+            // add_sized centres a label in its box; a table wants its text on the left
+            let cell = |ui: &mut egui::Ui, w: f32, label: egui::Label| ui.allocate_ui_with_layout(Vec2::new(w, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| { ui.set_min_width(w); ui.add(label) }).inner;
+            egui::Grid::new("earlier_table").num_columns(4).spacing([gap, 10.0]).show(ui, |ui| {
+                for (h, w) in [("Workflow", w_name), ("Setup", w_setup), ("State", w_state), ("Last touched", w_time)] {
+                    cell(ui, w, egui::Label::new(RichText::new(h).size(12.0).strong().color(theme::muted(&ctx))).truncate());
+                }
+                ui.end_row();
+                for &i in &sec.earlier {
+                    let e = &entries[i];
+                    let done = e.wf.status == Status::Done;
+                    let mut cells: Vec<egui::Response> = vec![];
+                    cells.push(cell(ui, w_name, egui::Label::new(RichText::new(&e.wf.title).strong()).truncate().sense(Sense::click())));
+                    cells.push(cell(ui, w_setup, egui::Label::new(kit::muted(ui, e.wf.summary())).truncate().sense(Sense::click())));
+                    let state = ui.allocate_ui_with_layout(Vec2::new(w_state, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.set_min_width(w_state);
+                        kit::glyph(ui, if done { kit::State::Done } else { kit::State::Idle });
+                        ui.label(kit::muted(ui, if done { "Done" } else { "Active" }));
                     });
-                });
-                let rect = r.response.rect;
-                ui.painter().hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1.0, line));
-                let click = ui.interact(rect, ui.scope_id().with(("earlier", &e.wf.id)), Sense::click());
-                if click.hovered() {
-                    ui.painter().rect_filled(rect, 4.0, theme::tint(&ctx).gamma_multiply(0.5));
+                    cells.push(ui.interact(state.response.rect, ui.scope_id().with(("earlier_state", &e.wf.id)), Sense::click()));
+                    cells.push(cell(ui, w_time, egui::Label::new(kit::muted(ui, ago(e.wf.touched_secs(), now_secs()))).truncate().sense(Sense::click())));
+                    ui.end_row();
+                    for c in cells {
+                        if c.clicked() {
+                            open = Some(e.wf.id.clone());
+                        }
+                        c.context_menu(|ui| {
+                            if ui.button("Pin to the dashboard").clicked() {
+                                menu = Some((e.wf.id.clone(), "pin"));
+                                ui.close();
+                            }
+                            if ui.button("Mark active again").clicked() {
+                                menu = Some((e.wf.id.clone(), "active"));
+                                ui.close();
+                            }
+                            if ui.button("Open folder").clicked() {
+                                menu = Some((e.wf.id.clone(), "folder"));
+                                ui.close();
+                            }
+                        });
+                    }
                 }
-                if click.clicked() {
-                    open = Some(e.wf.id.clone());
-                }
-                click.context_menu(|ui| {
-                    if ui.button("Pin to the dashboard").clicked() {
-                        menu = Some((e.wf.id.clone(), "pin"));
-                        ui.close();
-                    }
-                    if ui.button("Mark active again").clicked() {
-                        menu = Some((e.wf.id.clone(), "active"));
-                        ui.close();
-                    }
-                    if ui.button("Open folder").clicked() {
-                        menu = Some((e.wf.id.clone(), "folder"));
-                        ui.close();
-                    }
-                });
-            }
+            });
         }
 
         if let Some((id, what)) = menu {
@@ -340,14 +347,14 @@ fn filter_menu(ui: &mut egui::Ui, label: &str, value: &mut String, options: &[St
 
 fn workflow_card(ui: &mut egui::Ui, e: &Entry, spark: &[f64], width: f32) -> egui::Response {
     let ctx = ui.ctx().clone();
-    let colors = [theme::PLUM, Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0xC9, 0x7F, 0x1F), Color32::from_rgb(0x2F, 0x7A, 0x66)];
+    let colors = [theme::accent(ui.ctx()), Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0xC9, 0x7F, 0x1F), Color32::from_rgb(0x2F, 0x7A, 0x66)];
     let color = colors[e.wf.id.bytes().last().unwrap_or(0) as usize % colors.len()];
     let ok_last = e.wf.experiments.last().is_some_and(|x| x.runs.ok > 0 && x.runs.failed == 0);
     let r = egui::Frame::new().fill(theme::card(&ctx)).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).corner_radius(12).inner_margin(egui::Margin::same(14)).show(ui, |ui| ui.vertical(|ui| {
         ui.set_width(width - 30.0);
         ui.set_min_height(150.0);
         ui.horizontal(|ui| {
-            kit::dot(ui, if ok_last { theme::GREEN } else { theme::line(&ctx) });
+            kit::glyph(ui, if ok_last { kit::State::Done } else { kit::State::Idle });
             ui.add(egui::Label::new(RichText::new(&e.wf.title).strong().size(16.0)).truncate());
             if e.wf.pinned {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new("pinned").size(12.0).color(theme::accent(&ctx))));
@@ -359,7 +366,7 @@ fn workflow_card(ui: &mut egui::Ui, e: &Entry, spark: &[f64], width: f32) -> egu
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let n = e.wf.experiments.len();
-            ui.label(kit::muted(ui, format!("{n} experiment{} · {} run{}", if n == 1 { "" } else { "s" }, e.wf.run_count(), if e.wf.run_count() == 1 { "" } else { "s" })));
+            ui.label(kit::muted(ui, format!("{} · {}", crate::fmt::plural(n, "experiment"), crate::fmt::plural(e.wf.run_count(), "run"))));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, ago(e.wf.touched_secs(), now_secs()))));
         });
     }));

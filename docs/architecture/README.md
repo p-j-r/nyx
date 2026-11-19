@@ -9,7 +9,7 @@ Written 2026-11-03 against main `a047506`; brought up to date at the end of the 
 | **Full C4 set**: context, 12 containers, 91 components, code pages per component, exports, a browser viewer, a standalone copy; components and code read from the Rust source ([README](c4/README.md), [memo](c4/MEMO.md)) | [`c4/`](c4/README.md) |
 | Master Structurizr model (people, systems, containers, container relationships, two dynamic views; includes the generated components of `c4/`) as Structurizr DSL | [`workspace.dsl`](workspace.dsl) |
 | Rough spots the model showed (28 items, with evidence, severity and a fix direction; the resolutions are at the end) | [`ROUGH_SPOTS.md`](ROUGH_SPOTS.md) |
-| Decisions found in the history, docs and code (67 ADRs here; 66 and 67 are on the A3 branch, Nygard format; the first 23 written retrospectively) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
+| Decisions found in the history, docs and code (82 ADRs here, Nygard format; the first 23 written retrospectively; 84 to 96 are the productivity line) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
 | Every file of the repository mapped to the ADRs that cover it | [`CODE_TO_ADR.md`](CODE_TO_ADR.md), checked by `check_code_to_adr.sh` |
 | Interface contracts: exemplar files and the tests that pin them | [`contracts/`](contracts/README.md) |
 | Mermaid diagrams of the final structure (hand-written, render on GitHub or mermaid.live) | [`diagrams.md`](diagrams.md) |

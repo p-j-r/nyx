@@ -13,7 +13,7 @@ pub fn analyses() -> Vec<Box<dyn Analysis>> {
 
 impl Engine {
     /// The mesh a result was solved on, or why there is none (the geometry or mesh settings changed since).
-    fn analysis_inputs(
+    pub(crate) fn analysis_inputs(
         &self,
         physics: &str,
     ) -> Result<(std::sync::Arc<crate::meshing::MeshedModel>, std::sync::Arc<nyx_physics::SolveResult>), Error> {
@@ -48,6 +48,7 @@ impl Engine {
                 "analysis": a.id(),
                 "name": a.name(),
                 "applies_to": self.results.iter().filter(|(_, s)| a.applies_to(&s.result)).map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+                "stale": self.results.iter().filter(|(_, s)| a.applies_to(&s.result)).map(|(k, _)| (k.clone(), self.is_stale(k))).collect::<std::collections::BTreeMap<_, _>>(),
             }))
             .collect::<Vec<_>>())
     }
@@ -72,7 +73,9 @@ impl Engine {
         if let Some(o) = v.as_object_mut() {
             o.insert("analysis".into(), json!(analysis));
             o.insert("physics".into(), json!(physics));
-            o.insert("stale".into(), json!(self.results[physics].stamp != self.stamp()));
+            o.insert("stale".into(), json!(self.is_stale(physics)));
+            o.insert("age_s".into(), json!(self.result_age(physics)));
+            o.insert("validated".into(), self.validated_json(physics));
         }
         Ok(v)
     }

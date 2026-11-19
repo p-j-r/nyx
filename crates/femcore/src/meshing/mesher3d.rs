@@ -366,6 +366,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     let reg_lat: Vec<i32> = par_blocks(nv, 20_000, |r| r.map(|v| sf.region(lat.pos(v as u32))).collect::<Vec<i32>>()).into_iter().flatten().collect();
     let mut cls: Vec<Vec<i8>> = (0..ns).map(|s| reg_lat.iter().map(|&r| sf.sign(s, r)).collect()).collect();
     lap("  mesh3d: classify vertices");
+    crate::progress::check()?;
 
     // 2. warp vertices that are within alpha of an edge length of a surface onto it
     let warps = par_blocks(nv, 20_000, |r| {
@@ -471,6 +472,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     }
     let n_warped = warped.len();
     lap("  mesh3d: warp");
+    crate::progress::check()?;
     let pos_of = |v: u32| -> [f64; 3] { warped.get(&v).copied().unwrap_or_else(|| lat.pos(v)) };
     // a lattice vertex that was not moved lies strictly inside the region it was classified in
     let known_region = |v: u32| -> i32 {
@@ -565,6 +567,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         part
     });
     lap("  mesh3d: tetrahedra");
+    crate::progress::check()?;
 
     // 4. number the vertices: used lattice vertices, then the cut points
     let mut used = vec![false; nv];
@@ -615,6 +618,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         }
     };
     lap("  mesh3d: numbering, cut points");
+    crate::progress::check()?;
 
     // 5. cells (oriented) with their regions
     let mut raw: Vec<([u32; 4], i32)> = Vec::with_capacity(parts.iter().map(|p| p.inner.len() + p.surf.len()).sum());
@@ -770,6 +774,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     .flatten()
     .collect();
     lap("  mesh3d: cells, labels, facets");
+    crate::progress::check()?;
 
     // 7. the native mesh; vertices that no cell uses (cells dropped for having no region) are left out
     let mut new_id = vec![u32::MAX; points.len()];
@@ -820,6 +825,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     report.cells = rr.cells_after;
     report.refined = rr.bisections;
     lap("  mesh3d: local refinement");
+    crate::progress::check()?;
     Ok((mesh, report))
 }
 

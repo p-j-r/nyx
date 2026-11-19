@@ -63,10 +63,12 @@ pub fn card_of(v: &serde_json::Value) -> Card {
     keywords.dedup();
     let wl = wavelength_m.map(|w| format!(", {:.0} nm", w * 1e9)).unwrap_or_default();
     let summary = format!(
-        "{}D, {} features, {} regions, {} {}{}",
+        "{}D, {} feature{}, {} region{}, {} {}{}",
         p.geometry.dim,
         p.geometry.features.len(),
+        if p.geometry.features.len() == 1 { "" } else { "s" },
         regions.len(),
+        if regions.len() == 1 { "" } else { "s" },
         if active.is_empty() { "no physics" } else { &active },
         study,
         wl
@@ -130,6 +132,8 @@ pub enum RunOutcome<'a> {
 pub struct StoreLink {
     pub dir: WorkflowDir,
     pub experiment: String,
+    /// the script (name, text) the runs recorded now are made by, when a script drives the engine: its text is kept with each run (S4)
+    pub script: Option<(String, String)>,
 }
 
 impl StoreLink {
@@ -138,7 +142,7 @@ impl StoreLink {
         let dir = WorkflowDir::create_with(workspace, None, &project.title, origin, &project.to_json(), card_of)
             .map_err(store_err)?;
         let experiment = dir.wf.experiments[0].id.clone();
-        Ok(StoreLink { dir, experiment })
+        Ok(StoreLink { dir, experiment, script: None })
     }
 
     /// Opens a workflow folder and reads the project of its first experiment (or of `experiment`).
@@ -159,7 +163,7 @@ impl StoreLink {
         };
         let text = dir.read_spec(&experiment).map_err(store_err)?;
         let project = Project::from_json(&text)?;
-        Ok((StoreLink { dir, experiment }, project))
+        Ok((StoreLink { dir, experiment, script: None }, project))
     }
 
     /// Stores the project when it differs from the saved one; returns the new version number, `None` when nothing changed.
@@ -178,12 +182,39 @@ impl StoreLink {
         mesh: Option<&femcore::mesh::SimplexMesh>,
     ) -> Result<RunRecord, Error> {
         self.commit(project)?;
+        self.record_frozen(project, outcome, seconds, log, mesh, None)
+    }
+
+    /// Adds a run for a project that is not the experiment's own (a point of a sweep): the run freezes the project it solved, and the
+    /// experiment's project, its versions and its history are left as they are.
+    pub fn record_point(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<&femcore::mesh::SimplexMesh>,
+        reuse: Option<&serde_json::Value>,
+    ) -> Result<RunRecord, Error> {
+        self.record_frozen(project, outcome, seconds, log, mesh, reuse)
+    }
+
+    fn record_frozen(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<&femcore::mesh::SimplexMesh>,
+        reuse: Option<&serde_json::Value>,
+    ) -> Result<RunRecord, Error> {
         let (existing, _) = self.dir.runs(&self.experiment);
         let id = runs::next_id(&existing);
         let mut rec = RunRecord {
             id: id.clone(),
             sec: seconds,
             femcore: format!("nyx-engine {}", env!("CARGO_PKG_VERSION")),
+            reuse: reuse.cloned(),
             ..Default::default()
         };
         for p in project.geometry.params.iter().filter_map(|p| match p.value {
@@ -257,6 +288,11 @@ impl StoreLink {
         }
         if !log.is_empty() {
             write("log.txt", "log", format!("{}\n", log.join("\n")).into_bytes())?;
+        }
+        // the script that made this run, with its hash in the file name (`script-b3:...` would not be a Windows file name: the hash is hex)
+        if let Some((_, text)) = &self.script {
+            let hash = nyx_store::util::hash_bytes(text.as_bytes());
+            write(&format!("script-{}.nys", hash.trim_start_matches("b3:")), "script", text.clone().into_bytes())?;
         }
         artifacts.extend(extra);
         rec.artifacts = artifacts;

@@ -26,6 +26,7 @@ C4 level 4 (code) of the component **Mode report** (`analysis.modes`) in the con
 | [Analysis API](./api.md) | modes | AnalysisOptions, GroupReport, ModeAnalysis, ModeInput, ModeRow, ResolveAxis, Resolved, analyze_modes |
 | [Field samples](./samples.md) | modes | AnalysisOptions, ModeInput |
 | [engine: Analyses](../engine/analyse.md) | modes | ModeAnalysis |
+| [engine: Meshing seam](../engine/meshing.md) | modes | ModeAnalysis |
 
 ## Class diagram
 

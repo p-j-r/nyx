@@ -177,6 +177,9 @@ impl App {
         });
         ui.checkbox(&mut m.structured_pml, "structured absorbing layers").on_hover_text("Rebuild the absorbing layers of the model as structured layers (quadrilaterals, prisms, hexahedra) cut into simplices.");
         sweep_editor(ui, &mut m.sweep);
+        // as you type: the problem of the edits, or their size and cost from a trial mesh (nothing is built: `feedback.rs`); right under the
+        // controls it answers, not below the feature list (the lines show the state of the frame before, which is the edit being typed)
+        self.feedback_lines(ui);
         ui.add_space(4.0);
         crate::geomui::show(ui, &mut self.geom_ui, &mut g);
         ui.add_space(6.0);
@@ -185,11 +188,15 @@ impl App {
         self.mesh_edit = m;
         if changed {
             self.geometry_dirty = true;
+            let ctx = ui.ctx().clone();
+            self.edits_changed(&ctx);
         }
+        let ctx = ui.ctx().clone();
+        self.feedback_tick(&ctx);
         ui.add_space(6.0);
         let dirty = self.geometry_dirty || self.geom_edit != self.engine.project().geometry || self.mesh_edit != self.engine.project().mesh;
         ui.horizontal(|ui| {
-            let b = ui.add_enabled(self.busy.is_none(), egui::Button::new(RichText::new("Build mesh").strong()).fill(if dirty { Color32::from_rgb(40, 90, 150) } else { Color32::from_rgb(52, 56, 66) }));
+            let b = ui.add_enabled(self.busy.is_none(), egui::Button::new(RichText::new("Build mesh").strong().color(if dirty { crate::theme::on_accent(ui.ctx()) } else { crate::theme::text(ui.ctx()) })).fill(if dirty { crate::theme::accent(ui.ctx()) } else { crate::theme::raised(ui.ctx()) }));
             if b.clicked() {
                 self.rebuild_mesh();
             }
@@ -267,7 +274,7 @@ impl App {
         }
         let lib_names: Vec<String> = self.engine.library().map(|l| l.names()).unwrap_or_default();
         if lib_names.is_empty() {
-            ui.colored_label(Color32::from_rgb(200, 120, 20), "No material files were found (set NYX_MATERIALS, or keep a `materials` folder next to the program).");
+            ui.colored_label(crate::theme::activity_text(ui.ctx()), "No material files were found (set NYX_MATERIALS, or keep a `materials` folder next to the program).");
         }
         let mut apply_all: Option<String> = None;
         ui.horizontal(|ui| {
@@ -394,7 +401,7 @@ impl App {
                 }
             }
             Err(e) => {
-                ui.colored_label(Color32::from_rgb(200, 60, 60), e.to_string());
+                ui.colored_label(crate::theme::danger(ui.ctx()), e.to_string());
             }
         }
     }
@@ -497,7 +504,7 @@ impl App {
                 });
                 match self.rule_errors.get(&i) {
                     Some(e) => {
-                        ui.colored_label(Color32::from_rgb(235, 110, 100), e);
+                        ui.colored_label(crate::theme::danger(ui.ctx()), e);
                     }
                     None => {
                         if let Some(l) = self.bc_labels.get(i).filter(|l| !l.is_empty()) {
@@ -579,7 +586,7 @@ impl App {
                 nyx_engine::facade::physics::Dims::Both => true,
             };
             if !runs_here {
-                ui.colored_label(Color32::from_rgb(200, 120, 20), format!("This study runs on a {}D mesh; the model on show is {}D.", if dim == 2 { 3 } else { 2 }, dim));
+                ui.colored_label(crate::theme::activity_text(ui.ctx()), format!("This study runs on a {}D mesh; the model on show is {}D.", if dim == 2 { 3 } else { 2 }, dim));
             }
             forms::param_form(ui, &format!("study_{active}_{}", s.kind), &s.params, &mut spec.study.params);
         }
@@ -603,38 +610,40 @@ impl App {
             num(ui, &mut self.conv_factor);
             ui.label("tolerance");
             num(ui, &mut self.conv_tol);
-            start = ui.add_enabled(!self.convergence_running && self.busy.is_none(), egui::Button::new("Check convergence")).clicked();
+            start = ui.add_enabled(self.job_kind != Some(crate::app::JobKind::Open), egui::Button::new(if self.busy.is_some() { "Queue convergence check" } else { "Check convergence" })).clicked();
         });
         self.conv_factor = self.conv_factor.clamp(0.1, 0.95);
         if start {
             self.check_convergence();
         }
-        if self.convergence_running {
+        if self.convergence_running() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("two solves are running...");
+                ui.label("two solves are running (the toolbar shows the stage; Cancel stops it)...");
             });
         }
         if let Some(c) = &self.convergence {
             let ok = c["converged"] == true;
-            ui.colored_label(if ok { Color32::from_rgb(40, 150, 70) } else { Color32::from_rgb(200, 120, 20) }, format!("{} (worst relative difference {:.2e}; {} to {} cells, {:.1} s)", if ok { "converged" } else { "NOT converged" }, c["worst_relative"].as_f64().unwrap_or(f64::NAN), c["cells"]["coarse"], c["cells"]["refined"], c["seconds"].as_f64().unwrap_or(0.0)));
+            ui.colored_label(if ok { crate::theme::success(ui.ctx()) } else { crate::theme::activity_text(ui.ctx()) }, format!("{} (worst relative difference {:.2e}; {} to {} cells, {:.1} s)", if ok { "converged" } else { "NOT converged" }, c["worst_relative"].as_f64().unwrap_or(f64::NAN), c["cells"]["coarse"], c["cells"]["refined"], c["seconds"].as_f64().unwrap_or(0.0)));
             egui::Grid::new("conv_rows").num_columns(4).striped(true).show(ui, |ui| {
                 for r in c["rows"].as_array().into_iter().flatten().take(40) {
                     ui.label(r["quantity"].as_str().unwrap_or(""));
                     ui.monospace(format!("{:.6e}", r["coarse"].as_f64().unwrap_or(f64::NAN)));
                     ui.monospace(format!("{:.6e}", r["refined"].as_f64().unwrap_or(f64::NAN)));
                     let pass = r["converged"] == true;
-                    ui.colored_label(if pass { Color32::from_rgb(40, 150, 70) } else { Color32::from_rgb(200, 120, 20) }, format!("{:.1e}", r["relative"].as_f64().unwrap_or(f64::NAN)));
+                    ui.colored_label(if pass { crate::theme::success(ui.ctx()) } else { crate::theme::activity_text(ui.ctx()) }, format!("{:.1e}", r["relative"].as_f64().unwrap_or(f64::NAN)));
                     ui.end_row();
                 }
             });
         }
+        // what the check left the result on show as (it is the engine's state, so a check of another problem does not count)
+        self.validated_line(ui);
         if spec != spec0 {
             self.set_problem(&active, &spec);
         }
         ui.add_space(8.0);
-        let ok = self.busy.is_none() && self.doc.mesh.is_some();
-        if ui.add_enabled(ok, egui::Button::new(RichText::new("  Compute  ").strong()).fill(Color32::from_rgb(38, 110, 70))).clicked() {
+        let ok = self.can_queue_compute() && self.doc.mesh.is_some();
+        if ui.add_enabled(ok, egui::Button::new(RichText::new("  Compute  ").strong().color(crate::theme::on_accent(ui.ctx()))).fill(crate::theme::accent(ui.ctx()))).clicked() {
             self.compute();
         }
     }
@@ -647,10 +656,14 @@ impl App {
             return;
         };
         ui.heading("Results");
+        crate::spans::span("stale_band", || self.stale_band(ui));
+        crate::spans::span("validated_line", || self.validated_line(ui));
         if self.results.len() > 1 {
-            egui::ComboBox::from_id_salt("result_sel").selected_text(self.results[cur].name.clone()).show_ui(ui, |ui| {
+            let stale: Vec<bool> = (0..self.results.len()).map(|i| self.stale_reason(i).is_some()).collect();
+            let label = |i: usize, name: &str| if stale[i] { format!("{name} (stale)") } else { name.to_string() };
+            egui::ComboBox::from_id_salt("result_sel").selected_text(label(cur, &self.results[cur].name)).show_ui(ui, |ui| {
                 for (i, r) in self.results.iter().enumerate() {
-                    ui.selectable_value(&mut cur, i, r.name.clone());
+                    ui.selectable_value(&mut cur, i, label(i, &r.name));
                 }
             });
             if cur != self.current.unwrap() {
@@ -763,16 +776,171 @@ impl App {
             }
         });
         ui.weak(format!("{} unknowns, solved in {:.2} s", rv.result.dofs, rv.result.seconds));
-        egui::CollapsingHeader::new(format!("What the solver did ({} lines)", rv.result.log.len())).default_open(true).show(ui, |ui| {
-            egui::ScrollArea::vertical().max_height(260.0).id_salt("solver_log").show(ui, |ui| {
-                for l in &rv.result.log {
-                    ui.add(egui::Label::new(RichText::new(l).monospace().weak().size(11.0)).wrap());
-                }
+        crate::spans::span("solver_log", || {
+            // closed until opened: drawing eleven short monospace lines for the first time cost 14 ms in the frame after a result arrives (P3
+            // frame log; neither one label for the whole log nor laying the glyphs out beforehand made it cheaper), and the header says how many
+            egui::CollapsingHeader::new(format!("What the solver did ({} lines)", rv.result.log.len())).default_open(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(260.0).id_salt("solver_log").show(ui, |ui| {
+                    for l in &rv.result.log {
+                        ui.add(egui::Label::new(RichText::new(l).monospace().weak().size(11.0)).wrap());
+                    }
+                });
             });
         });
         ui.add_space(6.0);
+        crate::spans::span("reductions", || self.reductions(ui, cur));
+        ui.add_space(6.0);
         if ui.button("Export CSV...").clicked() {
             self.export_csv();
+        }
+    }
+
+    /// What the Reduce form offers for the result on show: its physics, the solution on show, the fields it can read and the regions of its mesh.
+    fn reduce_choices(&self, cur: usize) -> Option<(String, usize, Vec<String>, Vec<String>)> {
+        let physics = self.results[cur].physics.clone()?;
+        let r = &self.results[cur];
+        let sol = r.sol.min(r.result.solutions.len().checked_sub(1)?);
+        let s = &r.result.solutions[sol];
+        let mut names: Vec<String> = s.cell_fields.iter().map(|f| f.name.clone()).collect();
+        for f in &s.fields {
+            if f.components.is_empty() && !names.contains(&f.name) {
+                names.push(f.name.clone());
+            }
+        }
+        if names.is_empty() {
+            return None;
+        }
+        let regions = self.engine.result_regions(&physics);
+        Some((physics, sol, names, regions))
+    }
+
+    /// The Reduce form: integrals, extremes and the fraction in a region of the field on show, by the engine commands `integrate`, `extremum` and
+    /// `confinement` (ADR 90), so the number is the one a script or the MCP server gets. The answers stay listed, newest first.
+    fn reductions(&mut self, ui: &mut Ui, cur: usize) {
+        let Some((_, _, names, regions)) = self.reduce_choices(cur) else { return };
+        let f = &mut self.reduce;
+        f.field = f.field.min(names.len() - 1);
+        f.region = f.region.min(regions.len());
+        let mut action: Option<&'static str> = None;
+        egui::CollapsingHeader::new("Reduce: integral, extremes, fraction").default_open(false).show(ui, |ui| {
+            ui.weak("Computed by the engine on the cells the result was solved on, with the rule in ADR 90: the same numbers a script or the MCP server gets.");
+            ui.horizontal(|ui| {
+                ui.label("Field");
+                egui::ComboBox::from_id_salt("reduce_field").selected_text(names[f.field].clone()).show_ui(ui, |ui| {
+                    for (i, n) in names.iter().enumerate() {
+                        ui.selectable_value(&mut f.field, i, n);
+                    }
+                });
+                egui::ComboBox::from_id_salt("reduce_quantity").selected_text(QUANTITIES[f.quantity.min(2)]).show_ui(ui, |ui| {
+                    for (i, n) in QUANTITIES.iter().enumerate() {
+                        ui.selectable_value(&mut f.quantity, i, *n);
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Region");
+                egui::ComboBox::from_id_salt("reduce_region").selected_text(if f.region == 0 { "whole mesh".to_string() } else { regions[f.region - 1].clone() }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut f.region, 0, "whole mesh");
+                    for (i, r) in regions.iter().enumerate() {
+                        ui.selectable_value(&mut f.region, i + 1, r);
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Formula");
+                ui.add(egui::TextEdit::singleline(&mut f.formula).desired_width(ui.available_width().min(320.0)).hint_text("e.g. eps_r * norm2(E), or where(z > 0, abs2(Ex), 0)"))
+                    .on_hover_text("When this is not empty, Integral, Largest and Smallest read the formula instead of the field and quantity above. Names: the fields of the result, x y z, material values (eps_r, rho), region(\"Si\"), where(c, a, b), vectors (E: dot, cross, norm, norm2). The same language as the `expr` of a script or the MCP server.");
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Integral").on_hover_text("the integral over the region (a complex field with the value quantity gives re + im i); of the formula when there is one").clicked() {
+                    action = Some("integrate");
+                }
+                if ui.button("Largest").on_hover_text("the largest real value at the nodes of the region").clicked() {
+                    action = Some("max");
+                }
+                if ui.button("Smallest").clicked() {
+                    action = Some("min");
+                }
+                if ui.add_enabled(f.region > 0, egui::Button::new("Fraction in region")).on_hover_text("the integral of the squared moduli of the components of the vector this field belongs to (Ex, Ey, Ez for Ex) over the region, divided by the same over the whole mesh; no material weight").clicked() {
+                    action = Some("fraction");
+                }
+            });
+            for l in f.lines.iter().take(8) {
+                ui.add(egui::Label::new(RichText::new(l).monospace().size(11.0)).wrap());
+            }
+        });
+        if let Some(a) = action {
+            self.reduce_now(a);
+        }
+    }
+
+    /// Runs one reduction of the Reduce form (`integrate`, `max`, `min` or `fraction`) on the field, quantity and region it holds, through the engine
+    /// command of that name, and puts the answer first in its list.
+    pub fn reduce_now(&mut self, action: &str) {
+        let Some(cur) = self.current else { return };
+        let Some((physics, sol, names, regions)) = self.reduce_choices(cur) else { return };
+        let name = names[self.reduce.field.min(names.len() - 1)].clone();
+        let quantity = self.reduce.quantity.min(2);
+        let region = (self.reduce.region > 0 && self.reduce.region <= regions.len()).then(|| regions[self.reduce.region - 1].clone());
+        let formula = self.reduce.formula.trim().to_string();
+        let expr = if !formula.is_empty() {
+            json!(formula)
+        } else {
+            match quantity {
+                1 => json!({ "op": "abs", "args": [name] }),
+                2 => json!({ "op": "abs2", "args": [name] }),
+                _ => json!(name),
+            }
+        };
+        let label = if !formula.is_empty() {
+            format!("`{formula}`")
+        } else {
+            match quantity {
+                1 => format!("|{name}|"),
+                2 => format!("|{name}|²"),
+                _ => name.clone(),
+            }
+        };
+        let place = region.clone().unwrap_or_else(|| "the whole mesh".into());
+        let mut args = json!({ "physics": physics, "solution": sol });
+        if let Some(r) = &region {
+            args["region"] = json!(r);
+        }
+        let stale = |v: &Value| if v["stale"] == json!(true) { "  (stale result)" } else { "" };
+        let line = match action {
+            "integrate" => {
+                args["expr"] = expr;
+                self.cmd("integrate", args).map(|v| format!("integral of {label} over {place} = {}{}", reduce_number(&v["value"]), stale(&v)))
+            }
+            "fraction" => {
+                if region.is_none() {
+                    self.set_error("fraction: choose a region".to_string());
+                    return;
+                }
+                // the components of the vector this field belongs to: the engine knows them (`field` on the name without its axis letter)
+                let stem = name.strip_suffix(['x', 'y', 'z']).unwrap_or(&name).to_string();
+                let comps: Vec<String> = self
+                    .engine
+                    .call("field", &json!({ "physics": physics, "solution": sol, "name": stem }))
+                    .ok()
+                    .and_then(|v| v["components"].as_object().map(|m| m.values().filter_map(|c| c["name"].as_str().map(String::from)).collect()))
+                    .unwrap_or_else(|| vec![name.clone()]);
+                args["fields"] = json!(comps);
+                let shown = comps.join(", ");
+                self.cmd("confinement", args).map(|v| format!("share of |{shown}|² in {place} = {:.6}{}", v["fraction"].as_f64().unwrap_or(f64::NAN), stale(&v)))
+            }
+            op => {
+                args["expr"] = expr;
+                args["op"] = json!(op);
+                self.cmd("extremum", args).map(|v| {
+                    let at: Vec<String> = v["point"].as_array().map(|p| p.iter().map(|x| format!("{:.4e}", x.as_f64().unwrap_or(f64::NAN))).collect()).unwrap_or_default();
+                    format!("{op} of {label} in {place} = {:.6e} at ({})", v["value"].as_f64().unwrap_or(f64::NAN), at.join(", "))
+                })
+            }
+        };
+        if let Some(l) = line {
+            self.reduce.lines.insert(0, l);
+            self.reduce.lines.truncate(20);
         }
     }
 
@@ -929,6 +1097,7 @@ impl App {
     /// solutions of the current result.
     pub fn results_panel(&mut self, ui: &mut Ui) {
         let Some(cur) = self.current else { return };
+        self.stale_band(ui);
         let rv = &self.results[cur];
         let nsol = rv.sols.len();
         ui.horizontal(|ui| {
@@ -973,5 +1142,16 @@ impl App {
                 p.vline(egui_plot::VLine::new("now", current).color(Color32::from_rgb(230, 190, 80)));
             }
         });
+    }
+}
+
+/// What the Reduce form can take of a field.
+const QUANTITIES: [&str; 3] = ["value", "modulus", "modulus squared"];
+
+/// A number of a reduction answer as the form shows it: a real one, or `re + im i` for a pair.
+pub fn reduce_number(v: &Value) -> String {
+    match v {
+        Value::Array(a) if a.len() == 2 => format!("{:.6e} + {:.6e} i", a[0].as_f64().unwrap_or(f64::NAN), a[1].as_f64().unwrap_or(f64::NAN)),
+        other => format!("{:.6e}", other.as_f64().unwrap_or(f64::NAN)),
     }
 }

@@ -1,0 +1,7 @@
+# Cancel test (P0): 3D box cavity (a 2D section swept along y, 14_box_cavity with a finer mesh). One cancel per process, so the cancelled solve is the first of the process.
+# cancel 3.5 s after the shifted factorisation started, in the iterations (the factorisation takes 2.2 s). 'to cancel' in the table is the time from the cancel request to the job's Cancelled state. Run with NYX_PROFILE=1 to see which stages closed before it.
+{"cmd":"project_open","args":{"path":"examples/14_box_cavity.nyx.json"}}
+{"cmd":"set_mesh","args":{"h":0.003,"sweep":[{"domain_offset":0,"n":8,"thickness":0.03}]},"note":"6672 cells, 39k unknowns"}
+{"cmd":"solve_run","args":{"wait":false},"note":"the first solve of the process, started"}
+{"cmd":"job_cancel","job_arg":"id","after_stage":"factorising the shifted","note":"cancel 3.5 s after the shifted factorisation started, in the iterations (the factorisation takes 2.2 s)","delay_s":3.5}
+{"cmd":"job_wait","job_arg":"id","expect_error":true,"note":"until Cancelled"}

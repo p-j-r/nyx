@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 > The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, and the curved (quadratic) edges of boundary cells.
 
 **Decisions:** [ADR 40](../../../adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md), [ADR 55](../../../adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md), [ADR 82](../../../adr/0082-curved-order-2-geometry.md), [ADR 83](../../../adr/0083-face-size-rules-and-max-dev-in-the-lattice-mesher.md)  
-**Size:** 5 files, 2084 lines.
+**Size:** 5 files, 2090 lines.
 
 ## Files
 
@@ -14,7 +14,7 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 | `crates/femcore/src/meshing/adapt3d.rs` | 320 | Adaptive meshing of a 3D `geom` model (ADR 51): the metric adaptation of `adapt::drive3` driven by the exact faces of the model. |
 | `crates/femcore/src/meshing/curve3.rs` | 276 | Curved edges for 3D meshes (ADR 82): the mid-edge geometry nodes that make the tetrahedra around a curved surface quadratic (isoparametric) instead of straight. |
 | `crates/femcore/src/meshing/geomdrive3.rs` | 338 | From a 3D `geom` model to a tetrahedral mesh: the adapter between `geom::Evaluated` and the lattice mesher (`mesher3d`), which only knows the trait `Domain3`. |
-| `crates/femcore/src/meshing/mesher3d.rs` | 906 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
+| `crates/femcore/src/meshing/mesher3d.rs` | 912 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
 | `crates/femcore/src/meshing/refine3d.rs` | 244 | Local refinement of a tetrahedral mesh by longest-edge (Rivara) bisection. |
 
 ## What it uses
@@ -28,7 +28,7 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 | [Mesh](./mesh.md) | mesh, mesh::cells | CellMesh, CellType, SimplexMesh |
 | [Meshing facade](./meshing.md) | meshing, meshing::geomdrive | Adaptive, GeomMeshOpts, MeshedGeom, evaluate, periodic_labels |
 | [Metric fields](./metric.md) | adapt::field3, adapt::metric, adapt::work | BackgroundMetric3, SimplexMesh, Sym, isotropic, simplex_to_adapt |
-| [Runtime services](./runtime.md) | par, progress | lap, threads |
+| [Runtime services](./runtime.md) | par, progress | check, lap, threads |
 
 ## Used by
 

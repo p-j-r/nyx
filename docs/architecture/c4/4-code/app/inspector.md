@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 > The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 2030 lines.
+**Size:** 3 files, 2210 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 |---|---:|---|
 | `crates/app/src/forms.rs` | 135 | Forms drawn from descriptors: a study, a condition or the options of a physics are a list of `ParamDesc`s (name, label, unit, type and range, default), and the form for them is made here, the same for every physics. A new physics needs n... |
 | `crates/app/src/geomui.rs` | 917 | The Geometry tab's model editor: named parameters, the ordered feature list with one generated form per feature kind, the names the model gives its regions and boundaries, and the same model as builder code. It edits `geom::model::Featur... |
-| `crates/app/src/tabs.rs` | 978 | Inspector tabs (geometry, materials, physics, study, results, analysis) and the results panel. The Materials, Physics and Study tabs are drawn from the descriptors of the physics (`forms`), so they are the same for every physics; every c... |
+| `crates/app/src/tabs.rs` | 1158 | Inspector tabs (geometry, materials, physics, study, results, analysis) and the results panel. The Materials, Physics and Study tabs are drawn from the descriptors of the physics (`forms`), so they are the same for every physics; every c... |
 
 ## What it uses
 
@@ -21,8 +21,9 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 |---|---|---|
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, project | Applies, BcSpec, Both, Env, Evaluated, Expr, FeatureList, LabelMap, MODE_COLOURS, MaterialAssign +20 |
 | [Shell and dashboard](./shell.md) | examples | list, typical |
+| [Look and widgets](./style.md) | fmt, theme | accent, activity_text, danger, on_accent, plural, raised, success, text |
 | [Viewport](./viewport.md) | colormap | Colormap |
-| [Window](./window.md) | app, state | App |
+| [Window](./window.md) | app, spans, state | App, JobKind, span |
 
 ## Used by
 
@@ -59,6 +60,7 @@ classDiagram
         <<impl block>>
         +inspector(ui)
         +inspector_tab(ui, t)
+        +reduce_now(action)
         +has_analysis() bool
         +results_panel(ui)
     }
@@ -66,6 +68,7 @@ classDiagram
         <<module tabs.rs>>
         +fmt_num(n) String
         +num(ui, v) Response
+        +reduce_number(v) String
     }
   }
 ```
@@ -81,7 +84,9 @@ classDiagram
 | fn | `show` | `geomui.rs:628` | `pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool` —  The model editor. `list` is edited in place; the return value says whether it changed. |
 | fn | `fmt_num` | `tabs.rs:18` | `pub fn fmt_num(n: f64) -> String` |
 | fn | `num` | `tabs.rs:31` | `pub fn num(ui: &mut Ui, v: &mut f64) -> egui::Response` —  A number field: drag to change, or double-click and type (scientific notation accepted). |
+| fn | `reduce_number` | `tabs.rs:1152` | `pub fn reduce_number(v: &Value) -> String` —  A number of a reduction answer as the form shows it: a real one, or `re + im i` for a pair. |
 | fn | `App::inspector` | `tabs.rs:92` | `pub fn inspector(&mut self, ui: &mut Ui)` |
 | fn | `App::inspector_tab` | `tabs.rs:121` | `pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab)` —  One inspector tab on its own: the workflow view lays the six tabs out in its three sections. |
-| fn | `App::has_analysis` | `tabs.rs:782` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
-| fn | `App::results_panel` | `tabs.rs:930` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |
+| fn | `App::reduce_now` | `tabs.rs:879` | `pub fn reduce_now(&mut self, action: &str)` —  Runs one reduction of the Reduce form (`integrate`, `max`, `min` or `fraction`) on the field, quantity and region it holds, through the engine |
+| fn | `App::has_analysis` | `tabs.rs:950` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
+| fn | `App::results_panel` | `tabs.rs:1098` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |

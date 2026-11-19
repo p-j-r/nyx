@@ -5,18 +5,17 @@ use crate::examples;
 use crate::kit;
 use crate::shell::{Page, Sheet, Start};
 use crate::theme;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use nyx_engine::facade::store::archive::{ExportOptions, Limits};
 use nyx_engine::facade::store::util::{ago, now_secs};
 use nyx_engine::facade::store::versions::{self, VersionKind};
 use nyx_engine::facade::store::ShareLevel;
 
 /// Start-from cards: (title, text, index in `examples::list()`, or `None` when it starts blank)
-const TEMPLATES: [(&str, &str, Option<usize>); 8] = [
+const TEMPLATES: [(&str, &str, Option<usize>); 7] = [
     ("Optical waveguide", "Strip or rib cross-section, modes and n_eff", Some(14)),
     ("Strip on sapphire", "Optical and acoustic modes of a silicon strip", Some(12)),
     ("Rectangular cavity", "3D electromagnetic eigenmodes of a box", Some(13)),
-    ("Ring resonator", "Whispering-gallery modes, axisymmetric", None),
     ("Vibrating structure", "Solid mechanics, eigenfrequencies", Some(1)),
     ("Heat transfer", "Stationary or transient temperature", Some(2)),
     ("Electrostatics", "Potentials, fields, capacitance", Some(0)),
@@ -32,6 +31,7 @@ impl App {
             Sheet::Versions => kit::modal(ctx, "versions", 1000.0, |ui| self.sheet_versions(ui)),
             Sheet::Share => kit::modal(ctx, "share", 820.0, |ui| self.sheet_share(ui)),
             Sheet::Open => kit::modal(ctx, "open", 820.0, |ui| self.sheet_open(ui)),
+            Sheet::About => kit::modal(ctx, "about", 760.0, |ui| self.sheet_about(ui)),
         };
         if close {
             self.shell.sheet = Sheet::None;
@@ -56,22 +56,21 @@ impl App {
         ui.add_space(4.0);
         let sel = self.shell.new.template;
         let w = (ui.available_width() - 3.0 * 12.0) / 4.0;
-        for row in 0..2 {
+        for row in 0..TEMPLATES.len().div_ceil(4) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 for col in 0..4 {
                     let i = row * 4 + col;
-                    let (title, text, ex) = TEMPLATES[i];
+                    let Some(&(title, text, _)) = TEMPLATES.get(i) else { break };
                     let on = sel == i;
-                    let avail = ex.is_some() || i == 7;
                     let r = egui::Frame::new().fill(if on { theme::tint(&ctx) } else { theme::card(&ctx) }).stroke(egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { theme::accent(&ctx) } else { theme::line(&ctx) })).corner_radius(12).inner_margin(egui::Margin::same(12)).show(ui, |ui| ui.vertical(|ui| {
                         ui.set_width(w - 26.0);
                         ui.set_min_height(86.0);
-                        ui.label(RichText::new(title).strong().color(if avail { theme::text(&ctx) } else { theme::muted(&ctx) }));
-                        ui.label(kit::muted(ui, if avail { text.to_string() } else { format!("{text} (template coming soon)") }).size(12.5));
+                        ui.label(RichText::new(title).strong());
+                        ui.label(kit::muted(ui, text).size(12.5));
                     }));
                     let resp = ui.interact(r.response.rect, ui.scope_id().with(("tpl", i)), egui::Sense::click());
-                    if resp.clicked() && avail {
+                    if resp.clicked() {
                         self.shell.new.template = i;
                     }
                 }
@@ -80,7 +79,7 @@ impl App {
         }
         ui.separator();
         ui.horizontal(|ui| {
-            let blank = self.shell.new.template == 7;
+            let blank = self.shell.new.template == TEMPLATES.len() - 1;
             ui.add_enabled_ui(blank, |ui| {
                 ui.label("Physics");
                 let ids: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).collect();
@@ -158,7 +157,7 @@ impl App {
         let entries = self.shell.entries.clone();
         let hits = nyx_engine::facade::store::search::search(&q, &entries);
         let mut open: Option<String> = None;
-        let mut go: Option<&'static str> = None;
+        let mut go: Option<crate::menu::Act> = None;
         if !q.is_empty() {
             kit::label_caps(ui, "Workflows and experiments", "");
             if hits.is_empty() {
@@ -169,7 +168,7 @@ impl App {
                 let rect = ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&e.wf.title).strong());
-                        ui.label(kit::muted(ui, format!("matches {} · {} experiments", h.reasons.join(" · "), e.wf.experiments.len())).size(12.5));
+                        ui.label(kit::muted(ui, format!("matches {} · {}", h.reasons.join(" · "), crate::fmt::plural(e.wf.experiments.len(), "experiment"))).size(12.5));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if e.wf.status == nyx_engine::facade::store::Status::Done { "done" } else { "active" }, ago(e.wf.touched_secs(), now_secs())))));
                 });
@@ -199,45 +198,35 @@ impl App {
         ui.add_space(8.0);
         ui.columns(2, |cols| {
             kit::label_caps(&mut cols[0], "Do something", "");
-            for (label, act) in [("New workflow", "new"), ("Open a .nyx file", "open"), ("Go to the dashboard", "dash"), ("Compute the open experiment (F5)", "compute"), ("Settings", "settings")] {
+            // the same table as the menu bar (`menu::ACTIONS`)
+            for it in &crate::menu::ACTIONS {
+                if it.act == crate::menu::Act::Palette {
+                    continue;
+                }
+                let label = if it.keys.is_empty() { it.label.to_string() } else { format!("{}  ({})", it.label, it.keys) };
                 if cols[0].link(label).clicked() {
-                    go = Some(act);
+                    go = Some(it.act);
                 }
             }
             kit::label_caps(&mut cols[1], "Browse what nyx can do", "");
             let ui = &mut cols[1];
-            for (area, items) in [("CONCEPT", "Use-case templates · Named regions · Geometry as code (soon)"), ("BUILD", "Mesh preview · Boundary numbers · Solver diagnostics"), ("ANALYSIS", "Runs table and filter · Compare runs · Polarization · Sensitivity · Your script")] {
+            for (area, items) in [("CONCEPT", "Use-case templates · Named regions · Geometry as code"), ("BUILD", "Mesh preview · Boundary numbers · Solver diagnostics"), ("ANALYSIS", "Runs table and filter · Compare runs · Polarization · Sensitivity · Your script")] {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(area).monospace().strong());
                     ui.label(kit::muted(ui, items).size(12.5));
                 });
             }
-            ui.label(kit::muted(ui, "Not yet: fast frequency sweep, optimise a parameter, adaptive meshing, surrogate models.").size(12.5));
         });
         if let Some(id) = open {
             self.shell.sheet = Sheet::None;
             self.open_tab(&id, true);
         }
-        match go {
-            Some("new") => self.shell.sheet = Sheet::New,
-            Some("open") => {
+        if let Some(act) = go {
+            // an entry that opens another sheet replaces the palette; the others close it first
+            if !matches!(act, crate::menu::Act::New | crate::menu::Act::About) {
                 self.shell.sheet = Sheet::None;
-                self.pick_nyx_file();
             }
-            Some("dash") => {
-                self.shell.sheet = Sheet::None;
-                self.flush();
-                self.shell.page = Page::Dashboard;
-            }
-            Some("compute") => {
-                self.shell.sheet = Sheet::None;
-                self.shell_compute();
-            }
-            Some("settings") => {
-                self.shell.sheet = Sheet::None;
-                self.shell.page = Page::Settings;
-            }
-            _ => {}
+            self.do_act(&ctx, act);
         }
     }
 
@@ -293,7 +282,7 @@ impl App {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(kit::muted(ui, format!("{} · {}", if v.kind == VersionKind::Named { "named" } else { "auto" }, ago(nyx_engine::facade::store::util::parse_iso(&v.t).unwrap_or(0), now_secs())))));
                         });
                         ui.label(v.summary.as_str());
-                        ui.label(kit::muted(ui, format!("{nruns} run{} recorded on this version", if nruns == 1 { "" } else { "s" })).size(12.5));
+                        ui.label(kit::muted(ui, format!("{} recorded on this version", crate::fmt::plural(nruns, "run"))).size(12.5));
                     });
                     if ui.interact(r.response.rect, ui.scope_id().with(("ver", v.n)), egui::Sense::click()).clicked() {
                         self.shell.version_sel = Some(v.n);
@@ -315,7 +304,7 @@ impl App {
                         }
                     });
                     ui.add_space(4.0);
-                    ui.label(kit::muted(ui, format!("Runs on this version keep the numbers they were solved with ({} run{}).", runs_all.iter().filter(|r| r.version == v.n).count(), if runs_all.iter().filter(|r| r.version == v.n).count() == 1 { "" } else { "s" })).size(12.5));
+                    ui.label(kit::muted(ui, format!("Runs on this version keep the numbers they were solved with ({}).", crate::fmt::plural(runs_all.iter().filter(|r| r.version == v.n).count(), "run"))).size(12.5));
                 });
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -474,7 +463,7 @@ impl App {
             });
         });
         if !self.shell.share_msg.is_empty() {
-            ui.label(RichText::new(&self.shell.share_msg).color(theme::GREEN));
+            ui.label(RichText::new(&self.shell.share_msg).color(theme::success(ui.ctx())));
         }
         if let Some((ext, level, strip)) = save {
             let Some(path) = rfd::FileDialog::new().add_filter(ext, &[ext]).set_file_name(if ext == "zip" { file_name.replace(".nyx", ".zip") } else { file_name.clone() }).save_file() else { return };
@@ -502,22 +491,22 @@ impl App {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ins.intact {
-                kit::badge(ui, Color32::from_rgb(0xE3, 0xF2, 0xE9), theme::GREEN, "File is intact");
+                kit::badge(ui, theme::raised(&ctx), theme::success(&ctx), "File is intact");
             } else {
-                kit::badge(ui, Color32::from_rgb(0xF8, 0xE1, 0xE1), theme::RED, "File cannot be opened");
+                kit::badge(ui, theme::raised(&ctx), theme::danger(&ctx), "File cannot be opened");
             }
             if !ins.nyx_version.is_empty() {
-                kit::badge(ui, Color32::from_rgb(0xE3, 0xF2, 0xE9), theme::GREEN, format!("Made with nyx {}", ins.nyx_version));
+                kit::badge(ui, theme::raised(&ctx), theme::success(&ctx), format!("Made with nyx {}", ins.nyx_version));
             }
             if !ins.scripts.is_empty() {
-                kit::badge(ui, theme::AMBER_TINT, Color32::from_rgb(0x8A, 0x55, 0x00), format!("{} script{}, off until you approve", ins.scripts.len(), if ins.scripts.len() == 1 { "" } else { "s" }));
+                kit::badge(ui, theme::warm(&ctx), theme::activity_text(&ctx), format!("{}, off until you approve", crate::fmt::plural(ins.scripts.len(), "script")));
             }
         });
         ui.add_space(8.0);
         if !ins.problems.is_empty() {
-            kit::card(ui, Color32::from_rgb(0xF8, 0xE1, 0xE1), theme::RED, 12, |ui| {
+            kit::card(ui, theme::raised(&ctx), theme::danger(&ctx), 12, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("This file was not opened").strong().color(theme::RED));
+                ui.label(RichText::new("This file was not opened").strong().color(theme::danger(ui.ctx())));
                 for p in &ins.problems {
                     ui.label(p);
                 }
@@ -535,7 +524,7 @@ impl App {
                 ui.label(RichText::new("WHAT IS INSIDE").size(12.5).strong());
                 ui.label(RichText::new(&ins.title).strong().size(17.0));
                 ui.label(&ins.summary);
-                ui.label(kit::mono(format!("{} experiments · {} runs recorded", ins.experiments, ins.runs)));
+                ui.label(kit::mono(format!("{} · {} recorded", crate::fmt::plural(ins.experiments, "experiment"), crate::fmt::plural(ins.runs, "run"))));
                 ui.label(kit::mono(format!("{} versions", ins.versions)));
                 ui.label(kit::mono(format!("tags  {}", ins.tags.join("  "))));
             });
@@ -547,7 +536,6 @@ impl App {
             });
         });
         ui.add_space(8.0);
-        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Rebuild now and check the answers match the recorded ones (coming soon)"));
         if !ins.scripts.is_empty() {
             ui.label(kit::muted(ui, format!("Scripts: {}. They stay off; nothing runs until you approve it in the workflow.", ins.scripts.join(", "))).size(12.5));
         }
@@ -577,6 +565,24 @@ impl App {
                 self.shell.sheet = Sheet::None;
             }
         });
+    }
+
+    // ------------------------------------------------------------------------------------------------------ about
+
+    /// The version, what the fonts are and under which licence: the OFL asks that the licence text travels with the font and is shown.
+    fn sheet_about(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        ui.label(kit::title("nyx", 42.0).color(theme::accent(&ctx)));
+        ui.label(RichText::new("creative chaos.").font(theme::title(20.0)));
+        ui.label(kit::muted(ui, format!("Version {}. Finite-element photonics and phononics.", env!("CARGO_PKG_VERSION"))));
+        ui.add_space(10.0);
+        kit::label_caps(ui, "Fonts and their licences", "");
+        ui.label("Titles: EB Garamond Italic, Copyright 2017 The EB Garamond Project Authors, SIL Open Font License 1.1 (full text below). It is shipped as crates/app/assets/fonts/EBGaramond-Italic[wght].ttf with its licence next to it; when it is not found the window uses Georgia Italic.");
+        ui.label("Text and numbers: Inter and JetBrains Mono when installed (not shipped with nyx), otherwise Segoe UI and Cascadia or Consolas.");
+        ui.label("Fallback fonts inside egui (Ubuntu-Light, Hack, NotoEmoji, emoji-icon-font) keep their own licences; see the egui project.");
+        ui.add_space(10.0);
+        kit::label_caps(ui, "SIL Open Font License 1.1 (EB Garamond)", "");
+        ui.label(kit::mono(include_str!("../assets/fonts/OFL-EBGaramond.txt")).size(12.0));
     }
 
     // ------------------------------------------------------------------------------------------------------ settings
@@ -611,7 +617,7 @@ impl App {
                             ui.label("Run at once");
                             ui.label(kit::mono("1 experiment"));
                         });
-                        ui.label(kit::muted(ui, "One solve runs at a time: the solvers already use every core. A queue, per-run threads and memory limits are coming soon.").size(12.5));
+                        ui.label(kit::muted(ui, "One solve runs at a time: the solvers already use every core.").size(12.5));
                     });
                     ui.add_space(10.0);
                     kit::plain_card(ui, |ui| {
@@ -668,6 +674,34 @@ impl App {
                             }
                         });
                         ui.horizontal(|ui| {
+                            ui.label("Contrast");
+                            for (t, l) in [("auto", "Follow system"), ("standard", "Standard"), ("high", "High")] {
+                                if ui.selectable_label(s.contrast == t, l).clicked() {
+                                    s.contrast = t.into();
+                                }
+                            }
+                        });
+                        ui.label(kit::muted(ui, "High contrast: stronger edges on every control. Follow system reads the Windows High Contrast setting; on other systems it stays standard.").size(12.5));
+                        ui.checkbox(&mut s.reduce_motion, "Reduce motion (no sliding progress bar, no easing)");
+                        ui.horizontal(|ui| {
+                            ui.label("Canvas");
+                            for (t, l) in [("dark", "Always dark"), ("theme", "Follow the look")] {
+                                if ui.selectable_label(s.canvas == t, l).clicked() {
+                                    s.canvas = t.into();
+                                }
+                            }
+                        });
+                        ui.label(kit::muted(ui, "The canvas is the background of the model and the plots. Dark is the default also in a light window; the region colours are chosen for the canvas that is drawn.").size(12.5));
+                        ui.horizontal(|ui| {
+                            ui.label("Colour regions by");
+                            for (t, l) in [("material", "Material"), ("region", "Region")] {
+                                if ui.selectable_label(s.region_colouring == t, l).clicked() {
+                                    s.region_colouring = t.into();
+                                }
+                            }
+                        });
+                        ui.label(kit::muted(ui, "Material: regions of one material share a colour. Region: every region has its own. Eight colours are solid, the next eight are hatched, further regions are grey; the number chip and the legend always say which is which.").size(12.5));
+                        ui.horizontal(|ui| {
                             ui.label("Length");
                             ui.label(kit::mono("nm"));
                             ui.label("Frequency");
@@ -676,6 +710,9 @@ impl App {
                         ui.label(kit::muted(ui, "Unit choice is fixed for now; the numbers are always stored in SI.").size(12.5));
                         if ui.checkbox(&mut self.shell.classic, "Use the classic layout (menus and six tabs)").changed() {
                             self.status = "Layout changed.".into();
+                        }
+                        if ui.link("About nyx and licences").clicked() {
+                            self.shell.sheet = Sheet::About;
                         }
                     });
                     ui.add_space(10.0);
@@ -696,8 +733,7 @@ impl App {
             });
         });
         if s != before {
-            self.shell.dark = s.theme == "dark" || (s.theme == "system" && ctx.system_theme() == Some(egui::Theme::Dark));
-            theme::apply_mode(&ctx, self.shell.dark);
+            ctx.request_repaint(); // `sync_look` applies the look at the start of the next frame
             if let Some(ws) = &mut self.shell.ws {
                 ws.settings = s;
                 if let Err(e) = ws.save_settings() {

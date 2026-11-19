@@ -29,7 +29,7 @@ C4 level 4 (code) of the component **Project** (`engine.project`) in the contain
 | [app: Inspector tabs](../app/inspector.md) | project | SweepLayer |
 | [app: Window](../app/window.md) | project | MeshSettings |
 | [Commands](./commands.md) | project | MeshSettings, Project |
-| [Job runner](./jobs.md) | project | Project |
+| [Job runner and queue](./jobs.md) | project | Project |
 | [Meshing seam](./meshing.md) | project | MeshSettings |
 | [Registry and facade](./registry.md) | project | MeshSettings, Project, SweepLayer |
 | [Results files](./resultsIO.md) | project | Project |

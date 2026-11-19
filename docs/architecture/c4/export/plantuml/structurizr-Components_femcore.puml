@@ -70,7 +70,15 @@ hide stereotype
 
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "femcore\n<size:16>[Container: Rust library]</size>" <<Boundary-ZmVtY29yZQ==>> {
-    rectangle "==Runtime services\n<size:16>[Component: Rust modules]</size>\n\nThe shared worker pool, stage log and cancel, and refusal of NaN and infinity." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Runtimeservices
+    rectangle "==Eigensolvers\n<size:16>[Component: Rust modules]</size>\n\nKrylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Eigensolvers
+    rectangle "==Preconditioners\n<size:16>[Component: Rust modules]</size>\n\nSmoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Preconditioners
+    rectangle "==Time, nonlinear, sweeps\n<size:16>[Component: Rust modules]</size>\n\nTime integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Timenonlinearsweeps
+    rectangle "==Finite-element basics\n<size:16>[Component: Rust modules]</size>\n\nLagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Finiteelementbasics
+    rectangle "==Material specification\n<size:16>[Component: Rust modules]</size>\n\nTOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Materialspecification
+    rectangle "==Optical mode sets\n<size:16>[Component: Rust modules]</size>\n\nOptical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Opticalmodesets
+    rectangle "==Frame and sections\n<size:16>[Component: Rust modules]</size>\n\nThe one place that knows the wafer axes (x lateral, z normal, waves along +y)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Frameandsections
+    rectangle "==Expressions\n<size:16>[Component: Rust modules]</size>\n\nA small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Expressions
+    rectangle "==Runtime services\n<size:16>[Component: Rust modules]</size>\n\nThe shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Runtimeservices
     rectangle "==Mesh\n<size:16>[Component: Rust modules]</size>\n\nThe native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Mesh
     rectangle "==Mesh files\n<size:16>[Component: Rust modules]</size>\n\nThe compact lossless .fmsh format for meshes and results and its entropy coder." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Meshfiles
     rectangle "==Fixtures and test kit\n<size:16>[Component: Rust modules]</size>\n\nTest meshes and the SOI wire cross-section used by the tests of every physics crate." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Fixturesandtestkit
@@ -86,14 +94,6 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==Linear algebra driver\n<size:16>[Component: Rust modules]</size>\n\nThe door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Linearalgebradriver
     rectangle "==Direct solvers\n<size:16>[Component: Rust modules]</size>\n\nShifted sparse direct solves with symbolic reuse, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Directsolvers
     rectangle "==Krylov solvers\n<size:16>[Component: Rust modules]</size>\n\nCG, MINRES, GMRES, BiCGStab, COCR, QMR, IDR(s), GCRO-DR for real and complex systems." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Krylovsolvers
-    rectangle "==Eigensolvers\n<size:16>[Component: Rust modules]</size>\n\nKrylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Eigensolvers
-    rectangle "==Preconditioners\n<size:16>[Component: Rust modules]</size>\n\nSmoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Preconditioners
-    rectangle "==Time, nonlinear, sweeps\n<size:16>[Component: Rust modules]</size>\n\nTime integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Timenonlinearsweeps
-    rectangle "==Finite-element basics\n<size:16>[Component: Rust modules]</size>\n\nLagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Finiteelementbasics
-    rectangle "==Material specification\n<size:16>[Component: Rust modules]</size>\n\nTOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Materialspecification
-    rectangle "==Optical mode sets\n<size:16>[Component: Rust modules]</size>\n\nOptical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Opticalmodesets
-    rectangle "==Frame and sections\n<size:16>[Component: Rust modules]</size>\n\nThe one place that knows the wafer axes (x lateral, z normal, waves along +y)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Frameandsections
-    rectangle "==Expressions\n<size:16>[Component: Rust modules]</size>\n\nA small safe expression evaluator for user input; a copy of geom's kept equal by a corpus test." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Expressions
   }
 
   component "==geom\n<size:16>[Container: Rust library]</size>\n\nLean CSG-over-B-rep geometry kernel: feature lists, named regions and boundaries, selectors, exact projection oracles. Depends on serde and optional rayon only." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.geom
@@ -101,6 +101,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
 
 nyx.femcore.Adaptationdrivers --> nyx.femcore.Adaptationoperators <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::ops, adapt::ops3 +2\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationdrivers --> nyx.femcore.Metricfields <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::field, adapt::metric +2\n<size:16>[Rust paths]</size>"
+nyx.femcore.Adaptationdrivers --> nyx.femcore.Runtimeservices <<Relationship-UmVsYXRpb25zaGlw>> : "uses progress\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationoperators --> nyx.femcore.Adaptationdrivers <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::drive, adapt::geom +1\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationoperators --> nyx.femcore.Mesh <<Relationship-UmVsYXRpb25zaGlw>> : "uses mesh::quality\n<size:16>[Rust paths]</size>"
 nyx.femcore.Adaptationoperators --> nyx.femcore.Metricfields <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt::field, adapt::metric +1\n<size:16>[Rust paths]</size>"
@@ -112,6 +113,7 @@ nyx.femcore.Errorestimators --> nyx.femcore.Matricesandvectors <<Relationship-Um
 nyx.femcore.Errorestimators --> nyx.femcore.Mesh <<Relationship-UmVsYXRpb25zaGlw>> : "uses mesh\n<size:16>[Rust paths]</size>"
 nyx.femcore.Errorestimators --> nyx.femcore.Meshingfacade <<Relationship-UmVsYXRpb25zaGlw>> : "uses meshing, meshing::geomdrive\n<size:16>[Rust paths]</size>"
 nyx.femcore.Errorestimators --> nyx.femcore.Metricfields <<Relationship-UmVsYXRpb25zaGlw>> : "uses adapt, adapt::field +3\n<size:16>[Rust paths]</size>"
+nyx.femcore.Expressions --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::csr::assembly\n<size:16>[Rust paths]</size>"
 nyx.femcore.Expressions --> nyx.femcore.Frameandsections <<Relationship-UmVsYXRpb25zaGlw>> : "uses section\n<size:16>[Rust paths]</size>"
 nyx.femcore.Finiteelementbasics --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::csr, linalg::csr::assembly\n<size:16>[Rust paths]</size>"
 nyx.femcore.Finiteelementbasics --> nyx.femcore.Linearalgebradriver <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::driver\n<size:16>[Rust paths]</size>"
@@ -129,12 +131,12 @@ nyx.femcore.Directsolvers --> nyx.femcore.Matricesandvectors <<Relationship-UmVs
 nyx.femcore.Linearalgebradriver --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::basis, linalg::csr +5\n<size:16>[Rust paths]</size>"
 nyx.femcore.Linearalgebradriver --> nyx.femcore.Directsolvers <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::direct, linalg::ordering\n<size:16>[Rust paths]</size>"
 nyx.femcore.Linearalgebradriver --> nyx.femcore.Eigensolvers <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::arnoldi_real, linalg::eps +1\n<size:16>[Rust paths]</size>"
-nyx.femcore.Linearalgebradriver --> nyx.femcore.Runtimeservices <<Relationship-UmVsYXRpb25zaGlw>> : "uses par, progress\n<size:16>[Rust paths]</size>"
+nyx.femcore.Linearalgebradriver --> nyx.femcore.Runtimeservices <<Relationship-UmVsYXRpb25zaGlw>> : "uses par, progress +1\n<size:16>[Rust paths]</size>"
 nyx.femcore.Eigensolvers --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::basis, linalg::csr +7\n<size:16>[Rust paths]</size>"
 nyx.femcore.Eigensolvers --> nyx.femcore.Directsolvers <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::direct\n<size:16>[Rust paths]</size>"
 nyx.femcore.Eigensolvers --> nyx.femcore.Linearalgebradriver <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::driver\n<size:16>[Rust paths]</size>"
 nyx.femcore.Eigensolvers --> nyx.femcore.Krylovsolvers <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::ksp, linalg::ksp::gmres\n<size:16>[Rust paths]</size>"
-nyx.femcore.Eigensolvers --> nyx.femcore.Runtimeservices <<Relationship-UmVsYXRpb25zaGlw>> : "uses par, progress\n<size:16>[Rust paths]</size>"
+nyx.femcore.Eigensolvers --> nyx.femcore.Runtimeservices <<Relationship-UmVsYXRpb25zaGlw>> : "uses par, progress +1\n<size:16>[Rust paths]</size>"
 nyx.femcore.Krylovsolvers --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::basis, linalg::dense +4\n<size:16>[Rust paths]</size>"
 nyx.femcore.Timenonlinearsweeps --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::csr, linalg::dense +5\n<size:16>[Rust paths]</size>"
 nyx.femcore.Timenonlinearsweeps --> nyx.femcore.Directsolvers <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::direct\n<size:16>[Rust paths]</size>"
@@ -173,6 +175,7 @@ nyx.femcore.Opticalmodesets --> nyx.femcore.Finiteelementbasics <<Relationship-U
 nyx.femcore.Opticalmodesets --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::csr, linalg::csr::assembly\n<size:16>[Rust paths]</size>"
 nyx.femcore.Opticalmodesets --> nyx.femcore.Mesh <<Relationship-UmVsYXRpb25zaGlw>> : "uses mesh\n<size:16>[Rust paths]</size>"
 nyx.femcore.Opticalmodesets --> nyx.femcore.Frameandsections <<Relationship-UmVsYXRpb25zaGlw>> : "uses section\n<size:16>[Rust paths]</size>"
+nyx.femcore.Runtimeservices --> nyx.femcore.Matricesandvectors <<Relationship-UmVsYXRpb25zaGlw>> : "uses linalg::scalar\n<size:16>[Rust paths]</size>"
 nyx.femcore.Frameandsections --> nyx.femcore.Finiteelementbasics <<Relationship-UmVsYXRpb25zaGlw>> : "uses props\n<size:16>[Rust paths]</size>"
 nyx.femcore.Frameandsections --> nyx.femcore.Materialspecification <<Relationship-UmVsYXRpb25zaGlw>> : "uses material\n<size:16>[Rust paths]</size>"
 nyx.femcore.Frameandsections --> nyx.femcore.Mesh <<Relationship-UmVsYXRpb25zaGlw>> : "uses mesh\n<size:16>[Rust paths]</size>"

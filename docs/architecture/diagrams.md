@@ -188,7 +188,7 @@ flowchart LR
   Q["problem_spec.v3.json<br/>(ProblemSpec, format 1)"]:::c
   R["solve_result.v2.json"]:::c
   D["physics_descriptors.v1.json<br/>physics_dfs / sms / ems .v1"]:::c
-  K["engine_commands.v1.json<br/>mcp_tools.v2.json"]:::c
+  K["engine_commands.v1.json<br/>mcp_tools.v3.json"]:::c
   M["mesh_cells, mesh_request,<br/>mesh_report"]:::c
   X["material_schema.v1.json<br/>material_kitchen_sink*"]:::c
   S["store_workflow.v1.json<br/>store_run.v1.json"]:::c

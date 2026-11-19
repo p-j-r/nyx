@@ -35,7 +35,7 @@ meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, R
     properties {
         "adr" "40, 50, 51, 55, 82, 83"
         "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/curve3.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs"
-        "lines" "2084"
+        "lines" "2090"
         "codeDiagram" "4-code/femcore/meshing3d.md"
     }
 }
@@ -75,7 +75,7 @@ adaptdrive = component "Adaptation drivers" "Passes of operators until the mesh 
     properties {
         "adr" "7, 51"
         "code" "crates/femcore/src: adapt/drive.rs, adapt/drive3.rs, adapt/geom.rs, adapt/geom3.rs"
-        "lines" "716"
+        "lines" "720"
         "codeDiagram" "4-code/femcore/adaptdrive.md"
     }
 }
@@ -99,7 +99,7 @@ ladriver = component "Linear algebra driver" "The door the physics kernels use: 
     properties {
         "adr" "33"
         "code" "crates/femcore/src: linalg/driver.rs, linalg/pc.rs, linalg/problem.rs"
-        "lines" "731"
+        "lines" "740"
         "codeDiagram" "4-code/femcore/ladriver.md"
     }
 }
@@ -123,7 +123,7 @@ laeigen = component "Eigensolvers" "Krylov-Schur, LOBPCG, Jacobi-Davidson, quadr
     properties {
         "adr" "33, 8, 11"
         "code" "crates/femcore/src: linalg/arnoldi_real.rs, linalg/chebfsi.rs, linalg/contour.rs, linalg/eps/krylov_schur.rs, linalg/eps/mod.rs, linalg/eps/orth.rs, ... (12 files)"
-        "lines" "4560"
+        "lines" "4576"
         "codeDiagram" "4-code/femcore/laeigen.md"
     }
 }
@@ -175,19 +175,19 @@ section = component "Frame and sections" "The one place that knows the wafer axe
         "codeDiagram" "4-code/femcore/section.md"
     }
 }
-expr = component "Expressions" "A small safe expression evaluator for user input; a copy of geom's kept equal by a corpus test." "Rust modules" {
+expr = component "Expressions" "A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90)." "Rust modules" {
     properties {
-        "adr" "65, 2"
-        "code" "crates/femcore/src: expr.rs"
-        "lines" "286"
+        "adr" "65, 2, 90"
+        "code" "crates/femcore/src: expr.rs, fieldexpr.rs, formula.rs"
+        "lines" "1562"
         "codeDiagram" "4-code/femcore/expr.md"
     }
 }
-runtime = component "Runtime services" "The shared worker pool, stage log and cancel, and refusal of NaN and infinity." "Rust modules" {
+runtime = component "Runtime services" "The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity." "Rust modules" {
     properties {
-        "adr" "9, 11"
-        "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs"
-        "lines" "519"
+        "adr" "9, 11, 96"
+        "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, warm.rs"
+        "lines" "827"
         "codeDiagram" "4-code/femcore/runtime.md"
     }
 }

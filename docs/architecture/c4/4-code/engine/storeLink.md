@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Store link** (`engine.storeLink`) in the co
 > Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here).
 
 **Decisions:** [ADR 39](../../../adr/0039-the-store-takes-spec-text-and-a-card-function.md), [ADR 59](../../../adr/0059-the-store-knows-nothing-of-a-project.md)  
-**Size:** 1 file, 272 lines.
+**Size:** 1 file, 308 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/store_link.rs` | 272 | The engine's persistence, through `nyx-store`: a project is the spec of one experiment of a workflow folder, every solve is a run in its run table, and the search card and the run metrics are made here, from the project and the results, ... |
+| `crates/nyx-engine/src/store_link.rs` | 308 | The engine's persistence, through `nyx-store`: a project is the spec of one experiment of a workflow folder, every solve is a run in its run table, and the search card and the run metrics are made here, from the project and the results, ... |
 
 ## What it uses
 
@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Store link** (`engine.storeLink`) in the co
 | [container `femcore` (femcore)](../../3-components/femcore.md) | mesh | SimplexMesh |
 | [container `geom` (geom)](../../3-components/geom.md) | expr, model | Expr, Op |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | error, result, spec | Error, MaterialAssign, Scalar, SolveResult |
-| [container `store` (nyx-store)](../../3-components/store.md) | flow, model, runs, util | Artifact, Card, Dim, GeoCard, RunRecord, RunStatus, WorkflowDir, write_atomic |
+| [container `store` (nyx-store)](../../3-components/store.md) | flow, model, runs, util | Artifact, Card, Dim, GeoCard, RunRecord, RunStatus, WorkflowDir, hash_bytes, write_atomic |
 | [Geometry operations](./geometry.md) | geomdesc | kind_of |
 | [Project](./project.md) | project | Project |
 | [Results files](./resultsIO.md) | h5io, xdmf | file_bytes, write_results, write_xdmf |
@@ -31,6 +31,7 @@ C4 level 4 (code) of the component **Store link** (`engine.storeLink`) in the co
 |---|---|---|
 | [app: Shell and dashboard](../app/shell.md) | store_link | card_of, metrics_of |
 | [Commands](./commands.md) | store_link | RunOutcome, StoreLink |
+| [Job runner and queue](./jobs.md) | store_link | RunOutcome, metrics_of |
 
 ## Class diagram
 
@@ -47,10 +48,12 @@ classDiagram
       <<struct>>
       +dir WorkflowDir
       +experiment String
+      +script Option
       +create(workspace, project, origin) Result
       +open(root, experiment) Result
       +commit(project) Result
       +record(project, outcome, seconds, log, mesh) Result
+      +record_point(project, outcome, seconds, log, mesh, reuse) Result
       +runs() Vec~RunRecord~
   }
   class fns_store_link_rs {
@@ -65,11 +68,12 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | fn | `card_of` | `store_link.rs:17` | `pub fn card_of(v: &serde_json::Value) -> Card` —  The search card of a project (`nyx_store::CardFn`): what the dashboard shows and search finds, generated, never typed. |
-| fn | `metrics_of` | `store_link.rs:92` | `pub fn metrics_of(res: &SolveResult) -> BTreeMap<String, f64>` —  The numbers of one result that go in the run table: the first solution's value and eigenvalue, the counts, and every numeric scalar the |
-| enum | `RunOutcome` | `store_link.rs:124` | variants: `Solved`, `Failed` —  How a run ended. |
-| struct | `StoreLink` | `store_link.rs:130` | fields: `dir`, `experiment` —  The binding of a project to one experiment of a workflow folder. |
-| fn | `StoreLink::create` | `store_link.rs:137` | `pub fn create(workspace: &Path, project: &Project, origin: &str) -> Result<StoreLink, Error>` —  Makes a new workflow folder in `workspace` holding `project` as its first experiment. |
-| fn | `StoreLink::open` | `store_link.rs:145` | `pub fn open(root: &Path, experiment: Option<&str>) -> Result<(StoreLink, Project), Error>` —  Opens a workflow folder and reads the project of its first experiment (or of `experiment`). |
-| fn | `StoreLink::commit` | `store_link.rs:166` | `pub fn commit(&mut self, project: &Project) -> Result<Option<u32>, Error>` —  Stores the project when it differs from the saved one; returns the new version number, `None` when nothing changed. |
-| fn | `StoreLink::record` | `store_link.rs:172` | `pub fn record( &mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String], mesh: Option<&femcore::mesh::SimplexMesh>, ) -> Result<RunRecord, Error>` —  Adds a run to the table: the project as it was solved (frozen), the metrics of the results and the stage log. The heavy files |
-| fn | `StoreLink::runs` | `store_link.rs:268` | `pub fn runs(&self) -> Vec<RunRecord>` —  The run table of the bound experiment, oldest first. |
+| fn | `metrics_of` | `store_link.rs:94` | `pub fn metrics_of(res: &SolveResult) -> BTreeMap<String, f64>` —  The numbers of one result that go in the run table: the first solution's value and eigenvalue, the counts, and every numeric scalar the |
+| enum | `RunOutcome` | `store_link.rs:126` | variants: `Solved`, `Failed` —  How a run ended. |
+| struct | `StoreLink` | `store_link.rs:132` | fields: `dir`, `experiment`, `script` —  The binding of a project to one experiment of a workflow folder. |
+| fn | `StoreLink::create` | `store_link.rs:141` | `pub fn create(workspace: &Path, project: &Project, origin: &str) -> Result<StoreLink, Error>` —  Makes a new workflow folder in `workspace` holding `project` as its first experiment. |
+| fn | `StoreLink::open` | `store_link.rs:149` | `pub fn open(root: &Path, experiment: Option<&str>) -> Result<(StoreLink, Project), Error>` —  Opens a workflow folder and reads the project of its first experiment (or of `experiment`). |
+| fn | `StoreLink::commit` | `store_link.rs:170` | `pub fn commit(&mut self, project: &Project) -> Result<Option<u32>, Error>` —  Stores the project when it differs from the saved one; returns the new version number, `None` when nothing changed. |
+| fn | `StoreLink::record` | `store_link.rs:176` | `pub fn record( &mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String], mesh: Option<&femcore::mesh::SimplexMesh>, ) -> Result<RunRecord, Error>` —  Adds a run to the table: the project as it was solved (frozen), the metrics of the results and the stage log. The heavy files |
+| fn | `StoreLink::record_point` | `store_link.rs:190` | `pub fn record_point( &mut self, project: &Project, outcome: RunOutcome, seconds: f64, log: &[String], mesh: Option<&femcore::mesh::SimplexMesh>, reuse: Option<&serde_json::Value>, ) -> Result<RunRecord, Error>` —  Adds a run for a project that is not the experiment's own (a point of a sweep): the run freezes the project it solved, and the |
+| fn | `StoreLink::runs` | `store_link.rs:304` | `pub fn runs(&self) -> Vec<RunRecord>` —  The run table of the bound experiment, oldest first. |

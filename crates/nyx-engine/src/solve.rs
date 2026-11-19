@@ -44,31 +44,70 @@ pub fn run_chain(
     library: &Arc<femcore::material::Library>,
     progress: Arc<Progress>,
 ) -> Result<Vec<SolveResult>, Error> {
+    match run_chain_partial(registry, project, model, targets, library, progress) {
+        (results, None) => Ok(results),
+        (_, Some(e)) => Err(e),
+    }
+}
+
+/// Like `run_chain`, but when a physics fails the physics solved before it are returned with the error: a failed `sms` keeps the `ems` result
+/// it took its field from (a failure fails the physics after it in the chain, not the ones before).
+pub fn run_chain_partial(
+    registry: &Registry,
+    project: &Project,
+    model: &MeshedModel,
+    targets: &[String],
+    library: &Arc<femcore::material::Library>,
+    progress: Arc<Progress>,
+) -> (Vec<SolveResult>, Option<Error>) {
     let ids: Vec<&str> = targets.iter().map(String::as_str).collect();
-    let order = registry.solve_order(&ids)?;
+    let order = match registry.solve_order(&ids) {
+        Ok(o) => o,
+        Err(e) => return (vec![], Some(e)),
+    };
     let mut done: Vec<(String, SolveResult)> = vec![];
+    let mut failed = None;
     for id in order {
-        if progress.is_cancelled() {
-            return Err(Error::Cancelled);
-        }
-        let p = physics_for(registry, &id)?;
-        let spec = project
-            .spec(&id)
-            .ok_or_else(|| Error::invalid(format!("the project has no problem for '{id}'; add the physics first")))?;
-        validate_spec(p, spec)?;
-        p.validate(spec, model.mesh())?;
-        let mut ctx = Ctx::new(model);
-        ctx.progress = progress.clone();
-        ctx.library = Some(library.clone());
-        ctx.wavelength = crate::materials::study_wavelength(p, spec);
-        for imp in p.imports() {
-            if let Some(values) = done.iter().find_map(|(o, r)| exported(registry, o, r, &imp.role)) {
-                ctx.inputs.insert(imp.role.clone(), values);
+        match solve_one(registry, project, model, &id, library, &progress, &done) {
+            Ok(result) => done.push((id, result)),
+            Err(e) => {
+                failed = Some(e);
+                break;
             }
         }
-        let mut result = p.solve(model.mesh(), spec, &mut ctx)?;
-        name_domains(&mut result, model);
-        done.push((id, result));
     }
-    Ok(done.into_iter().map(|(_, r)| r).collect())
+    (done.into_iter().map(|(_, r)| r).collect(), failed)
+}
+
+/// One physics of a chain, with the fields of the physics solved before it.
+fn solve_one(
+    registry: &Registry,
+    project: &Project,
+    model: &MeshedModel,
+    id: &str,
+    library: &Arc<femcore::material::Library>,
+    progress: &Arc<Progress>,
+    done: &[(String, SolveResult)],
+) -> Result<SolveResult, Error> {
+    if progress.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    let p = physics_for(registry, id)?;
+    let spec = project
+        .spec(id)
+        .ok_or_else(|| Error::invalid(format!("the project has no problem for '{id}'; add the physics first")))?;
+    validate_spec(p, spec)?;
+    p.validate(spec, model.mesh())?;
+    let mut ctx = Ctx::new(model);
+    ctx.progress = progress.clone();
+    ctx.library = Some(library.clone());
+    ctx.wavelength = crate::materials::study_wavelength(p, spec);
+    for imp in p.imports() {
+        if let Some(values) = done.iter().find_map(|(o, r)| exported(registry, o, r, &imp.role)) {
+            ctx.inputs.insert(imp.role.clone(), values);
+        }
+    }
+    let mut result = p.solve(model.mesh(), spec, &mut ctx)?;
+    name_domains(&mut result, model);
+    Ok(result)
 }

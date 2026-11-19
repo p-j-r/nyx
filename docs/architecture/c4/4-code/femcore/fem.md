@@ -46,6 +46,7 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [ems: Complex-mode kernel](../ems/modescx.md) | edge, fem, fields | CellFields, cell_data, edge_basis, local_bary, node_average, tri_g |
 | [ems: Optical mode sets](../ems/optical.md) | props | PmlDir, TensorKind |
 | [ems: Typed problem](../ems/problem.md) | props | Materials, Periodic, Pml, PmlDir |
+| [engine: Commands](../engine/commands.md) | fem, props | RefElement, TensorKind, facet_rule, facets_with, geometry, quad_rule, shape |
 | [engine: Registry and facade](../engine/registry.md) | fields | Display |
 | [Error estimators](./estimators.md) | fem | quad_rule |
 | [Meshing facade](./meshing.md) | props | Pml, PmlDir |

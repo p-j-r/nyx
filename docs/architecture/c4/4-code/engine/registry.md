@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 > The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 1 file, 84 lines.
+**Size:** 1 file, 100 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/lib.rs` | 84 | nyx-engine: the one place that knows how a nyx session works. The window (`app`) and the MCP server (`nyx-mcp`) are thin front-ends over it: every action of either is a command of the engine (restructure phase 7, ADR 23 and 25). |
+| `crates/nyx-engine/src/lib.rs` | 100 | nyx-engine: the one place that knows how a nyx session works. The window (`app`) and the MCP server (`nyx-mcp`) are thin front-ends over it: every action of either is a command of the engine (restructure phase 7, ADR 23 and 25). |
 
 ## What it uses
 
@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 | [container `sms` (nyx-sms)](../../3-components/sms.md) | crate root | Sms |
 | [container `store` (nyx-store)](../../3-components/store.md) | crate root |  |
 | [Commands](./commands.md) | commands, engine | Access, CommandDesc, Engine |
-| [Job runner](./jobs.md) | jobs | JobId, JobInfo, JobOutput, JobRunner, JobState |
+| [Job runner and queue](./jobs.md) | estimate, jobs, queue | Estimate, History, JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, QueueOpts, Submit +1 |
 | [Meshing seam](./meshing.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
 | [Project](./project.md) | project | MeshSettings, Project, SweepLayer |
 
@@ -34,13 +34,13 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 
 | Component | Modules | Items |
 |---|---|---|
-| [app: Scripts and batch](../app/headless.md) | crate root | Scalar |
+| [app: Scripts and batch](../app/headless.md) | crate root | Done, Scalar |
 | [app: Inspector tabs](../app/inspector.md) | crate root | Applies, BcSpec, Both, Env, Evaluated, Expr, FeatureList, LabelMap +21 |
-| [app: Shell and dashboard](../app/shell.md) | crate root | Active, Artifact, Done, Entry, ExportOptions, Filter, Inspection, Limits +33 |
+| [app: Shell and dashboard](../app/shell.md) | crate root | Active, Artifact, Done, Entry, ExportOptions, FeatureList, Filter, Inspection +35 |
 | [app: Viewport](../app/viewport.md) | crate root | Display, ViewMesh |
-| [app: Window](../app/window.md) | crate root | Cancelled, Display, Domain, Failed, FeatureList, LabelResolver, ModeAnalysis, ProblemSpec +7 |
+| [app: Window](../app/window.md) | crate root | Cancelled, Display, Domain, Failed, FeatureList, LabelResolver, MaterialAssign, ModeAnalysis +9 |
 | [Commands](./commands.md) | crate root | physics_for, registry |
-| [Job runner](./jobs.md) | crate root | physics_for |
+| [Job runner and queue](./jobs.md) | crate root | physics_for, registry |
 | [Meshing seam](./meshing.md) | crate root | physics_for |
 | [Project](./project.md) | crate root | physics_for |
 
@@ -61,5 +61,5 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `registry` | `lib.rs:48` | `pub fn registry() -> Registry` —  The physics compiled into this build: `dfs`, `sms`, `ems`, each behind the cargo feature of the same name. |
-| fn | `physics_for` | `lib.rs:61` | `pub fn physics_for<'a>(registry: &'a Registry, id: &str) -> Result<&'a dyn nyx_physics::Physics, Error>` —  Looks up the physics a problem names; the error text lists what this build has. |
+| fn | `registry` | `lib.rs:64` | `pub fn registry() -> Registry` —  The physics compiled into this build: `dfs`, `sms`, `ems`, each behind the cargo feature of the same name. |
+| fn | `physics_for` | `lib.rs:77` | `pub fn physics_for<'a>(registry: &'a Registry, id: &str) -> Result<&'a dyn nyx_physics::Physics, Error>` —  Looks up the physics a problem names; the error text lists what this build has. |

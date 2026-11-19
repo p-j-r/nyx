@@ -8,7 +8,10 @@
 //! pairs, and `Matching::Track` follows the one mode nearest a given value (ADR 80).
 
 use crate::engine::Engine;
+use crate::meshing::MeshedModel;
 use crate::project::Project;
+use crate::queue::{SolveSummary, Stages};
+use femcore::progress::Progress;
 use nyx_physics::{Error, Scalar, SolveResult};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -37,7 +40,7 @@ fn refined(p: &Project, factor: f64) -> Project {
 }
 
 /// Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars.
-fn numbers(r: &SolveResult) -> Vec<(String, f64)> {
+pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)> {
     let mut out = vec![];
     for (i, s) in r.solutions.iter().enumerate() {
         if let Some(e) = s.eigenvalue {
@@ -194,6 +197,8 @@ pub struct ConvergenceJob {
     mesher: Arc<dyn crate::meshing::Mesher>,
     library: Arc<femcore::material::Library>,
     project: Project,
+    /// the stage cache and the key under which the coarse solve may already be there (set by `Engine::start_convergence_with`)
+    pub(crate) reuse: Option<(Arc<Stages>, String)>,
 }
 
 impl ConvergenceJob {
@@ -206,7 +211,7 @@ impl ConvergenceJob {
 
     /// Runs the check (see `Engine::convergence_check`); blocks until both solves are done.
     pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {
-        check(self, physics, factor, tolerance, &Matching::Index)
+        self.run_with(&Progress::new(), physics, factor, tolerance, &Matching::Index)
     }
 
     /// The check with the solutions paired as `matching` says.
@@ -217,7 +222,41 @@ impl ConvergenceJob {
         tolerance: Option<f64>,
         matching: &Matching,
     ) -> Result<Value, Error> {
-        check(self, physics, factor, tolerance, matching)
+        self.run_with(&Progress::new(), physics, factor, tolerance, matching)
+    }
+
+    /// Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either.
+    pub fn run_with(
+        &self,
+        progress: &Arc<Progress>,
+        physics: &str,
+        factor: f64,
+        tolerance: Option<f64>,
+        matching: &Matching,
+    ) -> Result<Value, Error> {
+        let _installed = femcore::progress::install(progress);
+        check(self, progress, physics, factor, tolerance, matching)
+    }
+
+    /// Meshes `project` and solves `targets` on the calling thread, under `progress`; returns the mesh and the result of `physics`.
+    fn solve_inline(
+        &self,
+        project: Project,
+        targets: &[String],
+        physics: &str,
+        progress: &Arc<Progress>,
+    ) -> Result<(Arc<MeshedModel>, Arc<SolveResult>), Error> {
+        let scratch = self.scratch(project.clone());
+        project.check(&self.registry)?;
+        let library = scratch.library()?;
+        let sizing = scratch.sizing();
+        let model = Arc::new(self.mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?);
+        let results = crate::solve::run_chain(&self.registry, &project, &model, targets, &library, progress.clone())?;
+        let result = results
+            .into_iter()
+            .find(|r| r.physics == physics)
+            .ok_or_else(|| Error::invalid("the solve gave no result"))?;
+        Ok((model, Arc::new(result)))
     }
 }
 
@@ -229,10 +268,12 @@ impl Engine {
             mesher: self.mesher.clone(),
             library: self.base_library.clone(),
             project: self.project.clone(),
+            reuse: None,
         }
     }
 
-    /// Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results. `tolerance`,
+    /// Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread
+    /// and outside the queue (the `convergence_check` command goes through `start_convergence`). `tolerance`,
     /// when given, is the largest relative difference accepted (the difference of a quantity over the larger of the two values, or over 1 for
     /// a value near zero); every row then says whether it passed and `converged` is true when all did.
     pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {
@@ -255,6 +296,7 @@ impl Engine {
 
 fn check(
     job: &ConvergenceJob,
+    progress: &Arc<Progress>,
     physics: &str,
     factor: f64,
     tolerance: Option<f64>,
@@ -269,21 +311,36 @@ fn check(
             .spec(physics)
             .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
         let targets = vec![physics.to_string()];
-        let mut coarse_engine = this.scratch(this.project.clone());
         let t0 = std::time::Instant::now();
-        let coarse_summary = coarse_engine.solve_now(Some(targets.clone()))?;
-        let coarse: Arc<SolveResult> = coarse_engine
-            .result(physics)
-            .map(|(r, _)| r.clone())
-            .ok_or_else(|| Error::invalid("the solve gave no result"))?;
-        let cells_coarse = coarse_engine.model().map(|m| m.mesh().n_cells());
-        let mut fine_engine = this.scratch(refined(&this.project, factor));
-        fine_engine.solve_now(Some(targets))?;
-        let fine: Arc<SolveResult> = fine_engine
-            .result(physics)
-            .map(|(r, _)| r.clone())
-            .ok_or_else(|| Error::invalid("the refined solve gave no result"))?;
-        let cells_fine = fine_engine.model().map(|m| m.mesh().n_cells());
+        // the two solves are stages of the one job, run here under its progress, so the check can be watched and cancelled; the first is skipped
+        // when an earlier request solved this physics alone on this mesh (found by content, so the numbers are the ones this solve would give)
+        // a check that pairs modes by their eigenvalues needs the solutions of the present mesh, which the cache does not keep (only numbers)
+        let reusable = if matches!(matching, Matching::Index) {
+            this.reuse.as_ref().and_then(|(stages, key)| stages.solve(key))
+        } else {
+            None
+        };
+        let (coarse, self_reused, coarse_result) = match reusable {
+            Some(s) => {
+                let _stage = femcore::progress::stage(
+                    "convergence check: the solve on the present mesh (reused from an earlier solve)",
+                );
+                (s, true, None)
+            }
+            None => {
+                let _stage = femcore::progress::stage("convergence check: the solve on the present mesh");
+                let (model, r) = this.solve_inline(this.project.clone(), &targets, physics, progress)?;
+                (Arc::new(SolveSummary::of(&r, model.mesh().n_cells())), false, Some(r))
+            }
+        };
+        let cells_coarse = Some(coarse.cells);
+        let (fine_model, fine) = {
+            let _stage = femcore::progress::stage(format!(
+                "convergence check: the solve on the finer mesh (element size times {factor})"
+            ));
+            this.solve_inline(refined(&this.project, factor), &targets, physics, progress)?
+        };
+        let cells_fine = Some(fine_model.mesh().n_cells());
 
         // the rows to compare: (name, present, finer) and, when the modes are paired, which solutions were paired
         let mut compared: Vec<(String, f64, f64)> = vec![];
@@ -296,36 +353,41 @@ fn check(
             }
         };
         match matching {
-            Matching::Index => common(numbers(&coarse), numbers(&fine)),
+            Matching::Index => common(coarse.numbers.clone(), numbers(&fine)),
             Matching::Nearest | Matching::Track(_) => {
+                let coarse_r = coarse_result.as_ref().expect("a check that pairs modes solves the present mesh itself");
                 let (pairs, lone_coarse, lone_fine) = match matching {
                     Matching::Track(f) => {
-                        let i = (0..coarse.solutions.len())
-                            .filter_map(|i| key(&coarse, i).map(|k| (i, (k[0] - f).abs())))
+                        let i = (0..coarse_r.solutions.len())
+                            .filter_map(|i| key(coarse_r, i).map(|k| (i, (k[0] - f).abs())))
                             .min_by(|x, y| x.1.total_cmp(&y.1))
                             .map(|(i, _)| i)
                             .ok_or_else(|| Error::invalid("the result has no eigenvalue or value to track"))?;
-                        let a = key(&coarse, i).expect("chosen by its key");
+                        let a = key(coarse_r, i).expect("chosen by its key");
                         let (j, d) = (0..fine.solutions.len())
                             .filter_map(|j| key(&fine, j).map(|b| (j, distance(a, b))))
                             .min_by(|x, y| x.1.total_cmp(&y.1))
                             .ok_or_else(|| Error::invalid("the refined result has no eigenvalue or value to track"))?;
                         (vec![(i, j, d)], vec![], vec![])
                     }
-                    _ => pair_nearest(&coarse, &fine),
+                    _ => pair_nearest(coarse_r, &fine),
                 };
                 for &(i, j, _) in &pairs {
-                    common(numbers_of(&coarse, i, i), numbers_of(&fine, j, i));
+                    common(numbers_of(coarse_r, i, i), numbers_of(&fine, j, i));
                 }
                 matched = Some((pairs, lone_coarse, lone_fine));
             }
         }
         let mut rows = vec![];
         let mut worst = 0.0f64;
+        let mut worst_name = String::new();
         let mut all = true;
         for (name, x, y) in &compared {
             let scale = x.abs().max(y.abs()).max(1e-300);
             let rel = (x - y).abs() / if scale < 1e-12 { 1.0 } else { scale };
+            if rel > worst || worst_name.is_empty() {
+                worst_name = name.clone();
+            }
             worst = worst.max(rel);
             let pass = tolerance.map(|t| rel <= t);
             all &= pass.unwrap_or(true);
@@ -337,13 +399,16 @@ fn check(
                 _ => "no mode of the present mesh could be paired with a mode of the finer mesh",
             }));
         }
-        let _ = coarse_summary;
         let mut out = json!({
             "physics": physics, "factor": factor, "tolerance": tolerance,
             "cells": { "coarse": cells_coarse, "refined": cells_fine },
             "unknowns": { "coarse": coarse.dofs, "refined": fine.dofs },
+            "coarse_reused": self_reused,
             "seconds": t0.elapsed().as_secs_f64(),
             "worst_relative": worst,
+            "worst_quantity": worst_name,
+            "quantities": rows.len(),
+            "matching": "index",
             "converged": tolerance.map(|_| all),
             "rows": rows,
             "note": "the project was not changed; compare with a smaller factor if the difference is still falling",

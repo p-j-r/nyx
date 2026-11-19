@@ -11,6 +11,7 @@ members = [
     "crates/nyx-store",
     "crates/nyx-engine",
     "crates/nyx-mcp",
+    "crates/nyx-script",
     "crates/nyx-connect",
     "crates/app",
 ]

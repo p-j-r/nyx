@@ -35,6 +35,16 @@ pub struct Settings {
     pub assistant: bool,
     /// what the assistant may do when it is switched on
     pub assistant_level: String,
+    /// the viewport and plot background: "dark" (the default, also in a light window) or "theme" (follows the look)
+    pub canvas: String,
+    /// "auto" (the system High Contrast flag where the platform has one, else standard), "standard" or "high"
+    pub contrast: String,
+    /// no animation: no sliding progress block, no easing
+    pub reduce_motion: bool,
+    /// what a region's colour follows: "material" (the default) or "region" (its number)
+    pub region_colouring: String,
+    /// the window zoom set with Ctrl and +/-, 1.0 = 100 %
+    pub zoom: f32,
     /// workflow ids open as tabs, in order
     pub open_tabs: Vec<String>,
 }
@@ -56,6 +66,11 @@ impl Default for Settings {
             assistant: false,
             assistant_level: "Ask before changing a setup".into(),
             open_tabs: vec![],
+            canvas: "dark".into(),
+            contrast: "auto".into(),
+            reduce_motion: false,
+            region_colouring: "material".into(),
+            zoom: 1.0,
         }
     }
 }

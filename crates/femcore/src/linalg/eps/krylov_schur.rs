@@ -69,7 +69,7 @@ where
     if weight.is_some_and(|w| w.dim() != n) {
         return Err(EpsError::InvalidArgument("weight matrix dimension differs from the operator"));
     }
-    if start.is_some_and(|s| s.len() != n) {
+    if start.is_some_and(|s| s.is_empty() || s.len() % n != 0) {
         return Err(EpsError::InvalidArgument("start vector has wrong length"));
     }
     // The decomposition needs `ncv + b` basis columns, which must fit in the space.
@@ -97,14 +97,16 @@ where
     let mut history = Vec::new();
     let mut matvecs = 0usize;
 
-    // Start block: user vector first, pseudo-random fill, then B-orthonormalise.
+    // Start block: the user's columns first (one vector, or the several columns of a warm start, at most `b`), pseudo-random fill, then
+    // B-orthonormalise. A single start vector, or none, gives the block it always did.
     {
         let cols = v.cols_mut(0, b);
+        let given = start.map_or(0, |s| (s.len() / n).min(b));
         match start {
-            Some(s) => cols[..n].copy_from_slice(s),
+            Some(s) => cols[..n * given].copy_from_slice(&s[..n * given]),
             None => cols[..n].copy_from_slice(&random_vector::<T>(n, opts.seed)),
         }
-        for c in 1..b {
+        for c in given.max(1)..b {
             cols[c * n..(c + 1) * n].copy_from_slice(&random_vector::<T>(n, opts.seed.wrapping_add(0x1000 + c as u64)));
         }
         let nrm = norm2(&cols[..n]);

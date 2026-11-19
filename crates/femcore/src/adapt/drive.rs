@@ -144,9 +144,11 @@ pub fn adapt2_with<G: Geometry2>(
     let mut w = report.phases.time("classify", || Work2::from_mesh(mesh, field, &opt.topo))?;
     let geom = make_geom(&w);
     for iter in 0..opt.max_iter {
+        crate::progress::check()?;
         let (mut ns, mut nc, mut nf, mut nm) = (0, 0, 0, 0);
         // flips between split passes keep the cascade of bisections from degrading slivers
         for _ in 0..30 {
+            crate::progress::check()?;
             // loose safety limit inside the split cascade (the first iteration overshoots legitimately)
             if opt.max_cells.is_some_and(|m| w.n_alive() >= m.saturating_mul(20)) {
                 report.capped = true;

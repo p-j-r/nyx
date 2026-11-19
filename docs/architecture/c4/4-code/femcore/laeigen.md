@@ -5,16 +5,16 @@ C4 level 4 (code) of the component **Eigensolvers** (`femcore.laeigen`) in the c
 > Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 12 files, 4560 lines.
+**Size:** 12 files, 4576 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/linalg/arnoldi_real.rs` | 259 | Real block Arnoldi with shift-and-invert for the real, non-symmetric pencil of the 2D waveguide modes (`ems`): the eigenvalues of `A x = lambda B x` nearest a real shift, real vectors, complex Ritz values skipped. The library's Krylov-Sc... |
+| `crates/femcore/src/linalg/arnoldi_real.rs` | 273 | Real block Arnoldi with shift-and-invert for the real, non-symmetric pencil of the 2D waveguide modes (`ems`): the eigenvalues of `A x = lambda B x` nearest a real shift, real vectors, complex Ritz values skipped. The library's Krylov-Sc... |
 | `crates/femcore/src/linalg/chebfsi.rs` | 298 | Chebyshev-filtered subspace iteration for many lowest eigenpairs (port item E5; the idea of ChASE, Winkelmann et al. 2019): for `nev` in the tens to hundreds (photonic-crystal band structures) where a polynomial filter beats Krylov metho... |
 | `crates/femcore/src/linalg/contour.rs` | 379 | Contour-integral eigensolver (port item E3): *all* eigenvalues of `A x = λ B x` inside an elliptical region of the complex plane, by block Sakurai–Sugiura moments with Rayleigh–Ritz extraction (the CIRR variant; SLEPc's `EPSCISS` is... |
-| `crates/femcore/src/linalg/eps/krylov_schur.rs` | 413 |  |
+| `crates/femcore/src/linalg/eps/krylov_schur.rs` | 415 |  |
 | `crates/femcore/src/linalg/eps/mod.rs` | 236 | Eigenvalue solvers (the role of SLEPc `EPS`). |
 | `crates/femcore/src/linalg/eps/orth.rs` | 259 | Block Gram–Schmidt for the Krylov bases, with an optional `B`-weighted inner product `⟨x, y⟩ = xᴴ B y` (generalised Hermitian problems). |
 | `crates/femcore/src/linalg/jd.rs` | 690 | Jacobi–Davidson interior eigensolver (port item E2; SLEPc's `EPSJD`/`EPSGD` are the nearest references): eigenpairs near a *target* without factorising `A − τB`. |
@@ -32,7 +32,7 @@ C4 level 4 (code) of the component **Eigensolvers** (`femcore.laeigen`) in the c
 | [Direct solvers](./ladirect.md) | linalg::direct | Definiteness, ShiftedFactorization, ShiftedSolver, SolverError, Threads |
 | [Linear algebra driver](./ladriver.md) | linalg::driver | DirectSolver |
 | [Krylov solvers](./laksp.md) | linalg::ksp, linalg::ksp::gmres | Gmres, GmresOptions, Tolerances |
-| [Runtime services](./runtime.md) | par, progress | check, threads |
+| [Runtime services](./runtime.md) | par, progress, warm | begin, check, threads |
 
 ## Used by
 
