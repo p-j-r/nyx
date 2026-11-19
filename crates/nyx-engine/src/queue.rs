@@ -26,6 +26,9 @@ pub struct QueueOpts {
     pub isolate: Option<bool>,
     /// start a solve even when its memory estimate says the machine cannot hold it (admission, `estimate.rs`)
     pub force: bool,
+    /// hand a solve to the queue of the workspace (Q3: the queue worker runs it, whichever program asked; it implies `isolate`); `None` is what the
+    /// engine was told to do by default (`Engine::set_shared_queue`)
+    pub shared: Option<bool>,
 }
 
 /// What the engine remembers of a job beyond the runner's own record.
@@ -36,6 +39,8 @@ pub(crate) struct JobMeta {
     pub stamp: String,
     /// what the job is expected to cost, filled in by the job once its mesh is known (`estimate.rs`); empty while there is no estimate
     pub estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>,
+    /// the id of the item in the workspace queue, once the job has written it (a solve that was handed to the queue worker)
+    pub shared_id: Option<Arc<Mutex<Option<String>>>>,
 }
 
 /// What a mesh convergence check needs of the coarse solve: the numbers that identify its solutions, the unknowns and the cells. A result's
@@ -105,6 +110,10 @@ pub(crate) fn solve_key(problem_key: &str, targets: &[String]) -> String {
     format!("{problem_key}|{}", t.join(","))
 }
 
+fn shared_id(args: &Value) -> Option<String> {
+    args.get("shared_id").and_then(Value::as_str).map(String::from)
+}
+
 fn priority_of(args: &Value) -> Result<Option<u8>, Error> {
     match args.get("priority") {
         None | Some(Value::Null) => Ok(None),
@@ -123,6 +132,28 @@ impl Engine {
 
     pub fn owner(&self) -> &str {
         &self.owner
+    }
+
+    /// The queue of the workspace, when the engine has a workspace.
+    pub(crate) fn shared(&self) -> Option<crate::shared_queue::SharedQueue> {
+        self.shared_root.as_deref().or(self.workspace.as_deref()).map(crate::shared_queue::SharedQueue::new)
+    }
+
+    /// The item id of a job of this engine that was handed to the workspace queue.
+    pub(crate) fn shared_of_job(&self, id: JobId) -> Option<String> {
+        self.meta.get(&id)?.shared_id.as_ref()?.lock().expect("shared id").clone()
+    }
+
+    /// Runs `f` on the item named by `shared_id` in the arguments; false when there is no such item.
+    fn shared_op(
+        &self,
+        args: &Value,
+        f: impl Fn(&crate::shared_queue::SharedQueue, &str) -> bool,
+    ) -> Result<bool, Error> {
+        let sid = shared_id(args).unwrap_or_default();
+        let q =
+            self.shared().ok_or_else(|| Error::invalid("this engine has no workspace, so there is no shared queue"))?;
+        Ok(f(&q, &sid))
     }
 
     /// The submission of a job of this engine: owner, priority by owner unless given, and the key a newer request of the same kind replaces.
@@ -148,12 +179,46 @@ impl Engine {
                 v["estimate"] = json!(e);
             }
         }
+        if let Some(sid) =
+            self.meta.get(&id).and_then(|m| m.shared_id.as_ref()).and_then(|s| s.lock().expect("shared id").clone())
+        {
+            v["shared"] = json!(true);
+            v["shared_id"] = json!(sid);
+            if let Some(item) = self.shared().and_then(|q| q.item(&sid)) {
+                v["place"] = json!(item.position);
+                v["queue_state"] = json!(item.state_name());
+                v["held"] = json!(item.held);
+            }
+        }
         v["applied"] = json!(!self.pending.contains_key(&id));
         Some(v)
     }
 
     /// The queue, oldest first, optionally of one owner or one state (`queued`, `running`, `done`, `cancelled`, `failed`).
     pub fn queue_list(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value> {
+        let mut out = self.queue_list_own(owner, state);
+        out.extend(self.shared_foreign(owner, state));
+        out
+    }
+
+    /// The items of the workspace queue that another program (or an earlier session of this one) wrote: what makes the queue one queue.
+    fn shared_foreign(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value> {
+        let Some(q) = self.shared() else { return vec![] };
+        let own = self.shared_own.lock().expect("own items").clone();
+        q.items()
+            .into_iter()
+            .filter(|i| !own.contains(&i.request.id))
+            .filter(|i| owner.is_none_or(|o| i.request.owner == o))
+            .filter(|i| state.is_none_or(|s| i.state_name() == s))
+            .map(|i| {
+                let mut v = i.to_json(&q);
+                v["foreign"] = json!(true);
+                v
+            })
+            .collect()
+    }
+
+    fn queue_list_own(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value> {
         self.jobs
             .list()
             .into_iter()
@@ -202,6 +267,7 @@ impl Engine {
                     hold: args.get("hold").and_then(Value::as_bool).unwrap_or(false),
                     isolate: args.get("isolate").and_then(Value::as_bool),
                     force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
+                    shared: args.get("shared").and_then(Value::as_bool),
                 };
                 let physics = args.get("physics").and_then(Value::as_str);
                 let job = match args.get("kind").and_then(Value::as_str).unwrap_or("solve") {
@@ -214,6 +280,9 @@ impl Engine {
                             }
                             Some(_) => return Err(Error::invalid("`physics` is a code or a list of codes")),
                         };
+                        if args.get("detached").and_then(Value::as_bool) == Some(true) {
+                            return self.queue_detached(targets, &opts);
+                        }
                         self.start_solve_with(targets, &opts)?
                     }
                     "mesh" => self.start_mesh_with(&opts)?,
@@ -237,6 +306,45 @@ impl Engine {
                 Ok(json!(self
                     .queue_list(args.get("owner").and_then(Value::as_str), args.get("state").and_then(Value::as_str))))
             }
+            "queue_get" if shared_id(args).is_some() => {
+                let sid = shared_id(args).unwrap_or_default();
+                let q = self
+                    .shared()
+                    .ok_or_else(|| Error::invalid("this engine has no workspace, so there is no shared queue"))?;
+                let item = q
+                    .item(&sid)
+                    .ok_or_else(|| Error::invalid(format!("no item {sid} in the queue of the workspace")))?;
+                let mut v = item.to_json(&q);
+                let log = item.state.as_ref().map(|s| s.log.clone()).unwrap_or_default();
+                v["log"] = json!(log[log.len().saturating_sub(20)..]);
+                Ok(v)
+            }
+            "queue_cancel" if shared_id(args).is_some() => {
+                Ok(json!({ "cancelled": self.shared_op(args, |q, s| q.cancel(s))? }))
+            }
+            "queue_hold" if shared_id(args).is_some() => Ok(json!({ "held": self.shared_op(args, |q, s| q.hold(s))? })),
+            "queue_release" if shared_id(args).is_some() => {
+                Ok(json!({ "released": self.shared_op(args, |q, s| q.release(s))? }))
+            }
+            "queue_set_priority" if shared_id(args).is_some() => {
+                let p = priority_of(args)?.ok_or_else(|| Error::invalid("`priority` is required"))?;
+                Ok(json!({ "changed": self.shared_op(args, |q, s| q.set_priority(s, p))? }))
+            }
+            "queue_hold" | "queue_release" | "queue_set_priority"
+                if args.get("id").and_then(Value::as_u64).and_then(|i| self.shared_of_job(i)).is_some() =>
+            {
+                // a job of this engine that is waiting in the workspace queue: its item carries the marker
+                let sid = self.shared_of_job(id()?).unwrap_or_default();
+                let q = self.shared().ok_or_else(|| Error::invalid("this engine has no workspace"))?;
+                Ok(match name {
+                    "queue_hold" => json!({ "held": q.hold(&sid) }),
+                    "queue_release" => json!({ "released": q.release(&sid) }),
+                    _ => {
+                        let p = priority_of(args)?.ok_or_else(|| Error::invalid("`priority` is required"))?;
+                        json!({ "changed": q.set_priority(&sid, p) })
+                    }
+                })
+            }
             "queue_get" => {
                 let id = id()?;
                 let mut v = self.queue_entry(id).ok_or_else(|| Error::invalid(format!("no job {id}")))?;
@@ -254,10 +362,16 @@ impl Engine {
             }
             "queue_pause" => {
                 self.jobs.pause();
+                if let Some(q) = self.shared() {
+                    q.pause();
+                }
                 Ok(json!({ "paused": true }))
             }
             "queue_resume" => {
                 self.jobs.resume();
+                if let Some(q) = self.shared() {
+                    q.resume();
+                }
                 Ok(json!({ "paused": false }))
             }
             "queue_wait" => {
@@ -275,6 +389,13 @@ impl Engine {
         }
     }
 
+    /// Remembers that the job `id` was handed to the workspace queue, and under which item.
+    pub(crate) fn note_shared(&mut self, id: JobId, item: Option<Arc<Mutex<Option<String>>>>) {
+        if let Some(m) = self.meta.get_mut(&id) {
+            m.shared_id = item;
+        }
+    }
+
     pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>) {
         self.note_job_estimate(id, kind, targets, Default::default());
     }
@@ -288,6 +409,6 @@ impl Engine {
         estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>,
     ) {
         let stamp = self.stamp();
-        self.meta.insert(id, JobMeta { kind, targets, stamp, estimate });
+        self.meta.insert(id, JobMeta { kind, targets, stamp, estimate, shared_id: None });
     }
 }

@@ -134,6 +134,158 @@ pub fn system_memory() -> Option<(u64, u64)> {
     }
 }
 
+/// Starts `program args...` as a process that belongs to nobody: it outlives the program that started it, has no console and no standard
+/// streams, and **inherits no handle** of the starter's. The last matters as much as the first: a child that inherited the pipe a host reads the
+/// starter's output from would keep that pipe open after the starter ended, and the host would wait for ever for its end. On Windows it is made
+/// with `CreateProcessW` (inheritance off, which `std::process::Command` cannot say) outside the job object of the starter where the system lets
+/// it (a window or terminal that ends kills the processes of its job); elsewhere in a process group of its own with the standard streams null.
+pub fn spawn_detached(program: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::ffi::c_void;
+        use std::os::windows::ffi::OsStrExt;
+        #[repr(C)]
+        struct StartupInfoW {
+            cb: u32,
+            reserved: *mut u16,
+            desktop: *mut u16,
+            title: *mut u16,
+            x: u32,
+            y: u32,
+            x_size: u32,
+            y_size: u32,
+            x_chars: u32,
+            y_chars: u32,
+            fill: u32,
+            flags: u32,
+            show: u16,
+            reserved2: u16,
+            reserved2_ptr: *mut u8,
+            std_in: *mut c_void,
+            std_out: *mut c_void,
+            std_err: *mut c_void,
+        }
+        #[repr(C)]
+        struct ProcessInformation {
+            process: *mut c_void,
+            thread: *mut c_void,
+            pid: u32,
+            tid: u32,
+        }
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateProcessW(
+                application: *const u16,
+                command_line: *mut u16,
+                process_attributes: *const c_void,
+                thread_attributes: *const c_void,
+                inherit_handles: i32,
+                flags: u32,
+                environment: *const c_void,
+                directory: *const u16,
+                startup: *const StartupInfoW,
+                info: *mut ProcessInformation,
+            ) -> i32;
+            fn CloseHandle(handle: *mut c_void) -> i32;
+        }
+        // the command line as the C runtime of the child will split it: every word quoted, quotes escaped, backslashes before a quote doubled
+        fn quote(word: &std::ffi::OsStr, out: &mut Vec<u16>) {
+            const BACKSLASH: u16 = b'\\' as u16;
+            const QUOTE: u16 = b'"' as u16;
+            out.push(QUOTE);
+            let mut backslashes = 0usize;
+            for c in word.encode_wide() {
+                if c == BACKSLASH {
+                    backslashes += 1;
+                    continue;
+                }
+                if c == QUOTE {
+                    out.extend(std::iter::repeat_n(BACKSLASH, backslashes * 2 + 1));
+                } else {
+                    out.extend(std::iter::repeat_n(BACKSLASH, backslashes));
+                }
+                backslashes = 0;
+                out.push(c);
+            }
+            out.extend(std::iter::repeat_n(BACKSLASH, backslashes * 2));
+            out.push(QUOTE);
+        }
+        let mut line: Vec<u16> = vec![];
+        quote(program.as_os_str(), &mut line);
+        for a in args {
+            line.push(' ' as u16);
+            quote(a, &mut line);
+        }
+        line.push(0);
+        let app: Vec<u16> = program.as_os_str().encode_wide().chain(Some(0)).collect();
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW, and CREATE_BREAKAWAY_FROM_JOB, which a job that does not allow it refuses
+        const BASE: u32 = 0x0000_0008 | 0x0000_0200 | 0x0800_0000;
+        const BREAKAWAY: u32 = 0x0100_0000;
+        for flags in [BASE | BREAKAWAY, BASE] {
+            let si = StartupInfoW {
+                cb: std::mem::size_of::<StartupInfoW>() as u32,
+                reserved: std::ptr::null_mut(),
+                desktop: std::ptr::null_mut(),
+                title: std::ptr::null_mut(),
+                x: 0,
+                y: 0,
+                x_size: 0,
+                y_size: 0,
+                x_chars: 0,
+                y_chars: 0,
+                fill: 0,
+                flags: 0,
+                show: 0,
+                reserved2: 0,
+                reserved2_ptr: std::ptr::null_mut(),
+                std_in: std::ptr::null_mut(),
+                std_out: std::ptr::null_mut(),
+                std_err: std::ptr::null_mut(),
+            };
+            let mut info =
+                ProcessInformation { process: std::ptr::null_mut(), thread: std::ptr::null_mut(), pid: 0, tid: 0 };
+            let mut buf = line.clone();
+            // SAFETY: every pointer is to a live, correctly laid out value or null; the command line is a writable NUL-terminated buffer, as the
+            // function requires; the two handles it returns are closed at once.
+            let ok = unsafe {
+                CreateProcessW(
+                    app.as_ptr(),
+                    buf.as_mut_ptr(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    0,
+                    flags,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    &si,
+                    &mut info,
+                )
+            };
+            if ok != 0 {
+                // SAFETY: handles returned by the successful call above.
+                unsafe {
+                    CloseHandle(info.process);
+                    CloseHandle(info.thread);
+                }
+                return Ok(());
+            }
+        }
+        Err(std::io::Error::last_os_error())
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::process::CommandExt;
+        std::process::Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map(|_| ())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

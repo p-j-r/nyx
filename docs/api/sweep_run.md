@@ -24,6 +24,7 @@ Queues one solve per point and returns the sweep's number at once. A point is a 
 | `series.cmd` | text | yes |  | the edit command repeated at every point |
 | `series.field` | text | yes |  | the argument that takes each value |
 | `series.values` | list of any | yes |  | the values, one point each |
+| `shared` | true or false | no |  | hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process |
 
 Lengths are in metres and every unit is SI unless the argument says otherwise.
 

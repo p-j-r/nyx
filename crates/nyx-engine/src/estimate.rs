@@ -27,7 +27,7 @@ pub struct Row {
 }
 
 /// An estimate with its basis.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Estimate {
     /// the memory the solve is expected to need, bytes of RAM
     pub bytes: u64,
@@ -155,6 +155,14 @@ impl History {
         }
         *self.rows.lock().expect("history") = rows;
         *self.file.lock().expect("history") = Some(path.to_path_buf());
+    }
+
+    /// Reads the file again: another program (the queue worker of the workspace) appends rows to it too.
+    pub fn reload(&self) {
+        let file = self.file.lock().expect("history").clone();
+        if let Some(p) = file {
+            self.set_file(&p);
+        }
     }
 
     pub fn rows(&self) -> Vec<Row> {

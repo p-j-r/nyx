@@ -122,12 +122,14 @@ struct Server {
 }
 
 impl Server {
-    fn new(dir: PathBuf, root: PathBuf) -> Server {
+    fn new(dir: PathBuf, root: PathBuf, queue: PathBuf) -> Server {
         let mut engine = Engine::new();
         engine.set_workspace(dir.clone(), true);
         engine.set_owner("ai"); // its requests queue behind a person's at the same priority (ADR 87)
         engine.set_self_as_worker(true); // solves run in a child process: running out of memory fails the job, not the server (ADR 86)
         engine.set_history_file(&dir.join("solve_history.jsonl")); // what solves cost, for memory estimates
+        // one queue with the window: solves are run by the queue worker of that folder, in order, whoever asked (Q3, ADR 95)
+        engine.set_shared_queue(&queue, true);
         Server { engine, kernel: None, dir, root, proto: PROTOCOLS[0], session: session_id(), revision: 0 }
     }
 
@@ -361,8 +363,8 @@ impl Server {
     }
 }
 
-fn serve(dir: PathBuf, root: PathBuf) {
-    let mut s = Server::new(dir, root);
+fn serve(dir: PathBuf, root: PathBuf, queue: PathBuf) {
+    let mut s = Server::new(dir, root, queue);
     eprintln!("{NAME} {VERSION} ready");
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -413,7 +415,7 @@ fn main() {
     nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     // started by an engine as its worker (`--job FOLDER`, see `nyx_engine::worker`): solve and answer on stdout, never serve MCP
-    if args.first().map(String::as_str) == Some("--job") {
+    if matches!(args.first().map(String::as_str), Some("--job" | "--worker")) {
         std::process::exit(nyx_engine::worker::serve(&args));
     }
     let dir_arg = take_opt(&mut args, "--dir");
@@ -422,7 +424,11 @@ fn main() {
     let dir = dir_arg.unwrap_or_else(default_dir);
     let root = root_arg.unwrap_or_else(|| default_root(dir_given, &dir));
     match args.first().map(String::as_str) {
-        None => serve(dir, root),
+        None => {
+            // the queue is the window's (`NYX_WORKSPACE`, else Documents/nyx) unless `--dir` named a folder: then the folder has its own
+            let queue = if dir_given { dir.clone() } else { nyx_engine::shared_queue::default_workspace() };
+            serve(dir, root, queue)
+        }
         Some("--version") => println!("{NAME} {VERSION}"),
         Some("--help") | Some("-h") => usage(),
         Some(other) => {

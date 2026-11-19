@@ -8,6 +8,7 @@ Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a m
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
+| `detached` | true or false | no |  | solve only, with `shared`: write the item into the queue and return at once, with nothing of this session waiting for it; the answer is the item (`shared_id`, and `results`, the file that `open_results` reads once its state is `done`). Closing the program leaves it running |
 | `factor` | number | no |  | convergence: finer/present element size, default 0.6 |
 | `force` | true or false | no |  | start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits |
 | `hold` | true or false | no |  | start held |
@@ -15,6 +16,7 @@ Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a m
 | `kind` | text: `solve`, `mesh`, `convergence` | no |  | default solve |
 | `physics` | text or list of text | no |  | physics code(s); default the active one |
 | `priority` | integer | no |  | 1, 2 or 3; lower runs first |
+| `shared` | true or false | no |  | hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process |
 | `supersede` | true or false | no |  | replace a queued request of the same kind and targets |
 | `tolerance` | number | no |  | convergence: largest accepted relative difference |
 

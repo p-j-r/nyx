@@ -807,6 +807,10 @@
             }
           ]
         },
+        "shared": {
+          "description": "hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process",
+          "type": "boolean"
+        },
         "wait": {
           "description": "wait for the result, default true",
           "type": "boolean"
@@ -897,6 +901,10 @@
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "detached": {
+          "description": "solve only, with `shared`: write the item into the queue and return at once, with nothing of this session waiting for it; the answer is the item (`shared_id`, and `results`, the file that `open_results` reads once its state is `done`). Closing the program leaves it running",
+          "type": "boolean"
+        },
         "factor": {
           "description": "convergence: finer/present element size, default 0.6",
           "type": "number"
@@ -940,6 +948,10 @@
           "description": "1, 2 or 3; lower runs first",
           "type": "integer"
         },
+        "shared": {
+          "description": "hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process",
+          "type": "boolean"
+        },
         "supersede": {
           "description": "replace a queued request of the same kind and targets",
           "type": "boolean"
@@ -956,7 +968,7 @@
   },
   {
     "access": "read",
-    "description": "Every job, oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.",
+    "description": "Every job of this session and every item that another program wrote into the workspace queue (`foreign`, with a `shared_id`), oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.",
     "name": "queue_list",
     "schema": {
       "additionalProperties": false,
@@ -977,7 +989,7 @@
   },
   {
     "access": "read",
-    "description": "The entry of `queue_list` for one job and the last lines of its stage log.",
+    "description": "The entry of `queue_list` for one job and the last lines of its stage log. Give `id` (a job of this session) or `shared_id` (an item of the workspace queue).",
     "name": "queue_get",
     "schema": {
       "additionalProperties": false,
@@ -985,18 +997,20 @@
         "id": {
           "description": "job id",
           "type": "integer"
+        },
+        "shared_id": {
+          "description": "an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote",
+          "type": "string"
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": [],
       "type": "object"
     },
     "title": "One job of the queue"
   },
   {
     "access": "expensive",
-    "description": "A queued job never runs. A running one stops at its next check (a factorisation in progress finishes first); `cancel_requested` says so until it stops.",
+    "description": "A queued job never runs. A running one stops at its next check (a factorisation in progress finishes first; a solve in a worker process is stopped at once); `cancel_requested` says so until it stops. Give `id` or `shared_id`.",
     "name": "queue_cancel",
     "schema": {
       "additionalProperties": false,
@@ -1004,18 +1018,20 @@
         "id": {
           "description": "job id",
           "type": "integer"
+        },
+        "shared_id": {
+          "description": "an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote",
+          "type": "string"
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": [],
       "type": "object"
     },
     "title": "Cancel a queued or running job"
   },
   {
     "access": "expensive",
-    "description": "Keeps a queued job from starting until `queue_release`.",
+    "description": "Keeps a queued job from starting until `queue_release`. Give `id` or `shared_id`.",
     "name": "queue_hold",
     "schema": {
       "additionalProperties": false,
@@ -1023,18 +1039,20 @@
         "id": {
           "description": "job id",
           "type": "integer"
+        },
+        "shared_id": {
+          "description": "an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote",
+          "type": "string"
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": [],
       "type": "object"
     },
     "title": "Hold a queued job"
   },
   {
     "access": "expensive",
-    "description": "",
+    "description": "Give `id` or `shared_id`.",
     "name": "queue_release",
     "schema": {
       "additionalProperties": false,
@@ -1042,18 +1060,20 @@
         "id": {
           "description": "job id",
           "type": "integer"
+        },
+        "shared_id": {
+          "description": "an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote",
+          "type": "string"
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": [],
       "type": "object"
     },
     "title": "Release a held job"
   },
   {
     "access": "expensive",
-    "description": "1 runs first, 3 last.",
+    "description": "1 runs first, 3 last. Give `id` or `shared_id`.",
     "name": "queue_set_priority",
     "schema": {
       "additionalProperties": false,
@@ -1065,10 +1085,13 @@
         "priority": {
           "description": "1, 2 or 3",
           "type": "integer"
+        },
+        "shared_id": {
+          "description": "an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote",
+          "type": "string"
         }
       },
       "required": [
-        "id",
         "priority"
       ],
       "type": "object"
@@ -1226,6 +1249,10 @@
             "values"
           ],
           "type": "object"
+        },
+        "shared": {
+          "description": "hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process",
+          "type": "boolean"
         }
       },
       "required": [],

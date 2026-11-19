@@ -45,6 +45,9 @@ pub enum JobOutput {
 pub struct WorkerRun {
     pub peak_working_set: Option<u64>,
     pub peak_commit: Option<u64>,
+    /// the run was done by the queue worker of the workspace, which has added its row to the history itself (Q3)
+    #[serde(skip)]
+    pub shared: bool,
 }
 
 /// What opening a results file gives the engine to apply.
@@ -80,6 +83,9 @@ impl JobState {
 pub enum Lane {
     Heavy,
     Light,
+    /// a job that hands its work to the queue of the workspace (Q3) and waits for it there: it holds no core and no memory of this process, so
+    /// many of them wait side by side while the queue worker runs one solve at a time
+    Shared,
 }
 
 /// How a job is submitted: its name, lane, owner and priority.
@@ -161,6 +167,7 @@ struct Sched {
     /// jobs that may run at once, per lane
     limit_heavy: usize,
     limit_light: usize,
+    limit_shared: usize,
     /// a queued job rises one priority level after this long
     age: Duration,
     /// when each owner was last served (a counter), for the round robin
@@ -228,8 +235,12 @@ fn pump(shared: &Arc<Shared>) {
     }
     loop {
         let mut started = false;
-        for lane in [Lane::Heavy, Lane::Light] {
-            let limit = if lane == Lane::Heavy { sched.limit_heavy } else { sched.limit_light };
+        for lane in [Lane::Heavy, Lane::Light, Lane::Shared] {
+            let limit = match lane {
+                Lane::Heavy => sched.limit_heavy,
+                Lane::Light => sched.limit_light,
+                Lane::Shared => sched.limit_shared,
+            };
             if shared.running(lane) >= limit {
                 continue;
             }
@@ -290,6 +301,7 @@ impl JobRunner {
                     paused: false,
                     limit_heavy: 1,
                     limit_light: 2,
+                    limit_shared: 256,
                     age: Duration::from_secs(60),
                     served: BTreeMap::new(),
                     tick: 0,
@@ -509,6 +521,7 @@ impl JobRunner {
             match lane {
                 Lane::Heavy => s.limit_heavy = n.max(1),
                 Lane::Light => s.limit_light = n.max(1),
+                Lane::Shared => s.limit_shared = n.max(1),
             }
         }
         pump(&self.shared);

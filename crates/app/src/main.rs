@@ -39,8 +39,11 @@ fn main() -> eframe::Result {
     nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     // started by an engine as its worker (`--job FOLDER`, see `nyx_engine::worker`): solve, answer on stdout, never open a window
-    if args.first().map(String::as_str) == Some("--job") {
+    if matches!(args.first().map(String::as_str), Some("--job" | "--worker")) {
         std::process::exit(nyx_engine::worker::serve(&args));
+    }
+    if args.first().map(String::as_str) == Some("queue") {
+        std::process::exit(nyx_engine::shared_queue::cli(&args[1..]));
     }
     if args.first().map(|a| a.as_str()) == Some("--batch") {
         if let Err(e) = batch::run(&args[1..]) {

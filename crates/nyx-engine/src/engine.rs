@@ -96,6 +96,14 @@ pub struct Engine {
     /// the worker program a solve runs in when it asks to be isolated (`set_worker`), and whether it does when it does not say (P4, ADR 86)
     pub(crate) worker: Option<PathBuf>,
     pub(crate) isolate_default: bool,
+    /// solves are handed to the queue of the workspace unless they say `shared: false` (`set_shared_queue`, Q3)
+    pub(crate) shared_default: bool,
+    /// the folder whose `queue` the shared queue is (`set_shared_queue`); without it the workspace of `set_workspace` is used
+    pub(crate) shared_root: Option<PathBuf>,
+    /// the items of the workspace queue this engine wrote and has not collected (the others are another program's, and listed as such)
+    pub(crate) shared_own: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+    /// one mesh is built at a time by jobs that wait in the workspace queue, so fifty sweep points do not start fifty meshers at once
+    pub(crate) mesh_gate: Arc<std::sync::Mutex<()>>,
     /// false for an engine whose registry or mesher is not the compiled-in one: a worker could not reproduce it
     pub(crate) isolable: bool,
     /// what solves of this machine have cost, learned from the workers (`estimate.rs`), and how the engine asks the machine about its memory
@@ -156,6 +164,10 @@ impl Engine {
             library_notes: vec![],
             worker: None,
             isolate_default: false,
+            shared_default: false,
+            shared_root: None,
+            shared_own: Default::default(),
+            mesh_gate: Default::default(),
             isolable: false,
             history: Arc::new(crate::estimate::History::default()),
             memory_probe: Arc::new(crate::process::system_memory),
@@ -210,6 +222,18 @@ impl Engine {
     pub fn set_worker(&mut self, worker: PathBuf, by_default: bool) {
         self.worker = Some(worker);
         self.isolate_default = by_default;
+    }
+
+    /// Names the folder whose `queue` this engine shares with every other program that names it (the window, the MCP server, `nyx queue`), and
+    /// with `by_default` hands every solve to it unless the request says `shared: false` (productivity plan Q3, ADR 95). A queue worker
+    /// (`PROGRAM --worker FOLDER`, started when none runs) solves the items one at a time, in a solver child, whichever program wrote them; the
+    /// job of this engine waits for its item and applies its results as for any worker. The cost history of the folder
+    /// (`solve_history.jsonl`) becomes this engine's. A solve that cannot be isolated (no worker program, another registry or mesher, no HDF5)
+    /// runs in this process as before.
+    pub fn set_shared_queue(&mut self, folder: &std::path::Path, by_default: bool) {
+        self.shared_root = Some(folder.to_path_buf());
+        self.shared_default = by_default;
+        self.history.set_file(&folder.join("solve_history.jsonl"));
     }
 
     /// Makes the running program its own worker: a front-end (`nyx`, `nyx-mcp`) that answers `--job FOLDER` with `worker::serve` calls this, so
@@ -451,13 +475,29 @@ impl Engine {
             Purpose::Current => format!("solve {}", targets.join(", ")),
             Purpose::Point { sweep, index } => format!("sweep {sweep} point {index}: {}", targets.join(", ")),
         };
-        let submit = self.submission(&label, Lane::Heavy, opts, &lane_key(&targets));
+        // handed to the queue of the workspace (Q3)? Then it is isolated too: the queue worker's child solves it
+        let shared_q =
+            match opts.shared {
+                Some(true) => Some(self.shared().ok_or_else(|| {
+                    Error::invalid("`shared` needs a workspace folder (the shared queue lives in it)")
+                })?),
+                Some(false) => None,
+                None if self.shared_default => self.shared(),
+                None => None,
+            };
+        let explicit_shared = opts.shared == Some(true);
+        let lane = if shared_q.is_some() { Lane::Shared } else { Lane::Heavy };
+        let mut submit = self.submission(&label, lane, opts, &lane_key(&targets));
+        if shared_q.is_some() {
+            // the hold is the item's (a held item stays in the folder until released); the job itself only waits for it
+            submit.hold = false;
+        }
         let chain = targets.clone();
         // in a worker process (P4)? the library the worker is given is the one this job would have used
         // asked for in the request, it must be possible or the request fails with the reason; only by the engine's default, a solve that cannot
         // be isolated (no worker, another registry or mesher, no HDF5) runs in this process as before
-        let explicit = opts.isolate == Some(true);
-        let remote = if opts.isolate.unwrap_or(self.isolate_default) {
+        let explicit = opts.isolate == Some(true) || explicit_shared;
+        let remote = if shared_q.is_some() || opts.isolate.unwrap_or(self.isolate_default) {
             let why_not = if self.worker.is_none() {
                 Some("this engine has no worker program (`Engine::set_worker`: nyx and nyx-mcp use themselves)")
             } else if !self.isolable {
@@ -480,9 +520,17 @@ impl Engine {
         } else {
             None
         };
+        // a solve that could not be isolated stays in this process even when the queue is the default
+        let shared = shared_q.zip(remote.clone()).map(|(q, spec)| (q, spec, self.worker.clone().unwrap_or_default()));
+        let (own_items, gate) = (self.shared_own.clone(), self.mesh_gate.clone());
+        let shared_id: Arc<std::sync::Mutex<Option<String>>> = Default::default();
+        let (owner, priority, stamp_now) = (submit.owner.clone(), submit.priority, self.stamp());
+        let hold_item = opts.hold;
         let estimate_slot: Arc<std::sync::Mutex<Option<crate::estimate::Estimate>>> = Default::default();
         let (history, probe, force, slot) =
             (self.history.clone(), self.memory_probe.clone(), opts.force, estimate_slot.clone());
+        let slot_id = shared_id.clone();
+        let used_shared = shared.is_some();
         let id = self.jobs.submit(submit, {
             let project = project.clone();
             move |progress| {
@@ -498,27 +546,56 @@ impl Engine {
                                 m
                             }
                             None => {
-                                let m = Arc::new(mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?);
-                                stages.put_mesh(&mesh_key, &m);
-                                m
+                                // jobs that wait in the workspace queue mesh one at a time (and the one before may have built this mesh)
+                                let _gate = shared.as_ref().map(|_| gate.lock().expect("mesh gate"));
+                                match stages.mesh(&mesh_key) {
+                                    Some(m) => m,
+                                    None => {
+                                        let m = Arc::new(mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?);
+                                        stages.put_mesh(&mesh_key, &m);
+                                        m
+                                    }
+                                }
                             }
                         }
                     }
                 };
                 stages.put_mesh(&mesh_key, &model);
                 // what this solve is expected to cost, from the solves this machine has run; it starts only when the memory is there
-                if let Some(est) = history.estimate(&crate::estimate::chain_key(&chain), model.mesh().dim() as u8, model.mesh().n_cells() as u64) {
-                    *slot.lock().expect("estimate") = Some(est.clone());
-                    crate::estimate::admit(&est, force, &probe, &progress)?;
+                if shared.is_some() {
+                    // the queue worker has appended rows since this engine read the file
+                    history.reload();
                 }
-                let (results, failed, worker) = match &remote {
-                    None => {
+                let est = history.estimate(&crate::estimate::chain_key(&chain), model.mesh().dim() as u8, model.mesh().n_cells() as u64);
+                if let Some(est) = &est {
+                    *slot.lock().expect("estimate") = Some(est.clone());
+                    // a solve handed to the queue is admitted there, when it is its turn and the memory is free then
+                    if shared.is_none() {
+                        crate::estimate::admit(est, force, &probe, &progress)?;
+                    }
+                }
+                let (results, failed, worker) = match (&shared, &remote) {
+                    (_, None) => {
                         let (r, f) =
                             crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress);
                         (r, f, None)
                     }
-                    Some(spec) => {
-                        let done = crate::worker::run_remote(spec, &progress)?;
+                    (shared, Some(spec)) => {
+                        let done = match shared {
+                            Some((q, spec, program)) => {
+                                let item = crate::shared_queue::NewItem {
+                                    owner: owner.clone(),
+                                    priority,
+                                    label: label.clone(),
+                                    stamp: stamp_now.clone(),
+                                    hold: hold_item,
+                                    force,
+                                    estimate: est.clone(),
+                                };
+                                crate::shared_queue::run_shared(q, program, &item, spec, &progress, &slot_id, &own_items)?
+                            }
+                            None => crate::worker::run_remote(spec, &progress)?,
+                        };
                         {
                             // the last word of the log: what the process cost (the log shown is the worker's, mirrored, until now)
                             let _installed = femcore::progress::install(&progress);
@@ -559,13 +636,71 @@ impl Engine {
                 self.pending
                     .insert(id, Pending::Solve { key, keys, project: Box::new(project), generation: self.generation });
                 self.note_job_estimate(id, "solve", targets, estimate_slot);
+                self.note_shared(id, used_shared.then_some(shared_id));
             }
             Purpose::Point { sweep, index } => {
                 self.pending.insert(id, Pending::Point { sweep, index, project: Box::new(project) });
                 self.note_job_estimate(id, "sweep", targets, estimate_slot);
+                self.note_shared(id, used_shared.then_some(shared_id));
             }
         }
         Ok(id)
+    }
+
+    /// Writes a solve into the queue of the workspace and leaves it there: nothing of this engine waits for it, so closing the front-end (or the
+    /// script) that wrote it changes nothing. The answer is the item (`shared_id`); its results are the file `results` names, which
+    /// `open_results` reads, once the item is `done`. A queue worker is started when none runs. Needs a worker program and a build with HDF5.
+    #[cfg(feature = "hdf5")]
+    pub fn queue_detached(&mut self, targets: Option<Vec<String>>, opts: &QueueOpts) -> Result<Value, Error> {
+        let q = self
+            .shared()
+            .ok_or_else(|| Error::invalid("`detached` needs a workspace folder (the shared queue lives in it)"))?;
+        let Some(worker) = self.worker.clone() else {
+            return Err(Error::invalid(
+                "this engine has no worker program (`Engine::set_worker`), which the queue worker's solvers need",
+            ));
+        };
+        if !self.isolable {
+            return Err(Error::invalid(
+                "this engine has a registry or mesher of its own, which a queue worker cannot rebuild",
+            ));
+        }
+        if self.project.physics.is_empty() {
+            return Err(Error::invalid("the project has no physics; add one first (add_physics)"));
+        }
+        self.project.check(&self.registry)?;
+        let targets = targets.unwrap_or_else(|| self.default_targets());
+        for t in &targets {
+            if self.project.spec(t).is_none() {
+                return Err(Error::invalid(format!("the project has no problem for '{t}'")));
+            }
+        }
+        let library = self.library()?;
+        let spec = crate::worker::RemoteSpec {
+            worker: worker.clone(),
+            project_json: self.project.to_json(),
+            materials: crate::worker::material_texts(&library),
+            targets: targets.clone(),
+        };
+        let item = crate::shared_queue::NewItem {
+            owner: self.owner.clone(),
+            priority: opts.priority.unwrap_or(if self.owner == "gui" { 1 } else { 2 }),
+            label: format!("solve {}", targets.join(", ")),
+            stamp: self.stamp(),
+            hold: opts.hold,
+            force: opts.force,
+            estimate: None,
+        };
+        let id = q.submit(&item, &spec)?;
+        q.ensure_runner(&worker)?;
+        Ok(q.item(&id).map(|i| i.to_json(&q)).unwrap_or_else(|| json!({ "shared_id": id })))
+    }
+
+    #[cfg(not(feature = "hdf5"))]
+    pub fn queue_detached(&mut self, _targets: Option<Vec<String>>, _opts: &QueueOpts) -> Result<Value, Error> {
+        Err(Error::Unsupported(
+            "this build has no HDF5 support, which the queue worker's solvers need to hand their results back".into(),
+        ))
     }
 
     /// Starts a mesh convergence check (two solves, the second on a finer mesh) on a job. Both solves run on the job's thread under its progress,
@@ -655,7 +790,23 @@ impl Engine {
     /// Why a queued job cannot start however long it is waited for (it is held, or the queue is paused); `None` for a job that is running or
     /// will start, and for a finished one. A host that polls a job instead of blocking on it asks, so that it does not poll for ever.
     pub fn job_blocked(&self, id: JobId) -> Option<&'static str> {
-        self.jobs.blocked(id)
+        self.jobs.blocked(id).or_else(|| self.shared_blocked(id))
+    }
+
+    /// Why a job that waits in the workspace queue cannot start however long it is waited for: its item is held, or the queue is paused.
+    fn shared_blocked(&self, id: JobId) -> Option<&'static str> {
+        let (q, sid) = (self.shared()?, self.shared_of_job(id)?);
+        let item = q.item(&sid)?;
+        if item.state.is_some() {
+            return None;
+        }
+        if item.held {
+            Some("its item is held in the workspace queue (release it with queue_release, or wait with a timeout_s)")
+        } else if q.paused() {
+            Some("the workspace queue is paused (resume it with queue_resume, or wait with a timeout_s)")
+        } else {
+            None
+        }
     }
 
     /// Waits for a job and applies it.
@@ -667,7 +818,7 @@ impl Engine {
         }
         // a wait with no timeout on a job that cannot start would never return (and a host that answers one call at a time could never send the
         // call that frees it)
-        if let Some(why) = self.jobs.blocked(id) {
+        if let Some(why) = self.job_blocked(id) {
             return Err(Error::invalid(format!("job {id} cannot start: {why}")));
         }
         let outcome = self.jobs.wait(id);
@@ -821,6 +972,10 @@ impl Engine {
     /// Learns what a finished worker run cost: its peak memory against the size of the problem, for the estimates of later solves. Only runs
     /// whose chain finished and whose worker measured its memory count (an in-process run cannot say how much of the process was its own).
     pub(crate) fn learn(&self, results: &[SolveResult], cells: u64, dim: u8, worker: &Option<crate::jobs::WorkerRun>) {
+        // a run of the queue worker is in the history already: it added the row itself, whoever was watching
+        if worker.as_ref().is_some_and(|w| w.shared) {
+            return;
+        }
         let Some(ws) = worker.as_ref().and_then(|w| w.peak_working_set) else { return };
         if results.is_empty() {
             return;

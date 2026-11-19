@@ -502,6 +502,8 @@ impl App {
         // what solves cost on this machine is learned in the workspace folder, for the memory estimates of later solves (ADR 86)
         let root = std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_engine::facade::store::workspace::default_root);
         self.engine.set_history_file(&root.join("solve_history.jsonl"));
+        // the queue of the workspace is shared with the MCP server and `nyx queue`; closing the window leaves its items running (Q3, ADR 95)
+        self.engine.set_shared_queue(&root, true);
     }
 
     pub fn open_path(&mut self, path: PathBuf) {

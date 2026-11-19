@@ -2,7 +2,7 @@
 
 **List the queue** · access `read`: reads the project or the results
 
-Every job, oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.
+Every job of this session and every item that another program wrote into the workspace queue (`foreign`, with a `shared_id`), oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.
 
 ## Arguments
 

@@ -65,13 +65,19 @@ fn error_from(code: &str, message: String) -> Error {
 
 // ------------------------------------------------------------------------------------------------------------------ the worker
 
-/// The worker program: `nyx-worker --job FOLDER`. Returns the exit code (0 when it ran, whatever the solve's outcome: the outcome is in the
-/// `done` message).
+/// The worker program: `nyx-worker --job FOLDER` solves one job; `nyx-worker --worker WORKSPACE` is the queue worker of a workspace (Q3,
+/// `shared_queue::run_queue`). Returns the exit code (0 when it ran, whatever the solve's outcome: the outcome is in the `done` message).
 pub fn serve(args: &[String]) -> i32 {
+    if let [flag, workspace] = args {
+        if flag == "--worker" {
+            return serve_queue(Path::new(workspace));
+        }
+    }
     let dir = match args {
         [flag, dir] if flag == "--job" => PathBuf::from(dir),
         _ => {
-            eprintln!("usage: nyx-worker --job FOLDER   (a folder written by an engine: project.nyx.json and job.json; this program is started by nyx, not by hand)");
+            eprintln!("usage: nyx-worker --job FOLDER   (a folder written by an engine: project.nyx.json and job.json; this program is started by nyx, not by hand)
+       nyx-worker --worker WORKSPACE   (the queue worker of a workspace folder)");
             return 2;
         }
     };
@@ -95,6 +101,25 @@ pub fn serve(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// The queue worker: runs the items of the workspace queue until it has been idle for a while (`NYX_QUEUE_IDLE_SECS`, 30 by default). Unlike a
+/// job's worker it does not end with the program that started it: closing the window must leave the queue running.
+#[cfg(feature = "hdf5")]
+fn serve_queue(workspace: &Path) -> i32 {
+    match crate::shared_queue::run_queue(workspace, &crate::shared_queue::RunnerOptions::standard(workspace)) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("nyx queue worker: {e}");
+            1
+        }
+    }
+}
+
+#[cfg(not(feature = "hdf5"))]
+fn serve_queue(_workspace: &Path) -> i32 {
+    eprintln!("this build has no HDF5 support, which the queue worker's solvers need to hand their results back");
+    1
 }
 
 fn say(v: &Value) {
@@ -165,11 +190,23 @@ fn serve_job(dir: &Path) -> Result<(), String> {
         Err(_) => false,
     };
     let (ws, commit) = crate::process::peak_memory().unzip();
+    // the size of what was solved, for the estimates of later solves (the queue worker adds the row to the history)
+    let size = e.results_snapshot().ok().filter(|s| !s.results.is_empty()).map(|s| {
+        let chain: Vec<String> = s.results.iter().map(|(c, _)| c.clone()).collect();
+        json!({
+            "chain": crate::estimate::chain_key(&chain),
+            "dim": s.model.mesh().dim(),
+            "cells": s.model.mesh().n_cells(),
+            "dofs": s.results.iter().map(|(_, r)| r.dofs).max().unwrap_or(0),
+            "seconds": s.results.iter().map(|(_, r)| r.seconds).sum::<f64>(),
+        })
+    });
     say(&json!({ "done": {
         "ok": error.is_none(),
         "error": error.as_ref().map(|e| json!({ "code": e.code(), "message": e.to_string() })),
         "has_results": has_results,
         "peak_working_set": ws, "peak_commit": commit,
+        "size": size,
     } }));
     Ok(())
 }
@@ -215,26 +252,44 @@ fn exit_words(status: &std::process::ExitStatus, stderr: &str) -> String {
     }
 }
 
-/// Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once.
+/// What a worker child left when it ended: its last `done` message (none when it stopped without one), how it ended and what it wrote to stderr.
 #[cfg(feature = "hdf5")]
-pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error> {
+pub(crate) struct ChildEnd {
+    pub done: Option<Value>,
+    pub status: std::process::ExitStatus,
+    pub stderr: String,
+}
+
+/// Writes what a worker is given into `dir`: the frozen project and the job's description.
+#[cfg(feature = "hdf5")]
+pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error> {
+    let io = |what: &str, e: std::io::Error| Error::Solver(format!("{what}: {e}"));
+    std::fs::write(dir.join("project.nyx.json"), &spec.project_json).map_err(|e| io("writing the job's project", e))?;
+    std::fs::write(dir.join("job.json"), json!({ "targets": spec.targets, "materials": spec.materials }).to_string())
+        .map_err(|e| io("writing the job's description", e))?;
+    Ok(())
+}
+
+/// Runs `worker --job dir` as a child and waits for it. Every `status` message goes to `on_status`; `on_spawn` gets the child's process id once
+/// it runs; when `cancelled` says so the child is killed at once (the whole point of a worker: no factorisation has to be waited for) and the
+/// answer is `Cancelled`. This is the one place a worker is started, for the in-process isolated solve and for the queue worker alike.
+#[cfg(feature = "hdf5")]
+pub(crate) fn run_child(
+    worker: &Path,
+    dir: &Path,
+    on_status: &mut dyn FnMut(&Value),
+    on_spawn: &mut dyn FnMut(u32),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ChildEnd, Error> {
     use std::io::BufRead;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
     use std::time::Duration;
-    if progress.is_cancelled() {
-        return Err(Error::Cancelled);
-    }
-    let dir = new_job_dir()?;
     let io = |what: &str, e: std::io::Error| Error::Solver(format!("{what}: {e}"));
-    std::fs::write(dir.0.join("project.nyx.json"), &spec.project_json)
-        .map_err(|e| io("writing the job's project", e))?;
-    std::fs::write(dir.0.join("job.json"), json!({ "targets": spec.targets, "materials": spec.materials }).to_string())
-        .map_err(|e| io("writing the job's description", e))?;
-    let stderr_path = dir.0.join("stderr.txt");
+    let stderr_path = dir.join("stderr.txt");
     let stderr = std::fs::File::create(&stderr_path).map_err(|e| io("making the worker's log file", e))?;
-    let mut cmd = Command::new(&spec.worker);
-    cmd.arg("--job").arg(&dir.0).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::from(stderr));
+    let mut cmd = Command::new(worker);
+    cmd.arg("--job").arg(dir).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::from(stderr));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -244,9 +299,10 @@ pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<
     let mut child = cmd.spawn().map_err(|e| {
         Error::Solver(format!(
             "could not start the worker program {}: {e} (the solve was not run; run it in this process instead)",
-            spec.worker.display()
+            worker.display()
         ))
     })?;
+    on_spawn(child.id());
     // keeping this end open is what tells the worker its parent is alive
     let _alive = child.stdin.take();
     let stdout = child.stdout.take().ok_or_else(|| Error::Solver("the worker has no output".into()))?;
@@ -259,25 +315,12 @@ pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<
         }
     });
     let mut done: Option<Value> = None;
-    // what the job logged before the worker started (the mesh, a wait for memory) stays above the worker's own log
-    let base = progress.log();
     loop {
         match rx.recv_timeout(Duration::from_millis(40)) {
             Ok(line) => {
                 if let Some(Ok(m)) = line.strip_prefix(PREFIX).map(serde_json::from_str::<Value>) {
                     if let Some(s) = m.get("status") {
-                        let log =
-                            s.get("log").and_then(|l| serde_json::from_value::<Vec<String>>(l.clone()).ok()).map(|l| {
-                                let mut all = base.clone();
-                                all.extend(l);
-                                all
-                            });
-                        progress.mirror(
-                            s.get("stage").and_then(Value::as_str).unwrap_or(""),
-                            s.get("stage_seconds").and_then(Value::as_f64).unwrap_or(0.0),
-                            s.get("fraction").and_then(Value::as_f64),
-                            log,
-                        );
+                        on_status(s);
                     } else if let Some(d) = m.get("done") {
                         done = Some(d.clone());
                     }
@@ -286,21 +329,27 @@ pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
-        if progress.is_cancelled() {
-            // the whole point of a worker: no factorisation has to be waited for
+        if cancelled() {
             let _ = child.kill();
             let _ = child.wait();
             return Err(Error::Cancelled);
         }
     }
     let status = child.wait().map_err(|e| io("waiting for the worker", e))?;
-    let Some(d) = done else {
-        let said = std::fs::read_to_string(&stderr_path).unwrap_or_default();
-        return Err(Error::Solver(format!(
-            "the worker process stopped without an answer ({}): the solve needed more memory than was free, or the process was ended. Nothing else was affected",
-            exit_words(&status, &said)
-        )));
-    };
+    Ok(ChildEnd { done, status, stderr: std::fs::read_to_string(&stderr_path).unwrap_or_default() })
+}
+
+/// The words for a worker that ended without a `done` message.
+pub(crate) fn stopped_words(status: &std::process::ExitStatus, stderr: &str) -> String {
+    format!(
+        "the worker process stopped without an answer ({}): the solve needed more memory than was free, or the process was ended. Nothing else was affected",
+        exit_words(status, stderr)
+    )
+}
+
+/// Reads what a finished worker handed back: the error it reports, the results file in `dir` and what the process cost.
+#[cfg(feature = "hdf5")]
+pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>) -> Result<RemoteDone, Error> {
     let failed = d.get("error").filter(|e| !e.is_null()).map(|e| {
         error_from(
             e.get("code").and_then(Value::as_str).unwrap_or("solver"),
@@ -308,9 +357,9 @@ pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<
         )
     });
     let (results, mesh) = if d.get("has_results").and_then(Value::as_bool) == Some(true) {
-        let _stage = femcore::progress::install(progress);
+        let _stage = progress.map(femcore::progress::install);
         let _s = femcore::progress::stage("reading the results of the worker");
-        let stored = crate::h5io::read_results(&dir.0.join("results.h5")).map_err(Error::Solver)?;
+        let stored = crate::h5io::read_results(&dir.join("results.h5")).map_err(Error::Solver)?;
         (stored.results, Some(stored.mesh))
     } else {
         (vec![], None)
@@ -318,8 +367,44 @@ pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<
     let run = WorkerRun {
         peak_working_set: d.get("peak_working_set").and_then(Value::as_u64),
         peak_commit: d.get("peak_commit").and_then(Value::as_u64),
+        shared: false,
     };
     Ok(RemoteDone { results, mesh, failed, run })
+}
+
+/// Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once.
+#[cfg(feature = "hdf5")]
+pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error> {
+    if progress.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    let dir = new_job_dir()?;
+    write_job_files(&dir.0, spec)?;
+    // what the job logged before the worker started (the mesh, a wait for memory) stays above the worker's own log
+    let base = progress.log();
+    let end = run_child(
+        &spec.worker,
+        &dir.0,
+        &mut |s| {
+            let log = s.get("log").and_then(|l| serde_json::from_value::<Vec<String>>(l.clone()).ok()).map(|l| {
+                let mut all = base.clone();
+                all.extend(l);
+                all
+            });
+            progress.mirror(
+                s.get("stage").and_then(Value::as_str).unwrap_or(""),
+                s.get("stage_seconds").and_then(Value::as_f64).unwrap_or(0.0),
+                s.get("fraction").and_then(Value::as_f64),
+                log,
+            );
+        },
+        &mut |_| {},
+        &|| progress.is_cancelled(),
+    )?;
+    let Some(d) = end.done else {
+        return Err(Error::Solver(stopped_words(&end.status, &end.stderr)));
+    };
+    read_done(&d, &dir.0, Some(progress))
 }
 
 #[cfg(not(feature = "hdf5"))]

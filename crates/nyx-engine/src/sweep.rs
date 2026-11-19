@@ -188,6 +188,7 @@ impl Engine {
             hold: args.get("hold").and_then(Value::as_bool).unwrap_or(false),
             isolate: args.get("isolate").and_then(Value::as_bool),
             force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
+            shared: args.get("shared").and_then(Value::as_bool),
         };
         // every point is edited and checked first: a bad one fails the request and nothing is submitted
         let allowed = self.point_commands();
