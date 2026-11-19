@@ -30,10 +30,7 @@ fn home() -> Option<PathBuf> {
 }
 
 fn default_dir() -> PathBuf {
-    match home() {
-        Some(h) => h.join("Documents").join("nyx_runs").join("mcp"),
-        None => std::env::temp_dir().join("nyx_runs").join("mcp"),
-    }
+    nyx_script::mcp_dir()
 }
 
 /// The folder the file arguments of a script's commands must lie in (the engine's path guard, ADR 93): `--root`, else the workspace when

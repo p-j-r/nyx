@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:2906495a56b8c8dc2831b036cbbed2e7` · 99 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:21133133f069e13f46ab1692dcbe1fb0` · 100 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -68,6 +68,7 @@ Catalog hash: `b3:2906495a56b8c8dc2831b036cbbed2e7` · 99 commands. `nyx api lis
 | [`project_new`](project_new.md) | edit | New project |
 | [`project_open`](project_open.md) | edit | Open a project file |
 | [`project_save`](project_save.md) | expensive | Save the project to a file |
+| [`project_script`](project_script.md) | read | Project as a script |
 | [`queue_cancel`](queue_cancel.md) | expensive | Cancel a queued or running job |
 | [`queue_get`](queue_get.md) | read | One job of the queue |
 | [`queue_hold`](queue_hold.md) | expensive | Hold a queued job |

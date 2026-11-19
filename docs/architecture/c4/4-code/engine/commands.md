@@ -4,18 +4,19 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 
 > The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries.
 
-**Decisions:** [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 90](../../../adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md), [ADR 91](../../../adr/0091-validated-is-a-state-checked-against-the-problem-key.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md)  
-**Size:** 6 files, 3814 lines.
+**Decisions:** [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 90](../../../adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md), [ADR 91](../../../adr/0091-validated-is-a-state-checked-against-the-problem-key.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md)  
+**Size:** 7 files, 4093 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/commands.rs` | 737 | The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list... |
+| `crates/nyx-engine/src/commands.rs` | 742 | The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list... |
 | `crates/nyx-engine/src/engine.rs` | 921 | The engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them and the binding to a workflow folder. The window and the MCP server hold an `Engine` and nothing else; every action is a method... |
 | `crates/nyx-engine/src/guide.rs` | 33 | Cards: short texts a host reads on demand through the `get_guide` command, embedded in the binary. They describe the commands, not a physics: how to build a geometry, assign materials, solve and read a result. |
 | `crates/nyx-engine/src/path_guard.rs` | 157 | The path guard (productivity plan S4, ADR [89]): a front-end that runs text it did not write (a script) asks the engine to keep every file and folder argument of a command inside one folder. The guard is in the engine, not in the script ... |
 | `crates/nyx-engine/src/reduce.rs` | 1731 | Whole-array operations on results (productivity plan N1, ADR 90): `field`, `field_op`, `integrate`, `extremum`, `probe`, `line_cut`, `overlap` and `confinement` as engine commands. A script, the MCP server and the window's Results tab ca... |
+| `crates/nyx-engine/src/scriptout.rs` | 274 | Export as script (productivity plan S7b, ADR [94]): the project as a script that rebuilds it. A person who built a model in the window gives it to an agent (or to themselves, as text) and the agent runs it with `params` to change a value... |
 | `crates/nyx-engine/src/validated.rs` | 235 | Validated is a state, not a feeling (productivity plan P6, ADR 91). A result is `exploratory` until a mesh-convergence check with a stated tolerance has passed on **the same problem key** (`Engine::problem_key`, ADR 84), then it is `chec... |
 
 ## What it uses
@@ -170,6 +171,18 @@ classDiagram
         +BLOCK const
     }
   }
+  namespace scriptout_rs {
+    class Exported {
+        <<struct>>
+        +script String
+        +form str
+        +commands usize
+    }
+    class fns_scriptout_rs {
+        <<module scriptout.rs>>
+        +export(p) Result
+    }
+  }
   namespace validated_rs {
     class Check {
         <<struct>>
@@ -221,7 +234,7 @@ classDiagram
 | enum | `Access` | `commands.rs:18` | variants: `Read`, `Edit`, `Expensive` —  How much a command changes or costs; a host may ask the person before an expensive or editing command. |
 | struct | `CommandDesc` | `commands.rs:28` | fields: `name`, `title`, `description`, `access`, `schema` |
 | fn | `Engine::catalog` | `commands.rs:110` | `pub fn catalog(&self) -> Vec<CommandDesc>` —  Every command of this build, with its schema. The geometry `add_*` commands come from `geomdesc`; the choices of physics from |
-| fn | `Engine::call` | `commands.rs:252` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
+| fn | `Engine::call` | `commands.rs:253` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
 | struct | `Stored` | `engine.rs:22` | fields: `result`, `key`, `job`, `at`, `model`, `run` |
 | enum | `Purpose` | `engine.rs:38` | variants: `Current`, `Point` —  What a solve job is for: the engine's own project, or one point of a sweep. |
 | enum | `Pending` | `engine.rs:43` | variants: `Mesh`, `Solve`, `Point`, `Convergence`, `Open`, `Export` |
@@ -292,6 +305,8 @@ classDiagram
 | fn | `Engine::cmd_line_cut` | `reduce.rs:1619` | `pub(crate) fn cmd_line_cut(&self, args: &Value) -> R` |
 | fn | `Engine::cmd_overlap` | `reduce.rs:1656` | `pub(crate) fn cmd_overlap(&self, args: &Value) -> R` |
 | fn | `Engine::cmd_confinement` | `reduce.rs:1690` | `pub(crate) fn cmd_confinement(&self, args: &Value) -> R` |
+| struct | `Exported` | `scriptout.rs:25` | fields: `script`, `form`, `commands` —  The script and how it was made. |
+| fn | `export` | `scriptout.rs:33` | `pub fn export(p: &Project) -> Result<Exported, Error>` —  The project as a script that rebuilds it (it does not solve). |
 | const | `PLANNED_FACTOR` | `validated.rs:20` | `f64` —  The element-size ratio a check is planned with when none was made (the step the command's own help recommends). |
 | struct | `Check` | `validated.rs:24` | fields: `factor`, `tolerance`, `passed`, `worst_relative`, `worst_quantity`, `quantities`, `cells_coarse`, `cells_refined`, `seconds` —  What a mesh-convergence check with a tolerance found, for one problem key. |
 | enum | `Validation` | `validated.rs:85` | variants: `Exploratory`, `Checked`, `NotAffordable` —  The three states, in the words every front-end shows. |

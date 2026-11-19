@@ -118,6 +118,7 @@ impl Engine {
                 schema(vec![("title", text("project title")), ("dim", int("2 (x-z cross-section, the default) or 3")), ("h", number("global element size in metres"))], &[])),
             cmd("project_info", "Project summary", "Title, geometry size, the problem of each physics, the mesh, the results (and whether they are stale), the store binding and the jobs.", Read, schema(vec![], &[])),
             cmd("project_json", "Project as JSON", "The whole project as JSON text (the file that is saved).", Read, schema(vec![], &[])),
+            cmd("project_script", "Project as a script", "The project as a script (Python, `.nys`) that rebuilds it: project_new, set_param (each parameter reads `params`), one add_* per feature, set_mesh, add_material, set_problem, set_active. It does not solve. It is replayed on a scratch engine and offered only when it gives the same project; `form` says how it is written: `commands`, `geometry_json` (the geometry as one set_geometry, for ids and pins that must be kept) or `project_json` (one project_load of the whole project: exact, not readable). Starts with project_new, so over MCP it needs allow_destructive.", Read, schema(vec![], &[])),
             cmd("project_load", "Load a project from JSON", "Replaces the project by JSON text, after checking it.", Edit, schema(vec![("json", text("project JSON text"))], &["json"])),
             cmd("project_open", "Open a project file", "Reads a project JSON file.", Edit, schema(vec![("path", text("file path"))], &["path"])),
             cmd("project_save", "Save the project to a file", "Writes the project as a JSON file.", Expensive, schema(vec![("path", text("file path"))], &["path"])),
@@ -282,6 +283,10 @@ impl Engine {
             }
             "project_info" => Ok(self.info()),
             "project_json" => Ok(json!({ "json": self.project.to_json() })),
+            "project_script" => {
+                let e = crate::scriptout::export(&self.project)?;
+                Ok(json!({ "script": e.script, "form": e.form, "commands": e.commands }))
+            }
             "project_load" => self.load(Project::from_json(get_str(args, "json")?)?),
             "project_open" => {
                 let path = get_str(args, "path")?;

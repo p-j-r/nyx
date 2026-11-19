@@ -158,7 +158,7 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Commands](../4-code/engine/commands.md) | 6 | 3814 | 57, 38, 15, 90, 91, 93 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries. |
+| [Commands](../4-code/engine/commands.md) | 7 | 4093 | 57, 38, 15, 90, 91, 93, 94 | The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries. |
 | [Project](../4-code/engine/project.md) | 1 | 197 | 63 | The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary. |
 | [Geometry operations](../4-code/engine/geometry.md) | 2 | 730 | 38, 3 | Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only). |
 | [Job runner and queue](../4-code/engine/jobs.md) | 9 | 2415 | 61, 85, 87, 86, 11 | Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings, mesh convergence on a scratch engine. |
@@ -169,4 +169,4 @@ graph TB
 | [Analyses](../4-code/engine/analyse.md) | 1 | 83 | 56 | Runs the analyses of nyx-analysis on the latest result of a physics. |
 | [Results files](../4-code/engine/resultsIO.md) | 3 | 985 | 62, 63 | HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results. |
 | [Store link](../4-code/engine/storeLink.md) | 1 | 305 | 39, 59 | Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here). |
-| [Registry and facade](../4-code/engine/registry.md) | 1 | 97 | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with. |
+| [Registry and facade](../4-code/engine/registry.md) | 1 | 98 | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with. |

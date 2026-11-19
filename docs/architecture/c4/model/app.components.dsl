@@ -3,7 +3,7 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57, 92"
         "code" "crates/app/src: app.rs, feedback.rs, main.rs, spans.rs, state.rs"
-        "lines" "2760"
+        "lines" "2788"
         "codeDiagram" "4-code/app/window.md"
     }
 }

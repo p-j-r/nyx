@@ -181,12 +181,13 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/examples/*` | 41, 9 | benchmarks and logs that drive every physics |
 | `crates/nyx-engine/src/validated.rs` | 91 | the validated state (exploratory, checked, check not affordable), the checks kept by problem key and the verdict written into the run record |
 | `crates/nyx-engine/src/reduce.rs` | 90 | field handles and the reductions `integrate`, `extremum`, `probe`, `line_cut`, `overlap`, `confinement`: the quadrature rule, the order of the sums, the cell locator |
+| `crates/nyx-engine/src/scriptout.rs` | 94 | export as script (`project_script`): the project as a command list replayed on a scratch engine to verify it, then rendered as Python; three forms (`commands`, `geometry_json`, `project_json`) |
 | `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57 | scripts: the host (run and check a script through a worker process), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93 | tracing of script functions (N3): the Python prelude the worker is fed, the formula functions, the `nyx` wrapper that turns a function given as a formula into its text, and the static guard against a branch on a value of the point |
 | `crates/nyx-script/src/kernel.rs` | 94, 93 | the kernel: one Monty session that outlives a script; commands that wait for a job served by polling so no call blocks for ever; `nyx.aio` futures; the refusal of the destructive commands; a dead worker replaced from a dump; `host::run` and `check` are one script on a kernel of their own |
 | `crates/nyx-script/src/bin/nyx-script-worker.rs` | 93, 86 | the script worker program: Monty's worker mode, the only place the interpreter runs |
-| `crates/nyx-script/{Cargo.toml,tests/script.rs,tests/trace.rs,tests/kernel.rs,tests/contract.rs}` | 94, 93, 90 | the nyx-script package, its tests (limits, the path guard, determinism, the static check, same numbers as plain commands) and the `script_api.v1` exemplar test |
+| `crates/nyx-script/{Cargo.toml,tests/script.rs,tests/trace.rs,tests/kernel.rs,tests/export.rs,tests/contract.rs}` | 94, 93, 90 | the nyx-script package, its tests (limits, the path guard, determinism, the static check, same numbers as plain commands) and the `script_api.v1` exemplar test |
 | `crates/nyx-engine/src/path_guard.rs` | 93 | the path guard: file and folder arguments of commands kept inside one folder |
 | `crates/nyx-engine/tests/path_guard.rs` | 93 | the path guard: every path-like argument of the catalog is guarded, no command writes or reads outside the root |
 | `docs/scripting-samples/*` | 93 | a sample script (the strip sweep) |

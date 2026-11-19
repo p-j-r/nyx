@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Script tools** (`mcp.tools`) in the contain
 > Four tools instead of one per command: `script_run` (a script on the kernel; `params`, `path`, `save_as`, `wait_s`, `allow_destructive`), `script_wait` (continue or cancel a script that is waiting for a job), `script_check` (the static check) and `api` (the guide, the command list, one command). One answer, as text, with the project header.
 
 **Decisions:** [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 1 file, 438 lines.
+**Size:** 1 file, 435 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-mcp/src/main.rs` | 438 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. Since S7 (ADR 94) the server offers... |
+| `crates/nyx-mcp/src/main.rs` | 435 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. Since S7 (ADR 94) the server offers... |
 
 ## What it uses
 
@@ -60,16 +60,16 @@ classDiagram
 | const | `DEFAULT_WAIT_S` | `main.rs:23` | `f64` —  How long `script_run` and `script_wait` give a script before answering `running`, and the most they may be asked to. |
 | const | `MAX_WAIT_S` | `main.rs:24` | `f64` |
 | const | `MAX_VALUE_BYTES` | `main.rs:26` | `usize` —  A script's value is cut past this many bytes of JSON: the point of a script is that fields stay in the engine. |
-| fn | `tools` | `main.rs:48` | `fn tools() -> Value` |
-| fn | `script_stem` | `main.rs:95` | `fn script_stem(name: &str) -> Result<String, String>` —  A saved script's file stem: letters, digits, `-` and `_`, with `.nys` allowed and dropped; nothing that names a folder. |
-| fn | `cap_value` | `main.rs:104` | `fn cap_value(v: Value) -> Value` —  A value too long for a model's context is replaced by its start and its size. |
-| fn | `Server::kernel` | `main.rs:153` | `fn kernel(&mut self) -> Result<&mut Kernel, String>` |
-| fn | `Server::scripts_dir` | `main.rs:166` | `fn scripts_dir(&self) -> PathBuf` |
-| fn | `Server::script_of` | `main.rs:171` | `fn script_of(&self, args: &Value) -> Result<(String, String), String>` —  The script a call names: its text and the name its errors and its run records carry. |
-| fn | `Server::wait_of` | `main.rs:191` | `fn wait_of(args: &Value) -> Result<Duration, String>` |
-| fn | `Server::answer` | `main.rs:202` | `fn answer(&mut self, r: Result<Step, String>) -> (Value, bool)` —  The JSON the host gets for one answer of the kernel. |
-| fn | `Server::script_run` | `main.rs:225` | `fn script_run(&mut self, args: &Value) -> (Value, bool)` |
-| fn | `Server::script_wait` | `main.rs:256` | `fn script_wait(&mut self, args: &Value) -> (Value, bool)` |
-| fn | `Server::script_check` | `main.rs:277` | `fn script_check(&mut self, args: &Value) -> (Value, bool)` |
-| fn | `Server::api` | `main.rs:300` | `fn api(&self, args: &Value) -> Result<String, String>` —  Plain text: a guide card, the list of commands, or one command. |
-| fn | `Server::tools_call` | `main.rs:310` | `fn tools_call(&mut self, params: &Value) -> Result<Value, (i64, String)>` |
+| fn | `tools` | `main.rs:45` | `fn tools() -> Value` |
+| fn | `script_stem` | `main.rs:92` | `fn script_stem(name: &str) -> Result<String, String>` —  A saved script's file stem: letters, digits, `-` and `_`, with `.nys` allowed and dropped; nothing that names a folder. |
+| fn | `cap_value` | `main.rs:101` | `fn cap_value(v: Value) -> Value` —  A value too long for a model's context is replaced by its start and its size. |
+| fn | `Server::kernel` | `main.rs:150` | `fn kernel(&mut self) -> Result<&mut Kernel, String>` |
+| fn | `Server::scripts_dir` | `main.rs:163` | `fn scripts_dir(&self) -> PathBuf` |
+| fn | `Server::script_of` | `main.rs:168` | `fn script_of(&self, args: &Value) -> Result<(String, String), String>` —  The script a call names: its text and the name its errors and its run records carry. |
+| fn | `Server::wait_of` | `main.rs:188` | `fn wait_of(args: &Value) -> Result<Duration, String>` |
+| fn | `Server::answer` | `main.rs:199` | `fn answer(&mut self, r: Result<Step, String>) -> (Value, bool)` —  The JSON the host gets for one answer of the kernel. |
+| fn | `Server::script_run` | `main.rs:222` | `fn script_run(&mut self, args: &Value) -> (Value, bool)` |
+| fn | `Server::script_wait` | `main.rs:253` | `fn script_wait(&mut self, args: &Value) -> (Value, bool)` |
+| fn | `Server::script_check` | `main.rs:274` | `fn script_check(&mut self, args: &Value) -> (Value, bool)` |
+| fn | `Server::api` | `main.rs:297` | `fn api(&self, args: &Value) -> Result<String, String>` —  Plain text: a guide card, the list of commands, or one command. |
+| fn | `Server::tools_call` | `main.rs:307` | `fn tools_call(&mut self, params: &Value) -> Result<Value, (i64, String)>` |

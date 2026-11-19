@@ -84,3 +84,14 @@ pub fn find_worker() -> Option<PathBuf> {
     let dir = exe.parent()?;
     [dir.to_path_buf(), dir.parent()?.to_path_buf()].into_iter().map(|d| d.join(&name)).find(|p| p.is_file())
 }
+
+/// The folder the MCP server keeps its workspace in by default: `Documents/nyx_runs/mcp` of the person (the temporary folder when there is no
+/// home). Its `scripts` folder holds the saved scripts `script_run path=...` runs, and the window's "Export as script" writes there, so an agent
+/// finds a script the person exported by its name (ADR 94).
+pub fn mcp_dir() -> PathBuf {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
+    match home {
+        Some(h) => h.join("Documents").join("nyx_runs").join("mcp"),
+        None => std::env::temp_dir().join("nyx_runs").join("mcp"),
+    }
+}

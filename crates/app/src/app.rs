@@ -778,6 +778,30 @@ impl App {
         }
     }
 
+
+    /// File > Export as script: the project as a script that rebuilds it (`project_script`, ADR 94), written where an agent finds it by name, the
+    /// MCP server's `scripts` folder. The window's buffered edits are pushed first, as Save does, so the script is what the person sees.
+    pub fn export_script(&mut self) {
+        if !self.push_edits() {
+            return;
+        }
+        let Some(r) = self.cmd("project_script", json!({})) else { return };
+        let (Some(text), form) = (r["script"].as_str(), r["form"].as_str().unwrap_or("commands")) else { return };
+        // a name an agent can give to `script_run path=...`: letters, digits, - and _
+        let stem: String = self.engine.project().title.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '_' }).collect();
+        let stem = if stem.trim_matches('_').is_empty() { "project".to_string() } else { stem.trim_matches('_').chars().take(60).collect() };
+        let dir = nyx_script::mcp_dir().join("scripts");
+        let _ = std::fs::create_dir_all(&dir);
+        let Some(path) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).set_directory(&dir).set_file_name(format!("{stem}.nys")).save_file() else { return };
+        match std::fs::write(&path, text) {
+            Ok(()) => {
+                let how = if form == "commands" { "" } else { " (one block, not command by command)" };
+                self.status = format!("Exported {}{how}. An agent runs it with script_run path \"{stem}\" and allow_destructive.", path.display());
+            }
+            Err(e) => self.set_error(format!("Could not write the file: {e}")),
+        }
+    }
+
     pub fn load_project(&mut self, path: &std::path::Path) {
         if self.busy.is_some() {
             self.queued = Some(Queued::Open(path.to_path_buf()));
@@ -919,6 +943,10 @@ impl App {
                     self.save_project(true);
                 }
                 ui.separator();
+                if ui.button("Export as script...").clicked() {
+                    ui.close();
+                    self.export_script();
+                }
                 if ui.button("Export current result as CSV...").clicked() {
                     ui.close();
                     self.export_csv();

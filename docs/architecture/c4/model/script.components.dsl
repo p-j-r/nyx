@@ -3,7 +3,7 @@ host = component "Script host" "Runs a script (Python syntax, `*.nys`) through a
     properties {
         "adr" "93, 57"
         "code" "crates/nyx-script/src: convert.rs, host.rs, lib.rs"
-        "lines" "184"
+        "lines" "198"
         "codeDiagram" "4-code/script/host.md"
     }
 }
@@ -11,7 +11,7 @@ kernel = component "Script kernel" "One Monty session in a worker process that o
     properties {
         "adr" "94, 93"
         "code" "crates/nyx-script/src: kernel.rs"
-        "lines" "644"
+        "lines" "650"
         "codeDiagram" "4-code/script/kernel.md"
     }
 }

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Protocol loop** (`mcp.protocol`) in the con
 > Newline-delimited JSON-RPC 2.0 over stdio, no async runtime and no SDK; initialize, ping, tools/list and tools/call. `--dir` (workflows and saved scripts), `--root` (the folder a script's file arguments may name); `--job` is the engine's solve worker.
 
 **Decisions:** [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md)  
-**Size:** 1 file, 438 lines.
+**Size:** 1 file, 435 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-mcp/src/main.rs` | 438 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. Since S7 (ADR 94) the server offers... |
+| `crates/nyx-mcp/src/main.rs` | 435 | nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr. No async runtime and no SDK: the protocol surface nyx needs is five methods. Since S7 (ADR 94) the server offers... |
 
 ## What it uses
 
@@ -61,14 +61,14 @@ classDiagram
 | const | `PROTOCOLS` | `main.rs:21` | `&[&str]` —  Protocol revisions this server speaks, newest first. It answers `initialize` with the client's if listed, else the newest. |
 | fn | `home` | `main.rs:28` | `fn home() -> Option<PathBuf>` |
 | fn | `default_dir` | `main.rs:32` | `fn default_dir() -> PathBuf` |
-| fn | `default_root` | `main.rs:41` | `fn default_root(dir_given: bool, dir: &Path) -> PathBuf` —  The folder the file arguments of a script's commands must lie in (the engine's path guard, ADR 93): `--root`, else the workspace when |
-| fn | `session_id` | `main.rs:89` | `fn session_id() -> String` —  A short id for this process: the session a result belongs to. |
-| struct | `Server` | `main.rs:116` |  |
-| fn | `serve` | `main.rs:367` | `fn serve(dir: PathBuf, root: PathBuf)` |
-| fn | `usage` | `main.rs:396` | `fn usage()` |
-| fn | `take_opt` | `main.rs:404` | `fn take_opt(args: &mut Vec<String>, flag: &str) -> Option<PathBuf>` —  Takes `--flag VALUE` out of the arguments. |
-| fn | `main` | `main.rs:415` | `fn main()` |
-| fn | `Server::new` | `main.rs:128` | `fn new(dir: PathBuf, root: PathBuf) -> Server` |
-| fn | `Server::header` | `main.rs:137` | `fn header(&self) -> Value` |
-| fn | `Server::initialize` | `main.rs:142` | `fn initialize(&mut self, params: &Value) -> Value` |
-| fn | `Server::handle` | `main.rs:344` | `fn handle(&mut self, msg: &Value) -> Option<Value>` —  One incoming message; `None` means no reply (notifications). |
+| fn | `default_root` | `main.rs:38` | `fn default_root(dir_given: bool, dir: &Path) -> PathBuf` —  The folder the file arguments of a script's commands must lie in (the engine's path guard, ADR 93): `--root`, else the workspace when |
+| fn | `session_id` | `main.rs:86` | `fn session_id() -> String` —  A short id for this process: the session a result belongs to. |
+| struct | `Server` | `main.rs:113` |  |
+| fn | `serve` | `main.rs:364` | `fn serve(dir: PathBuf, root: PathBuf)` |
+| fn | `usage` | `main.rs:393` | `fn usage()` |
+| fn | `take_opt` | `main.rs:401` | `fn take_opt(args: &mut Vec<String>, flag: &str) -> Option<PathBuf>` —  Takes `--flag VALUE` out of the arguments. |
+| fn | `main` | `main.rs:412` | `fn main()` |
+| fn | `Server::new` | `main.rs:125` | `fn new(dir: PathBuf, root: PathBuf) -> Server` |
+| fn | `Server::header` | `main.rs:134` | `fn header(&self) -> Value` |
+| fn | `Server::initialize` | `main.rs:139` | `fn initialize(&mut self, params: &Value) -> Value` |
+| fn | `Server::handle` | `main.rs:341` | `fn handle(&mut self, msg: &Value) -> Option<Value>` —  One incoming message; `None` means no reply (notifications). |

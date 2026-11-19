@@ -39,6 +39,7 @@ pub mod project;
 pub mod queue;
 pub mod reduce;
 pub mod results_file;
+pub mod scriptout;
 pub mod solve;
 pub mod store_link;
 pub mod sweep;

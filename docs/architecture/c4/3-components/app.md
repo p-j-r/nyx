@@ -57,6 +57,7 @@ graph TB
     10-. "<div>uses fmt, theme +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     7-. "<div>uses connect: config, env +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
     7-. "<div>uses engine: crate root,<br />engine +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    7-. "<div>uses script: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->16
     7-. "<div>uses pyscript</div><div style='font-size: 70%'>[Rust paths]</div>" .->12
     7-. "<div>uses geomui</div><div style='font-size: 70%'>[Rust paths]</div>" .->9
     7-. "<div>uses activity, examples +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
@@ -67,7 +68,7 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Window](../4-code/app/window.md) | 5 | 2760 | 23, 57, 92 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
+| [Window](../4-code/app/window.md) | 5 | 2788 | 23, 57, 92 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
 | [Shell and dashboard](../4-code/app/shell.md) | 8 | 4421 | 14, 23, 87, 88 | The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
 | [Inspector tabs](../4-code/app/inspector.md) | 3 | 2210 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
 | [Viewport](../4-code/app/viewport.md) | 4 | 1590 | 23, 88 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames. |

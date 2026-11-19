@@ -24,7 +24,7 @@ A model in a script
   print(nyx.result_info(physics="ems")[0]["solutions"][0]["eigenvalue"][0])
 Physics: ems = EM waves, sms = solid mechanics, dfs = diffusion (describe_physics).
 
-Numbers from a field: use the reductions, which run in the engine: integrate, extremum, probe, line_cut, overlap, confinement. A formula is a text or a function of the point, called once: nyx.integrate(expr=lambda p: p["eps_r"] * abs2(p["Ex"]), physics="ems", region="Si"). Do not loop over field values in the script.
+Numbers from a field: use the reductions, which run in the engine: integrate, extremum, probe, line_cut, overlap, confinement. A formula is a text or a function of the point, called once: nyx.integrate(expr=lambda p: p["eps_r"] * abs2(p["Ex"]), physics="ems", region="Si"). A project opened with project_open can be read as a script with project_script.
 
 Before you quote a number
 - convergence_check repeats the solve on a finer mesh with a `tolerance`; the answer says `validated: checked` (`exploratory` if nobody checked it).
