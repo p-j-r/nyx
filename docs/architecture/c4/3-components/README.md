@@ -2,7 +2,7 @@
 
 * [app](./app.md): 6 components
 * [nyx-mcp](./mcp.md): 2 components
-* [nyx-script](./script.md): 4 components
+* [nyx-script](./script.md): 5 components
 * [nyx-connect](./connect.md): 5 components
 * [nyx-engine](./engine.md): 12 components
 * [nyx-physics](./physics.md): 5 components

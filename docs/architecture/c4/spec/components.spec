@@ -17,17 +17,21 @@ style     | Look and widgets | theme.rs kit.rs tokens.rs fmt.rs cvd.rs | 23, 88 
 headless  | Scripts and batch | batch.rs runfile.rs apicmd.rs script.rs pyscript.rs | 23, 89, 93 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
 [mcp | nyx-mcp | nyx_mcp]
-protocol  | Protocol loop | main.rs#main,usage,serve,at_least,session_id,default_dir,NAME,VERSION,PROTOCOLS,Server,Server::new,Server::header,Server::initialize,Server::handle | 15, 57 | Newline-delimited JSON-RPC 2.0 over stdin/stdout: initialize with protocol negotiation, method dispatch, notifications, logs on stderr. No async runtime and no SDK.
-tools     | Tool bridge | main.rs#tool_list,destructive,render,Server::run,Server::tools_call | 15, 57 | The tool list is the engine's command catalog (with annotations: read-only, destructive); a tool call is Engine::call, its reply rendered as text.
-edge mcp.tools -> engine.commands | One tool per command: catalog and call
+protocol  | Protocol loop | main.rs#main,usage,serve,take_opt,session_id,default_dir,default_root,home,NAME,VERSION,PROTOCOLS,Server,Server::new,Server::header,Server::initialize,Server::handle | 15, 57, 94 | Newline-delimited JSON-RPC 2.0 over stdio, no async runtime and no SDK; initialize, ping, tools/list and tools/call. `--dir` (workflows and saved scripts), `--root` (the folder a script's file arguments may name); `--job` is the engine's solve worker.
+tools     | Script tools | main.rs#tools,cap_value,script_stem,MAX_VALUE_BYTES,DEFAULT_WAIT_S,MAX_WAIT_S,Server::kernel,Server::scripts_dir,Server::script_of,Server::wait_of,Server::answer,Server::script_run,Server::script_wait,Server::script_check,Server::api,Server::tools_call | 94, 57 | Four tools instead of one per command: `script_run` (a script on the kernel; `params`, `path`, `save_as`, `wait_s`, `allow_destructive`), `script_wait` (continue or cancel a script that is waiting for a job), `script_check` (the static check) and `api` (the guide, the command list, one command). One answer, as text, with the project header.
+edge mcp.tools -> script.kernel | script_run, script_wait and script_check drive the kernel; the kernel is made at the first script
+edge mcp.tools -> script.stubs | api: the command list and one command's documentation
+edge mcp.tools -> engine.commands | The one engine the scripts drive, and its project header
 edge mcp.protocol -> engine.registry | Server instructions text
 
 [script | nyx-script | nyx_script]
 host      | Script host | lib.rs host.rs convert.rs | 93, 57 | Runs a script (Python syntax, `*.nys`) through a worker process and answers each `nyx.<command>(...)` it makes with Engine::call; the limits, the clock and random policy, the path guard turned on for the run, the script kept with the runs it makes; `check` parses and type-checks without running. JSON to and from script values.
+kernel    | Script kernel | kernel.rs | 94, 93 | One Monty session in a worker process that outlives a script: `run`, `wait`, `cancel` and `check`; variables stay from one script to the next; a command that waits for a job (`solve_run`, `convergence_check`, `job_wait`, `queue_wait`) is started and polled by the host so no call blocks for ever and a script can be left `running`; `nyx.aio` futures; the destructive commands refused unless allowed; a dead worker replaced from a dump.
 stubs     | Type stub | stubs.rs | 93 | The `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads.
 tracing   | Tracing of script functions | trace.rs | 90, 93 | A Python function given as a formula is called once with a symbolic point and becomes formula text (N3): the prelude the worker is fed (the symbolic value, the formula functions, the `nyx` wrapper), the names the stub declares for it, and the static guard that refuses a branch or comparison on a value of the point with its line (Monty does not call `__bool__` or `__lt__`).
 worker    | Worker program | bin/nyx-script-worker.rs | 93, 86 | The only place the Monty interpreter runs: Monty's worker mode over stdin and stdout, with the allocator that bounds its memory. A script that exhausts memory or the stack ends this process, not the engine's.
-edge script.host -> engine.commands | One engine command per script call, and the path guard
+edge script.host -> script.kernel | `nyx run` and `nyx check` are one script on a kernel of their own
+edge script.kernel -> engine.commands | One engine command per script call (and the host's job polling), and the path guard
 edge script.host -> script.worker | Frames over a pipe: the script pauses at each command and the host answers
 edge script.stubs -> engine.commands | Reads the catalog
 

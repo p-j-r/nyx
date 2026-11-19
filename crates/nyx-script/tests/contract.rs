@@ -3,6 +3,7 @@
 //! do that only together with a line in `docs/architecture/contracts/VERSIONS.md`.
 
 use nyx_engine::path_guard::PATH_ARGS;
+use nyx_script::kernel::POLLABLE;
 use nyx_script::trace::{CONDS, FORMULA_ARGS, FUNCS_1, FUNCS_2};
 use nyx_script::Limits;
 use serde_json::{json, Value};
@@ -45,6 +46,18 @@ fn current() -> Value {
             "branch_rule": "if, while, a if c else b, and, or, not, assert, a comparison, math.f and min/max on a value that depends on the point are refused before the script runs, with the line; write where(cond, a, b)",
             "guard_limit": "syntactic: a value the guard cannot follow (a function chosen at run time) is not seen, and then `if sym:` takes the true branch",
             "numbers": "written with repr: finite int or float; an integer stays an integer",
+        },
+        "kernel": {
+            "session": "one Monty session outlives a script: variables, functions and imports stay from one script to the next; the static check knows them",
+            "params": "the dict given to the run, bound in the script as `params` (an empty dict when none)",
+            "waiting_commands": POLLABLE,
+            "waiting_rule": "started without waiting, then polled by the host; when the caller's time is spent the script stays paused at the call and the run answers `running`; the value is the value of the blocking call; the polling is not a script command",
+            "blocked_job": "a job that cannot start (held, queue paused) is an error, not an endless wait",
+            "futures": { "namespace": "nyx.aio", "commands": POLLABLE, "use": "await asyncio.gather(nyx.aio.solve_run(...), ...)", "pending_at_end": "the job of a future left pending when a script ends is cancelled", "missing_in_monty_1_6_0": ["asyncio.gather(return_exceptions=True)", "asyncio.create_task"] },
+            "destructive_commands": "project_new, project_load, project_open, store_open and remove_*: RuntimeError unless the run allows them; `nyx run` allows them",
+            "worker_loss": "a worker that dies is replaced and restored from the dump taken after the last script that finished",
+            "check": "type-checks in a copy of the session; what the part of the script before its first command raises at run time (it has no params) is not an error of the check",
+            "guard_limit_kernel": "the traced-function guard reads one script: a function defined by an earlier script and given as a formula in a later one is not seen",
         },
     })
 }

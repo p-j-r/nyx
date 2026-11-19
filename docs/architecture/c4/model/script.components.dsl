@@ -3,15 +3,23 @@ host = component "Script host" "Runs a script (Python syntax, `*.nys`) through a
     properties {
         "adr" "93, 57"
         "code" "crates/nyx-script/src: convert.rs, host.rs, lib.rs"
-        "lines" "345"
+        "lines" "184"
         "codeDiagram" "4-code/script/host.md"
+    }
+}
+kernel = component "Script kernel" "One Monty session in a worker process that outlives a script: `run`, `wait`, `cancel` and `check`; variables stay from one script to the next; a command that waits for a job (`solve_run`, `convergence_check`, `job_wait`, `queue_wait`) is started and polled by the host so no call blocks for ever and a script can be left `running`; `nyx.aio` futures; the destructive commands refused unless allowed; a dead worker replaced from a dump." "Rust modules" {
+    properties {
+        "adr" "94, 93"
+        "code" "crates/nyx-script/src: kernel.rs"
+        "lines" "644"
+        "codeDiagram" "4-code/script/kernel.md"
     }
 }
 stubs = component "Type stub" "The `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads." "Rust modules" {
     properties {
         "adr" "93"
         "code" "crates/nyx-script/src: stubs.rs"
-        "lines" "73"
+        "lines" "92"
         "codeDiagram" "4-code/script/stubs.md"
     }
 }
@@ -19,7 +27,7 @@ tracing = component "Tracing of script functions" "A Python function given as a 
     properties {
         "adr" "90, 93"
         "code" "crates/nyx-script/src: trace.rs"
-        "lines" "409"
+        "lines" "414"
         "codeDiagram" "4-code/script/tracing.md"
     }
 }

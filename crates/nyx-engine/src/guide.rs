@@ -13,8 +13,8 @@ pub fn card(topic: &str) -> Option<&'static str> {
     }
 }
 
-/// The text a server sends with `initialize`: just enough to find the guide.
-pub const SERVER_INSTRUCTIONS: &str = "nyx runs finite-element photonics and phononics (waveguide modes, effective index, polarization, vibration modes, heat). Call get_guide with topic \"nyx-instructions\" before other nyx tools. Build the geometry with the add_* tools, assign materials, add a physics, mesh and solve; every tool is one command of the nyx engine. Use nyx for numbers and state the assumptions you used.";
+/// The text a server sends with `initialize`: just enough to find the guide (the `api` tool) and to know that the work is scripts.
+pub const SERVER_INSTRUCTIONS: &str = "nyx runs finite-element photonics and phononics (waveguide modes, effective index, polarization, vibration modes, heat). You work by writing short Python scripts: call api first (it is the guide and the list of commands), then script_run; script_check checks a script without running it. Only what a script prints or returns comes back. Use nyx for numbers and state the assumptions you used.";
 
 #[cfg(test)]
 mod tests {

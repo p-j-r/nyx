@@ -6,7 +6,10 @@
 //! outside the engine commands, stops it when it computes too long, allocates too much or sends too many commands, and an engine path guard keeps
 //! the file arguments of those commands inside one folder.
 //!
-//! * `host`: `run` (execute a script against an engine) and `check` (parse and type-check it against the catalog without running anything)
+//! * `kernel`: one Monty session that outlives a script (ADR 94): `run` a script on it, `wait` for one that is waiting for a job, `check` against
+//!   its variables; a command that waits for a job is polled by the host so no call blocks for ever; `nyx.aio` futures; a dump replaces a dead worker
+//! * `host`: `run` (execute one script against an engine) and `check` (parse and type-check it against the catalog without running anything),
+//!   each on a kernel of its own
 //! * `stubs`: the `nyx` module's type stub generated from `Engine::catalog()`: the static check and the file an editor reads
 //! * `convert`: JSON to and from script values
 //! * `trace`: a script function given as a formula is called once with a symbolic point and becomes formula text (N3, ADR 90); the prelude the
@@ -19,6 +22,7 @@ use std::path::PathBuf;
 
 pub mod convert;
 pub mod host;
+pub mod kernel;
 pub mod stubs;
 pub mod trace;
 

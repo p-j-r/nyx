@@ -1,0 +1,17 @@
+# w2_soi_wavelength.nys -- the P0 workflow 2 as one script (productivity plan S7, ADR 94): the same wire, ten wavelengths 1500 to 1590 nm, one physics.
+#
+# Over MCP this is ONE script_run. tools/workflows/w2_soi_wavelength.jsonl is the 31 tool calls it replaces; the numbers are the same.
+#
+# Run it from the repository root, which is the folder the script may use:  nyx run docs/scripting-samples/w2_soi_wavelength.nys --workspace .
+
+C = 299792458.0
+wavelengths = params.get("wavelengths_nm", [1500 + 10 * i for i in range(10)])
+nyx.project_open(path="examples/15_soi_wire.nyx.json")
+rows = []
+for nm in wavelengths:
+    nyx.set_study(physics="ems", kind="modes", params={"freq": C / (nm * 1e-9), "n_modes": 2, "n_target": 2.75})
+    nyx.solve_run()
+    neff = nyx.result_info(physics="ems")[0]["solutions"][0]["eigenvalue"][0]
+    print("%4.0f nm   neff = %.5f" % (nm, neff))
+    rows.append([nm, neff])
+rows

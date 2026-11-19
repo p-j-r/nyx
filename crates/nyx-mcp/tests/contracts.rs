@@ -1,6 +1,6 @@
 //! Interface contract of nyx-mcp (docs/architecture/adr/0015, 0019 and 0057): what an AI host that has registered `nyx` can rely on.
 //!
-//! The snapshot `docs/architecture/contracts/mcp_tools.v2.json` lists, for every tool, its name, its annotations, its required
+//! The snapshot `docs/architecture/contracts/mcp_tools.v3.json` lists, for every tool, its name, its annotations, its required
 //! arguments and every argument with its JSON type (and enum values). Descriptions and defaults are free text and are not pinned.
 //! Adding a tool or an optional argument changes the snapshot (additive: bump the minor in `VERSIONS.md`); removing or renaming a tool or an
 //! argument, or making an argument required, is breaking (bump the major and tell hosts).
@@ -71,7 +71,7 @@ fn tools_snapshot() -> Value {
 #[test]
 fn mcp_tool_list_matches_the_contract_snapshot() {
     let got = serde_json::to_string_pretty(&tools_snapshot()).unwrap();
-    let path = contract_file("mcp_tools.v2.json");
+    let path = contract_file("mcp_tools.v3.json");
     if std::env::var_os("NYX_WRITE_CONTRACT").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, format!("{got}\n")).unwrap();
@@ -91,7 +91,7 @@ fn mcp_handshake_contract() {
         assert_eq!(r[0]["result"]["protocolVersion"], json!(proto), "a supported protocol version is echoed");
         assert_eq!(r[0]["result"]["serverInfo"]["name"], json!("nyx-mcp"));
         assert!(r[0]["result"]["capabilities"]["tools"].is_object());
-        assert!(r[0]["result"]["instructions"].as_str().unwrap().contains("get_guide"), "hosts are told to read the guide first");
+        assert!(r[0]["result"]["instructions"].as_str().unwrap().contains("script_run"), "hosts are told to read the api first and that the work is scripts");
     }
     // an unknown version falls back to a version the server speaks
     let r = session(&[init("1999-01-01")]);

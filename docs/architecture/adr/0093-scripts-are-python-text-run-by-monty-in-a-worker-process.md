@@ -4,6 +4,8 @@ Date: 2026-11-18
 
 ## Status
 
+**Amended by ADR 94** (provisional number, productivity plan S7): the MCP server offers four script tools, `script_run`, `script_wait`, `script_check` and `api`, instead of one tool per engine command, after Paul's answer to Q9 (2026-11-19); the engine commands themselves are unchanged.
+
 Accepted as step S4 of the productivity plan (`docs/NYX2_PRODUCTIVITY_PLAN.md`, section 3b), after Paul's choice (2026-11-18). **The number 93 is provisional**: the plan reserves 89 for scripts, but 89 is the command-list decision (S1) on this line; renumber when the lines merge (see the merge notes in `docs/PRODUCTIVITY_STATUS.md`). Amends ADR 57 (the front-ends over `Engine::call` are now three: the window, the MCP server, scripts) and uses ADR 86 (work that can take the process down runs in a child process). Python stays out in the sense of ADR 13: no CPython is embedded or needed; Monty is a Python-syntax interpreter written in Rust, and Paul accepted it on that reading.
 
 ## Context

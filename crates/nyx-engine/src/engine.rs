@@ -652,6 +652,12 @@ impl Engine {
         out
     }
 
+    /// Why a queued job cannot start however long it is waited for (it is held, or the queue is paused); `None` for a job that is running or
+    /// will start, and for a finished one. A host that polls a job instead of blocking on it asks, so that it does not poll for ever.
+    pub fn job_blocked(&self, id: JobId) -> Option<&'static str> {
+        self.jobs.blocked(id)
+    }
+
     /// Waits for a job and applies it.
     pub fn wait(&mut self, id: JobId) -> Result<Value, Error> {
         if !self.pending.contains_key(&id) {

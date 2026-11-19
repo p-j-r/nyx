@@ -42,11 +42,11 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                 !include c4/model/app.components.dsl
             }
 
-            mcp = container "nyx-mcp" "The MCP server (stdio, JSON-RPC 2.0): every tool is one engine command, with the JSON Schema the engine generates." "Rust binary" "Executable" {
+            mcp = container "nyx-mcp" "The MCP server (stdio, JSON-RPC 2.0): four script tools (script_run, script_wait, script_check, api) over one script kernel; the agent writes Python that calls the engine commands and only what it prints comes back." "Rust binary" "Executable" {
                 properties {
-                    "adr" "0057, 0015"
+                    "adr" "0094, 0057, 0015"
                     "code" "crates/nyx-mcp/src"
-                    "contract" "contracts/mcp_tools.v2.json"
+                    "contract" "contracts/mcp_tools.v3.json"
                 }
                 !include c4/model/mcp.components.dsl
             }
@@ -177,7 +177,8 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
         # containers: exactly the layering table of crates/nyx-engine/tests/layering.rs
         nyx.app -> nyx.engine "Calls commands, polls jobs, draws results" "Rust API"
         nyx.app -> nyx.connect "Connect menu" "Rust API"
-        nyx.mcp -> nyx.engine "One tool per command" "Rust API"
+        nyx.mcp -> nyx.engine "The one engine the scripts drive; the project header" "Rust API"
+        nyx.mcp -> nyx.script "script_run, script_wait, script_check" "Rust API"
         nyx.script -> nyx.engine "One engine command per script call; the path guard" "Rust API"
         nyx.app -> nyx.script "nyx check and nyx run on a script" "Rust API"
         nyx.engine -> nyx.physics "Registry, ProblemSpec, SolveResult" "Rust API"
@@ -236,7 +237,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
         }
 
         dynamic nyx "AICommand" "An AI host builds a model and solves it through the same commands." {
-            aiHost -> nyx.mcp "tools/call add_rect, add_overlay, add_physics, solve_run"
+            aiHost -> nyx.mcp "tools/call script_run (a script that builds, meshes and solves)"
             nyx.mcp -> nyx.engine "call(command, arguments)"
             nyx.engine -> nyx.geom "feature list edit and evaluation"
             nyx.engine -> nyx.femcore "mesh"

@@ -76,3 +76,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 91 | [Validated is a state: a result is checked only by a convergence check on its own problem key](adr/0091-validated-is-a-state-checked-against-the-problem-key.md) | `nyx-engine::{validated,convergence,engine}`, `nyx-store::runs`, `app::{activity,kit}` |
 | 92 | [Feedback while editing is a value, never a job](adr/0092-feedback-while-editing-is-a-value-never-a-job.md) | `nyx-engine::preview`, `app::{feedback,spans}` |
 | 93 | [Scripts are Python-syntax text run by Monty in a worker process, behind an engine path guard](adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md) | `nyx-script`, `nyx-engine::path_guard`, `app::{runfile,apicmd}` |
+| 94 | [The MCP server is four script tools over one long-lived kernel](adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md) | `nyx-script::{kernel,host,stubs,prelude}`, `nyx-mcp::main`, `nyx-engine::{guide,cards}` |

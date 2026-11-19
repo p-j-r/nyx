@@ -14,6 +14,37 @@
   "extension": ".nys",
   "files": "open, pathlib and os raise PermissionError",
   "format": "script_api.v1",
+  "kernel": {
+    "blocked_job": "a job that cannot start (held, queue paused) is an error, not an endless wait",
+    "check": "type-checks in a copy of the session; what the part of the script before its first command raises at run time (it has no params) is not an error of the check",
+    "destructive_commands": "project_new, project_load, project_open, store_open and remove_*: RuntimeError unless the run allows them; `nyx run` allows them",
+    "futures": {
+      "commands": [
+        "solve_run",
+        "convergence_check",
+        "job_wait",
+        "queue_wait"
+      ],
+      "missing_in_monty_1_6_0": [
+        "asyncio.gather(return_exceptions=True)",
+        "asyncio.create_task"
+      ],
+      "namespace": "nyx.aio",
+      "pending_at_end": "the job of a future left pending when a script ends is cancelled",
+      "use": "await asyncio.gather(nyx.aio.solve_run(...), ...)"
+    },
+    "guard_limit_kernel": "the traced-function guard reads one script: a function defined by an earlier script and given as a formula in a later one is not seen",
+    "params": "the dict given to the run, bound in the script as `params` (an empty dict when none)",
+    "session": "one Monty session outlives a script: variables, functions and imports stay from one script to the next; the static check knows them",
+    "waiting_commands": [
+      "solve_run",
+      "convergence_check",
+      "job_wait",
+      "queue_wait"
+    ],
+    "waiting_rule": "started without waiting, then polled by the host; when the caller's time is spent the script stays paused at the call and the run answers `running`; the value is the value of the blocking call; the polling is not a script command",
+    "worker_loss": "a worker that dies is replaced and restored from the dump taken after the last script that finished"
+  },
   "language": "Python syntax, run by Monty 1.6.0 in a worker process (no CPython)",
   "limits": {
     "calls": 20000,

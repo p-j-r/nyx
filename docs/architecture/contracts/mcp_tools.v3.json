@@ -1,0 +1,100 @@
+{
+  "server": "nyx-mcp",
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "The nyx API"
+      },
+      "arguments": {
+        "command": {
+          "type": "string"
+        },
+        "topic": {
+          "enum": [
+            "nyx-instructions",
+            "geometry",
+            "optical-modes",
+            "troubleshooting",
+            "commands"
+          ],
+          "type": "string"
+        }
+      },
+      "name": "api",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Check a script"
+      },
+      "arguments": {
+        "path": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "name": "script_check",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Run a script"
+      },
+      "arguments": {
+        "allow_destructive": {
+          "type": "boolean"
+        },
+        "params": {
+          "type": "object"
+        },
+        "path": {
+          "type": "string"
+        },
+        "save_as": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "wait_s": {
+          "type": "number"
+        }
+      },
+      "name": "script_run",
+      "required": []
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Continue or cancel a waiting script"
+      },
+      "arguments": {
+        "cancel": {
+          "type": "boolean"
+        },
+        "wait_s": {
+          "type": "number"
+        }
+      },
+      "name": "script_wait",
+      "required": []
+    }
+  ]
+}

@@ -10,17 +10,22 @@ graph TB
       subgraph 13 ["nyx-mcp"]
         style 13 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        14["<div style='font-weight: bold'>Protocol loop</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Newline-delimited JSON-RPC<br />2.0 over stdin/stdout:<br />initialize with protocol<br />negotiation, method dispatch,<br />notifications, logs on<br />stderr. No async runtime and<br />no SDK.</div>"]
+        14["<div style='font-weight: bold'>Protocol loop</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Newline-delimited JSON-RPC<br />2.0 over stdio, no async<br />runtime and no SDK;<br />initialize, ping, tools/list<br />and tools/call. `--dir`<br />(workflows and saved<br />scripts), `--root` (the<br />folder a script's file<br />arguments may name); `--job`<br />is the engine's solve worker.</div>"]
         style 14 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        15["<div style='font-weight: bold'>Tool bridge</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The tool list is the engine's<br />command catalog (with<br />annotations: read-only,<br />destructive); a tool call is<br />Engine::call, its reply<br />rendered as text.</div>"]
+        15["<div style='font-weight: bold'>Script tools</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Four tools instead of one per<br />command: `script_run` (a<br />script on the kernel;<br />`params`, `path`, `save_as`,<br />`wait_s`,<br />`allow_destructive`),<br />`script_wait` (continue or<br />cancel a script that is<br />waiting for a job),<br />`script_check` (the static<br />check) and `api` (the guide,<br />the command list, one<br />command). One answer, as<br />text, with the project<br />header.</div>"]
         style 15 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      27["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
-      style 27 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      16("<div style='font-weight: bold'>nyx-script</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library and worker binary]</div><div style='font-size: 80%; margin-top:10px'>Scripts, a third front-end of<br />the engine: Python-syntax<br />text (*.nys) run by Monty in<br />a worker process; each<br />nyx.<command>(...) is one<br />Engine::call. Limits, no<br />ambient access, the engine's<br />path guard.</div>")
+      style 16 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      28["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
+      style 28 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    14-. "<div>Server instructions text</div><div style='font-size: 70%'>[declared in spec]</div>" .->27
-    15-. "<div>One tool per command: catalog<br />and call</div><div style='font-size: 70%'>[declared in spec]</div>" .->27
+    16-. "<div>One engine command per script<br />call; the path guard</div><div style='font-size: 70%'>[Rust API]</div>" .->28
+    14-. "<div>Server instructions text</div><div style='font-size: 70%'>[declared in spec]</div>" .->28
+    15-. "<div>The one engine the scripts<br />drive, and its project header</div><div style='font-size: 70%'>[declared in spec]</div>" .->28
+    15-. "<div>script_run, script_wait and<br />script_check drive the<br />kernel; the kernel is made at<br />the first script</div><div style='font-size: 70%'>[declared in spec]</div>" .->16
+    15-. "<div>api: the command list and one<br />command's documentation</div><div style='font-size: 70%'>[declared in spec]</div>" .->16
 
   end

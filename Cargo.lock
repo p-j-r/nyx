@@ -4370,6 +4370,7 @@ name = "nyx-mcp"
 version = "0.1.0"
 dependencies = [
  "nyx-engine",
+ "nyx-script",
  "serde_json",
 ]
 

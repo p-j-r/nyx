@@ -4,7 +4,8 @@ One page per component, C4 level 4. [Component view](../../3-components/script.m
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Script host](./host.md) | 3 | 345 | 10 | 3 |
-| [Type stub](./stubs.md) | 1 | 73 | 1 | 0 |
-| [Tracing of script functions](./tracing.md) | 1 | 409 | 7 | 1 |
+| [Script host](./host.md) | 3 | 184 | 10 | 3 |
+| [Script kernel](./kernel.md) | 1 | 644 | 12 | 3 |
+| [Type stub](./stubs.md) | 1 | 92 | 3 | 0 |
+| [Tracing of script functions](./tracing.md) | 1 | 414 | 7 | 1 |
 | [Worker program](./worker.md) | 1 | 118 | 9 | 1 |

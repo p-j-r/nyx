@@ -14,33 +14,33 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 21 ["nyx-connect"]
-        style 21 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 22 ["nyx-connect"]
+        style 22 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        22["<div style='font-weight: bold'>Host table</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Where each AI host (Claude<br />Code, Claude Desktop, ...)<br />keeps its MCP config and what<br />an entry looks like; the home<br />folder, application-data<br />folders and the operating<br />system.</div>"]
-        style 22 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        23["<div style='font-weight: bold'>Host config</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Reads and rewrites a host's<br />JSON config: status of the<br />nyx entry, connect,<br />disconnect, list.</div>"]
+        23["<div style='font-weight: bold'>Host table</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Where each AI host (Claude<br />Code, Claude Desktop, ...)<br />keeps its MCP config and what<br />an entry looks like; the home<br />folder, application-data<br />folders and the operating<br />system.</div>"]
         style 23 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        24["<div style='font-weight: bold'>Server probe</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Finds the nyx-mcp program,<br />builds the snippet for a host<br />that is not in the table, and<br />does a real MCP handshake<br />against it.</div>"]
+        24["<div style='font-weight: bold'>Host config</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Reads and rewrites a host's<br />JSON config: status of the<br />nyx entry, connect,<br />disconnect, list.</div>"]
         style 24 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        25["<div style='font-weight: bold'>Report</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The machine-readable form of<br />what nyx-connect finds and<br />does, with its JSON Schema.</div>"]
+        25["<div style='font-weight: bold'>Server probe</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Finds the nyx-mcp program,<br />builds the snippet for a host<br />that is not in the table, and<br />does a real MCP handshake<br />against it.</div>"]
         style 25 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        26["<div style='font-weight: bold'>Command line</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The command-line twin of the<br />Connect menu: list, connect,<br />disconnect, test, optionally<br />as JSON.</div>"]
+        26["<div style='font-weight: bold'>Report</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The machine-readable form of<br />what nyx-connect finds and<br />does, with its JSON Schema.</div>"]
         style 26 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        27["<div style='font-weight: bold'>Command line</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The command-line twin of the<br />Connect menu: list, connect,<br />disconnect, test, optionally<br />as JSON.</div>"]
+        style 27 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
     end
 
-    26-. "<div>uses config</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    26-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
-    26-. "<div>uses report</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
-    26-. "<div>uses server</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    23-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
-    23-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
-    25-. "<div>uses config</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
-    25-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->22
-    25-. "<div>uses server</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
-    24-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
+    27-. "<div>uses config</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
+    27-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    27-. "<div>uses report</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    27-. "<div>uses server</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
+    24-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    24-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
+    26-. "<div>uses config</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
+    26-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
+    26-. "<div>uses server</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
+    25-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
 
   end```
 

@@ -12,24 +12,31 @@ graph TB
 
         17["<div style='font-weight: bold'>Script host</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Runs a script (Python syntax,<br />`*.nys`) through a worker<br />process and answers each<br />`nyx.<command>(...)` it makes<br />with Engine::call; the<br />limits, the clock and random<br />policy, the path guard turned<br />on for the run, the script<br />kept with the runs it makes;<br />`check` parses and<br />type-checks without running.<br />JSON to and from script<br />values.</div>"]
         style 17 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        18["<div style='font-weight: bold'>Type stub</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The `nyx` object written as<br />Python declarations from<br />Engine::catalog(): the static<br />check, and the file an editor<br />reads.</div>"]
+        18["<div style='font-weight: bold'>Script kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One Monty session in a worker<br />process that outlives a<br />script: `run`, `wait`,<br />`cancel` and `check`;<br />variables stay from one<br />script to the next; a command<br />that waits for a job<br />(`solve_run`,<br />`convergence_check`,<br />`job_wait`, `queue_wait`) is<br />started and polled by the<br />host so no call blocks for<br />ever and a script can be left<br />`running`; `nyx.aio` futures;<br />the destructive commands<br />refused unless allowed; a<br />dead worker replaced from a<br />dump.</div>"]
         style 18 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        19["<div style='font-weight: bold'>Tracing of script functions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A Python function given as a<br />formula is called once with a<br />symbolic point and becomes<br />formula text (N3): the<br />prelude the worker is fed<br />(the symbolic value, the<br />formula functions, the `nyx`<br />wrapper), the names the stub<br />declares for it, and the<br />static guard that refuses a<br />branch or comparison on a<br />value of the point with its<br />line (Monty does not call<br />`__bool__` or `__lt__`).</div>"]
+        19["<div style='font-weight: bold'>Type stub</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The `nyx` object written as<br />Python declarations from<br />Engine::catalog(): the static<br />check, and the file an editor<br />reads.</div>"]
         style 19 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        20["<div style='font-weight: bold'>Worker program</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The only place the Monty<br />interpreter runs: Monty's<br />worker mode over stdin and<br />stdout, with the allocator<br />that bounds its memory. A<br />script that exhausts memory<br />or the stack ends this<br />process, not the engine's.</div>"]
+        20["<div style='font-weight: bold'>Tracing of script functions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A Python function given as a<br />formula is called once with a<br />symbolic point and becomes<br />formula text (N3): the<br />prelude the worker is fed<br />(the symbolic value, the<br />formula functions, the `nyx`<br />wrapper), the names the stub<br />declares for it, and the<br />static guard that refuses a<br />branch or comparison on a<br />value of the point with its<br />line (Monty does not call<br />`__bool__` or `__lt__`).</div>"]
         style 20 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        21["<div style='font-weight: bold'>Worker program</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The only place the Monty<br />interpreter runs: Monty's<br />worker mode over stdin and<br />stdout, with the allocator<br />that bounds its memory. A<br />script that exhausts memory<br />or the stack ends this<br />process, not the engine's.</div>"]
+        style 21 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      27["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
-      style 27 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      28["<div style='font-weight: bold'>nyx-engine</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Engine: one project, the<br />mesh built for it, the latest<br />result of each physics, the<br />jobs that produce them, and<br />the binding to a workflow.<br />Every action is a named<br />command with a JSON Schema.</div>"]
+      style 28 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    17-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
-    17-. "<div>uses stubs</div><div style='font-size: 70%'>[Rust paths]</div>" .->18
-    17-. "<div>uses trace</div><div style='font-size: 70%'>[Rust paths]</div>" .->19
-    18-. "<div>uses engine: commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
-    18-. "<div>uses trace</div><div style='font-size: 70%'>[Rust paths]</div>" .->19
-    19-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->27
-    17-. "<div>Frames over a pipe: the<br />script pauses at each command<br />and the host answers</div><div style='font-size: 70%'>[declared in spec]</div>" .->20
+    17-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    17-. "<div>uses kernel</div><div style='font-size: 70%'>[Rust paths]</div>" .->18
+    18-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    18-. "<div>uses convert, crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->17
+    18-. "<div>uses stubs</div><div style='font-size: 70%'>[Rust paths]</div>" .->19
+    18-. "<div>uses trace</div><div style='font-size: 70%'>[Rust paths]</div>" .->20
+    19-. "<div>uses engine: commands, engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    19-. "<div>uses kernel</div><div style='font-size: 70%'>[Rust paths]</div>" .->18
+    19-. "<div>uses trace</div><div style='font-size: 70%'>[Rust paths]</div>" .->20
+    20-. "<div>uses engine: engine</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    20-. "<div>uses kernel</div><div style='font-size: 70%'>[Rust paths]</div>" .->18
+    17-. "<div>Frames over a pipe: the<br />script pauses at each command<br />and the host answers</div><div style='font-size: 70%'>[declared in spec]</div>" .->21
 
   end

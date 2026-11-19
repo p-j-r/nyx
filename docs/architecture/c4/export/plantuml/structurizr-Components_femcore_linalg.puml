@@ -58,13 +58,13 @@ hide stereotype
 
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "femcore\n<size:16>[Container: Rust library]</size>" <<Boundary-ZmVtY29yZQ==>> {
+    rectangle "==Eigensolvers\n<size:16>[Component: Rust modules]</size>\n\nKrylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Eigensolvers
     rectangle "==Preconditioners\n<size:16>[Component: Rust modules]</size>\n\nSmoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Preconditioners
     rectangle "==Time, nonlinear, sweeps\n<size:16>[Component: Rust modules]</size>\n\nTime integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Timenonlinearsweeps
     rectangle "==Matrices and vectors\n<size:16>[Component: Rust modules]</size>\n\nThe one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, problem bundles and test-problem generators." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Matricesandvectors
     rectangle "==Linear algebra driver\n<size:16>[Component: Rust modules]</size>\n\nThe door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Linearalgebradriver
     rectangle "==Direct solvers\n<size:16>[Component: Rust modules]</size>\n\nShifted sparse direct solves with symbolic reuse, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Directsolvers
     rectangle "==Krylov solvers\n<size:16>[Component: Rust modules]</size>\n\nCG, MINRES, GMRES, BiCGStab, COCR, QMR, IDR(s), GCRO-DR for real and complex systems." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Krylovsolvers
-    rectangle "==Eigensolvers\n<size:16>[Component: Rust modules]</size>\n\nKrylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Eigensolvers
   }
 
 }

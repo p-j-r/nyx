@@ -52,7 +52,12 @@ pub fn prelude(engine: &Engine) -> String {
         s.push_str(&format!("def {n}(a, b):\n    return Sym(\"(\" + _nyx_t(a) + \" {op} \" + _nyx_t(b) + \")\")\n\n\n"));
     }
     s.push_str("def lnot(a):\n    return Sym(\"(not \" + _nyx_t(a) + \")\")\n\n\n");
-    s.push_str("class _Nyx:\n");
+    // the commands that wait for a job, as futures (kernel.rs): `await asyncio.gather(nyx.aio.solve_run(...), ...)`
+    s.push_str("class _NyxAio:\n");
+    for n in crate::kernel::POLLABLE {
+        s.push_str(&format!("    def {n}(self, *a, **kw):\n        return _nyx_host.aio.{n}(*a, **kw)\n\n"));
+    }
+    s.push_str("\nclass _Nyx:\n    def __init__(self):\n        self.aio = _NyxAio()\n\n");
     s.push_str("    def call(self, name, *a, **kw):\n        return _nyx_host.call(name, *_nyx_pos(a), **_nyx_kw(kw))\n\n");
     for c in engine.catalog() {
         let takes_formula = c

@@ -50,6 +50,10 @@ fn method(c: &CommandDesc) -> String {
     };
     let mut s = format!("    def {}(self{sig}) -> Any:\n", c.name);
     s.push_str(&format!("        \"\"\"{}", doc_line(&c.title)));
+    // the command's own description is what an agent that writes a script reads: when to use it, what it returns, what it refuses
+    if !c.description.is_empty() {
+        s.push_str(&format!("\n\n        {}", doc_line(&c.description)));
+    }
     for d in docs {
         s.push_str(&format!("\n\n        {d}"));
     }
@@ -57,16 +61,31 @@ fn method(c: &CommandDesc) -> String {
     s
 }
 
+/// One command as a script sees it: its Python signature and its full documentation (what `api command=...` answers). `None` for a name that is
+/// not a command.
+pub fn command_stub(engine: &Engine, name: &str) -> Option<String> {
+    engine.catalog().iter().find(|c| c.name == name).map(method)
+}
+
+/// Every command with its title, one per line.
+pub fn command_list(engine: &Engine) -> String {
+    engine.catalog().iter().map(|c| format!("{:22} {}", c.name, c.title)).collect::<Vec<_>>().join("\n")
+}
+
 /// The stub of `nyx` for the commands of `engine`: a class with one method per command and the global `nyx` of that class.
 pub fn nyx_pyi(engine: &Engine) -> String {
-    let mut s = String::from(
-        "# nyx.pyi -- generated from Engine::catalog(); do not edit. `nyx` is the object every nyx script has: one method per engine command.\nfrom typing import Any\n\nclass _Nyx:\n",
-    );
+    let mut s = String::from("# nyx.pyi -- generated from Engine::catalog(); do not edit. `nyx` is the object every nyx script has: one method per engine command.\nfrom typing import Any\n\n");
+    // the commands that wait for a job also exist as futures: `await asyncio.gather(nyx.aio.solve_run(...), nyx.aio.solve_run(...))`
+    s.push_str("class _NyxAio:\n    \"\"\"The commands that wait for a job, as futures. The engine runs one heavy job at a time, so this overlaps waiting with other work and lets a script post-process each result as it arrives; it does not make solves faster.\"\"\"\n");
+    for c in engine.catalog().into_iter().filter(|c| crate::kernel::POLLABLE.contains(&c.name.as_str())) {
+        s.push_str(&method(&c).replacen("    def ", "    async def ", 1));
+    }
+    s.push_str("\nclass _Nyx:\n    aio: _NyxAio\n");
     s.push_str("    def call(self, name: str, args: dict[str, Any] = ..., /, **kwargs: Any) -> Any:\n        \"\"\"Any command by name, with its arguments as keywords or as one dict.\"\"\"\n        ...\n");
     for c in engine.catalog() {
         s.push_str(&method(&c));
     }
-    s.push_str("\nnyx: _Nyx\n");
+    s.push_str("\nnyx: _Nyx\nparams: dict[str, Any]  # the values given to the script (script_run params); a script reads params.get(\"w\", 500e-9)\n");
     s.push_str(&crate::trace::stub());
     s
 }

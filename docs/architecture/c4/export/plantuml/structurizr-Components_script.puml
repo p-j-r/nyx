@@ -71,6 +71,7 @@ hide stereotype
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "nyx-script\n<size:16>[Container: Rust library and worker binary]</size>" <<Boundary-bnl4LXNjcmlwdA==>> {
     rectangle "==Script host\n<size:16>[Component: Rust modules]</size>\n\nRuns a script (Python syntax, `*.nys`) through a worker process and answers each `nyx.<command>(...)` it makes with Engine::call; the limits, the clock and random policy, the path guard turned on for the run, the script kept with the runs it makes; `check` parses and type-checks without running. JSON to and from script values." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxscript.Scripthost
+    rectangle "==Script kernel\n<size:16>[Component: Rust modules]</size>\n\nOne Monty session in a worker process that outlives a script: `run`, `wait`, `cancel` and `check`; variables stay from one script to the next; a command that waits for a job (`solve_run`, `convergence_check`, `job_wait`, `queue_wait`) is started and polled by the host so no call blocks for ever and a script can be left `running`; `nyx.aio` futures; the destructive commands refused unless allowed; a dead worker replaced from a dump." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxscript.Scriptkernel
     rectangle "==Type stub\n<size:16>[Component: Rust modules]</size>\n\nThe `nyx` object written as Python declarations from Engine::catalog(): the static check, and the file an editor reads." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxscript.Typestub
     rectangle "==Tracing of script functions\n<size:16>[Component: Rust modules]</size>\n\nA Python function given as a formula is called once with a symbolic point and becomes formula text (N3): the prelude the worker is fed (the symbolic value, the formula functions, the `nyx` wrapper), the names the stub declares for it, and the static guard that refuses a branch or comparison on a value of the point with its line (Monty does not call `__bool__` or `__lt__`)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxscript.Tracingofscriptfunctions
     rectangle "==Worker program\n<size:16>[Component: Rust modules]</size>\n\nThe only place the Monty interpreter runs: Monty's worker mode over stdin and stdout, with the allocator that bounds its memory. A script that exhausts memory or the stack ends this process, not the engine's." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxscript.Workerprogram
@@ -80,11 +81,16 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
 }
 
 nyx.nyxscript.Scripthost --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: engine\n<size:16>[Rust paths]</size>"
-nyx.nyxscript.Scripthost --> nyx.nyxscript.Typestub <<Relationship-UmVsYXRpb25zaGlw>> : "uses stubs\n<size:16>[Rust paths]</size>"
-nyx.nyxscript.Scripthost --> nyx.nyxscript.Tracingofscriptfunctions <<Relationship-UmVsYXRpb25zaGlw>> : "uses trace\n<size:16>[Rust paths]</size>"
+nyx.nyxscript.Scripthost --> nyx.nyxscript.Scriptkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses kernel\n<size:16>[Rust paths]</size>"
+nyx.nyxscript.Scriptkernel --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: engine\n<size:16>[Rust paths]</size>"
+nyx.nyxscript.Scriptkernel --> nyx.nyxscript.Scripthost <<Relationship-UmVsYXRpb25zaGlw>> : "uses convert, crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxscript.Scriptkernel --> nyx.nyxscript.Typestub <<Relationship-UmVsYXRpb25zaGlw>> : "uses stubs\n<size:16>[Rust paths]</size>"
+nyx.nyxscript.Scriptkernel --> nyx.nyxscript.Tracingofscriptfunctions <<Relationship-UmVsYXRpb25zaGlw>> : "uses trace\n<size:16>[Rust paths]</size>"
 nyx.nyxscript.Typestub --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: commands, engine\n<size:16>[Rust paths]</size>"
+nyx.nyxscript.Typestub --> nyx.nyxscript.Scriptkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses kernel\n<size:16>[Rust paths]</size>"
 nyx.nyxscript.Typestub --> nyx.nyxscript.Tracingofscriptfunctions <<Relationship-UmVsYXRpb25zaGlw>> : "uses trace\n<size:16>[Rust paths]</size>"
 nyx.nyxscript.Tracingofscriptfunctions --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: engine\n<size:16>[Rust paths]</size>"
+nyx.nyxscript.Tracingofscriptfunctions --> nyx.nyxscript.Scriptkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses kernel\n<size:16>[Rust paths]</size>"
 nyx.nyxscript.Scripthost --> nyx.nyxscript.Workerprogram <<Relationship-UmVsYXRpb25zaGlw>> : "Frames over a pipe: the script pauses at each command and the host answers\n<size:16>[declared in spec]</size>"
 
 @enduml
