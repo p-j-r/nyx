@@ -33,6 +33,14 @@ pub(crate) struct RemoteSpec {
     /// every material of the library the job sees, as TOML by name
     pub materials: BTreeMap<String, String>,
     pub targets: Vec<String>,
+    /// a point of a warm sweep (P5b): the worker leaves its modes behind, and starts from `input` when there are some
+    pub warm: Option<WarmIo>,
+}
+
+/// The modes handed to a worker for a warm start (none for the first point, which only records).
+#[derive(Clone)]
+pub(crate) struct WarmIo {
+    pub input: Option<Arc<Vec<u8>>>,
 }
 
 /// What a worker handed back.
@@ -45,6 +53,9 @@ pub(crate) struct RemoteDone {
     /// why the chain stopped, when a physics failed after others were solved or before any was
     pub failed: Option<Error>,
     pub run: WorkerRun,
+    /// the modes the worker left for the next point of a warm sweep, and what its eigensolves did
+    pub warm_out: Option<Vec<u8>>,
+    pub warm_calls: Vec<Value>,
 }
 
 /// The materials of a library as TOML by name, what a worker rebuilds the library from.
@@ -157,7 +168,15 @@ fn serve_job(dir: &Path) -> Result<(), String> {
         // a crash drill for the tests: the process dies the way one does when the allocator gives up, with no answer
         std::process::abort();
     }
-    let id = e.start_solve_with(Some(targets), &crate::queue::QueueOpts::default()).map_err(|e| e.to_string())?;
+    // a point of a warm sweep (P5b): start from the modes in `warm_in.bin` when there are some, and leave this solve's in `warm_out.bin`
+    let warm_on = job["warm"].as_bool() == Some(true);
+    let warm_cell = crate::reuse::WarmCell::new();
+    let mut opts = crate::queue::QueueOpts::default();
+    if warm_on {
+        let input = std::fs::read(dir.join("warm_in.bin")).ok().map(Arc::new);
+        opts.warm = Some(crate::reuse::WarmLink::for_worker(input, warm_cell.clone()));
+    }
+    let id = e.start_solve_with(Some(targets), &opts).map_err(|e| e.to_string())?;
     let mut sent_log = 0usize;
     let mut sent_last = String::new();
     let outcome = loop {
@@ -189,6 +208,13 @@ fn serve_job(dir: &Path) -> Result<(), String> {
         }
         Err(_) => false,
     };
+    if let Some(d) = warm_on.then(|| warm_cell.get()).flatten() {
+        if let Some(b) = &d.bytes {
+            std::fs::write(dir.join("warm_out.bin"), b.as_slice()).map_err(|e| format!("warm_out.bin: {e}"))?;
+        }
+        std::fs::write(dir.join("warm_calls.json"), json!(d.calls).to_string())
+            .map_err(|e| format!("warm_calls.json: {e}"))?;
+    }
     let (ws, commit) = crate::process::peak_memory().unzip();
     // the size of what was solved, for the estimates of later solves (the queue worker adds the row to the history)
     let size = e.results_snapshot().ok().filter(|s| !s.results.is_empty()).map(|s| {
@@ -265,8 +291,14 @@ pub(crate) struct ChildEnd {
 pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error> {
     let io = |what: &str, e: std::io::Error| Error::Solver(format!("{what}: {e}"));
     std::fs::write(dir.join("project.nyx.json"), &spec.project_json).map_err(|e| io("writing the job's project", e))?;
-    std::fs::write(dir.join("job.json"), json!({ "targets": spec.targets, "materials": spec.materials }).to_string())
-        .map_err(|e| io("writing the job's description", e))?;
+    std::fs::write(
+        dir.join("job.json"),
+        json!({ "targets": spec.targets, "materials": spec.materials, "warm": spec.warm.is_some() }).to_string(),
+    )
+    .map_err(|e| io("writing the job's description", e))?;
+    if let Some(input) = spec.warm.as_ref().and_then(|w| w.input.as_ref()) {
+        std::fs::write(dir.join("warm_in.bin"), input.as_slice()).map_err(|e| io("writing the job's warm start", e))?;
+    }
     Ok(())
 }
 
@@ -369,7 +401,12 @@ pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>)
         peak_commit: d.get("peak_commit").and_then(Value::as_u64),
         shared: false,
     };
-    Ok(RemoteDone { results, mesh, failed, run })
+    let warm_out = std::fs::read(dir.join("warm_out.bin")).ok();
+    let warm_calls = std::fs::read_to_string(dir.join("warm_calls.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
+        .unwrap_or_default();
+    Ok(RemoteDone { results, mesh, failed, run, warm_out, warm_calls })
 }
 
 /// Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once.

@@ -513,6 +513,7 @@ impl Engine {
                     project_json: project.to_json(),
                     materials: crate::worker::material_texts(&library),
                     targets: targets.clone(),
+                    warm: None,
                 }),
                 (Some(why), _) if explicit => return Err(Error::invalid(format!("`isolate` is not possible: {why}"))),
                 _ => None,
@@ -526,6 +527,9 @@ impl Engine {
         let shared_id: Arc<std::sync::Mutex<Option<String>>> = Default::default();
         let (owner, priority, stamp_now) = (submit.owner.clone(), submit.priority, self.stamp());
         let hold_item = opts.hold;
+        // a point of a warm sweep (P5b): a point that waits for its predecessor does so only in the shared lane, where it holds nothing
+        let warm_link = opts.warm.clone();
+        let (jobs_handle, warm_wait) = (self.jobs.clone(), shared.is_some());
         let estimate_slot: Arc<std::sync::Mutex<Option<crate::estimate::Estimate>>> = Default::default();
         let (history, probe, force, slot) =
             (self.history.clone(), self.memory_probe.clone(), opts.force, estimate_slot.clone());
@@ -574,15 +578,34 @@ impl Engine {
                         crate::estimate::admit(est, force, &probe, &progress)?;
                     }
                 }
+                // what a warm sweep hands from one point to the next: the cell is filled when this job ends, however it ends
+                let _cell_guard = warm_link.as_ref().map(|l| l.guard());
+                let resolved = match &warm_link {
+                    Some(l) => Some(l.resolve(&jobs_handle, warm_wait, &progress)?),
+                    None => None,
+                };
+                let mut warm_done: Option<crate::reuse::WarmDone> = None;
                 let (results, failed, worker) = match (&shared, &remote) {
                     (_, None) => {
-                        let (r, f) =
-                            crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress);
+                        let (r, f) = match &resolved {
+                            Some(rs) => {
+                                let (out, wd) = crate::reuse::with_context(rs, || {
+                                    crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress)
+                                });
+                                warm_done = Some(wd);
+                                out
+                            }
+                            None => crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress),
+                        };
                         (r, f, None)
                     }
                     (shared, Some(spec)) => {
+                        let mut spec_w = spec.clone();
+                        if let Some(rs) = &resolved {
+                            spec_w.warm = Some(crate::worker::WarmIo { input: rs.bytes.clone() });
+                        }
                         let done = match shared {
-                            Some((q, spec, program)) => {
+                            Some((q, _, program)) => {
                                 let item = crate::shared_queue::NewItem {
                                     owner: owner.clone(),
                                     priority,
@@ -592,10 +615,16 @@ impl Engine {
                                     force,
                                     estimate: est.clone(),
                                 };
-                                crate::shared_queue::run_shared(q, program, &item, spec, &progress, &slot_id, &own_items)?
+                                crate::shared_queue::run_shared(q, program, &item, &spec_w, &progress, &slot_id, &own_items)?
                             }
-                            None => crate::worker::run_remote(spec, &progress)?,
+                            None => crate::worker::run_remote(&spec_w, &progress)?,
                         };
+                        if resolved.is_some() {
+                            warm_done = Some(crate::reuse::WarmDone {
+                                bytes: done.warm_out.clone().map(Arc::new),
+                                calls: done.warm_calls.clone(),
+                            });
+                        }
                         {
                             // the last word of the log: what the process cost (the log shown is the worker's, mirrored, until now)
                             let _installed = femcore::progress::install(&progress);
@@ -623,12 +652,29 @@ impl Engine {
                     _ => {}
                 }
                 let cells = model.mesh().n_cells();
-                for r in &results {
-                    if let Some(k) = solve_keys.get(&r.physics) {
-                        stages.put_solve(&solve_key(k, &chain), &Arc::new(SolveSummary::of(r, cells)));
+                // a solve started from another's modes is not kept as the coarse solve of a convergence check: the check solves cold
+                let warm_applied = warm_done.as_ref().is_some_and(|d| d.calls.iter().any(|c| c["warm"] == json!(true)));
+                if !warm_applied {
+                    for r in &results {
+                        if let Some(k) = solve_keys.get(&r.physics) {
+                            stages.put_solve(&solve_key(k, &chain), &Arc::new(SolveSummary::of(r, cells)));
+                        }
                     }
                 }
-                Ok(JobOutput::Solved { model, results, failed, worker })
+                let reuse = match (&warm_link, &resolved) {
+                    (Some(l), Some(rs)) => {
+                        let calls = warm_done.as_ref().map(|d| d.calls.clone()).unwrap_or_default();
+                        Some(crate::reuse::reuse_json(l, rs, &calls))
+                    }
+                    _ => None,
+                };
+                if let (Some(l), Some(d)) = (&warm_link, warm_done) {
+                    // only a solve that finished its whole chain hands its modes on
+                    if failed.is_none() {
+                        l.mine.set(d);
+                    }
+                }
+                Ok(JobOutput::Solved { model, results, failed, worker, reuse })
             }
         });
         match purpose {
@@ -681,6 +727,7 @@ impl Engine {
             project_json: self.project.to_json(),
             materials: crate::worker::material_texts(&library),
             targets: targets.clone(),
+            warm: None,
         };
         let item = crate::shared_queue::NewItem {
             owner: self.owner.clone(),
@@ -842,7 +889,10 @@ impl Engine {
             (Pending::Solve { generation, .. }, Ok(JobOutput::Solved { .. })) if generation != self.generation => {
                 Err(Error::invalid("the project was replaced while this solve ran; its results were dropped"))
             }
-            (Pending::Solve { key, keys, project, .. }, Ok(JobOutput::Solved { model, results, failed, worker })) => {
+            (
+                Pending::Solve { key, keys, project, .. },
+                Ok(JobOutput::Solved { model, results, failed, worker, .. }),
+            ) => {
                 let (cells, dim) = (model.mesh().n_cells() as u64, model.mesh().dim() as u8);
                 let mesh = model.solver_mesh();
                 let solved_on = model.clone();

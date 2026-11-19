@@ -1223,6 +1223,14 @@
           "description": "1, 2 or 3; default 3",
           "type": "integer"
         },
+        "reuse": {
+          "description": "`warm`: each point starts its eigensolves from the modes of the previous point instead of a random block (the first point only records them), which shortens the iterations of a sweep that keeps its mesh (a material, a study value, a boundary condition, a frequency with the mesh not sized by the physics; a point whose mesh or number of unknowns differs starts cold). The numbers agree to the solver's tolerance but not bit for bit with a cold solve, so a warm point is marked `exploratory` in its row and run (`reuse`) until it is solved cold. Default `none`: every point is a cold solve",
+          "enum": [
+            "none",
+            "warm"
+          ],
+          "type": "string"
+        },
         "series": {
           "description": "one command repeated with `field` set to each value",
           "properties": {

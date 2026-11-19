@@ -182,7 +182,7 @@ impl StoreLink {
         mesh: Option<&femcore::mesh::SimplexMesh>,
     ) -> Result<RunRecord, Error> {
         self.commit(project)?;
-        self.record_frozen(project, outcome, seconds, log, mesh)
+        self.record_frozen(project, outcome, seconds, log, mesh, None)
     }
 
     /// Adds a run for a project that is not the experiment's own (a point of a sweep): the run freezes the project it solved, and the
@@ -194,8 +194,9 @@ impl StoreLink {
         seconds: f64,
         log: &[String],
         mesh: Option<&femcore::mesh::SimplexMesh>,
+        reuse: Option<&serde_json::Value>,
     ) -> Result<RunRecord, Error> {
-        self.record_frozen(project, outcome, seconds, log, mesh)
+        self.record_frozen(project, outcome, seconds, log, mesh, reuse)
     }
 
     fn record_frozen(
@@ -205,6 +206,7 @@ impl StoreLink {
         seconds: f64,
         log: &[String],
         mesh: Option<&femcore::mesh::SimplexMesh>,
+        reuse: Option<&serde_json::Value>,
     ) -> Result<RunRecord, Error> {
         let (existing, _) = self.dir.runs(&self.experiment);
         let id = runs::next_id(&existing);
@@ -212,6 +214,7 @@ impl StoreLink {
             id: id.clone(),
             sec: seconds,
             femcore: format!("nyx-engine {}", env!("CARGO_PKG_VERSION")),
+            reuse: reuse.cloned(),
             ..Default::default()
         };
         for p in project.geometry.params.iter().filter_map(|p| match p.value {

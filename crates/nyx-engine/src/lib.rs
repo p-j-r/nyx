@@ -39,6 +39,7 @@ pub mod project;
 pub mod queue;
 pub mod reduce;
 pub mod results_file;
+pub mod reuse;
 pub mod scriptout;
 pub mod shared_queue;
 pub mod solve;

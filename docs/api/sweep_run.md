@@ -19,6 +19,7 @@ Queues one solve per point and returns the sweep's number at once. A point is a 
 | `points[].edits[].cmd` | text | yes |  | a command that changes the project |
 | `points[].label` | text | no |  | a name for the point in the table; default `point N` |
 | `priority` | integer | no |  | 1, 2 or 3; default 3 |
+| `reuse` | text: `none`, `warm` | no |  | `warm`: each point starts its eigensolves from the modes of the previous point instead of a random block (the first point only records them), which shortens the iterations of a sweep that keeps its mesh (a material, a study value, a boundary condition, a frequency with the mesh not sized by the physics; a point whose mesh or number of unknowns differs starts cold). The numbers agree to the solver's tolerance but not bit for bit with a cold solve, so a warm point is marked `exploratory` in its row and run (`reuse`) until it is solved cold. Default `none`: every point is a cold solve |
 | `series` | object | no |  | one command repeated with `field` set to each value |
 | `series.args` | object | no |  | its arguments that stay the same |
 | `series.cmd` | text | yes |  | the edit command repeated at every point |

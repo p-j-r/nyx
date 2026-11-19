@@ -71,6 +71,10 @@ pub struct RunRecord {
     /// the convergence check of the problem this run solved, when one was made (optional: runs written before it existed load without it)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub convergence: Option<Convergence>,
+    /// how the run's eigensolves were started when a sweep asked for warm starts (productivity plan P5b): which point's modes, how many
+    /// restarts, and that the result is not confirmed until it is solved cold (optional: other runs carry none)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

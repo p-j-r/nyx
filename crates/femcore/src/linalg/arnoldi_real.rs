@@ -124,6 +124,10 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
     let shifted = a.add_scaled(b, -sigma);
     let solver = DirectSolver::new(&shifted, false)?;
     let p = if opts.block > 0 { opts.block } else { nev.min(8) };
+    // a warm start (P5b): the previous solve's modes are the first block, all of them
+    let ticket = crate::warm::begin("arnoldi_real", n, nev);
+    let warm_cols: Option<Vec<f64>> = ticket.as_ref().and_then(|t| t.start_columns::<f64>());
+    let p = if warm_cols.is_some() { p.max(nev) } else { p };
     let max_dim = max_dim_for(n, nev, opts);
 
     let mut v: Vec<Vec<f64>> = Vec::new();
@@ -131,7 +135,14 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
     let mut h: Vec<Vec<f64>> = Vec::new(); // h[i][j] = v_i . (OP v_j)
     let mut rng = Rng(0xD1B54A32D192ED03);
     let mut cand: Vec<Vec<f64>> = (0..p).map(|_| (0..n).map(|_| rng.next()).collect()).collect();
+    if let Some(w) = &warm_cols {
+        for (c, prev) in cand.iter_mut().zip(w.chunks(n)) {
+            c.copy_from_slice(prev);
+        }
+    }
+    let mut cycles = 0usize;
     loop {
+        cycles += 1;
         crate::progress::check()?;
         let before = v.len();
         for mut w in cand.drain(..) {
@@ -227,6 +238,9 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
         all_ok &= out.values.len() == nev;
         if all_ok || e + p > max_dim {
             out.converged = all_ok;
+            if let (Some(t), true) = (ticket, all_ok) {
+                t.finish(out.vectors.iter().map(Vec::as_slice), cycles);
+            }
             return Ok(out);
         }
         cand = (before..e).map(|j| ov[j].clone()).collect();

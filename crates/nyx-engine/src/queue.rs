@@ -29,6 +29,8 @@ pub struct QueueOpts {
     /// hand a solve to the queue of the workspace (Q3: the queue worker runs it, whichever program asked; it implies `isolate`); `None` is what the
     /// engine was told to do by default (`Engine::set_shared_queue`)
     pub shared: Option<bool>,
+    /// this solve is a point of a warm sweep (`reuse: "warm"`, P5b): where its start block comes from and where it leaves its own modes
+    pub warm: Option<crate::reuse::WarmLink>,
 }
 
 /// What the engine remembers of a job beyond the runner's own record.
@@ -268,6 +270,7 @@ impl Engine {
                     isolate: args.get("isolate").and_then(Value::as_bool),
                     force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
                     shared: args.get("shared").and_then(Value::as_bool),
+                    warm: None,
                 };
                 let physics = args.get("physics").and_then(Value::as_str);
                 let job = match args.get("kind").and_then(Value::as_str).unwrap_or("solve") {

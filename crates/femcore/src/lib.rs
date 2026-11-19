@@ -39,6 +39,7 @@ pub mod periodic;
 pub mod pml;
 pub mod props;
 pub mod progress;
+pub mod warm;
 pub mod section;
 pub mod testkit;
 pub mod linalg;

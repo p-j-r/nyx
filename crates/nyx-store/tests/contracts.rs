@@ -91,6 +91,7 @@ fn store_run_record_exemplar_is_stable_and_old_lines_still_read() {
         artifacts: vec![Artifact { kind: "fields".into(), path: "r0001_abcd/fields.h5".into(), bytes: 1024 }],
         error: None,
         convergence: None,
+        reuse: None,
     };
     check_exemplar("store_run.v1.json", &serde_json::to_string(&r).unwrap());
     // a line written before `version`, `tags`, `star`, `note` and `artifacts` existed still reads (they are `#[serde(default)]`)

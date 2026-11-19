@@ -185,6 +185,10 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
     }
     progress::check()?;
     let block = if opts.block > 0 { opts.block } else { nev.min(8) };
+    // a warm start (P5b): the modes of the previous solve of a sweep are the start block, all of them, so the block holds at least `nev` columns
+    let ticket = crate::warm::begin("shift_invert", n, nev);
+    let warm_start: Option<Vec<T>> = ticket.as_ref().and_then(|t| t.start_columns::<T>());
+    let block = if warm_start.is_some() { block.max(nev) } else { block };
     let kind = match sym {
         Symmetry::Hermitian => Kind::Hermitian,
         Symmetry::General => Kind::General,
@@ -202,11 +206,16 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
     };
     let op = Guarded { inner: ParShiftInvert { fac: &fac, b, min_n: opts.par_solve_min_n }, project, _t: std::marker::PhantomData };
     let weight: Option<&dyn LinearOperator<T>> = if sym == Symmetry::Hermitian { Some(b) } else { None };
-    let res = match catch_unwind(AssertUnwindSafe(|| krylov_schur(&op, weight, None, &eps))) {
+    let res = match catch_unwind(AssertUnwindSafe(|| krylov_schur(&op, weight, warm_start.as_deref(), &eps))) {
         Ok(r) => r.map_err(|e| format!("the eigensolver failed: {e}"))?,
         Err(payload) if payload.is::<CancelUnwind>() => return Err(progress::CANCELLED.into()),
         Err(payload) => resume_unwind(payload),
     };
+    if let Some(t) = ticket {
+        if res.reason == EpsReason::Converged {
+            t.finish((0..res.values.len()).map(|i| res.vectors.col(i)), res.iterations);
+        }
+    }
     let s = sigma.to_c64();
     let values: Vec<C64> = res.values.iter().map(|&th| s + C64::ONE / th).collect();
     let (mut ax, mut bx) = (vec![T::ZERO; n], vec![T::ZERO; n]);

@@ -31,6 +31,8 @@ pub enum JobOutput {
         failed: Option<Error>,
         /// what the worker process reported, when the solve ran in one (`worker.rs`)
         worker: Option<WorkerRun>,
+        /// how the solve was started when it was a point of a warm sweep (`reuse.rs`)
+        reuse: Option<Value>,
     },
     /// the answer of a mesh convergence check
     Convergence(Value),
@@ -181,6 +183,7 @@ struct Shared {
     sched: Mutex<Sched>,
 }
 
+#[derive(Clone)]
 pub struct JobRunner {
     shared: Arc<Shared>,
 }

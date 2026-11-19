@@ -103,6 +103,10 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |
 | `crates/femcore/src/validate.rs` | 9 | |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
+| `crates/femcore/src/warm.rs` | 96 | warm starts of the eigensolvers: a context on the solving thread, the previous solve's modes as the start block, bytes for a worker process |
+| `crates/femcore/tests/warm.rs` | 96 | same modes in fewer iterations; no context or an empty one is the same bits; another size is a cold start |
+| `crates/nyx-engine/src/reuse.rs` | 96 | the chain of a warm sweep: the link, the cell a point leaves its modes in, the wait in the shared lane, the reuse record |
+| `crates/nyx-engine/tests/warm_sweep.rs` | 96 | a warm sweep agrees with a cold one, later points start warm, a worker and the queue worker give one answer, a predecessor that cannot finish does not hold the lane |
 | `crates/femcore/src/section.rs` | 1 | |
 | `crates/femcore/src/props.rs` | 41, 25 | shared per-domain data (materials, PML, periodic pairs, linear solver); replaced by material files in phase 6 |
 | `crates/femcore/src/testkit/*` | 41, 10, 60 | mesh fixtures of the tests of every physics crate; `soi.rs`, the cross-section of the SOI wire |

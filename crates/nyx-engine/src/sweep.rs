@@ -36,6 +36,8 @@ pub(crate) struct Prepared {
     asked: Vec<Asked>,
     pub targets: Option<Vec<String>>,
     opts: QueueOpts,
+    /// `reuse: "warm"`: each point starts its eigensolves from the modes of the one before (P5b, ADR 96)
+    warm: bool,
     pub engines: Vec<Engine>,
 }
 
@@ -189,6 +191,12 @@ impl Engine {
             isolate: args.get("isolate").and_then(Value::as_bool),
             force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
             shared: args.get("shared").and_then(Value::as_bool),
+            warm: None,
+        };
+        let warm = match args.get("reuse").and_then(Value::as_str) {
+            None | Some("none") => false,
+            Some("warm") => true,
+            Some(other) => return Err(Error::invalid(format!("`reuse` is `none` or `warm`, not '{other}'"))),
         };
         // every point is edited and checked first: a bad one fails the request and nothing is submitted
         let allowed = self.point_commands();
@@ -203,21 +211,34 @@ impl Engine {
             }
             engines.push(e);
         }
-        Ok(Prepared { asked, targets, opts, engines })
+        Ok(Prepared { asked, targets, opts, warm, engines })
     }
 
     fn sweep_run(&mut self, args: &Value) -> Result<Value, Error> {
-        let Prepared { asked, targets, opts, engines } = self.sweep_prepare(args)?;
+        let Prepared { asked, targets, opts, warm, engines } = self.sweep_prepare(args)?;
+        let cells: Vec<std::sync::Arc<crate::reuse::WarmCell>> =
+            (0..engines.len()).map(|_| crate::reuse::WarmCell::new()).collect();
         // a host that records (the MCP server) gets its workflow before the first run, as a solve does
         if self.auto_store && self.link.is_none() && self.workspace.is_some() {
             self.save_to_workspace(None)?;
         }
         self.next_sweep += 1;
         let id = self.next_sweep;
-        let mut points = vec![];
+        let mut points: Vec<Point> = vec![];
         let mut resolved = vec![];
         for (i, (a, e)) in asked.into_iter().zip(engines.iter()).enumerate() {
-            match self.submit_solve(Some(e), targets.clone(), &opts, Purpose::Point { sweep: id, index: i }) {
+            // a warm sweep links each point to the one before: its modes are this point's start block (the first point only records)
+            let mut point_opts = opts.clone();
+            if warm {
+                let source = match points.last() {
+                    Some(prev) => {
+                        crate::reuse::WarmSource::Cell { cell: cells[i - 1].clone(), job: prev.job, index: i - 1 }
+                    }
+                    None => crate::reuse::WarmSource::Cold,
+                };
+                point_opts.warm = Some(crate::reuse::WarmLink { source, mine: cells[i].clone(), index: i });
+            }
+            match self.submit_solve(Some(e), targets.clone(), &point_opts, Purpose::Point { sweep: id, index: i }) {
                 Ok(job) => {
                     resolved = targets.clone().unwrap_or_else(|| e.default_targets());
                     points.push(Point { label: a.label, edits: a.edits, job, row: None });
@@ -311,8 +332,10 @@ impl Engine {
         // what a recorded run of the same solve carries as its metrics (the keys the runs table and its plots use), so a front-end that
         // records the point itself (the window, which has no workspace link in the engine) records the same numbers a Compute would
         let mut metrics = Map::new();
+        let mut reuse: Option<Value> = None;
         let (state, error, run, numbers, dofs, cells) = match outcome {
-            Ok(JobOutput::Solved { model, results, failed, worker }) => {
+            Ok(JobOutput::Solved { model, results, failed, worker, reuse: reuse_of }) => {
+                reuse = reuse_of;
                 let mesh = model.solver_mesh();
                 for r in &results {
                     log.extend(r.log.iter().map(|l| format!("{}: {l}", r.physics)));
@@ -334,12 +357,26 @@ impl Engine {
                 match failed {
                     Some(e) => {
                         log.push(format!("stopped: {e}"));
-                        let run = self.record_point(&project, RunOutcome::Failed(&e), seconds, &log, Some(mesh));
+                        let run = self.record_point(
+                            &project,
+                            RunOutcome::Failed(&e),
+                            seconds,
+                            &log,
+                            Some(mesh),
+                            reuse.as_ref(),
+                        );
                         ("failed", Some(e.to_string()), run, numbers, dofs, Some(cells))
                     }
                     None => {
                         self.learn(&results, cells as u64, model.mesh().dim() as u8, &worker);
-                        let run = self.record_point(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
+                        let run = self.record_point(
+                            &project,
+                            RunOutcome::Solved(&results),
+                            seconds,
+                            &log,
+                            Some(mesh),
+                            reuse.as_ref(),
+                        );
                         ("done", None, run, numbers, dofs, Some(cells))
                     }
                 }
@@ -358,7 +395,7 @@ impl Engine {
                 let run = if never_ran {
                     Value::Null
                 } else {
-                    self.record_point(&project, RunOutcome::Failed(&e), seconds, &log, None)
+                    self.record_point(&project, RunOutcome::Failed(&e), seconds, &log, None, None)
                 };
                 let state = if matches!(e, Error::Cancelled) { "cancelled" } else { "failed" };
                 (state, Some(e.to_string()), run, Map::new(), Map::new(), None)
@@ -372,6 +409,10 @@ impl Engine {
             "index": index, "label": label, "edits": edits, "job": id, "state": state, "error": error,
             "numbers": numbers, "metrics": metrics, "unknowns": dofs, "cells": cells, "seconds": seconds, "run": run,
         });
+        let mut row = row;
+        if let Some(r) = reuse {
+            row["reuse"] = r;
+        }
         if let Some(p) = self.sweeps.get_mut(&sweep).and_then(|s| s.points.get_mut(index)) {
             p.row = Some(row.clone());
         }
@@ -385,13 +426,14 @@ impl Engine {
         seconds: f64,
         log: &[String],
         mesh: Option<std::sync::Arc<femcore::mesh::SimplexMesh>>,
+        reuse: Option<&Value>,
     ) -> Value {
         let script = self.script.clone();
         match self.link.as_mut() {
             None => Value::Null,
             Some(l) => {
                 l.script = script;
-                match l.record_point(project, outcome, seconds, log, mesh.as_deref()) {
+                match l.record_point(project, outcome, seconds, log, mesh.as_deref(), reuse) {
                     Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
                     Err(e) => json!({ "error": e.to_string() }),
                 }
