@@ -227,5 +227,7 @@ pub struct ReduceForm {
     pub field: usize,
     pub quantity: usize,
     pub region: usize,
+    /// a formula (ADR 90, N2); when it is not empty, the integral and the extremes read it instead of the field and quantity above
+    pub formula: String,
     pub lines: Vec<String>,
 }

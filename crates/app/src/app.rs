@@ -1506,6 +1506,18 @@ mod tests {
         a.reduce_now("min");
         assert!(a.reduce.lines[0].starts_with("min of Ex in the whole mesh = "), "{:?}", a.reduce.lines);
         assert!(a.error.is_none(), "{:?}", a.error);
+        // a formula in the box replaces the field and quantity: the line carries the number of the engine for the same text
+        a.reduce.region = si;
+        a.reduce.formula = "  eps_r * norm2(E)  ".into();
+        a.reduce_now("integrate");
+        let want = a.engine.call("integrate", &json!({ "expr": "eps_r * norm2(E)", "physics": physics, "region": "Si" })).unwrap();
+        assert_eq!(a.reduce.lines[0], format!("integral of `eps_r * norm2(E)` over Si = {}", crate::tabs::reduce_number(&want["value"])));
+        // a formula that cannot be read is an error that names it, and no line is added
+        let before = a.reduce.lines.len();
+        a.reduce.formula = "abs2(Ex) +".into();
+        a.reduce_now("integrate");
+        assert!(a.error.is_some(), "a broken formula is reported");
+        assert_eq!(a.reduce.lines.len(), before);
     }
     #[test]
     fn a_compute_behind_a_running_job_waits_its_turn_and_a_newer_one_replaces_it() {

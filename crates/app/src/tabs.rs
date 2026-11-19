@@ -847,7 +847,12 @@ impl App {
                 });
             });
             ui.horizontal(|ui| {
-                if ui.button("Integral").on_hover_text("the integral over the region (a complex field with the value quantity gives re + im i)").clicked() {
+                ui.label("Formula");
+                ui.add(egui::TextEdit::singleline(&mut f.formula).desired_width(ui.available_width().min(320.0)).hint_text("e.g. eps_r * norm2(E), or where(z > 0, abs2(Ex), 0)"))
+                    .on_hover_text("When this is not empty, Integral, Largest and Smallest read the formula instead of the field and quantity above. Names: the fields of the result, x y z, material values (eps_r, rho), region(\"Si\"), where(c, a, b), vectors (E: dot, cross, norm, norm2). The same language as the `expr` of a script or the MCP server.");
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Integral").on_hover_text("the integral over the region (a complex field with the value quantity gives re + im i); of the formula when there is one").clicked() {
                     action = Some("integrate");
                 }
                 if ui.button("Largest").on_hover_text("the largest real value at the nodes of the region").clicked() {
@@ -877,15 +882,24 @@ impl App {
         let name = names[self.reduce.field.min(names.len() - 1)].clone();
         let quantity = self.reduce.quantity.min(2);
         let region = (self.reduce.region > 0 && self.reduce.region <= regions.len()).then(|| regions[self.reduce.region - 1].clone());
-        let expr = match quantity {
-            1 => json!({ "op": "abs", "args": [name] }),
-            2 => json!({ "op": "abs2", "args": [name] }),
-            _ => json!(name),
+        let formula = self.reduce.formula.trim().to_string();
+        let expr = if !formula.is_empty() {
+            json!(formula)
+        } else {
+            match quantity {
+                1 => json!({ "op": "abs", "args": [name] }),
+                2 => json!({ "op": "abs2", "args": [name] }),
+                _ => json!(name),
+            }
         };
-        let label = match quantity {
-            1 => format!("|{name}|"),
-            2 => format!("|{name}|²"),
-            _ => name.clone(),
+        let label = if !formula.is_empty() {
+            format!("`{formula}`")
+        } else {
+            match quantity {
+                1 => format!("|{name}|"),
+                2 => format!("|{name}|²"),
+                _ => name.clone(),
+            }
         };
         let place = region.clone().unwrap_or_else(|| "the whole mesh".into());
         let mut args = json!({ "physics": physics, "solution": sol });
