@@ -966,3 +966,36 @@ fn the_entries_of_a_rotated_crystal_are_read_in_wafer_axes() {
     let w = call(&mut e, "integrate", json!({ "expr": "eps_r_zz * abs2(Ey)", "physics": "ems", "region": "sapphire*" }));
     assert!(num(&w["value"]).is_finite());
 }
+
+#[test]
+fn the_wavelength_argument_moves_the_material_values_and_nothing_else() {
+    let mut e = Engine::new();
+    call(&mut e, "project_open", json!({ "path": example("15_soi_wire") }));
+    call(&mut e, "solve_run", json!({}));
+    let lib = femcore::material::Library::load_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../materials")).unwrap();
+    let area = num(&call(&mut e, "integrate", json!({ "expr": 1.0, "physics": "ems", "region": "Si" }))["value"]);
+    let eps_at = |e: &mut Engine, w: Option<f64>| {
+        let mut args = json!({ "expr": "eps_r", "physics": "ems", "region": "Si" });
+        if let Some(w) = w {
+            args["wavelength"] = json!(w);
+        }
+        num(&call(e, "integrate", args)["value"]) / area
+    };
+    // the study's own wavelength gives the same as no argument, bit for bit
+    let study = eps_at(&mut e, None);
+    let own = eps_at(&mut e, Some(299792458.0 / 193414489032258.06));
+    assert_eq!(study.to_bits(), own.to_bits());
+    // another wavelength reads the model of the material there: the tabulated silicon of the library
+    for lambda in [1.31e-6, 1.7e-6] {
+        let want = lib.get("silicon").unwrap().optical_permittivity(lambda, None, [0.0; 3]).unwrap()[0][0].re;
+        close(eps_at(&mut e, Some(lambda)), want, 1e-9);
+    }
+    assert!((eps_at(&mut e, Some(1.31e-6)) - study).abs() > 1e-4, "silicon is dispersive here");
+    // the fields are those of the solve whatever the wavelength: a formula without a material value does not move
+    let a = call(&mut e, "integrate", json!({ "expr": "abs2(Ex)", "physics": "ems", "region": "Si" }));
+    let b = call(&mut e, "integrate", json!({ "expr": "abs2(Ex)", "physics": "ems", "region": "Si", "wavelength": 1.31e-6 }));
+    assert_eq!(a["value"], b["value"]);
+    // outside the range of the table the material says so; a bad value is refused
+    assert!(err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": 5e-7 })).contains("range"));
+    assert!(err(&mut e, "integrate", json!({ "expr": "eps_r", "physics": "ems", "wavelength": -1.0 })).contains("wavelength"));
+}

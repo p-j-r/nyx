@@ -54,8 +54,8 @@ pub(crate) enum What {
     Field,
     /// a wafer coordinate, 0 x, 1 y, 2 z; `name` is its letter
     Coord(usize),
-    /// the value of a property of the material of each cell, under the descriptor name in `name`
-    Material,
+    /// the value of a property of the material of each cell, under the descriptor name in `name`, at the wavelength given (m), else the study's
+    Material(Option<f64>),
     /// 1 in the cells of the region `name`, else 0
     Region,
 }
@@ -73,6 +73,8 @@ pub(crate) struct Spec {
 pub(crate) struct Defaults {
     physics: Option<String>,
     solution: usize,
+    /// `wavelength` of the request: where the materials are read for a dispersive model (m); None is the wavelength of the study
+    wavelength: Option<f64>,
 }
 
 enum Kind {
@@ -262,10 +264,10 @@ impl Names for Namer<'_> {
         }
         let prop = prop_name(&name);
         if self.props_of(&physics).iter().any(|p| p == prop) {
-            return Ok(Some(Named::Scalar(self.slot(&physics, solution, prop, What::Material))));
+            return Ok(Some(Named::Scalar(self.slot(&physics, solution, prop, What::Material(self.d.wavelength)))));
         }
         if let Some(c) = self.component(&physics, &name) {
-            return Ok(Some(Named::Scalar(self.slot(&physics, solution, &c, What::Material))));
+            return Ok(Some(Named::Scalar(self.slot(&physics, solution, &c, What::Material(self.d.wavelength)))));
         }
         self.unknown = true;
         Ok(None)
@@ -276,12 +278,12 @@ impl Names for Namer<'_> {
         let prop = prop_name(&name).to_string();
         let props = self.props_of(&physics);
         if let Some(c) = self.component(&physics, &name) {
-            return Ok(self.slot(&physics, solution, &c, What::Material));
+            return Ok(self.slot(&physics, solution, &c, What::Material(self.d.wavelength)));
         }
         if !props.contains(&prop) {
             return Err(format!("'{physics}' has no material property '{name}' (it has: {})", props.join(", ")));
         }
-        Ok(self.slot(&physics, solution, &prop, What::Material))
+        Ok(self.slot(&physics, solution, &prop, What::Material(self.d.wavelength)))
     }
 
     fn region(&mut self, text: &str) -> Result<Tree, String> {
@@ -328,7 +330,14 @@ impl Engine {
             None | Some(Value::Null) => 0,
             Some(v) => v.as_u64().ok_or_else(|| Error::invalid("`solution` must be a whole number"))? as usize,
         };
-        Ok(Defaults { physics, solution })
+        let wavelength = match args.get("wavelength") {
+            None | Some(Value::Null) => None,
+            Some(v) => match v.as_f64() {
+                Some(w) if w > 0.0 && w.is_finite() => Some(w),
+                _ => return invalid("`wavelength` must be a positive number of metres"),
+            },
+        };
+        Ok(Defaults { physics, solution, wavelength })
     }
 
     fn parse_expr(&self, v: &Value, d: &Defaults, specs: &mut Vec<Spec>, depth: usize) -> Result<Tree, Error> {
@@ -500,6 +509,7 @@ impl Engine {
     fn material_values(
         &self,
         s: &Spec,
+        wavelength: Option<f64>,
         model: &Arc<MeshedModel>,
         mesh: &SimplexMesh,
     ) -> Result<(Vec<f64>, String), Error> {
@@ -520,7 +530,7 @@ impl Engine {
         })?;
         let mut ctx = nyx_physics::Ctx::new(model.as_ref());
         ctx.library = Some(self.library()?);
-        ctx.wavelength = crate::materials::study_wavelength(p, spec);
+        ctx.wavelength = wavelength.or_else(|| crate::materials::study_wavelength(p, spec));
         let m = nyx_physics::decode::materials_by_label(spec, &ctx, &props)?;
         let kind = match base {
             "eps_r" => Some(femcore::props::TensorKind::Permittivity),
@@ -603,8 +613,8 @@ impl Engine {
                     }
                     (Kind::Const(v), false, String::new())
                 }
-                What::Material => {
-                    let (v, unit) = self.material_values(s, &stored.model, &mesh)?;
+                What::Material(wavelength) => {
+                    let (v, unit) = self.material_values(s, *wavelength, &stored.model, &mesh)?;
                     (Kind::Const(v), false, unit)
                 }
                 What::Field => {
