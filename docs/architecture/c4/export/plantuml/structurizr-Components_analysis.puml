@@ -74,6 +74,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==Field samples\n<size:16>[Component: Rust modules]</size>\n\nThe modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxanalysis.Fieldsamples
     rectangle "==Polarization\n<size:16>[Component: Rust modules]</size>\n\nStokes parameters, Poincare sphere and the classification of an optical mode." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxanalysis.Polarization
     rectangle "==Mode report\n<size:16>[Component: Rust modules]</size>\n\nOne report per mode, a table, the Poincare picture and the degenerate groups." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxanalysis.Modereport
+    rectangle "==Mode figures\n<size:16>[Component: Rust modules]</size>\n\nThe cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxanalysis.Modefigures
   }
 
   component "==nyx-physics\n<size:16>[Container: Rust library]</size>\n\nThe Physics trait, the problem envelope (ProblemSpec), descriptors, SolveResult, the registry type, validation, JSON Schemas." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxphysics
@@ -84,6 +85,8 @@ nyx.nyxphysics --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "Mesh, materi
 nyx.nyxanalysis.AnalysisAPI --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, error +1\n<size:16>[Rust paths]</size>"
 nyx.nyxanalysis.AnalysisAPI --> nyx.nyxanalysis.Modereport <<Relationship-UmVsYXRpb25zaGlw>> : "uses modes\n<size:16>[Rust paths]</size>"
 nyx.nyxanalysis.AnalysisAPI --> nyx.nyxanalysis.Fieldsamples <<Relationship-UmVsYXRpb25zaGlw>> : "uses samples\n<size:16>[Rust paths]</size>"
+nyx.nyxanalysis.Modefigures --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: mesh\n<size:16>[Rust paths]</size>"
+nyx.nyxanalysis.Modefigures --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, error +1\n<size:16>[Rust paths]</size>"
 nyx.nyxanalysis.Modereport --> nyx.nyxanalysis.Polarization <<Relationship-UmVsYXRpb25zaGlw>> : "uses polarization\n<size:16>[Rust paths]</size>"
 nyx.nyxanalysis.Fieldsamples --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +1\n<size:16>[Rust paths]</size>"
 nyx.nyxanalysis.Fieldsamples --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, error +2\n<size:16>[Rust paths]</size>"

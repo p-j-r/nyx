@@ -9,3 +9,9 @@ description = "Analyses of nyx results (polarization, Stokes parameters; later g
 femcore = { path = "../femcore" }
 nyx-physics = { path = "../nyx-physics" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+
+# figures (ADR 99): a PNG is written with `png`; the text of a PNG is drawn with `ab_glyph` in the font the window already carries
+png = "0.18"
+ab_glyph = "0.2"
+epaint_default_fonts = { version = "0.37", default-features = false }
+base64 = "0.22"

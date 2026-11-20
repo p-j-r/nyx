@@ -30,6 +30,7 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: Analysis API](../analysis/api.md) | crate root, error | Error, Mesh |
+| [analysis: Mode figures](../analysis/figures.md) | crate root, error | Discretisation, Error, Mesh, discretise |
 | [analysis: Field samples](../analysis/samples.md) | crate root, error | Error, Mesh, discretise |
 | [dfs: Physics adapter](../dfs/adapter.md) | crate root |  |
 | [dfs: Shared helpers](../dfs/common.md) | crate root | Discretisation |

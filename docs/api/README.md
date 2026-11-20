@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:9f484435044ddc91ef2a550422a20b7d` · 100 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:61d7e227fa5ee34f4d454b86ecd384df` · 101 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -43,6 +43,7 @@ Catalog hash: `b3:9f484435044ddc91ef2a550422a20b7d` · 100 commands. `nyx api li
 | [`extremum`](extremum.md) | read | Largest or smallest value of an expression |
 | [`field`](field.md) | read | A handle to a field |
 | [`field_op`](field_op.md) | read | Arithmetic on handles |
+| [`figure`](figure.md) | read | Draw the modes of a result |
 | [`geometry_names`](geometry_names.md) | read | Evaluate the geometry and list its names |
 | [`get_guide`](get_guide.md) | read | Read a nyx guide |
 | [`integrate`](integrate.md) | read | Integrate an expression over a region |

@@ -89,7 +89,12 @@ fn the_xdmf_file_names_only_datasets_that_exist_in_the_h5_file() {
         let info = e.call("export_results", &json!({ "path": path.to_str().unwrap() })).unwrap();
         let xdmf = std::fs::read_to_string(info["xdmf"].as_str().unwrap()).unwrap();
         assert!(xdmf.contains("<Xdmf") && xdmf.contains("<Attribute"), "{name}");
+        // the file says it is for nyx only and states the cell node order its connectivity is in
+        assert!(xdmf.contains("ParaView") && xdmf.contains("CellNodeOrder"), "{name}");
         let file = hdf5_metno::File::open(&path).unwrap();
+        // no second copy of the nodes and cells: the XDMF names the ones of the results
+        assert!(file.group("viz").is_err(), "{name}: there is no /viz group");
+        assert!(xdmf.contains("/points") && xdmf.contains("/cells") && !xdmf.contains("/viz/"), "{name}");
         let fname = path.file_name().unwrap().to_str().unwrap();
         let mut refs = 0;
         for part in xdmf.split("<DataItem").skip(1) {
@@ -165,5 +170,57 @@ fn curved_edges_are_stored_in_the_file_and_a_file_without_them_reads_as_straight
         let has = file.group("mesh").unwrap().dataset("edge_node_pairs").is_ok();
         assert_eq!(has, name == "curved", "the datasets exist only for a curved mesh");
         let _ = std::fs::remove_file(&path);
+    }
+}
+
+/// The documented cell node order of layout 4 is the real one: in every cell the edge nodes sit at the midpoints of the edges the
+/// `cell_order` text names, and a continuous cell field gives the same value at a node from every cell that holds it.
+#[test]
+fn the_cell_node_order_of_a_results_file_is_the_documented_one() {
+    for name in ["15_soi_wire", "04_thermal_bar"] {
+        let mut e = Engine::new();
+        e.call("project_open", &json!({ "path": example(name) })).unwrap();
+        e.call("solve_run", &json!({})).unwrap();
+        let path = tmp(&format!("{name}-order.h5"));
+        e.call("export_results", &json!({ "path": path.to_str().unwrap() })).unwrap();
+        let file = hdf5_metno::File::open(&path).unwrap();
+        assert_eq!(file.attr("version").unwrap().read_scalar::<i32>().unwrap(), 4);
+        for code in file.group("results").unwrap().member_names().unwrap() {
+            let g = file.group(&format!("results/{code}")).unwrap();
+            let order =
+                g.attr("cell_order").unwrap().read_scalar::<hdf5_metno::types::VarLenUnicode>().unwrap().to_string();
+            let (pts, cells) = (g.dataset("points").unwrap(), g.dataset("cells").unwrap());
+            let dim = pts.shape()[1];
+            let (p, c) = (pts.read_raw::<f64>().unwrap(), cells.read_raw::<u32>().unwrap());
+            let nloc = cells.shape()[1];
+            assert_eq!(order.split(' ').count(), nloc, "{name}/{code}: {order}");
+            // the edge nodes: `eij` is the midpoint of vertices i and j
+            let words: Vec<&str> = order.split(' ').collect();
+            let at = |n: u32, k: usize| p[n as usize * dim + k];
+            for row in c.chunks(nloc) {
+                for (a, w) in words.iter().enumerate() {
+                    if let Some(rest) = w.strip_prefix('e') {
+                        let (i, j) = (rest[0..1].parse::<usize>().unwrap(), rest[1..2].parse::<usize>().unwrap());
+                        for k in 0..dim {
+                            let mid = 0.5 * (at(row[i], k) + at(row[j], k));
+                            assert!(
+                                (at(row[a], k) - mid).abs() < 1e-9 * (1.0 + mid.abs()),
+                                "{name}/{code}: node {w} is not the midpoint of its edge"
+                            );
+                        }
+                    }
+                }
+            }
+            // the nodal and the cell view of a continuous field agree
+            for s in g.member_names().unwrap().iter().filter(|n| n.starts_with("solution_")) {
+                let Ok(cf) = g.group(&format!("{s}/cell_fields")) else { continue };
+                for f in cf.member_names().unwrap() {
+                    let re = cf.dataset(&format!("{f}/re")).unwrap().read_raw::<f64>().unwrap();
+                    assert_eq!(re.len(), c.len(), "{name}/{code}/{s}/{f}: one value per cell node");
+                }
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("xdmf"));
     }
 }

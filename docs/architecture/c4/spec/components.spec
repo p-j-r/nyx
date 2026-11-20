@@ -51,7 +51,7 @@ commandlist | Command lists | commandlist.rs | 89 | A JSON-lines list of engine 
 apiref    | API reference | apiref.rs | 89, 57 | One Markdown page per engine command and an index, generated from Engine::catalog() (arguments flattened from the schema, an example that passes the check); docs/api is compared with it by a test.
 meshing   | Meshing seam | meshing.rs pml.rs preview.rs | 54, 50, 92 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92).
 materials | Materials | materials.rs | 58 | The material library plus the materials a project carries, resolved at the study wavelength.
-analyse   | Analyses | analyse.rs | 56 | Runs the analyses of nyx-analysis on the latest result of a physics.
+analyse   | Analyses | analyse.rs figure.rs | 56, 99 | Runs the analyses of nyx-analysis on the latest result of a physics, and draws its modes as a figure (SVG or PNG).
 resultsIO | Results files | h5io.rs xdmf.rs results_file.rs | 62, 63 | HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results.
 storeLink | Store link | store_link.rs | 39, 59 | Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here).
 registry  | Registry and facade | lib.rs | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with.
@@ -97,6 +97,7 @@ api           | Analysis API | lib.rs | 56 | The entry points an engine calls: a
 samples       | Field samples | samples.rs | 56 | The modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates.
 polarization  | Polarization | polarization.rs | 56, 21 | Stokes parameters, Poincare sphere and the classification of an optical mode.
 modes         | Mode report | modes.rs | 56 | One report per mode, a table, the Poincare picture and the degenerate groups.
+figures       | Mode figures | section.rs modeview.rs canvas.rs raster.rs figure.rs | 99, 56 | The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named.
 
 [store | nyx-store | nyx_store]
 model     | Data model and card | model.rs card.rs | 14, 39 | The workflow manifest, experiments, run digest and the concept card generated from an experiment's spec.

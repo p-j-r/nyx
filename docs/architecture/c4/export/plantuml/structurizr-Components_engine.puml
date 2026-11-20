@@ -102,7 +102,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==API reference\n<size:16>[Component: Rust modules]</size>\n\nOne Markdown page per engine command and an index, generated from Engine::catalog() (arguments flattened from the schema, an example that passes the check); docs/api is compared with it by a test." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.APIreference
     rectangle "==Meshing seam\n<size:16>[Component: Rust modules]</size>\n\nMeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Meshingseam
     rectangle "==Materials\n<size:16>[Component: Rust modules]</size>\n\nThe material library plus the materials a project carries, resolved at the study wavelength." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Materials
-    rectangle "==Analyses\n<size:16>[Component: Rust modules]</size>\n\nRuns the analyses of nyx-analysis on the latest result of a physics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Analyses
+    rectangle "==Analyses\n<size:16>[Component: Rust modules]</size>\n\nRuns the analyses of nyx-analysis on the latest result of a physics, and draws its modes as a figure (SVG or PNG)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Analyses
     rectangle "==Results files\n<size:16>[Component: Rust modules]</size>\n\nHDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Resultsfiles
     rectangle "==Store link\n<size:16>[Component: Rust modules]</size>\n\nBinds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Storelink
     rectangle "==Registry and facade\n<size:16>[Component: Rust modules]</size>\n\nThe physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Registryandfacade
@@ -131,7 +131,7 @@ nyx.nyxanalysis --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "Reads So
 nyx.nyxanalysis --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "Mesh geometry, quadrature\n<size:16>[Rust API]</size>"
 nyx.nyxphysics --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "Mesh, materials\n<size:16>[Rust API]</size>"
 nyx.femcore --> nyx.geom <<Relationship-UmVsYXRpb25zaGlw>> : "Evaluates models, reads selectors and labels\n<size:16>[Rust API]</size>"
-nyx.nyxengine.Analyses --> nyx.nyxanalysis <<Relationship-UmVsYXRpb25zaGlw>> : "uses analysis: crate root, modes +1\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.Analyses --> nyx.nyxanalysis <<Relationship-UmVsYXRpb25zaGlw>> : "uses analysis: crate root, figure +2\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Analyses --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: error, result\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Analyses --> nyx.nyxengine.Commands <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Analyses --> nyx.nyxengine.Meshingseam <<Relationship-UmVsYXRpb25zaGlw>> : "uses meshing\n<size:16>[Rust paths]</size>"

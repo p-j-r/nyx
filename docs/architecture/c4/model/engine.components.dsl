@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91, 93, 94"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, scriptout.rs, validated.rs"
-        "lines" "4411"
+        "lines" "4427"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -35,7 +35,7 @@ commandlist = component "Command lists" "A JSON-lines list of engine commands is
     properties {
         "adr" "89"
         "code" "crates/nyx-engine/src: commandlist.rs"
-        "lines" "585"
+        "lines" "586"
         "codeDiagram" "4-code/engine/commandlist.md"
     }
 }
@@ -63,11 +63,11 @@ materials = component "Materials" "The material library plus the materials a pro
         "codeDiagram" "4-code/engine/materials.md"
     }
 }
-analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest result of a physics." "Rust modules" {
+analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest result of a physics, and draws its modes as a figure (SVG or PNG)." "Rust modules" {
     properties {
-        "adr" "56"
-        "code" "crates/nyx-engine/src: analyse.rs"
-        "lines" "83"
+        "adr" "56, 99"
+        "code" "crates/nyx-engine/src: analyse.rs, figure.rs"
+        "lines" "214"
         "codeDiagram" "4-code/engine/analyse.md"
     }
 }
@@ -75,7 +75,7 @@ resultsIO = component "Results files" "HDF5 results (serial or MPI-IO), the XDMF
     properties {
         "adr" "62, 63"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "1003"
+        "lines" "993"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }
@@ -91,7 +91,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "100"
+        "lines" "101"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

@@ -1,81 +1,26 @@
-//! The visualisation layer of a results file and its XDMF description (ADR 62), recovered from the writer of the old `femcore::h5io` and
-//! moved to the new result types. `/viz/<physics>` holds the nodes (dofs) and cells in the node order XDMF reads; an XDMF file (XML, written
-//! with `quick-xml`) next to the `.h5` names those datasets, so ParaView and VisIt open the results without copying the data.
+//! The XDMF description of a results file (ADR 62, ADR 99): a small XML file next to the `.h5` that is the light index of the heavy data in
+//! it. It names the datasets of the file as they are stored, per physics `points` and `cells` and per solution `fields/<name>`, with their
+//! shapes, so a reader finds a field and reads the part of it that it needs without opening the rest. Nothing is copied into the HDF5 file for
+//! it: the XDMF refers to the nodes (`points`), the node of every cell node (`cells`, in the cell node order of nyx, which the `Information`
+//! element `CellNodeOrder` of the topology states) and the stored fields. A reader that assumes the VTK order of quadratic cells would read
+//! the mid-edge nodes of a quadratic cell in the wrong order; the file is made for nyx and its tools.
 
-use crate::h5io::{link_name, Io};
+use crate::h5io::{cell_order_text, link_name};
 use femcore::mesh::SimplexMesh;
 use nyx_physics::SolveResult;
 use std::path::Path;
 
-/// Name usable in a plain HDF5/XDMF path: letters, digits and underscores.
-pub fn sanitize(name: &str) -> String {
-    let s: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-    if s.chars().next().is_none_or(|c| c.is_ascii_digit()) {
-        format!("f_{s}")
-    } else {
-        s
-    }
-}
+/// Written at the top of every XDMF file: who the file is for.
+const NOTE: &str = "Index of a nyx results file, made for nyx and its tools only. Do not open it with ParaView, VisIt or another XDMF viewer: the cells of a quadratic mesh are listed in the cell node order of nyx (see CellNodeOrder), not in the order those programs assume, so they would draw them wrongly.";
 
-/// XDMF topology type and the local node order of the cells for a mesh of the given order. Quadratic cells use the VTK/XDMF numbering
-/// (corners, then edge midpoints), so the nodes are the dofs of the P2 field and the attributes are nodal.
-fn topology(dim: usize, order: usize) -> (&'static str, Vec<usize>) {
+/// The XDMF topology type of the cells of a mesh of the given order (the node order within a cell is that of `cell_order_text`).
+fn topology(dim: usize, order: usize) -> &'static str {
     match (dim, order) {
-        (2, 1) => ("Triangle", vec![0, 1, 2]),
-        (3, 1) => ("Tetrahedron", vec![0, 1, 2, 3]),
-        // ours: v0 v1 v2 e01 e02 e12  ->  v0 v1 v2 e01 e12 e02
-        (2, _) => ("Triangle_6", vec![0, 1, 2, 3, 5, 4]),
-        // ours: v0..v3 e01 e02 e03 e12 e13 e23  ->  e01 e12 e02 e03 e13 e23
-        (_, _) => ("Tetrahedron_10", vec![0, 1, 2, 3, 4, 7, 5, 6, 8, 9]),
+        (2, 1) => "Triangle",
+        (3, 1) => "Tetrahedron",
+        (2, _) => "Triangle_6",
+        (_, _) => "Tetrahedron_10",
     }
-}
-
-/// `/viz/<physics>`: the nodes and cells in the node order XDMF reads, and for each solution the fields it points at: a scalar field is a
-/// hard link to the dataset under `/results`, a vector field gets a three-component copy (`v3_<name>`), since XDMF vectors have three.
-pub(crate) fn write_viz(io: &Io, code: &str, mesh: &SimplexMesh, r: &SolveResult) -> Result<(), String> {
-    let order = if r.order == 2 { 2 } else { 1 };
-    let viz = match io.file.group("viz") {
-        Ok(g) => g,
-        Err(_) => io.group(&io.file, "viz")?,
-    };
-    let g = io.group(&viz, &link_name(code))?;
-    let (topo, perm) = topology(mesh.dim, order);
-    let mut conn: Vec<u32> = Vec::with_capacity(mesh.n_cells() * perm.len());
-    let mut dofs = Vec::new();
-    for c in 0..mesh.n_cells() {
-        mesh.cell_dofs(c, order, &mut dofs);
-        conn.extend(perm.iter().map(|&i| dofs[i] as u32));
-    }
-    io.put(&g, "points", &mesh.dof_coordinates(order), mesh.dim)?;
-    io.put(&g, "cells", &conn, perm.len())?;
-    io.attr_text(&g, "topology", topo)?;
-    for (k, s) in r.solutions.iter().enumerate() {
-        let sg = io.group(&g, &format!("sol_{k}"))?;
-        for (i, f) in s.fields.iter().enumerate() {
-            if f.components.is_empty() {
-                let src = format!("/results/{}/solution_{k}/fields/{i:02}_{}", link_name(code), link_name(&f.name));
-                io.link(&sg, &src, &sanitize(&f.name))?;
-            } else {
-                let m = f.components.len();
-                let n = f.values.len() / m.max(1);
-                let mut v3 = vec![0.0; n * 3];
-                for (j, c) in f.components.iter().enumerate() {
-                    // wafer axes in the order of the coordinates of the mesh: a 2D section is (x, z), a 3D mesh (x, y, z)
-                    let slot = match (c.as_str(), mesh.dim) {
-                        ("x", _) => 0,
-                        ("y", _) => 1,
-                        ("z", 2) => 1,
-                        _ => 2,
-                    };
-                    for p in 0..n {
-                        v3[p * 3 + slot] = f.values[p * m + j];
-                    }
-                }
-                io.put(&sg, &format!("v3_{}", sanitize(&f.name)), &v3, 3)?;
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Writes the XDMF description of the results in `h5_path` next to it (same name, extension `.xdmf`). Every physics is a collection of
@@ -95,7 +40,14 @@ pub fn write_xdmf(
     let mut x = BytesStart::new("Xdmf");
     x.push_attribute(("Version", "3.0"));
     w.write_event(Event::Start(x)).map_err(xe)?;
+    w.write_event(Event::Comment(BytesText::new(NOTE))).map_err(xe)?;
     w.write_event(Event::Start(BytesStart::new("Domain"))).map_err(xe)?;
+    {
+        let mut i = BytesStart::new("Information");
+        i.push_attribute(("Name", "Note"));
+        i.push_attribute(("Value", NOTE));
+        w.write_event(Event::Empty(i)).map_err(xe)?;
+    }
     let item = |w: &mut Writer<Vec<u8>>, dims: &str, number: &str, prec: &str, path: &str| -> Result<(), String> {
         let mut d = BytesStart::new("DataItem");
         d.push_attribute(("Dimensions", dims));
@@ -106,12 +58,19 @@ pub fn write_xdmf(
         w.write_event(Event::Text(BytesText::new(&format!("{h5name}:{path}")))).map_err(|x| x.to_string())?;
         w.write_event(Event::End(BytesEnd::new("DataItem"))).map_err(|x| x.to_string())
     };
+    let info = |w: &mut Writer<Vec<u8>>, name: &str, value: &str| -> Result<(), String> {
+        let mut i = BytesStart::new("Information");
+        i.push_attribute(("Name", name));
+        i.push_attribute(("Value", value));
+        w.write_event(Event::Empty(i)).map_err(|x| x.to_string())
+    };
     for (code, result) in results {
         let order = if result.order == 2 { 2 } else { 1 };
-        let (topo, perm) = topology(mesh.dim, order);
+        let topo = topology(mesh.dim, order);
+        let nloc = mesh.nloc(order);
         let np = mesh.n_dofs(order);
         let nc = mesh.n_cells();
-        let base = format!("/viz/{}", link_name(code));
+        let base = format!("/results/{}", link_name(code));
         // time steps when a transient study orders its solutions by a value that rises; modes are numbered
         let times_ok = result.solutions.len() > 1
             && result.study.contains("transient")
@@ -140,31 +99,35 @@ pub fn write_xdmf(
             t.push_attribute(("TopologyType", topo));
             t.push_attribute(("NumberOfElements", nc.to_string().as_str()));
             w.write_event(Event::Start(t)).map_err(xe)?;
-            item(&mut w, &format!("{nc} {}", perm.len()), "UInt", "4", &format!("{base}/cells"))?;
+            info(&mut w, "CellNodeOrder", cell_order_text(mesh.dim, order))?;
+            item(&mut w, &format!("{nc} {nloc}"), "UInt", "4", &format!("{base}/cells"))?;
             w.write_event(Event::End(BytesEnd::new("Topology"))).map_err(xe)?;
             let mut ge = BytesStart::new("Geometry");
             ge.push_attribute(("GeometryType", if mesh.dim == 2 { "XY" } else { "XYZ" }));
             w.write_event(Event::Start(ge)).map_err(xe)?;
             item(&mut w, &format!("{np} {}", mesh.dim), "Float", "8", &format!("{base}/points"))?;
             w.write_event(Event::End(BytesEnd::new("Geometry"))).map_err(xe)?;
-            for f in &s.fields {
-                let vector = !f.components.is_empty();
+            for (i, f) in s.fields.iter().enumerate() {
+                let m = f.components.len();
                 let mut a = BytesStart::new("Attribute");
                 a.push_attribute(("Name", f.name.as_str()));
-                a.push_attribute(("AttributeType", if vector { "Vector" } else { "Scalar" }));
+                a.push_attribute((
+                    "AttributeType",
+                    match m {
+                        0 => "Scalar",
+                        3 => "Vector",
+                        _ => "Matrix",
+                    },
+                ));
                 a.push_attribute(("Center", "Node"));
                 w.write_event(Event::Start(a)).map_err(xe)?;
-                if vector {
-                    item(
-                        &mut w,
-                        &format!("{np} 3"),
-                        "Float",
-                        "8",
-                        &format!("{base}/sol_{k}/v3_{}", sanitize(&f.name)),
-                    )?;
-                } else {
-                    item(&mut w, &np.to_string(), "Float", "8", &format!("{base}/sol_{k}/{}", sanitize(&f.name)))?;
+                if m > 0 {
+                    // the components in the order of the stored values, which are interleaved by node
+                    info(&mut w, "Components", &f.components.join(" "))?;
                 }
+                let dims = if m == 0 { np.to_string() } else { format!("{np} {m}") };
+                let src = format!("{base}/solution_{k}/fields/{i:02}_{}", link_name(&f.name));
+                item(&mut w, &dims, "Float", "8", &src)?;
                 w.write_event(Event::End(BytesEnd::new("Attribute"))).map_err(xe)?;
             }
             w.write_event(Event::End(BytesEnd::new("Grid"))).map_err(xe)?;

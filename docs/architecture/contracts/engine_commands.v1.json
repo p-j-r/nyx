@@ -1996,7 +1996,7 @@
   },
   {
     "access": "expensive",
-    "description": "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.",
+    "description": "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF index of the stored datasets next to it, for nyx and its tools only (not for ParaView or VisIt). Needs a build with HDF5 support; `parallel` also needs `phdf5`.",
     "name": "export_results",
     "schema": {
       "additionalProperties": false,
@@ -2103,6 +2103,101 @@
       "type": "object"
     },
     "title": "Analyse a result"
+  },
+  {
+    "access": "read",
+    "description": "Writes a figure of the modes of the latest result of a physics as SVG or PNG (the extension of `path` decides). Each mode is put in a fixed phase first (its in-plane motion largest in Re u, sign fixed, peak 1) and drawn on the section of the mesh (the whole mesh of a 2D result, the first y-plane of a 3D one; a displacement deforms it by Re u), with the outline of the regions and arrows of the in-plane motion. `gallery` shows |u| for each mode; `components` a row per mode with |u|, the in-plane components and the propagation component in quadrature. The reply says, per mode, the angle it was turned by and `quadrature`: the share of the propagation component's energy still in Re after the phase step (near 0 when the mode is in the expected phase). A vector field is found by the names of the cell fields (ux uy uz, Ex Ey Ez).",
+    "name": "figure",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "arrows": {
+          "description": "arrows of the in-plane motion, default true",
+          "type": "boolean"
+        },
+        "at": {
+          "description": "the y of the plane a 3D mesh is cut on, in metres; default its first plane",
+          "type": "number"
+        },
+        "cmap": {
+          "description": "colour map of |u|: inferno (default), viridis, cividis, coolwarm",
+          "type": "string"
+        },
+        "columns": {
+          "description": "panels per row of a gallery, default 4",
+          "maximum": 8,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "core": {
+          "description": "domain numbers that carry the mode (the guide, not the substrate): the phase and the scale are taken over them; default all",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "family": {
+          "description": "the vector field to draw, by its prefix (u, E); default the first",
+          "type": "string"
+        },
+        "kind": {
+          "description": "gallery (default) or components",
+          "type": "string"
+        },
+        "max_modes": {
+          "description": "how many modes when `modes` is not given, default 12",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "modes": {
+          "description": "the modes to draw, numbered from 1; default the first max_modes",
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "panel_width": {
+          "description": "width of a panel in drawing units, default 250",
+          "type": "number"
+        },
+        "path": {
+          "description": "file to write, .svg or .png",
+          "type": "string"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "scale": {
+          "description": "pixels per drawing unit of a PNG, default 2",
+          "type": "number"
+        },
+        "warp": {
+          "description": "largest motion of the deformed shape as a fraction of the window width; default 0.05 for a displacement (vector field `u`) and 0 for any other field; 0 draws the undeformed section",
+          "minimum": 0,
+          "type": "number"
+        },
+        "window": {
+          "description": "[x0, x1, z0, z1] in metres; default the extent of the modes",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "physics",
+        "path"
+      ],
+      "type": "object"
+    },
+    "title": "Draw the modes of a result"
   },
   {
     "access": "expensive",

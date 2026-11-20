@@ -9,9 +9,14 @@
 //! `Analysis` trait, which returns plain JSON, so that the engine, the window and the MCP server can list and run analyses uniformly. Group
 //! index is a later analysis.
 
+pub mod canvas;
+pub mod figure;
 pub mod modes;
+pub mod modeview;
 pub mod polarization;
+pub mod raster;
 pub mod samples;
+pub mod section;
 
 pub use modes::{analyze_modes, AnalysisOptions, GroupReport, ModeAnalysis, ModeInput, ModeRow, ResolveAxis, Resolved};
 pub use samples::{polarization_input, PolarizationInput};

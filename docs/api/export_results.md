@@ -2,7 +2,7 @@
 
 **Write the results to an HDF5 file** · access `expensive`: starts a mesh build or a solve, or writes files
 
-Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.
+Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF index of the stored datasets next to it, for nyx and its tools only (not for ParaView or VisIt). Needs a build with HDF5 support; `parallel` also needs `phdf5`.
 
 ## Arguments
 

@@ -29,23 +29,23 @@ graph TB
         style 46 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      84["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 84 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      85["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 85 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    44-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
+    44-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
     44-. "<div>uses physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    43-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
+    43-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
     43-. "<div>uses desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
     43-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
     43-. "<div>uses error, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    45-. "<div>uses femcore: adapt, fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
-    46-. "<div>uses femcore: fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
+    45-. "<div>uses femcore: adapt, fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
+    46-. "<div>uses femcore: fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
     46-. "<div>uses schema</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
     46-. "<div>uses spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
     46-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
     46-. "<div>uses crate root, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    42-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->84
+    42-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
     42-. "<div>uses crate root, desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
     42-. "<div>uses spec, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
     42-. "<div>uses frame, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45

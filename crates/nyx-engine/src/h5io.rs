@@ -2,21 +2,32 @@
 //! cell fields, written compressed and read back exactly (ADR 62). This is the efficient store of the data a solve produces; the JSON files
 //! of a project and a run record stay small.
 //!
-//! Layout, version 3 (numbers as stored by HDF5, little-endian):
+//! Layout, version 4 (numbers as stored by HDF5, little-endian; version 3 files, which lack `points`, `cells` and `cell_order` of a physics,
+//! are still read):
 //!
 //! ```text
-//! /                          attrs: format = "nyx-results", version = 3
+//! /                          attrs: format = "nyx-results", version = 4
 //! /project                   the project as JSON text (u8 dataset)
 //! /mesh/points               [n_points, dim] f64         /mesh/cells        [n_cells, dim+1] u32
 //! /mesh/cell_labels          [n_cells] i32               /mesh/facets       [n_facets, dim] u32
 //! /mesh/facet_labels         [n_facets] i32
 //! /mesh/edge_node_pairs      [n_curved, 2] u32           /mesh/edge_node_points  [n_curved, 3] f64   (optional: curved edges, ADR 82; absent = straight)
-//! /results/<physics>         attrs: study, order, dim, dofs, seconds, n_solutions
+//! /results/<physics>         attrs: study, order, dim, dofs, seconds, n_solutions, cell_order
+//!   points                   [n_dofs, dim] f64         coordinates of the nodes (the dofs): vertices first, then edge midpoints
+//!   cells                    [n_cells, nloc] u32       the node (dof) of every cell node, in the cell node order of `cell_order`
 //!   scalars, log             JSON text (u8 datasets)
 //!   solution_<k>             attrs: label, value (when present), eig_re, eig_im (when present)
 //!     fields/<name>          f64, `n_dofs * components` values interleaved by dof; attrs: unit, components (JSON), name
 //!     cell_fields/<name>/re, im   f64 per cell node; attrs on the group: unit, nloc
 //! ```
+//!
+//! **One node order.** `fields/<name>` is indexed by node (dof), as `points`. `cell_fields/<name>/re[c * nloc + a]` is the value at the
+//! node `cells[c, a]` as seen from cell `c`, so any reader gets the nodal complex field by `nodal[cells[c, a]] = cell_field[c * nloc + a]`
+//! (for a continuous field every cell that holds the node gives the same value). The cell node order is the one of nyx (`cell_order`
+//! says it): a P1 cell lists its vertices; a P2 triangle `v0 v1 v2 e01 e02 e12`; a P2 tetrahedron `v0 v1 v2 v3 e01 e02 e03 e12 e13 e23`,
+//! where `eij` is the midpoint of the edge between vertices `i` and `j`. `/mesh/cells` lists the vertices of a cell (the first `dim + 1`
+//! entries of its row of `cells`). There is no second copy of the nodes or cells: the XDMF file next to the `.h5` (`xdmf.rs`) is a small XML
+//! index that names `points`, `cells` and the stored fields as they are, for nyx and its tools only (not for ParaView or other viewers).
 //!
 //! Large datasets are chunked and deflate-compressed (level 3); a result written and read back is bit-identical.
 
@@ -199,13 +210,6 @@ impl Io {
         self.attr(loc, name, &text(s)?)
     }
 
-    pub fn link(&self, g: &h5::Group, target: &str, name: &str) -> Result<(), String> {
-        if self.replay && g.link_exists(name) {
-            return Ok(());
-        }
-        g.link_hard(target, name).map_err(e("link"))
-    }
-
     /// A dataset of shape `[rows, cols]` (`[rows]` when `cols` is 0) holding `data` row by row.
     pub fn put<T: h5::H5Type>(
         &self,
@@ -322,7 +326,7 @@ fn write_into(
     io.attr_text(file, "writer", if mode == H5Mode::Serial { "serial" } else { "parallel" })?;
     io.attr(file, "processes", &(io.part.size as i64))?;
     io.attr_text(file, "format", "nyx-results")?;
-    io.attr(file, "version", &3i32)?;
+    io.attr(file, "version", &4i32)?;
     io.put_text(file, "project", &project.to_json())?;
     let d = mesh.dim;
     let m = io.group(file, "mesh")?;
@@ -349,6 +353,20 @@ fn write_into(
         io.attr(&g, "dofs", &(r.dofs as i64))?;
         io.attr(&g, "seconds", &r.seconds)?;
         io.attr(&g, "n_solutions", &(r.solutions.len() as i64))?;
+        // the nodes of this physics and the node of every cell node, in nyx's own cell node order (the order of every cell field)
+        {
+            let ord = if r.order == 2 { 2 } else { 1 };
+            let nloc = mesh.nloc(ord);
+            let mut conn: Vec<u32> = Vec::with_capacity(mesh.n_cells() * nloc);
+            let mut dofs = Vec::new();
+            for c in 0..mesh.n_cells() {
+                mesh.cell_dofs(c, ord, &mut dofs);
+                conn.extend(dofs.iter().take(nloc).map(|&d| d as u32));
+            }
+            io.put(&g, "points", &mesh.dof_coordinates(ord), mesh.dim)?;
+            io.put(&g, "cells", &conn, nloc)?;
+            io.attr_text(&g, "cell_order", cell_order_text(mesh.dim, ord))?;
+        }
         let scalars: Vec<Value> = r
             .scalars
             .iter()
@@ -392,9 +410,18 @@ fn write_into(
                 }
             }
         }
-        crate::xdmf::write_viz(io, code, mesh, r)?;
     }
     Ok(())
+}
+
+/// The text of the `cell_order` attribute: the cell node order of the cell fields and of `cells`.
+pub fn cell_order_text(dim: usize, order: usize) -> &'static str {
+    match (dim, order) {
+        (2, 1) => "v0 v1 v2",
+        (3, 1) => "v0 v1 v2 v3",
+        (2, _) => "v0 v1 v2 e01 e02 e12",
+        _ => "v0 v1 v2 v3 e01 e02 e03 e12 e13 e23",
+    }
 }
 
 fn read_text(g: &h5::Group, name: &str) -> Result<String, String> {
@@ -429,8 +456,8 @@ pub fn read_results(path: &Path) -> Result<Stored, String> {
     if attr_str(&file, "format").as_deref() != Some("nyx-results") {
         return Err("this HDF5 file was not written by nyx (no format attribute)".into());
     }
-    if attr_i64(&file, "version") != 3 {
-        return Err("this results file has another version than this nyx reads (3)".into());
+    if !matches!(attr_i64(&file, "version"), 3 | 4) {
+        return Err("this results file has another version than this nyx reads (3 and 4)".into());
     }
     let project = read_text(&file, "project")?;
     let m = file.group("mesh").map_err(e("mesh group"))?;
@@ -602,11 +629,11 @@ mod tests {
             assert_eq!(ca, cb);
             assert_eq!(ra, rb, "{ca}: every solution, field and cell field is the same");
         }
-        // the XDMF side (the /viz datasets) is partitioned too
+        // the nodes and cells of a physics, which the XDMF file names, are partitioned too
         let (fa, fb) = (h5::File::open(&serial).unwrap(), h5::File::open(&three).unwrap());
         let code = &results[0].0;
         for leaf in ["points", "cells"] {
-            let p = format!("viz/{}/{leaf}", link_name(code));
+            let p = format!("results/{}/{leaf}", link_name(code));
             let (da, db) = (fa.dataset(&p).unwrap(), fb.dataset(&p).unwrap());
             assert_eq!(da.shape(), db.shape(), "{p}");
             if leaf == "cells" {

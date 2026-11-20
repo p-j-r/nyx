@@ -25,6 +25,7 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: Analysis API](../analysis/api.md) | result | SolveResult |
+| [analysis: Mode figures](../analysis/figures.md) | result | Scalar, Solution, SolveResult |
 | [analysis: Field samples](../analysis/samples.md) | frame, result | CellField, FieldFrame, Solution, SolveResult |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [dfs: Heat kernel](../dfs/heat.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |

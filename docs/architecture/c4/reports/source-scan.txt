@@ -1,8 +1,8 @@
-components: 98, lines of Rust in components: 97556, classes drawn: 737, public items listed: 3064
+components: 99, lines of Rust in components: 99446, classes drawn: 749, public items listed: 3105
 
 container-level references found in the source (from->to, number of references):
-  analysis->femcore 7
-  analysis->physics 10
+  analysis->femcore 9
+  analysis->physics 18
   app->connect 10
   app->engine 180
   app->script 7
@@ -10,12 +10,12 @@ container-level references found in the source (from->to, number of references):
   dfs->physics 23
   ems->femcore 142
   ems->physics 41
-  engine->analysis 9
+  engine->analysis 14
   engine->dfs 1
   engine->ems 1
   engine->femcore 98
   engine->geom 36
-  engine->physics 99
+  engine->physics 101
   engine->sms 1
   engine->store 18
   femcore->geom 63

@@ -425,6 +425,7 @@ impl Engine {
                         "result_info"
                             | "result_field"
                             | "analyse"
+                            | "figure"
                             | "export_results"
                             | "field"
                             | "field_op"

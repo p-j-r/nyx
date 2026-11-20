@@ -3,7 +3,7 @@ api = component "Analysis API" "The entry points an engine calls: an analysis is
     properties {
         "adr" "56"
         "code" "crates/nyx-analysis/src: lib.rs"
-        "lines" "91"
+        "lines" "96"
         "codeDiagram" "4-code/analysis/api.md"
     }
 }
@@ -29,5 +29,13 @@ modes = component "Mode report" "One report per mode, a table, the Poincare pict
         "code" "crates/nyx-analysis/src: modes.rs"
         "lines" "620"
         "codeDiagram" "4-code/analysis/modes.md"
+    }
+}
+figures = component "Mode figures" "The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named." "Rust modules" {
+    properties {
+        "adr" "99, 56"
+        "code" "crates/nyx-analysis/src: canvas.rs, figure.rs, modeview.rs, raster.rs, section.rs"
+        "lines" "1746"
+        "codeDiagram" "4-code/analysis/figures.md"
     }
 }

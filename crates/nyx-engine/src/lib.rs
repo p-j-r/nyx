@@ -18,6 +18,7 @@ pub mod commands;
 pub mod convergence;
 pub mod engine;
 pub mod estimate;
+mod figure;
 pub mod geomdesc;
 pub mod geometry;
 pub mod guide;

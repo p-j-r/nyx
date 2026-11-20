@@ -34,6 +34,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/MCP_ASSISTANT_PLAN.md` | 15 | |
 | `docs/SWEEP_CACHING_PROPOSAL.md` | 6 | proposal; historical |
 | `docs/HOW_IT_WORKS.md` | 4, 9 | |
+| `docs/PLOTTING_PLAN.md` | 99 | design note of the mode figures (the script, the results layout, the stages) |
+| `docs/GDSFACTORY_INTEGRATION.md` | 57, 94 | design note: a gdsfactory plugin that drives the engine; not built |
+| `docs/MARKET_NOTE.md` | - | market note; no architecture decision |
+| `docs/results_format_measure.py.txt` | 62 | the measurement script of the results format study (`.py.txt`: `*.py` is git-ignored) |
+| `docs/RESULTS_FORMAT_STUDY.md` | 62, 99 | study of the results file layout |
+| `docs/figures/example_modes_gallery.png` | 99 | example output of the `figure` command |
 | `docs/chip_report.md` | 22 | |
 | `docs/photonic_use_cases.md` | 21, 22 | |
 | `docs/brand/*` | 23 | |
@@ -173,7 +179,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
 | `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
-| `crates/nyx-analysis/*` | 56, 25, 21 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
+| `crates/nyx-analysis/*` | 56, 25, 21, 99 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |

@@ -202,13 +202,15 @@ cylinders or spheres.
 Each simulation can write its results after Compute (Study tab > Results file) and `File > Open`
 reads such files back. The writer is `femcore::h5io`.
 
-* **`results.h5`** (HDF5): `/mesh` (points, cells, facets and labels), `/spec` (the problem as JSON
-  bytes), `/results/solution_k/fields/<name>` (and `disp`) with units as attributes, and `/viz`
-  (the same data in the shape ParaView needs: quadratic cells in VTK node order, 3-component vectors).
-* **`results.xdmf`** (XML written with `quick-xml`, next to the `.h5`): the light-data description
-  that ParaView and VisIt open; the heavy data stay in the HDF5 file. Several solutions (time steps)
-  become a temporal collection. Checked by reading the files back with meshio (triangle6/tetra10,
-  fields equal to the HDF5 data, time values correct); the midside node order is also tested in Rust.
+* **`results.h5`** (HDF5, layout 4, ADR 99): `/mesh` (points, cells, facets and labels), `/project`, and per
+  physics `/results/<physics>/{points,cells}` (the nodes and the node of every cell node, in nyx's cell node
+  order, named in the attribute `cell_order`) and `solution_k/fields/<name>` with units as attributes.
+  There is no second copy of the nodes or cells for a viewer.
+* **`results.xdmf`** (XML written with `quick-xml`, next to the `.h5`): the light index of the heavy data,
+  for nyx and its tools only, **not** for ParaView or VisIt (the file says so; their quadratic cell node
+  order differs from nyx's, stated in `CellNodeOrder`). It names `points`, `cells` and the stored fields
+  as they are, with their shapes; several solutions (time steps) become a temporal collection. A test
+  resolves every reference against the HDF5 file.
 * **`project.nyx.xml`**: the whole model (geometry, materials, boundary conditions, studies,
   output settings) as readable XML, written and read with `quick-xml`; `.nyx.json` still works.
   Round-trip tested on all examples.
