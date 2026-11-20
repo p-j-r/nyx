@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 > The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points.
 
 **Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 8 files, 4421 lines.
+**Size:** 8 files, 4425 lines.
 
 ## Files
 
@@ -15,7 +15,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 | `crates/app/src/dashboard.rs` | 379 | The dashboard: running workflows with live status, pinned and recent ones as cards, everything older in a list, and search. The rules (three days, the card cap, "done", nothing deleted) are `nyx_engine::facade::store::Workspace::sections`. |
 | `crates/app/src/examples.rs` | 138 | Starting points: the example projects (files in the `examples` folder, found next to the program or in a parent folder of it, or at `NYX_EXAMPLES`) and a blank simulation built from engine commands. An example is a project file like any ... |
 | `crates/app/src/menu.rs` | 169 | The actions of the window as one table (ADR 88): the "Do something" list of the command palette and the native menu bar are two views of it, so a command cannot be in one and missing from the other. The native menu (`muda`, Windows for n... |
-| `crates/app/src/sheets.rs` | 760 | The sheets that open over the shell (new workflow, search palette, versions, share, open a received file) and the settings page. |
+| `crates/app/src/sheets.rs` | 764 | The sheets that open over the shell (new workflow, search palette, versions, share, open a received file) and the settings page. |
 | `crates/app/src/shell.rs` | 973 | The shell around the simulation window: the tab bar (Dashboard, one tab per open workflow, +), the status chip, the search palette entry, and the glue between the window's single live project and the workspace on disk (`nyx-store`). |
 | `crates/app/src/sweepui.rs` | 471 | The Sweep section of a workflow's Build page (UX plan U5, ADR 88): vary one model parameter over a range, see what it costs before it starts, watch the points come in and keep each finished point as a run of the workflow. Everything is t... |
 | `crates/app/src/wfview.rs` | 1115 | The workflow view: header, experiments list, the three sections (1 Concept, 2 Build, 3 Analysis) and what hangs off them (the live run, the runs table and plot, compare, the field viewer and the model screen). |
@@ -352,7 +352,7 @@ classDiagram
 | fn | `Native::install` | `menu.rs:120` | `pub fn install(cc: &eframe::CreationContext<'_>) -> Option<Native>` —  Builds the menus from `ACTIONS` and attaches them to the window of `cc`. `None` when the window has no Win32 handle or muda refuses. |
 | fn | `Native::take` | `menu.rs:149` | `pub fn take(&self) -> Vec<Act>` —  The actions clicked in the menu since the last call. |
 | fn | `App::sheets_ui` | `sheets.rs:26` | `pub fn sheets_ui(&mut self, ctx: &egui::Context)` |
-| fn | `App::settings_ui` | `sheets.rs:590` | `pub fn settings_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::settings_ui` | `sheets.rs:594` | `pub fn settings_ui(&mut self, ui: &mut egui::Ui)` |
 | enum | `Page` | `shell.rs:21` | variants: `Dashboard`, `Workflow`, `Settings` |
 | enum | `Start` | `shell.rs:28` | variants: `Example`, `Results`, `Blank` —  Where a new workflow starts from: an example (or any project file), or a blank simulation. |
 | enum | `Part` | `shell.rs:37` | variants: `Concept`, `Build`, `Analysis` —  The three sections of an experiment. |

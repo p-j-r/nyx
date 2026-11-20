@@ -2,6 +2,7 @@
 name = "nyx-mcp"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 description = "Model Context Protocol server (stdio) for nyx: four script tools (script_run, script_wait, script_check, api) over one script kernel, so a host writes Python that calls the engine commands and only what it prints comes back"
 

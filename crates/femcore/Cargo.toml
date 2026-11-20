@@ -2,6 +2,7 @@
 name = "femcore"
 version.workspace = true
 edition.workspace = true
+license = "(AGPL-3.0-only OR LicenseRef-nyx-Commercial) AND BSD-2-Clause"
 rust-version.workspace = true
 description = "Finite-element core: meshes, meshing and adaptation, linear algebra, the finite-element basics the physics crates share, and the material specification"
 

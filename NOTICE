@@ -1,0 +1,43 @@
+nyx
+Copyright (C) 2026 p-j-r
+
+SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+
+nyx is dual licensed. You may use, modify and distribute it under EITHER of
+these licences, whichever you choose:
+
+  1. the GNU Affero General Public License, version 3 only (the file LICENSE
+     in this folder; https://www.gnu.org/licenses/agpl-3.0.html); or
+  2. a commercial licence, available from the copyright holder, for use that
+     the AGPL does not fit.
+
+nyx is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See sections 15 and 16 of the AGPL.
+
+Parts that carry their own licence
+----------------------------------
+
+These parts keep the licence they came with. The choice above does not change
+them, and the AGPL and the commercial licence do not apply to them.
+
+  * crates/geom                          BSD-2-Clause (crates/geom/LICENSE)
+  * the ported solver and mesher        BSD-2-Clause (docs/ports/solvers/LICENSE,
+    modules of crates/femcore:             docs/ports/meshers/LICENSE). Which
+    linalg, and mesh, meshing, adapt       modules come from the ports is in
+    as far as docs/ports lists them        docs/ports/*/PROVENANCE.md, with the
+                                           third-party notices
+  * crates/app/assets/fonts              EB Garamond Italic: SIL Open Font
+                                           License 1.1 (OFL-EBGaramond.txt next
+                                           to the font; shown in the About
+                                           sheet of the application)
+  * fonts that egui carries              Ubuntu-Light, Hack, NotoEmoji and
+                                           emoji-icon-font keep their own
+                                           licences (see the egui project);
+                                           nyx-analysis draws text into PNG
+                                           figures with Ubuntu-Light from
+                                           epaint_default_fonts
+  * third-party crates                   each under its own licence, as
+                                           declared by the crate; the list is
+                                           Cargo.lock (run `cargo metadata`
+                                           for the licence of each)

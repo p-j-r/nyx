@@ -2,6 +2,7 @@
 name = "nyx-analysis"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 description = "Analyses of nyx results (polarization, Stokes parameters; later group index): functions of a SolveResult"
 

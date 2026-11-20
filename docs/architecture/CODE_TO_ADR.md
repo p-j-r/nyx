@@ -15,6 +15,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `rust-toolchain.toml` | 13 | pinned compiler |
 | `CLAUDE.md` | 1, 10, 12, 13, 20 | conventions |
 | `README.md` | 13 | |
+| `LICENSE` | 100 | the AGPL-3.0 text |
+| `NOTICE` | 100 | the dual licence and the parts that keep their own |
 | `.gitignore` | 13, 20 | `*.py` ignored on purpose |
 | `docs/architecture/adr/*` | 19 | the ADRs themselves |
 | `docs/architecture/contracts/*` | 19 | exemplars |

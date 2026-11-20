@@ -5,7 +5,7 @@ One page per component, C4 level 4. [Component view](../../3-components/app.md) 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
 | [Window](./window.md) | 5 | 2805 | 72 | 14 |
-| [Shell and dashboard](./shell.md) | 8 | 4421 | 102 | 22 |
+| [Shell and dashboard](./shell.md) | 8 | 4425 | 102 | 22 |
 | [Inspector tabs](./inspector.md) | 3 | 2210 | 13 | 2 |
 | [Viewport](./viewport.md) | 4 | 1590 | 36 | 12 |
 | [Look and widgets](./style.md) | 5 | 1252 | 101 | 7 |

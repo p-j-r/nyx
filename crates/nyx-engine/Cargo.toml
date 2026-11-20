@@ -2,6 +2,7 @@
 name = "nyx-engine"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 description = "The nyx engine: the project, its commands, the job runner and the registry of compiled-in physics. Shared by the window and the MCP server"
 

@@ -2,6 +2,7 @@
 name = "nyx-script"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 description = "Scripts as a front-end of the nyx engine (productivity plan S4): Python-syntax scripts run by Monty in a worker process call engine commands, with host limits and no I/O"
 

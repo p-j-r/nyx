@@ -11,7 +11,7 @@ shell = component "Shell and dashboard" "The tab bar, the native menu and the ta
     properties {
         "adr" "14, 23, 87, 88"
         "code" "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs"
-        "lines" "4421"
+        "lines" "4425"
         "codeDiagram" "4-code/app/shell.md"
     }
 }

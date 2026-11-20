@@ -11,6 +11,12 @@ nyx/
   docs/            HOW_IT_WORKS.md, docs/architecture (ADRs, contracts, restructure plan) and docs/ports (provenance of the ported libraries)
 ```
 
+## Licence
+
+**nyx is dual licensed: you may use it under the GNU Affero General Public License, version 3 (see [LICENSE](LICENSE)), or under a commercial licence, whichever you choose.** (`SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial`)
+
+Copyright (C) 2026 p-j-r. A commercial licence is available from the copyright holder for use that the AGPL does not fit. Parts that carry their own licence keep it and are not relicensed: `crates/geom` and the ported solver and mesher modules of `femcore` (BSD-2-Clause, see `docs/ports`), the EB Garamond font (SIL OFL 1.1), and the third-party crates in `Cargo.lock`. [NOTICE](NOTICE) lists them.
+
 ## Build and run
 
 ```
