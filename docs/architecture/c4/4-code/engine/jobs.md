@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 11 files, 4249 lines.
+**Size:** 11 files, 4485 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-engine/src/bin/nyx-worker.rs` | 12 | nyx-worker: solves one frozen project in its own process and writes the results file (productivity plan P4, ADR 86). It is started by the window or the MCP server (`Engine::set_worker`), never by hand: see `nyx_engine::worker` for what i... |
-| `crates/nyx-engine/src/convergence.rs` | 424 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
+| `crates/nyx-engine/src/convergence.rs` | 653 | Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the results of the caller are untouched) and every number that identifies a solution is compared: the ei... |
 | `crates/nyx-engine/src/estimate.rs` | 322 | What a solve will cost, learned from what solves cost (productivity plan Q2, ADR 86). Every solve that runs in a worker process measures its own peak memory exactly (`process::peak_memory`); the engine keeps one row per such run (the phy... |
 | `crates/nyx-engine/src/jobs.rs` | 593 | The job runner and its queue (productivity plan P2 and Q1, ADR 85 and 87): a mesh build, a solve, a convergence check, opening or writing a results file is a job with a `Progress` handle, so it can be watched (stage, elapsed) and cancell... |
 | `crates/nyx-engine/src/process.rs` | 316 | Process-wide settings of the program that hosts the engine. Today one: on Windows, opt the process out of power throttling. |
@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | `crates/nyx-engine/src/reuse.rs` | 202 | Warm starts between the points of a sweep (productivity plan P5b, ADR 96): the engine's side of `femcore::warm`. A sweep asked with `reuse: "warm"` links its points in a chain: point i starts its eigensolves from the modes point i-1 foun... |
 | `crates/nyx-engine/src/shared_queue.rs` | 935 | The queue in the workspace folder (productivity plan Q3, ADR 95): the one queue that the window, the MCP server and the command line share, and the queue worker that runs it. A front-end that has a workspace writes a solve as an *item* i... |
 | `crates/nyx-engine/src/solve.rs` | 114 | Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then solved with the fields it imports from the physics before it. Everything goes through `Physics`, so ... |
-| `crates/nyx-engine/src/sweep.rs` | 448 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
+| `crates/nyx-engine/src/sweep.rs` | 455 | Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of th... |
 | `crates/nyx-engine/src/worker.rs` | 465 | Solving in a child process (productivity plan P4, ADR 86). A solve that needs more memory than the machine has, or a factorisation that nobody can interrupt, must not take the window or the MCP server with it. A *worker* is a small progr... |
 
 ## What it uses
@@ -32,7 +32,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | [container `store` (nyx-store)](../../3-components/store.md) | workspace | default_root |
 | [Commands](./commands.md) | commands, engine | Access, Engine, Purpose |
 | [Materials](./materials.md) | materials | study_wavelength |
-| [Meshing seam](./meshing.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
+| [Meshing seam](./meshing.md) | meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of |
 | [Project](./project.md) | project | Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
 | [Results files](./resultsIO.md) | h5io | read_results, write_results |
@@ -43,14 +43,14 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | Component | Modules | Items |
 |---|---|---|
 | [app: Window](../app/window.md) | process, queue, shared_queue, worker | QueueOpts, cli, opt_out_of_power_throttling, serve |
-| [Commands](./commands.md) | convergence, estimate, jobs, process, queue, reuse +4 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Matching +24 |
+| [Commands](./commands.md) | convergence, estimate, jobs, process, queue, reuse +4 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Limits +25 |
 | [Meshing seam](./meshing.md) | estimate | Estimate, History, chain_key |
 | [Registry and facade](./registry.md) | estimate, jobs, queue | Estimate, History, JobId, JobInfo, JobOutput, JobRunner, JobState, Lane +3 |
 | [Results files](./resultsIO.md) | jobs | Opened |
 
 ## Class diagram
 
-Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 2 more types than the diagram shows.**
+Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 3 more types than the diagram shows.**
 
 ```mermaid
 classDiagram
@@ -71,9 +71,17 @@ classDiagram
     class ConvergenceJob {
         <<struct>>
         +reuse Option
+        +limits Limits
         +run(physics, factor, tolerance) Result
         +run_matched(physics, factor, tolerance, matching) Result
         +run_with(progress, physics, factor, tolerance, matching) Result
+        +plan(physics, factor) Result
+    }
+    class Limits {
+        <<struct>>
+        +max_cells Option~u64~
+        +max_seconds Option~f64~
+        +from_args(args) Result
     }
     class Engine {
         <<impl block>>
@@ -422,15 +430,6 @@ classDiagram
         <<struct>>
         +input Option
     }
-    class RemoteDone {
-        <<struct>>
-        +results Vec
-        +mesh Option~SimplexMesh~
-        +failed Option~Error~
-        +run WorkerRun
-        +warm_out Option
-        +warm_calls Vec~Value~
-    }
     class fns_worker_rs {
         <<module worker.rs>>
         +material_texts(lib) BTreeMap
@@ -446,6 +445,7 @@ classDiagram
     }
   }
   ConvergenceJob --> Stages
+  ConvergenceJob --> Limits
   JobOutput --> WorkerRun
   JobOutput --> Opened
   Submit --> Lane
@@ -463,7 +463,6 @@ classDiagram
   Sweep --> Point
   Prepared --> Engine
   RemoteSpec --> WarmIo
-  RemoteDone --> WorkerRun
 ```
 
 ## Public items
@@ -473,14 +472,17 @@ classDiagram
 | fn | `main` | `bin/nyx-worker.rs:3` | `fn main()` |
 | fn | `numbers` | `convergence.rs:43` | `pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)>` —  Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars. |
 | enum | `Matching` | `convergence.rs:68` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
-| struct | `ConvergenceJob` | `convergence.rs:195` | fields: `reuse` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
+| struct | `ConvergenceJob` | `convergence.rs:241` | fields: `reuse`, `limits` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
+| struct | `Limits` | `convergence.rs:257` | fields: `max_cells`, `max_seconds` —  What a convergence check may cost: it is refused, before any solve, when the finer mesh has more cells than `max_cells` or when the solves it |
 | fn | `Matching::from_args` | `convergence.rs:82` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` is `{ "f": <value> }` and implies `nearest`. |
-| fn | `ConvergenceJob::run` | `convergence.rs:213` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
-| fn | `ConvergenceJob::run_matched` | `convergence.rs:218` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
-| fn | `ConvergenceJob::run_with` | `convergence.rs:229` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either. |
-| fn | `Engine::convergence_job` | `convergence.rs:265` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
-| fn | `Engine::convergence_check` | `convergence.rs:279` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
-| fn | `Engine::convergence_check_matched` | `convergence.rs:286` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
+| fn | `Limits::from_args` | `convergence.rs:264` | `pub fn from_args(args: &Value) -> Result<Limits, Error>` —  `max_cells` and `max_seconds` of the arguments of the command. |
+| fn | `ConvergenceJob::run` | `convergence.rs:294` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
+| fn | `ConvergenceJob::run_matched` | `convergence.rs:299` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
+| fn | `ConvergenceJob::run_with` | `convergence.rs:310` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either. |
+| fn | `ConvergenceJob::plan` | `convergence.rs:366` | `pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error>` —  What the check would cost, without solving anything: the present mesh and the finer one are built (milliseconds against a solve), and the |
+| fn | `Engine::convergence_job` | `convergence.rs:397` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
+| fn | `Engine::convergence_check` | `convergence.rs:413` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
+| fn | `Engine::convergence_check_matched` | `convergence.rs:420` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
 | struct | `Row` | `estimate.rs:17` | fields: `chain`, `dim`, `cells`, `dofs`, `peak_working_set`, `peak_commit`, `seconds` —  One finished worker run. |
 | struct | `Estimate` | `estimate.rs:31` | fields: `bytes`, `bytes_with_margin`, `seconds`, `runs`, `extrapolated`, `exponent` —  An estimate with its basis. |
 | fn | `estimate` | `estimate.rs:61` | `pub fn estimate(rows: &[Row], chain: &str, dim: u8, cells: u64) -> Option<Estimate>` —  The estimate for a solve of `chain` in `dim` dimensions on `cells` cells from `rows`, or `None` when the rows do not support one. |
@@ -612,7 +614,7 @@ classDiagram
 | fn | `Engine::scratch` | `sweep.rs:108` | `pub(crate) fn scratch(&self) -> Engine` —  A copy of this engine for editing: the project is a copy, the mesher, the registry and the material library are shared. Nothing it does |
 | fn | `Engine::sweep_command` | `sweep.rs:150` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
 | fn | `Engine::sweep_prepare` | `sweep.rs:166` | `pub(crate) fn sweep_prepare(&self, args: &Value) -> Result<Prepared, Error>` —  Reads and checks a sweep request without submitting anything: the points, what they solve, how they queue, and the engine of every point |
-| fn | `Engine::apply_point` | `sweep.rs:322` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
+| fn | `Engine::apply_point` | `sweep.rs:329` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
 | const | `PREFIX` | `worker.rs:26` | `&str` —  Every line of the worker's standard output that is a message starts with this. |
 | struct | `RemoteSpec` | `worker.rs:30` | fields: `worker`, `project_json`, `materials`, `targets`, `warm` —  What a worker is asked to solve. |
 | struct | `WarmIo` | `worker.rs:42` | fields: `input` —  The modes handed to a worker for a warm start (none for the first point, which only records). |

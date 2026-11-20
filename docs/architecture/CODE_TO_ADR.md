@@ -21,6 +21,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/architecture/*` | 19, 20 | model, rough spots, indexes |
 | `docs/RESTRUCTURE_STATUS.md` | 20, 19 | handoff for the restructure plan |
 | `docs/UX_STATUS.md` | 20, 88 | handoff for the UX review and plan |
+| `docs/HOST_SETUP.md` | 97, 94 | what costs time when an AI host drives nyx, and what to set in the host and do in the agent |
+| `docs/LATENCY_STATUS.md` | 97, 20 | handoff for the latency work L1 to L3 |
 | `docs/ux/*` | 88 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
 | `docs/FRAME_UNIFICATION_STATUS.md` | 1 | |
 | `docs/KERNEL_PORT_STATUS.md` | 1, 9, 10, 12 | |
@@ -108,6 +110,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/warm.rs` | 96 | same modes in fewer iterations; no context or an empty one is the same bits; another size is a cold start |
 | `crates/nyx-engine/src/reuse.rs` | 96 | the chain of a warm sweep: the link, the cell a point leaves its modes in, the wait in the shared lane, the reuse record |
 | `crates/nyx-engine/tests/warm_sweep.rs` | 96 | a warm sweep agrees with a cold one, later points start warm, a worker and the queue worker give one answer, a predecessor that cannot finish does not hold the lane |
+| `crates/nyx-engine/tests/latency.rs` | 97 | a starred material sizes a mesh with absorbing layers, `mesh_build` answers `cost`, a convergence dry run and its limits, the noise rows of a lossless guide on a tilted crystal |
 | `crates/femcore/src/section.rs` | 1 | |
 | `crates/femcore/src/props.rs` | 41, 25 | shared per-domain data (materials, PML, periodic pairs, linear solver); replaced by material files in phase 6 |
 | `crates/femcore/src/testkit/*` | 41, 10, 60 | mesh fixtures of the tests of every physics crate; `soi.rs`, the cross-section of the SOI wire |
@@ -149,8 +152,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |
 | `crates/app/src/*` | 23 | |
 | `crates/app/*` | 23 | |
-| `crates/nyx-mcp/tests/{contracts,stdio}.rs` | 94, 19, 15 | the `mcp_tools.v3` snapshot (four tools), the handshake, and the gate of S7: the P0 workflows in script mode against the per-command baseline |
-| `crates/nyx-mcp/*` | 94, 15 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over one script kernel, no tool per command (S7; ADR 15 amended); moved from `ai/` into the root workspace (ADR 26) |
+| `crates/nyx-mcp/tests/{contracts,stdio}.rs` | 94, 97, 19, 15 | the `mcp_tools.v3` snapshot (four tools), the handshake, and the gate of S7: the P0 workflows in script mode against the per-command baseline |
+| `crates/nyx-mcp/*` | 94, 97, 15 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over one script kernel, no tool per command (S7; ADR 15 amended); moved from `ai/` into the root workspace (ADR 26) |
 | `crates/nyx-connect/*` | 15, 28, 19 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27 | shared target directory |

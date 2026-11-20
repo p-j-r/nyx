@@ -223,6 +223,9 @@ impl Engine {
                 schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report")),
                     ("match", json!({ "type": "string", "enum": ["index", "nearest"], "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner" })),
                     ("track", json!({ "type": "object", "description": "follow one mode: { f } is a value (Hz for a vibration study); the mode whose eigenvalue is nearest it is compared with the nearest eigenvalue of the finer mesh", "properties": { "f": { "type": "number" } }, "required": ["f"], "additionalProperties": false })),
+                    ("max_cells", number("refuse, before any solve, a check whose finer mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6)")),
+                    ("max_seconds", number("refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the finer mesh")),
+                    ("dry_run", boolean("only build both meshes and answer their cells and what a solve of each is expected to cost; nothing is solved")),
                     ("wait", boolean("wait for the answer, default true; false starts a job that job_list, job_status and job_cancel see and job_wait answers"))], &["physics"])),
             cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF description next to it for ParaView and VisIt. Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)")), ("wait", boolean("wait for the file, default true; false starts a job that writes what the engine holds now, under its name only when complete"))], &["path"])),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
@@ -514,8 +517,13 @@ impl Engine {
                     args.get("tolerance").and_then(Value::as_f64),
                 );
                 let matching = crate::convergence::Matching::from_args(args)?;
+                let limits = crate::convergence::Limits::from_args(args)?;
+                if opt_bool(args, "dry_run", false) {
+                    // what the check would cost: both meshes are built, nothing is solved
+                    return self.convergence_job().plan(physics, factor);
+                }
                 let start = |e: &mut Engine| {
-                    e.start_convergence_matched(physics, factor, tolerance, &matching, &crate::queue::QueueOpts::default())
+                    e.start_convergence_limited(physics, factor, tolerance, &matching, &crate::queue::QueueOpts::default(), limits.clone())
                 };
                 if opt_bool(args, "wait", true) {
                     // through the queue, like a solve: it waits for the heavy lane and reuses the coarse solve of an earlier request

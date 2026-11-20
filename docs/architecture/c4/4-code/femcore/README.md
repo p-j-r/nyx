@@ -7,7 +7,7 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 | [Mesh](./mesh.md) | 5 | 1707 | 83 | 9 |
 | [Mesh files](./meshio.md) | 3 | 878 | 18 | 5 |
 | [Fixtures and test kit](./fixtures.md) | 3 | 582 | 25 | 8 |
-| [Meshing facade](./meshing.md) | 6 | 1777 | 73 | 25 |
+| [Meshing facade](./meshing.md) | 6 | 1818 | 74 | 25 |
 | [3D meshing](./meshing3d.md) | 5 | 2090 | 41 | 10 |
 | [Structured absorbing layers](./structpml.md) | 4 | 1408 | 24 | 8 |
 | [Meshing validation harness](./meshcheck.md) | 4 | 980 | 28 | 6 |

@@ -27,7 +27,7 @@ meshing = component "Meshing facade" "MeshPlan and mesh_model (the one way to me
     properties {
         "adr" "6, 17, 54"
         "code" "crates/femcore/src: meshing/geomdrive.rs, meshing/mesher.rs, meshing/mod.rs, meshing/physics_size.rs, meshing/request.rs, meshing/sizing.rs"
-        "lines" "1777"
+        "lines" "1818"
         "codeDiagram" "4-code/femcore/meshing.md"
     }
 }

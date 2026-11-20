@@ -256,9 +256,16 @@ impl Engine {
         let name = args.get("name").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("sweep {id}"));
         let listed: Vec<Value> =
             points.iter().enumerate().map(|(i, p)| json!({ "index": i, "label": p.label, "job": p.job })).collect();
+        // what the sweep is expected to take, from the present mesh and the solves this machine has run (L3): the points are solved one at a time;
+        // a sweep that changes the geometry or the mesh meshes every point anew, so this is the size of one point at the mesh that is current now
+        let cost = self.model().map(|m| {
+            let per_point = self.cost_json(&resolved, m.mesh().dim() as u8, m.mesh().n_cells() as u64);
+            let seconds = per_point["solve"]["seconds"].as_f64().map(|s| s * listed.len() as f64);
+            json!({ "per_point": per_point, "points": listed.len(), "seconds_estimate": seconds })
+        });
         self.sweeps.insert(id, Sweep { name: name.clone(), targets: resolved, points });
         Ok(json!({
-            "sweep": id, "name": name, "points": listed,
+            "sweep": id, "name": name, "points": listed, "cost": cost,
             "note": "the points are queued at their priority and run one at a time; sweep_table shows them as they finish, and the current project and results are not touched",
         }))
     }

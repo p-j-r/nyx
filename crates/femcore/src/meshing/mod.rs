@@ -135,6 +135,13 @@ pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGe
 /// the adaptive mesher adapts the start mesh to the intersection of the geometry metric and the wave metric.
 pub fn mesh_for_sizing(list: &FeatureList, plan: &MeshPlan, sizing: &Sizing, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
     let ev = evaluate(list)?;
+    // a material given for `Air*` sizes `Air` and its absorbing pieces `Air.pml_*` (the pieces exist only in the label map of the model)
+    let expanded = {
+        let labels = ev.label_map().map_err(|e| e.to_string())?;
+        let names: Vec<&str> = labels.domains.iter().map(|d| d.name.as_str()).collect();
+        sizing.expand_wildcards(&names)
+    };
+    let sizing = &expanded;
     if ev.list.dim == 3 {
         return mesh_3d_plan(ev, plan, Some((sizing, sz)));
     }
@@ -194,7 +201,8 @@ fn mesh_waves_2d(list: &FeatureList, plan: &MeshPlan, vertex_sizes: VertexSizesF
 pub fn wave_sizes_by_region(ev: &Evaluated, labels: &LabelMap, sizing: &Sizing, sz: &PhysicsSizing) -> Result<Vec<f64>, String> {
     let pml: std::collections::HashSet<i32> = ev.pml_regions().iter().map(|p| labels.domains[p.region as usize].id).collect();
     let ids: Vec<i32> = labels.domains.iter().map(|d| d.id).collect();
-    physics_size::cell_sizes_for(sizing, &|n| labels.domain(n), &ids, &|d| pml.contains(&d), sz)
+    let names: Vec<&str> = labels.domains.iter().map(|d| d.name.as_str()).collect();
+    physics_size::cell_sizes_for(&sizing.expand_wildcards(&names), &|n| labels.domain(n), &ids, &|d| pml.contains(&d), sz)
 }
 
 /// Meshes a 3D model (ADR 40, 50, 51, 52): the lattice mesher with the sizes of the model and, when `waves` is given, of the study; then

@@ -14,7 +14,7 @@ pub fn card(topic: &str) -> Option<&'static str> {
 }
 
 /// The text a server sends with `initialize`: just enough to find the guide (the `api` tool) and to know that the work is scripts.
-pub const SERVER_INSTRUCTIONS: &str = "nyx runs finite-element photonics and phononics (waveguide modes, effective index, polarization, vibration modes, heat). You work by writing short Python scripts: call api first (it is the guide and the list of commands), then script_run; script_check checks a script without running it. Only what a script prints or returns comes back. Use nyx for numbers and state the assumptions you used.";
+pub const SERVER_INSTRUCTIONS: &str = "nyx runs finite-element photonics and phononics (waveguide modes, effective index, polarization, vibration modes, heat). You work by writing short Python scripts: call api first (it is the guide and the list of commands), then script_run; script_check checks a script without running it. Do a whole task in one script_run, not one call per step; keep wait_s under your tool timeout (at most 90) and continue a `running` answer with script_wait. Only what a script prints or returns comes back. Use nyx for numbers and state the assumptions you used.";
 
 #[cfg(test)]
 mod tests {

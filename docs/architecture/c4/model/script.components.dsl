@@ -11,7 +11,7 @@ kernel = component "Script kernel" "One Monty session in a worker process that o
     properties {
         "adr" "94, 93"
         "code" "crates/nyx-script/src: kernel.rs"
-        "lines" "650"
+        "lines" "658"
         "codeDiagram" "4-code/script/kernel.md"
     }
 }

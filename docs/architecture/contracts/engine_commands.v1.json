@@ -1932,6 +1932,10 @@
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "dry_run": {
+          "description": "only build both meshes and answer their cells and what a solve of each is expected to cost; nothing is solved",
+          "type": "boolean"
+        },
         "factor": {
           "description": "finer/present element size, between 0 and 1, default 0.6",
           "type": "number"
@@ -1943,6 +1947,14 @@
             "nearest"
           ],
           "type": "string"
+        },
+        "max_cells": {
+          "description": "refuse, before any solve, a check whose finer mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6)",
+          "type": "number"
+        },
+        "max_seconds": {
+          "description": "refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the finer mesh",
+          "type": "number"
         },
         "physics": {
           "description": "the three-letter code of the physics",

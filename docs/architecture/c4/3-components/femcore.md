@@ -165,7 +165,7 @@ graph TB
 | [Mesh](../4-code/femcore/mesh.md) | 5 | 1707 | 4, 5, 32 | The native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics. |
 | [Mesh files](../4-code/femcore/meshio.md) | 3 | 878 | 16 | The compact lossless .fmsh format for meshes and results and its entropy coder. |
 | [Fixtures and test kit](../4-code/femcore/fixtures.md) | 3 | 582 | 41, 10, 60 | Test meshes and the SOI wire cross-section used by the tests of every physics crate. |
-| [Meshing facade](../4-code/femcore/meshing.md) | 6 | 1777 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
+| [Meshing facade](../4-code/femcore/meshing.md) | 6 | 1818 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
 | [3D meshing](../4-code/femcore/meshing3d.md) | 5 | 2090 | 40, 50, 51, 55, 82, 83 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, and the curved (quadratic) edges of boundary cells. |
 | [Structured absorbing layers](../4-code/femcore/structpml.md) | 4 | 1408 | 7, 52, 5 | Structured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels. |
 | [Meshing validation harness](../4-code/femcore/meshcheck.md) | 4 | 980 | 7 | A small independent scalar Helmholtz solver with PML used to validate meshes. |

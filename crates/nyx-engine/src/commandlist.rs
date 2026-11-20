@@ -365,6 +365,10 @@ impl Engine {
                     report.steps.push(step("mesh", format!("mesh ({})", if new_mesh { "built" } else { "reused" })));
                 }
                 "convergence_check" => {
+                    if l.args.get("dry_run").and_then(serde_json::Value::as_bool) == Some(true) {
+                        report.steps.push(step("convergence", "convergence check, dry run: both meshes are built and their cost is told; nothing is solved".to_string()));
+                        continue;
+                    }
                     let Some(p) = physics_arg(&l.args).and_then(|v| v.into_iter().next()) else {
                         report.problems.push(problem("a convergence check needs `physics`".into()));
                         continue;

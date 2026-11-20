@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91, 93, 94"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, scriptout.rs, validated.rs"
-        "lines" "4376"
+        "lines" "4411"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -27,7 +27,7 @@ jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs 
     properties {
         "adr" "61, 80, 85, 87, 86, 11, 95, 96"
         "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)"
-        "lines" "4249"
+        "lines" "4485"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -35,7 +35,7 @@ commandlist = component "Command lists" "A JSON-lines list of engine commands is
     properties {
         "adr" "89"
         "code" "crates/nyx-engine/src: commandlist.rs"
-        "lines" "581"
+        "lines" "585"
         "codeDiagram" "4-code/engine/commandlist.md"
     }
 }
@@ -51,7 +51,7 @@ meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, lab
     properties {
         "adr" "54, 50, 92"
         "code" "crates/nyx-engine/src: meshing.rs, pml.rs, preview.rs"
-        "lines" "479"
+        "lines" "537"
         "codeDiagram" "4-code/engine/meshing.md"
     }
 }

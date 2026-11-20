@@ -8,8 +8,11 @@ Solves the physics again on a finer mesh (element size times `factor`; the proje
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
+| `dry_run` | true or false | no |  | only build both meshes and answer their cells and what a solve of each is expected to cost; nothing is solved |
 | `factor` | number | no |  | finer/present element size, between 0 and 1, default 0.6 |
 | `match` | text: `index`, `nearest` | no |  | how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner |
+| `max_cells` | number | no |  | refuse, before any solve, a check whose finer mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6) |
+| `max_seconds` | number | no |  | refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the finer mesh |
 | `physics` | text: `dfs`, `ems`, `sms` | yes |  | the three-letter code of the physics |
 | `tolerance` | number | no |  | largest accepted relative difference, e.g. 1e-3; omit to only report |
 | `track` | object | no |  | follow one mode: { f } is a value (Hz for a vibration study); the mode whose eigenvalue is nearest it is compared with the nearest eigenvalue of the finer mesh |

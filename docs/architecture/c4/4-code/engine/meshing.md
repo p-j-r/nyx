@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 > MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92).
 
 **Decisions:** [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 3 files, 479 lines.
+**Size:** 3 files, 537 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/meshing.rs` | 286 | Meshing seam. `MeshedModel` is a mesh together with the names of the model (regions, boundaries) and the label resolver the physics use; `Mesher` builds one from a feature list. `FemcoreMesher` is the **only** code of the engine that cal... |
+| `crates/nyx-engine/src/meshing.rs` | 292 | Meshing seam. `MeshedModel` is a mesh together with the names of the model (regions, boundaries) and the label resolver the physics use; `Mesher` builds one from a feature list. `FemcoreMesher` is the **only** code of the engine that cal... |
 | `crates/nyx-engine/src/pml.rs` | 73 | Absorbing layers across the two halves of a project: the geometry cuts a region into the physical part and one piece per side of the window (`Pml` feature), the physics stretches the coordinates in each piece (`pml` condition). `add_pml_... |
-| `crates/nyx-engine/src/preview.rs` | 120 | What a person sees while editing, before anything is built for real (productivity plan P3, ADR 92). Three questions about an edit that has not been applied yet, answered without changing the engine, its mesh, its results or its queue: |
+| `crates/nyx-engine/src/preview.rs` | 172 | What a person sees while editing, before anything is built for real (productivity plan P3, ADR 92). Three questions about an edit that has not been applied yet, answered without changing the engine, its mesh, its results or its queue: |
 
 ## What it uses
 
@@ -35,7 +35,7 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 | [app: Window](../app/window.md) | meshing, preview | MeshedModel, SizePreview |
 | [Analyses](./analyse.md) | meshing | MeshedModel |
 | [Commands](./commands.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
-| [Job runner and queue](./jobs.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
+| [Job runner and queue](./jobs.md) | meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of |
 | [Registry and facade](./registry.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
 | [Results files](./resultsIO.md) | meshing | MeshedModel, Mesher |
 
@@ -71,6 +71,7 @@ classDiagram
         <<impl block>>
         +add_pml_conditions(physics, strength) Result
         +default_targets() Vec~String~
+        ~cost_json(targets, dim, cells) Value
         +check_edits(geometry, mesh) Result
         +size_preview(geometry, mesh) Result
         +polarization_task(physics) Option
@@ -88,6 +89,10 @@ classDiagram
     class SizeTask {
         <<struct>>
         +run() Result
+    }
+    class fns_preview_rs {
+        <<module preview.rs>>
+        ~cost_of(history, targets, dim, cells) Value
     }
   }
   FemcoreMesher ..|> Mesher
@@ -110,15 +115,17 @@ classDiagram
 | fn | `MeshedModel::report` | `meshing.rs:76` | `pub fn report(&self) -> Option<&femcore::meshing::request::MeshReport>` |
 | fn | `MeshedModel::regions` | `meshing.rs:81` | `pub fn regions(&self) -> Vec<(i32, String)>` —  Region labels with their names. |
 | fn | `MeshedModel::info` | `meshing.rs:86` | `pub fn info(&self) -> Value` —  What a person or a host needs to choose names: the regions, the boundary names and the size of the mesh. |
-| fn | `MeshedModel::suggest` | `meshing.rs:255` | `pub fn suggest(&self, labels: &[i32]) -> Vec<String>` —  Selectors, simplest first, that pick exactly the boundaries with these numbers; empty when no selector does. What the window offers |
-| fn | `MeshedModel::boundary_names` | `meshing.rs:282` | `pub fn boundary_names(&self) -> Vec<(i32, String)>` —  The names of the boundaries with their numbers (a boundary name may stand for several numbers). |
+| fn | `MeshedModel::suggest` | `meshing.rs:261` | `pub fn suggest(&self, labels: &[i32]) -> Vec<String>` —  Selectors, simplest first, that pick exactly the boundaries with these numbers; empty when no selector does. What the window offers |
+| fn | `MeshedModel::boundary_names` | `meshing.rs:288` | `pub fn boundary_names(&self) -> Vec<(i32, String)>` —  The names of the boundaries with their numbers (a boundary name may stand for several numbers). |
 | fn | `Engine::add_pml_conditions` | `pml.rs:12` | `pub fn add_pml_conditions(&mut self, physics: &str, strength: f64) -> Result<Value, Error>` —  Adds a `pml` condition for every absorbing piece of the geometry to `physics` (replacing the conditions it had on those pieces). |
 | fn | `Engine::default_targets` | `pml.rs:51` | `pub fn default_targets(&self) -> Vec<String>` —  The physics solved when none is named: the active one and, before it, those of the project that export what it imports (a heat |
 | struct | `SizePreview` | `preview.rs:29` | fields: `dim`, `cells`, `mesh_seconds`, `chain`, `estimate` —  The size and cost of a model that is being edited. |
-| struct | `SizeTask` | `preview.rs:43` |  A trial mesh waiting to run. It owns copies of everything it needs and is `Send`, so the caller chooses the thread. |
-| fn | `SizeTask::run` | `preview.rs:56` | `pub fn run(self) -> Result<SizePreview, Error>` —  Meshes the copy of the edits and looks up the estimate. Blocks for as long as the mesher takes (milliseconds for the models this is |
-| fn | `Engine::check_edits` | `preview.rs:71` | `pub fn check_edits(&self, geometry: &FeatureList, mesh: &MeshSettings) -> Result<(), Error>` —  The first problem of this project with `geometry` and `mesh` in place of its own, in plain words, or `Ok` when it passes |
-| fn | `Engine::size_preview` | `preview.rs:81` | `pub fn size_preview(&self, geometry: FeatureList, mesh: MeshSettings) -> Result<SizeTask, Error>` —  A trial mesh of the project with `geometry` and `mesh` applied, as a task that can run on any thread. Refused (with the reason, in plain |
-| fn | `Engine::polarization_task` | `preview.rs:108` | `pub fn polarization_task( &self, physics: &str, ) -> Option<(Arc<SolveResult>, impl FnOnce() -> Result<ModeAnalysis, Error> + Send + 'static)>` —  The polarization analysis of the latest result of `physics` as a function that does not borrow the engine, so it can run beside the |
+| fn | `cost_of` | `preview.rs:49` | `pub(crate) fn cost_of(history: &History, targets: &[String], dim: u8, cells: u64) -> serde_json::Value` —  What a solve of `targets` on a mesh of `cells` cells costs, from the solves `history` has seen (the answer of `mesh_build` and `convergence_check` |
+| struct | `SizeTask` | `preview.rs:72` |  A trial mesh waiting to run. It owns copies of everything it needs and is `Send`, so the caller chooses the thread. |
+| fn | `SizeTask::run` | `preview.rs:85` | `pub fn run(self) -> Result<SizePreview, Error>` —  Meshes the copy of the edits and looks up the estimate. Blocks for as long as the mesher takes (milliseconds for the models this is |
+| fn | `Engine::cost_json` | `preview.rs:101` | `pub(crate) fn cost_json(&self, targets: &[String], dim: u8, cells: u64) -> serde_json::Value` —  What a solve of `targets` on a mesh of `cells` cells costs, as the answer of `mesh_build` and `convergence_check` shows it: the estimate from the |
+| fn | `Engine::check_edits` | `preview.rs:107` | `pub fn check_edits(&self, geometry: &FeatureList, mesh: &MeshSettings) -> Result<(), Error>` —  The first problem of this project with `geometry` and `mesh` in place of its own, in plain words, or `Ok` when it passes |
+| fn | `Engine::size_preview` | `preview.rs:117` | `pub fn size_preview(&self, geometry: FeatureList, mesh: MeshSettings) -> Result<SizeTask, Error>` —  A trial mesh of the project with `geometry` and `mesh` applied, as a task that can run on any thread. Refused (with the reason, in plain |
+| fn | `Engine::polarization_task` | `preview.rs:144` | `pub fn polarization_task( &self, physics: &str, ) -> Option<(Arc<SolveResult>, impl FnOnce() -> Result<ModeAnalysis, Error> + Send + 'static)>` —  The polarization analysis of the latest result of `physics` as a function that does not borrow the engine, so it can run beside the |
 
 Trait implementations in this component: `MeshedModel: LabelResolver`, `FemcoreMesher: Mesher`

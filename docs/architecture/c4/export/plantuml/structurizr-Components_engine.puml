@@ -161,7 +161,7 @@ nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaG
 nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxstore <<Relationship-UmVsYXRpb25zaGlw>> : "uses store: workspace\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxengine.Commands <<Relationship-UmVsYXRpb25zaGlw>> : "uses commands, engine\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxengine.Materials <<Relationship-UmVsYXRpb25zaGlw>> : "uses materials\n<size:16>[Rust paths]</size>"
-nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxengine.Meshingseam <<Relationship-UmVsYXRpb25zaGlw>> : "uses meshing\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxengine.Meshingseam <<Relationship-UmVsYXRpb25zaGlw>> : "uses meshing, preview\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxengine.Project <<Relationship-UmVsYXRpb25zaGlw>> : "uses project\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxengine.Registryandfacade <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Jobrunnerandqueue --> nyx.nyxengine.Resultsfiles <<Relationship-UmVsYXRpb25zaGlw>> : "uses h5io\n<size:16>[Rust paths]</size>"

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Script kernel** (`script.kernel`) in the co
 > One Monty session in a worker process that outlives a script: `run`, `wait`, `cancel` and `check`; variables stay from one script to the next; a command that waits for a job (`solve_run`, `convergence_check`, `job_wait`, `queue_wait`) is started and polled by the host so no call blocks for ever and a script can be left `running`; `nyx.aio` futures; the destructive commands refused unless allowed; a dead worker replaced from a dump.
 
 **Decisions:** [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md)  
-**Size:** 1 file, 650 lines.
+**Size:** 1 file, 658 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-script/src/kernel.rs` | 650 | The kernel (productivity plan S7, ADR [94]): one Monty session in a worker process that outlives a script. `run` feeds a script to it and answers each pause (an engine command, a name nothing defines, a clock or file request) until the s... |
+| `crates/nyx-script/src/kernel.rs` | 658 | The kernel (productivity plan S7, ADR [94]): one Monty session in a worker process that outlives a script. `run` feeds a script to it and answers each pause (an engine command, a name nothing defines, a clock or file request) until the s... |
 
 ## What it uses
 
@@ -52,6 +52,7 @@ classDiagram
       +new(engine, limits, opts) Result
       +set_script_name(name)
       +waiting() Option~String~
+      +waiting_job() Option~u64~
       +run(engine, name, src, params, wait, allow_destructive) Result
       +wait(engine, wait) Result
       +cancel(engine) Result
@@ -79,9 +80,10 @@ classDiagram
 | fn | `Kernel::new` | `kernel.rs:270` | `pub fn new(engine: &Engine, limits: Limits, opts: Options) -> Result<Kernel, String>` —  A kernel for `engine`'s catalog. No process is started until the first script. |
 | fn | `Kernel::set_script_name` | `kernel.rs:303` | `pub fn set_script_name(&mut self, name: &str)` —  The name the static check gives the script in its messages (`file.nys:2:1`). It is the name of the session, so it is set before the first |
 | fn | `Kernel::waiting` | `kernel.rs:308` | `pub fn waiting(&self) -> Option<String>` —  What the script that has not finished is waiting for. |
-| fn | `Kernel::run` | `kernel.rs:323` | `pub fn run(&mut self, engine: &mut Engine, name: &str, src: &str, params: Option<&Value>, wait: Option<Duration>, allow_destructive: bool) -> Result<Step, String>` —  Feeds `src` to the session. It returns when the script is finished, or when `wait` is spent and it is waiting for a job. |
-| fn | `Kernel::wait` | `kernel.rs:346` | `pub fn wait(&mut self, engine: &mut Engine, wait: Option<Duration>) -> Result<Step, String>` —  Continues the script that is waiting; at the end of `wait` it may still be. |
-| fn | `Kernel::cancel` | `kernel.rs:362` | `pub fn cancel(&mut self, engine: &mut Engine) -> Result<(), String>` —  Abandons the script that is waiting: its job is cancelled and the session starts again from the last script that finished. |
-| fn | `Kernel::check` | `kernel.rs:379` | `pub fn check(&mut self, engine: &mut Engine, name: &str, src: &str) -> Result<(), String>` —  Parses and type-checks `src` against the commands and the variables of the session and runs nothing that matters: the session it is |
+| fn | `Kernel::waiting_job` | `kernel.rs:316` | `pub fn waiting_job(&self) -> Option<u64>` —  The engine job the script that has not finished is waiting for (none when it waits for futures): a host asks the engine about it. |
+| fn | `Kernel::run` | `kernel.rs:331` | `pub fn run(&mut self, engine: &mut Engine, name: &str, src: &str, params: Option<&Value>, wait: Option<Duration>, allow_destructive: bool) -> Result<Step, String>` —  Feeds `src` to the session. It returns when the script is finished, or when `wait` is spent and it is waiting for a job. |
+| fn | `Kernel::wait` | `kernel.rs:354` | `pub fn wait(&mut self, engine: &mut Engine, wait: Option<Duration>) -> Result<Step, String>` —  Continues the script that is waiting; at the end of `wait` it may still be. |
+| fn | `Kernel::cancel` | `kernel.rs:370` | `pub fn cancel(&mut self, engine: &mut Engine) -> Result<(), String>` —  Abandons the script that is waiting: its job is cancelled and the session starts again from the last script that finished. |
+| fn | `Kernel::check` | `kernel.rs:387` | `pub fn check(&mut self, engine: &mut Engine, name: &str, src: &str) -> Result<(), String>` —  Parses and type-checks `src` against the commands and the variables of the session and runs nothing that matters: the session it is |
 
 Trait implementations in this component: `Kernel: Drop`

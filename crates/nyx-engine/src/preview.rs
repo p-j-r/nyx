@@ -39,6 +39,35 @@ pub struct SizePreview {
     pub estimate: Option<Estimate>,
 }
 
+/// A mesh above this many cells (2D, 3D) takes tens of seconds to solve with the quadratic elements and the complex eigensolver, and a
+/// convergence check on a mesh made finer multiplies it again: said in the answer of `mesh_build`.
+const HEAVY_CELLS: (u64, u64) = (15_000, 100_000);
+
+/// What a solve of `targets` on a mesh of `cells` cells costs, from the solves `history` has seen (the answer of `mesh_build` and `convergence_check`
+/// carries it): `solve` is `null` while there are too few runs (no number is invented), `warning` is there for a mesh that is large for the way it is
+/// used (L3).
+pub(crate) fn cost_of(history: &History, targets: &[String], dim: u8, cells: u64) -> serde_json::Value {
+    use serde_json::json;
+    let chain = chain_key(targets);
+    let solve = history.estimate(&chain, dim, cells).map(
+        |e| json!({ "seconds": e.seconds, "memory_bytes": e.bytes, "runs": e.runs, "extrapolated": e.extrapolated }),
+    );
+    let mut v = json!({ "chain": chain, "dim": dim, "cells": cells, "solve": solve });
+    if let Some(w) = heavy_warning(dim, cells) {
+        v["warning"] = json!(w);
+    }
+    v
+}
+
+fn heavy_warning(dim: u8, cells: u64) -> Option<String> {
+    let limit = if dim >= 3 { HEAVY_CELLS.1 } else { HEAVY_CELLS.0 };
+    (cells > limit).then(|| {
+        format!(
+            "{cells} cells is a large mesh: a solve takes long and a convergence_check at factor 0.6 makes the mesh several times larger (an adaptive 2D mesh 6 to 8 times). Coarsen h or adapt_scale first, or ask convergence_check with dry_run true what the finer mesh would cost"
+        )
+    })
+}
+
 /// A trial mesh waiting to run. It owns copies of everything it needs and is `Send`, so the caller chooses the thread.
 pub struct SizeTask {
     mesher: Arc<dyn Mesher>,
@@ -66,6 +95,13 @@ impl SizeTask {
 }
 
 impl Engine {
+    /// What a solve of `targets` on a mesh of `cells` cells costs, as the answer of `mesh_build` and `convergence_check` shows it: the estimate from the
+    /// solves this machine has run (`null` while there are too few: no number is invented) and, for a mesh that is large for the way it is used, a
+    /// warning in plain words (L3).
+    pub(crate) fn cost_json(&self, targets: &[String], dim: u8, cells: u64) -> serde_json::Value {
+        cost_of(&self.history, targets, dim, cells)
+    }
+
     /// The first problem of this project with `geometry` and `mesh` in place of its own, in plain words, or `Ok` when it passes
     /// `Project::check`. The engine's project is not changed.
     pub fn check_edits(&self, geometry: &FeatureList, mesh: &MeshSettings) -> Result<(), Error> {
@@ -115,5 +151,21 @@ impl Engine {
         let (model, result) = self.analysis_inputs(physics).ok()?;
         let r = result.clone();
         Some((r, move || nyx_analysis::polarization(model.mesh(), &result)))
+    }
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+
+    #[test]
+    fn a_mesh_is_large_for_its_dimension_and_the_cost_has_no_number_without_runs() {
+        assert!(heavy_warning(2, 15_000).is_none() && heavy_warning(2, 15_001).is_some());
+        assert!(heavy_warning(3, 100_000).is_none() && heavy_warning(3, 100_001).is_some());
+        let h = History::default();
+        let v = cost_of(&h, &["ems".to_string()], 2, 22_714);
+        assert!(v["solve"].is_null(), "no runs, no estimate: {v}");
+        assert!(v["warning"].as_str().unwrap().contains("22714 cells"), "{v}");
+        assert_eq!(v["chain"], "ems");
     }
 }

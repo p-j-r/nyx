@@ -778,6 +778,27 @@ impl Engine {
         matching: &crate::convergence::Matching,
         opts: &QueueOpts,
     ) -> Result<JobId, Error> {
+        self.start_convergence_limited(
+            physics,
+            factor,
+            tolerance,
+            matching,
+            opts,
+            crate::convergence::Limits::default(),
+        )
+    }
+
+    /// `start_convergence_matched` that refuses, before any solve, a check whose finer mesh has more cells than `limits.max_cells` or is estimated
+    /// to take longer than `limits.max_seconds` (L3).
+    pub fn start_convergence_limited(
+        &mut self,
+        physics: &str,
+        factor: f64,
+        tolerance: Option<f64>,
+        matching: &crate::convergence::Matching,
+        opts: &QueueOpts,
+        limits: crate::convergence::Limits,
+    ) -> Result<JobId, Error> {
         if !(factor > 0.0 && factor < 1.0) {
             return Err(Error::invalid("`factor` is the ratio of the finer element size to the present one, between 0 and 1 (0.6 is a good step)"));
         }
@@ -785,6 +806,7 @@ impl Engine {
             return Err(Error::invalid(format!("the project has no problem for '{physics}'")));
         }
         let mut job = self.convergence_job();
+        job.limits = limits;
         // the coarse solve of the check is the solve of this physics alone on the present mesh: its key is the problem key and that chain
         job.reuse = self.problem_key(physics).map(|k| (self.stages.clone(), solve_key(&k, &[physics.to_string()])));
         let (physics, matching) = (physics.to_string(), matching.clone());
@@ -896,8 +918,13 @@ impl Engine {
                         "the project was replaced while the mesh was built; the mesh was dropped",
                     ));
                 }
+                let (cells, dim) = (m.mesh().n_cells() as u64, m.mesh().dim() as u8);
                 let current = self.install_model(key, m);
-                Ok(json!({ "job": id, "state": "done", "mesh": info, "seconds": seconds, "current": current }))
+                // what a solve on this mesh is expected to cost, so a script can decide before it starts one (L3)
+                let cost = self.cost_json(&self.default_targets(), dim, cells);
+                Ok(
+                    json!({ "job": id, "state": "done", "mesh": info, "seconds": seconds, "current": current, "cost": cost }),
+                )
             }
             (Pending::Solve { generation, .. }, Ok(JobOutput::Solved { .. })) if generation != self.generation => {
                 Err(Error::invalid("the project was replaced while this solve ran; its results were dropped"))

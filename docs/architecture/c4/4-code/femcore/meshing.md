@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Meshing facade** (`femcore.meshing`) in the
 > MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core.
 
 **Decisions:** [ADR 6](../../../adr/0006-one-meshing-interface.md), [ADR 17](../../../adr/0017-physics-driven-mesh-sizing.md), [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md)  
-**Size:** 6 files, 1777 lines.
+**Size:** 6 files, 1818 lines.
 
 ## Files
 
@@ -13,10 +13,10 @@ C4 level 4 (code) of the component **Meshing facade** (`femcore.meshing`) in the
 |---|---:|---|
 | `crates/femcore/src/meshing/geomdrive.rs` | 301 | From a `geom` model to a mesh and to the integers the solvers take, in the wafer frame throughout: x lateral, y the direction of propagation, z the surface normal. A 2D model is the x-z cross-section and its mesh has the columns `(x, z)`... |
 | `crates/femcore/src/meshing/mesher.rs` | 292 | The triangulation core shared by the geom path (`geomdrive`): chains of boundary points become a constrained Delaunay triangulation with Ruppert refinement (via the `spade` crate), cells labelled by a domain function; and the sweep of a ... |
-| `crates/femcore/src/meshing/mod.rs` | 580 | The one way to mesh a `geom` model: a `MeshPlan` says how fine and with which mesher, `mesh_model` returns a `MeshedGeom` with the names, labels and exact geometry of the model, whichever mesher made the cells. |
+| `crates/femcore/src/meshing/mod.rs` | 588 | The one way to mesh a `geom` model: a `MeshPlan` says how fine and with which mesher, `mesh_model` returns a `MeshedGeom` with the names, labels and exact geometry of the model, whichever mesher made the cells. |
 | `crates/femcore/src/meshing/physics_size.rs` | 221 | Element sizes from the physics: how fine a mesh must be for the waves the study looks for, before any solution exists. The core takes the neutral `meshing::Sizing` a physics reports (`cell_sizes_for`, `vertex_sizes_for`, `metrics_for`, `... |
 | `crates/femcore/src/meshing/request.rs` | 323 | A mesh asked for and reported in data (ADR 54): the serialisable request that the engine, the MCP tools and the window can build, run with [`mesh_request`], and the report that comes back, with JSON Schemas for both (draft 2020-12). Noth... |
-| `crates/femcore/src/meshing/sizing.rs` | 60 | The neutral request a physics makes of the mesher: what to resolve, with no knowledge of any physics or of `ProblemSpec`. |
+| `crates/femcore/src/meshing/sizing.rs` | 93 | The neutral request a physics makes of the mesher: what to resolve, with no knowledge of any physics or of `ProblemSpec`. |
 
 ## What it uses
 
@@ -293,6 +293,7 @@ classDiagram
         +headroom f64
         +wavelengths BTreeMap
         +by_label(order, headroom, wavelengths) Sizing
+        +expand_wildcards(names) Sizing
         +resolve(domain) Result
     }
     class fns_meshing_sizing_rs {
@@ -348,22 +349,22 @@ classDiagram
 | fn | `mesh_evaluated` | `meshing/mod.rs:107` | `pub fn mesh_evaluated(ev: Evaluated, plan: &MeshPlan) -> Result<MeshedGeom, String>` —  Meshes an evaluated model. |
 | fn | `mesh_evaluated_report` | `meshing/mod.rs:112` | `pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGeom, Option<AdaptReport>), String>` —  Like `mesh_evaluated`, with the report of the adaptation when there was one. |
 | fn | `mesh_for_sizing` | `meshing/mod.rs:136` | `pub fn mesh_for_sizing(list: &FeatureList, plan: &MeshPlan, sizing: &Sizing, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String>` —  Meshes a model of either dimension for the neutral `Sizing` a physics reports (ADR 50): the sizes the model asks for, and in |
-| fn | `wave_sizes_by_region` | `meshing/mod.rs:194` | `pub fn wave_sizes_by_region(ev: &Evaluated, labels: &LabelMap, sizing: &Sizing, sz: &PhysicsSizing) -> Result<Vec<f64>, String>` —  The element size the waves of `sizing` need in every region of a 3D model, by region index; `f64::INFINITY` where a region carries no |
-| fn | `a_priori_metrics` | `meshing/mod.rs:270` | `pub fn a_priori_metrics(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Result<Vec<Sym<2>>, String>` —  The isotropic metric at every vertex of a meshed model that the model itself asks for: the size of the region(s) the vertex belongs |
-| fn | `geometry_floor` | `meshing/mod.rs:276` | `pub fn geometry_floor(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Result<Vec<Sym<2>>, String>` —  The sizes the geometry insists on whatever the solution does: `Size` rules on regions and edges, the layers of an absorbing region, and |
-| fn | `adapt_to_metrics` | `meshing/mod.rs:364` | `pub fn adapt_to_metrics(g: MeshedGeom, metrics: &[Sym<2>], a: &Adaptive) -> Result<(MeshedGeom, AdaptReport), String>` —  Adapts a meshed model to a metric given at every vertex of its mesh. The metrics are graded and interpolated on the old mesh; the |
-| fn | `adapt_to_field` | `meshing/mod.rs:378` | `pub fn adapt_to_field(g: MeshedGeom, field: &dyn MetricField<2>, a: &Adaptive) -> Result<(MeshedGeom, AdaptReport), String>` —  Adapts a meshed model to a metric field defined anywhere in the plane, for example the final metric of an earlier, slightly different |
-| fn | `periodic_labels` | `meshing/mod.rs:397` | `pub(crate) fn periodic_labels(g: &MeshedGeom) -> Vec<i32>` —  Boundary labels of the edges that take part in a periodic pair of the model. Their chains stay exactly as the start mesh has them, so |
-| struct | `GeomOracle2` | `meshing/mod.rs:434` |  The exact geometry as the oracle of the adaptation: where a vertex of a boundary or interface chain may go is the closest point on |
-| enum | `Reuse` | `meshing/mod.rs:496` | variants: `Hit`, `Meshed` —  How a cached request was answered. |
-| struct | `CacheStats` | `meshing/mod.rs:506` | fields: `requests`, `hits`, `eval_seconds`, `mesh_seconds` —  Counters of a `MeshCache`. |
-| struct | `MeshCache` | `meshing/mod.rs:521` | fields: `stats` —  Meshes a series of related models (a parameter sweep, a refinement study, the same model for several physics) without repeating work. |
+| fn | `wave_sizes_by_region` | `meshing/mod.rs:201` | `pub fn wave_sizes_by_region(ev: &Evaluated, labels: &LabelMap, sizing: &Sizing, sz: &PhysicsSizing) -> Result<Vec<f64>, String>` —  The element size the waves of `sizing` need in every region of a 3D model, by region index; `f64::INFINITY` where a region carries no |
+| fn | `a_priori_metrics` | `meshing/mod.rs:278` | `pub fn a_priori_metrics(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Result<Vec<Sym<2>>, String>` —  The isotropic metric at every vertex of a meshed model that the model itself asks for: the size of the region(s) the vertex belongs |
+| fn | `geometry_floor` | `meshing/mod.rs:284` | `pub fn geometry_floor(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive) -> Result<Vec<Sym<2>>, String>` —  The sizes the geometry insists on whatever the solution does: `Size` rules on regions and edges, the layers of an absorbing region, and |
+| fn | `adapt_to_metrics` | `meshing/mod.rs:372` | `pub fn adapt_to_metrics(g: MeshedGeom, metrics: &[Sym<2>], a: &Adaptive) -> Result<(MeshedGeom, AdaptReport), String>` —  Adapts a meshed model to a metric given at every vertex of its mesh. The metrics are graded and interpolated on the old mesh; the |
+| fn | `adapt_to_field` | `meshing/mod.rs:386` | `pub fn adapt_to_field(g: MeshedGeom, field: &dyn MetricField<2>, a: &Adaptive) -> Result<(MeshedGeom, AdaptReport), String>` —  Adapts a meshed model to a metric field defined anywhere in the plane, for example the final metric of an earlier, slightly different |
+| fn | `periodic_labels` | `meshing/mod.rs:405` | `pub(crate) fn periodic_labels(g: &MeshedGeom) -> Vec<i32>` —  Boundary labels of the edges that take part in a periodic pair of the model. Their chains stay exactly as the start mesh has them, so |
+| struct | `GeomOracle2` | `meshing/mod.rs:442` |  The exact geometry as the oracle of the adaptation: where a vertex of a boundary or interface chain may go is the closest point on |
+| enum | `Reuse` | `meshing/mod.rs:504` | variants: `Hit`, `Meshed` —  How a cached request was answered. |
+| struct | `CacheStats` | `meshing/mod.rs:514` | fields: `requests`, `hits`, `eval_seconds`, `mesh_seconds` —  Counters of a `MeshCache`. |
+| struct | `MeshCache` | `meshing/mod.rs:529` | fields: `stats` —  Meshes a series of related models (a parameter sweep, a refinement study, the same model for several physics) without repeating work. |
 | fn | `MeshPlan::simple` | `meshing/mod.rs:85` | `pub fn simple(h: f64) -> Self` —  The simple mesher at element size `h`. |
 | fn | `MeshPlan::adaptive` | `meshing/mod.rs:90` | `pub fn adaptive(h: f64, scale: f64) -> Self` —  The adaptive mesher: start at element size `h`, adapt to `scale * h` (and to the curvature of the edges at that scale). |
-| fn | `GeomOracle2::from_work` | `meshing/mod.rs:441` | `pub fn from_work(ev: &'a Evaluated, labels: &LabelMap, w: &Work2) -> Self` |
-| fn | `MeshCache::new` | `meshing/mod.rs:537` | `pub fn new(capacity: usize) -> Self` —  A cache that keeps the `capacity` most recent distinct requests. |
-| fn | `MeshCache::mesh` | `meshing/mod.rs:547` | `pub fn mesh(&mut self, list: &FeatureList, plan: &MeshPlan) -> Result<(MeshedGeom, Reuse), String>` —  The meshed model for `list` and `plan`, from the cache when it is there. |
-| fn | `MeshCache::mesh_extruded` | `meshing/mod.rs:574` | `pub fn mesh_extruded(&mut self, list: &FeatureList, plan: &MeshPlan, layers: &[crate::meshing::mesher::Layer]) -> Result<(MeshedGeom, Reuse), String>` —  The section of `list` swept along y through `layers`. The section is the cached part: changing only the layers re-extrudes it. |
+| fn | `GeomOracle2::from_work` | `meshing/mod.rs:449` | `pub fn from_work(ev: &'a Evaluated, labels: &LabelMap, w: &Work2) -> Self` |
+| fn | `MeshCache::new` | `meshing/mod.rs:545` | `pub fn new(capacity: usize) -> Self` —  A cache that keeps the `capacity` most recent distinct requests. |
+| fn | `MeshCache::mesh` | `meshing/mod.rs:555` | `pub fn mesh(&mut self, list: &FeatureList, plan: &MeshPlan) -> Result<(MeshedGeom, Reuse), String>` —  The meshed model for `list` and `plan`, from the cache when it is there. |
+| fn | `MeshCache::mesh_extruded` | `meshing/mod.rs:582` | `pub fn mesh_extruded(&mut self, list: &FeatureList, plan: &MeshPlan, layers: &[crate::meshing::mesher::Layer]) -> Result<(MeshedGeom, Reuse), String>` —  The section of `list` swept along y through `layers`. The section is the cached part: changing only the layers re-extrudes it. |
 | struct | `PhysicsSizing` | `meshing/physics_size.rs:30` | fields: `points_per_wavelength`, `pml_relax`, `eigen_headroom` —  How finely the waves are resolved. |
 | fn | `wave_speed_range` | `meshing/physics_size.rs:56` | `pub fn wave_speed_range(c: &M6, rho: f64) -> (f64, f64)` —  Slowest and fastest plane-wave speed of a medium with stiffness `c` (solver Voigt order xx, yy, zz, xy, yz, xz; engineering shear) and |
 | fn | `cell_sizes_for` | `meshing/physics_size.rs:93` | `pub fn cell_sizes_for( sizing: &Sizing, resolve: &dyn Fn(&str) -> Option<i32>, cell_labels: &[i32], pml: &dyn Fn(i32) -> bool, sz: &PhysicsSizing, ) -> Result<Vec<f64>, String>` —  Target element size of every cell: the shortest wavelength of its domain, divided by the headroom and by the points per wavelength, and |
@@ -386,8 +387,9 @@ classDiagram
 | fn | `report_schema` | `meshing/request.rs:285` | `pub fn report_schema() -> Value` —  JSON Schema of [`MeshReport`]. |
 | fn | `MeshRequest::plan` | `meshing/request.rs:85` | `pub fn plan(&self) -> MeshPlan` —  The plan this request names. |
 | struct | `Sizing` | `meshing/sizing.rs:14` | fields: `order`, `headroom`, `wavelengths` —  What the mesher needs from a physics to size the elements before any solution exists. |
-| fn | `label_names` | `meshing/sizing.rs:41` | `pub fn label_names(name: &str) -> Option<i32>` —  Resolver for meshes without names: the key of a region is its decimal domain label. |
+| fn | `label_names` | `meshing/sizing.rs:55` | `pub fn label_names(name: &str) -> Option<i32>` —  Resolver for meshes without names: the key of a region is its decimal domain label. |
 | fn | `Sizing::by_label` | `meshing/sizing.rs:25` | `pub fn by_label(order: u8, headroom: f64, wavelengths: &BTreeMap<i32, f64>) -> Sizing` —  A request for a mesh that only has domain numbers: the keys are the decimal labels. |
-| fn | `Sizing::resolve` | `meshing/sizing.rs:30` | `pub fn resolve(&self, domain: &dyn Fn(&str) -> Option<i32>) -> Result<BTreeMap<i32, f64>, String>` —  The wavelengths by domain label, the names resolved by `domain`. A region the model does not have is an error. |
+| fn | `Sizing::expand_wildcards` | `meshing/sizing.rs:32` | `pub fn expand_wildcards(&self, names: &[&str]) -> Sizing` —  The same request with a name that ends in `*` replaced by the regions it stands for: `Air*` is `Air` and its absorbing pieces |
+| fn | `Sizing::resolve` | `meshing/sizing.rs:44` | `pub fn resolve(&self, domain: &dyn Fn(&str) -> Option<i32>) -> Result<BTreeMap<i32, f64>, String>` —  The wavelengths by domain label, the names resolved by `domain`. A region the model does not have is an error. |
 
 Trait implementations in this component: `Adaptive: Default`, `MeshPlan: From`, `GeomOracle2: Geometry2`, `MeshCache: Default`, `PhysicsSizing: Default`

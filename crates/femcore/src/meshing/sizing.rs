@@ -26,6 +26,20 @@ impl Sizing {
         Sizing { order, headroom, wavelengths: wavelengths.iter().map(|(d, l)| (d.to_string(), *l)).collect() }
     }
 
+    /// The same request with a name that ends in `*` replaced by the regions it stands for: `Air*` is `Air` and its absorbing pieces
+    /// `Air.pml_xmin`, `Air.pml_xmax` (the rule `set_material` and the solvers use). `names` are the region names of the model. A name that is
+    /// given in full keeps its own wavelength; a `*` that matches nothing adds nothing (the solver refuses it when it reads the materials).
+    pub fn expand_wildcards(&self, names: &[&str]) -> Sizing {
+        let mut out: BTreeMap<String, f64> = self.wavelengths.iter().filter(|(k, _)| !k.ends_with('*')).map(|(k, l)| (k.clone(), *l)).collect();
+        for (k, lam) in self.wavelengths.iter().filter(|(k, _)| k.ends_with('*')) {
+            let base = &k[..k.len() - 1];
+            for n in names.iter().filter(|n| **n == base || n.strip_prefix(base).is_some_and(|rest| rest.starts_with('.'))) {
+                out.entry((*n).to_string()).or_insert(*lam);
+            }
+        }
+        Sizing { order: self.order, headroom: self.headroom, wavelengths: out }
+    }
+
     /// The wavelengths by domain label, the names resolved by `domain`. A region the model does not have is an error.
     pub fn resolve(&self, domain: &dyn Fn(&str) -> Option<i32>) -> Result<BTreeMap<i32, f64>, String> {
         let mut out = BTreeMap::new();
@@ -45,6 +59,25 @@ pub fn label_names(name: &str) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_star_stands_for_the_region_and_its_absorbing_pieces_and_a_full_name_keeps_its_own_wavelength() {
+        let s = Sizing {
+            order: 2,
+            headroom: 1.0,
+            wavelengths: [("Air*", 1.5e-6), ("Si", 4e-7), ("Sapphire*", 8e-7), ("Sapphire.pml_xmin", 7e-7), ("Gone*", 1e-6)].iter().map(|(k, l)| (k.to_string(), *l)).collect(),
+        };
+        let names = ["Air", "Air.pml_xmin", "Air.pml_xmax", "Airy", "Si", "Sapphire", "Sapphire.pml_xmin", "Sapphire.pml_xmax"];
+        let e = s.expand_wildcards(&names);
+        let keys: Vec<&str> = e.wavelengths.keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["Air", "Air.pml_xmax", "Air.pml_xmin", "Sapphire", "Sapphire.pml_xmax", "Sapphire.pml_xmin", "Si"], "`Airy` is not `Air*`, `Gone*` adds nothing");
+        assert_eq!(e.wavelengths["Sapphire.pml_xmin"], 7e-7, "a name given in full keeps its own value");
+        assert_eq!(e.wavelengths["Sapphire.pml_xmax"], 8e-7);
+        // every name resolves now
+        let id = |n: &str| names.iter().position(|m| *m == n).map(|i| i as i32 + 1);
+        assert!(e.resolve(&id).is_ok());
+        assert!(s.resolve(&id).is_err(), "before, `Air*` named a region the model does not have");
+    }
 
     #[test]
     fn labels_round_trip_and_unknown_regions_are_refused() {
