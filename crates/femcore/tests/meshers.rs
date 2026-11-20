@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! End-to-end tests of the 2D adaptation driver against analytic metrics. All quality, length
 //! and conservation figures are recomputed here from the output coordinates, independently of
 //! the code under test.

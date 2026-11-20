@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 > The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 2210 lines.
+**Size:** 3 files, 2216 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/forms.rs` | 135 | Forms drawn from descriptors: a study, a condition or the options of a physics are a list of `ParamDesc`s (name, label, unit, type and range, default), and the form for them is made here, the same for every physics. A new physics needs n... |
-| `crates/app/src/geomui.rs` | 917 | The Geometry tab's model editor: named parameters, the ordered feature list with one generated form per feature kind, the names the model gives its regions and boundaries, and the same model as builder code. It edits `geom::model::Featur... |
-| `crates/app/src/tabs.rs` | 1158 | Inspector tabs (geometry, materials, physics, study, results, analysis) and the results panel. The Materials, Physics and Study tabs are drawn from the descriptors of the physics (`forms`), so they are the same for every physics; every c... |
+| `crates/app/src/forms.rs` | 137 |  |
+| `crates/app/src/geomui.rs` | 919 |  |
+| `crates/app/src/tabs.rs` | 1160 |  |
 
 ## What it uses
 
@@ -77,16 +77,16 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `default_value` | `forms.rs:10` | `pub fn default_value(d: &ParamDesc) -> Value` —  The JSON value a descriptor gives a parameter that was not set. |
-| fn | `fill_required` | `forms.rs:23` | `pub fn fill_required(descs: &[ParamDesc], value: &mut Value)` —  Makes `value` an object holding every required parameter (with its default): a study or condition that is created must be complete. |
-| fn | `param_form` | `forms.rs:45` | `pub fn param_form(ui: &mut Ui, salt: &str, descs: &[ParamDesc], value: &mut Value) -> bool` —  Draws one row per parameter and writes what the person changes into `value` (an object; `Null` becomes one). A parameter that was not |
-| struct | `State` | `geomui.rs:19` | fields: `preview` —  What the editor remembers between frames: the last list it evaluated and the outcome. |
-| fn | `show` | `geomui.rs:628` | `pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool` —  The model editor. `list` is edited in place; the return value says whether it changed. |
-| fn | `fmt_num` | `tabs.rs:18` | `pub fn fmt_num(n: f64) -> String` |
-| fn | `num` | `tabs.rs:31` | `pub fn num(ui: &mut Ui, v: &mut f64) -> egui::Response` —  A number field: drag to change, or double-click and type (scientific notation accepted). |
-| fn | `reduce_number` | `tabs.rs:1152` | `pub fn reduce_number(v: &Value) -> String` —  A number of a reduction answer as the form shows it: a real one, or `re + im i` for a pair. |
-| fn | `App::inspector` | `tabs.rs:92` | `pub fn inspector(&mut self, ui: &mut Ui)` |
-| fn | `App::inspector_tab` | `tabs.rs:121` | `pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab)` —  One inspector tab on its own: the workflow view lays the six tabs out in its three sections. |
-| fn | `App::reduce_now` | `tabs.rs:879` | `pub fn reduce_now(&mut self, action: &str)` —  Runs one reduction of the Reduce form (`integrate`, `max`, `min` or `fraction`) on the field, quantity and region it holds, through the engine |
-| fn | `App::has_analysis` | `tabs.rs:950` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
-| fn | `App::results_panel` | `tabs.rs:1098` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |
+| fn | `default_value` | `forms.rs:12` | `pub fn default_value(d: &ParamDesc) -> Value` —  The JSON value a descriptor gives a parameter that was not set. |
+| fn | `fill_required` | `forms.rs:25` | `pub fn fill_required(descs: &[ParamDesc], value: &mut Value)` —  Makes `value` an object holding every required parameter (with its default): a study or condition that is created must be complete. |
+| fn | `param_form` | `forms.rs:47` | `pub fn param_form(ui: &mut Ui, salt: &str, descs: &[ParamDesc], value: &mut Value) -> bool` —  Draws one row per parameter and writes what the person changes into `value` (an object; `Null` becomes one). A parameter that was not |
+| struct | `State` | `geomui.rs:21` | fields: `preview` —  What the editor remembers between frames: the last list it evaluated and the outcome. |
+| fn | `show` | `geomui.rs:630` | `pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool` —  The model editor. `list` is edited in place; the return value says whether it changed. |
+| fn | `fmt_num` | `tabs.rs:20` | `pub fn fmt_num(n: f64) -> String` |
+| fn | `num` | `tabs.rs:33` | `pub fn num(ui: &mut Ui, v: &mut f64) -> egui::Response` —  A number field: drag to change, or double-click and type (scientific notation accepted). |
+| fn | `reduce_number` | `tabs.rs:1154` | `pub fn reduce_number(v: &Value) -> String` —  A number of a reduction answer as the form shows it: a real one, or `re + im i` for a pair. |
+| fn | `App::inspector` | `tabs.rs:94` | `pub fn inspector(&mut self, ui: &mut Ui)` |
+| fn | `App::inspector_tab` | `tabs.rs:123` | `pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab)` —  One inspector tab on its own: the workflow view lays the six tabs out in its three sections. |
+| fn | `App::reduce_now` | `tabs.rs:881` | `pub fn reduce_now(&mut self, action: &str)` —  Runs one reduction of the Reduce form (`integrate`, `max`, `min` or `fraction`) on the field, quantity and region it holds, through the engine |
+| fn | `App::has_analysis` | `tabs.rs:952` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
+| fn | `App::results_panel` | `tabs.rs:1100` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |

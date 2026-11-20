@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `nyx check` and `nyx run` (productivity plan S1, ADR 89): the command line checks a list before it runs, names the bad line, exits 2 and runs
 //! nothing; a good list is planned without meshing and runs through the engine's commands.
 

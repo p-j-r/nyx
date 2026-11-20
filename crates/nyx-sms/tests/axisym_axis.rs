@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The axis conditions of the axisymmetric solid kernel (K1, ADR 69) against closed forms of bodies that touch the axis `r = 0`:
 //! torsion and radial modes of a solid cylinder (exact for any length) and the radial contour modes of a thin solid disk (the mode
 //! family of benchmark A1). Printed relative errors are in the test output (`-- --nocapture`).

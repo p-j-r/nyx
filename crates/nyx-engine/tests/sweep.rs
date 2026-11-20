@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Sweeps (productivity plan Q6, ADR 87): one run per point, recorded; a point is a list of edits, so the case decides what varies. A sweep's
 //! numbers are those of a hand-made solve with the same edits, in any order the queue runs them; it never touches the engine's own project,
 //! mesh or results; a bad point stops the request before anything runs; its points wait behind a person's request.

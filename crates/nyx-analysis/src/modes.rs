@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The polarization of a set of modes: one report per mode, a table, the Poincaré-sphere picture and the degenerate groups.
 //!
 //! Takes the modes of a mode study (complex lateral, normal and propagation components at sample points, with weights) and produces, per mode, the

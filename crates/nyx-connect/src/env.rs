@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Where things live on this machine: the home folder, the Windows application-data folders and the operating system.
 //! [`Env::detect`] reads the process environment; tests build an `Env` by hand and never touch the real home folder.
 use std::path::PathBuf;

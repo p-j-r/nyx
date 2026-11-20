@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A material as a human-written TOML file: `MaterialSpec` (density, elastic stiffness, thermal and electrical tensors, optical
 //! dispersion), reading with plain-language errors, writing back, and `Library`, a folder of such files loaded at run time.
 //! The format is version `FORMAT` (key `format = 1`); the schema is in `schema.rs` and documented in `docs/MATERIALS.md`.

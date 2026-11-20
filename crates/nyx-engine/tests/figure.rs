@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The `figure` command (ADR 99): a gallery and a component view of the modes of a solved example, as SVG and as PNG, the same figure from the
 //! same result, and the figure of a stored results file (the benches of the author, when `NYX_FIG_H5` names one).
 

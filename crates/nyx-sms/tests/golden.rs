@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Frozen reference output of the sms kernels (ADR 10): the golden files in `tests/golden/` were taken through the pre-restructure
 //! `solve::solve` (femcore tests/golden_frames) and moved here with the kernels, unchanged. The kernels must reproduce them (tolerances as
 //! before, 1e-8 for the static cases and 1e-7 for the complex-frequency ones).

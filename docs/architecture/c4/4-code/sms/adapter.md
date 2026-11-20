@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Physics adapter** (`sms.adapter`) in the co
 > The Physics implementation of sms with three studies (static, eigenfrequency, axisymmetric eigenfrequency): descriptors, validation, solve entry.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 68](../../../adr/0068-the-axisymmetric-solid-gets-a-study.md)  
-**Size:** 1 file, 305 lines.
+**Size:** 1 file, 307 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/lib.rs` | 305 | nyx-sms: solid mechanics (`sms`, ADR 12): static and eigenfrequency studies of isotropic and anisotropic solids, in 2D (plane strain or stress) and 3D, with absorbing layers (perfectly matched layers and low-reflecting boundaries) and Fl... |
+| `crates/nyx-sms/src/lib.rs` | 307 |  |
 
 ## What it uses
 
@@ -49,7 +49,7 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Sms` | `lib.rs:31` |  |
-| fn | `run` | `lib.rs:275` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
+| struct | `Sms` | `lib.rs:33` |  |
+| fn | `run` | `lib.rs:277` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
 
 Trait implementations in this component: `Sms: Physics`

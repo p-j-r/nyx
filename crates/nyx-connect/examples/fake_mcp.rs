@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A stand-in MCP server for the tests of `nyx_connect::test_server`: it answers `initialize` and `tools/list` over stdio, one JSON line each.
 //! `FAKE_MCP=silent` makes it read and never answer (a hung server); `FAKE_MCP=error` answers `tools/list` with a JSON-RPC error;
 //! `FAKE_MCP=noise` writes an unrelated notification before each answer. Built by `cargo test`; never shipped.

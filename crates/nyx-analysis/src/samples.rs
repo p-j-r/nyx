@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The modes of a `SolveResult` as weighted samples of the field, which is what the polarization analysis integrates.
 //!
 //! A mode study of `ems` states its frame (`nyx_physics::FieldFrame`: the lateral, normal and propagation axes, the handedness, the absorbing

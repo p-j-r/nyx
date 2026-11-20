@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Complex-mode kernel** (`ems.modescx`) in th
 > Complex-valued mode analysis: lossy media and perfectly matched layers.
 
 **Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md)  
-**Size:** 1 file, 464 lines.
+**Size:** 1 file, 466 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/modes_complex.rs` | 464 | Complex-valued mode analysis of a 2D cross-section: lossy or absorbing media and perfectly matched layers (PML) by complex coordinate stretching. |
+| `crates/nyx-ems/src/modes_complex.rs` | 466 |  |
 
 ## What it uses
 
@@ -69,11 +69,11 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `ModesC` | `modes_complex.rs:47` | fields: `neff`, `et`, `phi`, `converged` |
-| fn | `solve_modes_complex` | `modes_complex.rs:55` | `pub fn solve_modes_complex( mesh: &Discretisation, freq: f64, eps: &[EpsC], mu: &[MuC], n_target: C, k: usize, order: usize, ) -> Result<ModesC, String>` —  Modes with complex effective index nearest `n_target` (complex). |
-| struct | `ModeAssemblyC` | `modes_complex.rs:70` | fields: `a`, `b`, `a1`, `free`, `n_tot`, `net`, `k0` —  Stage 1 of the complex mode solver: `A x = lambda B x` (`lambda = -beta^2`) on the free dofs, plus the part of `A` |
-| fn | `assemble_modes_complex` | `modes_complex.rs:81` | `pub fn assemble_modes_complex( mesh: &Discretisation, freq: f64, eps: &[EpsC], mu: &[MuC], order: usize, ) -> Result<ModeAssemblyC, String>` |
-| fn | `solve_mode_pairs_complex` | `modes_complex.rs:234` | `pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> Result<ModesC, String>` —  Stage 2: the `k` eigenpairs nearest the complex effective index `n_target`, as effective indices, edge coefficients |
-| fn | `mode_fields_complex` | `modes_complex.rs:330` | `pub fn mode_fields_complex(mesh: &Discretisation, modes: &ModesC, j: usize, freq: f64, order: usize) -> Vec<Field>` —  Nodal magnitude fields of a complex mode, scaled to max \|E\| = 1, under wafer names: `\|E\|, \|Exz\|, \|Ey\|, Re Ex, |
-| fn | `mode_fields_complex_cells` | `modes_complex.rs:336` | `pub fn mode_fields_complex_cells( mesh: &Discretisation, modes: &ModesC, j: usize, freq: f64, order: usize, ) -> (Vec<Field>, CellFields)` —  Stage 3: `mode_fields_complex` and, next to them, the complex components `Ex`, `Ez`, `Ey` at the local dofs of every |
-| fn | `solve_waveguide_complex` | `modes_complex.rs:416` | `pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The modes of a `Modes` study in the complex solver: absorbing layers, lossy or complex materials, a crystal tilted against the guide. |
+| struct | `ModesC` | `modes_complex.rs:49` | fields: `neff`, `et`, `phi`, `converged` |
+| fn | `solve_modes_complex` | `modes_complex.rs:57` | `pub fn solve_modes_complex( mesh: &Discretisation, freq: f64, eps: &[EpsC], mu: &[MuC], n_target: C, k: usize, order: usize, ) -> Result<ModesC, String>` —  Modes with complex effective index nearest `n_target` (complex). |
+| struct | `ModeAssemblyC` | `modes_complex.rs:72` | fields: `a`, `b`, `a1`, `free`, `n_tot`, `net`, `k0` —  Stage 1 of the complex mode solver: `A x = lambda B x` (`lambda = -beta^2`) on the free dofs, plus the part of `A` |
+| fn | `assemble_modes_complex` | `modes_complex.rs:83` | `pub fn assemble_modes_complex( mesh: &Discretisation, freq: f64, eps: &[EpsC], mu: &[MuC], order: usize, ) -> Result<ModeAssemblyC, String>` |
+| fn | `solve_mode_pairs_complex` | `modes_complex.rs:236` | `pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> Result<ModesC, String>` —  Stage 2: the `k` eigenpairs nearest the complex effective index `n_target`, as effective indices, edge coefficients |
+| fn | `mode_fields_complex` | `modes_complex.rs:332` | `pub fn mode_fields_complex(mesh: &Discretisation, modes: &ModesC, j: usize, freq: f64, order: usize) -> Vec<Field>` —  Nodal magnitude fields of a complex mode, scaled to max \|E\| = 1, under wafer names: `\|E\|, \|Exz\|, \|Ey\|, Re Ex, |
+| fn | `mode_fields_complex_cells` | `modes_complex.rs:338` | `pub fn mode_fields_complex_cells( mesh: &Discretisation, modes: &ModesC, j: usize, freq: f64, order: usize, ) -> (Vec<Field>, CellFields)` —  Stage 3: `mode_fields_complex` and, next to them, the complex components `Ex`, `Ez`, `Ey` at the local dofs of every |
+| fn | `solve_waveguide_complex` | `modes_complex.rs:418` | `pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The modes of a `Modes` study in the complex solver: absorbing layers, lossy or complex materials, a crystal tilted against the guide. |

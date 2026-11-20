@@ -3,7 +3,7 @@ host = component "Script host" "Runs a script (Python syntax, `*.nys`) through a
     properties {
         "adr" "93, 57"
         "code" "crates/nyx-script/src: convert.rs, host.rs, lib.rs"
-        "lines" "198"
+        "lines" "204"
         "codeDiagram" "4-code/script/host.md"
     }
 }
@@ -11,7 +11,7 @@ kernel = component "Script kernel" "One Monty session in a worker process that o
     properties {
         "adr" "94, 93"
         "code" "crates/nyx-script/src: kernel.rs"
-        "lines" "658"
+        "lines" "660"
         "codeDiagram" "4-code/script/kernel.md"
     }
 }
@@ -19,7 +19,7 @@ stubs = component "Type stub" "The `nyx` object written as Python declarations f
     properties {
         "adr" "93"
         "code" "crates/nyx-script/src: stubs.rs"
-        "lines" "92"
+        "lines" "94"
         "codeDiagram" "4-code/script/stubs.md"
     }
 }
@@ -27,7 +27,7 @@ tracing = component "Tracing of script functions" "A Python function given as a 
     properties {
         "adr" "90, 93"
         "code" "crates/nyx-script/src: trace.rs"
-        "lines" "414"
+        "lines" "416"
         "codeDiagram" "4-code/script/tracing.md"
     }
 }
@@ -35,7 +35,7 @@ worker = component "Worker program" "The only place the Monty interpreter runs: 
     properties {
         "adr" "93, 86"
         "code" "crates/nyx-script/src: bin/nyx-script-worker.rs"
-        "lines" "118"
+        "lines" "120"
         "codeDiagram" "4-code/script/worker.md"
     }
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A mode shape on a section in a fixed phase, so that it can be drawn and compared (ADR 99).
 //!
 //! An eigensolver returns a mode up to a complex factor `exp(i phi)`: every `phi` gives an equally good eigenvector. A picture shows one instant,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The problem envelope: the one shape every physics is given. Each physics owns the typed form of `study.params`, `bcs[].params` and
 //! `params` and validates them against its descriptors (`validate`); nothing physics-specific lives here.
 //!

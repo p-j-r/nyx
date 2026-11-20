@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Stage timings of a 3D solid static solve: NYX_PROFILE=1 cargo run --release -p nyx-engine --example profile3d -- NX NY NZ [p1|p2]
 #[path = "../../femcore/examples/benchmesh/mod.rs"]
 mod benchmesh;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Matrix exponential and its action: dense identities, modal closed forms for heat, Schrödinger and
 //! wave equations, matrix-free operators and the time direction.
 #![allow(clippy::needless_range_loop)]

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Analyses of results as engine commands: a result is solved once, an analysis is a function of it and of the mesh it was solved on
 //! (`nyx-analysis`, ADR 56). The window draws the typed `ModeAnalysis`; the MCP server gets the same through `analyse`, as plain JSON.
 

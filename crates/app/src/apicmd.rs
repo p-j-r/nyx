@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The API reference from the command line (productivity plan S2): `nyx api list [--json]` lists the engine commands and `nyx api show COMMAND
 //! [--json]` prints one command's page, the same text as `docs/api/COMMAND.md`. Both are generated from `Engine::catalog()` by
 //! `nyx_engine::apiref` (ADR 57); nothing here knows a command. Exit code 2 for a command that does not exist (with the nearest names) or a

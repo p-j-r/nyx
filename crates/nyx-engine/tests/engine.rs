@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Behaviour of the engine core with stand-in physics (the real ones answer `NotYetMoved` until restructure phase 4): the project is built
 //! through commands only (the strip, the rib and the ring of gate G5), meshed with the real mesher, solved through the `Physics` trait in
 //! coupling order, cancelled, stored and reopened.

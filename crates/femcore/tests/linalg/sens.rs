@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Eigenvalue derivatives against finite differences and closed forms, left eigenvectors, and
 //! mode tracking through exact and avoided crossings.
 #![allow(clippy::needless_range_loop)]

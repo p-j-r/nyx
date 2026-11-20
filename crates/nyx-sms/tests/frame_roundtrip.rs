@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What a wafer-frame problem on a 2D cross-section says, solved through `nyx_sms::run`, against physics that has a direction: every result
 //! field is named in the wafer axes (flat names `ux`, `uz`, `|u|`), the fields that carry a direction point the right way; the component that
 //! points out of the plane is wafer y. The mesh of `common::rect` has the columns (x, z); its boundaries are 1 x = 0, 2 z = 0 (bottom),

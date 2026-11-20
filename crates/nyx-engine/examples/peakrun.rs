@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Runs a program and reports its wall time and its peak memory (productivity plan P0): the exact peak working set and peak commit that
 //! Windows keeps for the child process, read from the child's handle after it has exited, so nothing is sampled and nothing is missed.
 //! Run the built program (`target/release/examples/<name>.exe`), not `cargo run`: under cargo the numbers would be cargo's, not the solver's.

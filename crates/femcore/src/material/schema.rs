@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The versioned JSON Schema of a material file (a TOML file read as JSON data). `SCHEMA_VERSION` is the schema's own version and
 //! changes with the contract exemplar `material_schema.v1.json`; the file format number `format = 1` is `spec::FORMAT`.
 //! The schema is documentation and an editor aid; the loader in `spec.rs` is the authority and reports errors in plain words.

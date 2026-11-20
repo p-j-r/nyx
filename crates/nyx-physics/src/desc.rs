@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Descriptors: what a physics tells the rest of nyx about itself. The window builds forms from them, the MCP server builds JSON
 //! Schemas from them, the mesher reads the sizing hint, and the engine validates a problem against them. All plain serde data.
 

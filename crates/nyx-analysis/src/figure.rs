@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Figures of the modes of a result (ADR 99): a gallery of modes (`|u|` on the deformed section, the outline of the regions, arrows of the in-plane
 //! motion) and the component view of chosen modes (`|u|`, the in-plane components, the propagation component in quadrature). Every mode is put in
 //! the phase of `modeview` first. Nothing here names a physics: a vector field is found by the names of its cell fields, the title of a mode

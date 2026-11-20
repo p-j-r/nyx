@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! ROM sweep vs one full solve per frequency: 2-D damped Helmholtz-like problem, 120 × 120 unknowns.
 use femcore::linalg::csr::laplacian_2d;
 use femcore::linalg::direct::Definiteness;

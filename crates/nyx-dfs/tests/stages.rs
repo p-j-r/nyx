@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The kernels are three stages (ADR 9): assemble (matrices, constraints), solve (the solution), fields (plot fields and the same quantities
 //! per cell). The one-call `solve_*` is their composition; these tests drive the stages on their own.
 mod common;

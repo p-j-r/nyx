@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The queue (productivity plan Q1, ADR 87): jobs run in lanes, the heavy lane one at a time in order of priority, then round robin between
 //! owners, then submission; a queued job starts by itself when the lane frees; requests of one project share the mesh; a convergence check
 //! after a solve skips its coarse solve; the order of the queue never changes a number. The runner tests use closures that wait on a gate, so

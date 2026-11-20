@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Heat transfer on P1/P2 simplices, stationary and transient: `rho Cp dT/dt - div(k grad T) = Q`, `T = T0`, `-n.q = q0`,
 //! `-n.q = h (Text - T)`. Three stages (ADR 9): `assemble_heat`, `solve_heat_states`, `heat_fields`; `solve_heat` runs them.
 

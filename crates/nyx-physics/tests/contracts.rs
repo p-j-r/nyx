@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Contracts of `nyx-physics` (ADR 19, ADR 25):
 //! * `problem_spec.v3.json`: the serde shape of the problem envelope, one spec per physics
 //! * `solve_result.v2.json`: the serde shape of a result (the old `SolveResult` was not serialisable, R27)

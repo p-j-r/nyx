@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Floquet eigenmodes against an exact band edge. A stack of two dielectrics seen by a plane wave at normal incidence is the textbook
 //! Bragg mirror: with the cell periodic in x and z (phase 0) and in y, the stack axis (phase `pi`, the band edge of the stack) the eigenmodes of a 3D cell
 //! are the plane waves of the stack, and the Bloch relation

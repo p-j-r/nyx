@@ -1,4 +1,6 @@
-﻿//! Checks that run before and after a solve so that bad numbers produce a clear error instead of a silent
+﻿// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
+//! Checks that run before and after a solve so that bad numbers produce a clear error instead of a silent
 //! "solution" full of NaN.
 //!
 //! Before: every number the user can type (mesh coordinates, material properties, boundary-condition values, study

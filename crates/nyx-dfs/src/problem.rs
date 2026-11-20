@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The typed problem of `dfs`: what the kernels read. It is decoded from the `ProblemSpec` envelope by `decode` (names and selectors
 //! resolved to mesh numbers, parameters with their defaults), or built directly by code that already has mesh numbers (tests, the
 //! legacy window bridge of the engine). The envelope carries scalar material properties only; anisotropic tensors are given in

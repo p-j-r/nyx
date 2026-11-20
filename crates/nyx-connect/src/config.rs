@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Reading and rewriting a host's JSON config: the status of the `nyx` entry, adding it, removing it.
 //!
 //! Rules that hold for every host (pinned by `tests/behaviour.rs`):

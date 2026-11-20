@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Cards: short texts a host reads on demand through the `get_guide` command, embedded in the binary. They describe the commands, not a
 //! physics: how to build a geometry, assign materials, solve and read a result.
 

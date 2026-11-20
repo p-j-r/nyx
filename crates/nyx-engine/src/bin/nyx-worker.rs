@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! nyx-worker: solves one frozen project in its own process and writes the results file (productivity plan P4, ADR 86). It is started by the
 //! window or the MCP server (`Engine::set_worker`), never by hand: see `nyx_engine::worker` for what it is given and what it answers.
 fn main() {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Optical modes of a 2D cross-section as a field-evaluable set: the modes of the `nyx-ems` mode solvers together with the material data
 //! needed to evaluate their E, D and H on the mesh, the vacuum constants, the 24-point quadrature rule used for field
 //! integrals, and the quadrature rule the polarization analysis (`nyx-analysis`) samples the modes with. Everything works on the native

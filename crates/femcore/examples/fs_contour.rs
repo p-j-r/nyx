@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `fs-contour <bundle-dir> [options]`: all eigenvalues of `A x = λ B x` inside an ellipse, by the
 //! contour-integral method; prints one JSON line (same fields as the SLEPc CISS mode of
 //! `harness/c/slepc_eps.c`).

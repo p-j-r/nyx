@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Meshes sized by the physics of the study (`physics_size`, `meshing::mesh_for_sizing`, the sizing stated from the problem): the wavelength per domain sets the element
 //! size, and the mode index the solver then finds agrees with the closed form of a PEC guide.
 use common::{adapt_tets, mesh_for_problem};

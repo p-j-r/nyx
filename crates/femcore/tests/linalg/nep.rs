@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Nonlinear eigenproblems with closed-form spectra: each problem is a function of the 1-D Laplacian
 //! `L` (eigenvalues μ_k, sine eigenvectors), so every mode reduces to a scalar equation whose roots
 //! are known: damped vibration (quadratic) and a Drude-type dispersive medium (rational, cubic).

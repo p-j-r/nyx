@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Electromagnetic eigenmodes of 3D cavities and resonators (the `Eigenfrequency` study of EM waves
 //! on a tetrahedral mesh): `curl(1/mu curl E) = (2 pi f / c)^2 eps E` with perfect electric
 //! conductor on the exterior boundary and optional perfectly matched layers.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! S2/LU experiment: what does a user-chosen fill-reducing ordering buy for *LU* (the matrices faer's LU
 //! orders with its own COLAMD)? Compares `femcore::linalg::sparse_lu::SparseLu` with natural / AMD / nested
 //! dissection against faer's supernodal sparse LU (`ShiftedFactorization`, `Definiteness::General`) on a 2-D

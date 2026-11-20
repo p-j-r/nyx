@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `extends`: a material that starts from another of the library and replaces whole tables. The combined result is validated.
 
 use femcore::material::*;

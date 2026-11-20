@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Wavelength sizing, adaptive meshing and structured absorbing layers for 3D `geom` models (ADR 50, 51, 52): the three features that the
 //! 2D mesher has and ADR 40 left out of the lattice mesher.
 use femcore::mesh::SimplexMesh;

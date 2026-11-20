@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Estimates and admission (productivity plan Q2, ADR 86): what solves cost is learned from the runs of workers; a solve whose estimate does not
 //! fit the memory free now waits and says why, one the machine could never hold is refused unless forced, a cancel ends the wait, and a
 //! solve with no estimate (fewer than two sizes seen) starts as before. The machine's memory is played by a probe, so nothing here depends on

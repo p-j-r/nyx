@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! nyx-mcp: a Model Context Protocol server over stdio for nyx. Newline-delimited JSON-RPC 2.0 on stdin/stdout, logs on stderr.
 //! No async runtime and no SDK: the protocol surface nyx needs is five methods. Since S7 (ADR 94) the server offers four tools, not one per engine
 //! command: `script_run`, `script_wait`, `script_check` and `api`. The server holds one `nyx_engine::Engine` and one script kernel

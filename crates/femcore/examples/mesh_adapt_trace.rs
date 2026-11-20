@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Replays the driver loop on one case and reports the first operator pass that creates a
 //! triangle of metric quality below a threshold. Usage: `adapt_trace <p|inf> <target> [grade_g]`
 

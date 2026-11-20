@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The software rasteriser of the figures (ADR 99): Gouraud triangles, flat triangles, segments as thin quads, text from the font of the window,
 //! raster images. A figure is drawn at twice the size and averaged down, which smooths the edges of everything.
 

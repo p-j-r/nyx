@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Units of material files: a quantity is written as `"496.8 GPa"`, as `{ value = 496.8, unit = "GPa" }`, or as a bare number
 //! next to a declared unit. This module turns a unit name into a dimension and a factor to SI and refuses a unit of the wrong
 //! kind with a message that says what was expected. All values leave this module in SI.

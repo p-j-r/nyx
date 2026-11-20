@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Contract of `nyx-sms` (ADR 19, ADR 25, ADR 42): its descriptors are pinned by `docs/architecture/contracts/physics_sms.v1.json`, an example problem
 //! passes the structural validation; the envelope solves through `Physics::solve` and agrees with the typed problem; the shape of a result is pinned by
 //! `physics_sms_result.v1.json`; the stage functions are public.

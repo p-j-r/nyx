@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The frame a result's vector fields are to be read in by an analysis (restructure phase 5, ADR 56).
 //!
 //! An analysis is a function of a `SolveResult`, so everything it needs that is not in the numbers has to be in the result. For the

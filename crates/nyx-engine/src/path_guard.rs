@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The path guard (productivity plan S4, ADR [89]): a front-end that runs text it did not write (a script) asks the engine to keep every file
 //! and folder argument of a command inside one folder. The guard is in the engine, not in the script host, so no language and no front-end has
 //! to get it right: `Engine::set_path_root` turns it on and `Engine::call` then rewrites each path argument to an absolute path inside the

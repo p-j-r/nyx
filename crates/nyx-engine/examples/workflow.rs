@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Replays a list of engine commands against an `Engine` and times each one (productivity plan P0). The list is a JSON-lines file, one command per
 //! line, the format `nyx check` and `nyx run` take (plan step S1, `nyx_engine::commandlist`, which this example uses to replay); the workflows of `tools/workflows/` are written in it.
 //!

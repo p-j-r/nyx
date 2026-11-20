@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The API reference (productivity plan S2): one Markdown page per engine command and an index, generated from `Engine::catalog()` and from
 //! nothing else, so the reference cannot disagree with the commands (ADR 57: the catalog is the one list). A page has the command's title,
 //! description and access, a table of its arguments (flattened from the JSON Schema: type, whether it is required, the unit or meaning the schema

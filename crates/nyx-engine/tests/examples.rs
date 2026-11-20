@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The example projects in `examples/` (written by `tests/make_examples.rs`): each file opens, passes the checks, meshes and solves through
 //! engine commands, and the ones with a closed form give it. They replace the use-case tests: a device is a project file, not code.
 

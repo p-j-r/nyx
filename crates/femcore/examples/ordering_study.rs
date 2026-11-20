@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! S2 experiment: does a nested-dissection ordering beat faer's default AMD for sparse Cholesky?
 //! Graph-based nested dissection (BFS level-set separators, recursion down to 100 nodes) against AMD
 //! on 2-D and 3-D grid Laplacians: factor non-zeros and numeric factorisation time.

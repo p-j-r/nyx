@@ -5,17 +5,17 @@ C4 level 4 (code) of the component **Mode figures** (`analysis.figures`) in the 
 > The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named.
 
 **Decisions:** [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md), [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 5 files, 1746 lines.
+**Size:** 5 files, 1756 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-analysis/src/canvas.rs` | 140 | A figure as a list of drawing items (rectangles, polylines, triangles, text, raster images) on a canvas, written as SVG or as PNG (ADR 99). |
-| `crates/nyx-analysis/src/figure.rs` | 799 | Figures of the modes of a result (ADR 99): a gallery of modes (`\|u\|` on the deformed section, the outline of the regions, arrows of the in-plane motion) and the component view of chosen modes (`\|u\|`, the in-plane components, the propagat... |
-| `crates/nyx-analysis/src/modeview.rs` | 319 | A mode shape on a section in a fixed phase, so that it can be drawn and compared (ADR 99). |
-| `crates/nyx-analysis/src/raster.rs` | 280 | The software rasteriser of the figures (ADR 99): Gouraud triangles, flat triangles, segments as thin quads, text from the font of the window, raster images. A figure is drawn at twice the size and averaged down, which smooths the edges o... |
-| `crates/nyx-analysis/src/section.rs` | 208 | The cross-section of a result as a mesh of triangles with the nodes the cell fields live on: the whole mesh for a 2D result, the face of the 3D cells that lies on a plane of constant propagation coordinate for a 3D periodic slab (a mode ... |
+| `crates/nyx-analysis/src/canvas.rs` | 142 |  |
+| `crates/nyx-analysis/src/figure.rs` | 801 |  |
+| `crates/nyx-analysis/src/modeview.rs` | 321 |  |
+| `crates/nyx-analysis/src/raster.rs` | 282 |  |
+| `crates/nyx-analysis/src/section.rs` | 210 |  |
 
 ## What it uses
 
@@ -196,47 +196,47 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| type | `Rgba` | `canvas.rs:10` |  |
-| enum | `Anchor` | `canvas.rs:13` | variants: `Start`, `Middle`, `End` |
-| enum | `Item` | `canvas.rs:20` | variants: `Rect`, `Line`, `Tri`, `Text`, `Image` |
-| struct | `Canvas` | `canvas.rs:34` | fields: `width`, `height`, `background`, `items` |
-| const | `WHITE` | `canvas.rs:41` | `Rgba` |
-| const | `INK` | `canvas.rs:42` | `Rgba` |
-| const | `MUTED` | `canvas.rs:43` | `Rgba` |
-| fn | `encode_png` | `canvas.rs:129` | `pub fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String>` —  A PNG of RGBA pixels. |
-| fn | `Canvas::new` | `canvas.rs:46` | `pub fn new(width: f64, height: f64) -> Canvas` |
-| fn | `Canvas::push` | `canvas.rs:50` | `pub fn push(&mut self, item: Item)` |
-| fn | `Canvas::text` | `canvas.rs:54` | `pub fn text(&mut self, x: f64, y: f64, text: &str, size: f64, color: Rgba, anchor: Anchor)` |
-| fn | `Canvas::bold` | `canvas.rs:58` | `pub fn bold(&mut self, x: f64, y: f64, text: &str, size: f64, color: Rgba, anchor: Anchor)` |
-| fn | `Canvas::to_svg` | `canvas.rs:63` | `pub fn to_svg(&self) -> Result<String, String>` —  The figure as SVG text. Fields are embedded as PNG images. |
-| fn | `Canvas::to_png` | `canvas.rs:122` | `pub fn to_png(&self, scale: f64) -> Result<Vec<u8>, String>` —  The figure as PNG bytes, `scale` pixels per unit of the canvas (2 gives a sharp figure on a screen). |
-| enum | `Cmap` | `figure.rs:14` | variants: `Viridis`, `Cividis`, `Inferno`, `Coolwarm` —  Colour maps of the figures. The tables are those of the window (`crates/app/src/colormap.rs`). |
-| enum | `Kind` | `figure.rs:92` | variants: `Gallery`, `Components` |
-| struct | `FigureOptions` | `figure.rs:100` | fields: `kind`, `modes`, `max_modes`, `columns`, `panel_width`, `cmap`, `warp`, `arrows`, `window`, `at`, `core`, `family` |
-| struct | `ModeNote` | `figure.rs:257` | fields: `mode`, `field`, `phase_deg`, `flipped`, `peak`, `quadrature`, `complex` —  What was done to one mode to draw it: the numbers that make the picture reproducible. |
-| struct | `Figure` | `figure.rs:274` | fields: `canvas`, `modes`, `window`, `at` |
-| fn | `mode_figure` | `figure.rs:284` | `pub fn mode_figure(mesh: &Mesh, result: &SolveResult, o: &FigureOptions) -> Result<Figure, Error>` —  The figure of the modes of `result`, solved on `mesh`. |
-| fn | `mode_figure_on` | `figure.rs:290` | `pub fn mode_figure_on(disc: &Discretisation, result: &SolveResult, o: &FigureOptions) -> Result<Figure, Error>` —  The same on the solver mesh. |
-| fn | `Cmap::parse` | `figure.rs:22` | `pub fn parse(s: &str) -> Option<Cmap>` |
-| fn | `Cmap::at` | `figure.rs:32` | `pub fn at(self, t: f64) -> [f32` |
-| struct | `VectorFamily` | `modeview.rs:30` | fields: `prefix`, `axes`, `fields` —  A vector field kept as cell fields `<prefix>x`, `<prefix>y`, `<prefix>z` (`ux uy uz`, `Ex Ey Ez`): the cell fields of one prefix whose last |
-| fn | `vector_families` | `modeview.rs:39` | `pub fn vector_families(sol: &Solution) -> Vec<VectorFamily>` —  The vector families of a solution, in the order of their first component. |
-| struct | `AlignOptions` | `modeview.rs:60` | fields: `family`, `core`, `propagation` |
-| struct | `AlignedMode` | `modeview.rs:77` | fields: `prefix`, `axes`, `re`, `im`, `theta`, `flipped`, `peak`, `in_plane`, `along`, `quadrature`, `complex` |
-| fn | `align` | `modeview.rs:123` | `pub fn align(section: &Section, sol: &Solution, opts: &AlignOptions) -> Result<AlignedMode, Error>` —  Puts solution `sol` on `section` in the phase, sign and scale described above. |
-| fn | `AlignedMode::magnitude` | `modeview.rs:99` | `pub fn magnitude(&self) -> Vec<f64>` —  `\|u\|` at every node. |
-| fn | `AlignedMode::quadrature_part` | `modeview.rs:113` | `pub fn quadrature_part(&self, c: usize) -> (&[f64], &'static str)` —  The part of component `c` to draw as its second view: `Im` when it holds the larger share of the energy (the propagation component of a |
-| fn | `text_width` | `raster.rs:16` | `pub fn text_width(text: &str, size: f64) -> f64` —  The width of `text` at font size `size` (canvas units), as the PNG draws it. The SVG uses the same number to place centred text. |
-| type | `ColouredTri` | `raster.rs:131` |  Rasterises triangles with a colour per corner into `w` by `h` RGBA pixels; pixels no triangle covers stay transparent. Used for the field of |
-| fn | `raster_field` | `raster.rs:133` | `pub fn raster_field(w: u32, h: u32, tris: &[ColouredTri]) -> Vec<u8>` |
-| fn | `render` | `raster.rs:151` | `pub fn render(canvas: &Canvas, scale: f64) -> Result<(u32, u32, Vec<u8>), String>` —  Draws the canvas at `scale` pixels per unit; returns width, height and RGBA bytes. |
-| struct | `Section` | `section.rs:18` | fields: `order`, `nt`, `xz`, `tris`, `labels`, `src`, `at` |
-| fn | `Section::n_tris` | `section.rs:36` | `pub fn n_tris(&self) -> usize` |
-| fn | `Section::n_nodes` | `section.rs:40` | `pub fn n_nodes(&self) -> usize` |
-| fn | `Section::tri` | `section.rs:45` | `pub fn tri(&self, t: usize) -> &[u32]` —  The nodes of triangle `t`. |
-| fn | `Section::new` | `section.rs:51` | `pub fn new(mesh: &SimplexMesh, order: usize, at: Option<f64>) -> Result<Section, String>` —  The section of `mesh` for a result of `order`. A 3D mesh is cut on the plane y = `at` (default: its smallest y); the cells that have a |
-| fn | `Section::linear_tris` | `section.rs:110` | `pub fn linear_tris(&self) -> Vec<[u32` —  The triangles to draw: every P2 triangle split in four linear ones (`v0 e01 e02`, `e01 v1 e12`, `e02 e12 v2`, `e01 e12 e02`), which |
-| fn | `Section::linear_labels` | `section.rs:127` | `pub fn linear_labels(&self) -> Vec<i32>` —  The label of every linear triangle of `linear_tris`. |
-| fn | `Section::outline` | `section.rs:134` | `pub fn outline(&self) -> Vec<[u32` —  The outline of the regions: the edges (as segments of two nodes, through the edge midpoint of a P2 triangle) that lie on the border of the |
+| type | `Rgba` | `canvas.rs:12` |  |
+| enum | `Anchor` | `canvas.rs:15` | variants: `Start`, `Middle`, `End` |
+| enum | `Item` | `canvas.rs:22` | variants: `Rect`, `Line`, `Tri`, `Text`, `Image` |
+| struct | `Canvas` | `canvas.rs:36` | fields: `width`, `height`, `background`, `items` |
+| const | `WHITE` | `canvas.rs:43` | `Rgba` |
+| const | `INK` | `canvas.rs:44` | `Rgba` |
+| const | `MUTED` | `canvas.rs:45` | `Rgba` |
+| fn | `encode_png` | `canvas.rs:131` | `pub fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String>` —  A PNG of RGBA pixels. |
+| fn | `Canvas::new` | `canvas.rs:48` | `pub fn new(width: f64, height: f64) -> Canvas` |
+| fn | `Canvas::push` | `canvas.rs:52` | `pub fn push(&mut self, item: Item)` |
+| fn | `Canvas::text` | `canvas.rs:56` | `pub fn text(&mut self, x: f64, y: f64, text: &str, size: f64, color: Rgba, anchor: Anchor)` |
+| fn | `Canvas::bold` | `canvas.rs:60` | `pub fn bold(&mut self, x: f64, y: f64, text: &str, size: f64, color: Rgba, anchor: Anchor)` |
+| fn | `Canvas::to_svg` | `canvas.rs:65` | `pub fn to_svg(&self) -> Result<String, String>` —  The figure as SVG text. Fields are embedded as PNG images. |
+| fn | `Canvas::to_png` | `canvas.rs:124` | `pub fn to_png(&self, scale: f64) -> Result<Vec<u8>, String>` —  The figure as PNG bytes, `scale` pixels per unit of the canvas (2 gives a sharp figure on a screen). |
+| enum | `Cmap` | `figure.rs:16` | variants: `Viridis`, `Cividis`, `Inferno`, `Coolwarm` —  Colour maps of the figures. The tables are those of the window (`crates/app/src/colormap.rs`). |
+| enum | `Kind` | `figure.rs:94` | variants: `Gallery`, `Components` |
+| struct | `FigureOptions` | `figure.rs:102` | fields: `kind`, `modes`, `max_modes`, `columns`, `panel_width`, `cmap`, `warp`, `arrows`, `window`, `at`, `core`, `family` |
+| struct | `ModeNote` | `figure.rs:259` | fields: `mode`, `field`, `phase_deg`, `flipped`, `peak`, `quadrature`, `complex` —  What was done to one mode to draw it: the numbers that make the picture reproducible. |
+| struct | `Figure` | `figure.rs:276` | fields: `canvas`, `modes`, `window`, `at` |
+| fn | `mode_figure` | `figure.rs:286` | `pub fn mode_figure(mesh: &Mesh, result: &SolveResult, o: &FigureOptions) -> Result<Figure, Error>` —  The figure of the modes of `result`, solved on `mesh`. |
+| fn | `mode_figure_on` | `figure.rs:292` | `pub fn mode_figure_on(disc: &Discretisation, result: &SolveResult, o: &FigureOptions) -> Result<Figure, Error>` —  The same on the solver mesh. |
+| fn | `Cmap::parse` | `figure.rs:24` | `pub fn parse(s: &str) -> Option<Cmap>` |
+| fn | `Cmap::at` | `figure.rs:34` | `pub fn at(self, t: f64) -> [f32` |
+| struct | `VectorFamily` | `modeview.rs:32` | fields: `prefix`, `axes`, `fields` —  A vector field kept as cell fields `<prefix>x`, `<prefix>y`, `<prefix>z` (`ux uy uz`, `Ex Ey Ez`): the cell fields of one prefix whose last |
+| fn | `vector_families` | `modeview.rs:41` | `pub fn vector_families(sol: &Solution) -> Vec<VectorFamily>` —  The vector families of a solution, in the order of their first component. |
+| struct | `AlignOptions` | `modeview.rs:62` | fields: `family`, `core`, `propagation` |
+| struct | `AlignedMode` | `modeview.rs:79` | fields: `prefix`, `axes`, `re`, `im`, `theta`, `flipped`, `peak`, `in_plane`, `along`, `quadrature`, `complex` |
+| fn | `align` | `modeview.rs:125` | `pub fn align(section: &Section, sol: &Solution, opts: &AlignOptions) -> Result<AlignedMode, Error>` —  Puts solution `sol` on `section` in the phase, sign and scale described above. |
+| fn | `AlignedMode::magnitude` | `modeview.rs:101` | `pub fn magnitude(&self) -> Vec<f64>` —  `\|u\|` at every node. |
+| fn | `AlignedMode::quadrature_part` | `modeview.rs:115` | `pub fn quadrature_part(&self, c: usize) -> (&[f64], &'static str)` —  The part of component `c` to draw as its second view: `Im` when it holds the larger share of the energy (the propagation component of a |
+| fn | `text_width` | `raster.rs:18` | `pub fn text_width(text: &str, size: f64) -> f64` —  The width of `text` at font size `size` (canvas units), as the PNG draws it. The SVG uses the same number to place centred text. |
+| type | `ColouredTri` | `raster.rs:133` |  Rasterises triangles with a colour per corner into `w` by `h` RGBA pixels; pixels no triangle covers stay transparent. Used for the field of |
+| fn | `raster_field` | `raster.rs:135` | `pub fn raster_field(w: u32, h: u32, tris: &[ColouredTri]) -> Vec<u8>` |
+| fn | `render` | `raster.rs:153` | `pub fn render(canvas: &Canvas, scale: f64) -> Result<(u32, u32, Vec<u8>), String>` —  Draws the canvas at `scale` pixels per unit; returns width, height and RGBA bytes. |
+| struct | `Section` | `section.rs:20` | fields: `order`, `nt`, `xz`, `tris`, `labels`, `src`, `at` |
+| fn | `Section::n_tris` | `section.rs:38` | `pub fn n_tris(&self) -> usize` |
+| fn | `Section::n_nodes` | `section.rs:42` | `pub fn n_nodes(&self) -> usize` |
+| fn | `Section::tri` | `section.rs:47` | `pub fn tri(&self, t: usize) -> &[u32]` —  The nodes of triangle `t`. |
+| fn | `Section::new` | `section.rs:53` | `pub fn new(mesh: &SimplexMesh, order: usize, at: Option<f64>) -> Result<Section, String>` —  The section of `mesh` for a result of `order`. A 3D mesh is cut on the plane y = `at` (default: its smallest y); the cells that have a |
+| fn | `Section::linear_tris` | `section.rs:112` | `pub fn linear_tris(&self) -> Vec<[u32` —  The triangles to draw: every P2 triangle split in four linear ones (`v0 e01 e02`, `e01 v1 e12`, `e02 e12 v2`, `e01 e12 e02`), which |
+| fn | `Section::linear_labels` | `section.rs:129` | `pub fn linear_labels(&self) -> Vec<i32>` —  The label of every linear triangle of `linear_tris`. |
+| fn | `Section::outline` | `section.rs:136` | `pub fn outline(&self) -> Vec<[u32` —  The outline of the regions: the edges (as segments of two nodes, through the edge midpoint of a P2 triangle) that lie on the border of the |
 
 Trait implementations in this component: `FigureOptions: Default`, `AlignOptions: Default`

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Poisson on a disk meshed by the unified meshing interface: the adaptive mesher and the solve-estimate-adapt loop improve the electrostatic
 //! solution. (Moved from the femcore meshing tests with the dfs kernel.)
 use femcore::adapt::estimate::{solve_adaptively, LoopSettings};

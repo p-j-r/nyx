@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Low-reflecting boundaries for solid mechanics (low-reflecting boundary): a boundary
 //! traction that absorbs outgoing pressure and shear waves,
 //!

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Axisymmetric study kernel** (`sms.crosssect
 > Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages); every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain.
 
 **Decisions:** [ADR 43](../../../adr/0043-axisymmetric-solid-kernel-stays-a-library-entry.md), [ADR 68](../../../adr/0068-the-axisymmetric-solid-gets-a-study.md), [ADR 69](../../../adr/0069-axis-conditions-and-cylindrical-stretch-of-the-axisymmetric-solid.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md)  
-**Size:** 1 file, 502 lines.
+**Size:** 1 file, 504 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/cross_section.rs` | 502 | The shared kernel of the elastic cross-section models: stiffness and mass on a 2D mesh with three displacement components, the constraints, absorbing layers and low-reflecting boundaries, the complex eigensolve and the fields. It serves ... |
+| `crates/nyx-sms/src/cross_section.rs` | 504 |  |
 
 ## What it uses
 
@@ -83,13 +83,13 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `CrossModes` | `cross_section.rs:47` | fields: `m_az`, `freqs`, `vectors`, `c6`, `rho`, `converged` —  The complex eigenvectors behind a cross-section solid result: displacement over all `3 * n_dofs(order)` dofs (component blocks), the complex |
-| enum | `CrossSection` | `cross_section.rs:59` | variants: `Axisymmetric` —  What the third displacement component and the third dimension are: the azimuth of an axisymmetric body with azimuthal order `m` |
-| fn | `solve_solid_axisym` | `cross_section.rs:65` | `pub fn solve_solid_axisym(mesh: &Discretisation, spec: &Problem, m: f64) -> Result<(SolveResult, CrossModes), String>` —  Elastic modes of a body of revolution with azimuthal dependence `exp(-i m theta)` on the (r, z) half |
-| fn | `solve_axisymmetric` | `cross_section.rs:72` | `pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The axisymmetric eigenfrequency study (ADR 68): the azimuthal order is taken from the study, the result carries `physics` and `study`. |
-| fn | `solve_cross_section` | `cross_section.rs:98` | `pub fn solve_cross_section( mesh: &Discretisation, spec: &Problem, kind: CrossSection, ) -> Result<(SolveResult, CrossModes), String>` |
-| struct | `CrossAssembly` | `cross_section.rs:113` | fields: `kind`, `order`, `n`, `n1`, `kf`, `mf`, `cf`, `free`, `fixed`, `c6`, `rho`, `n_modes`, ... —  Stage 1 of the cross-section solid kernels: stiffness, mass and (low-reflecting) damping on the free dofs, the |
-| fn | `assemble_cross_section` | `cross_section.rs:137` | `pub fn assemble_cross_section( mesh: &Discretisation, spec: &Problem, kind: CrossSection, ) -> Result<CrossAssembly, String>` |
-| struct | `CrossSolve` | `cross_section.rs:274` | fields: `modes`, `dim` —  Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them. |
-| fn | `solve_cross_section_modes` | `cross_section.rs:282` | `pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, String>` —  Stage 2: the complex eigenpairs (`K - w^2 M` or the quadratic problem with the low-reflecting damping) nearest the |
-| fn | `cross_section_fields` | `cross_section.rs:355` | `pub fn cross_section_fields( mesh: &Discretisation, asm: &CrossAssembly, solved: &CrossSolve, ) -> Result<SolveResult, String>` —  Stage 3: the plot fields `\|u\|`, `Re ux` (radial), `Re uz` (axial), `Re uy` (azimuthal), `\|uy\|` of every mode (largest component |
+| struct | `CrossModes` | `cross_section.rs:49` | fields: `m_az`, `freqs`, `vectors`, `c6`, `rho`, `converged` —  The complex eigenvectors behind a cross-section solid result: displacement over all `3 * n_dofs(order)` dofs (component blocks), the complex |
+| enum | `CrossSection` | `cross_section.rs:61` | variants: `Axisymmetric` —  What the third displacement component and the third dimension are: the azimuth of an axisymmetric body with azimuthal order `m` |
+| fn | `solve_solid_axisym` | `cross_section.rs:67` | `pub fn solve_solid_axisym(mesh: &Discretisation, spec: &Problem, m: f64) -> Result<(SolveResult, CrossModes), String>` —  Elastic modes of a body of revolution with azimuthal dependence `exp(-i m theta)` on the (r, z) half |
+| fn | `solve_axisymmetric` | `cross_section.rs:74` | `pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The axisymmetric eigenfrequency study (ADR 68): the azimuthal order is taken from the study, the result carries `physics` and `study`. |
+| fn | `solve_cross_section` | `cross_section.rs:100` | `pub fn solve_cross_section( mesh: &Discretisation, spec: &Problem, kind: CrossSection, ) -> Result<(SolveResult, CrossModes), String>` |
+| struct | `CrossAssembly` | `cross_section.rs:115` | fields: `kind`, `order`, `n`, `n1`, `kf`, `mf`, `cf`, `free`, `fixed`, `c6`, `rho`, `n_modes`, ... —  Stage 1 of the cross-section solid kernels: stiffness, mass and (low-reflecting) damping on the free dofs, the |
+| fn | `assemble_cross_section` | `cross_section.rs:139` | `pub fn assemble_cross_section( mesh: &Discretisation, spec: &Problem, kind: CrossSection, ) -> Result<CrossAssembly, String>` |
+| struct | `CrossSolve` | `cross_section.rs:276` | fields: `modes`, `dim` —  Stage 2 output: the mode shapes over all dofs and what the eigensolver says about them. |
+| fn | `solve_cross_section_modes` | `cross_section.rs:284` | `pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, String>` —  Stage 2: the complex eigenpairs (`K - w^2 M` or the quadratic problem with the low-reflecting damping) nearest the |
+| fn | `cross_section_fields` | `cross_section.rs:357` | `pub fn cross_section_fields( mesh: &Discretisation, asm: &CrossAssembly, solved: &CrossSolve, ) -> Result<SolveResult, String>` —  Stage 3: the plot fields `\|u\|`, `Re ux` (radial), `Re uz` (axial), `Re uy` (azimuthal), `\|uy\|` of every mode (largest component |

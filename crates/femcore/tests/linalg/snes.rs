@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Nonlinear solvers on manufactured problems: `F(u) = L u + u³ − g` with `g` chosen so that a given
 //! `u*` is the exact solution; the arctan system on which full Newton steps diverge; an analytic complex
 //! cubic; and Bratu-type 2-D problems for Newton against JFNK with an AMG preconditioner.

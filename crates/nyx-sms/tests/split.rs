@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! (Moved from femcore with the solid kernel, whose uniaxial bar is the oracle.)
 //! Meshes with quadrilaterals, hexahedra and prisms are split into simplices; the result must be
 //! conforming, fill the same volume and solve exactly for linear fields.

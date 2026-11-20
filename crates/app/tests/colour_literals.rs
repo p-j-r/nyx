@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! No new colour literal in the window code (ADR 88, rule "no Color32 literal outside theme.rs, tokens.rs and colormap.rs"). The literals that were
 //! there before the colour tokens are counted per file and may only go DOWN: when you remove one, lower the number here; a file that is not in the
 //! table has none and may not get one. The table is the to-do list of plan steps U4 (data and canvas colours: `viewport.rs`, `app.rs`, `tabs.rs`,

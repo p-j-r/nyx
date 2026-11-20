@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Optical modes of a crystal whose axes are tilted against the propagation axis: the permittivity has xz/yz terms,
 //! the 2D mode problem becomes quadratic in the propagation constant and is solved exactly. Checked against the 3D
 //! eigenmode solver on a periodic cell of the same PEC guide (a different formulation sharing only the tensor). Both are written in the

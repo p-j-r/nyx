@@ -59,8 +59,8 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Physics adapter](../4-code/dfs/adapter.md) | 1 | 217 | 41, 25 | The Physics implementation of dfs: descriptors, validation, solve entry. |
-| [Typed problem](../4-code/dfs/problem.md) | 1 | 195 | 41 | The typed dfs problem the kernels read, decoded from the ProblemSpec envelope. |
-| [Heat kernel](../4-code/dfs/heat.md) | 1 | 273 | 41, 9 | Heat transfer on P1/P2 simplices, stationary and transient. |
-| [Electrostatics kernel](../4-code/dfs/electro.md) | 1 | 136 | 41, 9 | Electrostatics on P1/P2 simplices with fixed-potential and surface-charge conditions. |
-| [Shared helpers](../4-code/dfs/common.md) | 1 | 56 | 41 | Per-cell gradients and values shared by the heat and electrostatics kernels. |
+| [Physics adapter](../4-code/dfs/adapter.md) | 1 | 219 | 41, 25 | The Physics implementation of dfs: descriptors, validation, solve entry. |
+| [Typed problem](../4-code/dfs/problem.md) | 1 | 197 | 41 | The typed dfs problem the kernels read, decoded from the ProblemSpec envelope. |
+| [Heat kernel](../4-code/dfs/heat.md) | 1 | 275 | 41, 9 | Heat transfer on P1/P2 simplices, stationary and transient. |
+| [Electrostatics kernel](../4-code/dfs/electro.md) | 1 | 138 | 41, 9 | Electrostatics on P1/P2 simplices with fixed-potential and surface-charge conditions. |
+| [Shared helpers](../4-code/dfs/common.md) | 1 | 58 | 41 | Per-cell gradients and values shared by the heat and electrostatics kernels. |

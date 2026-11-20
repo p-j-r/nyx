@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What a solve will cost, learned from what solves cost (productivity plan Q2, ADR 86). Every solve that runs in a worker process measures its
 //! own peak memory exactly (`process::peak_memory`); the engine keeps one row per such run (the physics of the chain, the dimension, the cells,
 //! the unknowns, the peak memory, the seconds) and, before a solve starts, fits the rows of the same chain and dimension with a power law

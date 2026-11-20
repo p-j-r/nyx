@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Shared by the benchmark programs: a plain generated mesh with numbered boundaries (`femcore/examples/benchmesh`) is driven through the
 //! `Physics` trait, with a resolver that maps the boundary names used here to those numbers. The same kernels, on the same meshes, as the
 //! window and the MCP server reach through `Engine`; only the geometry and meshing steps are left out so that the times are solver times.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Anisotropic material data: crystal stiffness (cubic, hexagonal, trigonal, orthotropic),
 //! symmetric tensors for conductivity, permittivity and thermal expansion, and rotation of the
 //! crystal axes into the global frame.

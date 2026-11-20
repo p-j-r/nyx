@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The `figure` command (ADR 99): a figure of the modes of the latest result of a physics, written as SVG or PNG. The window, a script and the MCP
 //! server all call it; the drawing is `nyx_analysis::figure`, which names no physics.
 

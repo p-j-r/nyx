@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! M2 study: matrix-free sum factorisation against the assembled CSR matrix for the 3-D spectral-element
 //! Helmholtz operator on a warped mesh (on an axis-aligned box the assembled GLL matrices are very sparse, ~3(p+1) per
 //! row, and assembly wins: see docs/LEARNINGS.md) at (almost) fixed unknown count and growing polynomial degree.

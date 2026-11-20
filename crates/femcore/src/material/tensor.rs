@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Second-rank tensor properties of a material (relative permittivity, thermal and electrical conductivity, thermal expansion) in the
 //! crystal frame. A file gives one value (isotropic), three (diagonal), six (xx, yy, zz, yz, xz, xy as for the stiffness), a 3x3
 //! array, or `{ perp = .., par = .. }` for a uniaxial crystal with the unique axis along crystal z. Symmetry and, where physics

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals, periodic
 //! waveguide cells): the stiffness and mass matrices are reduced by the periodic constraints and the
 //! complex Hermitian eigenproblem is solved with the complex shift-and-invert Arnoldi solver.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Does one call into faer's GEMM slow down *later, unrelated* code on this CPU?
 //! (Observed on the benchmark VM: after the first restart multiply every phase of an eigensolve
 //! ran about 3x slower, including code that never calls faer. A dirty upper vector state after

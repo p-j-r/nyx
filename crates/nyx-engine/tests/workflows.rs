@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The command lists in `tools/workflows/` (productivity plan P0): JSON lines of `{cmd, args}` that the `workflow` example replays and that
 //! `nyx check` / `nyx run` will take over (plan step S1). Every line must name a command of the catalog with an object for its arguments and
 //! use only the replay keys the format defines; the start of the first list is replayed to show the format runs against an `Engine`.

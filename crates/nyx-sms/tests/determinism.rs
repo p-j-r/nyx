@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The shared thread pool must not make results depend on scheduling: the same problem solved twice in one process
 //! gives bit-identical numbers (work is split into fixed pieces and combined in a fixed order).
 mod common;

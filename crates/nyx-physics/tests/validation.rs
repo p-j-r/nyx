@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Structural validation of a problem against the descriptors, and the JSON Schemas generated from them.
 mod common;
 use common::*;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The machine-readable form of what `nyx-connect` finds and does (`nyx-connect list|connect|disconnect|test --json`), and its JSON Schema.
 //!
 //! Three reports, all with `{"schema": "nyx-connect.<kind>", "version": 1, ...}`:

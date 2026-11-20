@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Meshing seam. `MeshedModel` is a mesh together with the names of the model (regions, boundaries) and the label resolver the physics
 //! use; `Mesher` builds one from a feature list. `FemcoreMesher` is the **only** code of the engine that calls femcore's mesher
 //! (`meshing::mesh_model`, `mesher::extrude_y`): restructure phase 2 replaces the mesh types and moves those modules, and rewrites this

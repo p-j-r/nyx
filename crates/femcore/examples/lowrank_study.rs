@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! S4 study: HODLR compression and the O(n log² n) direct solve on a kernel matrix, and the off-diagonal ranks
 //! of the Schur complement on a separator of a 2-D grid (the dense front that a low-rank multifrontal solver
 //! would compress). `cargo run --release --example lowrank_study`

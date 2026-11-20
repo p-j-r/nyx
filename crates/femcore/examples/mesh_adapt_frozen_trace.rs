@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 use femcore::adapt::drive::AdaptOptions;
 use femcore::adapt::geom::PolylineGeometry;
 use femcore::adapt::metric::*;

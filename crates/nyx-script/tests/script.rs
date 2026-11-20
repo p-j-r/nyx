@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Scripts (productivity plan S4, ADR [89]): what a script can do, and the gates: the same numbers as the same workflow sent command by command,
 //! a runaway script is stopped without taking the engine down, and a script cannot reach a file outside its folder.
 

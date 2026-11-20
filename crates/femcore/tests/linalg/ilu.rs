@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Incomplete factorisations: exactness when no fill is dropped, iteration-count ordering of the
 //! variants, complex symmetric and Hermitian incomplete Cholesky, and the diagonal-shift fallback.
 #![allow(clippy::needless_range_loop)]

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Warm starts of the eigensolvers (productivity plan P5b, ADR 96): the wanted modes of one solve as the start block of the next solve of a
 //! sweep that keeps its mesh. A shift-and-invert Krylov-Schur (or block Arnoldi) run that begins from the previous point's `nev` eigenvectors
 //! needs far fewer iterations when the problem moved a little; the factorisation, which is a new matrix at every point, is not touched.

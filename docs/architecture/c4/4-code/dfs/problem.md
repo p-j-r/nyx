@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Typed problem** (`dfs.problem`) in the cont
 > The typed dfs problem the kernels read, decoded from the ProblemSpec envelope.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md)  
-**Size:** 1 file, 195 lines.
+**Size:** 1 file, 197 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/problem.rs` | 195 | The typed problem of `dfs`: what the kernels read. It is decoded from the `ProblemSpec` envelope by `decode` (names and selectors resolved to mesh numbers, parameters with their defaults), or built directly by code that already has mesh ... |
+| `crates/nyx-dfs/src/problem.rs` | 197 |  |
 
 ## What it uses
 
@@ -80,12 +80,12 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| enum | `BcKind` | `problem.rs:12` | variants: `Potential`, `Ground`, `SurfaceCharge`, `Temperature`, `Flux`, `Convection` |
-| struct | `Bc` | `problem.rs:45` | fields: `labels`, `kind` —  A condition on boundary numbers of the mesh. |
-| enum | `Study` | `problem.rs:51` | variants: `Electrostatic`, `HeatStationary`, `HeatTransient` |
-| struct | `Problem` | `problem.rs:74` | fields: `order`, `study`, `materials`, `bcs`, `solver` |
-| fn | `decode` | `problem.rs:138` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
-| fn | `BcKind::name` | `problem.rs:27` | `pub fn name(&self) -> &'static str` |
-| fn | `Study::kind` | `problem.rs:64` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
-| fn | `Problem::new` | `problem.rs:84` | `pub fn new(study: Study, order: usize) -> Problem` |
-| fn | `Problem::check_finite` | `problem.rs:89` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field. |
+| enum | `BcKind` | `problem.rs:14` | variants: `Potential`, `Ground`, `SurfaceCharge`, `Temperature`, `Flux`, `Convection` |
+| struct | `Bc` | `problem.rs:47` | fields: `labels`, `kind` —  A condition on boundary numbers of the mesh. |
+| enum | `Study` | `problem.rs:53` | variants: `Electrostatic`, `HeatStationary`, `HeatTransient` |
+| struct | `Problem` | `problem.rs:76` | fields: `order`, `study`, `materials`, `bcs`, `solver` |
+| fn | `decode` | `problem.rs:140` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
+| fn | `BcKind::name` | `problem.rs:29` | `pub fn name(&self) -> &'static str` |
+| fn | `Study::kind` | `problem.rs:66` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
+| fn | `Problem::new` | `problem.rs:86` | `pub fn new(study: Study, order: usize) -> Problem` |
+| fn | `Problem::check_finite` | `problem.rs:91` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field. |

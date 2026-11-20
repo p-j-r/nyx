@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Perfectly matched layers by complex coordinate stretching, shared by the electromagnetic kernels (`nyx-ems`) and the solid kernels: the
 //! stretch factor of a point inside a layer (`stretch`, from a `props::Pml` and the bounding box of its domain) and the stretch of every
 //! cell of a 2D or 3D mesh (`cell_stretches`). Split out of `ems_pml` when `ems` moved into its crate (ADR 45).

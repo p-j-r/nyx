@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Frame and sections** (`femcore.section`) in
 > The one place that knows the wafer axes (x lateral, z normal, waves along +y).
 
 **Decisions:** [ADR 1](../../../adr/0001-one-public-wafer-frame.md)  
-**Size:** 1 file, 221 lines.
+**Size:** 1 file, 223 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/section.rs` | 221 | The cross-section of a waveguide in wafer axes: the one place where the axis numbers of the 2D kernels are written down. |
+| `crates/femcore/src/section.rs` | 223 |  |
 
 ## What it uses
 
@@ -68,18 +68,18 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `wafer_axes` | `section.rs:25` | `pub fn wafer_axes(dim: usize) -> &'static [usize]` —  Wafer axis (0 = x, 1 = y, 2 = z) of each axis of a mesh of dimension `dim`. |
-| fn | `component_names` | `section.rs:34` | `pub fn component_names(dim: usize) -> &'static [&'static str]` —  Wafer name of each component of a vector field on a mesh of dimension `dim`: `["x", "z"]` on a cross-section. |
-| fn | `wafer_point` | `section.rs:43` | `pub fn wafer_point(p: &[f64], dim: usize) -> [f64` —  The wafer coordinates `(x, y, z)` of a mesh point (`y = 0` on a cross-section). |
-| fn | `plane_tensor` | `section.rs:52` | `pub fn plane_tensor(t: &M3, dim: usize) -> M3` —  A wafer tensor in the axes (x, z, y) of a cross-section (the identity on a 3D mesh), see the module documentation. |
-| const | `PLANE_VOIGT` | `section.rs:62` | `[usize` —  For each entry of the Voigt order of the axes (x, z, y) of a cross-section, (xx, zz, yy, xz, zy, xy), the entry of the wafer Voigt order |
-| fn | `plane_stiffness` | `section.rs:66` | `pub fn plane_stiffness(c: &M6, dim: usize) -> M6` —  A wafer stiffness (Voigt order xx, yy, zz, xy, yz, xz, engineering shear) in the Voigt order of the axes (x, z, y) of a cross-section; |
-| fn | `stress_name` | `section.rs:80` | `pub fn stress_name(dim: usize, idx: usize) -> &'static str` —  Wafer name of stress component `idx` of the solid kernels (their Voigt order: wafer order in 3D, `PLANE_VOIGT` on a cross-section). |
-| fn | `mesh_pml_dirs` | `section.rs:86` | `pub fn mesh_pml_dirs(p: &Pml, dim: usize) -> [PmlDir` —  The directions of a perfectly matched layer along the axes of a mesh: (x, z) on a cross-section, (x, y, z) in 3D. |
-| const | `PROP_SIGN` | `section.rs:95` | `f64` —  Sign of the propagation axis of the mode solvers against wafer y: everything propagates along `+y`. |
-| const | `LOCAL_AXES` | `section.rs:98` | `[(usize, f64)` —  The wafer axis behind each axis of the local frame (lateral, normal, propagation) and its sign. |
-| fn | `local_tensor` | `section.rs:101` | `pub fn local_tensor(t: &M3) -> M3` —  A wafer tensor in the local axes (lateral, normal, propagation) of the mode solvers. |
-| fn | `local_tensor_signed` | `section.rs:106` | `pub fn local_tensor_signed(t: &M3, prop_sign: f64) -> M3` —  As `local_tensor` for a propagation axis along `prop_sign * y` (the reciprocity test runs a guide both ways). |
-| fn | `is_left_handed` | `section.rs:111` | `pub fn is_left_handed(prop_sign: f64) -> bool` —  Whether the local triple (lateral, normal, propagation) of a mode solver with propagation `prop_sign * y` is left-handed. |
-| fn | `local_component` | `section.rs:126` | `pub fn local_component(i: usize) -> (&'static str, f64)` —  Wafer name and sign of a component of a field written in the local axes: `0` lateral -&gt; `x`, `1` normal -&gt; `z`, `2` propagation -&gt; `y`. |
-| fn | `axes_of_3d_periodic` | `section.rs:135` | `pub fn axes_of_3d_periodic(periodic: &[Periodic], mesh: &SimplexMesh) -> ([usize` —  The three axes of a 3D problem that play the roles of the cross-section: `(lateral, normal, propagation)` as indices of x, y, z, |
+| fn | `wafer_axes` | `section.rs:27` | `pub fn wafer_axes(dim: usize) -> &'static [usize]` —  Wafer axis (0 = x, 1 = y, 2 = z) of each axis of a mesh of dimension `dim`. |
+| fn | `component_names` | `section.rs:36` | `pub fn component_names(dim: usize) -> &'static [&'static str]` —  Wafer name of each component of a vector field on a mesh of dimension `dim`: `["x", "z"]` on a cross-section. |
+| fn | `wafer_point` | `section.rs:45` | `pub fn wafer_point(p: &[f64], dim: usize) -> [f64` —  The wafer coordinates `(x, y, z)` of a mesh point (`y = 0` on a cross-section). |
+| fn | `plane_tensor` | `section.rs:54` | `pub fn plane_tensor(t: &M3, dim: usize) -> M3` —  A wafer tensor in the axes (x, z, y) of a cross-section (the identity on a 3D mesh), see the module documentation. |
+| const | `PLANE_VOIGT` | `section.rs:64` | `[usize` —  For each entry of the Voigt order of the axes (x, z, y) of a cross-section, (xx, zz, yy, xz, zy, xy), the entry of the wafer Voigt order |
+| fn | `plane_stiffness` | `section.rs:68` | `pub fn plane_stiffness(c: &M6, dim: usize) -> M6` —  A wafer stiffness (Voigt order xx, yy, zz, xy, yz, xz, engineering shear) in the Voigt order of the axes (x, z, y) of a cross-section; |
+| fn | `stress_name` | `section.rs:82` | `pub fn stress_name(dim: usize, idx: usize) -> &'static str` —  Wafer name of stress component `idx` of the solid kernels (their Voigt order: wafer order in 3D, `PLANE_VOIGT` on a cross-section). |
+| fn | `mesh_pml_dirs` | `section.rs:88` | `pub fn mesh_pml_dirs(p: &Pml, dim: usize) -> [PmlDir` —  The directions of a perfectly matched layer along the axes of a mesh: (x, z) on a cross-section, (x, y, z) in 3D. |
+| const | `PROP_SIGN` | `section.rs:97` | `f64` —  Sign of the propagation axis of the mode solvers against wafer y: everything propagates along `+y`. |
+| const | `LOCAL_AXES` | `section.rs:100` | `[(usize, f64)` —  The wafer axis behind each axis of the local frame (lateral, normal, propagation) and its sign. |
+| fn | `local_tensor` | `section.rs:103` | `pub fn local_tensor(t: &M3) -> M3` —  A wafer tensor in the local axes (lateral, normal, propagation) of the mode solvers. |
+| fn | `local_tensor_signed` | `section.rs:108` | `pub fn local_tensor_signed(t: &M3, prop_sign: f64) -> M3` —  As `local_tensor` for a propagation axis along `prop_sign * y` (the reciprocity test runs a guide both ways). |
+| fn | `is_left_handed` | `section.rs:113` | `pub fn is_left_handed(prop_sign: f64) -> bool` —  Whether the local triple (lateral, normal, propagation) of a mode solver with propagation `prop_sign * y` is left-handed. |
+| fn | `local_component` | `section.rs:128` | `pub fn local_component(i: usize) -> (&'static str, f64)` —  Wafer name and sign of a component of a field written in the local axes: `0` lateral -&gt; `x`, `1` normal -&gt; `z`, `2` propagation -&gt; `y`. |
+| fn | `axes_of_3d_periodic` | `section.rs:137` | `pub fn axes_of_3d_periodic(periodic: &[Periodic], mesh: &SimplexMesh) -> ([usize` —  The three axes of a 3D problem that play the roles of the cross-section: `(lateral, normal, propagation)` as indices of x, y, z, |

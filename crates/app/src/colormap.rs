@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Colour maps for field plots (Viridis, Cividis, Turbo, Inferno, cool-warm, gray) as functions of a value in [0, 1], and the
 //! palette used to tell boundary conditions apart (the eight region colours of `tokens.rs`).
 

@@ -41,3 +41,11 @@ them, and the AGPL and the commercial licence do not apply to them.
                                            declared by the crate; the list is
                                            Cargo.lock (run `cargo metadata`
                                            for the licence of each)
+
+Source files
+------------
+
+Every Rust file of nyx's own code starts with the SPDX line of the choice above
+and the copyright line. Files of crates/geom and of the BSD-2-Clause ports in
+crates/femcore (linalg, adapt, meshing, mesh) carry no such line: they are
+covered by this file and by the licence texts named above.

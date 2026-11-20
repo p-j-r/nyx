@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Behaviour of `femcore::material`: the shipped library against the in-code data it replaces, published dispersion values, the three
 //! ways to give a stiffness, round trips from file to matrix and back, and the plain-language error messages.
 

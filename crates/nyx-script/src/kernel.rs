@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The kernel (productivity plan S7, ADR [94]): one Monty session in a worker process that outlives a script. `run` feeds a script to it and
 //! answers each pause (an engine command, a name nothing defines, a clock or file request) until the script completes, fails, or the time the
 //! caller gave is spent; `wait` continues a script that was left waiting; `check` type-checks a script against the commands and the variables of

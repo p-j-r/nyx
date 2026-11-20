@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What a person sees while editing (productivity plan P3, ADR 92): the project checked with edits that are not applied yet, the cells and the
 //! cost of those edits from a trial mesh, and the polarization as a function off the drawing thread. None of it changes the engine, takes a
 //! job or replaces the mesh: no mesh or solve starts without a request.

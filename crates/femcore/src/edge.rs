@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The edge-element basis of the 2D mode solvers and of everything that evaluates their fields: Whitney and degree-2 Nedelec functions on a
 //! triangle (`edge_basis`), the per-cell numbering and signs of the edge functions (`cell_data`) and the barycentric gradients of a triangle
 //! (`tri_g`). Split out of `ems` when the electromagnetic kernels moved into `nyx-ems` (ADR 45): `optical` (the field sampler of the

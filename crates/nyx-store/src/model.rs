@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The data model: the workflow manifest (`workflow.json`), its experiments, the auto-generated concept card, the run digest and
 //! the share levels. Everything is plain serde and ordered (`BTreeMap`) so files are byte-for-byte reproducible.
 

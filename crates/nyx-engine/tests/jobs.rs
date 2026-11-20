@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Every long operation is a job (productivity plan P2, ADR 85): a mesh, a solve, a mesh convergence check, opening a results file and writing
 //! one run on a job that can be watched and cancelled, and a job started for a project that was replaced does not put its outcome into the new one.
 //! Each cancel test fails when the job reaches `Done`: a cancel that did not happen cannot pass for one.

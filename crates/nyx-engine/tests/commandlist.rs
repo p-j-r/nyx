@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Command lists (productivity plan S1): a JSON-lines list is checked before it runs (every command in the catalog, every argument against its
 //! schema, then a dry run that finds what only the project can tell), the check starts no job and changes nothing, a bad line is named with its
 //! command, and the workflows of `tools/workflows/` run from their files.

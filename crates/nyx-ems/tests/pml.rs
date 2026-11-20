@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Perfectly matched layers and complex materials in the mode solver.
 mod common;
 use femcore::linalg::csr::c;

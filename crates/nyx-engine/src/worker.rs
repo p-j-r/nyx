@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Solving in a child process (productivity plan P4, ADR 86). A solve that needs more memory than the machine has, or a factorisation that
 //! nobody can interrupt, must not take the window or the MCP server with it. A *worker* is a small program (`nyx-worker`, built from this crate)
 //! that solves one frozen project and writes the results file; the engine that asked runs it as a child, shows its stage log as its own, kills

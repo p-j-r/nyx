@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Helpers shared by the test files of nyx-connect: a throw-away "machine" (home folder, program) and the fake MCP server.
 #![allow(dead_code)]
 use nyx_connect::{Env, Os};

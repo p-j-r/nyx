@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Warm starts of the eigensolvers (productivity plan P5b, ADR 96): the previous solve's modes as the start block give the same modes in
 //! fewer iterations when the problem moved a little; a solve with no context, or a context with nothing to start from, is bit for bit the
 //! solve it always was; a start of the wrong size is a cold start.

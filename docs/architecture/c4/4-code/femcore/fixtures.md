@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **Fixtures and test kit** (`femcore.fixtures`
 > Test meshes and the SOI wire cross-section used by the tests of every physics crate.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 10](../../../adr/0010-golden-files-are-the-numerical-oracle.md), [ADR 60](../../../adr/0060-examples-are-project-files-and-use-cases-are-gone.md)  
-**Size:** 3 files, 582 lines.
+**Size:** 3 files, 586 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/mesh/fixtures.rs` | 278 | Test fixtures: structured box meshes, labelled like the output of a CAD mesher, and analytic scalar fields with exact gradients and Hessians. |
-| `crates/femcore/src/testkit/mod.rs` | 121 | Shared helpers for the tests of the physics crates and of femcore: small meshes made from geom models with the boundary numbers the tests have always used, and `maxdiff`. Public so that `nyx-dfs`, `nyx-sms` and `nyx-ems` use the same fix... |
-| `crates/femcore/src/testkit/soi.rs` | 183 | Test fixture: the cross-section of a silicon wire on 300 nm silicon-on-insulator at 1550 nm (it was the SOI use case of the window until phase 7). |
+| `crates/femcore/src/testkit/mod.rs` | 123 |  |
+| `crates/femcore/src/testkit/soi.rs` | 185 |  |
 
 ## What it uses
 
@@ -136,21 +136,21 @@ classDiagram
 | struct | `Gaussian` | `mesh/fixtures.rs:136` | fields: `centre`, `width` —  `exp(-sum_a ((x_a - c_a) / w_a)^2)`: anisotropic Gaussian bump. |
 | struct | `Layer` | `mesh/fixtures.rs:172` | fields: `axis`, `at`, `delta` —  `tanh((x_axis - at) / delta)`: a boundary or interior layer normal to one axis. |
 | struct | `ObliqueLayer` | `mesh/fixtures.rs:197` | fields: `normal`, `offset`, `delta` —  `tanh((n . x - c) / delta)` with unit normal `n`: a layer in an arbitrary direction. |
-| fn | `maxdiff` | `testkit/mod.rs:7` | `pub fn maxdiff(a: &[f64], b: &[f64]) -> f64` |
-| fn | `rect` | `testkit/mod.rs:24` | `pub fn rect(lx: f64, ly: f64, nx: usize, ny: usize) -> SimplexMesh` —  A rectangle `[0, lx] x [0, ly]` made from a geom model (`geomdrive::plate`) with element size of the finer of `lx / nx` and `ly / ny`. Its mesh |
-| fn | `block` | `testkit/mod.rs:33` | `pub fn block(lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize) -> SimplexMesh` —  A box `[0, lx] x [0, ly] x [0, lz]`: the x-z rectangle of `geomdrive::block` swept along y through `ny` layers. Boundary numbers: |
-| fn | `rect_split_x` | `testkit/mod.rs:47` | `pub fn rect_split_x(lx: f64, ly: f64, xc: f64, h: f64) -> SimplexMesh` —  The rectangle `[0, lx] x [0, ly]` in two domains, 1 for `x < xc` and 2 for `x > xc`, meeting along the line `x = xc` (a model of two |
-| fn | `block_split_z` | `testkit/mod.rs:61` | `pub fn block_split_z(lx: f64, ly: f64, lz: f64, zc: f64, h: f64, ny: usize) -> SimplexMesh` —  The box `[0, lx] x [0, ly] x [0, lz]` in two domains, 1 for `z < zc` and 2 for `z > zc`: the x-z section of two stacked rectangles swept |
-| fn | `stack_y` | `testkit/mod.rs:77` | `pub fn stack_y(a: f64, layers: &[(f64, usize)], h: f64) -> SimplexMesh` —  A stack along y of `a x a` sections (x-z): layer `k` is `layers[k] = (thickness, number of element layers)` and domain `k + 1`. |
-| struct | `RectPart` | `testkit/mod.rs:89` | fields: `lo`, `hi`, `domain`, `h` —  One axis-aligned rectangle of a section: `(x0, z0, x1, z1)`, the domain number it gets, and an element size of its own (else the |
-| fn | `part` | `testkit/mod.rs:96` | `pub fn part(x0: f64, z0: f64, x1: f64, z1: f64, domain: i32, h: Option<f64>) -> RectPart` |
-| fn | `parts_mesh` | `testkit/mod.rs:102` | `pub fn parts_mesh(parts: &[RectPart], h: f64) -> SimplexMesh` —  The rectangles laid over each other in order (later ones win), as a geom model meshed with element size `h`; the cells carry the |
-| enum | `Cladding` | `testkit/soi.rs:25` | variants: `Oxide`, `Air` |
-| enum | `SlabPol` | `testkit/soi.rs:34` | variants: `Te`, `Tm` —  Polarization of a slab mode. |
-| fn | `slab_neff` | `testkit/soi.rs:43` | `pub fn slab_neff(n_core: f64, n_clad: f64, t: f64, wavelength: f64, pol: SlabPol, m: usize) -> Option<f64>` —  Effective index of mode `m` of a symmetric slab of index `n_core` and thickness `t` in a cladding `n_clad`: |
-| struct | `SoiWire` | `testkit/soi.rs:72` | fields: `wavelength`, `width`, `thickness`, `slab`, `sidewall_deg`, `sidewall_left_deg`, `n_si`, `n_sio2`, `cladding`, `margin`, `box_thickness`, `n_modes`, ... —  The geometry, materials and study of the use case. |
-| fn | `SoiWire::model` | `testkit/soi.rs:130` | `pub fn model(&self) -> Model` —  The cross-section as a geom model in the wafer frame: x lateral, z the surface normal, the silicon starts at z = 0. Regions are |
-| fn | `SoiWire::mesh` | `testkit/soi.rs:173` | `pub fn mesh(&self) -> Result<MeshedGeom, String>` —  The cross-section meshed from the exact model: the mesh, the names of its domains and boundaries, and the evaluation. |
-| fn | `SoiWire::slab_reference` | `testkit/soi.rs:179` | `pub fn slab_reference(&self, pol: SlabPol) -> Option<f64>` —  The same silicon thickness as an infinite slab: reference for very wide wires. |
+| fn | `maxdiff` | `testkit/mod.rs:9` | `pub fn maxdiff(a: &[f64], b: &[f64]) -> f64` |
+| fn | `rect` | `testkit/mod.rs:26` | `pub fn rect(lx: f64, ly: f64, nx: usize, ny: usize) -> SimplexMesh` —  A rectangle `[0, lx] x [0, ly]` made from a geom model (`geomdrive::plate`) with element size of the finer of `lx / nx` and `ly / ny`. Its mesh |
+| fn | `block` | `testkit/mod.rs:35` | `pub fn block(lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize) -> SimplexMesh` —  A box `[0, lx] x [0, ly] x [0, lz]`: the x-z rectangle of `geomdrive::block` swept along y through `ny` layers. Boundary numbers: |
+| fn | `rect_split_x` | `testkit/mod.rs:49` | `pub fn rect_split_x(lx: f64, ly: f64, xc: f64, h: f64) -> SimplexMesh` —  The rectangle `[0, lx] x [0, ly]` in two domains, 1 for `x < xc` and 2 for `x > xc`, meeting along the line `x = xc` (a model of two |
+| fn | `block_split_z` | `testkit/mod.rs:63` | `pub fn block_split_z(lx: f64, ly: f64, lz: f64, zc: f64, h: f64, ny: usize) -> SimplexMesh` —  The box `[0, lx] x [0, ly] x [0, lz]` in two domains, 1 for `z < zc` and 2 for `z > zc`: the x-z section of two stacked rectangles swept |
+| fn | `stack_y` | `testkit/mod.rs:79` | `pub fn stack_y(a: f64, layers: &[(f64, usize)], h: f64) -> SimplexMesh` —  A stack along y of `a x a` sections (x-z): layer `k` is `layers[k] = (thickness, number of element layers)` and domain `k + 1`. |
+| struct | `RectPart` | `testkit/mod.rs:91` | fields: `lo`, `hi`, `domain`, `h` —  One axis-aligned rectangle of a section: `(x0, z0, x1, z1)`, the domain number it gets, and an element size of its own (else the |
+| fn | `part` | `testkit/mod.rs:98` | `pub fn part(x0: f64, z0: f64, x1: f64, z1: f64, domain: i32, h: Option<f64>) -> RectPart` |
+| fn | `parts_mesh` | `testkit/mod.rs:104` | `pub fn parts_mesh(parts: &[RectPart], h: f64) -> SimplexMesh` —  The rectangles laid over each other in order (later ones win), as a geom model meshed with element size `h`; the cells carry the |
+| enum | `Cladding` | `testkit/soi.rs:27` | variants: `Oxide`, `Air` |
+| enum | `SlabPol` | `testkit/soi.rs:36` | variants: `Te`, `Tm` —  Polarization of a slab mode. |
+| fn | `slab_neff` | `testkit/soi.rs:45` | `pub fn slab_neff(n_core: f64, n_clad: f64, t: f64, wavelength: f64, pol: SlabPol, m: usize) -> Option<f64>` —  Effective index of mode `m` of a symmetric slab of index `n_core` and thickness `t` in a cladding `n_clad`: |
+| struct | `SoiWire` | `testkit/soi.rs:74` | fields: `wavelength`, `width`, `thickness`, `slab`, `sidewall_deg`, `sidewall_left_deg`, `n_si`, `n_sio2`, `cladding`, `margin`, `box_thickness`, `n_modes`, ... —  The geometry, materials and study of the use case. |
+| fn | `SoiWire::model` | `testkit/soi.rs:132` | `pub fn model(&self) -> Model` —  The cross-section as a geom model in the wafer frame: x lateral, z the surface normal, the silicon starts at z = 0. Regions are |
+| fn | `SoiWire::mesh` | `testkit/soi.rs:175` | `pub fn mesh(&self) -> Result<MeshedGeom, String>` —  The cross-section meshed from the exact model: the mesh, the names of its domains and boundaries, and the evaluation. |
+| fn | `SoiWire::slab_reference` | `testkit/soi.rs:181` | `pub fn slab_reference(&self, pol: SlabPol) -> Option<f64>` —  The same silicon thickness as an infinite slab: reference for very wide wires. |
 
 Trait implementations in this component: `Gaussian: Field`, `Layer: Field`, `ObliqueLayer: Field`, `SoiWire: Default`

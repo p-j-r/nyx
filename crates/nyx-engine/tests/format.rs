@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The file format key (ADR 63): written in the project, its feature list and every problem; a file without it or of another format is
 //! refused with a plain message, and nothing is converted.
 

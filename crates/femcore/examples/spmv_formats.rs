@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! SpMV speed and memory: CSR vs block CSR (3×3 blocks, elasticity-like) and CSR vs symmetric
 //! (upper-triangle) storage for a complex symmetric matrix. `cargo run --release --example spmv_formats`.
 use femcore::linalg::bsr::{Bsr, SymCsr};

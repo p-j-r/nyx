@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Wavelength-dependent optical properties. A material holds dispersion models (constant, Sellmeier, Cauchy, tabulated n and k) per
 //! principal axis, evaluated at the study wavelength and temperature: complex index `n - j k` (time convention `e^{j omega t}`, so loss
 //! is a negative imaginary part), its derivative with respect to wavelength, the group index and the permittivity tensor.

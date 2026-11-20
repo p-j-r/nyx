@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Meshes of boxes for the timing studies, made from geom models (`geomdrive::plate` / `block`) with the element size of the finer of
 //! the given counts. The boundary numbers are the ones the studies have always used: `rect` 1 x = 0, 2 y = 0, 3 y = ly, 4 x = lx (the
 //! second axis is z of the x-z section); `block` 1 x = 0, 2 y = 0, 3 z = 0, 4 z = lz, 5 y = ly, 6 x = lx.

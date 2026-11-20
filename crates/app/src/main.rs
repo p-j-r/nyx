@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in
 //! the engine and the physics crates).
 //!

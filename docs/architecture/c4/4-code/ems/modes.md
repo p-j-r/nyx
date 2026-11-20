@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Mode kernel** (`ems.modes`) in the containe
 > Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed).
 
 **Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md)  
-**Size:** 1 file, 438 lines.
+**Size:** 1 file, 440 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/modes.rs` | 438 | Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed), perfectly conducting walls. |
+| `crates/nyx-ems/src/modes.rs` | 440 |  |
 
 ## What it uses
 
@@ -80,14 +80,14 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `EpsCell` | `modes.rs:41` | fields: `xx`, `xy`, `yy`, `zz` —  Relative permittivity of one cell in the local axes (lateral x, normal y, propagation z): the transverse 2x2 block (xx, xy, yy) and zz. The |
-| struct | `Modes` | `modes.rs:48` | fields: `neff`, `et`, `phi`, `converged`, `complex_wanted` |
-| fn | `solve_modes` | `modes.rs:64` | `pub fn solve_modes( mesh: &Discretisation, freq: f64, eps_r: &[f64], mu_r: &[f64], n_target: f64, evanescent: bool, k: usize, order: usize, ) -> Result<Modes, String>` —  Modes nearest the effective index `n_target` (real, or imaginary if `evanescent`) at |
-| fn | `solve_modes_tensor` | `modes.rs:80` | `pub fn solve_modes_tensor( mesh: &Discretisation, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], n_target: f64, evanescent: bool, k: usize, order: usize, ) -> Result<Modes, String>` —  As `solve_modes` with a permittivity tensor per cell. |
-| struct | `ModeAssembly` | `modes.rs:96` | fields: `a`, `b`, `free`, `n_tot`, `net`, `k0` —  Stage 1 of the real mode solver: the generalized eigenproblem `A x = lambda B x` (`lambda = -beta^2`) of the |
-| fn | `assemble_modes` | `modes.rs:108` | `pub fn assemble_modes( mesh: &Discretisation, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], order: usize, ) -> Result<ModeAssembly, String>` |
-| fn | `solve_mode_pairs` | `modes.rs:237` | `pub fn solve_mode_pairs(asm: &ModeAssembly, n_target: f64, evanescent: bool, k: usize) -> Result<Modes, String>` —  Stage 2: the `k` eigenpairs nearest the effective index `n_target` (real, or imaginary if `evanescent`), sorted by |
-| fn | `mode_fields` | `modes.rs:271` | `pub fn mode_fields(mesh: &Discretisation, modes: &Modes, j: usize, freq: f64, order: usize) -> Vec<Field>` —  Nodal fields of one mode: transverse and longitudinal field at every dof (node average of |
-| fn | `mode_fields_cells` | `modes.rs:277` | `pub fn mode_fields_cells( mesh: &Discretisation, modes: &Modes, j: usize, freq: f64, order: usize, ) -> (Vec<Field>, CellFields)` —  Stage 3: `mode_fields` and, next to them, the components `Ex`, `Ez` (in the plane) and `Ey` (along the guide) at the |
-| fn | `solve_waveguide` | `modes.rs:362` | `pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The guided modes of a 2D cross-section for a `Modes` study: stages 1 to 3 of the real solver, or the complex solver (`modes_complex`) |
-| fn | `n_unknowns` | `modes.rs:435` | `pub fn n_unknowns(mesh: &Discretisation, order: usize) -> usize` —  Number of edge-element dofs plus phi dofs (for reporting). |
+| struct | `EpsCell` | `modes.rs:43` | fields: `xx`, `xy`, `yy`, `zz` —  Relative permittivity of one cell in the local axes (lateral x, normal y, propagation z): the transverse 2x2 block (xx, xy, yy) and zz. The |
+| struct | `Modes` | `modes.rs:50` | fields: `neff`, `et`, `phi`, `converged`, `complex_wanted` |
+| fn | `solve_modes` | `modes.rs:66` | `pub fn solve_modes( mesh: &Discretisation, freq: f64, eps_r: &[f64], mu_r: &[f64], n_target: f64, evanescent: bool, k: usize, order: usize, ) -> Result<Modes, String>` —  Modes nearest the effective index `n_target` (real, or imaginary if `evanescent`) at |
+| fn | `solve_modes_tensor` | `modes.rs:82` | `pub fn solve_modes_tensor( mesh: &Discretisation, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], n_target: f64, evanescent: bool, k: usize, order: usize, ) -> Result<Modes, String>` —  As `solve_modes` with a permittivity tensor per cell. |
+| struct | `ModeAssembly` | `modes.rs:98` | fields: `a`, `b`, `free`, `n_tot`, `net`, `k0` —  Stage 1 of the real mode solver: the generalized eigenproblem `A x = lambda B x` (`lambda = -beta^2`) of the |
+| fn | `assemble_modes` | `modes.rs:110` | `pub fn assemble_modes( mesh: &Discretisation, freq: f64, eps_r: &[EpsCell], mu_r: &[f64], order: usize, ) -> Result<ModeAssembly, String>` |
+| fn | `solve_mode_pairs` | `modes.rs:239` | `pub fn solve_mode_pairs(asm: &ModeAssembly, n_target: f64, evanescent: bool, k: usize) -> Result<Modes, String>` —  Stage 2: the `k` eigenpairs nearest the effective index `n_target` (real, or imaginary if `evanescent`), sorted by |
+| fn | `mode_fields` | `modes.rs:273` | `pub fn mode_fields(mesh: &Discretisation, modes: &Modes, j: usize, freq: f64, order: usize) -> Vec<Field>` —  Nodal fields of one mode: transverse and longitudinal field at every dof (node average of |
+| fn | `mode_fields_cells` | `modes.rs:279` | `pub fn mode_fields_cells( mesh: &Discretisation, modes: &Modes, j: usize, freq: f64, order: usize, ) -> (Vec<Field>, CellFields)` —  Stage 3: `mode_fields` and, next to them, the components `Ex`, `Ez` (in the plane) and `Ey` (along the guide) at the |
+| fn | `solve_waveguide` | `modes.rs:364` | `pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The guided modes of a 2D cross-section for a `Modes` study: stages 1 to 3 of the real solver, or the complex solver (`modes_complex`) |
+| fn | `n_unknowns` | `modes.rs:437` | `pub fn n_unknowns(mesh: &Discretisation, order: usize) -> usize` —  Number of edge-element dofs plus phi dofs (for reporting). |

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Running and checking one script (S4): `nyx run FILE.nys` and `nyx check FILE.nys`. Each is a script on a kernel of its own (`kernel::Kernel`,
 //! S7), which starts one worker process, feeds it the script and answers each pause until the script completes or a limit ends it. The engine
 //! never leaves this process.

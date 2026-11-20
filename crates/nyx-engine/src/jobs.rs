@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The job runner and its queue (productivity plan P2 and Q1, ADR 85 and 87): a mesh build, a solve, a convergence check, opening or writing a
 //! results file is a job with a `Progress` handle, so it can be watched (stage, elapsed) and cancelled by the window, a script or the MCP server
 //! alike. Jobs run in *lanes*: the heavy lane (mesh, solve, convergence check, open: they hold every core and the memory) runs one job at a

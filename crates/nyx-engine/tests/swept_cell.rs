@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A periodic cell made by sweeping a 2D section: the section is meshed, its vertices are renumbered by coordinates so that opposite walls
 //! are cut alike, and layers with a `fill` region take that region everywhere (cladding above and below a patterned slab). Floquet pairs
 //! then join the walls. Checked on a vacuum cell with a closed form, and by the refusal of a fill that names no region.

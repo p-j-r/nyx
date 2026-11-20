@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Connects the `nyx-mcp` server to the AI hosts installed on this computer, the way a "Connect" button in a design tool does:
 //! find each host's MCP config file, add or remove one `nyx` entry, keep a backup, and never overwrite a file it cannot parse.
 //!

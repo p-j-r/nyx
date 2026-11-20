@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Analysis API** (`analysis.api`) in the cont
 > The entry points an engine calls: an analysis is a function of a SolveResult and its mesh.
 
 **Decisions:** [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 1 file, 96 lines.
+**Size:** 1 file, 98 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-analysis/src/lib.rs` | 96 | nyx-analysis: analyses of results. An analysis is a function of a `SolveResult` (and the mesh it was solved on); results do not carry an `analysis` of their own (restructure phase 5, ADR 56). |
+| `crates/nyx-analysis/src/lib.rs` | 98 |  |
 
 ## What it uses
 
@@ -56,9 +56,9 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| trait | `Analysis` | `lib.rs:28` | methods: `id`, `name`, `applies_to`, `run` —  One analysis: a name, a test of whether it applies to a result, and the run, which returns plain JSON data. |
-| fn | `polarization` | `lib.rs:38` | `pub fn polarization(mesh: &Mesh, result: &SolveResult) -> Result<ModeAnalysis, Error>` —  The polarization of the modes of `result`, solved on `mesh`. |
-| fn | `polarization_applies` | `lib.rs:44` | `pub fn polarization_applies(result: &SolveResult) -> bool` —  Whether `polarization` can analyse `result`. |
-| struct | `PolarizationAnalysis` | `lib.rs:49` |  The polarization analysis behind the `Analysis` trait. |
+| trait | `Analysis` | `lib.rs:30` | methods: `id`, `name`, `applies_to`, `run` —  One analysis: a name, a test of whether it applies to a result, and the run, which returns plain JSON data. |
+| fn | `polarization` | `lib.rs:40` | `pub fn polarization(mesh: &Mesh, result: &SolveResult) -> Result<ModeAnalysis, Error>` —  The polarization of the modes of `result`, solved on `mesh`. |
+| fn | `polarization_applies` | `lib.rs:46` | `pub fn polarization_applies(result: &SolveResult) -> bool` —  Whether `polarization` can analyse `result`. |
+| struct | `PolarizationAnalysis` | `lib.rs:51` |  The polarization analysis behind the `Analysis` trait. |
 
 Trait implementations in this component: `PolarizationAnalysis: Analysis`

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Tracing of script functions (productivity plan S6, N3, ADR 90): a Python function given where a formula is expected is called once with a
 //! symbolic point and becomes formula text for the engine.
 //!

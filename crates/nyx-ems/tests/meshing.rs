@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The SOI wire (`femcore::usecases::soi`) through the simple and the adaptive mesher and the adaptive loop, solved by the ems mode solver:
 //! moved from the femcore meshing tests when the kernels moved into this crate (ADR 45). The ignored tests are studies (`--ignored --nocapture`).
 mod common;

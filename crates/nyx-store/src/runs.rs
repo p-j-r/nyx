@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Run records: one append-only line per run in `runs.jsonl`, the digest derived from them, and the small filter language of the runs table.
 //!
 //! A run is one Compute. Appending is one `write` of one line on a file opened for append, so a window and a detached worker can both

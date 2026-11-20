@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The path guard (productivity plan S4, ADR [89]): with a root set, no command reads or writes a file outside it, and no command of the catalog
 //! takes a path-like argument the guard does not know about.
 

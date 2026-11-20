@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of dfs: descri
     properties {
         "adr" "41, 25"
         "code" "crates/nyx-dfs/src: lib.rs"
-        "lines" "217"
+        "lines" "219"
         "codeDiagram" "4-code/dfs/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed dfs problem the kernels read, dec
     properties {
         "adr" "41"
         "code" "crates/nyx-dfs/src: problem.rs"
-        "lines" "195"
+        "lines" "197"
         "codeDiagram" "4-code/dfs/problem.md"
     }
 }
@@ -19,7 +19,7 @@ heat = component "Heat kernel" "Heat transfer on P1/P2 simplices, stationary and
     properties {
         "adr" "41, 9"
         "code" "crates/nyx-dfs/src: heat.rs"
-        "lines" "273"
+        "lines" "275"
         "codeDiagram" "4-code/dfs/heat.md"
     }
 }
@@ -27,7 +27,7 @@ electro = component "Electrostatics kernel" "Electrostatics on P1/P2 simplices w
     properties {
         "adr" "41, 9"
         "code" "crates/nyx-dfs/src: electro.rs"
-        "lines" "136"
+        "lines" "138"
         "codeDiagram" "4-code/dfs/electro.md"
     }
 }
@@ -35,7 +35,7 @@ common = component "Shared helpers" "Per-cell gradients and values shared by the
     properties {
         "adr" "41"
         "code" "crates/nyx-dfs/src: common.rs"
-        "lines" "56"
+        "lines" "58"
         "codeDiagram" "4-code/dfs/common.md"
     }
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The shared data of a problem that is not specific to one physics: material properties per domain (scalars, anisotropic tensors with a
 //! crystal orientation, perfectly matched layers), Floquet-periodic boundary pairs and the choice of linear solver. The physics crates
 //! (`nyx-dfs`, `nyx-sms`, `nyx-ems`) decode their problem into these; the old `problem` module re-exports them for the window until

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Shared helpers of the ems tests: the mesh fixtures of `femcore::testkit`, a solve helper over the typed problem, the effective index of a
 //! solution, and the conversion of an old-shape `ProblemSpec` (what the use cases build) to the typed problem.
 #![allow(dead_code, unused_imports)]

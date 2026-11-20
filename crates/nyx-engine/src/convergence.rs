@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Mesh convergence as an engine command: the same project is solved on a finer mesh (on a scratch engine, so the project, the mesh and the
 //! results of the caller are untouched) and every number that identifies a solution is compared: the eigenvalues (effective indices,
 //! frequencies), the values that order the solutions and the numeric scalars of the result. This replaces the `mesh_converge` check of the

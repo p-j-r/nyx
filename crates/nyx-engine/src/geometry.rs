@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Editing the geometry of a project: every edit of a `geom` feature list the window or a host can make, as a function that either does it
 //! or leaves the list untouched and says why. The operations and their arguments come from `geomdesc`, so a new operation in geom
 //! is available here (and as a tool) without a change in this file. Features are named by name, never by id, in this interface.

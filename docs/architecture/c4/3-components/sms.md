@@ -81,11 +81,11 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Physics adapter](../4-code/sms/adapter.md) | 1 | 305 | 42, 25, 68 | The Physics implementation of sms with three studies (static, eigenfrequency, axisymmetric eigenfrequency): descriptors, validation, solve entry. |
-| [Typed problem](../4-code/sms/problem.md) | 1 | 373 | 42, 68 | The typed sms problem the kernels read, decoded from the envelope. |
-| [Solid kernel](../4-code/sms/solid.md) | 1 | 746 | 42, 9 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies. |
-| [Axisymmetric study kernel](../4-code/sms/crosssection.md) | 1 | 502 | 43, 68, 69, 80 | Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages); every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain. |
-| [Axisymmetric kernel](../4-code/sms/axisym.md) | 1 | 388 | 43, 69, 80 | Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions, the cylindrical PML stretch and the energy weight of a mode per component and class of cells. |
-| [Floquet kernel](../4-code/sms/floquet.md) | 1 | 128 | 42 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals). |
-| [Absorbing-layer kernel](../4-code/sms/pml.md) | 1 | 214 | 42 | Eigenfrequencies of elastic bodies with perfectly matched layers. |
-| [Low-reflecting boundary](../4-code/sms/lrb.md) | 1 | 296 | 42 | Low-reflecting boundaries for solid mechanics. |
+| [Physics adapter](../4-code/sms/adapter.md) | 1 | 307 | 42, 25, 68 | The Physics implementation of sms with three studies (static, eigenfrequency, axisymmetric eigenfrequency): descriptors, validation, solve entry. |
+| [Typed problem](../4-code/sms/problem.md) | 1 | 375 | 42, 68 | The typed sms problem the kernels read, decoded from the envelope. |
+| [Solid kernel](../4-code/sms/solid.md) | 1 | 748 | 42, 9 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies. |
+| [Axisymmetric study kernel](../4-code/sms/crosssection.md) | 1 | 504 | 43, 68, 69, 80 | Axisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages); every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain. |
+| [Axisymmetric kernel](../4-code/sms/axisym.md) | 1 | 390 | 43, 69, 80 | Elastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions, the cylindrical PML stretch and the energy weight of a mode per component and class of cells. |
+| [Floquet kernel](../4-code/sms/floquet.md) | 1 | 130 | 42 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals). |
+| [Absorbing-layer kernel](../4-code/sms/pml.md) | 1 | 216 | 42 | Eigenfrequencies of elastic bodies with perfectly matched layers. |
+| [Low-reflecting boundary](../4-code/sms/lrb.md) | 1 | 298 | 42 | Low-reflecting boundaries for solid mechanics. |

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The dashboard: running workflows with live status, pinned and recent ones as cards, everything older in a list, and search.
 //! The rules (three days, the card cap, "done", nothing deleted) are `nyx_engine::facade::store::Workspace::sections`.
 

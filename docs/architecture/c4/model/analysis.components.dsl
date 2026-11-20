@@ -3,7 +3,7 @@ api = component "Analysis API" "The entry points an engine calls: an analysis is
     properties {
         "adr" "56"
         "code" "crates/nyx-analysis/src: lib.rs"
-        "lines" "96"
+        "lines" "98"
         "codeDiagram" "4-code/analysis/api.md"
     }
 }
@@ -11,7 +11,7 @@ samples = component "Field samples" "The modes of a SolveResult as weighted samp
     properties {
         "adr" "56"
         "code" "crates/nyx-analysis/src: samples.rs"
-        "lines" "151"
+        "lines" "153"
         "codeDiagram" "4-code/analysis/samples.md"
     }
 }
@@ -19,7 +19,7 @@ polarization = component "Polarization" "Stokes parameters, Poincare sphere and 
     properties {
         "adr" "56, 21"
         "code" "crates/nyx-analysis/src: polarization.rs"
-        "lines" "936"
+        "lines" "938"
         "codeDiagram" "4-code/analysis/polarization.md"
     }
 }
@@ -27,7 +27,7 @@ modes = component "Mode report" "One report per mode, a table, the Poincare pict
     properties {
         "adr" "56"
         "code" "crates/nyx-analysis/src: modes.rs"
-        "lines" "620"
+        "lines" "622"
         "codeDiagram" "4-code/analysis/modes.md"
     }
 }
@@ -35,7 +35,7 @@ figures = component "Mode figures" "The cross-section of a result, the phase, si
     properties {
         "adr" "99, 56"
         "code" "crates/nyx-analysis/src: canvas.rs, figure.rs, modeview.rs, raster.rs, section.rs"
-        "lines" "1746"
+        "lines" "1756"
         "codeDiagram" "4-code/analysis/figures.md"
     }
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Tests of the ems kernels that were mixed into other femcore test files before the move (ADR 45): the anisotropic guide, the field names in
 //! wafer axes, the stage functions of the mode solver, a Floquet cell on an adapted mesh, a guide in the frame round trip.
 mod common;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! nyx-store: where nyx keeps its work.
 //!
 //! A *workspace* folder holds *workflows*; a workflow holds *experiments* (simulation definitions, forks and links of each other);

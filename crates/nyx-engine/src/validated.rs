@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Validated is a state, not a feeling (productivity plan P6, ADR 91). A result is `exploratory` until a mesh-convergence check with a stated
 //! tolerance has passed on **the same problem key** (`Engine::problem_key`, ADR 84), then it is `checked`. A third state says why a result
 //! that is not checked cannot be: `check_not_affordable` when the check, which solves again on a finer mesh, is expected not to fit this

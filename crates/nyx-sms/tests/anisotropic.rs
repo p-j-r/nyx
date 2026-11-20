@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Anisotropic materials: crystal stiffness, tensor conductivity/permittivity/expansion.
 mod common;
 use common::*;

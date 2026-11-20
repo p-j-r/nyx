@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The sweep of a section along y. (The stress concentration of a plate with a hole, which needed the solid solver, moved to `nyx-sms`.)
 use femcore::meshing::mesher::{extrude_y, Layer};
 use std::collections::HashMap;

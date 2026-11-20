@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The registry: the physics a build contains, by code. The engine fills it from cargo features (physics are compiled in); a project
 //! loads a few of them. Nothing outside the physics crates names a physics: everything goes through `Registry::get`.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The axisymmetric solid kernel (`sms::axisym`, through `solve_solid_axisym`) against closed forms (gate G1: paul asked that its
 //! implementation be checked; the electromagnetic one is checked in `femcore/tests/axisym_closed_form.rs`). Printed relative errors are
 //! in the test output (`-- --nocapture`).

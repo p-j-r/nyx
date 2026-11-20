@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What a solve returns: plain, serialisable data (flat arrays), so a result can be stored, sent to another process or compared with a
 //! golden file. It does not carry an analysis: analyses are functions of a result (`nyx-analysis`).
 

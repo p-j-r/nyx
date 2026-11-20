@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Writes the example projects of the program to `examples/*.nyx.json` at the root of the repository, each built through engine commands
 //! alone (the same commands a person or a host uses). Run it when an example changes:
 //!

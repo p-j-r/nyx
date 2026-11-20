@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The type stub of the `nyx` module (S4): `Engine::catalog()` written as Python declarations. Monty type-checks a script against it before the
 //! script runs, so a misspelled command, a misspelled or missing argument fails in milliseconds with the line named, and an editor that reads the
 //! same text (`nyx script stubs` writes it as `nyx.pyi`) offers the commands and their documentation while the script is written.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Small shared helpers: UTC time without a time crate, short time-ordered ids, atomic file writes, hashes and slugs.
 
 use std::path::Path;

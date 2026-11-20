@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Contracts of `nyx-engine` (ADR 19, ADR 37): the catalog of commands (names, access, schemas: what the MCP server turns into tools) and an
 //! example project written by commands alone. The project layout is provisional until phase 8 derives the final one (gate G6), so its
 //! exemplar is version 0.x.

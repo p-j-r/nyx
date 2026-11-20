@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Inspector tabs (geometry, materials, physics, study, results, analysis) and the results panel. The Materials, Physics and Study tabs are
 //! drawn from the descriptors of the physics (`forms`), so they are the same for every physics; every change is handed to the engine as a
 //! command (`set_problem`, `set_mesh`, `add_condition`, ...).

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Shared helpers** (`dfs.common`) in the cont
 > Per-cell gradients and values shared by the heat and electrostatics kernels.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md)  
-**Size:** 1 file, 56 lines.
+**Size:** 1 file, 58 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/common.rs` | 56 | Helpers shared by the electrostatics and heat kernels: per-cell gradients and values (not averaged over the cells at a node), the component and norm arrays of a vector field, the minimum and maximum of an array. |
+| `crates/nyx-dfs/src/common.rs` | 58 |  |
 
 ## What it uses
 
@@ -48,9 +48,9 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `plane_tensors` | `common.rs:9` | `pub(crate) fn plane_tensors(mesh: &Discretisation, t: Vec<M3>) -> Vec<M3>` —  The wafer tensors of the cells in the axes of the mesh (on a cross-section the x-z block comes first, see `section::plane_tensor`). |
-| fn | `cell_gradient` | `common.rs:14` | `pub(crate) fn cell_gradient(mesh: &Discretisation, u: &[f64], order: usize, scale: &[f64]) -> Vec<f64>` —  `scale[c] * grad u` at the local dofs of every cell, not averaged: `g[(c*nloc + a)*dim + k]`. |
-| fn | `cell_tensor_gradient` | `common.rs:29` | `pub(crate) fn cell_tensor_gradient(mesh: &Discretisation, u: &[f64], order: usize, k: &[M3], sign: f64) -> Vec<f64>` —  `sign * K grad(u)` at the local dofs of every cell, not averaged, `dim` values per local dof. |
-| fn | `components` | `common.rs:45` | `pub(crate) fn components(g: &[f64], d: usize) -> Vec<Vec<f64>>` |
-| fn | `norm_of` | `common.rs:49` | `pub(crate) fn norm_of(comps: &[Vec<f64>]) -> Vec<f64>` |
-| fn | `minmax` | `common.rs:53` | `pub(crate) fn minmax(v: &[f64]) -> (f64, f64)` |
+| fn | `plane_tensors` | `common.rs:11` | `pub(crate) fn plane_tensors(mesh: &Discretisation, t: Vec<M3>) -> Vec<M3>` —  The wafer tensors of the cells in the axes of the mesh (on a cross-section the x-z block comes first, see `section::plane_tensor`). |
+| fn | `cell_gradient` | `common.rs:16` | `pub(crate) fn cell_gradient(mesh: &Discretisation, u: &[f64], order: usize, scale: &[f64]) -> Vec<f64>` —  `scale[c] * grad u` at the local dofs of every cell, not averaged: `g[(c*nloc + a)*dim + k]`. |
+| fn | `cell_tensor_gradient` | `common.rs:31` | `pub(crate) fn cell_tensor_gradient(mesh: &Discretisation, u: &[f64], order: usize, k: &[M3], sign: f64) -> Vec<f64>` —  `sign * K grad(u)` at the local dofs of every cell, not averaged, `dim` values per local dof. |
+| fn | `components` | `common.rs:47` | `pub(crate) fn components(g: &[f64], d: usize) -> Vec<Vec<f64>>` |
+| fn | `norm_of` | `common.rs:51` | `pub(crate) fn norm_of(comps: &[Vec<f64>]) -> Vec<f64>` |
+| fn | `minmax` | `common.rs:55` | `pub(crate) fn minmax(v: &[f64]) -> (f64, f64)` |

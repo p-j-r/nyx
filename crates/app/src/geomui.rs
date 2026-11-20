@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The Geometry tab's model editor: named parameters, the ordered feature list with one generated form per feature kind, the names the
 //! model gives its regions and boundaries, and the same model as builder code. It edits `geom::model::FeatureList` and nothing else, so
 //! what the forms can make the Rust builder can make and the reverse. The list is evaluated when it changes (about a millisecond for a

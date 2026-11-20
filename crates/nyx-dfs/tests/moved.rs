@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The electrostatics and heat tests that used to sit in the femcore test files (amg_solve, anisotropic, finite_guard, frame, frame_roundtrip,
 //! geom_meshes, wafer_names), rewritten against the typed problem. Numbers and tolerances are unchanged.
 mod common;

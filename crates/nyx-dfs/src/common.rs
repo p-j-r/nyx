@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Helpers shared by the electrostatics and heat kernels: per-cell gradients and values (not averaged over the cells at a node), the
 //! component and norm arrays of a vector field, the minimum and maximum of an array.
 

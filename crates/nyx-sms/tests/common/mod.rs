@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Shared helpers of the sms tests: the mesh fixtures of `femcore::testkit` and a solve helper over the typed problem (the entry the
 //! engine uses: `nyx_sms::run`, which checks the numbers first).
 #![allow(dead_code, unused_imports)]

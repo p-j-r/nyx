@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! M7 experiment: 3D PML truncation error, native prism/hex layers (P1 x linear / trilinear)
 //! against the same layers split into tetrahedra (P1). Each variant is compared with a reference
 //! of its own kind (thick layer, many layers) on the same interface mesh, so the physical

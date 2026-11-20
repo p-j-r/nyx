@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The API reference (productivity plan S2, ADR 57): `docs/api/` is generated from `Engine::catalog()`, one page per command and an index, and
 //! must be exactly what the generator writes now, so no page can disagree with a command and no command can lack a page. Every example on a
 //! page is a line that `nyx check` accepts.

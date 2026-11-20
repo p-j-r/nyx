@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What identifies a mode of the axisymmetric study (ADR 80): the numeric scalars `f re N (Hz)` and `f im N (Hz)`, and the energy shares
 //! (`int rho |u|^2 r` outside the layers) per displacement component and per domain. Checked on closed forms whose family is known
 //! (torsion: azimuthal only; radial plane strain: radial only), on a two-domain body and on a body with an absorbing layer.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What a person sees while editing, before anything is built for real (productivity plan P3, ADR 92). Three questions about an edit that has
 //! not been applied yet, answered without changing the engine, its mesh, its results or its queue:
 //!

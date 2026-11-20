@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The shared kernel of the elastic cross-section models: stiffness and mass on a 2D mesh with three displacement components, the
 //! constraints, absorbing layers and low-reflecting boundaries, the complex eigensolve and the fields. It serves the axisymmetric
 //! model (`axisym`: bodies of revolution, azimuthal order `m`); it was `femcore::sms_kz`, the shared part of the removed out-of-plane

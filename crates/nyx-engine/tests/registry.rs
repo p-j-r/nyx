@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The engine builds its registry from cargo features; every physics it holds follows the interface rules.
 use nyx_engine::{physics_for, registry};
 use nyx_physics::*;

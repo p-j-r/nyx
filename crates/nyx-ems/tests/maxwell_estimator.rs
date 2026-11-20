@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The Maxwell residual estimator (ADR 53, `femcore::adapt::maxwell`) with the edge-element cavity kernel of `nyx-ems`, on a PEC box cavity, whose modes are known in closed form: the indicators fall with the mesh at the
 //! rate of the element order, and driving the adaptation loop with them reaches an accuracy that uniform blocks need many more cells for,
 //! also at the lowest order where the Hessian of the plotted field cannot steer (`MISSING_FEATURES.md`, section 2).

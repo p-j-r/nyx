@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Interface contracts of nyx-store (docs/architecture/adr/0014 and 0019): the files other programs and later versions of nyx read.
 //!
 //! * `store_workflow` / `store_run`: exemplar `workflow.json` and `runs.jsonl` line (docs/architecture/contracts/store_*.v1.json).

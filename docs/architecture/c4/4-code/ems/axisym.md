@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Axisymmetric kernel** (`ems.axisym`) in the
 > Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities).
 
 **Decisions:** [ADR 46](../../../adr/0046-axisymmetric-ems-checked-and-given-a-study.md)  
-**Size:** 1 file, 467 lines.
+**Size:** 1 file, 469 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/axisym.rs` | 467 | Electromagnetic eigenmodes of a body of revolution (ring resonators, disks, coaxial cavities) with azimuthal dependence `exp(-i m theta)` on the (r, z) half plane (mesh x = r, mesh z = z; theta is wafer y, so `m > 0` runs along +y): the ... |
+| `crates/nyx-ems/src/axisym.rs` | 469 |  |
 
 ## What it uses
 
@@ -91,20 +91,20 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `AxiMaterial` | `axisym.rs:36` | fields: `eps`, `mu` —  Material data of every cell of an axisymmetric problem (diagonal tensors in the order r, z, theta; complex inside |
-| struct | `AxiModes` | `axisym.rs:109` | fields: `m`, `freqs`, `freqs_c`, `vectors`, `order`, `converged` —  Modes of one azimuthal order. |
-| struct | `Fields3` | `axisym.rs:123` | fields: `e`, `d`, `h` —  Fields of one mode at a point. |
-| struct | `AxiCtx` | `axisym.rs:129` | fields: `mesh`, `geo`, `cd`, `order` |
-| fn | `solve_axisym_modes` | `axisym.rs:195` | `pub fn solve_axisym_modes( mesh: &Discretisation, mat: &AxiMaterial, m: f64, f_target: f64, nev: usize, order: usize, ) -> Result<AxiModes, String>` —  Modes with frequency nearest `f_target` at azimuthal order `m` (`nev` of them). |
-| struct | `AxiAssembly` | `axisym.rs:209` | fields: `m`, `order`, `a`, `b`, `free`, `n_tot` —  Stage 1: the curl-curl matrix `A` and the permittivity mass `B` of `A x = (omega/c)^2 B x` on the free dofs (edge |
-| fn | `assemble_axisym` | `axisym.rs:218` | `pub fn assemble_axisym(mesh: &Discretisation, mat: &AxiMaterial, m: f64, order: usize) -> Result<AxiAssembly, String>` |
-| fn | `solve_axisym_pairs` | `axisym.rs:321` | `pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Result<AxiModes, String>` —  Stage 2: the `nev` eigenpairs nearest `f_target` (Hz), as complex frequencies and field vectors over all dofs, |
-| fn | `power_along_theta` | `axisym.rs:355` | `pub fn power_along_theta(mesh: &Discretisation, mat: &AxiMaterial, modes: &AxiModes, j: usize) -> f64` —  The power `P = 2 Int Re(conj(E_z) H_r - conj(E_r) H_z) dA` of mode `j` along `+theta` (W for the amplitudes of the mode), with the |
-| fn | `axisym_fields_cells` | `axisym.rs:372` | `pub fn axisym_fields_cells( mesh: &Discretisation, mat: &AxiMaterial, modes: &AxiModes, j: usize, ) -> (Vec<Field>, CellFields)` —  Stage 3: the electric field of mode `j` at the local nodes of every cell, as plot fields (`\|E\|`, `Re Ex`, `Re Ey`, `Re Ez`, wafer names: x is |
-| fn | `solve_axisymmetric` | `axisym.rs:412` | `pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The modes of a body of revolution for an `AxisymmetricModes` study: the three stages, one solution per mode with its frequency (and Q when |
-| fn | `AxiMaterial::from_indices` | `axisym.rs:43` | `pub fn from_indices(mesh: &Discretisation, index: &std::collections::BTreeMap<i32, f64>) -> AxiMaterial` —  Isotropic `eps_r` and `mu_r = 1` per domain (`index`: refractive index per domain label, default 1). |
-| fn | `AxiMaterial::from_materials` | `axisym.rs:54` | `pub fn from_materials(mesh: &Discretisation, m: &Materials) -> Result<AxiMaterial, String>` —  `eps_r` and `mu_r` per domain from the problem's materials (default 1), absorbing layers (`Materials::pml`) included. |
-| fn | `AxiMaterial::with_pml` | `axisym.rs:68` | `pub fn with_pml(mut self, mesh: &Discretisation, pml: &std::collections::BTreeMap<i32, Pml>) -> AxiMaterial` —  Absorbing layers by complex coordinate stretching of `r` and `z` (`Pml::x` is the r direction, `Pml::z` the z direction). |
-| fn | `AxiCtx::new` | `axisym.rs:137` | `pub fn new(mesh: &'a Discretisation, order: usize) -> Self` |
-| fn | `AxiCtx::radius` | `axisym.rs:141` | `pub fn radius(&self, ci: usize, l: &[f64; 3]) -> f64` |
-| fn | `AxiCtx::fields` | `axisym.rs:148` | `pub fn fields(&self, x: &[C], m: f64, omega: f64, mat: &AxiMaterial, ci: usize, l: &[f64; 3]) -> Fields3` —  E (r, z, theta), D and H of a mode (coefficients `x`, azimuthal order `m`, angular frequency `omega`) |
+| struct | `AxiMaterial` | `axisym.rs:38` | fields: `eps`, `mu` —  Material data of every cell of an axisymmetric problem (diagonal tensors in the order r, z, theta; complex inside |
+| struct | `AxiModes` | `axisym.rs:111` | fields: `m`, `freqs`, `freqs_c`, `vectors`, `order`, `converged` —  Modes of one azimuthal order. |
+| struct | `Fields3` | `axisym.rs:125` | fields: `e`, `d`, `h` —  Fields of one mode at a point. |
+| struct | `AxiCtx` | `axisym.rs:131` | fields: `mesh`, `geo`, `cd`, `order` |
+| fn | `solve_axisym_modes` | `axisym.rs:197` | `pub fn solve_axisym_modes( mesh: &Discretisation, mat: &AxiMaterial, m: f64, f_target: f64, nev: usize, order: usize, ) -> Result<AxiModes, String>` —  Modes with frequency nearest `f_target` at azimuthal order `m` (`nev` of them). |
+| struct | `AxiAssembly` | `axisym.rs:211` | fields: `m`, `order`, `a`, `b`, `free`, `n_tot` —  Stage 1: the curl-curl matrix `A` and the permittivity mass `B` of `A x = (omega/c)^2 B x` on the free dofs (edge |
+| fn | `assemble_axisym` | `axisym.rs:220` | `pub fn assemble_axisym(mesh: &Discretisation, mat: &AxiMaterial, m: f64, order: usize) -> Result<AxiAssembly, String>` |
+| fn | `solve_axisym_pairs` | `axisym.rs:323` | `pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Result<AxiModes, String>` —  Stage 2: the `nev` eigenpairs nearest `f_target` (Hz), as complex frequencies and field vectors over all dofs, |
+| fn | `power_along_theta` | `axisym.rs:357` | `pub fn power_along_theta(mesh: &Discretisation, mat: &AxiMaterial, modes: &AxiModes, j: usize) -> f64` —  The power `P = 2 Int Re(conj(E_z) H_r - conj(E_r) H_z) dA` of mode `j` along `+theta` (W for the amplitudes of the mode), with the |
+| fn | `axisym_fields_cells` | `axisym.rs:374` | `pub fn axisym_fields_cells( mesh: &Discretisation, mat: &AxiMaterial, modes: &AxiModes, j: usize, ) -> (Vec<Field>, CellFields)` —  Stage 3: the electric field of mode `j` at the local nodes of every cell, as plot fields (`\|E\|`, `Re Ex`, `Re Ey`, `Re Ez`, wafer names: x is |
+| fn | `solve_axisymmetric` | `axisym.rs:414` | `pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  The modes of a body of revolution for an `AxisymmetricModes` study: the three stages, one solution per mode with its frequency (and Q when |
+| fn | `AxiMaterial::from_indices` | `axisym.rs:45` | `pub fn from_indices(mesh: &Discretisation, index: &std::collections::BTreeMap<i32, f64>) -> AxiMaterial` —  Isotropic `eps_r` and `mu_r = 1` per domain (`index`: refractive index per domain label, default 1). |
+| fn | `AxiMaterial::from_materials` | `axisym.rs:56` | `pub fn from_materials(mesh: &Discretisation, m: &Materials) -> Result<AxiMaterial, String>` —  `eps_r` and `mu_r` per domain from the problem's materials (default 1), absorbing layers (`Materials::pml`) included. |
+| fn | `AxiMaterial::with_pml` | `axisym.rs:70` | `pub fn with_pml(mut self, mesh: &Discretisation, pml: &std::collections::BTreeMap<i32, Pml>) -> AxiMaterial` —  Absorbing layers by complex coordinate stretching of `r` and `z` (`Pml::x` is the r direction, `Pml::z` the z direction). |
+| fn | `AxiCtx::new` | `axisym.rs:139` | `pub fn new(mesh: &'a Discretisation, order: usize) -> Self` |
+| fn | `AxiCtx::radius` | `axisym.rs:143` | `pub fn radius(&self, ci: usize, l: &[f64; 3]) -> f64` |
+| fn | `AxiCtx::fields` | `axisym.rs:150` | `pub fn fields(&self, x: &[C], m: f64, omega: f64, mat: &AxiMaterial, ci: usize, l: &[f64; 3]) -> Fields3` —  E (r, z, theta), D and H of a mode (coefficients `x`, azimuthal order `m`, angular frequency `omega`) |

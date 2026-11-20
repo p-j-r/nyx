@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! 3D geom models meshed with tetrahedra (ADR 40): a sphere in a box, a torus against its closed form, labels and conformity, local sizes.
 //! The PEC sphere cavity against the closed-form mode is in the `nyx-ems` cavity tests.
 use femcore::meshing::geomdrive::MeshedGeom;

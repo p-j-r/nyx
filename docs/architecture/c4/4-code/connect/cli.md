@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Command line** (`connect.cli`) in the conta
 > The command-line twin of the Connect menu: list, connect, disconnect, test, optionally as JSON.
 
 **Decisions:** [ADR 28](../../../adr/0028-nyx-connect-is-one-crate-with-a-versioned-report.md)  
-**Size:** 1 file, 170 lines.
+**Size:** 1 file, 172 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-connect/src/main.rs` | 170 | `nyx-connect`: the command-line twin of the app's Connect menu. It writes nothing unless you say connect/disconnect. `--json` prints the versioned report of `nyx_connect::report` instead of text (contract `connect_report`). |
+| `crates/nyx-connect/src/main.rs` | 172 |  |
 
 ## What it uses
 
@@ -49,11 +49,11 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `usage` | `main.rs:6` | `fn usage()` |
-| fn | `alone_in_console` | `main.rs:15` | `fn alone_in_console() -> bool` —  True when this program is the only one attached to its console, which is what a double click in the file explorer does: the window would |
-| fn | `alone_in_console` | `main.rs:25` | `fn alone_in_console() -> bool` |
-| fn | `no_command` | `main.rs:30` | `fn no_command(env: &Env, exe: &std::path::Path)` —  What a double click shows: the commands and where nyx stands now, then the window stays until Enter. |
-| fn | `print_list` | `main.rs:42` | `fn print_list(env: &Env, exe: &std::path::Path)` |
-| fn | `describe` | `main.rs:49` | `fn describe(s: &Status) -> String` |
-| fn | `print_json` | `main.rs:59` | `fn print_json(v: &serde_json::Value)` |
-| fn | `main` | `main.rs:63` | `fn main()` |
+| fn | `usage` | `main.rs:8` | `fn usage()` |
+| fn | `alone_in_console` | `main.rs:17` | `fn alone_in_console() -> bool` —  True when this program is the only one attached to its console, which is what a double click in the file explorer does: the window would |
+| fn | `alone_in_console` | `main.rs:27` | `fn alone_in_console() -> bool` |
+| fn | `no_command` | `main.rs:32` | `fn no_command(env: &Env, exe: &std::path::Path)` —  What a double click shows: the commands and where nyx stands now, then the window stays until Enter. |
+| fn | `print_list` | `main.rs:44` | `fn print_list(env: &Env, exe: &std::path::Path)` |
+| fn | `describe` | `main.rs:51` | `fn describe(s: &Status) -> String` |
+| fn | `print_json` | `main.rs:61` | `fn print_json(v: &serde_json::Value)` |
+| fn | `main` | `main.rs:65` | `fn main()` |

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! How much of one factorisation is *symbolic* (ordering and elimination structure), i.e. how much
 //! symbolic reuse (port item S1) can save per additional shift.
 //!

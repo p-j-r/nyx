@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The concept card: a summary of an experiment generated from its spec, so nothing has to be typed to make it findable.
 //!
 //! What a project looks like is not the store's business: the engine makes the card (`nyx_engine::store_link::card_of`, ADR 39) and hands the

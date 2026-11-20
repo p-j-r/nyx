@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The cross-section of a result as a mesh of triangles with the nodes the cell fields live on: the whole mesh for a 2D result, the face of the
 //! 3D cells that lies on a plane of constant propagation coordinate for a 3D periodic slab (a mode of a Bloch study along y). Plain functions of
 //! the mesh and the order of the result; no physics is named.

@@ -3,7 +3,7 @@ trait = component "Physics trait and registry" "The Physics trait (everything th
     properties {
         "adr" "25"
         "code" "crates/nyx-physics/src: error.rs, lib.rs, physics.rs, registry.rs"
-        "lines" "294"
+        "lines" "302"
         "codeDiagram" "4-code/physics/trait.md"
     }
 }
@@ -11,7 +11,7 @@ envelope = component "Problem envelope" "The one shape every physics is given (P
     properties {
         "adr" "25, 41, 63"
         "code" "crates/nyx-physics/src: decode.rs, spec.rs, validate.rs"
-        "lines" "534"
+        "lines" "540"
         "codeDiagram" "4-code/physics/envelope.md"
     }
 }
@@ -19,7 +19,7 @@ descriptors = component "Descriptors and schemas" "What a physics tells nyx abou
     properties {
         "adr" "25"
         "code" "crates/nyx-physics/src: desc.rs, schema.rs"
-        "lines" "332"
+        "lines" "336"
         "codeDiagram" "4-code/physics/descriptors.md"
     }
 }
@@ -27,7 +27,7 @@ result = component "Result and frame" "SolveResult as plain serialisable data, a
     properties {
         "adr" "25, 56"
         "code" "crates/nyx-physics/src: frame.rs, result.rs"
-        "lines" "286"
+        "lines" "290"
         "codeDiagram" "4-code/physics/result.md"
     }
 }
@@ -35,7 +35,7 @@ testsupport = component "Test support" "The golden-file harness and the contract
     properties {
         "adr" "10, 19"
         "code" "crates/nyx-physics/src: contract.rs, testkit.rs"
-        "lines" "229"
+        "lines" "233"
         "codeDiagram" "4-code/physics/testsupport.md"
     }
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Fill-reducing orderings for the sparse Cholesky: all choices give the same solution; nested dissection
 //! reduces fill on 3-D graphs; `Auto` keeps the better of the two.
 use crate::common;

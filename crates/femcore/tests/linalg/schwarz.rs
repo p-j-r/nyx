@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Additive and restricted Schwarz: exactness for one subdomain, effect of overlap, two-level
 //! scalability, RAS with GMRES, complex symmetric COCG and independence from the worker count.
 #![allow(clippy::needless_range_loop)]

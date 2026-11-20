@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `.nyx` files: a workflow as one small, deterministic ZIP, and the safe way back in.
 //!
 //! **Export** writes the files in sorted order with a fixed timestamp, fixed permissions and fixed compression, plus `nyx-archive.json`

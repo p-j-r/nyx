@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The `nyx-mcp` program: where it is, what to paste for a host that is not in the table, and a real MCP handshake against it.
 use serde_json::{json, Value};
 use std::ffi::OsString;

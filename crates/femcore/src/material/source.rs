@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Provenance of material data: a `source` key at the top of a file and in each table says where the numbers come from.
 //! It is a citation text, or a table `{ cite, url, doi, verified }` (`verified` is the date `YYYY-MM-DD` on which someone compared the
 //! values with the cited publication), or a list of those. Data that were not checked say so in the citation text.

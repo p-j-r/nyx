@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What a running solve is doing, and a way to stop it.
 //!
 //! A `Progress` is shared between the thread that solves and whoever watches it (the window, a script, a

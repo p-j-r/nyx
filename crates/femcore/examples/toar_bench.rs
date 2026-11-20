@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! TOAR vs Krylov–Schur shift-and-invert on the explicit 2n linearisation (time and basis memory).
 use femcore::linalg::csr::{laplacian_2d, mass_1d};
 use femcore::linalg::direct::Definiteness;

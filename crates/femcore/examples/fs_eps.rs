@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `fs-eps <bundle-dir> [options]`: solves a bundle with Krylov–Schur and prints one JSON line.
 //!
 //! The JSON has the same fields as the SLEPc driver (`harness/c/slepc_eps.c`), so the two can

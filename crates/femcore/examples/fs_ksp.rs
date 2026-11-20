@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `fs-ksp <bundle-dir> [options]`: solves `A x = b` (`b` = the bundle's `v0.mtx`) with a Krylov
 //! method and prints one JSON line in the same schema as the PETSc driver
 //! (`harness/c/petsc_ksp.c`).

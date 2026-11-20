@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `fs-gen <spec> <dir>`: writes a test problem bundle (A.mtx, B.mtx, v0.mtx, meta.txt).
 //!
 //! Specs (all use a fixed start vector so Rust and SLEPc runs start identically):

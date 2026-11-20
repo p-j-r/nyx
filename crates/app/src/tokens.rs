@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The colour tokens of the window as plain data (ADR 88): every role in a light and a dark value, and the two region palettes. No egui types
 //! here: `theme.rs` turns this into `Visuals`, the tests below check the contrast of every text pair and the colour-blind separation of the
 //! region palettes. The values equal `docs/ux/tokens.json` (a test compares the two), which is the document Paul accepted.

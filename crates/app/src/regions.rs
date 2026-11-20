@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Which colour a region gets on the canvas (ADR 88, plan U4, section 5 of docs/ux/UX_MERGED_PLAN.md). The colour follows the entity, not the rank:
 //! a region is keyed by its material when it has one (regions of the same material share a colour), otherwise by its own number, and slots are
 //! handed out in order of first appearance over the region numbers in ascending order, so hiding, filtering or reordering never repaints. Slots 1

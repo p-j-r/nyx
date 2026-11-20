@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Prints the plain-language stage log of a few small solves, to see what the simulator reports for each kind of study
 //! (the text of docs/HOW_IT_WORKS.md quotes these):
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! One workflow folder: `workflow.json`, `history.jsonl`, `notes.md`, `specs/` and one folder per experiment.
 //!
 //! ```text

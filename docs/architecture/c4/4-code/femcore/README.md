@@ -6,7 +6,7 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 |---|---:|---:|---:|---:|
 | [Mesh](./mesh.md) | 5 | 1707 | 83 | 9 |
 | [Mesh files](./meshio.md) | 3 | 878 | 18 | 5 |
-| [Fixtures and test kit](./fixtures.md) | 3 | 582 | 25 | 8 |
+| [Fixtures and test kit](./fixtures.md) | 3 | 586 | 25 | 8 |
 | [Meshing facade](./meshing.md) | 6 | 1818 | 74 | 25 |
 | [3D meshing](./meshing3d.md) | 5 | 2090 | 41 | 10 |
 | [Structured absorbing layers](./structpml.md) | 4 | 1408 | 24 | 8 |
@@ -22,9 +22,9 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 | [Eigensolvers](./laeigen.md) | 12 | 4576 | 95 | 36 (+11 not shown) |
 | [Preconditioners](./laprecond.md) | 8 | 2516 | 57 | 19 |
 | [Time, nonlinear, sweeps](./laother.md) | 10 | 3627 | 82 | 28 |
-| [Finite-element basics](./fem.md) | 6 | 2013 | 100 | 17 |
-| [Material specification](./material.md) | 9 | 3519 | 127 | 25 |
-| [Optical mode sets](./optical.md) | 1 | 231 | 12 | 4 |
-| [Frame and sections](./section.md) | 1 | 221 | 15 | 0 |
-| [Expressions](./expr.md) | 3 | 1562 | 20 | 8 |
-| [Runtime services](./runtime.md) | 5 | 827 | 44 | 8 |
+| [Finite-element basics](./fem.md) | 6 | 2025 | 100 | 17 |
+| [Material specification](./material.md) | 9 | 3537 | 127 | 25 |
+| [Optical mode sets](./optical.md) | 1 | 233 | 12 | 4 |
+| [Frame and sections](./section.md) | 1 | 223 | 15 | 0 |
+| [Expressions](./expr.md) | 3 | 1568 | 20 | 8 |
+| [Runtime services](./runtime.md) | 5 | 837 | 44 | 8 |

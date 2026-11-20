@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A worker that dies (here on purpose, by `NYX_WORKER_DRILL=abort`, which makes `nyx-worker` abort a moment after it starts, as the allocator does
 //! when memory runs out) fails its job and nothing else: the engine, its results and the next job are intact (productivity plan P4, ADR 86).
 //! The test sets an environment variable, so it is the only test of this binary.

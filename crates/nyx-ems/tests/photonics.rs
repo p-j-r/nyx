@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Nanophotonic scale: a 450 nm x 230 nm silicon strip (n = 3.45) on sapphire (n = 1.746) under air at 1550 nm with PML on
 //! all sides. The guided mode must lie between the cladding and core indices, be lossless, and be converged under mesh
 //! refinement (the finest meshes of the convergence study give neff = 2.3175).

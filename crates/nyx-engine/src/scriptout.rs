@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Export as script (productivity plan S7b, ADR [94]): the project as a script that rebuilds it. A person who built a model in the window
 //! gives it to an agent (or to themselves, as text) and the agent runs it with `params` to change a value, so a hand-built model is the
 //! start of a script and not a JSON blob.

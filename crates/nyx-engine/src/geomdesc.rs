@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Descriptors of the geom feature operations (they live here, not in `geom`, because `geom` depends on serde only: ADR 3): for every `Op` its kind, what it does, its fields with their types and defaults, and the JSON
 //! Schema built from them. The MCP server generates one tool per descriptor (restructure gate G5: every tool geom offers, none hand-picked),
 //! the window can build its forms from the same table, and `build_op` turns the friendly arguments of a tool call (selectors as text,

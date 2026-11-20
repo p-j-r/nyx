@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! 3D metric adaptation: refinement of boxes towards isotropic and anisotropic metrics keeps volumes, labelled faces, interfaces,
 //! creases and corners, and reaches the metric. Recomputes volume, area and edge lengths independently of the code under test.
 use femcore::adapt::drive3::adapt3;

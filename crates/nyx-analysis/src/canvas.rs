@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A figure as a list of drawing items (rectangles, polylines, triangles, text, raster images) on a canvas, written as SVG or as PNG (ADR 99).
 //!
 //! The items are what both outputs can draw. A field on a mesh is not a vector drawing: thousands of coloured triangles make a heavy SVG that

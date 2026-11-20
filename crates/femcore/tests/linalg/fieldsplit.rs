@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Field-split and Schur-complement preconditioners on saddle-point and coupled problems.
 #![allow(clippy::needless_range_loop)]
 use crate::common;

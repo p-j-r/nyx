@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Warm starts in a sweep (productivity plan P5b, ADR 96): `sweep_run {reuse: "warm"}` starts each point's eigensolves from the modes of the
 //! point before. The numbers agree with a cold sweep to the solver's tolerance (not bit for bit, which is why a warm point says so), the first
 //! point is cold, the iterations of the later ones are fewer, a point whose predecessor cannot finish is cold and says why, and the three ways

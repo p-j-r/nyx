@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Polarization analysis of optical modes: Stokes parameters, Poincaré sphere and a classification of the mode.
 //!
 //! A mode has a field transverse to its direction of propagation, `(E_lat, E_nor)`, that is complex at every point of the cross-section;

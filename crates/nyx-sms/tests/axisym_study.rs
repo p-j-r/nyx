@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The axisymmetric eigenfrequency study (`sms`, ADR 68): the envelope, the typed problem and the library entry give the same modes; the
 //! study refuses what it cannot say; with an absorbing layer the modes are complex and carry Q, an eigenvalue and a layer fraction.
 //! The meshes are rings off the axis (the axis conditions are the kernel's K1, tested elsewhere).

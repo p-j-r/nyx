@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Memory-bandwidth check of the orthogonalisation kernels (the `BV` role).
 //!
 //!   cargo run --release --example basis_bench -- [n]

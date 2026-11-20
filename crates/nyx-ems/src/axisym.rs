@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Electromagnetic eigenmodes of a body of revolution (ring resonators, disks, coaxial cavities) with
 //! azimuthal dependence `exp(-i m theta)` on the (r, z) half plane (mesh x = r, mesh z = z; theta is wafer y, so `m > 0` runs along +y): the frequency is
 //! sought at a fixed azimuthal order `m`, so `m / (k0 R)` is the effective index of a ring of radius `R`.

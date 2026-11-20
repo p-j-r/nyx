@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Optimisers: Rosenbrock and quadratic problems for L-BFGS / nonlinear CG, MMA on a problem with a known KKT
 //! solution, adjoint gradients against finite differences, and a 2-D heat-conduction topology optimisation
 //! ("volume to point") with MMA and adjoint sensitivities.

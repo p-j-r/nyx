@@ -1,4 +1,4 @@
-components: 99, lines of Rust in components: 99450, classes drawn: 749, public items listed: 3105
+components: 99, lines of Rust in components: 99768, classes drawn: 749, public items listed: 3105
 
 container-level references found in the source (from->to, number of references):
   analysis->femcore 9

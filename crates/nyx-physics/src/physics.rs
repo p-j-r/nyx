@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The `Physics` trait: everything the rest of nyx may ask of a physics (restructure plan, section 2; ADR 25).
 //!
 //! Only plain data crosses the trait: descriptors and specs are serde values, meshes and fields are flat arrays. That keeps a

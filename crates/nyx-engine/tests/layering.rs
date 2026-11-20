@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The layering of the workspace (ADR 26; ROUGH_SPOTS R18, R15, R16): which crate may depend on which. The table below is the target
 //! structure of `docs/architecture/RESTRUCTURE_PLAN.md` section 2, plus a list of edges that exist for the time being and that a named phase removes
 //! (empty since restructure phase 7).

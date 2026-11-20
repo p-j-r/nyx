@@ -3,7 +3,7 @@ hosts = component "Host table" "Where each AI host (Claude Code, Claude Desktop,
     properties {
         "adr" "28"
         "code" "crates/nyx-connect/src: env.rs, hosts.rs"
-        "lines" "215"
+        "lines" "219"
         "codeDiagram" "4-code/connect/hosts.md"
     }
 }
@@ -11,7 +11,7 @@ config = component "Host config" "Reads and rewrites a host's JSON config: statu
     properties {
         "adr" "28"
         "code" "crates/nyx-connect/src: config.rs"
-        "lines" "172"
+        "lines" "174"
         "codeDiagram" "4-code/connect/config.md"
     }
 }
@@ -19,7 +19,7 @@ server = component "Server probe" "Finds the nyx-mcp program, builds the snippet
     properties {
         "adr" "28"
         "code" "crates/nyx-connect/src: server.rs"
-        "lines" "171"
+        "lines" "173"
         "codeDiagram" "4-code/connect/server.md"
     }
 }
@@ -27,7 +27,7 @@ report = component "Report" "The machine-readable form of what nyx-connect finds
     properties {
         "adr" "28, 19"
         "code" "crates/nyx-connect/src: lib.rs, report.rs"
-        "lines" "185"
+        "lines" "189"
         "codeDiagram" "4-code/connect/report.md"
     }
 }
@@ -35,7 +35,7 @@ cli = component "Command line" "The command-line twin of the Connect menu: list,
     properties {
         "adr" "28"
         "code" "crates/nyx-connect/src: main.rs"
-        "lines" "170"
+        "lines" "172"
         "codeDiagram" "4-code/connect/cli.md"
     }
 }

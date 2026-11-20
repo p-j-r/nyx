@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! M2 experiment: PML truncation error vs number of layers, structured quad layers (Q1) against
 //! the same layers split into triangles (P1), on identical physical meshes. Quad runs are compared
 //! with a quad reference and split runs with a split reference.

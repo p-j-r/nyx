@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Absorbing-layer kernel** (`sms.pml`) in the
 > Eigenfrequencies of elastic bodies with perfectly matched layers.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md)  
-**Size:** 1 file, 214 lines.
+**Size:** 1 file, 216 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/pml.rs` | 214 | Eigenfrequencies of elastic bodies with perfectly matched layers (complex coordinate stretching), giving complex frequencies and quality factors (anchor loss into a substrate). |
+| `crates/nyx-sms/src/pml.rs` | 216 |  |
 
 ## What it uses
 
@@ -66,9 +66,9 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `solve_solid_pml` | `pml.rs:41` | `pub fn solve_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
-| struct | `PmlAssembly` | `pml.rs:51` | fields: `order`, `d`, `n`, `kff`, `mff`, `free`, `n_modes`, `f_search`, `has_fixed` —  Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the |
-| struct | `PmlSolve` | `pml.rs:64` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
-| fn | `assemble_solid_pml` | `pml.rs:71` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
-| fn | `solve_pml_modes` | `pml.rs:160` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
-| fn | `pml_fields` | `pml.rs:181` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q. |
+| fn | `solve_solid_pml` | `pml.rs:43` | `pub fn solve_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
+| struct | `PmlAssembly` | `pml.rs:53` | fields: `order`, `d`, `n`, `kff`, `mff`, `free`, `n_modes`, `f_search`, `has_fixed` —  Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the |
+| struct | `PmlSolve` | `pml.rs:66` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
+| fn | `assemble_solid_pml` | `pml.rs:73` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
+| fn | `solve_pml_modes` | `pml.rs:162` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
+| fn | `pml_fields` | `pml.rs:183` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q. |

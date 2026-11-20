@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Structural validation of a problem against the descriptors of its physics: the study and condition kinds exist, parameters have the
 //! declared type and range, unknown keys are reported, material property names are ones the physics reads (ROUGH_SPOTS R12). What
 //! needs the mesh or the physics itself stays in `Physics::validate`.

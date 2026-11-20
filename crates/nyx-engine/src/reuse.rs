@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Warm starts between the points of a sweep (productivity plan P5b, ADR 96): the engine's side of `femcore::warm`. A sweep asked with
 //! `reuse: "warm"` links its points in a chain: point i starts its eigensolves from the modes point i-1 found, when point i-1 has finished and
 //! left them, and from a random block (as every solve does) when it has not. Nothing else ever carries from one solve to another: a solve

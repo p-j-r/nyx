@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **Expressions** (`femcore.expr`) in the conta
 > A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90).
 
 **Decisions:** [ADR 65](../../../adr/0065-closing-the-restructure-what-the-structure-replaced.md), [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 90](../../../adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md)  
-**Size:** 3 files, 1562 lines.
+**Size:** 3 files, 1568 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/expr.rs` | 286 | A small, safe expression evaluator for user input such as `293.15 + 50*exp(-((x-0.5)^2)/0.01)` (initial temperature fields, for example). Numbers, `+ - * / ^`, parentheses, the functions `sin cos tan exp log ln log10 sqrt abs sinh cosh t... |
-| `crates/femcore/src/fieldexpr.rs` | 436 | A typed expression tree over complex field values, evaluated at one point at a time (productivity plan N1 and N2, ADR 90). |
-| `crates/femcore/src/formula.rs` | 840 | Text formulas over fields, coordinates and material values (productivity plan N2, ADR 90): `abs(Ex)^2 * eps_r`, `where(x > 0, T, 0)`, `dot(E, conj(E))`. The text is parsed once into a `fieldexpr::Tree`, the same tree that handle arithmet... |
+| `crates/femcore/src/expr.rs` | 288 |  |
+| `crates/femcore/src/fieldexpr.rs` | 438 |  |
+| `crates/femcore/src/formula.rs` | 842 |  |
 
 ## What it uses
 
@@ -142,23 +142,23 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Expr` | `expr.rs:34` | fields: `source` |
-| fn | `eval_at` | `expr.rs:256` | `pub fn eval_at(text: &str, coords: &[f64], dim: usize) -> Result<Vec<f64>, String>` —  Evaluates `text` at dof coordinates (flat, `dim` per point) in the wafer axes: `x`, `y`, `z`. On a 2D cross-section the mesh is the x-z |
-| fn | `Expr::parse` | `expr.rs:199` | `pub fn parse(text: &str) -> Result<Expr, String>` |
-| fn | `Expr::eval` | `expr.rs:212` | `pub fn eval(&self, x: f64, y: f64, z: f64) -> f64` |
-| enum | `Op` | `fieldexpr.rs:18` | variants: `Add`, `Sub`, `Mul`, `Div`, `And`, `Or` —  Binary operations. `And` and `Or` read the truth of the real parts (nonzero is true) and answer 1 or 0. |
-| enum | `Cmp` | `fieldexpr.rs:29` | variants: `Lt`, `Le`, `Gt`, `Ge`, `Eq`, `Ne` —  Comparisons of two real values; the answer is 1 or 0 (false when either side is NaN). |
-| enum | `Fun` | `fieldexpr.rs:40` | variants: `Abs`, `Abs2`, `Re`, `Im`, `Conj`, `Sqrt`, `Exp`, `Sin`, `Cos`, `Arg`, `RealSqrt`, `Log`, ... —  Functions of one value. |
-| enum | `Fun2` | `fieldexpr.rs:112` | variants: `Min`, `Max`, `Pow`, `Atan2` —  Functions of two real values. |
-| enum | `Tree` | `fieldexpr.rs:133` | variants: `Num`, `Leaf`, `Neg`, `Bin`, `Call`, `Call2`, `Pow`, `Cmp`, `Where` |
-| const | `MAX_POWER` | `fieldexpr.rs:149` | `u32` —  Largest integer power a tree may carry. |
-| fn | `Fun::name` | `fieldexpr.rs:76` | `pub fn name(self) -> &'static str` —  The name a formula uses. |
-| fn | `Fun2::name` | `fieldexpr.rs:122` | `pub fn name(self) -> &'static str` |
-| fn | `Tree::num` | `fieldexpr.rs:180` | `pub fn num(x: f64) -> Tree` |
-| fn | `Tree::leaves` | `fieldexpr.rs:185` | `pub fn leaves(&self) -> usize` —  The number of leaf slots the tree reads (one more than the largest slot). |
-| fn | `Tree::eval` | `fieldexpr.rs:196` | `pub fn eval(&self, leaf: &[C]) -> C` —  The value at one point; `leaf[i]` holds slot `i`. |
-| fn | `Tree::is_real_valued` | `fieldexpr.rs:283` | `pub fn is_real_valued(&self, leaf_is_complex: &[bool]) -> bool` —  Whether the value is real for these leaves: `true` when the tree ends in a function that answers a real value, or reads no imaginary |
-| fn | `Tree::check` | `fieldexpr.rs:300` | `pub fn check(&self, leaf_is_complex: &[bool]) -> Result<(), String>` —  Refuses what has no meaning for the leaves' values: an order, a comparison, a logical operation, `log`, `tan`, a non-integer power |
-| enum | `Named` | `formula.rs:26` | variants: `Scalar`, `Vector` —  What a name stands for. |
-| trait | `Names` | `formula.rs:33` | methods: `name`, `material`, `region`, `known` —  The caller's side of a formula: what its names mean. |
-| fn | `parse` | `formula.rs:78` | `pub fn parse(text: &str, names: &mut dyn Names) -> Result<Tree, String>` —  Parses `text` into a scalar tree; `names` says what its names are. |
+| struct | `Expr` | `expr.rs:36` | fields: `source` |
+| fn | `eval_at` | `expr.rs:258` | `pub fn eval_at(text: &str, coords: &[f64], dim: usize) -> Result<Vec<f64>, String>` —  Evaluates `text` at dof coordinates (flat, `dim` per point) in the wafer axes: `x`, `y`, `z`. On a 2D cross-section the mesh is the x-z |
+| fn | `Expr::parse` | `expr.rs:201` | `pub fn parse(text: &str) -> Result<Expr, String>` |
+| fn | `Expr::eval` | `expr.rs:214` | `pub fn eval(&self, x: f64, y: f64, z: f64) -> f64` |
+| enum | `Op` | `fieldexpr.rs:20` | variants: `Add`, `Sub`, `Mul`, `Div`, `And`, `Or` —  Binary operations. `And` and `Or` read the truth of the real parts (nonzero is true) and answer 1 or 0. |
+| enum | `Cmp` | `fieldexpr.rs:31` | variants: `Lt`, `Le`, `Gt`, `Ge`, `Eq`, `Ne` —  Comparisons of two real values; the answer is 1 or 0 (false when either side is NaN). |
+| enum | `Fun` | `fieldexpr.rs:42` | variants: `Abs`, `Abs2`, `Re`, `Im`, `Conj`, `Sqrt`, `Exp`, `Sin`, `Cos`, `Arg`, `RealSqrt`, `Log`, ... —  Functions of one value. |
+| enum | `Fun2` | `fieldexpr.rs:114` | variants: `Min`, `Max`, `Pow`, `Atan2` —  Functions of two real values. |
+| enum | `Tree` | `fieldexpr.rs:135` | variants: `Num`, `Leaf`, `Neg`, `Bin`, `Call`, `Call2`, `Pow`, `Cmp`, `Where` |
+| const | `MAX_POWER` | `fieldexpr.rs:151` | `u32` —  Largest integer power a tree may carry. |
+| fn | `Fun::name` | `fieldexpr.rs:78` | `pub fn name(self) -> &'static str` —  The name a formula uses. |
+| fn | `Fun2::name` | `fieldexpr.rs:124` | `pub fn name(self) -> &'static str` |
+| fn | `Tree::num` | `fieldexpr.rs:182` | `pub fn num(x: f64) -> Tree` |
+| fn | `Tree::leaves` | `fieldexpr.rs:187` | `pub fn leaves(&self) -> usize` —  The number of leaf slots the tree reads (one more than the largest slot). |
+| fn | `Tree::eval` | `fieldexpr.rs:198` | `pub fn eval(&self, leaf: &[C]) -> C` —  The value at one point; `leaf[i]` holds slot `i`. |
+| fn | `Tree::is_real_valued` | `fieldexpr.rs:285` | `pub fn is_real_valued(&self, leaf_is_complex: &[bool]) -> bool` —  Whether the value is real for these leaves: `true` when the tree ends in a function that answers a real value, or reads no imaginary |
+| fn | `Tree::check` | `fieldexpr.rs:302` | `pub fn check(&self, leaf_is_complex: &[bool]) -> Result<(), String>` —  Refuses what has no meaning for the leaves' values: an order, a comparison, a logical operation, `log`, `tan`, a non-integer power |
+| enum | `Named` | `formula.rs:28` | variants: `Scalar`, `Vector` —  What a name stands for. |
+| trait | `Names` | `formula.rs:35` | methods: `name`, `material`, `region`, `known` —  The caller's side of a formula: what its names mean. |
+| fn | `parse` | `formula.rs:80` | `pub fn parse(text: &str, names: &mut dyn Names) -> Result<Tree, String>` —  Parses `text` into a scalar tree; `names` says what its names are. |

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The cylindrical PML stretch of the axisymmetric solid kernel (K2 of the A1 plan, ADR 69): inside an absorbing layer with a radial (`x`)
 //! stretch the radius becomes `r~` and `s_theta = r~ / r` enters the `1/r` terms and the weight `r`, as in `nyx-ems` (ADR 46).
 //!

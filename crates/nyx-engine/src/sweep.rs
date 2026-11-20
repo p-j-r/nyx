@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Sweeps (productivity plan Q6, ADR 87): one run per point, recorded. A point is a list of edits (any command of access `edit`: a geometry
 //! parameter, a study value such as the wavelength, a material, a mesh setting) applied to a copy of the project; the case decides what varies,
 //! the helper does not. Every point is a job of the queue at priority 3 (so a person's request and an agent's single request go before a

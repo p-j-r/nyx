@@ -164,7 +164,7 @@ graph TB
 |---|---:|---:|---|---|
 | [Mesh](../4-code/femcore/mesh.md) | 5 | 1707 | 4, 5, 32 | The native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics. |
 | [Mesh files](../4-code/femcore/meshio.md) | 3 | 878 | 16 | The compact lossless .fmsh format for meshes and results and its entropy coder. |
-| [Fixtures and test kit](../4-code/femcore/fixtures.md) | 3 | 582 | 41, 10, 60 | Test meshes and the SOI wire cross-section used by the tests of every physics crate. |
+| [Fixtures and test kit](../4-code/femcore/fixtures.md) | 3 | 586 | 41, 10, 60 | Test meshes and the SOI wire cross-section used by the tests of every physics crate. |
 | [Meshing facade](../4-code/femcore/meshing.md) | 6 | 1818 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
 | [3D meshing](../4-code/femcore/meshing3d.md) | 5 | 2090 | 40, 50, 51, 55, 82, 83 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, and the curved (quadratic) edges of boundary cells. |
 | [Structured absorbing layers](../4-code/femcore/structpml.md) | 4 | 1408 | 7, 52, 5 | Structured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels. |
@@ -180,12 +180,12 @@ graph TB
 | [Eigensolvers](../4-code/femcore/laeigen.md) | 12 | 4576 | 33, 8, 11 | Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities. |
 | [Preconditioners](../4-code/femcore/laprecond.md) | 8 | 2516 | 33, 8 | Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations. |
 | [Time, nonlinear, sweeps](../4-code/femcore/laother.md) | 10 | 3627 | 33, 8 | Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators. |
-| [Finite-element basics](../4-code/femcore/fem.md) | 6 | 2013 | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
-| [Material specification](../4-code/femcore/material.md) | 9 | 3519 | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader. |
-| [Optical mode sets](../4-code/femcore/optical.md) | 1 | 231 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
-| [Frame and sections](../4-code/femcore/section.md) | 1 | 221 | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y). |
-| [Expressions](../4-code/femcore/expr.md) | 3 | 1562 | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90). |
-| [Runtime services](../4-code/femcore/runtime.md) | 5 | 827 | 9, 11, 96 | The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity. |
+| [Finite-element basics](../4-code/femcore/fem.md) | 6 | 2025 | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
+| [Material specification](../4-code/femcore/material.md) | 9 | 3537 | 29, 30, 34, 35 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader. |
+| [Optical mode sets](../4-code/femcore/optical.md) | 1 | 233 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
+| [Frame and sections](../4-code/femcore/section.md) | 1 | 223 | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y). |
+| [Expressions](../4-code/femcore/expr.md) | 3 | 1568 | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90). |
+| [Runtime services](../4-code/femcore/runtime.md) | 5 | 837 | 9, 11, 96 | The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity. |
 
 ## Part: Meshing and adaptation
 

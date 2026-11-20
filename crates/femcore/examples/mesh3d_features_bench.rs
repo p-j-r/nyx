@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Timing of the 3D features of ADR 50 to 53 (no control run exists: the parent commit refuses them): wavelength sizing with the simple
 //! mesher, adaptive meshing of a sphere, structured absorbing layers, the Maxwell indicators and one adaptation step of the loop on a
 //! cavity. Prints `name seconds cells`.

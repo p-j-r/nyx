@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The `ems` cavity kernel on curved (isoparametric) tetrahedra, ADR 82: closed forms only. A mesh with every edge node at the midpoint
 //! gives the matrices of the straight mesh; the curl of the basis is the physical curl of its field; a constant field is represented
 //! exactly on a mesh that is a quadratic image of a box.

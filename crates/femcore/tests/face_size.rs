@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Sizes on faces in the 3D lattice mesher (ADR 83): `add_size` on a face and the chord limit `max_dev` refine the mesh next to the face,
 //! a mesh without them is unchanged, and the result does not depend on the number of threads.
 #![allow(clippy::needless_range_loop)]

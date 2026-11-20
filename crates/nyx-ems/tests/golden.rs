@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Frozen reference output of the ems mode kernels (ADR 10): the golden files in `tests/golden/` were taken through the pre-restructure
 //! `solve::solve` (femcore tests/golden_frames) and moved here with the kernels; the kernels reproduce them (tolerance 1e-7 and 1e-8). The
 //! two silicon-wire files are the exception: they never reproduced on this machine (R22), and gate G2 (option B: loose tolerances, no

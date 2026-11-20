@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Small widgets of the shell: cards, chips, buttons in the brand style, sparklines and modal sheets.
 
 use crate::theme;

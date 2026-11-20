@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Helpers for the contract tests of every physics crate (ADR 19): the snapshot of a physics' descriptors, and the exemplar file check.
 //!
 //! A contract exemplar is a JSON file in `docs/architecture/contracts/`; the test builds the same JSON from the code and compares the two as

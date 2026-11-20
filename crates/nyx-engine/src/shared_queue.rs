@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The queue in the workspace folder (productivity plan Q3, ADR 95): the one queue that the window, the MCP server and the command line share, and
 //! the queue worker that runs it. A front-end that has a workspace writes a solve as an *item* in `<workspace>/queue/items/<id>/` and watches it;
 //! a program started with `--worker <workspace>` (the *queue worker*, a process of its own that outlives the window) runs the items one at a time,

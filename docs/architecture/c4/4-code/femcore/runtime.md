@@ -5,17 +5,17 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 5 files, 827 lines.
+**Size:** 5 files, 837 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/lib.rs` | 48 | femcore: finite elements for the nyx application, in pure Rust. docs/HOW_IT_WORKS.md explains the whole chain in plain language; this is the map of the modules. |
-| `crates/femcore/src/par.rs` | 150 | The one shared pool of worker threads used by every parallel loop of the solvers. |
-| `crates/femcore/src/progress.rs` | 295 | What a running solve is doing, and a way to stop it. |
-| `crates/femcore/src/validate.rs` | 46 |  |
-| `crates/femcore/src/warm.rs` | 288 | Warm starts of the eigensolvers (productivity plan P5b, ADR 96): the wanted modes of one solve as the start block of the next solve of a sweep that keeps its mesh. A shift-and-invert Krylov-Schur (or block Arnoldi) run that begins from t... |
+| `crates/femcore/src/lib.rs` | 50 |  |
+| `crates/femcore/src/par.rs` | 152 |  |
+| `crates/femcore/src/progress.rs` | 297 |  |
+| `crates/femcore/src/validate.rs` | 48 |  |
+| `crates/femcore/src/warm.rs` | 290 |  |
 
 ## What it uses
 
@@ -156,49 +156,49 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `threads` | `par.rs:21` | `pub fn threads() -> usize` —  Number of worker threads of the shared pool (and the number of pieces large loops are split into). |
-| fn | `threads_up_to` | `par.rs:33` | `pub fn threads_up_to(cap: usize) -> usize` —  `threads()` capped at `cap` (some kernels stop scaling earlier). |
-| fn | `factor_threads` | `par.rs:42` | `pub fn factor_threads() -> usize` —  Threads used for sparse factorisations (supernodal Cholesky/LU of faer). They scale only to about 8 threads and |
-| fn | `on_factor_pool` | `par.rs:48` | `pub fn on_factor_pool<R: Send>(f: impl FnOnce() -> R + Send) -> R` —  Runs `f` (a sparse factorisation) on the factorisation pool: faer takes the number of threads of the pool it is called in. |
-| const | `CHUNK` | `par.rs:62` | `usize` —  Chunk length used by default. |
-| fn | `fold_chunks_mut` | `par.rs:67` | `pub fn fold_chunks_mut<T: Send, F>(data: &mut [T], chunk: usize, nthreads: usize, f: F) -> f64` —  `f` must only touch its own chunk. With `nthreads == 1`, or fewer than two chunks, everything |
-| fn | `sum_range` | `par.rs:100` | `pub fn sum_range<F>(n: usize, chunk: usize, nthreads: usize, f: F) -> f64` —  Sum of `f(i)` over `0..n`, evaluated in fixed chunks and combined in chunk order. |
-| const | `CANCELLED` | `progress.rs:28` | `&str` —  The error text of a cancelled solve. |
-| struct | `Progress` | `progress.rs:42` |  Shared state of one job. Create with `Progress::new()`. |
-| struct | `Status` | `progress.rs:51` | fields: `stage`, `stage_seconds`, `total_seconds`, `fraction`, `cancelled` —  A snapshot for display. |
-| fn | `install` | `progress.rs:141` | `pub fn install(p: &Arc<Progress>) -> InstallGuard` —  Makes `p` the progress of the current thread until the returned guard is dropped. |
-| struct | `InstallGuard` | `progress.rs:146` |  |
-| fn | `current` | `progress.rs:158` | `pub fn current() -> Option<Arc<Progress>>` —  The progress installed on this thread, if any. |
-| struct | `Stage` | `progress.rs:169` |  A running stage: its line stands in the log from the start ("... running") and gets its duration when the guard is |
-| fn | `stage` | `progress.rs:178` | `pub fn stage(text: impl Into<String>) -> Stage` —  Starts a stage with a plain-language description, e.g. `stage(format!("assembling the stiffness matrix: {n} unknowns"))`. |
-| fn | `note` | `progress.rs:218` | `pub fn note(text: impl Into<String>)` —  Adds a line to the stage log (and to the display), e.g. `"iteration 30: residual 3.1e-6"`. |
-| fn | `lap` | `progress.rs:230` | `pub fn lap(what: &str, seconds: f64)` —  Timing of a finished piece of work: `what` (the label) took `seconds`. Labels that start with four spaces are |
-| fn | `lap_since` | `progress.rs:241` | `pub fn lap_since(t: &mut std::time::Instant, what: &str)` —  `lap` for the time since `t`, then restarts `t` (the helper the kernels use between their stages). |
-| fn | `fraction` | `progress.rs:247` | `pub fn fraction(f: f64)` —  Fraction (0..1) of the current stage that is done, for a progress bar. |
-| fn | `check` | `progress.rs:254` | `pub fn check() -> Result<(), String>` —  `Err("cancelled")` when the watcher asked to stop; call it once per iteration of a long loop. |
-| fn | `Progress::new` | `progress.rs:63` | `pub fn new() -> Arc<Progress>` |
-| fn | `Progress::cancel` | `progress.rs:68` | `pub fn cancel(&self)` —  Asks the solver to stop at its next check. |
-| fn | `Progress::is_cancelled` | `progress.rs:72` | `pub fn is_cancelled(&self) -> bool` |
-| fn | `Progress::status` | `progress.rs:76` | `pub fn status(&self) -> Status` |
-| fn | `Progress::mirror` | `progress.rs:85` | `pub fn mirror(&self, stage: &str, stage_seconds: f64, fraction: Option<f64>, log: Option<Vec<String>>)` —  Shows the state of work done in another process (a worker, productivity plan P4): the stage it is in and for how long, the fraction |
-| fn | `Progress::log` | `progress.rs:100` | `pub fn log(&self) -> Vec<String>` —  The finished-stage lines and notes so far. |
-| fn | `non_finite_token` | `validate.rs:11` | `pub fn non_finite_token(text: &str) -> Option<usize>` —  Byte position of the first bare `NaN` / `inf` token outside quotes in a `Debug` string. |
-| struct | `Entry` | `warm.rs:28` | fields: `kind`, `n`, `nev`, `cols` —  The modes one eigensolve found: its kind, the number of unknowns, the number of modes asked for, and the vectors (columns). |
-| struct | `Call` | `warm.rs:37` | fields: `kind`, `n`, `nev`, `warm`, `iterations` —  What one eigensolve did with a warm context, for the run's record. |
-| struct | `Warm` | `warm.rs:48` |  The warm context of one solve: the entries of the previous solve (input), the ones this solve leaves (output) and what each call did. |
-| fn | `install` | `warm.rs:82` | `pub fn install(w: &Arc<Warm>) -> InstallGuard` —  Makes `w` the warm context of the current thread until the guard is dropped. |
-| struct | `InstallGuard` | `warm.rs:87` |  |
-| fn | `current` | `warm.rs:99` | `pub fn current() -> Option<Arc<Warm>>` —  The context installed on this thread, if any. |
-| struct | `Ticket` | `warm.rs:104` |  One eigensolve's share of the context: what to start from and where to leave its modes. |
-| fn | `begin` | `warm.rs:114` | `pub fn begin(kind: &'static str, n: usize, nev: usize) -> Option<Ticket>` —  Takes the next place of the installed context for an eigensolve of `kind` on `n` unknowns asking for `nev` modes; `None` without a context. |
-| fn | `to_bytes` | `warm.rs:159` | `pub fn to_bytes(entries: &[Option<Entry>]) -> Vec<u8>` —  The entries as bytes (little endian), for a worker process: a count, then for each a presence byte and the kind, sizes and numbers. |
-| fn | `from_bytes` | `warm.rs:186` | `pub fn from_bytes(bytes: &[u8]) -> Result<Vec<Option<Entry>>, String>` —  Reads what `to_bytes` wrote; an error says what is wrong (a file of another version, a truncated one). |
-| fn | `Warm::new` | `warm.rs:57` | `pub fn new(input: Vec<Option<Entry>>) -> Arc<Warm>` —  A context whose solve starts from `input` (empty: a cold first point that only records). |
-| fn | `Warm::output` | `warm.rs:62` | `pub fn output(&self) -> Vec<Option<Entry>>` —  The entries this solve left, in the order of its eigensolves (a solve that failed or was not made leaves a gap). |
-| fn | `Warm::calls` | `warm.rs:67` | `pub fn calls(&self) -> Vec<Call>` —  What every eigensolve did, in order. |
-| fn | `Warm::was_used` | `warm.rs:72` | `pub fn was_used(&self) -> bool` —  True when at least one eigensolve of this solve started from the previous solve's modes. |
-| fn | `Ticket::start_columns` | `warm.rs:128` | `pub fn start_columns<T: Scalar>(&self) -> Option<Vec<T>>` —  The columns of the previous solve's modes, one after the other (`k * n` numbers), or `None` for a cold start. |
-| fn | `Ticket::start_len` | `warm.rs:134` | `pub fn start_len(&self) -> usize` —  How many columns the start has (0 for a cold start). |
-| fn | `Ticket::finish` | `warm.rs:139` | `pub fn finish<'a, T: Scalar + 'a>(self, vectors: impl Iterator<Item = &'a [T]>, iterations: usize)` —  Records the modes this eigensolve found (the first `nev` of them) and how it went. |
+| fn | `threads` | `par.rs:23` | `pub fn threads() -> usize` —  Number of worker threads of the shared pool (and the number of pieces large loops are split into). |
+| fn | `threads_up_to` | `par.rs:35` | `pub fn threads_up_to(cap: usize) -> usize` —  `threads()` capped at `cap` (some kernels stop scaling earlier). |
+| fn | `factor_threads` | `par.rs:44` | `pub fn factor_threads() -> usize` —  Threads used for sparse factorisations (supernodal Cholesky/LU of faer). They scale only to about 8 threads and |
+| fn | `on_factor_pool` | `par.rs:50` | `pub fn on_factor_pool<R: Send>(f: impl FnOnce() -> R + Send) -> R` —  Runs `f` (a sparse factorisation) on the factorisation pool: faer takes the number of threads of the pool it is called in. |
+| const | `CHUNK` | `par.rs:64` | `usize` —  Chunk length used by default. |
+| fn | `fold_chunks_mut` | `par.rs:69` | `pub fn fold_chunks_mut<T: Send, F>(data: &mut [T], chunk: usize, nthreads: usize, f: F) -> f64` —  `f` must only touch its own chunk. With `nthreads == 1`, or fewer than two chunks, everything |
+| fn | `sum_range` | `par.rs:102` | `pub fn sum_range<F>(n: usize, chunk: usize, nthreads: usize, f: F) -> f64` —  Sum of `f(i)` over `0..n`, evaluated in fixed chunks and combined in chunk order. |
+| const | `CANCELLED` | `progress.rs:30` | `&str` —  The error text of a cancelled solve. |
+| struct | `Progress` | `progress.rs:44` |  Shared state of one job. Create with `Progress::new()`. |
+| struct | `Status` | `progress.rs:53` | fields: `stage`, `stage_seconds`, `total_seconds`, `fraction`, `cancelled` —  A snapshot for display. |
+| fn | `install` | `progress.rs:143` | `pub fn install(p: &Arc<Progress>) -> InstallGuard` —  Makes `p` the progress of the current thread until the returned guard is dropped. |
+| struct | `InstallGuard` | `progress.rs:148` |  |
+| fn | `current` | `progress.rs:160` | `pub fn current() -> Option<Arc<Progress>>` —  The progress installed on this thread, if any. |
+| struct | `Stage` | `progress.rs:171` |  A running stage: its line stands in the log from the start ("... running") and gets its duration when the guard is |
+| fn | `stage` | `progress.rs:180` | `pub fn stage(text: impl Into<String>) -> Stage` —  Starts a stage with a plain-language description, e.g. `stage(format!("assembling the stiffness matrix: {n} unknowns"))`. |
+| fn | `note` | `progress.rs:220` | `pub fn note(text: impl Into<String>)` —  Adds a line to the stage log (and to the display), e.g. `"iteration 30: residual 3.1e-6"`. |
+| fn | `lap` | `progress.rs:232` | `pub fn lap(what: &str, seconds: f64)` —  Timing of a finished piece of work: `what` (the label) took `seconds`. Labels that start with four spaces are |
+| fn | `lap_since` | `progress.rs:243` | `pub fn lap_since(t: &mut std::time::Instant, what: &str)` —  `lap` for the time since `t`, then restarts `t` (the helper the kernels use between their stages). |
+| fn | `fraction` | `progress.rs:249` | `pub fn fraction(f: f64)` —  Fraction (0..1) of the current stage that is done, for a progress bar. |
+| fn | `check` | `progress.rs:256` | `pub fn check() -> Result<(), String>` —  `Err("cancelled")` when the watcher asked to stop; call it once per iteration of a long loop. |
+| fn | `Progress::new` | `progress.rs:65` | `pub fn new() -> Arc<Progress>` |
+| fn | `Progress::cancel` | `progress.rs:70` | `pub fn cancel(&self)` —  Asks the solver to stop at its next check. |
+| fn | `Progress::is_cancelled` | `progress.rs:74` | `pub fn is_cancelled(&self) -> bool` |
+| fn | `Progress::status` | `progress.rs:78` | `pub fn status(&self) -> Status` |
+| fn | `Progress::mirror` | `progress.rs:87` | `pub fn mirror(&self, stage: &str, stage_seconds: f64, fraction: Option<f64>, log: Option<Vec<String>>)` —  Shows the state of work done in another process (a worker, productivity plan P4): the stage it is in and for how long, the fraction |
+| fn | `Progress::log` | `progress.rs:102` | `pub fn log(&self) -> Vec<String>` —  The finished-stage lines and notes so far. |
+| fn | `non_finite_token` | `validate.rs:13` | `pub fn non_finite_token(text: &str) -> Option<usize>` —  Byte position of the first bare `NaN` / `inf` token outside quotes in a `Debug` string. |
+| struct | `Entry` | `warm.rs:30` | fields: `kind`, `n`, `nev`, `cols` —  The modes one eigensolve found: its kind, the number of unknowns, the number of modes asked for, and the vectors (columns). |
+| struct | `Call` | `warm.rs:39` | fields: `kind`, `n`, `nev`, `warm`, `iterations` —  What one eigensolve did with a warm context, for the run's record. |
+| struct | `Warm` | `warm.rs:50` |  The warm context of one solve: the entries of the previous solve (input), the ones this solve leaves (output) and what each call did. |
+| fn | `install` | `warm.rs:84` | `pub fn install(w: &Arc<Warm>) -> InstallGuard` —  Makes `w` the warm context of the current thread until the guard is dropped. |
+| struct | `InstallGuard` | `warm.rs:89` |  |
+| fn | `current` | `warm.rs:101` | `pub fn current() -> Option<Arc<Warm>>` —  The context installed on this thread, if any. |
+| struct | `Ticket` | `warm.rs:106` |  One eigensolve's share of the context: what to start from and where to leave its modes. |
+| fn | `begin` | `warm.rs:116` | `pub fn begin(kind: &'static str, n: usize, nev: usize) -> Option<Ticket>` —  Takes the next place of the installed context for an eigensolve of `kind` on `n` unknowns asking for `nev` modes; `None` without a context. |
+| fn | `to_bytes` | `warm.rs:161` | `pub fn to_bytes(entries: &[Option<Entry>]) -> Vec<u8>` —  The entries as bytes (little endian), for a worker process: a count, then for each a presence byte and the kind, sizes and numbers. |
+| fn | `from_bytes` | `warm.rs:188` | `pub fn from_bytes(bytes: &[u8]) -> Result<Vec<Option<Entry>>, String>` —  Reads what `to_bytes` wrote; an error says what is wrong (a file of another version, a truncated one). |
+| fn | `Warm::new` | `warm.rs:59` | `pub fn new(input: Vec<Option<Entry>>) -> Arc<Warm>` —  A context whose solve starts from `input` (empty: a cold first point that only records). |
+| fn | `Warm::output` | `warm.rs:64` | `pub fn output(&self) -> Vec<Option<Entry>>` —  The entries this solve left, in the order of its eigensolves (a solve that failed or was not made leaves a gap). |
+| fn | `Warm::calls` | `warm.rs:69` | `pub fn calls(&self) -> Vec<Call>` —  What every eigensolve did, in order. |
+| fn | `Warm::was_used` | `warm.rs:74` | `pub fn was_used(&self) -> bool` —  True when at least one eigensolve of this solve started from the previous solve's modes. |
+| fn | `Ticket::start_columns` | `warm.rs:130` | `pub fn start_columns<T: Scalar>(&self) -> Option<Vec<T>>` —  The columns of the previous solve's modes, one after the other (`k * n` numbers), or `None` for a cold start. |
+| fn | `Ticket::start_len` | `warm.rs:136` | `pub fn start_len(&self) -> usize` —  How many columns the start has (0 for a cold start). |
+| fn | `Ticket::finish` | `warm.rs:141` | `pub fn finish<'a, T: Scalar + 'a>(self, vectors: impl Iterator<Item = &'a [T]>, iterations: usize)` —  Records the modes this eigensolve found (the first `nev` of them) and how it went. |
 
 Trait implementations in this component: `InstallGuard: Drop`, `Stage: Drop`, `InstallGuard: Drop`

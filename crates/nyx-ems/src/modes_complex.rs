@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Complex-valued mode analysis of a 2D cross-section: lossy or absorbing media and perfectly
 //! matched layers (PML) by complex coordinate stretching.
 //!

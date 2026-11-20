@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The whole-array reductions (productivity plan N1, ADR 90) against two oracles. A stand-in physics `fld` writes polynomial fields of degree 2
 //! at the nodes of the mesh, which a P2 field holds exactly, so every integral has a closed form (Gauss-Legendre over a box, which is exact for
 //! these degrees). And each reduction is written out again here as a plain loop on the raw arrays of the result, in the order the module

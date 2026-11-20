@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Heap use of a solve, stage by stage: a counting allocator records the bytes in use and a watcher thread notes the
 //! largest value seen in every stage that the solver reports (see `femcore::progress`).
 //!

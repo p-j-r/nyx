@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The shell around the simulation window: the tab bar (Dashboard, one tab per open workflow, +), the status chip, the search
 //! palette entry, and the glue between the window's single live project and the workspace on disk (`nyx-store`).
 //!

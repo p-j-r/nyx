@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Linear elastic solid mechanics on P1/P2 triangles (plane stress or plane strain) and tetrahedra: static solve with boundary loads,
 //! prescribed displacements and thermal expansion, eigenfrequencies, stress and von Mises. Moved here from `femcore::sms` in restructure
 //! phase 4 (ADR 42): the kernels are unchanged, they read the typed `Problem` and give `nyx_physics` results.

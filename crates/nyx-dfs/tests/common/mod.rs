@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Shared helpers of the dfs tests: the mesh fixtures of `femcore::testkit`, a solve helper over the typed problem, and the flat field
 //! names the golden files and the older tests use (`|E|`, `Ex`, `Ez`, `|q|`, ...).
 #![allow(dead_code, unused_imports)]

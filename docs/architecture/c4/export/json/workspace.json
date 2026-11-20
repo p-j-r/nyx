@@ -17,7 +17,7 @@
       "status" : "Accepted",
       "title" : "Golden files are the numerical oracle, and are not regenerated to hide a difference"
     }, {
-      "content" : "# 100. nyx is dual licensed: AGPL-3.0 or a commercial licence\n\nDate: 2026-11-20\n\n## Status\n\nAccepted on Paul's instruction. Built on the bookmark of the merge of the plotting stack with `main`.\n\n## Context\n\nnyx had no licence file. Paul's decision: nyx is licensed under the GNU Affero General Public License, version 3, and a commercial licence is available; people choose which one they want. Parts of the repository came with their own licence: `crates/geom` and the ported solver and mesher modules of `femcore` (BSD-2-Clause, `docs/ports`), the EB Garamond font (SIL OFL 1.1), and the third-party crates.\n\n## Decision\n\n* **The grant is `AGPL-3.0-only`** (version 3, not \"or any later version\"; Paul chose this), **or** a commercial licence from the copyright holder, at the licensee's choice. The SPDX expression is `AGPL-3.0-only OR LicenseRef-nyx-Commercial`.\n* **Notices.** `LICENSE` is the verbatim text of the AGPL-3.0 (661 lines, from gnu.org). `NOTICE` says in one paragraph that the licensee chooses between the two licences, carries the copyright line (`Copyright (C) 2026 p-j-r`), the disclaimer of warranty, and lists what keeps its own licence. The README has a Licence section with the one-line summary. The About sheet of the window (Help, \"About nyx and licences\") shows the copyright, the choice, the absence of warranty and where the licence text is, which is what section 5(d) of the AGPL asks of an interactive interface.\n* **Cargo metadata.** `[workspace.package] license` holds the expression and every crate uses it (`license.workspace = true`), except `geom` (`BSD-2-Clause`, unchanged) and `femcore` (`(AGPL-3.0-only OR LicenseRef-nyx-Commercial) AND BSD-2-Clause`, since it holds the ported modules).\n* **What keeps its own licence is not relicensed**: the BSD-2-Clause parts, the font (its licence text is shipped next to it and shown in the About sheet) and the third-party crates.\n\n## Not in this decision\n\n* Per-file headers (`SPDX-License-Identifier` in every source file) are not added: a mechanical change to every file that would conflict with every open workspace. It can follow as one commit.\n* The commercial licence itself (terms, contact) is not in the repository; the notices say it is available from the copyright holder.\n* A policy for contributions from other people (dual licensing needs the right to relicense them) is not written.\n* Release packaging (`dist/`) must carry `LICENSE`, `NOTICE` and `OFL-EBGaramond.txt` with the program.\n\n## Consequences\n\n* `cargo metadata` reports the licence of every crate; a tool that reads SPDX sees the choice.\n* The AGPL applies to what is not listed above; section 13 (offering the source to users who interact with a modified version over a network) is the operator's duty for a modified nyx served remotely.\n\n## Code\n\n`LICENSE`, `NOTICE`, `README.md`, `Cargo.toml` and the `Cargo.toml` of the crates, `crates/app/src/sheets.rs` (`sheet_about`).\n",
+      "content" : "# 100. nyx is dual licensed: AGPL-3.0 or a commercial licence\n\nDate: 2026-11-20\n\n## Status\n\nAccepted on Paul's instruction. Built on the bookmark of the merge of the plotting stack with `main`.\n\n## Context\n\nnyx had no licence file. Paul's decision: nyx is licensed under the GNU Affero General Public License, version 3, and a commercial licence is available; people choose which one they want. Parts of the repository came with their own licence: `crates/geom` and the ported solver and mesher modules of `femcore` (BSD-2-Clause, `docs/ports`), the EB Garamond font (SIL OFL 1.1), and the third-party crates.\n\n## Decision\n\n* **The grant is `AGPL-3.0-only`** (version 3, not \"or any later version\"; Paul chose this), **or** a commercial licence from the copyright holder, at the licensee's choice. The SPDX expression is `AGPL-3.0-only OR LicenseRef-nyx-Commercial`.\n* **Notices.** `LICENSE` is the verbatim text of the AGPL-3.0 (661 lines, from gnu.org). `NOTICE` says in one paragraph that the licensee chooses between the two licences, carries the copyright line (`Copyright (C) 2026 p-j-r`), the disclaimer of warranty, and lists what keeps its own licence. The README has a Licence section with the one-line summary. The About sheet of the window (Help, \"About nyx and licences\") shows the copyright, the choice, the absence of warranty and where the licence text is, which is what section 5(d) of the AGPL asks of an interactive interface.\n* **Cargo metadata.** `[workspace.package] license` holds the expression and every crate uses it (`license.workspace = true`), except `geom` (`BSD-2-Clause`, unchanged) and `femcore` (`(AGPL-3.0-only OR LicenseRef-nyx-Commercial) AND BSD-2-Clause`, since it holds the ported modules).\n* **Per-file headers.** Every Rust file of nyx's own code starts with `// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial` and `// Copyright (C) 2026 p-j-r` (344 files). Left without a header, because the BSD-2-Clause ports and nyx's own code are mixed there and the file-by-file split is not recorded: `crates/geom` (BSD-2-Clause) and the modules `linalg`, `adapt`, `meshing` and `mesh` of `femcore`; `NOTICE` covers them.\n* **Packaging.** `tools/package_dist.sh` builds the release programs and copies them to `dist/<name>/` with `LICENSE`, `NOTICE` and `OFL-EBGaramond.txt`.\n* **What keeps its own licence is not relicensed**: the BSD-2-Clause parts, the font (its licence text is shipped next to it and shown in the About sheet) and the third-party crates.\n\n## Not in this decision\n\n* The commercial licence itself (terms, contact) is not in the repository; the notices say it is available from the copyright holder.\n* A policy for contributions from other people (dual licensing needs the right to relicense them) is not written.\n\n## Consequences\n\n* `cargo metadata` reports the licence of every crate; a tool that reads SPDX sees the choice.\n* The AGPL applies to what is not listed above; section 13 (offering the source to users who interact with a modified version over a network) is the operator's duty for a modified nyx served remotely.\n\n## Code\n\n`LICENSE`, `NOTICE`, `README.md`, `Cargo.toml` and the `Cargo.toml` of the crates, `crates/app/src/sheets.rs` (`sheet_about`).\n",
       "date" : "2026-11-19T23:00:00Z",
       "format" : "Markdown",
       "id" : "100",
@@ -704,7 +704,7 @@
             "structurizr.dsl.identifier" : "nyx.app.window",
             "codeDiagram" : "4-code/app/window.md",
             "code" : "crates/app/src: app.rs, feedback.rs, main.rs, spans.rs, state.rs",
-            "lines" : "2805",
+            "lines" : "2815",
             "adr" : "23, 57, 92"
           },
           "relationships" : [ {
@@ -775,7 +775,7 @@
             "structurizr.dsl.identifier" : "nyx.app.shell",
             "codeDiagram" : "4-code/app/shell.md",
             "code" : "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs",
-            "lines" : "4425",
+            "lines" : "4441",
             "adr" : "14, 23, 87, 88"
           },
           "relationships" : [ {
@@ -811,7 +811,7 @@
             "structurizr.dsl.identifier" : "nyx.app.inspector",
             "codeDiagram" : "4-code/app/inspector.md",
             "code" : "crates/app/src: forms.rs, geomui.rs, tabs.rs",
-            "lines" : "2210",
+            "lines" : "2216",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -861,7 +861,7 @@
             "structurizr.dsl.identifier" : "nyx.app.viewport",
             "codeDiagram" : "4-code/app/viewport.md",
             "code" : "crates/app/src: colormap.rs, regions.rs, scene.rs, viewport.rs",
-            "lines" : "1590",
+            "lines" : "1598",
             "adr" : "23, 88"
           },
           "relationships" : [ {
@@ -890,7 +890,7 @@
             "structurizr.dsl.identifier" : "nyx.app.style",
             "codeDiagram" : "4-code/app/style.md",
             "code" : "crates/app/src: cvd.rs, fmt.rs, kit.rs, theme.rs, tokens.rs",
-            "lines" : "1252",
+            "lines" : "1262",
             "adr" : "23, 88"
           },
           "tags" : "Element,Component",
@@ -904,7 +904,7 @@
             "structurizr.dsl.identifier" : "nyx.app.headless",
             "codeDiagram" : "4-code/app/headless.md",
             "code" : "crates/app/src: apicmd.rs, batch.rs, pyscript.rs, runfile.rs, script.rs",
-            "lines" : "723",
+            "lines" : "733",
             "adr" : "23, 89, 93"
           },
           "relationships" : [ {
@@ -995,7 +995,7 @@
             "structurizr.dsl.identifier" : "nyx.mcp.protocol",
             "codeDiagram" : "4-code/mcp/protocol.md",
             "code" : "crates/nyx-mcp/src: main.rs",
-            "lines" : "707",
+            "lines" : "709",
             "adr" : "15, 57, 94"
           },
           "relationships" : [ {
@@ -1017,7 +1017,7 @@
             "structurizr.dsl.identifier" : "nyx.mcp.tools",
             "codeDiagram" : "4-code/mcp/tools.md",
             "code" : "crates/nyx-mcp/src: main.rs",
-            "lines" : "707",
+            "lines" : "709",
             "adr" : "94, 57"
           },
           "relationships" : [ {
@@ -1082,7 +1082,7 @@
             "structurizr.dsl.identifier" : "nyx.script.host",
             "codeDiagram" : "4-code/script/host.md",
             "code" : "crates/nyx-script/src: convert.rs, host.rs, lib.rs",
-            "lines" : "198",
+            "lines" : "204",
             "adr" : "93, 57"
           },
           "relationships" : [ {
@@ -1118,7 +1118,7 @@
             "structurizr.dsl.identifier" : "nyx.script.kernel",
             "codeDiagram" : "4-code/script/kernel.md",
             "code" : "crates/nyx-script/src: kernel.rs",
-            "lines" : "658",
+            "lines" : "660",
             "adr" : "94, 93"
           },
           "relationships" : [ {
@@ -1161,7 +1161,7 @@
             "structurizr.dsl.identifier" : "nyx.script.stubs",
             "codeDiagram" : "4-code/script/stubs.md",
             "code" : "crates/nyx-script/src: stubs.rs",
-            "lines" : "92",
+            "lines" : "94",
             "adr" : "93"
           },
           "relationships" : [ {
@@ -1197,7 +1197,7 @@
             "structurizr.dsl.identifier" : "nyx.script.tracing",
             "codeDiagram" : "4-code/script/tracing.md",
             "code" : "crates/nyx-script/src: trace.rs",
-            "lines" : "414",
+            "lines" : "416",
             "adr" : "90, 93"
           },
           "relationships" : [ {
@@ -1226,7 +1226,7 @@
             "structurizr.dsl.identifier" : "nyx.script.worker",
             "codeDiagram" : "4-code/script/worker.md",
             "code" : "crates/nyx-script/src: bin/nyx-script-worker.rs",
-            "lines" : "118",
+            "lines" : "120",
             "adr" : "93, 86"
           },
           "tags" : "Element,Component",
@@ -1262,7 +1262,7 @@
             "structurizr.dsl.identifier" : "nyx.connect.hosts",
             "codeDiagram" : "4-code/connect/hosts.md",
             "code" : "crates/nyx-connect/src: env.rs, hosts.rs",
-            "lines" : "215",
+            "lines" : "219",
             "adr" : "28"
           },
           "tags" : "Element,Component",
@@ -1276,7 +1276,7 @@
             "structurizr.dsl.identifier" : "nyx.connect.config",
             "codeDiagram" : "4-code/connect/config.md",
             "code" : "crates/nyx-connect/src: config.rs",
-            "lines" : "172",
+            "lines" : "174",
             "adr" : "28"
           },
           "relationships" : [ {
@@ -1305,7 +1305,7 @@
             "structurizr.dsl.identifier" : "nyx.connect.server",
             "codeDiagram" : "4-code/connect/server.md",
             "code" : "crates/nyx-connect/src: server.rs",
-            "lines" : "171",
+            "lines" : "173",
             "adr" : "28"
           },
           "relationships" : [ {
@@ -1334,7 +1334,7 @@
             "structurizr.dsl.identifier" : "nyx.connect.report",
             "codeDiagram" : "4-code/connect/report.md",
             "code" : "crates/nyx-connect/src: lib.rs, report.rs",
-            "lines" : "185",
+            "lines" : "189",
             "adr" : "28, 19"
           },
           "relationships" : [ {
@@ -1370,7 +1370,7 @@
             "structurizr.dsl.identifier" : "nyx.connect.cli",
             "codeDiagram" : "4-code/connect/cli.md",
             "code" : "crates/nyx-connect/src: main.rs",
-            "lines" : "170",
+            "lines" : "172",
             "adr" : "28"
           },
           "relationships" : [ {
@@ -1427,7 +1427,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.commands",
             "codeDiagram" : "4-code/engine/commands.md",
             "code" : "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, scriptout.rs, validated.rs",
-            "lines" : "4427",
+            "lines" : "4441",
             "adr" : "57, 38, 15, 90, 91, 93, 94"
           },
           "relationships" : [ {
@@ -1526,7 +1526,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.project",
             "codeDiagram" : "4-code/engine/project.md",
             "code" : "crates/nyx-engine/src: project.rs",
-            "lines" : "206",
+            "lines" : "208",
             "adr" : "63"
           },
           "relationships" : [ {
@@ -1569,7 +1569,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.geometry",
             "codeDiagram" : "4-code/engine/geometry.md",
             "code" : "crates/nyx-engine/src: geomdesc.rs, geometry.rs",
-            "lines" : "730",
+            "lines" : "734",
             "adr" : "38, 3"
           },
           "relationships" : [ {
@@ -1598,7 +1598,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.jobs",
             "codeDiagram" : "4-code/engine/jobs.md",
             "code" : "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)",
-            "lines" : "4485",
+            "lines" : "4507",
             "adr" : "61, 80, 85, 87, 86, 11, 95, 96"
           },
           "relationships" : [ {
@@ -1683,7 +1683,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.commandlist",
             "codeDiagram" : "4-code/engine/commandlist.md",
             "code" : "crates/nyx-engine/src: commandlist.rs",
-            "lines" : "586",
+            "lines" : "588",
             "adr" : "89"
           },
           "relationships" : [ {
@@ -1726,7 +1726,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.apiref",
             "codeDiagram" : "4-code/engine/apiref.md",
             "code" : "crates/nyx-engine/src: apiref.rs",
-            "lines" : "291",
+            "lines" : "293",
             "adr" : "89, 57"
           },
           "relationships" : [ {
@@ -1762,7 +1762,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.meshing",
             "codeDiagram" : "4-code/engine/meshing.md",
             "code" : "crates/nyx-engine/src: meshing.rs, pml.rs, preview.rs",
-            "lines" : "537",
+            "lines" : "543",
             "adr" : "54, 50, 92"
           },
           "relationships" : [ {
@@ -1833,7 +1833,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.materials",
             "codeDiagram" : "4-code/engine/materials.md",
             "code" : "crates/nyx-engine/src: materials.rs",
-            "lines" : "155",
+            "lines" : "157",
             "adr" : "58"
           },
           "relationships" : [ {
@@ -1876,7 +1876,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.analyse",
             "codeDiagram" : "4-code/engine/analyse.md",
             "code" : "crates/nyx-engine/src: analyse.rs, figure.rs",
-            "lines" : "214",
+            "lines" : "218",
             "adr" : "56, 99"
           },
           "relationships" : [ {
@@ -1919,7 +1919,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.resultsIO",
             "codeDiagram" : "4-code/engine/resultsIO.md",
             "code" : "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs",
-            "lines" : "993",
+            "lines" : "999",
             "adr" : "62, 63"
           },
           "relationships" : [ {
@@ -1983,7 +1983,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.storeLink",
             "codeDiagram" : "4-code/engine/storeLink.md",
             "code" : "crates/nyx-engine/src: store_link.rs",
-            "lines" : "308",
+            "lines" : "310",
             "adr" : "39, 59"
           },
           "relationships" : [ {
@@ -2047,7 +2047,7 @@
             "structurizr.dsl.identifier" : "nyx.engine.registry",
             "codeDiagram" : "4-code/engine/registry.md",
             "code" : "crates/nyx-engine/src: lib.rs",
-            "lines" : "101",
+            "lines" : "103",
             "adr" : "25"
           },
           "relationships" : [ {
@@ -2238,7 +2238,7 @@
             "structurizr.dsl.identifier" : "nyx.physics.trait",
             "codeDiagram" : "4-code/physics/trait.md",
             "code" : "crates/nyx-physics/src: error.rs, lib.rs, physics.rs, registry.rs",
-            "lines" : "294",
+            "lines" : "302",
             "adr" : "25"
           },
           "relationships" : [ {
@@ -2281,7 +2281,7 @@
             "structurizr.dsl.identifier" : "nyx.physics.envelope",
             "codeDiagram" : "4-code/physics/envelope.md",
             "code" : "crates/nyx-physics/src: decode.rs, spec.rs, validate.rs",
-            "lines" : "534",
+            "lines" : "540",
             "adr" : "25, 41, 63"
           },
           "relationships" : [ {
@@ -2324,7 +2324,7 @@
             "structurizr.dsl.identifier" : "nyx.physics.descriptors",
             "codeDiagram" : "4-code/physics/descriptors.md",
             "code" : "crates/nyx-physics/src: desc.rs, schema.rs",
-            "lines" : "332",
+            "lines" : "336",
             "adr" : "25"
           },
           "relationships" : [ {
@@ -2353,7 +2353,7 @@
             "structurizr.dsl.identifier" : "nyx.physics.result",
             "codeDiagram" : "4-code/physics/result.md",
             "code" : "crates/nyx-physics/src: frame.rs, result.rs",
-            "lines" : "286",
+            "lines" : "290",
             "adr" : "25, 56"
           },
           "relationships" : [ {
@@ -2375,7 +2375,7 @@
             "structurizr.dsl.identifier" : "nyx.physics.testsupport",
             "codeDiagram" : "4-code/physics/testsupport.md",
             "code" : "crates/nyx-physics/src: contract.rs, testkit.rs",
-            "lines" : "229",
+            "lines" : "233",
             "adr" : "10, 19"
           },
           "relationships" : [ {
@@ -2447,7 +2447,7 @@
             "structurizr.dsl.identifier" : "nyx.dfs.adapter",
             "codeDiagram" : "4-code/dfs/adapter.md",
             "code" : "crates/nyx-dfs/src: lib.rs",
-            "lines" : "217",
+            "lines" : "219",
             "adr" : "41, 25"
           },
           "relationships" : [ {
@@ -2497,7 +2497,7 @@
             "structurizr.dsl.identifier" : "nyx.dfs.problem",
             "codeDiagram" : "4-code/dfs/problem.md",
             "code" : "crates/nyx-dfs/src: problem.rs",
-            "lines" : "195",
+            "lines" : "197",
             "adr" : "41"
           },
           "relationships" : [ {
@@ -2533,7 +2533,7 @@
             "structurizr.dsl.identifier" : "nyx.dfs.heat",
             "codeDiagram" : "4-code/dfs/heat.md",
             "code" : "crates/nyx-dfs/src: heat.rs",
-            "lines" : "273",
+            "lines" : "275",
             "adr" : "41, 9"
           },
           "relationships" : [ {
@@ -2576,7 +2576,7 @@
             "structurizr.dsl.identifier" : "nyx.dfs.electro",
             "codeDiagram" : "4-code/dfs/electro.md",
             "code" : "crates/nyx-dfs/src: electro.rs",
-            "lines" : "136",
+            "lines" : "138",
             "adr" : "41, 9"
           },
           "relationships" : [ {
@@ -2619,7 +2619,7 @@
             "structurizr.dsl.identifier" : "nyx.dfs.common",
             "codeDiagram" : "4-code/dfs/common.md",
             "code" : "crates/nyx-dfs/src: common.rs",
-            "lines" : "56",
+            "lines" : "58",
             "adr" : "41"
           },
           "relationships" : [ {
@@ -2677,7 +2677,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.adapter",
             "codeDiagram" : "4-code/sms/adapter.md",
             "code" : "crates/nyx-sms/src: lib.rs",
-            "lines" : "305",
+            "lines" : "307",
             "adr" : "42, 25, 68"
           },
           "relationships" : [ {
@@ -2727,7 +2727,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.problem",
             "codeDiagram" : "4-code/sms/problem.md",
             "code" : "crates/nyx-sms/src: problem.rs",
-            "lines" : "373",
+            "lines" : "375",
             "adr" : "42, 68"
           },
           "relationships" : [ {
@@ -2763,7 +2763,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.solid",
             "codeDiagram" : "4-code/sms/solid.md",
             "code" : "crates/nyx-sms/src: solid.rs",
-            "lines" : "746",
+            "lines" : "748",
             "adr" : "42, 9"
           },
           "relationships" : [ {
@@ -2827,7 +2827,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.crosssection",
             "codeDiagram" : "4-code/sms/crosssection.md",
             "code" : "crates/nyx-sms/src: cross_section.rs",
-            "lines" : "502",
+            "lines" : "504",
             "adr" : "43, 68, 69, 80"
           },
           "relationships" : [ {
@@ -2877,7 +2877,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.axisym",
             "codeDiagram" : "4-code/sms/axisym.md",
             "code" : "crates/nyx-sms/src: axisym.rs",
-            "lines" : "388",
+            "lines" : "390",
             "adr" : "43, 69, 80"
           },
           "relationships" : [ {
@@ -2906,7 +2906,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.floquet",
             "codeDiagram" : "4-code/sms/floquet.md",
             "code" : "crates/nyx-sms/src: floquet.rs",
-            "lines" : "128",
+            "lines" : "130",
             "adr" : "42"
           },
           "relationships" : [ {
@@ -2949,7 +2949,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.pml",
             "codeDiagram" : "4-code/sms/pml.md",
             "code" : "crates/nyx-sms/src: pml.rs",
-            "lines" : "214",
+            "lines" : "216",
             "adr" : "42"
           },
           "relationships" : [ {
@@ -2992,7 +2992,7 @@
             "structurizr.dsl.identifier" : "nyx.sms.lrb",
             "codeDiagram" : "4-code/sms/lrb.md",
             "code" : "crates/nyx-sms/src: lrb.rs",
-            "lines" : "296",
+            "lines" : "298",
             "adr" : "42"
           },
           "relationships" : [ {
@@ -3064,7 +3064,7 @@
             "structurizr.dsl.identifier" : "nyx.ems.adapter",
             "codeDiagram" : "4-code/ems/adapter.md",
             "code" : "crates/nyx-ems/src: lib.rs",
-            "lines" : "293",
+            "lines" : "295",
             "adr" : "45, 25"
           },
           "relationships" : [ {
@@ -3135,7 +3135,7 @@
             "structurizr.dsl.identifier" : "nyx.ems.problem",
             "codeDiagram" : "4-code/ems/problem.md",
             "code" : "crates/nyx-ems/src: problem.rs",
-            "lines" : "187",
+            "lines" : "189",
             "adr" : "45"
           },
           "relationships" : [ {
@@ -3171,7 +3171,7 @@
             "structurizr.dsl.identifier" : "nyx.ems.modes",
             "codeDiagram" : "4-code/ems/modes.md",
             "code" : "crates/nyx-ems/src: modes.rs",
-            "lines" : "438",
+            "lines" : "440",
             "adr" : "45, 9"
           },
           "relationships" : [ {
@@ -3221,7 +3221,7 @@
             "structurizr.dsl.identifier" : "nyx.ems.modescx",
             "codeDiagram" : "4-code/ems/modescx.md",
             "code" : "crates/nyx-ems/src: modes_complex.rs",
-            "lines" : "464",
+            "lines" : "466",
             "adr" : "45"
           },
           "relationships" : [ {
@@ -3271,7 +3271,7 @@
             "structurizr.dsl.identifier" : "nyx.ems.axisym",
             "codeDiagram" : "4-code/ems/axisym.md",
             "code" : "crates/nyx-ems/src: axisym.rs",
-            "lines" : "467",
+            "lines" : "469",
             "adr" : "46"
           },
           "relationships" : [ {
@@ -3314,7 +3314,7 @@
             "structurizr.dsl.identifier" : "nyx.ems.cavity",
             "codeDiagram" : "4-code/ems/cavity.md",
             "code" : "crates/nyx-ems/src: cavity.rs",
-            "lines" : "789",
+            "lines" : "791",
             "adr" : "45"
           },
           "relationships" : [ {
@@ -3357,7 +3357,7 @@
             "structurizr.dsl.identifier" : "nyx.ems.optical",
             "codeDiagram" : "4-code/ems/optical.md",
             "code" : "crates/nyx-ems/src: optical.rs",
-            "lines" : "97",
+            "lines" : "99",
             "adr" : "45, 21"
           },
           "relationships" : [ {
@@ -3436,7 +3436,7 @@
             "structurizr.dsl.identifier" : "nyx.analysis.api",
             "codeDiagram" : "4-code/analysis/api.md",
             "code" : "crates/nyx-analysis/src: lib.rs",
-            "lines" : "96",
+            "lines" : "98",
             "adr" : "56"
           },
           "relationships" : [ {
@@ -3472,7 +3472,7 @@
             "structurizr.dsl.identifier" : "nyx.analysis.samples",
             "codeDiagram" : "4-code/analysis/samples.md",
             "code" : "crates/nyx-analysis/src: samples.rs",
-            "lines" : "151",
+            "lines" : "153",
             "adr" : "56"
           },
           "relationships" : [ {
@@ -3515,7 +3515,7 @@
             "structurizr.dsl.identifier" : "nyx.analysis.polarization",
             "codeDiagram" : "4-code/analysis/polarization.md",
             "code" : "crates/nyx-analysis/src: polarization.rs",
-            "lines" : "936",
+            "lines" : "938",
             "adr" : "56, 21"
           },
           "tags" : "Element,Component",
@@ -3529,7 +3529,7 @@
             "structurizr.dsl.identifier" : "nyx.analysis.modes",
             "codeDiagram" : "4-code/analysis/modes.md",
             "code" : "crates/nyx-analysis/src: modes.rs",
-            "lines" : "620",
+            "lines" : "622",
             "adr" : "56"
           },
           "relationships" : [ {
@@ -3551,7 +3551,7 @@
             "structurizr.dsl.identifier" : "nyx.analysis.figures",
             "codeDiagram" : "4-code/analysis/figures.md",
             "code" : "crates/nyx-analysis/src: canvas.rs, figure.rs, modeview.rs, raster.rs, section.rs",
-            "lines" : "1746",
+            "lines" : "1756",
             "adr" : "99, 56"
           },
           "relationships" : [ {
@@ -3608,7 +3608,7 @@
             "structurizr.dsl.identifier" : "nyx.store.model",
             "codeDiagram" : "4-code/store/model.md",
             "code" : "crates/nyx-store/src: card.rs, model.rs",
-            "lines" : "223",
+            "lines" : "227",
             "adr" : "14, 39"
           },
           "relationships" : [ {
@@ -3630,7 +3630,7 @@
             "structurizr.dsl.identifier" : "nyx.store.workspace",
             "codeDiagram" : "4-code/store/workspace.md",
             "code" : "crates/nyx-store/src: lib.rs, workspace.rs",
-            "lines" : "306",
+            "lines" : "310",
             "adr" : "14"
           },
           "relationships" : [ {
@@ -3673,7 +3673,7 @@
             "structurizr.dsl.identifier" : "nyx.store.flow",
             "codeDiagram" : "4-code/store/flow.md",
             "code" : "crates/nyx-store/src: flow.rs",
-            "lines" : "484",
+            "lines" : "486",
             "adr" : "14, 59"
           },
           "relationships" : [ {
@@ -3730,7 +3730,7 @@
             "structurizr.dsl.identifier" : "nyx.store.versions",
             "codeDiagram" : "4-code/store/versions.md",
             "code" : "crates/nyx-store/src: versions.rs",
-            "lines" : "200",
+            "lines" : "202",
             "adr" : "14, 59"
           },
           "tags" : "Element,Component",
@@ -3744,7 +3744,7 @@
             "structurizr.dsl.identifier" : "nyx.store.runs",
             "codeDiagram" : "4-code/store/runs.md",
             "code" : "crates/nyx-store/src: runs.rs",
-            "lines" : "452",
+            "lines" : "454",
             "adr" : "64"
           },
           "relationships" : [ {
@@ -3780,7 +3780,7 @@
             "structurizr.dsl.identifier" : "nyx.store.search",
             "codeDiagram" : "4-code/store/search.md",
             "code" : "crates/nyx-store/src: search.rs",
-            "lines" : "253",
+            "lines" : "255",
             "adr" : "14"
           },
           "relationships" : [ {
@@ -3816,7 +3816,7 @@
             "structurizr.dsl.identifier" : "nyx.store.archive",
             "codeDiagram" : "4-code/store/archive.md",
             "code" : "crates/nyx-store/src: archive.rs",
-            "lines" : "703",
+            "lines" : "705",
             "adr" : "14"
           },
           "relationships" : [ {
@@ -3852,7 +3852,7 @@
             "structurizr.dsl.identifier" : "nyx.store.util",
             "codeDiagram" : "4-code/store/util.md",
             "code" : "crates/nyx-store/src: util.rs",
-            "lines" : "171",
+            "lines" : "173",
             "adr" : "14"
           },
           "tags" : "Element,Component",
@@ -3938,7 +3938,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.fixtures",
             "codeDiagram" : "4-code/femcore/fixtures.md",
             "code" : "crates/femcore/src: mesh/fixtures.rs, testkit/mod.rs, testkit/soi.rs",
-            "lines" : "582",
+            "lines" : "586",
             "adr" : "41, 10, 60"
           },
           "relationships" : [ {
@@ -4640,7 +4640,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.fem",
             "codeDiagram" : "4-code/femcore/fem.md",
             "code" : "crates/femcore/src: edge.rs, fem.rs, fields.rs, periodic.rs, pml.rs, props.rs",
-            "lines" : "2013",
+            "lines" : "2025",
             "adr" : "9, 4, 45, 69"
           },
           "relationships" : [ {
@@ -4704,7 +4704,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.material",
             "codeDiagram" : "4-code/femcore/material.md",
             "code" : "crates/femcore/src: material/elastic.rs, material/mod.rs, material/optics.rs, material/reader.rs, material/schema.rs, material/source.rs, ... (9 files)",
-            "lines" : "3519",
+            "lines" : "3537",
             "adr" : "29, 30, 34, 35"
           },
           "tags" : "Element,Component",
@@ -4718,7 +4718,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.optical",
             "codeDiagram" : "4-code/femcore/optical.md",
             "code" : "crates/femcore/src: optical.rs",
-            "lines" : "231",
+            "lines" : "233",
             "adr" : "21, 9, 45"
           },
           "relationships" : [ {
@@ -4761,7 +4761,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.section",
             "codeDiagram" : "4-code/femcore/section.md",
             "code" : "crates/femcore/src: section.rs",
-            "lines" : "221",
+            "lines" : "223",
             "adr" : "1"
           },
           "relationships" : [ {
@@ -4797,7 +4797,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.expr",
             "codeDiagram" : "4-code/femcore/expr.md",
             "code" : "crates/femcore/src: expr.rs, fieldexpr.rs, formula.rs",
-            "lines" : "1562",
+            "lines" : "1568",
             "adr" : "65, 2, 90"
           },
           "relationships" : [ {
@@ -4826,7 +4826,7 @@
             "structurizr.dsl.identifier" : "nyx.femcore.runtime",
             "codeDiagram" : "4-code/femcore/runtime.md",
             "code" : "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, warm.rs",
-            "lines" : "827",
+            "lines" : "837",
             "adr" : "9, 11, 96"
           },
           "relationships" : [ {

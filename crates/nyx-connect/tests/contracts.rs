@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Interface contracts of nyx-connect (ADR 19 and ADR 28): what other programs depend on.
 //!
 //! * `connect_hosts` (v1): the table of hosts: id, name, config file (relative to the home folder) per operating system, the key that holds the

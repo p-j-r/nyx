@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The sheets that open over the shell (new workflow, search palette, versions, share, open a received file) and the settings page.
 
 use crate::app::App;

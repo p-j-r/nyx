@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 #![allow(clippy::needless_range_loop)]
 //! NLEIGS against the closed-form spectra of the scalar-reducible problems of `nep.rs`, and against Beyn's method.
 use crate::common;

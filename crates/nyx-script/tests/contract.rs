@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The script binding's contract (`script_api.v1`, ADR 93, ADR 19): what a script can rely on, written from the constants the code uses so the
 //! exemplar cannot drift from them. The commands a script calls are `engine_commands`, not this file. `NYX_WRITE_CONTRACT=1` rewrites the exemplar;
 //! do that only together with a line in `docs/architecture/contracts/VERSIONS.md`.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The ring (axisymmetric) kernels in the wafer frame.
 //!
 //! A ring resonator is solved on the (r, z) half-plane: mesh x = r, mesh z = z, and the azimuthal direction theta is the third

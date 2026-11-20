@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The actions of the window as one table (ADR 88): the "Do something" list of the command palette and the native menu bar are two views of it, so
 //! a command cannot be in one and missing from the other. The native menu (`muda`, Windows for now) shows the shortcuts; the keys themselves are
 //! handled by the window (`shell_shortcuts`, and egui's own Ctrl +/- for the zoom), so nothing fires twice.

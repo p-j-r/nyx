@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The Sweep section of a workflow's Build page (UX plan U5, ADR 88): vary one model parameter over a range, see what it costs before it
 //! starts, watch the points come in and keep each finished point as a run of the workflow. Everything is the engine's own: the plan is the engine's
 //! dry run of the command (`check_list`, the same count `nyx check` prints), the points are `sweep_run` jobs of the queue at priority 3 (so a

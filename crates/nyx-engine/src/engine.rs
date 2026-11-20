@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them and the binding to a
 //! workflow folder. The window and the MCP server hold an `Engine` and nothing else; every action is a method here or a named command
 //! (`commands.rs`, which calls these methods).

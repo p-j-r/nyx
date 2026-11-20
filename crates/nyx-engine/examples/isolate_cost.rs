@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What running a solve in a worker process costs (productivity plan P4): the same project is solved in this process and in a worker, each in a
 //! fresh engine (so both mesh), `--reps` times, and the wall time of each is printed with the stages that belong to the worker (the results
 //! read back) and the memory the worker reports. The difference of the best times is the price of isolation: starting the program, meshing

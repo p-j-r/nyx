@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `geom::expr` and `femcore::expr` are two copies of one grammar (ROUGH_SPOTS R06): geom must not depend on femcore, so the evaluator is
 //! copied rather than shared. This test keeps the copies equal: on one corpus both accept the same inputs, both refuse the same inputs,
 //! and the values agree to the last bit. (`femcore` depends on `geom`, so the test lives here.)

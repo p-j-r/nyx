@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Eigenfrequencies of a block beam (fixed at x = 0) with a chosen linear-solver setting, to compare the multigrid/LOBPCG
 //! path with the sparse factorisation and to time them:
 //!

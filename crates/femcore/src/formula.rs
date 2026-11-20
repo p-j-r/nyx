@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Text formulas over fields, coordinates and material values (productivity plan N2, ADR 90): `abs(Ex)^2 * eps_r`, `where(x > 0, T, 0)`,
 //! `dot(E, conj(E))`. The text is parsed once into a `fieldexpr::Tree`, the same tree that handle arithmetic builds, so a formula and a
 //! handle expression are one request with one evaluator. The grammar allows nothing but arithmetic: no input can run code, name a file or

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Chebyshev-filtered subspace iteration: many lowest eigenpairs of a 2-D Laplacian against the closed form,
 //! complex Hermitian operators, the effect of the degree, and input validation.
 #![allow(clippy::needless_range_loop)]

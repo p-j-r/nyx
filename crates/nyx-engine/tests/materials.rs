@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Materials, analysis and a sized mesh through engine commands alone: a silicon wire in oxide is built from geometry commands, its
 //! materials are named library files (silicon and silica, Sellmeier or tabulated models evaluated at the study wavelength), it is solved
 //! with the real `ems` physics and its modes are analysed. Nothing here names a physics type or a solver.

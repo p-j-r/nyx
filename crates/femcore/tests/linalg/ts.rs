@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Tier C checks for the time steppers: closed-form solutions on tridiagonal systems whose
 //! eigenvectors are sines, convergence orders at fixed step, error-versus-tolerance for the adaptive
 //! methods, and the algebraic properties (energy conservation, high-frequency damping).

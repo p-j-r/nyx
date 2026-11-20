@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Typed problem** (`ems.problem`) in the cont
 > The typed ems problem the kernels read, decoded from the envelope.
 
 **Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md)  
-**Size:** 1 file, 187 lines.
+**Size:** 1 file, 189 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/problem.rs` | 187 | The typed problem of `ems`: what the kernels read. It is decoded from the `ProblemSpec` envelope by `decode` (region names and selectors resolved to mesh numbers, parameters with their defaults), or built directly by code that already ha... |
+| `crates/nyx-ems/src/problem.rs` | 189 |  |
 
 ## What it uses
 
@@ -66,9 +66,9 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| enum | `Study` | `problem.rs:16` | variants: `Modes`, `AxisymmetricModes`, `Cavity` |
-| struct | `Problem` | `problem.rs:40` | fields: `order`, `study`, `materials`, `periodic`, `pmc` |
-| fn | `decode` | `problem.rs:111` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
-| fn | `Study::kind` | `problem.rs:30` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
-| fn | `Problem::new` | `problem.rs:55` | `pub fn new(study: Study, order: usize) -> Problem` |
-| fn | `Problem::check_finite` | `problem.rs:60` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field. |
+| enum | `Study` | `problem.rs:18` | variants: `Modes`, `AxisymmetricModes`, `Cavity` |
+| struct | `Problem` | `problem.rs:42` | fields: `order`, `study`, `materials`, `periodic`, `pmc` |
+| fn | `decode` | `problem.rs:113` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
+| fn | `Study::kind` | `problem.rs:32` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
+| fn | `Problem::new` | `problem.rs:57` | `pub fn new(study: Study, order: usize) -> Problem` |
+| fn | `Problem::check_finite` | `problem.rs:62` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field. |

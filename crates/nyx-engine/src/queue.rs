@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The queue of the engine (productivity plan Q1, ADR 87): what a front-end sees of the job runner's lanes (`queue_*` commands), the options a
 //! request is submitted with, and the stage caches that let queued requests share work. A request that comes after another of the same project
 //! finds the mesh the first built; a convergence check right after a solve finds its coarse result done. Stages are looked up by content

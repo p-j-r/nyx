@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Decoding the problem envelope into what a kernel reads: typed parameters with the descriptor defaults, region names resolved to
 //! domain numbers (`materials_by_label`), condition selectors resolved to boundary or domain numbers (`resolve_conditions`). Every physics
 //! crate uses these, so that the envelope is read the same way in all of them (ADR 41).

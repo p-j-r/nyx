@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A typed expression tree over complex field values, evaluated at one point at a time (productivity plan N1 and N2, ADR 90).
 //!
 //! The tree is what "handle arithmetic" and the text formulas of `femcore::formula` build: leaves are numbered slots (`Leaf(i)`, the caller

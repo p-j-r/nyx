@@ -51,8 +51,8 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Analysis API](../4-code/analysis/api.md) | 1 | 96 | 56 | The entry points an engine calls: an analysis is a function of a SolveResult and its mesh. |
-| [Field samples](../4-code/analysis/samples.md) | 1 | 151 | 56 | The modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates. |
-| [Polarization](../4-code/analysis/polarization.md) | 1 | 936 | 56, 21 | Stokes parameters, Poincare sphere and the classification of an optical mode. |
-| [Mode report](../4-code/analysis/modes.md) | 1 | 620 | 56 | One report per mode, a table, the Poincare picture and the degenerate groups. |
-| [Mode figures](../4-code/analysis/figures.md) | 5 | 1746 | 99, 56 | The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named. |
+| [Analysis API](../4-code/analysis/api.md) | 1 | 98 | 56 | The entry points an engine calls: an analysis is a function of a SolveResult and its mesh. |
+| [Field samples](../4-code/analysis/samples.md) | 1 | 153 | 56 | The modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates. |
+| [Polarization](../4-code/analysis/polarization.md) | 1 | 938 | 56, 21 | Stokes parameters, Poincare sphere and the classification of an optical mode. |
+| [Mode report](../4-code/analysis/modes.md) | 1 | 622 | 56 | One report per mode, a table, the Poincare picture and the degenerate groups. |
+| [Mode figures](../4-code/analysis/figures.md) | 5 | 1756 | 99, 56 | The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named. |

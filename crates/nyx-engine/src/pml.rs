@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Absorbing layers across the two halves of a project: the geometry cuts a region into the physical part and one piece per side of the
 //! window (`Pml` feature), the physics stretches the coordinates in each piece (`pml` condition). `add_pml_conditions` writes one condition
 //! per piece from the geometry, so the two cannot disagree.

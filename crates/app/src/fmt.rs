@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Small text helpers of the window (plan U3): plurals ("1 run", "2 runs"), ellipsis for long titles, SI prefixes ("201.7 µm"), and readable labels
 //! for the metric and parameter keys of the runs table ("max_von_mises_pa" becomes "Max von Mises [Pa]"). Numbers are stored in SI everywhere; this is
 //! only how they are shown.

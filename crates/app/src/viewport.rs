@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The 2D/3D viewport: camera, drawing of meshes and result fields, picking.
 
 use crate::colormap::Colormap;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Process-wide settings of the program that hosts the engine. Today one: on Windows, opt the process out of power throttling.
 //!
 //! Windows 11 puts a process it considers background work (a console program, a window that is hidden or not in front, a program started by

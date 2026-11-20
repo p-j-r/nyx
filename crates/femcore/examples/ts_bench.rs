@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! 2-D heat equation `y' + L y = 0` on a 200×200 grid with the variable-step BDF: steps, factorisations
 //! and where the time goes (`cargo run --release --example ts_bench`).
 use femcore::linalg::csr::laplacian_2d;

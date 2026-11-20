@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Results are stale per physics (productivity plan P1, ADR 84): the key of a result is the problem key of its physics (its own problem, the project
 //! materials, the mesh key and the keys of the physics it takes fields from), so an edit stales what it feeds and nothing else, and a job that
 //! finishes late cannot replace a result that is current.

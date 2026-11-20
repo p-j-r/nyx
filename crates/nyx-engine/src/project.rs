@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The project: what is saved. A geometry (a `geom` feature list), the mesh settings, one problem (`ProblemSpec` envelope) per physics the
 //! project loads, and which physics is active. It is plain serde data; `to_json` writes it with sorted keys so the same project is the same
 //! text (and hash) in every build. The project, its feature list and each of its problems carry a `format` key (first value 1, ADR 63); a file

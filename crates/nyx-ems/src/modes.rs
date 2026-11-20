@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed),
 //! perfectly conducting walls.
 //!

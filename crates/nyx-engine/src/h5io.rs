@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Results in HDF5 files (cargo feature `hdf5`): the project, the mesh and every solution of every solved physics with all its fields and
 //! cell fields, written compressed and read back exactly (ADR 62). This is the efficient store of the data a solve produces; the JSON files
 //! of a project and a run record stay small.

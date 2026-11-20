@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The table of AI hosts nyx can connect to: where each keeps its MCP config file and what an entry in it looks like.
 //! Adding a host is one row here and one row in the contract exemplar `connect_hosts.v1.json`.
 use crate::env::{Env, Os};

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Floquet-periodic boundary conditions: the dofs on a `dest` boundary equal the dofs on a `source`
 //! boundary (translated by the vector between the two) times `exp(-i phase)`. The two boundaries must
 //! carry the same mesh up to the translation.

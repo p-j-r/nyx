@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Behaviour of nyx-connect: what it does to a host's config file and how it finds and probes the server.
 //! Everything runs in a temporary "machine" (see `common`); the real home folder is never read or written.
 //! The key order of the user's config file is part of the behaviour (the crate enables `serde_json/preserve_order` itself, ADR 28),

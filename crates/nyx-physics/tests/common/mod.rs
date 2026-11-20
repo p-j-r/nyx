@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Shared helpers: a mock physics, a table resolver, and the exemplar file check used by the contract tests.
 #![allow(dead_code)]
 

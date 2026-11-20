@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Interface contract of nyx-mcp (docs/architecture/adr/0015, 0019 and 0057): what an AI host that has registered `nyx` can rely on.
 //!
 //! The snapshot `docs/architecture/contracts/mcp_tools.v3.json` lists, for every tool, its name, its annotations, its required

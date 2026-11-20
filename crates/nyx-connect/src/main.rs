@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `nyx-connect`: the command-line twin of the app's Connect menu. It writes nothing unless you say connect/disconnect.
 //! `--json` prints the versioned report of `nyx_connect::report` instead of text (contract `connect_report`).
 use nyx_connect::report::{change_report, change_row, list_report, test_report};

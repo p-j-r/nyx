@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The commands: every action a front-end can take, by name, with JSON arguments, a JSON schema and a JSON reply. The window calls the typed
 //! methods of `Engine` directly or these commands; the MCP server turns `catalog()` into its tool list and `call()` into its tool calls,
 //! so a tool is a command and nothing else. The geometry tools are generated from `geomdesc` (gate G5: every operation, none picked by

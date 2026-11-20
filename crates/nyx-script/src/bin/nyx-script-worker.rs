@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The script worker program (productivity plan S4, ADR [89]): `nyx-script-worker subprocess`, started by `nyx-script` through monty-pool. It
 //! holds the Monty interpreter and nothing of the engine: every `nyx.<command>(...)` a script makes is sent back to the process that started
 //! it as a pause of the script, and that process answers with `Engine::call`. A script that allocates without bound or overflows the stack

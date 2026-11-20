@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Feedback while editing and while a result arrives (productivity plan P3, ADR 92): the project checked with the edits that are not applied
 //! yet, the size and cost of those edits from a trial mesh, and the polarization of a new result computed beside the frame. Everything here
 //! answers a person's edit with a value or a line of text: it starts no mesh build, no solve, no job and no run, and it never replaces the

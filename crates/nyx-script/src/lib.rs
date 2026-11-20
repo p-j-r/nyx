@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Scripts as a front-end of the nyx engine (productivity plan S4, ADR [89]).
 //!
 //! A script is a text file in Python syntax (`*.nys`). Monty, a Python interpreter written in Rust, runs it in a *worker process*; each

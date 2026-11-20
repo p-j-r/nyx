@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Mixed-precision LU with refinement: accuracy equal to a double-precision solve, detection of matrices that
 //! single precision cannot handle, and use inside a shift-and-invert eigensolve.
 #![allow(clippy::needless_range_loop)]

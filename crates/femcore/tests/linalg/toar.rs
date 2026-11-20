@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! TOAR for the quadratic eigenproblem: closed form for modally damped vibration, a general
 //! (non-modal) problem against Arnoldi on the explicit linearisation, and the memory saving.
 #![allow(clippy::needless_range_loop)]

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Solving in a worker process (productivity plan P4, ADR 86): the numbers are those of the same solve in this process, to the bit, over the
 //! examples and a coupled chain; the stage log of the child is the job's log; a cancel kills the child at once; the library and the mesh the
 //! child used are the parent's; what cannot be isolated says so. The crash of a worker is in `worker_crash.rs` (it sets an environment variable,

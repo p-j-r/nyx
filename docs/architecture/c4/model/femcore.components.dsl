@@ -19,7 +19,7 @@ fixtures = component "Fixtures and test kit" "Test meshes and the SOI wire cross
     properties {
         "adr" "41, 10, 60"
         "code" "crates/femcore/src: mesh/fixtures.rs, testkit/mod.rs, testkit/soi.rs"
-        "lines" "582"
+        "lines" "586"
         "codeDiagram" "4-code/femcore/fixtures.md"
     }
 }
@@ -147,7 +147,7 @@ fem = component "Finite-element basics" "Lagrange P1/P2 elements and quadrature,
     properties {
         "adr" "9, 4, 45, 69"
         "code" "crates/femcore/src: edge.rs, fem.rs, fields.rs, periodic.rs, pml.rs, props.rs"
-        "lines" "2013"
+        "lines" "2025"
         "codeDiagram" "4-code/femcore/fem.md"
     }
 }
@@ -155,7 +155,7 @@ material = component "Material specification" "TOML material files with explicit
     properties {
         "adr" "29, 30, 34, 35"
         "code" "crates/femcore/src: material/elastic.rs, material/mod.rs, material/optics.rs, material/reader.rs, material/schema.rs, material/source.rs, ... (9 files)"
-        "lines" "3519"
+        "lines" "3537"
         "codeDiagram" "4-code/femcore/material.md"
     }
 }
@@ -163,7 +163,7 @@ optical = component "Optical mode sets" "Optical modes of a 2D cross-section as 
     properties {
         "adr" "21, 9, 45"
         "code" "crates/femcore/src: optical.rs"
-        "lines" "231"
+        "lines" "233"
         "codeDiagram" "4-code/femcore/optical.md"
     }
 }
@@ -171,7 +171,7 @@ section = component "Frame and sections" "The one place that knows the wafer axe
     properties {
         "adr" "1"
         "code" "crates/femcore/src: section.rs"
-        "lines" "221"
+        "lines" "223"
         "codeDiagram" "4-code/femcore/section.md"
     }
 }
@@ -179,7 +179,7 @@ expr = component "Expressions" "A small safe expression evaluator for user input
     properties {
         "adr" "65, 2, 90"
         "code" "crates/femcore/src: expr.rs, fieldexpr.rs, formula.rs"
-        "lines" "1562"
+        "lines" "1568"
         "codeDiagram" "4-code/femcore/expr.md"
     }
 }
@@ -187,7 +187,7 @@ runtime = component "Runtime services" "The shared worker pool, stage log and ca
     properties {
         "adr" "9, 11, 96"
         "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, warm.rs"
-        "lines" "827"
+        "lines" "837"
         "codeDiagram" "4-code/femcore/runtime.md"
     }
 }

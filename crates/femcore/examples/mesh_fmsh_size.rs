@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Storage study: `.fmsh` against plain binary arrays (and, when the tools are installed, against
 //! gzip/xz/zstd run on the plain arrays; those are comparisons only, nothing links to them).
 //! Every file is decoded again and compared bit for bit.

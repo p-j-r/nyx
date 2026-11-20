@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Test kit for the physics crates: the golden-file harness (ADR 10). A golden file holds, for every solution of a case, the names of its fields
 //! (flat names: a vector `E` is `|E|`, `Ex`, `Ez`), `n`, the sum of |v|, the max and a few probe values per field, the scalars and the
 //! eigenvalue. A kernel that is ported must reproduce them. `NYX_WRITE_GOLDEN=1` writes every file, `NYX_WRITE_GOLDEN=<prefix>` the files whose

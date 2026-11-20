@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Curved (isoparametric, quadratic geometry) tetrahedra, ADR 82: the map of `fem::CurvedTet`, the quadrature rule built for it and the
 //! storage of curved edges in the meshes. Closed forms only.
 #![allow(clippy::needless_range_loop)]

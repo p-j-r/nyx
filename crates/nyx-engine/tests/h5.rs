@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The HDF5 results file (feature `hdf5`; ADR 62): what is written is read back bit for bit, the file is smaller than the same data as JSON,
 //! and the engine commands write and describe it.
 #![cfg(feature = "hdf5")]

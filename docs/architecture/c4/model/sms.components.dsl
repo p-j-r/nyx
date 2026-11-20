@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of sms with th
     properties {
         "adr" "42, 25, 68"
         "code" "crates/nyx-sms/src: lib.rs"
-        "lines" "305"
+        "lines" "307"
         "codeDiagram" "4-code/sms/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed sms problem the kernels read, dec
     properties {
         "adr" "42, 68"
         "code" "crates/nyx-sms/src: problem.rs"
-        "lines" "373"
+        "lines" "375"
         "codeDiagram" "4-code/sms/problem.md"
     }
 }
@@ -19,7 +19,7 @@ solid = component "Solid kernel" "Linear elastic solid mechanics on P1/P2 triang
     properties {
         "adr" "42, 9"
         "code" "crates/nyx-sms/src: solid.rs"
-        "lines" "746"
+        "lines" "748"
         "codeDiagram" "4-code/sms/solid.md"
     }
 }
@@ -27,7 +27,7 @@ crosssection = component "Axisymmetric study kernel" "Axisymmetric study kernel:
     properties {
         "adr" "43, 68, 69, 80"
         "code" "crates/nyx-sms/src: cross_section.rs"
-        "lines" "502"
+        "lines" "504"
         "codeDiagram" "4-code/sms/crosssection.md"
     }
 }
@@ -35,7 +35,7 @@ axisym = component "Axisymmetric kernel" "Elastic modes of a body of revolution 
     properties {
         "adr" "43, 69, 80"
         "code" "crates/nyx-sms/src: axisym.rs"
-        "lines" "388"
+        "lines" "390"
         "codeDiagram" "4-code/sms/axisym.md"
     }
 }
@@ -43,7 +43,7 @@ floquet = component "Floquet kernel" "Eigenfrequencies of a solid with Floquet-p
     properties {
         "adr" "42"
         "code" "crates/nyx-sms/src: floquet.rs"
-        "lines" "128"
+        "lines" "130"
         "codeDiagram" "4-code/sms/floquet.md"
     }
 }
@@ -51,7 +51,7 @@ pml = component "Absorbing-layer kernel" "Eigenfrequencies of elastic bodies wit
     properties {
         "adr" "42"
         "code" "crates/nyx-sms/src: pml.rs"
-        "lines" "214"
+        "lines" "216"
         "codeDiagram" "4-code/sms/pml.md"
     }
 }
@@ -59,7 +59,7 @@ lrb = component "Low-reflecting boundary" "Low-reflecting boundaries for solid m
     properties {
         "adr" "42"
         "code" "crates/nyx-sms/src: lrb.rs"
-        "lines" "296"
+        "lines" "298"
         "codeDiagram" "4-code/sms/lrb.md"
     }
 }

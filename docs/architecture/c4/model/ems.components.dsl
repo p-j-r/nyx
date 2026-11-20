@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of ems: descri
     properties {
         "adr" "45, 25"
         "code" "crates/nyx-ems/src: lib.rs"
-        "lines" "293"
+        "lines" "295"
         "codeDiagram" "4-code/ems/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed ems problem the kernels read, dec
     properties {
         "adr" "45"
         "code" "crates/nyx-ems/src: problem.rs"
-        "lines" "187"
+        "lines" "189"
         "codeDiagram" "4-code/ems/problem.md"
     }
 }
@@ -19,7 +19,7 @@ modes = component "Mode kernel" "Full-vector mode analysis of a 2D waveguide cro
     properties {
         "adr" "45, 9"
         "code" "crates/nyx-ems/src: modes.rs"
-        "lines" "438"
+        "lines" "440"
         "codeDiagram" "4-code/ems/modes.md"
     }
 }
@@ -27,7 +27,7 @@ modescx = component "Complex-mode kernel" "Complex-valued mode analysis: lossy m
     properties {
         "adr" "45"
         "code" "crates/nyx-ems/src: modes_complex.rs"
-        "lines" "464"
+        "lines" "466"
         "codeDiagram" "4-code/ems/modescx.md"
     }
 }
@@ -35,7 +35,7 @@ axisym = component "Axisymmetric kernel" "Electromagnetic eigenmodes of a body o
     properties {
         "adr" "46"
         "code" "crates/nyx-ems/src: axisym.rs"
-        "lines" "467"
+        "lines" "469"
         "codeDiagram" "4-code/ems/axisym.md"
     }
 }
@@ -43,7 +43,7 @@ cavity = component "3D cavity kernel" "Electromagnetic eigenmodes of 3D cavities
     properties {
         "adr" "45"
         "code" "crates/nyx-ems/src: cavity.rs"
-        "lines" "789"
+        "lines" "791"
         "codeDiagram" "4-code/ems/cavity.md"
     }
 }
@@ -51,7 +51,7 @@ optical = component "Optical mode sets" "The mode solvers' results as an Optical
     properties {
         "adr" "45, 21"
         "code" "crates/nyx-ems/src: optical.rs"
-        "lines" "97"
+        "lines" "99"
         "codeDiagram" "4-code/ems/optical.md"
     }
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The nyx look: every colour of the shell comes from `tokens.rs` (ADR 88) through the functions here, in a light and a dark look, both installed
 //! once (`apply_mode`) so a switch of the theme only changes which one is active. Body text is Inter, numbers JetBrains Mono and titles EB Garamond
 //! italic when they are installed (next to the executable in `fonts/`, or on the system); otherwise Segoe UI, Cascadia/Consolas and Georgia italic

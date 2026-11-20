@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Test support** (`physics.testsupport`) in t
 > The golden-file harness and the contract-test helpers shared by every physics crate.
 
 **Decisions:** [ADR 10](../../../adr/0010-golden-files-are-the-numerical-oracle.md), [ADR 19](../../../adr/0019-versioned-interface-contracts.md)  
-**Size:** 2 files, 229 lines.
+**Size:** 2 files, 233 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-physics/src/contract.rs` | 50 | Helpers for the contract tests of every physics crate (ADR 19): the snapshot of a physics' descriptors, and the exemplar file check. |
-| `crates/nyx-physics/src/testkit.rs` | 179 | Test kit for the physics crates: the golden-file harness (ADR 10). A golden file holds, for every solution of a case, the names of its fields (flat names: a vector `E` is `\|E\|`, `Ex`, `Ez`), `n`, the sum of \|v\|, the max and a few probe v... |
+| `crates/nyx-physics/src/contract.rs` | 52 |  |
+| `crates/nyx-physics/src/testkit.rs` | 181 |  |
 
 ## What it uses
 
@@ -58,9 +58,9 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `descriptor_snapshot` | `contract.rs:14` | `pub fn descriptor_snapshot(p: &dyn Physics) -> Value` —  Everything a physics tells the rest of nyx, as one JSON value: the exemplar `physics_<id>.v1.json` is this value. |
-| fn | `contract_dir` | `contract.rs:32` | `pub fn contract_dir(manifest_dir: &str) -> PathBuf` |
-| fn | `check_exemplar` | `contract.rs:37` | `pub fn check_exemplar(manifest_dir: &str, name: &str, got: &Value)` —  Compares `got` with the exemplar file `name` (call with `env!("CARGO_MANIFEST_DIR")`). Panics with the instruction to version the change. |
-| fn | `record` | `testkit.rs:11` | `pub fn record(r: &SolveResult) -> Value` —  The record of a result that goes into a golden file. |
-| fn | `golden` | `testkit.rs:81` | `pub fn golden(dir: &std::path::Path, name: &str, r: &SolveResult, tol: f64)` —  Checks (or, with NYX_WRITE_GOLDEN, writes) the record of `r` against the golden file `name`. |
-| fn | `cell_fields_reproduce_the_plot_fields` | `testkit.rs:154` | `pub fn cell_fields_reproduce_the_plot_fields(mesh: &crate::Discretisation, r: &SolveResult)` —  The fields stage hands out the same quantities as the plot fields before the average over the cells at a node: every cell field has the |
+| fn | `descriptor_snapshot` | `contract.rs:16` | `pub fn descriptor_snapshot(p: &dyn Physics) -> Value` —  Everything a physics tells the rest of nyx, as one JSON value: the exemplar `physics_<id>.v1.json` is this value. |
+| fn | `contract_dir` | `contract.rs:34` | `pub fn contract_dir(manifest_dir: &str) -> PathBuf` |
+| fn | `check_exemplar` | `contract.rs:39` | `pub fn check_exemplar(manifest_dir: &str, name: &str, got: &Value)` —  Compares `got` with the exemplar file `name` (call with `env!("CARGO_MANIFEST_DIR")`). Panics with the instruction to version the change. |
+| fn | `record` | `testkit.rs:13` | `pub fn record(r: &SolveResult) -> Value` —  The record of a result that goes into a golden file. |
+| fn | `golden` | `testkit.rs:83` | `pub fn golden(dir: &std::path::Path, name: &str, r: &SolveResult, tol: f64)` —  Checks (or, with NYX_WRITE_GOLDEN, writes) the record of `r` against the golden file `name`. |
+| fn | `cell_fields_reproduce_the_plot_fields` | `testkit.rs:156` | `pub fn cell_fields_reproduce_the_plot_fields(mesh: &crate::Discretisation, r: &SolveResult)` —  The fields stage hands out the same quantities as the plot fields before the average over the cells at a node: every cell field has the |

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What the engine runs and what waits, as the window shows it (UX plan U5, ADR 88): the busy chip of the top bar, the queue popover under it
 //! (cancel, priority and pause; no hold, decision D8) and the stale band. The numbers are the engine's own, read from `queue_list` (the entries an
 //! assistant gets from the `queue_*` commands), not the window's own list of its jobs: a sweep submits its points straight to the engine and they

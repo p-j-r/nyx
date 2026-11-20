@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The error type every `Physics` method returns. Plain data, so it can cross a process boundary later.
 
 use std::fmt;

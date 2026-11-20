@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Tracing of script functions (productivity plan S6, N3, ADR 90): a function given where a formula is expected is called once, becomes formula
 //! text, and gives the number of the same formula written by hand, to the bit. A branch on a value of the point is refused with the line and the
 //! `where(...)` spelling.

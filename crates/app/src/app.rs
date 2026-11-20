@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The application: the state of the window around one `nyx_engine::Engine`, and the window layout.
 //!
 //! `App` holds the engine (the project, the mesh it built, the results, the jobs), the mesh and results on show and the viewport. Every action

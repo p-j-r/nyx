@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The polarization analysis as a function of a `SolveResult`: what it needs from the result (frame, cell fields), what it leaves out (the
 //! absorbing domains) and how it refuses a result that does not state a frame. The results here are made by hand on a small mesh, so the
 //! numbers are known: the physics crates' own tests (`nyx-ems`: goldens, closed forms) check real modes.

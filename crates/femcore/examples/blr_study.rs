@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! S4 study: the block low-rank multifrontal LU (`blr.rs`) on 2-D and 3-D grid operators: how much of the exact
 //! multifrontal factor is stored, how fast factorisation and solve are, and how accurate the compressed solver is
 //! (direct, after iterative refinement, and as a GMRES preconditioner). `cargo run --release --example blr_study`

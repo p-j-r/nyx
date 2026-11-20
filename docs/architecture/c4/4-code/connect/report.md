@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Report** (`connect.report`) in the containe
 > The machine-readable form of what nyx-connect finds and does, with its JSON Schema.
 
 **Decisions:** [ADR 28](../../../adr/0028-nyx-connect-is-one-crate-with-a-versioned-report.md), [ADR 19](../../../adr/0019-versioned-interface-contracts.md)  
-**Size:** 2 files, 185 lines.
+**Size:** 2 files, 189 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-connect/src/lib.rs` | 28 | Connects the `nyx-mcp` server to the AI hosts installed on this computer, the way a "Connect" button in a design tool does: find each host's MCP config file, add or remove one `nyx` entry, keep a backup, and never overwrite a file it can... |
-| `crates/nyx-connect/src/report.rs` | 157 | The machine-readable form of what `nyx-connect` finds and does (`nyx-connect list\|connect\|disconnect\|test --json`), and its JSON Schema. |
+| `crates/nyx-connect/src/lib.rs` | 30 |  |
+| `crates/nyx-connect/src/report.rs` | 159 |  |
 
 ## What it uses
 
@@ -61,12 +61,12 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| const | `ENTRY` | `lib.rs:27` | `&str` —  The name of the entry written into every host's config. |
-| const | `VERSION` | `report.rs:16` | `u64` —  The major version written into every report. |
-| fn | `status_json` | `report.rs:26` | `pub fn status_json(s: &Status) -> Value` —  `{"state": ..., "found"?: ..., "why"?: ...}`; `state` is one of `not_installed`, `not_connected`, `connected`, `stale`, `unreadable`. |
-| fn | `host_json` | `report.rs:36` | `pub fn host_json(h: &HostInfo) -> Value` |
-| fn | `list_report` | `report.rs:41` | `pub fn list_report(server: &Path, hosts: &[HostInfo]) -> Value` —  The `list` report. `server_found` says whether `server` is a file. |
-| fn | `change_row` | `report.rs:50` | `pub fn change_row(host: &str, result: &Result<Done, String>) -> Value` —  One row of a `change` report. |
-| fn | `change_report` | `report.rs:58` | `pub fn change_report(action: &str, rows: Vec<Value>) -> Value` —  The `change` report; `action` is `connect` or `disconnect`. |
-| fn | `test_report` | `report.rs:66` | `pub fn test_report(result: &Result<ServerInfo, String>) -> Value` —  The `test` report. |
-| fn | `schema` | `report.rs:84` | `pub fn schema() -> Value` —  The JSON Schema (2020-12) of the three reports: a `oneOf` over `#/$defs/list`, `#/$defs/change` and `#/$defs/test`. |
+| const | `ENTRY` | `lib.rs:29` | `&str` —  The name of the entry written into every host's config. |
+| const | `VERSION` | `report.rs:18` | `u64` —  The major version written into every report. |
+| fn | `status_json` | `report.rs:28` | `pub fn status_json(s: &Status) -> Value` —  `{"state": ..., "found"?: ..., "why"?: ...}`; `state` is one of `not_installed`, `not_connected`, `connected`, `stale`, `unreadable`. |
+| fn | `host_json` | `report.rs:38` | `pub fn host_json(h: &HostInfo) -> Value` |
+| fn | `list_report` | `report.rs:43` | `pub fn list_report(server: &Path, hosts: &[HostInfo]) -> Value` —  The `list` report. `server_found` says whether `server` is a file. |
+| fn | `change_row` | `report.rs:52` | `pub fn change_row(host: &str, result: &Result<Done, String>) -> Value` —  One row of a `change` report. |
+| fn | `change_report` | `report.rs:60` | `pub fn change_report(action: &str, rows: Vec<Value>) -> Value` —  The `change` report; `action` is `connect` or `disconnect`. |
+| fn | `test_report` | `report.rs:68` | `pub fn test_report(result: &Result<ServerInfo, String>) -> Value` —  The `test` report. |
+| fn | `schema` | `report.rs:86` | `pub fn schema() -> Value` —  The JSON Schema (2020-12) of the three reports: a `oneOf` over `#/$defs/list`, `#/$defs/change` and `#/$defs/test`. |

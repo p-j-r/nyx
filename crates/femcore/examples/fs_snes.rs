@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! `fs-snes --problem bratu|atan [--nx 80] [--mu 6] [--n 10] [--x0 2] [--rtol 1e-8] [--ls bt|none] [--lag 1] [--maxit 50]`
 //!
 //! Newton on the same two problems as `harness/c/petsc_snes.c` (Bratu `−Δu − μ e^u` on an `nx × nx` grid with

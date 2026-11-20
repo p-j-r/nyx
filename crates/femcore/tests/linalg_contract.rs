@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Contract of the linear-algebra driver (docs/architecture/adr/0031): the shape of the eigensolver options, the names the kernels call,
 //! and closed-form answers that do not depend on frozen floating-point values. `NYX_WRITE_CONTRACT=1` rewrites the exemplar
 //! (only with a line in `contracts/VERSIONS.md`).

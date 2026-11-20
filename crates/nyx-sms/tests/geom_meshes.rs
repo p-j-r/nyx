@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Physics on meshes made from geom models: what the solid solver promises on curved boundaries and holes. (The sweep of a section along y
 //! stays in femcore.)
 mod common;

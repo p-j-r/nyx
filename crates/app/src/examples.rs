@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Starting points: the example projects (files in the `examples` folder, found next to the program or in a parent folder of it, or at
 //! `NYX_EXAMPLES`) and a blank simulation built from engine commands. An example is a project file like any other; nothing about a device is
 //! in the program.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Cost per right-hand side of a sparse triangular solve as a function of the block width.
 //! The solves dominate shift-and-invert eigensolves, so this decides whether the block variant
 //! of Krylov–Schur is also *faster* per vector, not just more robust for degenerate spectra.

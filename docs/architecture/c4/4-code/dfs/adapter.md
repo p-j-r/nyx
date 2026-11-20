@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Physics adapter** (`dfs.adapter`) in the co
 > The Physics implementation of dfs: descriptors, validation, solve entry.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 1 file, 217 lines.
+**Size:** 1 file, 219 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/lib.rs` | 217 | nyx-dfs: diffusion physics (`dfs`, ADR 12): electrostatics and heat transfer, stationary and transient. |
+| `crates/nyx-dfs/src/lib.rs` | 219 |  |
 
 ## What it uses
 
@@ -49,7 +49,7 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Dfs` | `lib.rs:25` |  |
-| fn | `run` | `lib.rs:193` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
+| struct | `Dfs` | `lib.rs:27` |  |
+| fn | `run` | `lib.rs:195` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
 
 Trait implementations in this component: `Dfs: Physics`

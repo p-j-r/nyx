@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Timing of the 3D meshing paths that exist before and after ADR 50 to 55, with fixed arguments so that a control run of the parent commit
 //! can be compared case by case: the lattice mesher on a sphere in a box and on a layer stack, the sphere cavity of `cavity_bench`, and plain
 //! `adapt3` on a block. Prints one line per case: `name seconds cells`. Run three times and take the best of each (`tools/bench_mesh3d.sh`).

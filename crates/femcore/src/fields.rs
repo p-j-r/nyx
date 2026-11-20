@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Derived fields and what is drawn: element gradients at the element's own nodes, the node averaging of nodal data
 //! and `Display`, the surface mesh used for plotting.
 //!

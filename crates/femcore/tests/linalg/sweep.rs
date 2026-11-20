@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Frequency sweeps: reduced-order model against closed forms (modal solutions of the 1-D Laplacian
 //! with damping or a Drude medium) and against a full solve per frequency on a 2-D problem.
 #![allow(clippy::needless_range_loop)]

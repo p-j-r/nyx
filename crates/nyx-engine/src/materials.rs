@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The materials of a session: the library of material files (`materials/*.toml`, ADR 29 to 35) and the materials a project carries as TOML
 //! text, which may extend a library material. A problem names a material of either (`MaterialAssign::Named` or `Oriented`); the engine
 //! hands the merged library to the physics through `Ctx` and works out the wavelength an optical model is evaluated at from the study.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The XDMF description of a results file (ADR 62, ADR 99): a small XML file next to the `.h5` that is the light index of the heavy data in
 //! it. It names the datasets of the file as they are stored, per physics `points` and `cells` and per solution `fields/<name>`, with their
 //! shapes, so a reader finds a field and reads the part of it that it needs without opening the rest. Nothing is copied into the HDF5 file for

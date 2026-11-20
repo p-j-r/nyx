@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The kernel (productivity plan S7, ADR [94]): one session that outlives a script, a command that waits for a job that cannot block for ever,
 //! `params`, the futures of `nyx.aio`, the refusal of the commands that discard the project, and a worker that dies replaced from the last dump.
 

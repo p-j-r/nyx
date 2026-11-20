@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What the interactions of productivity plan P3 cost, per example project: the geometry preview (`geometry_names`, what the window evaluates on
 //! every edit), the input check (`check_project`), the mesh build (`mesh_build`, to decide whether a small 2D mesh preview pays), and, with
 //! `--polarization`, the polarization analysis of a solved mode study (what the window computes when a solve is taken).

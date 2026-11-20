@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Runs an optional user Python script: `python script.py project.json [result.csv]`. Python is never needed by the application itself.
 //! The script runs on its own thread; its output comes back to the window as a message.
 

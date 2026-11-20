@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Scripted runs for testing and screenshots: `nyx --script "example 1; compute; shot out.png; quit"`.
 //!
 //! Commands (separated by `;`): `example N`, `new es|heat|solid|emw [3d]`, `open PATH`, `physics es|heat|solid|emw|dfs|sms|ems`,

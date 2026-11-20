@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The run-time state of the window around the engine's project: the mesh on show (`Doc`) and a result on show with its plot settings
 //! (`ResultView`). The project itself, with its geometry, mesh settings and one problem per physics, is `nyx_engine::Project` and lives in the
 //! engine; the window edits it through engine commands.

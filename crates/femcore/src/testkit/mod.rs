@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Shared helpers for the tests of the physics crates and of femcore: small meshes made from geom models with the boundary numbers the
 //! tests have always used, and `maxdiff`. Public so that `nyx-dfs`, `nyx-sms` and `nyx-ems` use the same fixtures.
 #![allow(dead_code, clippy::type_complexity)]

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The cross-section of a waveguide in wafer axes: the one place where the axis numbers of the 2D kernels are written down.
 //!
 //! The wafer frame is x lateral, y the direction of propagation, z the surface normal (right-handed). A 2D mesh is the x-z plane of the

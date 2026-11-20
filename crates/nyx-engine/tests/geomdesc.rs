@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Contract of `geomdesc` (ADR 38): every operation has a descriptor, the descriptor's fields are exactly the serde fields of the
 //! operation, `build_op` accepts the friendly form (names, selector text) and round-trips through `args_of`, and refusals name what is wrong.
 use geom::model::{FeatureList, Model, Op};

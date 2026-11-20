@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What the viewport draws, kept between frames.
 //!
 //! Drawing a mesh or a result field means: colour every vertex, project the vertices to the screen, sort the

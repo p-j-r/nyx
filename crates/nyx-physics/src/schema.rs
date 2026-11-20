@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! JSON Schemas generated from descriptors, so the MCP server, the window and the documentation read the same truth. The schemas are
 //! draft 2020-12 documents; `physics_schema` describes the whole `ProblemSpec` of one physics.
 

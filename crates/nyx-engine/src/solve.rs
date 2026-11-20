@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Solving a project: the physics in an order that satisfies the one-way couplings, each checked against its descriptors and the mesh, then
 //! solved with the fields it imports from the physics before it. Everything goes through `Physics`, so nothing here names a physics.
 

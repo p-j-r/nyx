@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The multigrid-preconditioned CG path must give the same answers as the direct solver.
 mod common;
 use common::maxdiff;

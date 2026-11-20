@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Elastic stiffness of a material: the full 6x6 matrix in the textbook Voigt order (1=xx, 2=yy, 3=zz, 4=yz, 5=xz, 6=xy, engineering
 //! shear strain) in the crystal frame, in Pa. It is read from a crystal class with its independent constants, from the reduced matrix
 //! (upper triangle or full), from the compliance (constants or matrix), or from isotropic constants (E and nu, lambda and mu, K and G).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Contract of the material file format (ADR 30): the JSON Schema exemplar, the kitchen-sink file and its resolved form, and the
 //! agreement of the schema with the keys the loader accepts. Rewrite an exemplar with `NYX_WRITE_CONTRACT=1` and a line in
 //! `docs/architecture/contracts/VERSIONS.md`.

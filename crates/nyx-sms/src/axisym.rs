@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Elastic modes of a body of revolution (a ring, a disk, a wheel) on its half-plane cross-section:
 //! the displacement is `u(r, z) exp(-i m theta)` with azimuthal order `m`, and the mesh has `x = r`,
 //! `y = z`. The three components are stored as (u_r, u_z, u_theta) so the assembly is that of

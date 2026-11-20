@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What an agent lost time on in the Antigravity benchmark session (L1 to L3, ADR 97): a wildcard material name that failed only in `mesh_build`
 //! with `physics_sizing`, a mesh far larger than needed that was found out by solving it, and a convergence check that could not be asked
 //! what it would cost. The tests use small 2D models; nothing here needs a long solve.

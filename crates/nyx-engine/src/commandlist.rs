@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Command lists (productivity plan S1): a file of JSON lines, `{"cmd": "<command of Engine::catalog()>", "args": {...}}`, that a person or an agent
 //! writes once and the engine checks, plans and runs. A list is a third front-end over `Engine::call` (ADR 57), beside the window and the MCP
 //! server: nothing here knows a command's meaning except through the catalog and the few names that start work.

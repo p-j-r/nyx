@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A dielectric sphere in a periodic cube at k = 0 with the `curved` mesh setting on and off (ADR 82): the reduced system keeps its size,
 //! the three uniform-field modes stay at zero, and the frequencies move the expected way (a curved sphere holds more dielectric than the
 //! polyhedron inscribed in it, so its modes are lower). The settings and the report travel through the engine commands.

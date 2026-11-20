@@ -3,7 +3,7 @@ model = component "Data model and card" "The workflow manifest, experiments, run
     properties {
         "adr" "14, 39"
         "code" "crates/nyx-store/src: card.rs, model.rs"
-        "lines" "223"
+        "lines" "227"
         "codeDiagram" "4-code/store/model.md"
     }
 }
@@ -11,7 +11,7 @@ workspace = component "Workspace" "The folder behind the dashboard: settings, th
     properties {
         "adr" "14"
         "code" "crates/nyx-store/src: lib.rs, workspace.rs"
-        "lines" "306"
+        "lines" "310"
         "codeDiagram" "4-code/store/workspace.md"
     }
 }
@@ -19,7 +19,7 @@ flow = component "Workflow folder" "One workflow folder: workflow.json, history.
     properties {
         "adr" "14, 59"
         "code" "crates/nyx-store/src: flow.rs"
-        "lines" "484"
+        "lines" "486"
         "codeDiagram" "4-code/store/flow.md"
     }
 }
@@ -27,7 +27,7 @@ versions = component "Versions" "Every change to an experiment's set-up kept in 
     properties {
         "adr" "14, 59"
         "code" "crates/nyx-store/src: versions.rs"
-        "lines" "200"
+        "lines" "202"
         "codeDiagram" "4-code/store/versions.md"
     }
 }
@@ -35,7 +35,7 @@ runs = component "Runs" "Append-only run records in runs.jsonl, the digest deriv
     properties {
         "adr" "64"
         "code" "crates/nyx-store/src: runs.rs"
-        "lines" "452"
+        "lines" "454"
         "codeDiagram" "4-code/store/runs.md"
     }
 }
@@ -43,7 +43,7 @@ search = component "Search" "Search over the manifests: plain words with a synon
     properties {
         "adr" "14"
         "code" "crates/nyx-store/src: search.rs"
-        "lines" "253"
+        "lines" "255"
         "codeDiagram" "4-code/store/search.md"
     }
 }
@@ -51,7 +51,7 @@ archive = component "Archives" ".nyx files: a workflow as one deterministic ZIP 
     properties {
         "adr" "14"
         "code" "crates/nyx-store/src: archive.rs"
-        "lines" "703"
+        "lines" "705"
         "codeDiagram" "4-code/store/archive.md"
     }
 }
@@ -59,7 +59,7 @@ util = component "Utilities" "UTC time without a time crate, time-ordered ids, a
     properties {
         "adr" "14"
         "code" "crates/nyx-store/src: util.rs"
-        "lines" "171"
+        "lines" "173"
         "codeDiagram" "4-code/store/util.md"
     }
 }

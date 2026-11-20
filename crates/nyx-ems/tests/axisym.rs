@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The axisymmetric kernel (bodies of revolution on the (r, z) half plane) against closed forms (gate G1: paul asked that its implementation be
 //! checked; ADR 46) and the direction of the azimuthal wave.
 mod common;

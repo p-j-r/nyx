@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Perfectly matched layers in solid mechanics eigenfrequencies.
 mod common;
 use femcore::props::*;

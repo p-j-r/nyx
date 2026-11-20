@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The queue in the workspace folder (productivity plan Q3, ADR 95). Real processes where the gate is about processes: the queue worker is a
 //! program of its own (`nyx-worker --worker FOLDER`), a submitter that exits is a child process (`nyx-worker queue submit`), and a worker is
 //! killed with the system's own kill. Two `Engine`s in this test process stand for two front-ends (the window and the MCP server): they share

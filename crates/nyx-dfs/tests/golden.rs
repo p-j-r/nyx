@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Frozen reference output of the dfs kernels (ADR 10): the golden files in `tests/golden/` were taken through the pre-restructure `solve::solve`
 //! (femcore tests/golden_frames) and moved here with the kernels. The kernels must reproduce them to round-off (tolerance 1e-9).
 //! `NYX_WRITE_GOLDEN=<prefix> cargo test --release -p nyx-dfs --test golden` rewrites them; do that only for a kernel known to be right.

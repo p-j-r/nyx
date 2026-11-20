@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Search over the manifests: plain words with a synonym table, and numbers with units matched against card dimensions, wavelengths
 //! and the parameter ranges of runs. No index and no engine: a few thousand manifests scan in milliseconds.
 //!

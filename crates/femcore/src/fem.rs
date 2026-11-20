@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Lagrange P1/P2 finite elements on simplices: quadrature, shape functions, scalar matrices, boundary integrals and
 //! Dirichlet constraints, and the choice between a sparse factorisation and multigrid for symmetric positive systems.
 //!

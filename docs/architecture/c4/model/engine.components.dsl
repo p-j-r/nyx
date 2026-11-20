@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91, 93, 94"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, scriptout.rs, validated.rs"
-        "lines" "4427"
+        "lines" "4441"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -11,7 +11,7 @@ project = component "Project" "The saved state: feature list, mesh settings, one
     properties {
         "adr" "63"
         "code" "crates/nyx-engine/src: project.rs"
-        "lines" "206"
+        "lines" "208"
         "codeDiagram" "4-code/engine/project.md"
     }
 }
@@ -19,7 +19,7 @@ geometry = component "Geometry operations" "Every edit of a geom feature list as
     properties {
         "adr" "38, 3"
         "code" "crates/nyx-engine/src: geomdesc.rs, geometry.rs"
-        "lines" "730"
+        "lines" "734"
         "codeDiagram" "4-code/engine/geometry.md"
     }
 }
@@ -27,7 +27,7 @@ jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs 
     properties {
         "adr" "61, 80, 85, 87, 86, 11, 95, 96"
         "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)"
-        "lines" "4485"
+        "lines" "4507"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -35,7 +35,7 @@ commandlist = component "Command lists" "A JSON-lines list of engine commands is
     properties {
         "adr" "89"
         "code" "crates/nyx-engine/src: commandlist.rs"
-        "lines" "586"
+        "lines" "588"
         "codeDiagram" "4-code/engine/commandlist.md"
     }
 }
@@ -43,7 +43,7 @@ apiref = component "API reference" "One Markdown page per engine command and an 
     properties {
         "adr" "89, 57"
         "code" "crates/nyx-engine/src: apiref.rs"
-        "lines" "291"
+        "lines" "293"
         "codeDiagram" "4-code/engine/apiref.md"
     }
 }
@@ -51,7 +51,7 @@ meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, lab
     properties {
         "adr" "54, 50, 92"
         "code" "crates/nyx-engine/src: meshing.rs, pml.rs, preview.rs"
-        "lines" "537"
+        "lines" "543"
         "codeDiagram" "4-code/engine/meshing.md"
     }
 }
@@ -59,7 +59,7 @@ materials = component "Materials" "The material library plus the materials a pro
     properties {
         "adr" "58"
         "code" "crates/nyx-engine/src: materials.rs"
-        "lines" "155"
+        "lines" "157"
         "codeDiagram" "4-code/engine/materials.md"
     }
 }
@@ -67,7 +67,7 @@ analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest 
     properties {
         "adr" "56, 99"
         "code" "crates/nyx-engine/src: analyse.rs, figure.rs"
-        "lines" "214"
+        "lines" "218"
         "codeDiagram" "4-code/engine/analyse.md"
     }
 }
@@ -75,7 +75,7 @@ resultsIO = component "Results files" "HDF5 results (serial or MPI-IO), the XDMF
     properties {
         "adr" "62, 63"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "993"
+        "lines" "999"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }
@@ -83,7 +83,7 @@ storeLink = component "Store link" "Binds the project to a workflow of the works
     properties {
         "adr" "39, 59"
         "code" "crates/nyx-engine/src: store_link.rs"
-        "lines" "308"
+        "lines" "310"
         "codeDiagram" "4-code/engine/storeLink.md"
     }
 }
@@ -91,7 +91,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "101"
+        "lines" "103"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

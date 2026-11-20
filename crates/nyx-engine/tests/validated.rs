@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Validated is a state (productivity plan P6, ADR 91): a result is exploratory until a mesh-convergence check with a tolerance has passed on
 //! its problem key, then checked; a stale result is never checked; a result whose check would not fit the machine says so; the verdict is
 //! written into the run that solved the problem; every answer that carries `stale` carries `validated`.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Test fixture: the cross-section of a silicon wire on 300 nm silicon-on-insulator at 1550 nm (it was the SOI use case of the window until phase 7).
 //!
 //! A silicon core of thickness `thickness` (300 nm by default) and `width` on a buried oxide (BOX), under an oxide or air

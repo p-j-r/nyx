@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Reading a TOML material file: a `Section` wraps one table, remembers which keys were read, converts quantities with their units
 //! to SI and reports every key nobody read ("unknown key", with a suggestion). Errors name the material and the key path.
 

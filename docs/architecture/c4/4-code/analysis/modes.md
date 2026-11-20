@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Mode report** (`analysis.modes`) in the con
 > One report per mode, a table, the Poincare picture and the degenerate groups.
 
 **Decisions:** [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 1 file, 620 lines.
+**Size:** 1 file, 622 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-analysis/src/modes.rs` | 620 | The polarization of a set of modes: one report per mode, a table, the Poincaré-sphere picture and the degenerate groups. |
+| `crates/nyx-analysis/src/modes.rs` | 622 |  |
 
 ## What it uses
 
@@ -100,17 +100,17 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `ModeInput` | `modes.rs:39` | fields: `label`, `neff`, `samples` —  One mode as the analysis reads it: a label, its eigenvalue (effective index, or frequency) and the field at weighted sample points. |
-| enum | `ResolveAxis` | `modes.rs:48` | variants: `S1`, `S2`, `S3` —  Which Stokes operator is diagonalized to resolve a degenerate pair. |
-| struct | `AnalysisOptions` | `modes.rs:58` | fields: `class`, `value_label`, `degeneracy_tol`, `resolve_axis` |
-| struct | `ModeRow` | `modes.rs:80` | fields: `label`, `neff`, `report`, `group` |
-| struct | `Resolved` | `modes.rs:91` | fields: `axis`, `mixing`, `eigenvalues`, `reports` —  The pair of modes of definite polarization inside a degenerate pair. |
-| struct | `GroupReport` | `modes.rs:101` | fields: `members`, `invariant`, `overlap`, `resolved`, `note` |
-| struct | `ModeAnalysis` | `modes.rs:113` | fields: `value_label`, `rows`, `groups` |
-| fn | `analyze_modes` | `modes.rs:202` | `pub fn analyze_modes(modes: &[ModeInput], opts: &AnalysisOptions) -> ModeAnalysis` —  Analyze all modes. Rows are in the order of `modes`. |
-| fn | `ModeAnalysis::table` | `modes.rs:269` | `pub fn table(&self) -> String` —  Plain-text table, one line per mode, then one block per degenerate group. |
-| fn | `ModeAnalysis::summary_lines` | `modes.rs:354` | `pub fn summary_lines(&self) -> Vec<(usize, String)>` —  One line per mode that has an intensity, in the form the mode studies used to put in their result scalars `polarization N` |
-| fn | `ModeAnalysis::csv` | `modes.rs:374` | `pub fn csv(&self) -> String` |
-| fn | `ModeAnalysis::sphere_svg` | `modes.rs:420` | `pub fn sphere_svg(&self, size: f64) -> String` —  Poincaré sphere with one numbered marker per mode on a line from the centre to its integrated state (a hybrid mode lies inside the |
+| struct | `ModeInput` | `modes.rs:41` | fields: `label`, `neff`, `samples` —  One mode as the analysis reads it: a label, its eigenvalue (effective index, or frequency) and the field at weighted sample points. |
+| enum | `ResolveAxis` | `modes.rs:50` | variants: `S1`, `S2`, `S3` —  Which Stokes operator is diagonalized to resolve a degenerate pair. |
+| struct | `AnalysisOptions` | `modes.rs:60` | fields: `class`, `value_label`, `degeneracy_tol`, `resolve_axis` |
+| struct | `ModeRow` | `modes.rs:82` | fields: `label`, `neff`, `report`, `group` |
+| struct | `Resolved` | `modes.rs:93` | fields: `axis`, `mixing`, `eigenvalues`, `reports` —  The pair of modes of definite polarization inside a degenerate pair. |
+| struct | `GroupReport` | `modes.rs:103` | fields: `members`, `invariant`, `overlap`, `resolved`, `note` |
+| struct | `ModeAnalysis` | `modes.rs:115` | fields: `value_label`, `rows`, `groups` |
+| fn | `analyze_modes` | `modes.rs:204` | `pub fn analyze_modes(modes: &[ModeInput], opts: &AnalysisOptions) -> ModeAnalysis` —  Analyze all modes. Rows are in the order of `modes`. |
+| fn | `ModeAnalysis::table` | `modes.rs:271` | `pub fn table(&self) -> String` —  Plain-text table, one line per mode, then one block per degenerate group. |
+| fn | `ModeAnalysis::summary_lines` | `modes.rs:356` | `pub fn summary_lines(&self) -> Vec<(usize, String)>` —  One line per mode that has an intensity, in the form the mode studies used to put in their result scalars `polarization N` |
+| fn | `ModeAnalysis::csv` | `modes.rs:376` | `pub fn csv(&self) -> String` |
+| fn | `ModeAnalysis::sphere_svg` | `modes.rs:422` | `pub fn sphere_svg(&self, size: f64) -> String` —  Poincaré sphere with one numbered marker per mode on a line from the centre to its integrated state (a hybrid mode lies inside the |
 
 Trait implementations in this component: `AnalysisOptions: Default`

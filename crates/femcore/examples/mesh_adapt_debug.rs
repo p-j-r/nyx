@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Single adaptation run with a per-iteration log, for diagnosing the cases of `adapt_convergence`.
 //! Usage: `cargo run --release --example adapt_debug -- <p|inf> <target> <gauss|layer|ridge> [grade_g]`
 

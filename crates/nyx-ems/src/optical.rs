@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The mode solvers' results as an `OpticalSet` (`femcore::optical`): the modes together with the material data needed to evaluate their
 //! fields, for tests of the fields (the polarization analysis reads the cell fields of the result, `nyx-analysis`, ADR 56).
 //! `solve_optical` solves a `Modes` problem and returns the set (it was in `femcore::optical` before the kernels moved here, ADR 45).

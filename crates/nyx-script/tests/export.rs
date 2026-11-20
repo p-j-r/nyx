@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Export as script (productivity plan S7b, ADR [94]): `project_script` writes a script that rebuilds the project. The gate: for every example
 //! project and for a project shaped like one built in the window, the script type-checks, runs on a fresh engine, and gives the same project;
 //! the readable form (`commands`) is required for all of them, so the fallbacks cannot hide a bug; `params` gives the variant.

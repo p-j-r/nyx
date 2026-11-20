@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! What a front-end pays per frame, idle and while a solve runs (productivity plan P0). A project is opened and solved once (so that there is a
 //! result to look at), then a loop at the cadence of a window (one tick per `--tick-ms`, default 16) makes the engine calls the window makes
 //! on every repaint and times each one: `result()` (which hashes the whole project through `stamp()`), `stamp()`, `mesh_key()` and `sizing()`

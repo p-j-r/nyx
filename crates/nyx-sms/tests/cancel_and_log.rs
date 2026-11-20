@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A running solve can be cancelled from another thread within a bounded time, a cancelled solve leaves no result,
 //! and every solve returns a plain-language stage log.
 mod common;

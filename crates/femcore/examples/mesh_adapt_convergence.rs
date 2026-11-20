@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! M4 study: P1 interpolation error against number of elements for metric-adapted 2D meshes
 //! (Hessian-driven, with and without gradation) versus uniform meshes of the same size.
 //!

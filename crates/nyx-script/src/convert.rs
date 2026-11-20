@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! JSON to and from the values of a script (S4). Written by hand: a script value is a `MontyObject`, an engine value is a `serde_json::Value`,
 //! and a number keeps its kind (an integer stays an integer, everything else is a float).
 

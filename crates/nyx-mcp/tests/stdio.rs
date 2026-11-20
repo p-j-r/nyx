@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Drives the real binary over stdio the way an MCP host does (ADR 94: four script tools). The tests that run a script need the script worker
 //! program next to `nyx-mcp`: `cargo build --release -p nyx-script` (a workspace build has it).
 use serde_json::{json, Value};

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Runs** (`store.runs`) in the container **ny
 > Append-only run records in runs.jsonl, the digest derived from them and the filter language of the runs table.
 
 **Decisions:** [ADR 64](../../../adr/0064-identity-hashes-one-persisted-the-rest-are-caches.md)  
-**Size:** 1 file, 452 lines.
+**Size:** 1 file, 454 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-store/src/runs.rs` | 452 | Run records: one append-only line per run in `runs.jsonl`, the digest derived from them, and the small filter language of the runs table. |
+| `crates/nyx-store/src/runs.rs` | 454 |  |
 
 ## What it uses
 
@@ -101,20 +101,20 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| enum | `RunStatus` | `runs.rs:15` | variants: `Ok`, `Failed`, `Cancelled` |
-| struct | `Artifact` | `runs.rs:23` | fields: `kind`, `path`, `bytes` |
-| struct | `Convergence` | `runs.rs:33` | fields: `factor`, `tolerance`, `observable`, `passed`, `worst_relative` —  What a mesh-convergence check said about the problem a run solved (ADR 91, productivity plan P6). Plain data: the store knows nothing of a project. |
-| struct | `RunRecord` | `runs.rs:48` | fields: `id`, `t`, `sec`, `status`, `spec`, `femcore`, `version`, `params`, `metrics`, `tags`, `star`, `note`, ... |
-| struct | `RunPatch` | `runs.rs:81` | fields: `star`, `tags`, `note`, `convergence` |
-| fn | `append` | `runs.rs:107` | `pub fn append(path: &Path, r: &RunRecord) -> Result<(), String>` |
-| fn | `append_patch` | `runs.rs:111` | `pub fn append_patch(path: &Path, id: &str, patch: RunPatch) -> Result<(), String>` |
-| fn | `read` | `runs.rs:116` | `pub fn read(path: &Path) -> (Vec<RunRecord>, usize)` —  The runs in file order with patches applied, and the number of lines that could not be read (a torn last line, say). |
-| fn | `parse` | `runs.rs:121` | `pub fn parse(text: &str) -> (Vec<RunRecord>, usize)` |
-| fn | `digest` | `runs.rs:150` | `pub fn digest(runs: &[RunRecord]) -> Digest` —  Counts and ranges of `runs` (failed and cancelled runs count but add no ranges). |
-| fn | `next_id` | `runs.rs:182` | `pub fn next_id(runs: &[RunRecord]) -> String` —  The next run id for `runs`: `r0007_7hb` (number, then three characters of entropy so two writers cannot collide). |
-| fn | `parse_quantity` | `runs.rs:190` | `pub fn parse_quantity(s: &str) -> Option<f64>` —  A number with an optional unit suffix, in SI: `450 nm`, `1.55um`, `193 THz`, `2e-7`. |
-| struct | `Filter` | `runs.rs:233` |  A parsed filter such as `params.w between 450 nm and 550 nm and metrics.neff_re > 2.4 and star`. |
-| fn | `to_csv` | `runs.rs:342` | `pub fn to_csv(runs: &[&RunRecord]) -> String` —  CSV of runs: id, time, status, version, then every parameter and metric column (the union, sorted). |
-| fn | `Filter::parse` | `runs.rs:239` | `pub fn parse(text: &str) -> Result<Filter, String>` —  Fields: `params.NAME`, `metrics.NAME`, `version`, `sec`; `status = ok\|failed\|cancelled`, `tag = NAME`, `star` and `note` alone. |
-| fn | `Filter::is_empty` | `runs.rs:303` | `pub fn is_empty(&self) -> bool` |
-| fn | `Filter::matches` | `runs.rs:307` | `pub fn matches(&self, r: &RunRecord) -> bool` |
+| enum | `RunStatus` | `runs.rs:17` | variants: `Ok`, `Failed`, `Cancelled` |
+| struct | `Artifact` | `runs.rs:25` | fields: `kind`, `path`, `bytes` |
+| struct | `Convergence` | `runs.rs:35` | fields: `factor`, `tolerance`, `observable`, `passed`, `worst_relative` —  What a mesh-convergence check said about the problem a run solved (ADR 91, productivity plan P6). Plain data: the store knows nothing of a project. |
+| struct | `RunRecord` | `runs.rs:50` | fields: `id`, `t`, `sec`, `status`, `spec`, `femcore`, `version`, `params`, `metrics`, `tags`, `star`, `note`, ... |
+| struct | `RunPatch` | `runs.rs:83` | fields: `star`, `tags`, `note`, `convergence` |
+| fn | `append` | `runs.rs:109` | `pub fn append(path: &Path, r: &RunRecord) -> Result<(), String>` |
+| fn | `append_patch` | `runs.rs:113` | `pub fn append_patch(path: &Path, id: &str, patch: RunPatch) -> Result<(), String>` |
+| fn | `read` | `runs.rs:118` | `pub fn read(path: &Path) -> (Vec<RunRecord>, usize)` —  The runs in file order with patches applied, and the number of lines that could not be read (a torn last line, say). |
+| fn | `parse` | `runs.rs:123` | `pub fn parse(text: &str) -> (Vec<RunRecord>, usize)` |
+| fn | `digest` | `runs.rs:152` | `pub fn digest(runs: &[RunRecord]) -> Digest` —  Counts and ranges of `runs` (failed and cancelled runs count but add no ranges). |
+| fn | `next_id` | `runs.rs:184` | `pub fn next_id(runs: &[RunRecord]) -> String` —  The next run id for `runs`: `r0007_7hb` (number, then three characters of entropy so two writers cannot collide). |
+| fn | `parse_quantity` | `runs.rs:192` | `pub fn parse_quantity(s: &str) -> Option<f64>` —  A number with an optional unit suffix, in SI: `450 nm`, `1.55um`, `193 THz`, `2e-7`. |
+| struct | `Filter` | `runs.rs:235` |  A parsed filter such as `params.w between 450 nm and 550 nm and metrics.neff_re > 2.4 and star`. |
+| fn | `to_csv` | `runs.rs:344` | `pub fn to_csv(runs: &[&RunRecord]) -> String` —  CSV of runs: id, time, status, version, then every parameter and metric column (the union, sorted). |
+| fn | `Filter::parse` | `runs.rs:241` | `pub fn parse(text: &str) -> Result<Filter, String>` —  Fields: `params.NAME`, `metrics.NAME`, `version`, `sec`; `status = ok\|failed\|cancelled`, `tag = NAME`, `star` and `note` alone. |
+| fn | `Filter::is_empty` | `runs.rs:305` | `pub fn is_empty(&self) -> bool` |
+| fn | `Filter::matches` | `runs.rs:309` | `pub fn matches(&self, r: &RunRecord) -> bool` |

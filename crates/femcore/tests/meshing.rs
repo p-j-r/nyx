@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The unified meshing interface: the simple and the adaptive mesher make meshes of the same model with the same names and labels, and
 //! the adaptive one puts its boundary and interface vertices on the exact curves of the geometry.
 use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts};

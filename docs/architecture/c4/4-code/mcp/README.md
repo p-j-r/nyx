@@ -4,5 +4,5 @@ One page per component, C4 level 4. [Component view](../../3-components/mcp.md) 
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Protocol loop](./protocol.md) | 1 | 707 | 16 | 1 |
-| [Script tools](./tools.md) | 1 | 707 | 16 | 1 |
+| [Protocol loop](./protocol.md) | 1 | 709 | 16 | 1 |
+| [Script tools](./tools.md) | 1 | 709 | 16 | 1 |

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Named timing spans for the frame log (productivity plan P3). `NYX_FRAME_LOG=<file>.csv` writes one row per frame; with spans, the row also
 //! says where the frame's time went (`poll=48.2;script=0.0;shell_ui=31.1`). A span is a name and the milliseconds a closure took. When the
 //! variable is unset a span is just the closure: nothing is read, timed or stored.

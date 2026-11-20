@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 > SolveResult as plain serialisable data, and the frame a result states for the analysis of its vector fields.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 2 files, 286 lines.
+**Size:** 2 files, 290 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-physics/src/frame.rs` | 111 | The frame a result's vector fields are to be read in by an analysis (restructure phase 5, ADR 56). |
-| `crates/nyx-physics/src/result.rs` | 175 | What a solve returns: plain, serialisable data (flat arrays), so a result can be stored, sent to another process or compared with a golden file. It does not carry an analysis: analyses are functions of a result (`nyx-analysis`). |
+| `crates/nyx-physics/src/frame.rs` | 113 |  |
+| `crates/nyx-physics/src/result.rs` | 177 |  |
 
 ## What it uses
 
@@ -138,26 +138,26 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| const | `FRAME_KEY` | `frame.rs:13` | `&str` —  Name of the scalar that carries the frame. |
-| struct | `FieldFrame` | `frame.rs:20` | fields: `lateral`, `normal`, `propagation`, `left_handed`, `outside` —  Wafer axes (0 = x, 1 = y, 2 = z) of the lateral, normal and propagation direction of the modes of a result, and the domains the |
-| fn | `FieldFrame::to_text` | `frame.rs:32` | `pub fn to_text(&self) -> String` —  The text written to the result. |
-| fn | `FieldFrame::from_text` | `frame.rs:48` | `pub fn from_text(text: &str) -> Option<FieldFrame>` —  Reads `to_text` back; `None` for anything else. |
-| fn | `FieldFrame::of` | `frame.rs:78` | `pub fn of(result: &SolveResult) -> Option<FieldFrame>` —  The frame a result states, if it states one. |
-| fn | `FieldFrame::scalar` | `frame.rs:86` | `pub fn scalar(&self) -> (String, Scalar)` —  The scalar to push on a result. |
-| fn | `FieldFrame::names` | `frame.rs:91` | `pub fn names(&self) -> [&'static str` —  Wafer axis name (`x`, `y` or `z`) of the lateral, normal and propagation direction. |
-| struct | `Field` | `result.rs:8` | fields: `name`, `unit`, `components`, `values` —  A field with one or more components, one value per dof (P1: vertices; P2: vertices then edge midpoints). |
-| struct | `CellField` | `result.rs:19` | fields: `name`, `unit`, `nloc`, `re`, `im` —  A field before it is averaged over the cells at a node, one value per cell node (`nloc` per cell). |
-| enum | `Scalar` | `result.rs:30` | variants: `Num`, `Text` |
-| struct | `Solution` | `result.rs:37` | fields: `label`, `fields`, `value`, `eigenvalue`, `cell_fields` —  One solution of a study: a time step, an eigenmode, a frequency. |
-| struct | `SolveResult` | `result.rs:60` | fields: `physics`, `study`, `order`, `dim`, `dofs`, `seconds`, `solutions`, `scalars`, `log` |
-| fn | `cell_fields_of` | `result.rs:139` | `pub fn cell_fields_of(cf: &femcore::fields::CellFields) -> Vec<CellField>` —  The per-cell fields of a kernel (`femcore::fields::CellFields`) as plain serialisable data. |
-| fn | `cell_fields_back` | `result.rs:153` | `pub fn cell_fields_back(order: usize, fields: &[CellField]) -> femcore::fields::CellFields` —  The inverse of `cell_fields_of`, for code that still reads `CellFields` (the window until phase 7, the analysis until phase 5). |
-| fn | `Solution::field` | `result.rs:49` | `pub fn field(&self, name: &str) -> Option<&Field>` |
-| fn | `Solution::flat` | `result.rs:54` | `pub fn flat(&self, name: &str) -> Option<Vec<f64>>` —  The values of a field by its flat name (`V`, `\|E\|`, `Ex`; see `flat_fields`). |
-| fn | `SolveResult::scalar` | `result.rs:77` | `pub fn scalar(&self, name: &str) -> Option<f64>` —  The first numeric scalar whose name starts with `name`. |
-| fn | `Field::scalar` | `result.rs:87` | `pub fn scalar(name: impl Into<String>, unit: impl Into<String>, values: Vec<f64>) -> Field` —  A scalar field, one value per dof. |
-| fn | `Field::vector` | `result.rs:92` | `pub fn vector(name: impl Into<String>, unit: impl Into<String>, names: &[&str], comps: &[Vec<f64>]) -> Field` —  A vector field from one array per component (`comps[j][dof]`), stored interleaved by dof. |
-| fn | `Field::component` | `result.rs:110` | `pub fn component(&self, j: usize) -> Vec<f64>` —  The array of component `j` of a vector field (the whole array for a scalar). |
-| fn | `Solution::flat_fields` | `result.rs:119` | `pub fn flat_fields(&self) -> Vec<(String, String, Vec<f64>)>` —  The fields in the flat form the window and the golden files use: a scalar keeps its name; a vector `E` with components `x`, `z` |
+| const | `FRAME_KEY` | `frame.rs:15` | `&str` —  Name of the scalar that carries the frame. |
+| struct | `FieldFrame` | `frame.rs:22` | fields: `lateral`, `normal`, `propagation`, `left_handed`, `outside` —  Wafer axes (0 = x, 1 = y, 2 = z) of the lateral, normal and propagation direction of the modes of a result, and the domains the |
+| fn | `FieldFrame::to_text` | `frame.rs:34` | `pub fn to_text(&self) -> String` —  The text written to the result. |
+| fn | `FieldFrame::from_text` | `frame.rs:50` | `pub fn from_text(text: &str) -> Option<FieldFrame>` —  Reads `to_text` back; `None` for anything else. |
+| fn | `FieldFrame::of` | `frame.rs:80` | `pub fn of(result: &SolveResult) -> Option<FieldFrame>` —  The frame a result states, if it states one. |
+| fn | `FieldFrame::scalar` | `frame.rs:88` | `pub fn scalar(&self) -> (String, Scalar)` —  The scalar to push on a result. |
+| fn | `FieldFrame::names` | `frame.rs:93` | `pub fn names(&self) -> [&'static str` —  Wafer axis name (`x`, `y` or `z`) of the lateral, normal and propagation direction. |
+| struct | `Field` | `result.rs:10` | fields: `name`, `unit`, `components`, `values` —  A field with one or more components, one value per dof (P1: vertices; P2: vertices then edge midpoints). |
+| struct | `CellField` | `result.rs:21` | fields: `name`, `unit`, `nloc`, `re`, `im` —  A field before it is averaged over the cells at a node, one value per cell node (`nloc` per cell). |
+| enum | `Scalar` | `result.rs:32` | variants: `Num`, `Text` |
+| struct | `Solution` | `result.rs:39` | fields: `label`, `fields`, `value`, `eigenvalue`, `cell_fields` —  One solution of a study: a time step, an eigenmode, a frequency. |
+| struct | `SolveResult` | `result.rs:62` | fields: `physics`, `study`, `order`, `dim`, `dofs`, `seconds`, `solutions`, `scalars`, `log` |
+| fn | `cell_fields_of` | `result.rs:141` | `pub fn cell_fields_of(cf: &femcore::fields::CellFields) -> Vec<CellField>` —  The per-cell fields of a kernel (`femcore::fields::CellFields`) as plain serialisable data. |
+| fn | `cell_fields_back` | `result.rs:155` | `pub fn cell_fields_back(order: usize, fields: &[CellField]) -> femcore::fields::CellFields` —  The inverse of `cell_fields_of`, for code that still reads `CellFields` (the window until phase 7, the analysis until phase 5). |
+| fn | `Solution::field` | `result.rs:51` | `pub fn field(&self, name: &str) -> Option<&Field>` |
+| fn | `Solution::flat` | `result.rs:56` | `pub fn flat(&self, name: &str) -> Option<Vec<f64>>` —  The values of a field by its flat name (`V`, `\|E\|`, `Ex`; see `flat_fields`). |
+| fn | `SolveResult::scalar` | `result.rs:79` | `pub fn scalar(&self, name: &str) -> Option<f64>` —  The first numeric scalar whose name starts with `name`. |
+| fn | `Field::scalar` | `result.rs:89` | `pub fn scalar(name: impl Into<String>, unit: impl Into<String>, values: Vec<f64>) -> Field` —  A scalar field, one value per dof. |
+| fn | `Field::vector` | `result.rs:94` | `pub fn vector(name: impl Into<String>, unit: impl Into<String>, names: &[&str], comps: &[Vec<f64>]) -> Field` —  A vector field from one array per component (`comps[j][dof]`), stored interleaved by dof. |
+| fn | `Field::component` | `result.rs:112` | `pub fn component(&self, j: usize) -> Vec<f64>` —  The array of component `j` of a vector field (the whole array for a scalar). |
+| fn | `Solution::flat_fields` | `result.rs:121` | `pub fn flat_fields(&self) -> Vec<(String, String, Vec<f64>)>` —  The fields in the flat form the window and the golden files use: a scalar keeps its name; a vector `E` with components `x`, `z` |
 
 Trait implementations in this component: `SolveResult: PlotFields`

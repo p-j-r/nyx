@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The engine's persistence, through `nyx-store`: a project is the spec of one experiment of a workflow folder, every solve is a run in its
 //! run table, and the search card and the run metrics are made here, from the project and the results, because the store does not know what
 //! a project or a result looks like (R21, R25). `StoreLink` is the project's binding to a workflow folder.

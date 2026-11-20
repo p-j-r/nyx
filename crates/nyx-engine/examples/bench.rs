@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Timings on larger generated models: cargo run --release -p nyx-engine --example bench
 #[path = "../../femcore/examples/benchmesh/mod.rs"]
 mod benchmesh;

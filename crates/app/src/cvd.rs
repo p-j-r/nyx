@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Colour-vision simulation for the screenshots of the scripted runs (UX plan U6): `cvd protan|deutan|tritan` makes every later `shot` show the window
 //! as a person with that kind of colour-vision difference sees it, so the canvas, the legend and the status colours can be looked at that way
 //! without such a person at hand. It is the Machado, Oliveira and Fernandes (2009) model at full severity, applied in linear sRGB, the same

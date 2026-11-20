@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Contract of `nyx-ems` (ADR 19, ADR 25, ADR 45): its descriptors are pinned by `docs/architecture/contracts/physics_ems.v1.json`, and an
 //! example problem passes the structural validation; the envelope solves through `Physics::solve` and agrees with the typed problem; the stage
 //! functions are public; the shape of a result is pinned by `physics_ems_result.v1.json`.

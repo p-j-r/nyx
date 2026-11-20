@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Versions: every change to an experiment's set-up is kept in `history.jsonl` (one line per version) with the hash of its spec; the
 //! specs themselves sit content-addressed in `specs/`, so any version can be diffed, restored or forked from.
 //!

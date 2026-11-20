@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! Anisotropic materials: tensor permittivity in the waveguide modes and the rotation of a crystal stiffness. The solid mechanics tests (stiffness,
 //! expansion) moved to `nyx-sms` with the kernel.
 mod common;

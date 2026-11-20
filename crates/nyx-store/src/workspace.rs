@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! The workspace: the folder behind the dashboard, its settings (`workspace.json`), the list of workflows (manifests only) and the
 //! dashboard retention rules.
 //!
