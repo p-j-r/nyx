@@ -312,6 +312,14 @@ impl Kernel {
         })
     }
 
+    /// The engine job the script that has not finished is waiting for (none when it waits for futures): a host asks the engine about it.
+    pub fn waiting_job(&self) -> Option<u64> {
+        match self.paused.as_ref()? {
+            Paused::Call(c) => Some(c.job),
+            Paused::Futures(_) => None,
+        }
+    }
+
     fn take_printed(&self) -> Vec<String> {
         let mut o = self.out.lock().unwrap();
         let lines = o.lines().map(str::to_string).collect();

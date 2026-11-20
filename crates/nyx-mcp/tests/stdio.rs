@@ -52,6 +52,19 @@ impl Host {
     fn tool(&mut self, name: &str, args: Value) -> Value {
         self.request("tools/call", json!({ "name": name, "arguments": args }))
     }
+    /// Sends a request without waiting for its answer: its id.
+    fn send_request(&mut self, method: &str, params: Value) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
+        id
+    }
+    /// The next line of the server, whatever it is.
+    fn read(&mut self) -> Value {
+        let mut line = String::new();
+        self.rx.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("bad line {line:?}: {e}"))
+    }
     fn init(&mut self, proto: &str) -> Value {
         let r = self.request("initialize", json!({ "protocolVersion": proto, "capabilities": {}, "clientInfo": { "name": "test", "version": "0" } }));
         self.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
@@ -338,6 +351,79 @@ fn a_solve_that_outlasts_wait_s_answers_running_and_script_wait_finishes_it() {
     assert!(h.script("r")["value"].is_object());
     let m = failure(&h.tool("script_wait", json!({})));
     assert!(m.contains("no script is running"), "{m}");
+}
+
+#[test]
+fn a_wait_longer_than_the_server_allows_is_cut_and_the_answer_says_so() {
+    worker_present();
+    let mut h = Host::start();
+    h.init("2025-06-18");
+    let a = ok(&h.tool("script_run", json!({ "source": "1 + 1", "wait_s": 600 })));
+    assert_eq!(a["status"], "done", "{a}");
+    assert_eq!(a["wait_s"]["asked"], 600.0, "{a}");
+    assert_eq!(a["wait_s"]["used"], 90.0, "{a}");
+    // within the limit nothing is said
+    assert!(ok(&h.tool("script_run", json!({ "source": "2", "wait_s": 30 })))["wait_s"].is_null());
+    // the limit is in the tool description and the schema, and a negative wait is refused
+    let l = h.request("tools/list", json!({}));
+    let run = l["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "script_run").unwrap().clone();
+    assert_eq!(run["inputSchema"]["properties"]["wait_s"]["maximum"], 90.0, "{run}");
+    let m = failure(&h.tool("script_run", json!({ "source": "3", "wait_s": -1 })));
+    assert!(m.contains("wait_s"), "{m}");
+}
+
+/// A model whose solve takes long enough for a host to send three more messages while it runs.
+const HEAVY: &str = "
+nyx.set_mesh(h=4e-8, adapt_scale=0.4)
+";
+
+#[test]
+fn a_waiting_call_ends_when_the_host_sends_a_newer_one_or_cancels_and_ping_is_answered_meanwhile() {
+    worker_present();
+    let mut h = Host::start();
+    h.init("2025-06-18");
+    let run = h.send_request("tools/call", json!({ "name": "script_run", "arguments": { "source": format!("{MODEL}{HEAVY}print('before')\nnyx.solve_run()\n'finished'"), "allow_destructive": true, "wait_s": 60 } }));
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    // a ping is answered at once, the long wait goes on (the old server answered it after the wait)
+    let ping = h.send_request("ping", json!({}));
+    let r = h.read();
+    assert_eq!(r["id"], json!(ping), "the ping was answered during the wait: {r}");
+    assert_eq!(r["result"], json!({}));
+    // the host gave up on the first call and asks again: the first is answered `running` now, with what it printed
+    let wait = h.send_request("tools/call", json!({ "name": "script_wait", "arguments": { "wait_s": 60 } }));
+    let r = h.read();
+    assert_eq!(r["id"], json!(run), "{r}");
+    let a = ok(&r);
+    assert_eq!(a["status"], "running", "the solve outlasts this test; make HEAVY heavier if this is `done`: {a}");
+    assert_eq!(a["printed"], json!(["before"]), "{a}");
+    assert!(a["note"].as_str().unwrap().contains("newer request"), "{a}");
+    // the host cancels the second: it gets no answer, and the request after it is served at once
+    h.send(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": wait, "reason": "timeout" } }));
+    let cancel = h.send_request("tools/call", json!({ "name": "script_wait", "arguments": { "cancel": true } }));
+    let r = h.read();
+    assert_eq!(r["id"], json!(cancel), "no answer is sent for a cancelled request: {r}");
+    assert_eq!(ok(&r)["status"], "cancelled");
+    // the server is still usable
+    assert_eq!(h.script("1 + 1")["value"], 2);
+}
+
+#[test]
+fn a_call_with_a_progress_token_gets_progress_notifications_while_it_waits() {
+    worker_present();
+    let mut h = Host::start();
+    h.init("2025-06-18");
+    let id = h.send_request("tools/call", json!({ "name": "script_run", "_meta": { "progressToken": "t1" }, "arguments": { "source": format!("{MODEL}{HEAVY}nyx.solve_run()"), "allow_destructive": true, "wait_s": 60 } }));
+    let n = h.read();
+    assert_eq!(n["method"], "notifications/progress", "{n}");
+    assert_eq!(n["params"]["progressToken"], "t1");
+    assert!(n["params"]["progress"].as_f64().unwrap() >= 4.0, "{n}");
+    // the call itself is answered when its wait ends: here the host abandons it
+    let cancel = h.send_request("tools/call", json!({ "name": "script_wait", "arguments": { "cancel": true } }));
+    let mut r = h.read();
+    if r["id"] == json!(id) {
+        r = h.read();
+    }
+    assert_eq!(r["id"], json!(cancel), "{r}");
 }
 
 #[test]

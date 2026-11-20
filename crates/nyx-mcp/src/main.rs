@@ -4,10 +4,19 @@
 //! (`nyx_script::kernel`, created at the first script, so `initialize` and `tools/list` start no process): the agent writes Python that calls the
 //! engine commands and only what the script prints or returns comes back. What a host does is stored as a workflow of the workspace folder
 //! (origin `ai`), so the person sees it in the window's dashboard, with the script that made each run.
+//!
+//! Reading and waiting (L1, ADR 97): a reader thread takes the lines of stdin, so the server sees a host's newer request or a cancellation while
+//! a script is waiting for a solve. The script itself runs in its own worker process and the engine and the kernel stay on the main thread:
+//! a wait is made of slices of 200 ms (`Kernel::wait` with a short wait), and between two slices the server looks at what arrived. A `script_run`
+//! or `script_wait` that arrives answers the waiting call `running` at once (the host that sent it gave up on it) and is then served; a
+//! `notifications/cancelled` for the waiting call stops the wait and sends no answer; `ping` and `tools/list` are answered during a wait. A wait is
+//! never longer than `--max-wait` (default 90 s) whatever the call asked: a host's tool timeout is often 180 s or less.
+use std::collections::{HashSet, VecDeque};
 use std::io::{BufRead, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use nyx_engine::guide::{self, SERVER_INSTRUCTIONS};
 use nyx_engine::Engine;
@@ -21,7 +30,15 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 /// How long `script_run` and `script_wait` give a script before answering `running`, and the most they may be asked to.
 const DEFAULT_WAIT_S: f64 = 25.0;
-const MAX_WAIT_S: f64 = 900.0;
+/// The longest wait unless `--max-wait` says otherwise. Hosts end a tool call after 60 to 180 s (Antigravity: 180 s); an answer `running` is cheap,
+/// a call the host gave up on is not (L1).
+const MAX_WAIT_S: f64 = 90.0;
+/// The most `--max-wait` may name.
+const LIMIT_WAIT_S: f64 = 900.0;
+/// A wait is made of slices of this length; between two the server looks at what the host sent.
+const SLICE: Duration = Duration::from_millis(200);
+/// A call that carries a progress token gets a `notifications/progress` this often while it waits (some hosts restart their timeout on it).
+const PROGRESS_EVERY: Duration = Duration::from_secs(5);
 /// A script's value is cut past this many bytes of JSON: the point of a script is that fields stay in the engine.
 const MAX_VALUE_BYTES: usize = 48 << 10;
 
@@ -42,8 +59,9 @@ fn default_root(dir_given: bool, dir: &Path) -> PathBuf {
     home().map(|h| h.join("Documents")).unwrap_or_else(|| dir.to_path_buf())
 }
 
-fn tools() -> Value {
-    let wait = json!({ "type": "number", "description": format!("seconds to let the script run before answering `running` (default {DEFAULT_WAIT_S}, at most {MAX_WAIT_S})") });
+fn tools(max_wait: f64) -> Value {
+    let default = DEFAULT_WAIT_S.min(max_wait);
+    let wait = json!({ "type": "number", "maximum": max_wait, "description": format!("seconds to let the script run before answering `running` (default {default}, at most {max_wait}: a longer value is cut to it; script_wait continues, so keep it under your host's tool timeout)") });
     json!([
         {
             "name": "script_run", "title": "Run a script",
@@ -110,6 +128,61 @@ fn cap_value(v: Value) -> Value {
     json!({ "truncated": true, "bytes": s.len(), "head": &s[..end], "hint": "print the numbers you need from the script instead of returning a table" })
 }
 
+/// What the reader thread took from stdin.
+enum Incoming {
+    Msg(Value),
+    /// a line that is not JSON: answered with a parse error
+    Bad(String),
+}
+
+/// Takes the lines of stdin on a thread of its own, so the main loop can look at them while a script waits.
+fn spawn_reader() -> mpsc::Receiver<Incoming> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let m = match serde_json::from_str::<Value>(&line) {
+                Ok(v) => Incoming::Msg(v),
+                Err(e) => Incoming::Bad(e.to_string()),
+            };
+            if tx.send(m).is_err() {
+                break;
+            }
+        }
+    });
+    rx
+}
+
+/// One line on stdout. The reader of the lines and the main loop both answer, so a line is written under the lock of stdout. `false`: the host went away.
+fn send(v: &Value) -> bool {
+    let out = std::io::stdout();
+    let mut o = out.lock();
+    writeln!(o, "{v}").and_then(|_| o.flush()).is_ok()
+}
+
+/// The text a request id (or the `requestId` of a cancellation) is matched by.
+fn key_of(v: &Value) -> Option<String> {
+    (!v.is_null()).then(|| v.to_string())
+}
+
+/// What `drive` starts with.
+enum Go {
+    Run { name: String, src: String, params: Option<Value>, allow: bool },
+    Wait,
+}
+
+/// What the host sent while a call waited.
+#[derive(Default)]
+struct Pumped {
+    /// a `script_run` or `script_wait` is next in line: the host has given up on the call that waits
+    newer: bool,
+    /// the host cancelled the call that waits
+    cancelled: bool,
+}
+
 struct Server {
     engine: Engine,
     kernel: Option<Kernel>,
@@ -119,10 +192,23 @@ struct Server {
     session: String,
     /// counts the scripts that ran a command, so a host can tell that something moved
     revision: u64,
+    /// the longest wait of a call (`--max-wait`)
+    max_wait: f64,
+    /// what the reader thread took, the messages that wait their turn, the requests the host cancelled before their turn, and whether stdin ended
+    rx: mpsc::Receiver<Incoming>,
+    backlog: VecDeque<Incoming>,
+    cancelled: HashSet<String>,
+    eof: bool,
+    /// the `tools/call` being served: its id, its progress token, and the notes its answer carries
+    current: Option<String>,
+    token: Option<Value>,
+    note: Option<String>,
+    /// the host cancelled the call being served: it gets no answer
+    suppress: bool,
 }
 
 impl Server {
-    fn new(dir: PathBuf, root: PathBuf, queue: PathBuf) -> Server {
+    fn new(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64, rx: mpsc::Receiver<Incoming>) -> Server {
         let mut engine = Engine::new();
         engine.set_workspace(dir.clone(), true);
         engine.set_owner("ai"); // its requests queue behind a person's at the same priority (ADR 87)
@@ -130,7 +216,93 @@ impl Server {
         engine.set_history_file(&dir.join("solve_history.jsonl")); // what solves cost, for memory estimates
         // one queue with the window: solves are run by the queue worker of that folder, in order, whoever asked (Q3, ADR 95)
         engine.set_shared_queue(&queue, true);
-        Server { engine, kernel: None, dir, root, proto: PROTOCOLS[0], session: session_id(), revision: 0 }
+        Server {
+            engine,
+            kernel: None,
+            dir,
+            root,
+            proto: PROTOCOLS[0],
+            session: session_id(),
+            revision: 0,
+            max_wait,
+            rx,
+            backlog: VecDeque::new(),
+            cancelled: HashSet::new(),
+            eof: false,
+            current: None,
+            token: None,
+            note: None,
+            suppress: false,
+        }
+    }
+
+    /// Takes in what the reader thread has for the server and answers what needs no kernel at once (`ping`, `tools/list`); the rest waits its turn
+    /// in `backlog`. `waiting` is the id of the call that waits, if one does.
+    fn pump(&mut self, waiting: Option<&str>) -> Pumped {
+        let mut out = Pumped::default();
+        loop {
+            let m = match self.rx.try_recv() {
+                Ok(m) => m,
+                Err(mpsc::TryRecvError::Empty) => return out,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.eof = true;
+                    return out;
+                }
+            };
+            let Incoming::Msg(v) = &m else {
+                self.backlog.push_back(m);
+                continue;
+            };
+            let method = v.get("method").and_then(Value::as_str).unwrap_or("");
+            let has_id = v.get("id").is_some_and(|i| !i.is_null());
+            match method {
+                "ping" | "tools/list" if has_id => {
+                    if let Some(r) = self.handle(v) {
+                        let _ = send(&r);
+                    }
+                }
+                "notifications/cancelled" => {
+                    if let Some(k) = v.get("params").and_then(|p| p.get("requestId")).and_then(key_of) {
+                        if waiting == Some(k.as_str()) {
+                            out.cancelled = true;
+                        } else {
+                            self.cancelled.insert(k);
+                        }
+                    }
+                }
+                "tools/call" => {
+                    let tool = v.get("params").and_then(|p| p.get("name")).and_then(Value::as_str).unwrap_or("");
+                    out.newer |= matches!(tool, "script_run" | "script_wait");
+                    self.backlog.push_back(m);
+                }
+                _ => self.backlog.push_back(m),
+            }
+        }
+    }
+
+    /// The next message to serve, waiting for one; `None` when stdin has ended and nothing is left. A request the host cancelled while it waited
+    /// its turn is dropped (the protocol sends no answer for it).
+    fn next_message(&mut self) -> Option<Incoming> {
+        loop {
+            self.pump(None);
+            let m = match self.backlog.pop_front() {
+                Some(m) => m,
+                None if self.eof => return None,
+                None => match self.rx.recv() {
+                    Ok(m) => {
+                        self.backlog.push_back(m);
+                        continue;
+                    }
+                    Err(_) => return None,
+                },
+            };
+            if let Incoming::Msg(v) = &m {
+                if v.get("id").and_then(key_of).is_some_and(|k| self.cancelled.remove(&k)) {
+                    continue;
+                }
+            }
+            return Some(m);
+        }
     }
 
     fn header(&self) -> Value {
@@ -187,18 +359,87 @@ impl Server {
         }
     }
 
-    fn wait_of(args: &Value) -> Result<Duration, String> {
+    /// The wait a call asked for, cut to the longest wait of the server; the second is the value that was asked when it was cut.
+    fn wait_of(&self, args: &Value) -> Result<(Duration, Option<f64>), String> {
         match args.get("wait_s") {
-            None | Some(Value::Null) => Ok(Duration::from_secs_f64(DEFAULT_WAIT_S)),
+            None | Some(Value::Null) => Ok((Duration::from_secs_f64(DEFAULT_WAIT_S.min(self.max_wait)), None)),
             Some(v) => match v.as_f64() {
-                Some(w) if (0.0..=MAX_WAIT_S).contains(&w) => Ok(Duration::from_secs_f64(w)),
-                _ => Err(format!("`wait_s` is a number of seconds from 0 to {MAX_WAIT_S}")),
+                Some(w) if w >= 0.0 && w.is_finite() => {
+                    let used = w.min(self.max_wait);
+                    Ok((Duration::from_secs_f64(used), (w > self.max_wait).then_some(w)))
+                }
+                _ => Err(format!("`wait_s` is a number of seconds from 0 to {} (a longer wait is cut to it)", self.max_wait)),
             },
+        }
+    }
+
+    /// The answer of a call that may wait: the note of a wait that was cut or ended early goes with it.
+    fn answer_wait(&mut self, r: Result<Step, String>, cut: Option<f64>) -> (Value, bool) {
+        let (mut v, is_error) = self.answer(r);
+        if let Some(asked) = cut {
+            v["wait_s"] = json!({ "asked": asked, "used": self.max_wait, "note": "a wait is cut to the server's longest; script_wait continues" });
+        }
+        (v, is_error)
+    }
+
+    /// Runs a script or continues the one that waits, for at most `wait`, in slices of `SLICE`. Between two slices the host's messages are looked at
+    /// (`pump`): a newer `script_run` or `script_wait` or a cancellation ends the wait with the script still running (the job goes on in the
+    /// engine's queue, the next `script_wait` picks it up). What was printed in every slice is kept, and a command is counted once.
+    fn drive(&mut self, go: Go, wait: Duration) -> Result<Step, String> {
+        let started = Instant::now();
+        let deadline = started + wait;
+        let mut last_note = started;
+        let mut printed: Vec<String> = vec![];
+        let slice = wait.min(SLICE);
+        let mut r = {
+            self.kernel()?;
+            let (engine, kernel) = (&mut self.engine, self.kernel.as_mut().expect("made above"));
+            match go {
+                Go::Run { name, src, params, allow } => kernel.run(engine, &name, &src, params.as_ref(), Some(slice), allow),
+                Go::Wait => kernel.wait(engine, Some(slice)),
+            }
+        };
+        loop {
+            match r {
+                Ok(Step::Running(mut p)) => {
+                    printed.append(&mut p.printed);
+                    let now = Instant::now();
+                    let current = self.current.clone();
+                    let got = self.pump(current.as_deref());
+                    if got.cancelled {
+                        self.suppress = true;
+                    }
+                    if now >= deadline || got.newer || got.cancelled || self.eof {
+                        if got.newer {
+                            self.note = Some("a newer request arrived: this wait ended; the script is still running".to_string());
+                        }
+                        p.printed = printed;
+                        return Ok(Step::Running(p));
+                    }
+                    if now.duration_since(last_note) >= PROGRESS_EVERY {
+                        last_note = now;
+                        if let Some(t) = &self.token {
+                            let n = json!({ "jsonrpc": "2.0", "method": "notifications/progress", "params": { "progressToken": t, "progress": now.duration_since(started).as_secs_f64(), "message": format!("nyx waits for {}", p.waiting) } });
+                            let _ = send(&n);
+                        }
+                    }
+                    let slice = SLICE.min(deadline.saturating_duration_since(now));
+                    let (engine, kernel) = (&mut self.engine, self.kernel.as_mut().expect("the kernel exists while a script waits"));
+                    r = kernel.wait(engine, Some(slice));
+                }
+                Ok(Step::Done(mut o)) => {
+                    printed.append(&mut o.printed);
+                    o.printed = printed;
+                    return Ok(Step::Done(o));
+                }
+                Err(m) => return Err(m),
+            }
         }
     }
 
     /// The JSON the host gets for one answer of the kernel.
     fn answer(&mut self, r: Result<Step, String>) -> (Value, bool) {
+        let note = self.note.take();
         let (mut v, is_error) = match r {
             Ok(Step::Done(o)) => {
                 if o.calls > 0 {
@@ -210,10 +451,23 @@ impl Server {
                 if p.calls > 0 {
                     self.revision += 1;
                 }
-                (
-                    json!({ "status": "running", "waiting_for": p.waiting, "printed": p.printed, "calls": p.calls, "next": "call script_wait to continue, or script_wait with cancel true to abandon it" }),
-                    false,
-                )
+                let mut v = json!({ "status": "running", "waiting_for": p.waiting, "printed": p.printed, "calls": p.calls, "next": "call script_wait to continue, or script_wait with cancel true to abandon it" });
+                if let Some(n) = note {
+                    v["note"] = json!(n);
+                }
+                // what the engine says of the job: its stage, how long it has run, how much of it is done and what such a solve took on this
+                // machine before (no number when nothing was learned): enough to decide between waiting and cancelling
+                let entry = self.kernel.as_ref().and_then(Kernel::waiting_job).and_then(|id| self.engine.queue_entry(id));
+                if let Some(e) = entry {
+                    let mut job = serde_json::Map::new();
+                    for k in ["id", "state", "stage", "stage_seconds", "seconds", "fraction", "position", "queued_seconds", "estimate"] {
+                        if let Some(x) = e.get(k).filter(|x| !x.is_null()) {
+                            job.insert(k.to_string(), x.clone());
+                        }
+                    }
+                    v["job"] = Value::Object(job);
+                }
+                (v, false)
             }
             Err(m) => (json!({ "status": "error", "message": m }), true),
         };
@@ -224,7 +478,7 @@ impl Server {
     fn script_run(&mut self, args: &Value) -> (Value, bool) {
         let prepared = (|| {
             let (src, name) = self.script_of(args)?;
-            let wait = Self::wait_of(args)?;
+            let wait = self.wait_of(args)?;
             if let (Some(_), Some(save)) = (args.get("source"), args.get("save_as").and_then(Value::as_str)) {
                 let stem = script_stem(save)?;
                 std::fs::create_dir_all(self.scripts_dir()).map_err(|e| format!("cannot create the scripts folder: {e}"))?;
@@ -232,7 +486,7 @@ impl Server {
             }
             Ok::<_, String>((src, name, wait))
         })();
-        let (src, name, wait) = match prepared {
+        let (src, name, (wait, cut)) = match prepared {
             Ok(x) => x,
             Err(m) => return self.answer(Err(m)),
         };
@@ -241,19 +495,12 @@ impl Server {
             return self.answer(Err("`params` is an object (a dict)".to_string()));
         }
         let allow = args.get("allow_destructive").and_then(Value::as_bool).unwrap_or(false);
-        let r = match self.kernel() {
-            // the kernel and the engine are two fields of this struct
-            Ok(_) => {
-                let (engine, kernel) = (&mut self.engine, self.kernel.as_mut().expect("made above"));
-                kernel.run(engine, &name, &src, params.as_ref(), Some(wait), allow)
-            }
-            Err(m) => Err(m),
-        };
-        self.answer(r)
+        let r = self.drive(Go::Run { name, src, params, allow }, wait);
+        self.answer_wait(r, cut)
     }
 
     fn script_wait(&mut self, args: &Value) -> (Value, bool) {
-        let wait = match Self::wait_of(args) {
+        let (wait, cut) = match self.wait_of(args) {
             Ok(w) => w,
             Err(m) => return self.answer(Err(m)),
         };
@@ -269,8 +516,11 @@ impl Server {
                 Err(m) => self.answer(Err(m)),
             };
         }
-        let r = kernel.wait(&mut self.engine, Some(wait));
-        self.answer(r)
+        if kernel.waiting().is_none() {
+            return self.answer(Err("no script is running".to_string()));
+        }
+        let r = self.drive(Go::Wait, wait);
+        self.answer_wait(r, cut)
     }
 
     fn script_check(&mut self, args: &Value) -> (Value, bool) {
@@ -352,8 +602,21 @@ impl Server {
         let r = match method {
             "initialize" => Ok(self.initialize(&params)),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": tools() })),
-            "tools/call" => self.tools_call(&params),
+            "tools/list" => Ok(json!({ "tools": tools(self.max_wait) })),
+            "tools/call" => {
+                // the call being served: what a wait looks for in the host's messages, and what it reports progress to
+                self.current = key_of(&id);
+                self.token = params.get("_meta").and_then(|m| m.get("progressToken")).cloned();
+                self.suppress = false;
+                let r = self.tools_call(&params);
+                self.current = None;
+                self.token = None;
+                self.note = None;
+                if std::mem::take(&mut self.suppress) {
+                    return None; // the host cancelled it: the protocol sends no answer
+                }
+                r
+            }
             m => Err((-32601, format!("method not found: {m}"))),
         };
         Some(match r {
@@ -363,28 +626,21 @@ impl Server {
     }
 }
 
-fn serve(dir: PathBuf, root: PathBuf, queue: PathBuf) {
-    let mut s = Server::new(dir, root, queue);
+fn serve(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64) {
+    let mut s = Server::new(dir, root, queue, max_wait, spawn_reader());
     eprintln!("{NAME} {VERSION} ready");
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let reply = match serde_json::from_str::<Value>(&line) {
-            Ok(Value::Array(batch)) => {
+    while let Some(incoming) = s.next_message() {
+        let reply = match incoming {
+            Incoming::Msg(Value::Array(batch)) => {
                 // 2025-06-18 dropped batching; answering one is harmless
                 let out: Vec<Value> = batch.iter().filter_map(|m| s.handle(m)).collect();
                 if out.is_empty() { None } else { Some(Value::Array(out)) }
             }
-            Ok(m) => s.handle(&m),
-            Err(e) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": format!("parse error: {e}") } })),
+            Incoming::Msg(m) => s.handle(&m),
+            Incoming::Bad(e) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": format!("parse error: {e}") } })),
         };
         if let Some(r) = reply {
-            let mut out = stdout.lock();
-            if writeln!(out, "{r}").and_then(|_| out.flush()).is_err() {
+            if !send(&r) {
                 break; // the host went away
             }
         }
@@ -394,7 +650,7 @@ fn serve(dir: PathBuf, root: PathBuf, queue: PathBuf) {
 
 fn usage() {
     println!(
-        "nyx-mcp {VERSION}\n\nUSAGE\n  nyx-mcp [--dir PATH] [--root PATH]   serve MCP on stdio: the tools script_run, script_wait, script_check and api\n\nWorkflows and saved scripts go to --dir (default {}). The files a script's commands may name must lie in --root (default: --dir when given, else your Documents folder).\nThe program nyx-script-worker must sit next to this one (or be named in NYX_SCRIPT_WORKER).",
+        "nyx-mcp {VERSION}\n\nUSAGE\n  nyx-mcp [--dir PATH] [--root PATH] [--max-wait SECONDS]   serve MCP on stdio: the tools script_run, script_wait, script_check and api\n\nWorkflows and saved scripts go to --dir (default {}). The files a script's commands may name must lie in --root (default: --dir when given, else your Documents folder).\nA call never waits longer than --max-wait seconds (default {MAX_WAIT_S}, at most {LIMIT_WAIT_S}) whatever its wait_s says: keep it under your host's tool timeout; script_wait continues.\nThe program nyx-script-worker must sit next to this one (or be named in NYX_SCRIPT_WORKER).",
         default_dir().display()
     );
 }
@@ -420,6 +676,16 @@ fn main() {
     }
     let dir_arg = take_opt(&mut args, "--dir");
     let root_arg = take_opt(&mut args, "--root");
+    let max_wait = match take_opt(&mut args, "--max-wait") {
+        None => MAX_WAIT_S,
+        Some(v) => match v.to_str().and_then(|s| s.parse::<f64>().ok()).filter(|w| (1.0..=LIMIT_WAIT_S).contains(w)) {
+            Some(w) => w,
+            None => {
+                eprintln!("--max-wait is a number of seconds from 1 to {LIMIT_WAIT_S}");
+                std::process::exit(2);
+            }
+        },
+    };
     let dir_given = dir_arg.is_some();
     let dir = dir_arg.unwrap_or_else(default_dir);
     let root = root_arg.unwrap_or_else(|| default_root(dir_given, &dir));
@@ -427,7 +693,7 @@ fn main() {
         None => {
             // the queue is the window's (`NYX_WORKSPACE`, else Documents/nyx) unless `--dir` named a folder: then the folder has its own
             let queue = if dir_given { dir.clone() } else { nyx_engine::shared_queue::default_workspace() };
-            serve(dir, root, queue)
+            serve(dir, root, queue, max_wait)
         }
         Some("--version") => println!("{NAME} {VERSION}"),
         Some("--help") | Some("-h") => usage(),
