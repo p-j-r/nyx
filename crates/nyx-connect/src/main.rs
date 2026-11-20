@@ -1,12 +1,49 @@
 //! `nyx-connect`: the command-line twin of the app's Connect menu. It writes nothing unless you say connect/disconnect.
 //! `--json` prints the versioned report of `nyx_connect::report` instead of text (contract `connect_report`).
 use nyx_connect::report::{change_report, change_row, list_report, test_report};
-use nyx_connect::{claude_code_command, connect, disconnect, list, server_exe, snippet, test_server, Env, Status};
+use nyx_connect::{agent_instructions, claude_code_command, connect, disconnect, list, server_exe, snippet, test_server, Env, Status};
 
 fn usage() {
     println!(
-        "nyx-connect: connect the nyx MCP server to your AI apps\n\n  nyx-connect list                 show every supported app and whether nyx is connected\n  nyx-connect connect <app|all>    add nyx to one app, or to every installed app ('all')\n  nyx-connect disconnect <app>     remove nyx from one app\n  nyx-connect test                 start the server and list its tools\n  nyx-connect snippet              print the JSON to paste into any other app\n\nAdd --json to list, connect, disconnect or test for a machine-readable report.\nApps: claude-code, claude-desktop, cursor, vscode, windsurf. Set NYX_MCP to use a nyx-mcp program in another place."
+        "nyx-connect: connect the nyx MCP server to your AI apps\n\n  nyx-connect list                 show every supported app and whether nyx is connected\n  nyx-connect connect <app|all>    add nyx to one app, or to every installed app ('all')\n  nyx-connect disconnect <app>     remove nyx from one app\n  nyx-connect test                 start the server and list its tools\n  nyx-connect snippet              print the JSON to paste into any other app\n  nyx-connect instructions         print a text to paste into an AI app, so that it connects nyx itself\n\nAdd --json to list, connect, disconnect or test for a machine-readable report.\nApps: claude-code, claude-desktop, cursor, vscode, windsurf, antigravity. Set NYX_MCP to use a nyx-mcp program in another place."
     );
+}
+
+/// True when this program is the only one attached to its console, which is what a double click in the file explorer does: the window would
+/// close the moment the program ends.
+#[cfg(windows)]
+fn alone_in_console() -> bool {
+    extern "system" {
+        fn GetConsoleProcessList(list: *mut u32, count: u32) -> u32;
+    }
+    let mut ids = [0u32; 4];
+    // SAFETY: the buffer is valid for `ids.len()` entries, which is the count passed; the call only writes into it
+    unsafe { GetConsoleProcessList(ids.as_mut_ptr(), ids.len() as u32) == 1 }
+}
+
+#[cfg(not(windows))]
+fn alone_in_console() -> bool {
+    false
+}
+
+/// What a double click shows: the commands and where nyx stands now, then the window stays until Enter.
+fn no_command(env: &Env, exe: &std::path::Path) {
+    usage();
+    println!("\nNow:");
+    print_list(env, exe);
+    println!("\nThis is a command-line program: open a terminal here and type one of the commands above, for example  nyx-connect connect all");
+    if alone_in_console() {
+        println!("\nPress Enter to close this window.");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+    }
+}
+
+fn print_list(env: &Env, exe: &std::path::Path) {
+    println!("server: {}{}", exe.display(), if exe.is_file() { "" } else { "  (NOT FOUND, build it first)" });
+    for h in list(env, exe) {
+        println!("{:15} {:16} {}", h.id, h.name, describe(&h.status));
+    }
 }
 
 fn describe(s: &Status) -> String {
@@ -41,10 +78,7 @@ fn main() {
             if json {
                 print_json(&list_report(&exe, &hosts));
             } else {
-                println!("server: {}{}", exe.display(), if exe.is_file() { "" } else { "  (NOT FOUND, build it first)" });
-                for h in hosts {
-                    println!("{:15} {:16} {}", h.id, h.name, describe(&h.status));
-                }
+                print_list(&env, &exe);
             }
             0
         }
@@ -113,7 +147,15 @@ fn main() {
             println!("{}\n\nClaude Code command:\n{}", snippet(&exe), claude_code_command(&exe));
             0
         }
-        Some("--help") | Some("-h") | None => {
+        Some("instructions") => {
+            println!("{}", agent_instructions(&env, &exe));
+            0
+        }
+        None => {
+            no_command(&env, &exe);
+            0
+        }
+        Some("--help") | Some("-h") => {
             usage();
             0
         }

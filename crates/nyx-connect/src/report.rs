@@ -106,7 +106,7 @@ pub fn schema() -> Value {
                 "required": ["id", "name", "config", "after_connect", "status"],
                 "additionalProperties": false,
                 "properties": {
-                    "id": { "enum": ["claude-code", "claude-desktop", "cursor", "vscode", "windsurf"] },
+                    "id": { "enum": ["claude-code", "claude-desktop", "cursor", "vscode", "windsurf", "antigravity"] },
                     "name": string(), "config": string(), "after_connect": string(),
                     "status": { "$ref": "#/$defs/status" }
                 }

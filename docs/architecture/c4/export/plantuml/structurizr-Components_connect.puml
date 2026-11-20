@@ -76,6 +76,7 @@ nyx.nyxconnect.Hostconfig --> nyx.nyxconnect.Report <<Relationship-UmVsYXRpb25za
 nyx.nyxconnect.Report --> nyx.nyxconnect.Hostconfig <<Relationship-UmVsYXRpb25zaGlw>> : "uses config\n<size:16>[Rust paths]</size>"
 nyx.nyxconnect.Report --> nyx.nyxconnect.Hosttable <<Relationship-UmVsYXRpb25zaGlw>> : "uses env\n<size:16>[Rust paths]</size>"
 nyx.nyxconnect.Report --> nyx.nyxconnect.Serverprobe <<Relationship-UmVsYXRpb25zaGlw>> : "uses server\n<size:16>[Rust paths]</size>"
+nyx.nyxconnect.Serverprobe --> nyx.nyxconnect.Hosttable <<Relationship-UmVsYXRpb25zaGlw>> : "uses env\n<size:16>[Rust paths]</size>"
 nyx.nyxconnect.Serverprobe --> nyx.nyxconnect.Report <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
 
 @enduml

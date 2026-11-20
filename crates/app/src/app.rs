@@ -1031,7 +1031,8 @@ impl App {
             return;
         };
         if self.connect_status.is_empty() {
-            ui.weak("No supported AI app found (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf). Use 'Copy config JSON' below.");
+            ui.weak("No supported AI app found (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Antigravity).");
+            ui.weak("Paste the instructions below into your AI app and it connects nyx itself, or copy the config JSON and paste it by hand.");
         }
         for host in self.connect_status.clone() {
             let status = host.status.clone();
@@ -1074,7 +1075,11 @@ impl App {
         }
         ui.separator();
         ui.weak(format!("Server: {}", server.display()));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Copy instructions for an AI").on_hover_text("A text for any AI app that can edit files: it tells the app which file to change and what to add.").clicked() {
+                ui.ctx().copy_text(nyx_connect::agent_instructions(&env, &server));
+                self.connect_note = Some("Instructions copied; paste them into your AI app's chat and let it edit its own MCP configuration.".into());
+            }
             if ui.button("Copy config JSON").clicked() {
                 ui.ctx().copy_text(nyx_connect::snippet(&server));
                 self.connect_note = Some("Config JSON copied; paste it into the mcpServers of any MCP client.".into());

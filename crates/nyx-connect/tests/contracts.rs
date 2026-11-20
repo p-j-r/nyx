@@ -187,6 +187,7 @@ fn report_examples() -> Vec<(&'static str, Value)> {
             host_info("cursor", "Cursor", Status::NotConnected),
             host_info("vscode", "VS Code", Status::Unreadable { why: "/h/mcp.json is not plain JSON (expected value at line 2); it may contain comments. Not changed: add the entry by hand (see the snippet)".into() }),
             host_info("windsurf", "Windsurf", Status::NotInstalled),
+            host_info("antigravity", "Antigravity", Status::Connected),
         ],
     );
     let done = |changed, backup: Option<&str>| Done { host: "cursor", config: PathBuf::from("/h/.cursor/mcp.json"), backup: backup.map(PathBuf::from), changed };
@@ -195,7 +196,7 @@ fn report_examples() -> Vec<(&'static str, Value)> {
         vec![
             change_row("cursor", &Ok(done(true, Some("/h/.cursor/mcp.json.nyx-backup")))),
             change_row("claude-code", &Ok(done(false, None))),
-            change_row("vscode", &Err("no host 'vscode2'; valid: claude-code, claude-desktop, cursor, vscode, windsurf".into())),
+            change_row("vscode", &Err("no host 'vscode2'; valid: claude-code, claude-desktop, cursor, vscode, windsurf, antigravity".into())),
         ],
     );
     let ok = test_report(&Ok(ServerInfo { name: "nyx-mcp".into(), version: "0.1.0".into(), protocol: "2025-06-18".into(), tools: vec!["geometry_build".into(), "solve".into()] }));
@@ -283,7 +284,7 @@ fn connect_report_v1_the_program_prints_valid_reports() {
     assert_valid(&list);
     assert_eq!(list["server_found"], true);
     let states: Vec<(&str, &str)> = list["hosts"].as_array().unwrap().iter().map(|h| (h["id"].as_str().unwrap(), h["status"]["state"].as_str().unwrap())).collect();
-    assert_eq!(states, [("claude-code", "not_connected"), ("claude-desktop", "not_installed"), ("cursor", "not_connected"), ("vscode", "not_installed"), ("windsurf", "not_installed")]);
+    assert_eq!(states, [("claude-code", "not_connected"), ("claude-desktop", "not_installed"), ("cursor", "not_connected"), ("vscode", "not_installed"), ("windsurf", "not_installed"), ("antigravity", "not_installed")]);
 
     let (code, out) = run(&sb, &fake, &["connect", "all", "--json"]);
     assert_eq!(code, 0);

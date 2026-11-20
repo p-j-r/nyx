@@ -132,6 +132,19 @@ pub fn hosts(env: &Env) -> Vec<Host> {
         marker: ws,
         shape: Shape::McpServers,
     });
+
+    // Antigravity: one file for the IDE and its command line, `~/.gemini/config/mcp_config.json` (seen on a machine that runs it). The marker is
+    // the `config` folder, not `~/.gemini`, which Gemini CLI users have too. A `.agents/mcp_config.json` in a workspace is documented but has
+    // been reported as ignored, so it is not used.
+    let gemini_config = h.join(".gemini").join("config");
+    v.push(Host {
+        id: "antigravity",
+        name: "Antigravity",
+        config: gemini_config.join("mcp_config.json"),
+        after_connect: "Restart Antigravity, or refresh its MCP servers, to use it.",
+        marker: gemini_config,
+        shape: Shape::McpServers,
+    });
     v
 }
 

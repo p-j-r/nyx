@@ -21,7 +21,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/architecture/*` | 19, 20 | model, rough spots, indexes |
 | `docs/RESTRUCTURE_STATUS.md` | 20, 19 | handoff for the restructure plan |
 | `docs/UX_STATUS.md` | 20, 88 | handoff for the UX review and plan |
-| `docs/HOST_SETUP.md` | 97, 94 | what costs time when an AI host drives nyx, and what to set in the host and do in the agent |
+| `docs/HOST_SETUP.md` | 97, 98, 94 | what costs time when an AI host drives nyx, and what to set in the host and do in the agent |
 | `docs/LATENCY_STATUS.md` | 97, 20 | handoff for the latency work L1 to L3 |
 | `docs/ux/*` | 88 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
 | `docs/FRAME_UNIFICATION_STATUS.md` | 1 | |
@@ -154,7 +154,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/app/*` | 23 | |
 | `crates/nyx-mcp/tests/{contracts,stdio}.rs` | 94, 97, 19, 15 | the `mcp_tools.v3` snapshot (four tools), the handshake, and the gate of S7: the P0 workflows in script mode against the per-command baseline |
 | `crates/nyx-mcp/*` | 94, 97, 15 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over one script kernel, no tool per command (S7; ADR 15 amended); moved from `ai/` into the root workspace (ADR 26) |
-| `crates/nyx-connect/*` | 15, 28, 19 | one copy of the Connect logic (R07 resolved)|
+| `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27 | shared target directory |
 | `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |

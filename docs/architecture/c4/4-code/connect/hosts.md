@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Host table** (`connect.hosts`) in the conta
 > Where each AI host (Claude Code, Claude Desktop, ...) keeps its MCP config and what an entry looks like; the home folder, application-data folders and the operating system.
 
 **Decisions:** [ADR 28](../../../adr/0028-nyx-connect-is-one-crate-with-a-versioned-report.md)  
-**Size:** 2 files, 202 lines.
+**Size:** 2 files, 215 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-connect/src/env.rs` | 51 | Where things live on this machine: the home folder, the Windows application-data folders and the operating system. [`Env::detect`] reads the process environment; tests build an `Env` by hand and never touch the real home folder. |
-| `crates/nyx-connect/src/hosts.rs` | 151 | The table of AI hosts nyx can connect to: where each keeps its MCP config file and what an entry in it looks like. Adding a host is one row here and one row in the contract exemplar `connect_hosts.v1.json`. |
+| `crates/nyx-connect/src/hosts.rs` | 164 | The table of AI hosts nyx can connect to: where each keeps its MCP config file and what an entry in it looks like. Adding a host is one row here and one row in the contract exemplar `connect_hosts.v1.json`. |
 
 ## What it uses
 
@@ -26,6 +26,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [Command line](./cli.md) | env | Env |
 | [Host config](./config.md) | env | Env |
 | [Report](./report.md) | env | Env, Os |
+| [Server probe](./server.md) | env | Env |
 
 ## Class diagram
 

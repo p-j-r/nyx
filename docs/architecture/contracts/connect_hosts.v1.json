@@ -61,6 +61,17 @@
           "command": "/x/nyx-mcp",
           "args": []
         }
+      },
+      {
+        "id": "antigravity",
+        "name": "Antigravity",
+        "config": ".gemini/config/mcp_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Antigravity, or refresh its MCP servers, to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
       }
     ],
     "mac": [
@@ -121,6 +132,17 @@
           "command": "/x/nyx-mcp",
           "args": []
         }
+      },
+      {
+        "id": "antigravity",
+        "name": "Antigravity",
+        "config": ".gemini/config/mcp_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Antigravity, or refresh its MCP servers, to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
       }
     ],
     "linux": [
@@ -177,6 +199,17 @@
         "config": ".codeium/windsurf/mcp_config.json",
         "servers_key": "mcpServers",
         "after_connect": "Restart Windsurf to use it.",
+        "entry": {
+          "command": "/x/nyx-mcp",
+          "args": []
+        }
+      },
+      {
+        "id": "antigravity",
+        "name": "Antigravity",
+        "config": ".gemini/config/mcp_config.json",
+        "servers_key": "mcpServers",
+        "after_connect": "Restart Antigravity, or refresh its MCP servers, to use it.",
         "entry": {
           "command": "/x/nyx-mcp",
           "args": []

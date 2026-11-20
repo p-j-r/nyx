@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::env::Env;
+use crate::hosts::hosts;
 use crate::ENTRY;
 
 /// The file name of the server program on this operating system.
@@ -71,6 +73,34 @@ pub fn server_exe() -> PathBuf {
 /// The JSON a user can paste into any host that is not listed.
 pub fn snippet(exe: &Path) -> String {
     serde_json::to_string_pretty(&json!({ "mcpServers": { ENTRY: { "command": exe.to_string_lossy(), "args": [] } } })).unwrap_or_default()
+}
+
+/// Text to paste into an AI app that can edit files (Antigravity, Cursor, Claude Code ...) so that it connects nyx itself: which file, which
+/// key, which entry, and the rules `connect` follows (a backup first, valid JSON, only the `nyx` entry touched). The paths are this machine's.
+pub fn agent_instructions(env: &Env, exe: &Path) -> String {
+    let plain = serde_json::to_string(&json!({ "command": exe.to_string_lossy(), "args": [] })).unwrap_or_default();
+    let mut s = format!(
+        "Connect the nyx MCP server to the app you are running in. Edit that app's MCP configuration file and change nothing else.\n\n\
+         The server program is: {exe}\n\
+         The entry to add under the servers key, named \"{ENTRY}\": {plain}\n\n\
+         Which file (use the one of the app you run in; create it if it is missing):\n",
+        exe = exe.display()
+    );
+    for h in hosts(env) {
+        let seen = if h.config.is_file() || h.marker.is_dir() { "" } else { " (not found on this computer)" };
+        let entry = h.entry(exe);
+        let own = if entry == serde_json::from_str::<Value>(&plain).unwrap_or(Value::Null) { String::new() } else { format!(", with this entry: {entry}") };
+        s.push_str(&format!("- {}: {}, under the key \"{}\"{own}{seen}\n", h.name, h.config.display(), h.servers_key()));
+    }
+    s.push_str(&format!(
+        "\nRules:\n\
+         1. Keep every other server and setting in the file, in their order.\n\
+         2. If there is no copy of the file named like it with \".nyx-backup\" added, make one before you change it.\n\
+         3. The file must stay plain JSON. If it has comments or does not parse, stop and tell me; do not rewrite it.\n\
+         4. If a \"{ENTRY}\" entry exists, change only its \"command\" to the program above and keep its other keys.\n\
+         5. Then tell me to restart the app (or refresh its MCP servers). When it is back, nyx offers four tools: script_run, script_wait, script_check and api.\n"
+    ));
+    s
 }
 
 /// The `claude mcp add` line for Claude Code, for people who prefer the command.

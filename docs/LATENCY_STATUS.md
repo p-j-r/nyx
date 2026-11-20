@@ -2,12 +2,13 @@
 
 Handoff for the work that came out of the benchmark session of 2026-11-19 (two silicon-on-sapphire waveguides driven from Antigravity; the analysis is `LATENCY_AND_WORKFLOW_ANALYSIS.md` in the benchmark workspace). Decision record: ADR 97. For people and agents using a host: `docs/HOST_SETUP.md`.
 
-Workspace `nyx2-latency` (`C:\Users\robin-adm\Documents\opomech\nyx2-latency`), based on `main` = `productivity-merge-main` 219fe4e1. Two bookmarks, stacked:
+Workspace `nyx2-latency` (`C:\Users\robin-adm\Documents\opomech\nyx2-latency`), based on `main` = `productivity-merge-main` 219fe4e1. Three bookmarks, stacked:
 
 | Bookmark | What |
 |---|---|
 | `latency-1-mcp-reader` | L1. `nyx-mcp` reads stdin on a thread; a wait is cut to `--max-wait` (default 90 s, 1 to 900) and ends for a newer `script_run` or `script_wait` or `notifications/cancelled`; `ping` and `tools/list` are answered during a wait; progress notifications; the job (stage, seconds, estimate) in a `running` answer. `crates/nyx-mcp`, `Kernel::waiting_job`. |
 | `latency-2-estimates-noise` | L2, L3. Noise rows in `convergence_check`; `dry_run`, `max_cells`, `max_seconds`; `cost` in the answers of `mesh_build` and `sweep_run`; starred materials in the wave sizing of the mesher; the guide cards; `docs/HOST_SETUP.md`; ADR 97; `engine_commands` 1.22. |
+| `latency-3-connect-antigravity` | L4. `nyx-connect`: host `antigravity`, `agent_instructions` (`nyx-connect instructions`, button "Copy instructions for an AI"), the double click, the hint in the Connect menu; ADR 98; `connect_hosts` and `connect_report` 1.1. |
 
 ## What was found, in the code
 
@@ -26,7 +27,7 @@ Workspace `nyx2-latency` (`C:\Users\robin-adm\Documents\opomech\nyx2-latency`), 
 
 ## Not done
 
-* **Connecting Antigravity.** `nyx-connect` has no good way to write the configuration of Antigravity; Paul asked for a plan after this work. Planned in the next step, not built.
+* Antigravity in Connect: done as L4 (bookmark `latency-3-connect-antigravity`, ADR 98): a host row, `nyx-connect instructions` and the button "Copy instructions for an AI", a double click on `nyx-connect.exe` shows the commands. Not tried on a running Antigravity (whether it reloads the file without a restart).
 * The A-benchmarks, `tools/ux-shots.sh`, `tools/baseline.sh` and the `-- --ignored` tests were not run on this build.
 * The C4 pages in `docs/architecture/c4` are rebuilt; the copy in `Documents/opomech/nyx-c4` is not.
 * No run with a real host: the stdio tests drive the binary the way a host does (a newer request, a cancellation, a ping, a progress token), Antigravity itself was not tried.

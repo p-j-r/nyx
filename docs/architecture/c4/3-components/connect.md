@@ -40,14 +40,15 @@ graph TB
     26-. "<div>uses config</div><div style='font-size: 70%'>[Rust paths]</div>" .->24
     26-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
     26-. "<div>uses server</div><div style='font-size: 70%'>[Rust paths]</div>" .->25
+    25-. "<div>uses env</div><div style='font-size: 70%'>[Rust paths]</div>" .->23
     25-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->26
 
   end```
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Host table](../4-code/connect/hosts.md) | 2 | 202 | 28 | Where each AI host (Claude Code, Claude Desktop, ...) keeps its MCP config and what an entry looks like; the home folder, application-data folders and the operating system. |
+| [Host table](../4-code/connect/hosts.md) | 2 | 215 | 28 | Where each AI host (Claude Code, Claude Desktop, ...) keeps its MCP config and what an entry looks like; the home folder, application-data folders and the operating system. |
 | [Host config](../4-code/connect/config.md) | 1 | 172 | 28 | Reads and rewrites a host's JSON config: status of the nyx entry, connect, disconnect, list. |
-| [Server probe](../4-code/connect/server.md) | 1 | 141 | 28 | Finds the nyx-mcp program, builds the snippet for a host that is not in the table, and does a real MCP handshake against it. |
+| [Server probe](../4-code/connect/server.md) | 1 | 171 | 28 | Finds the nyx-mcp program, builds the snippet for a host that is not in the table, and does a real MCP handshake against it. |
 | [Report](../4-code/connect/report.md) | 2 | 185 | 28, 19 | The machine-readable form of what nyx-connect finds and does, with its JSON Schema. |
-| [Command line](../4-code/connect/cli.md) | 1 | 128 | 28 | The command-line twin of the Connect menu: list, connect, disconnect, test, optionally as JSON. |
+| [Command line](../4-code/connect/cli.md) | 1 | 170 | 28 | The command-line twin of the Connect menu: list, connect, disconnect, test, optionally as JSON. |

@@ -2,7 +2,7 @@
 
 `nyx-mcp` is a stdio MCP server (JSON-RPC 2.0, no async runtime, no SDK) over one `nyx_engine::Engine`. Since S7 of the productivity plan (ADR 94) it has **four tools**,
 not one per engine command: the agent writes a short Python script that calls the engine commands, and only what the script prints or returns comes back.
-`nyx-connect` connects the server to the AI apps installed on this computer (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf).
+`nyx-connect` connects the server to the AI apps installed on this computer (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Antigravity).
 
 | tool | what |
 |---|---|

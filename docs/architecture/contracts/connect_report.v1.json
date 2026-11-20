@@ -51,6 +51,15 @@
         "status": {
           "state": "not_installed"
         }
+      },
+      {
+        "id": "antigravity",
+        "name": "Antigravity",
+        "config": "/h/antigravity.json",
+        "after_connect": "Restart it to use it.",
+        "status": {
+          "state": "connected"
+        }
       }
     ]
   },
@@ -76,7 +85,7 @@
       {
         "host": "vscode",
         "ok": false,
-        "error": "no host 'vscode2'; valid: claude-code, claude-desktop, cursor, vscode, windsurf"
+        "error": "no host 'vscode2'; valid: claude-code, claude-desktop, cursor, vscode, windsurf, antigravity"
       }
     ]
   },

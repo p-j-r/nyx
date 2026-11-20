@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 5 files, 2800 lines.
+**Size:** 5 files, 2805 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 2192 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
+| `crates/app/src/app.rs` | 2197 | The application: the state of the window around one `nyx_engine::Engine`, and the window layout. |
 | `crates/app/src/feedback.rs` | 214 | Feedback while editing and while a result arrives (productivity plan P3, ADR 92): the project checked with the edits that are not applied yet, the size and cost of those edits from a trial mesh, and the polarization of a new result compu... |
 | `crates/app/src/main.rs` | 120 | nyx: a desktop application for finite-element simulations (window with `eframe`/`egui`, solvers in the engine and the physics crates). |
 | `crates/app/src/spans.rs` | 40 | Named timing spans for the frame log (productivity plan P3). `NYX_FRAME_LOG=<file>.csv` writes one row per frame; with spans, the row also says where the frame's time went (`poll=48.2;script=0.0;shell_ui=31.1`). A span is a name and the ... |
@@ -21,7 +21,7 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `connect` (nyx-connect)](../../3-components/connect.md) | config, env, server | Env, HostInfo, Status, connect, disconnect, find_server, list, plain_path, snippet |
+| [container `connect` (nyx-connect)](../../3-components/connect.md) | config, env, server | Env, HostInfo, Status, agent_instructions, connect, disconnect, find_server, list, plain_path, snippet |
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, preview, process, project, queue, shared_queue +2 | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MaterialAssign, MeshSettings, MeshedModel +16 |
 | [container `script` (nyx-script)](../../3-components/script.md) | crate root | mcp_dir |
 | [Scripts and batch](./headless.md) | pyscript | spawn |
@@ -246,10 +246,10 @@ classDiagram
 | fn | `App::export_analysis` | `app.rs:876` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
 | fn | `App::run_python_script` | `app.rs:892` | `pub fn run_python_script(&mut self)` |
 | fn | `App::new_project` | `app.rs:912` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
-| fn | `App::region_paint` | `app.rs:1215` | `pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint` —  The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions |
-| fn | `App::viewport_ui` | `app.rs:1245` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
-| fn | `App::set_condition_on` | `app.rs:1337` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
-| fn | `App::set_problem` | `app.rs:1347` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
+| fn | `App::region_paint` | `app.rs:1220` | `pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint` —  The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions |
+| fn | `App::viewport_ui` | `app.rs:1250` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::set_condition_on` | `app.rs:1342` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
+| fn | `App::set_problem` | `app.rs:1352` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
 | const | `REST` | `feedback.rs:16` | `Duration` —  An edit rests this long before a trial mesh is made of it. |
 | const | `SLOW` | `feedback.rs:18` | `f64` —  A trial mesh that takes longer than this (seconds) turns the automatic preview off: the rule of plan question 2 (about 100 ms). |
 | enum | `SizeView` | `feedback.rs:22` | variants: `None`, `Pending`, `Ready`, `Refused`, `Slow` —  What the size line shows. |

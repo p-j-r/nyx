@@ -250,7 +250,7 @@ fn connect_refuses_when_the_server_program_is_missing_or_the_host_is_unknown() {
     let e = connect(&env, "cursor", &sb.0.join("missing")).unwrap_err();
     assert!(e.contains("build it first") && !e.contains("cd ai"), "{e}");
     let e = connect(&env, "nope", &sb.0).unwrap_err();
-    assert!(e.contains("valid: claude-code, claude-desktop, cursor, vscode, windsurf"), "{e}");
+    assert!(e.contains("valid: claude-code, claude-desktop, cursor, vscode, windsurf, antigravity"), "{e}");
     assert!(!env.home.exists(), "a refused connect creates nothing");
 }
 
@@ -261,11 +261,11 @@ fn every_host_has_its_own_id_and_config_file_and_a_hint() {
         let hs = hosts(&sb.env(os));
         let mut ids: Vec<_> = hs.iter().map(|h| h.id).collect();
         ids.dedup();
-        assert_eq!(ids.len(), 5);
+        assert_eq!(ids.len(), 6);
         let mut files: Vec<_> = hs.iter().map(|h| h.config.clone()).collect();
         files.sort();
         files.dedup();
-        assert_eq!(files.len(), 5, "{os:?}");
+        assert_eq!(files.len(), 6, "{os:?}");
         assert!(hs.iter().all(|h| !h.after_connect.is_empty() && !h.name.is_empty()));
     }
 }
@@ -346,6 +346,63 @@ fn the_snippet_and_the_claude_code_command_name_the_program() {
     let v: Value = serde_json::from_str(&snippet(exe)).unwrap();
     assert_eq!(v, json!({ "mcpServers": { "nyx": { "command": "/opt/nyx-mcp", "args": [] } } }));
     assert_eq!(claude_code_command(exe), "claude mcp add nyx -- \"/opt/nyx-mcp\"");
+}
+
+#[test]
+fn antigravity_is_found_by_its_config_folder_not_by_the_folder_gemini_cli_shares() {
+    let sb = Sandbox::new("antigravity");
+    let env = sb.env(Os::Windows);
+    let exe = sb.exe();
+    let h = host(&hosts(&env), "antigravity").config.clone();
+    assert!(h.ends_with(".gemini/config/mcp_config.json") || h.ends_with(".gemini\\config\\mcp_config.json"), "{}", h.display());
+    // Gemini CLI alone leaves `~/.gemini`: that is not Antigravity
+    fs::create_dir_all(env.home.join(".gemini")).unwrap();
+    assert_eq!(status_of(&env, "antigravity", &exe), Status::NotInstalled);
+    fs::create_dir_all(env.home.join(".gemini/config")).unwrap();
+    assert_eq!(status_of(&env, "antigravity", &exe), Status::NotConnected);
+}
+
+#[test]
+fn antigravity_keeps_its_other_servers_and_repairs_an_entry_that_points_at_an_older_build() {
+    let sb = Sandbox::new("antigravity_stale");
+    let env = sb.env(Os::Windows);
+    let exe = sb.exe();
+    let cfg = host(&hosts(&env), "antigravity").config.clone();
+    fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    // the file as a user had it: nyx set up by hand for an older build, and another server
+    fs::write(&cfg, r#"{"mcpServers": {"nyx": {"command": "C:\\old\\nyx-mcp.exe", "args": []}, "other": {"command": "x", "args": ["-y"]}}}"#).unwrap();
+    assert!(matches!(status_of(&env, "antigravity", &exe), Status::Stale { .. }));
+    let d = connect(&env, "antigravity", &exe).unwrap();
+    assert!(d.changed && d.backup.is_some());
+    assert_eq!(status_of(&env, "antigravity", &exe), Status::Connected);
+    let v = read(&cfg);
+    assert_eq!(v["mcpServers"]["nyx"], json!({ "command": exe.to_string_lossy(), "args": [] }), "written untyped, as Cursor and Windsurf are");
+    assert_eq!(v["mcpServers"]["other"], json!({ "command": "x", "args": ["-y"] }));
+    assert_eq!(v["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["nyx", "other"], "the order is kept");
+    assert!(disconnect(&env, "antigravity").unwrap().changed);
+    assert!(read(&cfg)["mcpServers"].get("other").is_some() && read(&cfg)["mcpServers"].get("nyx").is_none());
+}
+
+#[test]
+fn the_instructions_for_an_ai_name_the_program_every_file_and_the_rules() {
+    let sb = Sandbox::new("instructions");
+    let env = sb.env(Os::Linux);
+    let exe = sb.exe();
+    fs::create_dir_all(env.home.join(".gemini/config")).unwrap();
+    let t = agent_instructions(&env, &exe);
+    assert!(t.contains(&exe.display().to_string()), "{t}");
+    for h in hosts(&env) {
+        assert!(t.contains(&h.config.display().to_string()) && t.contains(h.name), "{}: {t}", h.id);
+        assert!(t.contains(&format!("under the key \"{}\"", h.servers_key())), "{}: {t}", h.id);
+    }
+    // the hosts whose entry has more than command and args say so; the plain ones do not repeat it
+    assert!(t.contains("\"type\":\"stdio\""), "Claude Code and VS Code want a type: {t}");
+    assert!(t.contains("Cursor") && t.contains("(not found on this computer)"), "{t}");
+    let antigravity = t.lines().find(|l| l.starts_with("- Antigravity")).unwrap();
+    assert!(!antigravity.contains("not found"), "its folder is there: {antigravity}");
+    for rule in [".nyx-backup", "plain JSON", "restart", "script_run"] {
+        assert!(t.contains(rule), "the text says '{rule}': {t}");
+    }
 }
 
 fn probe(mode: &str, within: Duration) -> Result<ServerInfo, String> {

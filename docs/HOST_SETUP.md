@@ -2,6 +2,16 @@
 
 For the people who connect nyx to an AI host (Antigravity, Claude Code, Claude Desktop, others) and for the agents that run there. It comes from the benchmark session of 2026-11-19 (two silicon-on-sapphire waveguides, `LATENCY_AND_WORKFLOW_ANALYSIS.md` in the benchmark workspace): the solves that gave the final numbers took 3.8 s and 4.2 s; the sessions took 35 and 13 minutes. Over 90 % of the time was waiting and model turns, not solving. ADR 97 records what nyx changed because of it.
 
+## Connecting a host
+
+Three ways, all writing the same `nyx` entry (ADR 98):
+
+1. **The button.** In the nyx window, the menu **Connect** (between Examples and Python) lists every installed host (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Antigravity) with a Connect, Reconnect or Disconnect button. *Points to another nyx-mcp* means the host runs an older build: Reconnect. The same from a terminal: `nyx-connect list`, `nyx-connect connect antigravity` (or `all`). `nyx-connect` is a command-line program: a double click only shows its commands and the state, then waits for Enter.
+2. **Let the AI do it.** *Copy instructions for an AI* in the Connect menu, or `nyx-connect instructions`, gives a text to paste into the chat of any AI app that can edit files (Antigravity, Cursor, Claude Code ...). It names the program, the file and the key of every host on this computer and the rules (keep the other servers, back the file up, keep it plain JSON). Restart the app afterwards.
+3. **By hand.** *Copy config JSON*, or `nyx-connect snippet`, and paste it into the `mcpServers` of the host.
+
+**Antigravity** keeps one file for the IDE and its command line, `~/.gemini/config/mcp_config.json` (`C:\Users\<you>\.gemini\config\mcp_config.json`), with `{"mcpServers": {"nyx": {"command": "...\\nyx-mcp.exe", "args": []}}}`. A file in the workspace (`.agents/mcp_config.json`) has been reported as ignored. Restart Antigravity, or refresh its MCP servers, after a change. A host that needs a shorter wait than 90 s gets `"args": ["--max-wait", "60"]` by hand; Connect writes no arguments.
+
 ## What nyx does since L1 (ADR 97)
 
 - **A call never waits longer than 90 s** (`--max-wait SECONDS` changes it, 1 to 900). `wait_s` above the limit is cut to it and the answer says so. A host whose tool timeout is shorter than 90 s must be given `--max-wait` below its timeout, in the `args` of its MCP configuration. Antigravity ends a call after 180 s.

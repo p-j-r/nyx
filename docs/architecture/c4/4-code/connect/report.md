@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Report** (`connect.report`) in the containe
 |---|---|---|
 | [Host config](./config.md) | config | Done, HostInfo, Status, connect, disconnect, list, status |
 | [Host table](./hosts.md) | env | Env, Os |
-| [Server probe](./server.md) | server | ServerInfo, claude_code_command, find_server, find_server_with, is_cargo_build_tree, plain_path, server_exe, snippet, test_server, test_server_with +1 |
+| [Server probe](./server.md) | server | ServerInfo, agent_instructions, claude_code_command, find_server, find_server_with, is_cargo_build_tree, plain_path, server_exe, snippet, test_server +2 |
 
 ## Used by
 
