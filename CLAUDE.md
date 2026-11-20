@@ -1,6 +1,6 @@
 # nyx (repository `nyx2`)
 
-Desktop finite-element application for photonics and phononics, in pure Rust. No Python is needed to build or run anything. This repository is the restructure of `nyx`: read `docs/architecture/RESTRUCTURE_PLAN.md` and `docs/RESTRUCTURE_STATUS.md` **before changing crate layout, mesh types, solvers or the problem types**. `README.md` is the feature tour (parts of it describe the pre-restructure state) and `docs/HOW_IT_WORKS.md` explains what the solver does and what each log line means.
+Desktop finite-element application for photonics and phononics, in pure Rust. No Python is needed to build or run anything. This repository is the restructure of `nyx`: read `docs/architecture/RESTRUCTURE_PLAN.md` and `docs/RESTRUCTURE_STATUS.md` **before changing crate layout, mesh types, solvers or the problem types**. `README.md` is the overview of what nyx is, how to build and drive it, and what it solves, and `docs/HOW_IT_WORKS.md` explains what the solver does and what each log line means.
 
 ## Layout
 
