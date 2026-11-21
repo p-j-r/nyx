@@ -68,6 +68,7 @@ pub struct OpenWf {
     /// draft state (no folder yet)
     pub draft_title: String,
     pub spec0: String,
+    pub draft_spec: String,
     pub tags: Vec<String>,
     pub tag_input: String,
     pub exp: String,
@@ -106,6 +107,7 @@ impl OpenWf {
             dir: None,
             draft_title: String::new(),
             spec0: String::new(),
+            draft_spec: String::new(),
             tags: vec![],
             tag_input: String::new(),
             exp: "e1".into(),
@@ -240,6 +242,8 @@ pub struct Shell {
     pub confirm_cancel: bool,
     /// scripts left out of the file being shared
     pub share_exclude: Vec<String>,
+    /// tab id that should be scrolled into view in the bounded tab bar
+    pub scroll_to_tab: Option<String>,
 }
 
 impl Shell {
@@ -281,6 +285,7 @@ impl Shell {
             notice: None,
             confirm_cancel: false,
             share_exclude: vec![],
+            scroll_to_tab: None,
         }
     }
 
@@ -363,6 +368,11 @@ impl App {
 
     /// The engine has a new project (opened, or made): the window takes over its geometry and settings and meshes it.
     fn adopt_project(&mut self) {
+        self.doc = crate::state::Doc::default();
+        self.results.clear();
+        self.current = None;
+        self.show_results = false;
+        self.geom_ui = Default::default();
         self.adopt();
         self.project_path = None;
         self.rebuild_mesh();
@@ -375,6 +385,9 @@ impl App {
         let Ok(spec) = self.spec_json() else { return };
         let h = hash_bytes(spec.as_bytes());
         let Some(w) = self.shell.open.get_mut(&wid) else { return };
+        if w.dir.is_none() {
+            w.draft_spec = spec.clone();
+        }
         if h == w.last_hash {
             return;
         }
@@ -437,7 +450,25 @@ impl App {
         w.sub = Sub::Main;
         w.reload_runs();
         w.selected.clear();
-        let Some(d) = &w.dir else { return };
+        let Some(d) = &w.dir else {
+            let spec = if !w.draft_spec.is_empty() { w.draft_spec.clone() } else { w.spec0.clone() };
+            if spec.is_empty() {
+                return;
+            }
+            match self.engine.call("project_load", &serde_json::json!({ "json": spec })) {
+                Ok(_) => {
+                    self.adopt_project();
+                    let h = hash_bytes(spec.as_bytes());
+                    if let Some(w) = self.shell.open.get_mut(wid) {
+                        w.last_hash = h;
+                    }
+                    self.shell.loaded = Some((wid.to_string(), eid.to_string()));
+                    self.status = "Draft workflow (nothing is saved until you change something).".into();
+                }
+                Err(e) => self.set_error(format!("Draft {wid}: {e}")),
+            }
+            return;
+        };
         let path = d.spec_path(eid);
         match self.engine.call("project_open", &serde_json::json!({ "path": path.to_str().unwrap_or_default() })) {
             Ok(_) => {
@@ -489,6 +520,7 @@ impl App {
     pub fn show_workflow(&mut self, id: &str) {
         self.flush();
         self.shell.page = Page::Workflow(id.to_string());
+        self.shell.scroll_to_tab = Some(id.to_string());
         let eid = self.shell.open.get(id).map(|w| w.exp.clone()).unwrap_or_default();
         if self.shell.loaded.as_ref() != Some(&(id.to_string(), eid.clone())) {
             self.load_experiment(id, &eid);
@@ -557,9 +589,11 @@ impl App {
         let spec = self.spec_json().unwrap_or_default();
         if let Some(w) = self.shell.open.get_mut(&id) {
             w.spec0 = spec.clone();
+            w.draft_spec = spec.clone();
             w.last_hash = hash_bytes(spec.as_bytes());
         }
         self.shell.loaded = Some((id.clone(), "e1".into()));
+        self.shell.scroll_to_tab = Some(id.clone());
         self.shell.page = Page::Workflow(id);
         self.shell.sheet = Sheet::None;
         self.status = if shown { format!("Opened {title}: its project, mesh and results. Nothing is saved until you change something.") } else { "New workflow. Nothing is saved until you change something.".into() };
@@ -571,13 +605,20 @@ impl App {
         }
         if self.shell.loaded.as_ref().is_some_and(|l| l.0 == id) {
             self.flush();
+            self.shell.loaded = None;
         }
         self.shell.tabs.retain(|t| t != id);
         if self.shell.run.as_ref().is_none_or(|r| r.wf_id != id) {
             self.shell.open.remove(id);
         }
         if self.shell.page == Page::Workflow(id.to_string()) {
-            self.shell.page = self.shell.tabs.last().map(|t| Page::Workflow(t.clone())).unwrap_or(Page::Dashboard);
+            let next = self.shell.tabs.last().cloned();
+            if let Some(t) = next {
+                self.show_workflow(&t);
+            } else {
+                self.shell.page = Page::Dashboard;
+                self.shell.loaded = None;
+            }
         }
         self.shell.closed.push(id.to_string());
         self.save_tabs();
@@ -765,7 +806,26 @@ impl App {
     }
 
     fn shell_shortcuts(&mut self, ctx: &egui::Context) {
-        let (k, n, w, o, tab, shift, t) = ctx.input(|i| (i.modifiers.command && i.key_pressed(egui::Key::K), i.modifiers.command && i.key_pressed(egui::Key::N), i.modifiers.command && i.key_pressed(egui::Key::W), i.modifiers.command && i.key_pressed(egui::Key::O), i.modifiers.command && i.key_pressed(egui::Key::Tab), i.modifiers.shift, i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::T)));
+        let key_cmd = |i: &egui::InputState, key: egui::Key, shift: bool| {
+            (i.modifiers.command && i.modifiers.shift == shift && i.key_pressed(key))
+                || i.events.iter().any(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                            if *k == key && modifiers.command && modifiers.shift == shift
+                    )
+                })
+        };
+        let (k, n, w, o, tab, shift, t) = ctx.input(|i| (
+            key_cmd(i, egui::Key::K, false),
+            key_cmd(i, egui::Key::N, false),
+            key_cmd(i, egui::Key::W, false),
+            key_cmd(i, egui::Key::O, false),
+            key_cmd(i, egui::Key::Tab, false) || key_cmd(i, egui::Key::Tab, true),
+            i.modifiers.shift
+                || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, modifiers, .. } if modifiers.shift)),
+            key_cmd(i, egui::Key::T, true),
+        ));
         if k {
             self.shell.sheet = if self.shell.sheet == Sheet::Palette { Sheet::None } else { Sheet::Palette };
             self.shell.palette_q.clear();
@@ -802,6 +862,15 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let running_wf = self.shell.run.as_ref().map(|r| r.wf_id.clone());
+        let activity = self.activity();
+        let busy_visible = !activity.is_idle() || activity.paused || self.show_queue;
+        let busy_w = if busy_visible {
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let g = ui.painter().layout_no_wrap(activity.chip_text(), font, theme::text(&ctx));
+            g.size().x + 56.0
+        } else {
+            0.0
+        };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             if let Some(tex) = &self.shell.logo {
@@ -811,36 +880,66 @@ impl App {
                 ui.label(RichText::new("Nyx").font(theme::title(24.0)).color(theme::accent(&ctx)));
             }
             let on_dash = self.shell.page == Page::Dashboard;
-            let dash = crate::kit::tab(ui, "dashboard", "Dashboard", on_dash, None, false).select;
-            if dash.clicked() {
+            let mut go_dash = crate::kit::tab(ui, "dashboard", "Dashboard", on_dash, None, false).select.clicked();
+            let mut close = None;
+            let mut show = None;
+            let right_reserve = 460.0 + busy_w;
+            let max_tabs_w = (ui.available_width() - right_reserve).max(80.0);
+            egui::ScrollArea::horizontal().id_salt("tabbar_scroll").max_width(max_tabs_w).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    for id in self.shell.tabs.clone() {
+                        let Some(w) = self.shell.open.get(&id) else { continue };
+                        let on = self.shell.page == Page::Workflow(id.clone());
+                        let title = crate::fmt::ellipsize(&w.title(), 22);
+                        let running = running_wf.as_deref() == Some(&id);
+                        let state = if running { crate::kit::State::Running } else if w.dir.is_none() { crate::kit::State::Idle } else { crate::kit::State::Done };
+                        let hit = crate::kit::tab(ui, ("tab", &id), &title, on, Some(state), true);
+                        if on && self.shell.scroll_to_tab.as_deref() == Some(id.as_str()) {
+                            hit.select.scroll_to_me(Some(egui::Align::Center));
+                            self.shell.scroll_to_tab = None;
+                        }
+                        hit.select.clone().on_hover_text(state.word());
+                        if hit.select.clicked() {
+                            show = Some(id.clone());
+                        }
+                        if hit.select.middle_clicked() {
+                            close = Some(id.clone());
+                        }
+                        if let Some(c) = hit.close {
+                            if c.on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
+                                close = Some(id.clone());
+                            }
+                        }
+                    }
+                });
+            });
+            if ui.add(egui::Button::new(RichText::new("+").size(18.0)).min_size(Vec2::new(34.0, 34.0))).on_hover_text("New workflow (Ctrl+N)").clicked() {
+                self.shell.sheet = Sheet::New;
+            }
+            ui.menu_button("▾", |ui| {
+                if ui.selectable_label(on_dash, "Dashboard").clicked() {
+                    go_dash = true;
+                    ui.close();
+                }
+                for id in self.shell.tabs.clone() {
+                    let Some(w) = self.shell.open.get(&id) else { continue };
+                    let on = self.shell.page == Page::Workflow(id.clone());
+                    if ui.selectable_label(on, w.title()).clicked() {
+                        show = Some(id.clone());
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button("New workflow (Ctrl+N)").clicked() {
+                    self.shell.sheet = Sheet::New;
+                    ui.close();
+                }
+            }).response.on_hover_text("All open tabs");
+            if go_dash {
                 self.flush();
                 self.shell.page = Page::Dashboard;
                 self.refresh_entries();
-            }
-            let mut close = None;
-            let mut show = None;
-            for id in self.shell.tabs.clone() {
-                let Some(w) = self.shell.open.get(&id) else { continue };
-                let on = self.shell.page == Page::Workflow(id.clone());
-                let title = crate::fmt::ellipsize(&w.title(), 22);
-                let running = running_wf.as_deref() == Some(&id);
-                let state = if running { crate::kit::State::Running } else if w.dir.is_none() { crate::kit::State::Idle } else { crate::kit::State::Done };
-                let hit = crate::kit::tab(ui, ("tab", &id), &title, on, Some(state), true);
-                hit.select.clone().on_hover_text(state.word());
-                if hit.select.clicked() {
-                    show = Some(id.clone());
-                }
-                if hit.select.middle_clicked() {
-                    close = Some(id.clone());
-                }
-                if let Some(c) = hit.close {
-                    if c.on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
-                        close = Some(id.clone());
-                    }
-                }
-            }
-            if ui.add(egui::Button::new(RichText::new("+").size(18.0)).min_size(Vec2::new(34.0, 34.0))).on_hover_text("New workflow (Ctrl+N)").clicked() {
-                self.shell.sheet = Sheet::New;
             }
             if let Some(id) = show {
                 self.show_workflow(&id);
@@ -860,7 +959,6 @@ impl App {
                     self.shell.palette_q.clear();
                 }
                 // the busy chip and its queue popover (activity.rs): only while something runs or waits (review I-12: an always-on "Idle" is noise)
-                let activity = self.activity();
                 self.busy_chip(ui, &activity);
             });
         });
@@ -894,8 +992,11 @@ pub fn params_of(json: &str) -> BTreeMap<String, f64> {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
         let c = nyx_engine::store_link::card_of(&v);
         for d in &c.geometry.dims {
-            let key: String = format!("{}_{}", d.of, d.name).chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
-            m.entry(key).or_insert(d.m);
+            let key: String = d.name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
+            let key = key.trim_matches('_').to_string();
+            if !key.is_empty() {
+                m.entry(key).or_insert(d.m);
+            }
         }
         if let Some(w) = c.wavelength_m {
             m.insert("wavelength".into(), w);
@@ -970,5 +1071,58 @@ impl App {
                 let _ = ws.save_settings();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn params_of_uses_clean_parameter_names_without_parameter_prefix() {
+        let mut eng = nyx_engine::Engine::new();
+        crate::examples::blank(&mut eng, "ems", false).unwrap();
+        eng.call("set_param", &serde_json::json!({ "name": "w", "value": 5e-7 })).unwrap();
+        eng.call("set_param", &serde_json::json!({ "name": "h_si", "value": 2.2e-7 })).unwrap();
+        let json = eng.project().to_json();
+        let p = params_of(&json);
+        assert_eq!(p.get("w").copied(), Some(5e-7));
+        assert_eq!(p.get("h_si").copied(), Some(2.2e-7));
+        assert!(!p.contains_key("parameter_w"));
+        assert!(!p.contains_key("parameter_h_si"));
+    }
+
+    #[test]
+    fn switching_between_unsaved_drafts_preserves_each_spec_and_close_tab_reloads_remaining() {
+        let mut app = App::with_context(egui::Context::default());
+        app.new_draft("Draft Electrostatic", Start::Blank { physics: "dfs".into(), three_d: false });
+        let id_a = app.shell.tabs[0].clone();
+        assert_eq!(app.active().as_deref(), Some("dfs"));
+        assert_eq!(app.shell.loaded, Some((id_a.clone(), "e1".into())));
+
+        app.new_draft("Draft Solid", Start::Blank { physics: "sms".into(), three_d: false });
+        let id_b = app.shell.tabs[1].clone();
+        assert_eq!(app.active().as_deref(), Some("sms"));
+        assert_eq!(app.shell.loaded, Some((id_b.clone(), "e1".into())));
+
+        // Switch back to Draft A: must reload Draft A's spec ("dfs") into the engine, not leave Draft B's ("sms")
+        app.show_workflow(&id_a);
+        assert_eq!(app.shell.page, Page::Workflow(id_a.clone()));
+        assert_eq!(app.shell.loaded, Some((id_a.clone(), "e1".into())));
+        assert_eq!(app.active().as_deref(), Some("dfs"));
+        assert!(app.shell.open[&id_a].dir.is_none());
+
+        // Switch to Draft B again, then close Draft B: must switch to and reload Draft A ("dfs")
+        app.show_workflow(&id_b);
+        assert_eq!(app.active().as_deref(), Some("sms"));
+        app.close_tab(&id_b);
+        assert_eq!(app.shell.page, Page::Workflow(id_a.clone()));
+        assert_eq!(app.shell.loaded, Some((id_a.clone(), "e1".into())));
+        assert_eq!(app.active().as_deref(), Some("dfs"));
+
+        // Closing the last tab returns to Dashboard and clears loaded
+        app.close_tab(&id_a);
+        assert_eq!(app.shell.page, Page::Dashboard);
+        assert_eq!(app.shell.loaded, None);
     }
 }

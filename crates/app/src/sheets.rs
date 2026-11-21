@@ -13,6 +13,17 @@ use nyx_engine::facade::store::util::{ago, now_secs};
 use nyx_engine::facade::store::versions::{self, VersionKind};
 use nyx_engine::facade::store::ShareLevel;
 
+/// State of the in-window `.nys` script editor and runner sheet.
+#[derive(Default)]
+pub struct ScriptSheet {
+    pub open: bool,
+    pub code: String,
+    pub path: Option<std::path::PathBuf>,
+    pub check_msg: Option<Result<String, String>>,
+    pub output: Option<Result<String, String>>,
+    pub running: bool,
+}
+
 /// Start-from cards: (title, text, index in `examples::list()`, or `None` when it starts blank)
 const TEMPLATES: [(&str, &str, Option<usize>); 7] = [
     ("Optical waveguide", "Strip or rib cross-section, modes and n_eff", Some(14)),
@@ -26,6 +37,12 @@ const TEMPLATES: [(&str, &str, Option<usize>); 7] = [
 
 impl App {
     pub fn sheets_ui(&mut self, ctx: &egui::Context) {
+        if self.nys.open {
+            if kit::modal(ctx, "nys_script", 920.0, |ui| self.sheet_script(ui)) {
+                self.nys.open = false;
+            }
+            return;
+        }
         let close = match self.shell.sheet {
             Sheet::None => return,
             Sheet::New => kit::modal(ctx, "new", 940.0, |ui| self.sheet_new(ui)),
@@ -37,6 +54,106 @@ impl App {
         };
         if close {
             self.shell.sheet = Sheet::None;
+        }
+    }
+
+    fn sheet_script(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        ui.label(kit::title("Script (.nys)", 34.0).color(theme::accent(&ctx)));
+        ui.label(kit::muted(ui, "Python-syntax script run by nyx-script-worker on the open setup. Changes to geometry, materials, mesh and solves update this workflow directly."));
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if kit::ghost(ui, "Load .nys...").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).pick_file() {
+                    match std::fs::read_to_string(&p) {
+                        Ok(text) => {
+                            self.nys.code = text.trim_start_matches('\u{feff}').to_string();
+                            self.nys.path = Some(p);
+                            self.nys.check_msg = None;
+                        }
+                        Err(e) => self.set_error(format!("Could not read script: {e}")),
+                    }
+                }
+            }
+            if kit::ghost(ui, "Save .nys...").clicked() {
+                let default_name = self.nys.path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("script.nys").to_string();
+                if let Some(p) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).set_file_name(default_name).save_file() {
+                    match std::fs::write(&p, &self.nys.code) {
+                        Ok(()) => {
+                            self.status = format!("Saved {}", p.display());
+                            self.nys.path = Some(p);
+                        }
+                        Err(e) => self.set_error(format!("Could not write script: {e}")),
+                    }
+                }
+            }
+            if kit::ghost(ui, "Fill from model").on_hover_text("Replace the editor contents with the .nys commands that build the current model").clicked() {
+                self.fill_nys_from_model();
+            }
+            if kit::ghost(ui, "Check").on_hover_text("Parse and validate every nyx command and argument without running").clicked() {
+                self.check_nys_script();
+            }
+            let can_run = !self.nys.running && self.busy.is_none();
+            if kit::primary_enabled(ui, can_run, if self.nys.running { "Running..." } else { "Run .nys script" }).clicked() {
+                self.run_nys_script();
+            }
+            if kit::ghost(ui, "External .py on CSV...").on_hover_text("Run an external Python script on the exported project JSON and result CSV").clicked() {
+                self.run_python_script();
+            }
+        });
+        if let Some(p) = &self.nys.path {
+            ui.label(kit::mono(p.display().to_string()).size(12.0));
+        }
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical().id_salt("nys_code_scroll").max_height(280.0).show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::multiline(&mut self.nys.code)
+                    .code_editor()
+                    .desired_rows(15)
+                    .desired_width(f32::INFINITY)
+                    .lock_focus(true)
+                    .hint_text("# Write .nys commands here, e.g.\n# mesh_build()\n# solve()"),
+            );
+        });
+        if self.nys.running {
+            ui.add_space(6.0);
+            kit::status(ui, kit::State::Running, "Running script in nyx-script-worker...");
+        }
+        if let Some(chk) = &self.nys.check_msg {
+            ui.add_space(6.0);
+            match chk {
+                Ok(msg) => kit::status(ui, kit::State::Done, msg.clone()),
+                Err(err) => {
+                    kit::card(ui, theme::raised(&ctx), theme::danger(&ctx), 10, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.colored_label(theme::danger(&ctx), RichText::new("Static check failed").strong());
+                        ui.label(kit::mono(err.as_str()).size(12.0));
+                    });
+                }
+            }
+        }
+        if let Some(out) = &self.nys.output {
+            ui.add_space(6.0);
+            match out {
+                Ok(text) => {
+                    kit::plain_card(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new("Script output").strong().color(theme::success(&ctx)));
+                        egui::ScrollArea::vertical().id_salt("nys_out_scroll").max_height(180.0).show(ui, |ui| {
+                            ui.add(egui::TextEdit::multiline(&mut text.as_str()).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
+                        });
+                    });
+                }
+                Err(err) => {
+                    kit::card(ui, theme::raised(&ctx), theme::danger(&ctx), 10, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.colored_label(theme::danger(&ctx), RichText::new("Script run failed").strong());
+                        egui::ScrollArea::vertical().id_salt("nys_err_scroll").max_height(180.0).show(ui, |ui| {
+                            ui.label(kit::mono(err.as_str()).size(12.0));
+                        });
+                    });
+                }
+            }
         }
     }
 
@@ -114,6 +231,11 @@ impl App {
             if ui.link("Import a .nyx.json project").clicked() {
                 self.shell.sheet = Sheet::None;
                 self.pick_nyx_file();
+            }
+            if ui.link("Write/run a .nys script...").clicked() {
+                let title = if self.shell.new.title.trim().is_empty() { "Scripted workflow".to_string() } else { self.shell.new.title.trim().to_string() };
+                self.new_draft(&title, Start::Blank { physics: "ems".into(), three_d: false });
+                self.open_nys_script();
             }
             if ui.link(format!("Browse all {} examples", examples::list().len())).clicked() {
                 self.shell.new.all_examples = !self.shell.new.all_examples;
@@ -198,13 +320,24 @@ impl App {
             ui.label(kit::muted(ui, format!("Understood as: {}", q.understood().join(" · "))));
         }
         ui.add_space(8.0);
+        let q_raw = self.shell.palette_q.clone();
+        let matching_actions: Vec<&crate::menu::Item> = crate::menu::ACTIONS
+            .iter()
+            .filter(|it| it.act != crate::menu::Act::Palette && action_matches_query(it, &q_raw))
+            .collect();
+        if !q_raw.trim().is_empty() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if let Some(first) = matching_actions.first() {
+                go = Some(first.act);
+            } else if let Some(h) = hits.first() {
+                open = Some(entries[h.index].wf.id.clone());
+            }
+        }
         ui.columns(2, |cols| {
             kit::label_caps(&mut cols[0], "Do something", "");
-            // the same table as the menu bar (`menu::ACTIONS`)
-            for it in &crate::menu::ACTIONS {
-                if it.act == crate::menu::Act::Palette {
-                    continue;
-                }
+            if matching_actions.is_empty() {
+                cols[0].label(kit::muted(&cols[0], "No matching command."));
+            }
+            for it in &matching_actions {
                 let label = if it.keys.is_empty() { it.label.to_string() } else { format!("{}  ({})", it.label, it.keys) };
                 if cols[0].link(label).clicked() {
                     go = Some(it.act);
@@ -212,10 +345,46 @@ impl App {
             }
             kit::label_caps(&mut cols[1], "Browse what nyx can do", "");
             let ui = &mut cols[1];
-            for (area, items) in [("CONCEPT", "Use-case templates · Named regions · Geometry as code"), ("BUILD", "Mesh preview · Boundary numbers · Solver diagnostics"), ("ANALYSIS", "Runs table and filter · Compare runs · Polarization · Sensitivity · Your script")] {
+            let browse: [(&str, &[(&str, crate::menu::Act)]); 3] = [
+                (
+                    "CONCEPT",
+                    &[
+                        ("Use-case templates", crate::menu::Act::New),
+                        ("Geometry & parameters", crate::menu::Act::ConceptGeometry),
+                        ("Materials & regions", crate::menu::Act::ConceptMaterials),
+                    ],
+                ),
+                (
+                    "BUILD",
+                    &[
+                        ("Mesh preview & rebuild", crate::menu::Act::BuildMesh),
+                        ("Boundaries & conditions", crate::menu::Act::BuildConditions),
+                        ("Study, wavelength & solver", crate::menu::Act::BuildStudy),
+                        ("Parameter sweep", crate::menu::Act::BuildSweep),
+                        ("Mesh convergence check", crate::menu::Act::CheckConvergence),
+                    ],
+                ),
+                (
+                    "ANALYSIS & SCRIPTS",
+                    &[
+                        ("Runs table, plot & compare", crate::menu::Act::AnalysisRuns),
+                        ("Script (.nys) editor & runner", crate::menu::Act::ScriptEditor),
+                        ("Export as .nys script", crate::menu::Act::ExportScript),
+                    ],
+                ),
+            ];
+            for (area, items) in browse {
+                ui.add_space(4.0);
+                ui.label(RichText::new(area).monospace().strong());
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(area).monospace().strong());
-                    ui.label(kit::muted(ui, items).size(12.5));
+                    for (idx, (label, act)) in items.iter().enumerate() {
+                        if idx > 0 {
+                            ui.label(kit::muted(ui, "·"));
+                        }
+                        if ui.link(*label).clicked() {
+                            go = Some(*act);
+                        }
+                    }
                 });
             }
         });
@@ -225,7 +394,7 @@ impl App {
         }
         if let Some(act) = go {
             // an entry that opens another sheet replaces the palette; the others close it first
-            if !matches!(act, crate::menu::Act::New | crate::menu::Act::About) {
+            if !matches!(act, crate::menu::Act::New | crate::menu::Act::About | crate::menu::Act::Versions | crate::menu::Act::Share) {
                 self.shell.sheet = Sheet::None;
             }
             self.do_act(&ctx, act);
@@ -751,6 +920,29 @@ impl App {
     }
 }
 
+fn action_matches_query(it: &crate::menu::Item, q_raw: &str) -> bool {
+    let q = q_raw.trim().to_lowercase();
+    if q.is_empty() {
+        return true;
+    }
+    let hay = format!("{} {} {}", it.menu, it.label, it.keys).to_lowercase();
+    let extra = match it.act {
+        crate::menu::Act::BuildStudy => "frequency wavelength modes eigenfrequency solver order p1 p2 target neff study",
+        crate::menu::Act::BuildConditions => "boundary boundaries condition conditions pml pec port source load constraint physics",
+        crate::menu::Act::BuildSweep => "sweep parameter range points batch",
+        crate::menu::Act::ConceptGeometry => "geometry dimensions parameters width height thickness rect circle polygon cad step",
+        crate::menu::Act::ConceptMaterials => "material materials silicon silica sapphire refractive index epsilon conductivity",
+        crate::menu::Act::AnalysisRuns => "analysis runs plot compare table filter export csv field modes polarization poincare",
+        crate::menu::Act::ScriptEditor => "script .nys python monty code automate batch editor runfile",
+        crate::menu::Act::ExportScript => "export script .nys save code",
+        crate::menu::Act::BuildMesh => "mesh remesh elements cells triangulation",
+        crate::menu::Act::CheckConvergence => "convergence refine accuracy check error",
+        crate::menu::Act::Compute => "compute solve run f5 start simulation",
+        _ => "",
+    };
+    q.split_whitespace().all(|tok| hay.contains(tok) || extra.contains(tok))
+}
+
 fn human(b: u64) -> String {
     let b = b as f64;
     if b < 1024.0 {
@@ -761,5 +953,39 @@ fn human(b: u64) -> String {
         format!("{:.1} MB", b / 1024.0 / 1024.0)
     } else {
         format!("{:.2} GB", b / 1024.0 / 1024.0 / 1024.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn palette_query_filters_commands_and_synonyms() {
+        let find = |q: &str| -> Vec<crate::menu::Act> {
+            crate::menu::ACTIONS
+                .iter()
+                .filter(|it| it.act != crate::menu::Act::Palette && action_matches_query(it, q))
+                .map(|it| it.act)
+                .collect()
+        };
+        assert!(find("wavelength").contains(&crate::menu::Act::BuildStudy));
+        assert!(find("freq").contains(&crate::menu::Act::BuildStudy));
+        assert!(find(".nys").contains(&crate::menu::Act::ScriptEditor));
+        assert!(find("material").contains(&crate::menu::Act::ConceptMaterials));
+        assert!(find("geom").contains(&crate::menu::Act::ConceptGeometry));
+        assert!(find("mesh").contains(&crate::menu::Act::BuildMesh));
+    }
+
+    #[test]
+    fn nys_script_sheet_prefills_from_project() {
+        let ctx = egui::Context::default();
+        let mut a = App::with_context(ctx.clone());
+        assert!(!a.nys.open);
+        a.open_nys_script();
+        assert!(a.nys.open);
+        assert!(!a.nys.code.trim().is_empty(), "prefilled with project_script");
+        let mut out = ctx.run_ui(Default::default(), |ui| a.sheets_ui(ui.ctx()));
+        out.textures_delta.clear();
     }
 }

@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 > The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points.
 
 **Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 8 files, 4441 lines.
+**Size:** 8 files, 5092 lines.
 
 ## Files
 
@@ -14,11 +14,11 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 | `crates/app/src/activity.rs` | 418 |  |
 | `crates/app/src/dashboard.rs` | 381 |  |
 | `crates/app/src/examples.rs` | 140 |  |
-| `crates/app/src/menu.rs` | 171 |  |
-| `crates/app/src/sheets.rs` | 766 |  |
-| `crates/app/src/shell.rs` | 975 |  |
+| `crates/app/src/menu.rs` | 399 |  |
+| `crates/app/src/sheets.rs` | 992 |  |
+| `crates/app/src/shell.rs` | 1129 |  |
 | `crates/app/src/sweepui.rs` | 473 |  |
-| `crates/app/src/wfview.rs` | 1117 |  |
+| `crates/app/src/wfview.rs` | 1160 |  |
 
 ## What it uses
 
@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 |---|---|---|
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, store_link, validated | Active, Artifact, Done, Engine, Entry, ExportOptions, FeatureList, Filter, Inspection, Limits +38 |
 | [Look and widgets](./style.md) | fmt, kit, theme | State, card, danger, ellipsize, key_label, modal, muted, plural, primary, tab +1 |
-| [Window](./window.md) | app, spans, state | App, JobKind, Tab, span |
+| [Window](./window.md) | app, spans, state | App, Doc, JobKind, Tab, span |
 
 ## Used by
 
@@ -34,7 +34,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 |---|---|---|
 | [Scripts and batch](./headless.md) | examples, shell | Page, Part, Sheet, Start, Sub, list |
 | [Inspector tabs](./inspector.md) | examples | list, typical |
-| [Window](./window.md) | activity, examples, shell, sweepui | Active, Deferred, Shell, Start, band_colours, validation_state |
+| [Window](./window.md) | activity, examples, menu, sheets, shell, sweepui | Act, Active, Deferred, Page, RunCtx, ScriptSheet, Sheet, Shell +4 |
 
 ## Class diagram
 
@@ -76,7 +76,7 @@ classDiagram
         +forget_validated()
         +validated_line(ui)
         ~edit_workflow(id, f)
-        +more_32_methods()
+        +more_33_methods()
     }
     class fns_activity_rs {
         <<module activity.rs>>
@@ -142,6 +142,17 @@ classDiagram
         +ACTIONS const
     }
   }
+  namespace sheets_rs {
+    class ScriptSheet {
+        <<struct>>
+        +open bool
+        +code String
+        +path Option~PathBuf~
+        +check_msg Option
+        +output Option
+        +running bool
+    }
+  }
   namespace shell_rs {
     class Page {
         <<enumeration>>
@@ -183,11 +194,11 @@ classDiagram
         +dir Option~WorkflowDir~
         +draft_title String
         +spec0 String
+        +draft_spec String
         +tags Vec~String~
         +tag_input String
         +exp String
-        +part Part
-        +more_25_fields
+        +more_26_fields
         +new(id) OpenWf
         +title() String
         +reload_runs()
@@ -230,7 +241,7 @@ classDiagram
         +open HashMap
         +loaded Option
         +run Option~RunCtx~
-        +more_26_fields
+        +more_27_fields
         +detached() Shell
         +active() bool
         +settings() Settings
@@ -302,7 +313,6 @@ classDiagram
   Act --> Sub
   Act --> Form
   Item --> Act
-  OpenWf --> Part
   Deferred --> RunCtx
   Shell --> Page
   Shell --> OpenWf
@@ -343,56 +353,58 @@ classDiagram
 | fn | `typical` | `examples.rs:72` | `pub fn typical(name: &str) -> f64` —  A value for a property the descriptor gives no default for: a typical number, so that a new simulation runs before anything is edited. |
 | fn | `blank` | `examples.rs:87` | `pub fn blank(engine: &mut Engine, physics: &str, three_d: bool) -> Result<(), String>` —  Starts a blank simulation in `engine`: a unit plate (one region `plate`, x-z) or, in 3D, the unit cube made by sweeping it along y, |
 | fn | `blank_json` | `examples.rs:135` | `pub fn blank_json(physics: &str, three_d: bool) -> Result<String, String>` —  The JSON text of a blank simulation (`blank`) made on a scratch engine: the spec a new experiment starts from. |
-| enum | `Act` | `menu.rs:12` | variants: `New`, `Open`, `CloseTab`, `Quit`, `Palette`, `Dashboard`, `Settings`, `ZoomIn`, `ZoomOut`, `ZoomReset`, `Compute`, `Stop`, ... |
-| struct | `Item` | `menu.rs:28` | fields: `menu`, `label`, `keys`, `act` |
-| const | `ACTIONS` | `menu.rs:38` | `[Item` —  Menus in order; the items of a menu in the order of this table. |
-| fn | `menus` | `menu.rs:55` | `pub fn menus() -> Vec<&'static str>` —  The top-level menus in order. |
-| struct | `Native` | `menu.rs:113` |  The native menu bar (Windows). Other platforms use the command palette until their `muda` integration is tried: GTK on Linux and the main |
-| fn | `App::do_act` | `menu.rs:67` | `pub fn do_act(&mut self, ctx: &egui::Context, act: Act)` —  Does what a menu entry or a palette entry says. |
-| fn | `Native::install` | `menu.rs:122` | `pub fn install(cc: &eframe::CreationContext<'_>) -> Option<Native>` —  Builds the menus from `ACTIONS` and attaches them to the window of `cc`. `None` when the window has no Win32 handle or muda refuses. |
-| fn | `Native::take` | `menu.rs:151` | `pub fn take(&self) -> Vec<Act>` —  The actions clicked in the menu since the last call. |
-| fn | `App::sheets_ui` | `sheets.rs:28` | `pub fn sheets_ui(&mut self, ctx: &egui::Context)` |
-| fn | `App::settings_ui` | `sheets.rs:596` | `pub fn settings_ui(&mut self, ui: &mut egui::Ui)` |
+| enum | `Act` | `menu.rs:13` | variants: `New`, `Open`, `ScriptEditor`, `ExportScript`, `CloseTab`, `Quit`, `Palette`, `Dashboard`, `ConceptGeometry`, `ConceptMaterials`, `BuildConditions`, `BuildStudy`, ... |
+| struct | `Item` | `menu.rs:43` | fields: `menu`, `label`, `keys`, `act` |
+| const | `ACTIONS` | `menu.rs:53` | `[Item` —  Menus in order; the items of a menu in the order of this table. |
+| fn | `menus` | `menu.rs:84` | `pub fn menus() -> Vec<&'static str>` —  The top-level menus in order. |
+| struct | `Native` | `menu.rs:303` |  The native menu bar (Windows). Other platforms use the command palette until their `muda` integration is tried: GTK on Linux and the main |
+| fn | `App::bar_ui` | `menu.rs:108` | `pub fn bar_ui(&mut self, ui: &mut egui::Ui)` —  In-window themed menu bar generated from `ACTIONS`, plus the Connect menu. |
+| fn | `App::do_act` | `menu.rs:139` | `pub fn do_act(&mut self, ctx: &egui::Context, act: Act)` —  Does what a menu entry or a palette entry says. |
+| fn | `Native::install` | `menu.rs:312` | `pub fn install(cc: &eframe::CreationContext<'_>) -> Option<Native>` —  Builds the menus from `ACTIONS` and attaches them to the window of `cc`. `None` when the window has no Win32 handle or muda refuses. |
+| fn | `Native::take` | `menu.rs:341` | `pub fn take(&self) -> Vec<Act>` —  The actions clicked in the menu since the last call. |
+| struct | `ScriptSheet` | `sheets.rs:18` | fields: `open`, `code`, `path`, `check_msg`, `output`, `running` —  State of the in-window `.nys` script editor and runner sheet. |
+| fn | `App::sheets_ui` | `sheets.rs:39` | `pub fn sheets_ui(&mut self, ctx: &egui::Context)` |
+| fn | `App::settings_ui` | `sheets.rs:765` | `pub fn settings_ui(&mut self, ui: &mut egui::Ui)` |
 | enum | `Page` | `shell.rs:23` | variants: `Dashboard`, `Workflow`, `Settings` |
 | enum | `Start` | `shell.rs:30` | variants: `Example`, `Results`, `Blank` —  Where a new workflow starts from: an example (or any project file), or a blank simulation. |
 | enum | `Part` | `shell.rs:39` | variants: `Concept`, `Build`, `Analysis` —  The three sections of an experiment. |
 | enum | `Sub` | `shell.rs:47` | variants: `Main`, `Compare`, `Field` —  What fills the workflow view's centre besides the section itself. |
 | enum | `Sheet` | `shell.rs:54` | variants: `None`, `New`, `Palette`, `Versions`, `Share`, `Open`, `About` |
-| struct | `OpenWf` | `shell.rs:65` | fields: `id`, `dir`, `draft_title`, `spec0`, `tags`, `tag_input`, `exp`, `part`, `sub`, `concept_tab`, `build_tab`, `runs`, ... |
-| struct | `LiveRun` | `shell.rs:163` | fields: `wf_id`, `exp`, `run`, `physics` —  The run that is being solved, so its record can be written whatever the window shows when it ends. |
-| enum | `Deferred` | `shell.rs:172` | variants: `Record`, `RefreshEntries` —  Work that follows a solve and is not needed to show its result, done one piece per frame so that no frame holds more than one piece (the |
-| struct | `RunCtx` | `shell.rs:179` | fields: `wf_id`, `exp`, `spec_json`, `params`, `started` |
-| struct | `NewState` | `shell.rs:187` | fields: `title`, `template`, `physics`, `three_d`, `all_examples` |
-| struct | `Shell` | `shell.rs:201` | fields: `ws`, `entries`, `spark`, `page`, `tabs`, `open`, `loaded`, `run`, `live_run`, `sheet`, `new`, `palette_q`, ... |
-| fn | `params_of` | `shell.rs:892` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
-| fn | `OpenWf::new` | `shell.rs:103` | `pub fn new(id: String) -> OpenWf` |
-| fn | `OpenWf::title` | `shell.rs:141` | `pub fn title(&self) -> String` |
-| fn | `OpenWf::reload_runs` | `shell.rs:148` | `pub fn reload_runs(&mut self)` |
-| fn | `Shell::detached` | `shell.rs:247` | `pub fn detached() -> Shell` —  No workspace: the shell is off (tests and `--batch`). |
-| fn | `Shell::active` | `shell.rs:287` | `pub fn active(&self) -> bool` |
-| fn | `Shell::settings` | `shell.rs:291` | `pub fn settings(&self) -> Settings` |
-| fn | `Shell::current_mut` | `shell.rs:295` | `pub fn current_mut(&mut self) -> Option<&mut OpenWf>` |
-| fn | `App::attach_workspace` | `shell.rs:308` | `pub fn attach_workspace(&mut self, root: PathBuf)` —  Switches the shell on with the workspace at `root` (the window passes the default one; `NYX_WORKSPACE` overrides it). |
-| fn | `App::refresh_entries` | `shell.rs:330` | `pub fn refresh_entries(&mut self)` |
-| fn | `App::spec_json` | `shell.rs:357` | `pub fn spec_json(&self) -> Result<String, String>` —  The project as it would be saved (the geometry being edited included). |
-| fn | `App::flush` | `shell.rs:373` | `pub fn flush(&mut self)` —  Stores the live project in its workflow when it changed (called about once a second, and before anything that replaces it). |
-| fn | `App::persist_draft` | `shell.rs:406` | `pub fn persist_draft(&mut self, wid: &str, spec: &str) -> Result<(), String>` |
-| fn | `App::load_experiment` | `shell.rs:433` | `pub fn load_experiment(&mut self, wid: &str, eid: &str)` —  Loads experiment `eid` of workflow `wid` into the window (the current one is stored first). |
-| fn | `App::open_tab` | `shell.rs:458` | `pub fn open_tab(&mut self, id: &str, show: bool)` —  Opens a tab for the workflow `id` of the workspace and (when `show`) switches to it. |
-| fn | `App::show_workflow` | `shell.rs:489` | `pub fn show_workflow(&mut self, id: &str)` |
-| fn | `App::new_draft` | `shell.rs:499` | `pub fn new_draft(&mut self, title: &str, start: Start)` —  A new draft workflow from a project (nothing is written until the first change). |
-| fn | `App::finish_open` | `shell.rs:541` | `pub(crate) fn finish_open(&mut self, summary: &serde_json::Value)` —  The results file the window was opening on a job is in: its project is the engine's, so the draft workflow is made around it and the |
-| fn | `App::close_tab` | `shell.rs:568` | `pub fn close_tab(&mut self, id: &str)` |
-| fn | `App::shell_compute` | `shell.rs:590` | `pub fn shell_compute(&mut self)` —  Compute with a run record: stores the spec, remembers what is being solved and starts the solve. |
-| fn | `App::record_ok` | `shell.rs:623` | `pub fn record_ok(&mut self, rc: RunCtx, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun>` —  A solve finished well: writes its run record (the context `rc` was taken when the solve was taken) and keeps the log with it. Returns the run. |
-| fn | `App::note_check_in_run` | `shell.rs:631` | `pub fn note_check_in_run(&mut self)` —  A convergence check of the result on show has finished: when the engine says the result now rests on a check, the verdict goes into the |
-| fn | `App::defer` | `shell.rs:648` | `pub fn defer(&mut self, d: Deferred)` —  Puts work after a solve in the queue of pieces (a refresh is not queued twice). |
-| fn | `App::run_deferred` | `shell.rs:656` | `pub fn run_deferred(&mut self)` —  Does the next piece of work that followed a solve; one piece per call, and `poll` is called once per frame. |
-| fn | `App::record_end` | `shell.rs:667` | `pub fn record_end(&mut self, status: RunStatus, error: Option<String>)` —  A solve failed or was cancelled. |
-| fn | `App::shell_ui` | `shell.rs:721` | `pub fn shell_ui(&mut self, ui: &mut egui::Ui)` —  The whole window in the shell layout. |
-| fn | `App::pick_nyx_file` | `shell.rs:870` | `pub fn pick_nyx_file(&mut self)` —  File dialog for a `.nyx` file; shows what is inside before anything is saved. |
-| fn | `App::open_received` | `shell.rs:875` | `pub fn open_received(&mut self, p: PathBuf)` |
-| fn | `App::sync_look` | `shell.rs:952` | `pub fn sync_look(&mut self, ctx: &egui::Context)` —  Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs), |
+| struct | `OpenWf` | `shell.rs:65` | fields: `id`, `dir`, `draft_title`, `spec0`, `draft_spec`, `tags`, `tag_input`, `exp`, `part`, `sub`, `concept_tab`, `build_tab`, ... |
+| struct | `LiveRun` | `shell.rs:165` | fields: `wf_id`, `exp`, `run`, `physics` —  The run that is being solved, so its record can be written whatever the window shows when it ends. |
+| enum | `Deferred` | `shell.rs:174` | variants: `Record`, `RefreshEntries` —  Work that follows a solve and is not needed to show its result, done one piece per frame so that no frame holds more than one piece (the |
+| struct | `RunCtx` | `shell.rs:181` | fields: `wf_id`, `exp`, `spec_json`, `params`, `started` |
+| struct | `NewState` | `shell.rs:189` | fields: `title`, `template`, `physics`, `three_d`, `all_examples` |
+| struct | `Shell` | `shell.rs:203` | fields: `ws`, `entries`, `spark`, `page`, `tabs`, `open`, `loaded`, `run`, `live_run`, `sheet`, `new`, `palette_q`, ... |
+| fn | `params_of` | `shell.rs:990` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
+| fn | `OpenWf::new` | `shell.rs:104` | `pub fn new(id: String) -> OpenWf` |
+| fn | `OpenWf::title` | `shell.rs:143` | `pub fn title(&self) -> String` |
+| fn | `OpenWf::reload_runs` | `shell.rs:150` | `pub fn reload_runs(&mut self)` |
+| fn | `Shell::detached` | `shell.rs:251` | `pub fn detached() -> Shell` —  No workspace: the shell is off (tests and `--batch`). |
+| fn | `Shell::active` | `shell.rs:292` | `pub fn active(&self) -> bool` |
+| fn | `Shell::settings` | `shell.rs:296` | `pub fn settings(&self) -> Settings` |
+| fn | `Shell::current_mut` | `shell.rs:300` | `pub fn current_mut(&mut self) -> Option<&mut OpenWf>` |
+| fn | `App::attach_workspace` | `shell.rs:313` | `pub fn attach_workspace(&mut self, root: PathBuf)` —  Switches the shell on with the workspace at `root` (the window passes the default one; `NYX_WORKSPACE` overrides it). |
+| fn | `App::refresh_entries` | `shell.rs:335` | `pub fn refresh_entries(&mut self)` |
+| fn | `App::spec_json` | `shell.rs:362` | `pub fn spec_json(&self) -> Result<String, String>` —  The project as it would be saved (the geometry being edited included). |
+| fn | `App::flush` | `shell.rs:383` | `pub fn flush(&mut self)` —  Stores the live project in its workflow when it changed (called about once a second, and before anything that replaces it). |
+| fn | `App::persist_draft` | `shell.rs:419` | `pub fn persist_draft(&mut self, wid: &str, spec: &str) -> Result<(), String>` |
+| fn | `App::load_experiment` | `shell.rs:446` | `pub fn load_experiment(&mut self, wid: &str, eid: &str)` —  Loads experiment `eid` of workflow `wid` into the window (the current one is stored first). |
+| fn | `App::open_tab` | `shell.rs:489` | `pub fn open_tab(&mut self, id: &str, show: bool)` —  Opens a tab for the workflow `id` of the workspace and (when `show`) switches to it. |
+| fn | `App::show_workflow` | `shell.rs:520` | `pub fn show_workflow(&mut self, id: &str)` |
+| fn | `App::new_draft` | `shell.rs:531` | `pub fn new_draft(&mut self, title: &str, start: Start)` —  A new draft workflow from a project (nothing is written until the first change). |
+| fn | `App::finish_open` | `shell.rs:573` | `pub(crate) fn finish_open(&mut self, summary: &serde_json::Value)` —  The results file the window was opening on a job is in: its project is the engine's, so the draft workflow is made around it and the |
+| fn | `App::close_tab` | `shell.rs:602` | `pub fn close_tab(&mut self, id: &str)` |
+| fn | `App::shell_compute` | `shell.rs:631` | `pub fn shell_compute(&mut self)` —  Compute with a run record: stores the spec, remembers what is being solved and starts the solve. |
+| fn | `App::record_ok` | `shell.rs:664` | `pub fn record_ok(&mut self, rc: RunCtx, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun>` —  A solve finished well: writes its run record (the context `rc` was taken when the solve was taken) and keeps the log with it. Returns the run. |
+| fn | `App::note_check_in_run` | `shell.rs:672` | `pub fn note_check_in_run(&mut self)` —  A convergence check of the result on show has finished: when the engine says the result now rests on a check, the verdict goes into the |
+| fn | `App::defer` | `shell.rs:689` | `pub fn defer(&mut self, d: Deferred)` —  Puts work after a solve in the queue of pieces (a refresh is not queued twice). |
+| fn | `App::run_deferred` | `shell.rs:697` | `pub fn run_deferred(&mut self)` —  Does the next piece of work that followed a solve; one piece per call, and `poll` is called once per frame. |
+| fn | `App::record_end` | `shell.rs:708` | `pub fn record_end(&mut self, status: RunStatus, error: Option<String>)` —  A solve failed or was cancelled. |
+| fn | `App::shell_ui` | `shell.rs:762` | `pub fn shell_ui(&mut self, ui: &mut egui::Ui)` —  The whole window in the shell layout. |
+| fn | `App::pick_nyx_file` | `shell.rs:968` | `pub fn pick_nyx_file(&mut self)` —  File dialog for a `.nyx` file; shows what is inside before anything is saved. |
+| fn | `App::open_received` | `shell.rs:973` | `pub fn open_received(&mut self, p: PathBuf)` |
+| fn | `App::sync_look` | `shell.rs:1053` | `pub fn sync_look(&mut self, ctx: &egui::Context)` —  Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs), |
 | struct | `Plan` | `sweepui.rs:24` | fields: `points`, `meshes`, `solves`, `problems` —  What the engine's dry run says a sweep will cost. |
 | struct | `Form` | `sweepui.rs:41` | fields: `shown`, `param`, `from`, `to`, `n`, `metric` —  The form of the section, one per open workflow. |
 | fn | `values` | `sweepui.rs:61` | `pub fn values(from: f64, to: f64, n: usize) -> Vec<f64>` —  `n` values from `from` to `to`, evenly spaced, ends included (one value when `n` is 1). |

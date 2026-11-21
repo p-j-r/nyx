@@ -227,7 +227,7 @@ impl App {
             }
             Act::Close => self.close_tab(id),
             Act::ExportCsv => self.export_runs_csv(id),
-            Act::Script => self.run_python_script(),
+            Act::Script => self.open_nys_script(),
             Act::Field(rid) => {
                 if let Some(w) = self.shell.open.get_mut(id) {
                     w.focus = Some(rid);
@@ -435,7 +435,7 @@ impl App {
                         Part::Build => "How is it computed? Mesh, boundaries, study and solver.",
                         Part::Analysis => "What came out? Runs, plots, comparisons and fields.",
                     };
-                    let room = (ui.available_width() - 330.0).max(40.0);
+                    let room = (ui.available_width() - 440.0).max(40.0);
                     ui.scope(|ui| {
                         ui.set_max_width(room);
                         ui.add(egui::Label::new(kit::muted(ui, hint)).truncate());
@@ -450,6 +450,9 @@ impl App {
                         let can = self.busy.is_none() && self.doc.mesh.is_some();
                         if kit::primary_enabled(ui, can, "Compute   F5").on_disabled_hover_text(if self.busy.is_some() { "Something else is running" } else { "There is no mesh to solve on yet" }).clicked() {
                             acts.push(Act::Compute);
+                        }
+                        if kit::ghost(ui, "Script (.nys)").on_hover_text("Write, load, check or run a .nys script (Ctrl+Shift+R)").clicked() {
+                            acts.push(Act::Script);
                         }
                         if w.part == Part::Analysis && w.selected.len() >= 2 && kit::ghost(ui, format!("Compare {} selected", w.selected.len())).clicked() {
                             acts.push(Act::Sub(Sub::Compare));
@@ -544,12 +547,26 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     let active = self.active();
                     let codes: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
-                    for p in codes {
-                        if kit::pill(ui, active.as_deref() == Some(p.as_str()), short_physics(&p)).clicked() {
-                            self.cmd("set_active", serde_json::json!({ "physics": p }));
-                            self.rules_dirty = true;
-                            self.picking = None;
+                    if codes.len() == 1 {
+                        let p = &codes[0];
+                        let info = match self.engine.project().spec(p) {
+                            Some(s) => format!("{} · {} · P{}", short_physics(p), s.study.kind, s.order),
+                            None => short_physics(p),
+                        };
+                        ui.label(RichText::new(info).strong().color(theme::accent(&ctx)));
+                    } else {
+                        for p in &codes {
+                            if kit::pill(ui, active.as_deref() == Some(p.as_str()), short_physics(p)).clicked() {
+                                self.cmd("set_active", serde_json::json!({ "physics": p }));
+                                self.rules_dirty = true;
+                                self.picking = None;
+                            }
                         }
+                    }
+                    if kit::ghost(ui, "Study & solver →").on_hover_text("Go to 2 · Build > Study and solver (wavelength, modes, solver)").clicked() {
+                        w.part = Part::Build;
+                        w.build_tab = Tab::Study;
+                        w.sweep.shown = false;
                     }
                 });
                 ui.horizontal(|ui| {
@@ -560,7 +577,7 @@ impl App {
                     }
                 });
                 ui.separator();
-                egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     self.tab = w.concept_tab;
                     self.inspector_tab(ui, w.concept_tab);
                     ui.add_space(10.0);
@@ -577,7 +594,7 @@ impl App {
             self.wf_live(ui, w, acts);
             return;
         }
-        egui::Panel::right("wf_build_inspector").default_size((ui.available_width() * 0.42).clamp(300.0, 440.0)).size_range(300.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::right("wf_build_inspector").default_size((ui.available_width() * 0.42).clamp(360.0, 460.0)).size_range(360.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (t, l) in [(Tab::Physics, "Boundaries and conditions"), (Tab::Study, "Study and solver")] {
                     if kit::pill(ui, !w.sweep.shown && w.build_tab == t, l).clicked() {
@@ -590,7 +607,7 @@ impl App {
                 }
             });
             ui.separator();
-            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 if w.sweep.shown {
                     self.sweep_section(ui, w, acts);
                 } else {
@@ -793,7 +810,7 @@ impl App {
                     if ui.add_enabled(has_pol, egui::Button::new("Polarization on the Poincaré sphere")).on_disabled_hover_text("Needs a result with a polarization analysis in this session: compute a mode study first.").clicked() {
                         acts.push(Act::Field(String::new()));
                     }
-                    if ui.add(egui::Button::new("Your script...")).on_hover_text("Runs a Python script on the project and the result on show").clicked() {
+                    if ui.add(egui::Button::new("Your script...")).on_hover_text("Write, check or run a .nys script (or an external Python script) on this project and result").clicked() {
                         acts.push(Act::Script);
                     }
                 });
@@ -811,6 +828,32 @@ impl App {
                     _ => format!("{} plotted.", crate::fmt::plural(pts.len(), "run")),
                 };
                 ui.label(RichText::new(out).size(13.0));
+                if let Some(cur) = self.current {
+                    if self.results.get(cur).is_some_and(|rv| rv.sols.len() > 1) {
+                        ui.add_space(10.0);
+                        let mut pick_sol: Option<usize> = None;
+                        kit::plain_card(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            let rv = &self.results[cur];
+                            ui.label(RichText::new(format!("Modes / solutions of latest solve ({})", rv.sols.len())).strong());
+                            for (si, s) in rv.sols.iter().enumerate() {
+                                let pol = rv.analysis.as_ref().and_then(|a| a.rows.get(si)).and_then(|r| r.report.as_ref()).map(|m| format!(" · {} (TE {:.0}%)", m.class.label(), m.te_fraction * 100.0)).unwrap_or_default();
+                                ui.horizontal(|ui| {
+                                    let on = rv.sol == si;
+                                    if ui.selectable_label(on, kit::mono(format!("{}{pol}", s.label)).size(12.0)).on_hover_text("Click to open this solution in the Field viewer").clicked() {
+                                        pick_sol = Some(si);
+                                    }
+                                });
+                            }
+                        });
+                        if let Some(si) = pick_sol {
+                            self.results[cur].sol = si;
+                            self.results[cur].values_cache = None;
+                            let rid = w.runs.last().map(|r| r.id.clone()).unwrap_or_default();
+                            acts.push(Act::Field(rid));
+                        }
+                    }
+                }
                 ui.add_space(6.0);
                 ui.label(kit::muted(ui, "Click a row to open its fields. Tick rows to compare them.").size(12.5));
             });

@@ -145,32 +145,37 @@ impl App {
         }
     }
 
-    /// The problem line and the size line under the Build mesh button.
+    /// The problem line and the size line above the Build mesh button.
     pub fn feedback_lines(&mut self, ui: &mut Ui) {
-        if let Some(p) = self.feedback.problem.clone() {
-            kit::status(ui, State::Failed, format!("Problem: {p}"));
-            return;
-        }
-        let muted = |ui: &Ui, t: String| kit::muted(ui, t).size(12.5);
         let mut ask = false;
-        match self.feedback.size.clone() {
-            SizeView::None | SizeView::Pending => {
-                ui.label(muted(ui, "Counting cells…".into()));
+        let problem = self.feedback.problem.clone();
+        let size = self.feedback.size.clone();
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 40.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_min_height(40.0);
+            if let Some(p) = problem {
+                kit::status(ui, State::Failed, format!("Problem: {p}"));
+                return;
             }
-            SizeView::Refused(why) => {
-                ui.label(muted(ui, format!("No size preview: {why}")));
+            let muted = |ui: &Ui, t: String| kit::muted(ui, t).size(12.5);
+            match size {
+                SizeView::None | SizeView::Pending => {
+                    ui.label(muted(ui, "Counting cells…".into()));
+                }
+                SizeView::Refused(why) => {
+                    ui.label(muted(ui, format!("No size preview: {why}")));
+                }
+                SizeView::Slow(s) => {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(muted(ui, format!("The trial mesh took {}: the preview waits for you.", crate::fmt::seconds(s))));
+                        ask = ui.small_button("Estimate size").clicked();
+                    });
+                }
+                SizeView::Ready(p) => {
+                    ui.label(RichText::new(size_line(&p)).size(12.5));
+                    ui.label(muted(ui, cost_line(&p)));
+                }
             }
-            SizeView::Slow(s) => {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(muted(ui, format!("The trial mesh took {}: the preview waits for you.", crate::fmt::seconds(s))));
-                    ask = ui.small_button("Estimate size").clicked();
-                });
-            }
-            SizeView::Ready(p) => {
-                ui.label(RichText::new(size_line(&p)).size(12.5));
-                ui.label(muted(ui, cost_line(&p)));
-            }
-        }
+        });
         if ask {
             self.feedback.paused = false;
             self.start_size_preview();

@@ -31,6 +31,8 @@ pub struct State {
     ev: Option<Evaluated>,
     /// the exact regions and edges as a display mesh (2D models), for the viewport before any meshing
     pub preview: Option<Arc<ViewMesh>>,
+    /// newly added feature id so its CollapsingHeader starts expanded
+    pub last_added: Option<FeatureId>,
 }
 
 impl State {
@@ -120,31 +122,52 @@ fn preview(ev: &Evaluated, lm: &LabelMap) -> Option<ViewMesh> {
 }
 
 /// Edits a number-or-expression field in place. While the field has the keyboard the typed text is kept as it is, so half-typed input like `1e-` survives.
-fn expr_edit(ui: &mut Ui, e: &mut Expr) -> bool {
-    let id = ui.next_auto_id();
+fn expr_edit(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, e: &mut Expr) -> bool {
+    let id = ui.make_persistent_id(salt);
     let focused = ui.memory(|m| m.has_focus(id));
-    let mut text = if focused { ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| e.source()) } else { e.source() };
-    let r = ui.add(TextEdit::singleline(&mut text).id(id).desired_width(130.0).font(egui::TextStyle::Monospace));
+    let cached = if focused { ui.data_mut(|d| d.get_temp::<String>(id)) } else { None };
+    let mut text = cached.clone().unwrap_or_else(|| e.source());
+    if focused && cached.is_none() {
+        crate::tabs::select_all_text(ui.ctx(), id, &text);
+    }
+    let r = ui.add(
+        TextEdit::singleline(&mut text)
+            .id(id)
+            .min_size(egui::vec2(104.0, 28.0))
+            .desired_width(118.0)
+            .clip_text(false)
+            .font(egui::TextStyle::Monospace),
+    );
+    crate::tabs::select_all_on_focus_gain(ui.ctx(), &r, &text);
     let mut changed = false;
     if r.changed() {
-        *e = match text.trim().parse::<f64>() {
-            Ok(v) if v.is_finite() => Expr::Num(v),
-            _ => Expr::Text(text.clone()),
+        *e = match crate::tabs::parse_si_f64(&text) {
+            Some(v) => Expr::Num(v),
+            None => Expr::Text(text.clone()),
         };
         changed = true;
     }
     if r.has_focus() {
         ui.data_mut(|d| d.insert_temp(id, text));
+    } else if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(id));
     }
     changed
 }
 
 /// A selector as text: edits that parse replace the selector, others are shown in red and leave it as it was.
-fn selector_edit(ui: &mut Ui, s: &mut Selector, ev: Option<&Evaluated>) -> bool {
-    let id = ui.next_auto_id();
+fn selector_edit(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, s: &mut Selector, ev: Option<&Evaluated>) -> bool {
+    let id = ui.make_persistent_id(salt);
     let focused = ui.memory(|m| m.has_focus(id));
     let mut text = if focused { ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| s.to_string()) } else { s.to_string() };
-    let r = ui.add(TextEdit::singleline(&mut text).id(id).desired_width(260.0).font(egui::TextStyle::Monospace));
+    let r = ui.add(
+        TextEdit::singleline(&mut text)
+            .id(id)
+            .min_size(egui::vec2(140.0, 28.0))
+            .desired_width(240.0)
+            .clip_text(false)
+            .font(egui::TextStyle::Monospace),
+    );
     let mut changed = false;
     if r.changed() {
         if let Ok(p) = Selector::parse(&text) {
@@ -157,6 +180,8 @@ fn selector_edit(ui: &mut Ui, s: &mut Selector, ev: Option<&Evaluated>) -> bool 
             ui.colored_label(RED, e.to_string());
         }
         ui.data_mut(|d| d.insert_temp(id, text));
+    } else if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(id));
     }
     if let Some(ev) = ev {
         match ev.resolve(s) {
@@ -179,15 +204,15 @@ fn row(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> bool) -> bool {
 fn exprs<const N: usize>(ui: &mut Ui, label: &str, v: &mut [Expr; N]) -> bool {
     row(ui, label, |ui| {
         let mut c = false;
-        for e in v.iter_mut() {
-            c |= expr_edit(ui, e);
+        for (i, e) in v.iter_mut().enumerate() {
+            c |= expr_edit(ui, (label, i), e);
         }
         c
     })
 }
 
 fn one(ui: &mut Ui, label: &str, e: &mut Expr) -> bool {
-    row(ui, label, |ui| expr_edit(ui, e))
+    row(ui, label, |ui| expr_edit(ui, label, e))
 }
 
 fn feature_combo(ui: &mut Ui, label: &str, id: &mut FeatureId, prior: &[(FeatureId, String)]) -> bool {
@@ -221,7 +246,7 @@ fn optional(ui: &mut Ui, label: &str, e: &mut Option<Expr>) -> bool {
             *e = if on { Some(Expr::Num(0.0)) } else { None };
         }
         if let Some(x) = e {
-            c |= expr_edit(ui, x);
+            c |= expr_edit(ui, (label, "opt"), x);
         }
         c
     })
@@ -313,8 +338,8 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&
             for (k, p) in pts.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("point {k}")).weak());
-                    c |= expr_edit(ui, &mut p[0]);
-                    c |= expr_edit(ui, &mut p[1]);
+                    c |= expr_edit(ui, ("pt", k, 0), &mut p[0]);
+                    c |= expr_edit(ui, ("pt", k, 1), &mut p[1]);
                     if ui.small_button("✕").clicked() {
                         rm = Some(k);
                     }
@@ -445,7 +470,10 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&
             for (k, r) in regions.iter_mut().enumerate() {
                 ui.push_id(k, |ui| {
                     ui.horizontal(|ui| {
-                        c |= ui.add(TextEdit::singleline(&mut r.name).desired_width(100.0)).changed();
+                        let rid = ui.make_persistent_id("region_name");
+                        let resp = ui.add(TextEdit::singleline(&mut r.name).id(rid).min_size(egui::vec2(88.0, 28.0)).desired_width(100.0));
+                        crate::tabs::select_all_on_focus_gain(ui.ctx(), &resp, &r.name);
+                        c |= resp.changed();
                         let shown = prior.iter().find(|(i, _)| *i == r.input).map(|(_, n)| n.as_str()).unwrap_or("(none)");
                         ComboBox::from_id_salt("input").selected_text(shown).show_ui(ui, |ui| {
                             for (i, nm) in prior {
@@ -537,19 +565,19 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&
             });
         }
         Op::Periodic { sel_a, sel_b, translation } => {
-            c |= row(ui, "face A", |ui| selector_edit(ui, sel_a, ev));
-            c |= row(ui, "face B", |ui| selector_edit(ui, sel_b, ev));
+            c |= row(ui, "face A", |ui| selector_edit(ui, "face_a", sel_a, ev));
+            c |= row(ui, "face B", |ui| selector_edit(ui, "face_b", sel_b, ev));
             c |= exprs(ui, "translation A to B", translation);
         }
         Op::Size { sel, h, max_deviation, min_layers } => {
-            c |= row(ui, "applies to", |ui| selector_edit(ui, sel, ev));
+            c |= row(ui, "applies to", |ui| selector_edit(ui, "size_sel", sel, ev));
             c |= optional(ui, "element size", h);
             c |= optional(ui, "largest chord deviation", max_deviation);
             c |= optional(ui, "layers across thin parts", min_layers);
         }
         Op::Tag { sel, name } => {
-            c |= row(ui, "applies to", |ui| selector_edit(ui, sel, ev));
-            c |= row(ui, "tag", |ui| ui.add(TextEdit::singleline(name).desired_width(120.0)).changed());
+            c |= row(ui, "applies to", |ui| selector_edit(ui, "tag_sel", sel, ev));
+            c |= row(ui, "tag", |ui| ui.add(TextEdit::singleline(name).id(ui.make_persistent_id("tag_name")).min_size(egui::vec2(104.0, 28.0)).desired_width(120.0)).changed());
         }
     }
     c
@@ -644,21 +672,31 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
     // ---- parameters
     ui.label(RichText::new("Parameters").strong());
     let mut rm = None;
-    egui::Grid::new("geom_params").num_columns(4).show(ui, |ui| {
-        for (k, p) in list.params.iter_mut().enumerate() {
-            ui.add(TextEdit::singleline(&mut p.name).desired_width(80.0));
-            ui.label("=");
-            expr_edit(ui, &mut p.value);
-            match st.values.get(k).map(|(_, v)| v) {
-                Some(Ok(x)) => ui.label(RichText::new(format!("{x:.6e}")).weak().monospace()),
-                Some(Err(e)) => ui.colored_label(RED, e),
-                None => ui.label(""),
-            };
-            if ui.small_button("✕").clicked() {
-                rm = Some(k);
+    ui.push_id("geom_params", |ui| {
+        egui::Grid::new("geom_params").num_columns(5).spacing([6.0, 4.0]).show(ui, |ui| {
+            for (k, p) in list.params.iter_mut().enumerate() {
+                let nid = ui.make_persistent_id(("param_name", k));
+                let nr = ui.add(
+                    TextEdit::singleline(&mut p.name)
+                        .id(nid)
+                        .min_size(egui::vec2(72.0, 28.0))
+                        .desired_width(82.0)
+                        .clip_text(false),
+                );
+                crate::tabs::select_all_on_focus_gain(ui.ctx(), &nr, &p.name);
+                ui.label("=");
+                expr_edit(ui, ("param_val", k), &mut p.value);
+                match st.values.get(k).map(|(_, v)| v) {
+                    Some(Ok(x)) => ui.label(RichText::new(format!("{x:.6e}")).weak().monospace()),
+                    Some(Err(e)) => ui.colored_label(RED, e),
+                    None => ui.label(""),
+                };
+                if ui.small_button("✕").clicked() {
+                    rm = Some(k);
+                }
+                ui.end_row();
             }
-            ui.end_row();
-        }
+        });
     });
     if let Some(k) = rm {
         list.params.remove(k);
@@ -675,31 +713,48 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
     let used: Vec<FeatureId> = list.features.iter().flat_map(|f| f.op.inputs()).collect();
     let mut remove = None;
     let mut move_by: Option<(usize, isize)> = None;
+    let n_features = list.features.len();
     for (k, f) in list.features.iter_mut().enumerate() {
         let prior = &heads[..k];
         let title = format!("{}  ·  {} {}", f.name, f.op.kind(), summary(&f.op));
-        egui::CollapsingHeader::new(RichText::new(title).color(if f.suppressed { Color32::GRAY } else { ui.visuals().text_color() })).id_salt(("feature", f.id)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut f.name).desired_width(120.0));
-                let mut on = !f.suppressed;
-                if ui.checkbox(&mut on, "active").changed() {
-                    f.suppressed = !on;
-                }
-                if ui.small_button("↑").clicked() {
-                    move_by = Some((k, -1));
-                }
-                if ui.small_button("↓").clicked() {
-                    move_by = Some((k, 1));
-                }
-                if ui.small_button("remove").clicked() {
-                    remove = Some(k);
-                }
-                if f.origin == Origin::Code {
-                    ui.weak("made by code");
-                }
+        let default_open = n_features <= 4 || st.last_added == Some(f.id);
+        egui::CollapsingHeader::new(RichText::new(title).color(if f.suppressed { Color32::GRAY } else { ui.visuals().text_color() }))
+            .id_salt(("feature", f.id))
+            .default_open(default_open)
+            .show(ui, |ui| {
+                ui.push_id(("feat_body", f.id), |ui| {
+                    ui.horizontal(|ui| {
+                        let fid = ui.make_persistent_id("feat_name");
+                        let fr = ui.add(
+                            TextEdit::singleline(&mut f.name)
+                                .id(fid)
+                                .min_size(egui::vec2(96.0, 28.0))
+                                .desired_width(120.0),
+                        );
+                        crate::tabs::select_all_on_focus_gain(ui.ctx(), &fr, &f.name);
+                        let mut on = !f.suppressed;
+                        if ui.checkbox(&mut on, "active").changed() {
+                            f.suppressed = !on;
+                        }
+                        if ui.small_button("↑").clicked() {
+                            move_by = Some((k, -1));
+                        }
+                        if ui.small_button("↓").clicked() {
+                            move_by = Some((k, 1));
+                        }
+                        if ui.small_button("remove").clicked() {
+                            remove = Some(k);
+                        }
+                        if f.origin == Origin::Code {
+                            ui.weak("made by code");
+                        }
+                    });
+                    op_form(ui, &mut f.op, prior, st.ev.as_ref());
+                });
             });
-            op_form(ui, &mut f.op, prior, st.ev.as_ref());
-        });
+        if st.last_added == Some(f.id) {
+            st.last_added = None;
+        }
     }
     st.notice = None;
     if let Some(k) = remove {
@@ -722,7 +777,7 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
     }
     let mut add: Option<&str> = None;
     ui.horizontal(|ui| {
-        ComboBox::from_id_salt("add_feature").selected_text("+ add feature").show_ui(ui, |ui| {
+        ComboBox::from_id_salt("add_feature").height(360.0).selected_text("+ add feature").show_ui(ui, |ui| {
             for (group, kinds) in GROUPS {
                 ui.label(RichText::new(group).weak());
                 for kind in kinds.iter().filter(|k| list.dim == 3 || !is_3d_kind(k)) {
@@ -745,7 +800,17 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
                 while list.features.iter().any(|f| f.name == format!("{lower}_{n}")) {
                     n += 1;
                 }
-                list.features.push(Feature { id, name: format!("{lower}_{n}"), op, suppressed: false, origin: Origin::Gui, tags: vec![] });
+                let is_post = matches!(op, Op::Overlay { .. } | Op::Pml { .. } | Op::Size { .. } | Op::Tag { .. } | Op::Cut { .. } | Op::Periodic { .. });
+                let pos = if is_post {
+                    list.features.len()
+                } else {
+                    list.features
+                        .iter()
+                        .position(|f| matches!(f.op, Op::Overlay { .. } | Op::Pml { .. } | Op::Size { .. } | Op::Tag { .. } | Op::Cut { .. } | Op::Periodic { .. }))
+                        .unwrap_or(list.features.len())
+                };
+                list.features.insert(pos, Feature { id, name: format!("{lower}_{n}"), op, suppressed: false, origin: Origin::Gui, tags: vec![] });
+                st.last_added = Some(id);
             }
             None => st.notice = Some(format!("a {kind} needs an earlier feature to refer to")),
         }
@@ -755,25 +820,25 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
     ui.add_space(6.0);
     ui.collapsing("Names and numbers", |ui| {
         ui.weak("Problems refer to regions and boundaries by these names or by a rule; the integers are what the solvers store. Read-only.");
-        egui::Grid::new("model_domains").num_columns(3).show(ui, |ui| {
+        egui::Grid::new("model_domains").num_columns(3).spacing([8.0, 4.0]).max_col_width(180.0).show(ui, |ui| {
             ui.label(RichText::new("region").strong());
             ui.label(RichText::new("kind").strong());
             ui.label(RichText::new("number").strong());
             ui.end_row();
             for (n, id, kd) in &st.domains {
-                ui.label(n);
+                ui.add(egui::Label::new(n).truncate());
                 ui.label(kind_name(*kd));
                 ui.label(id.to_string());
                 ui.end_row();
             }
         });
         ui.add_space(4.0);
-        egui::Grid::new("model_boundaries").num_columns(2).show(ui, |ui| {
+        egui::Grid::new("model_boundaries").num_columns(2).spacing([8.0, 4.0]).max_col_width(240.0).show(ui, |ui| {
             ui.label(RichText::new("boundary").strong());
             ui.label(RichText::new("number").strong());
             ui.end_row();
             for (n, id) in &st.boundaries {
-                ui.label(n);
+                ui.add(egui::Label::new(n).truncate());
                 ui.label(id.to_string());
                 ui.end_row();
             }
@@ -781,8 +846,8 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
     });
 
     // ---- code
-    ui.collapsing("Show as code", |ui| {
-        ui.weak("The same model as Rust builder code; running it gives this feature list back.");
+    ui.collapsing("Show geometry as Rust builder code", |ui| {
+        ui.weak("The same model as Rust builder code; running it gives this feature list back. Runnable .nys scripts live in Script (.nys) (Ctrl+Shift+R).");
         if ui.small_button("copy").clicked() {
             ui.ctx().copy_text(st.code.clone());
         }

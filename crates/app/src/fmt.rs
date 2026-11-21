@@ -55,17 +55,41 @@ pub fn si(v: f64, unit: &str) -> String {
     }
 }
 
-/// The unit a metric or parameter key ends with ("max_u_m" is in metres), when the last word is a unit.
+/// The unit a metric key ends with ("max_u_m" is in metres), when the last word is a physical unit.
+/// Parameter keys ("parameter_w", "w", "r_w") never carry an implicit SI unit suffix.
 pub fn unit_of(key: &str) -> Option<&'static str> {
-    const UNITS: [(&str, &str); 12] = [("m", "m"), ("pa", "Pa"), ("hz", "Hz"), ("s", "s"), ("k", "K"), ("w", "W"), ("v", "V"), ("n", "N"), ("j", "J"), ("a", "A"), ("kg", "kg"), ("rad", "rad")];
-    let (_, last) = key.rsplit_once('_')?;
-    UNITS.iter().find(|(w, _)| *w == last).map(|(_, u)| *u)
+    if key.starts_with("parameter_") {
+        return None;
+    }
+    let (stem, last) = key.rsplit_once('_')?;
+    match last {
+        "pa" => return Some("Pa"),
+        "hz" => return Some("Hz"),
+        "kg" => return Some("kg"),
+        "rad" => return Some("rad"),
+        _ => {}
+    }
+    const SINGLE_UNITS: [(&str, &str); 8] = [("m", "m"), ("s", "s"), ("k", "K"), ("w", "W"), ("v", "V"), ("n", "N"), ("j", "J"), ("a", "A")];
+    const METRIC_PREFIXES: [&str; 22] = [
+        "max_", "min_", "mean_", "avg_", "total_", "rms_", "peak_", "net_", "freq_", "time_", "power_", "energy_", "force_", "temp_",
+        "temperature_", "voltage_", "potential_", "current_", "disp_", "displacement_", "wavelength_", "charge_",
+    ];
+    const METRIC_STEMS: [&str; 20] = [
+        "max", "min", "mean", "avg", "total", "rms", "peak", "net", "freq", "frequency", "time", "power", "energy", "force", "temp",
+        "temperature", "voltage", "potential", "current", "displacement",
+    ];
+    let is_metric = METRIC_PREFIXES.iter().any(|p| stem.starts_with(p)) || METRIC_STEMS.contains(&stem);
+    if !is_metric {
+        return None;
+    }
+    SINGLE_UNITS.iter().find(|(w, _)| *w == last).map(|(_, u)| *u)
 }
 
 /// "max_von_mises_pa" as "Max von Mises [Pa]": first word capitalised, a few names spelled right, the unit in brackets.
 pub fn key_label(key: &str) -> String {
+    let clean = key.strip_prefix("parameter_").filter(|s| !s.is_empty()).unwrap_or(key);
     let unit = unit_of(key);
-    let stem = if unit.is_some() { key.rsplit_once('_').map(|(s, _)| s).unwrap_or(key) } else { key };
+    let stem = if unit.is_some() { clean.rsplit_once('_').map(|(s, _)| s).unwrap_or(clean) } else { clean };
     let words: Vec<String> = stem
         .split('_')
         .filter(|w| !w.is_empty())
@@ -97,6 +121,14 @@ pub fn key_label(key: &str) -> String {
     }
 }
 
+fn is_length_param(key: &str) -> bool {
+    let k = key.strip_prefix("parameter_").filter(|s| !s.is_empty()).unwrap_or(key);
+    ["width", "height", "thick", "diam", "wavelength", "layer", "box", "gap", "radius", "pitch", "period"].iter().any(|w| k.contains(w))
+        || k.starts_with('l')
+        || matches!(k, "w" | "t" | "h" | "r" | "d" | "g")
+        || ["w_", "h_", "t_", "r_", "d_", "g_"].iter().any(|p| k.starts_with(p))
+}
+
 /// A number as the runs table shows it: SI prefixes when the key names a unit, whole numbers without decimals, lengths of a parameter in nm,
 /// small and large values in scientific notation.
 pub fn value(key: &str, v: f64) -> String {
@@ -105,7 +137,7 @@ pub fn value(key: &str, v: f64) -> String {
             return si(v, u);
         }
     }
-    let lengthy = v != 0.0 && v.abs() < 1e-3 && ["width", "height", "thick", "diam", "wavelength", "layer", "box", "gap"].iter().any(|w| key.contains(w)) || (v != 0.0 && v.abs() < 1e-3 && key.starts_with('l'));
+    let lengthy = v != 0.0 && v.abs() < 1e-3 && is_length_param(key);
     if lengthy {
         let s = format!("{:.3}", v * 1e9);
         format!("{} nm", s.trim_end_matches('0').trim_end_matches('.'))
@@ -164,6 +196,15 @@ mod tests {
         assert_eq!(key_label("neff_re"), "N_eff (real)");
         assert_eq!(key_label("dofs"), "DOFs");
         assert_eq!(key_label("seconds"), "Seconds");
+        assert_eq!(key_label("w"), "W");
+        assert_eq!(key_label("parameter_w"), "W");
+        assert_eq!(key_label("h_si"), "H si");
+        assert_eq!(key_label("parameter_h_si"), "H si");
+        assert_eq!(key_label("parameter_k"), "K");
+        assert_eq!(unit_of("w"), None);
+        assert_eq!(unit_of("parameter_w"), None);
+        assert_eq!(unit_of("parameter_k"), None);
+        assert_eq!(unit_of("r_w"), None);
     }
 
     #[test]
@@ -171,6 +212,11 @@ mod tests {
         assert_eq!(value("max_u_m", 2.017e-4), "201.7 µm");
         assert_eq!(value("dofs", 3214.0), "3214");
         assert_eq!(value("width", 5e-7), "500 nm");
+        assert_eq!(value("w", 5e-7), "500 nm");
+        assert_eq!(value("parameter_w", 5e-7), "500 nm");
+        assert_eq!(value("h_si", 3e-7), "300 nm");
+        assert_eq!(value("parameter_h_si", 3e-7), "300 nm");
+        assert_eq!(value("parameter_k", 3.5), "3.5000");
         assert_eq!(value("neff_re", 2.4), "2.4000");
     }
 }

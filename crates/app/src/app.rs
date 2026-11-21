@@ -57,9 +57,21 @@ pub struct WinJob {
     pub cancellable: bool,
 }
 
+/// Result of running a `.nys` script on a background thread.
+pub struct NysRunResult {
+    pub engine: Box<Engine>,
+    pub model: Option<Arc<nyx_engine::MeshedModel>>,
+    pub results: Vec<(String, Arc<SolveResult>)>,
+    pub printed: Vec<String>,
+    pub value: Value,
+    pub calls: u64,
+    pub seconds: f64,
+}
+
 /// A message from a helper thread (the optional Python script) to the window.
 pub enum Msg {
     Script(Result<String, String>),
+    NysDone(Result<NysRunResult, String>),
     /// the trial mesh of an edit (the number in the tuple is the edit it was made for, `Feedback::generation`)
     Size(Result<nyx_engine::preview::SizePreview, String>),
     /// the polarization of a result, with the result it was computed from
@@ -119,6 +131,7 @@ pub struct App {
     /// the File > New dialog while it is open
     pub new_dialog: Option<NewDialog>,
     pub script_output: Option<String>,
+    pub nys: crate::sheets::ScriptSheet,
     pub script: VecDeque<String>,
     pub settle: u32,
     /// a script with `wait off` carries on while a job runs (to shoot a running job and the queue); by default it waits for the job
@@ -204,6 +217,7 @@ impl App {
             bottom_open: true,
             new_dialog: None,
             script_output: None,
+            nys: Default::default(),
             script: VecDeque::new(),
             settle: 6,
             script_free: false,
@@ -292,6 +306,7 @@ impl App {
             if self.cmd("set_geometry", json!({ "geometry": g })).is_none() {
                 return false;
             }
+            self.prune_stale_materials();
         }
         if self.mesh_edit != self.engine.project().mesh {
             let m = &self.mesh_edit;
@@ -563,6 +578,7 @@ impl App {
             match msg {
                 Msg::Script(Ok(t)) => self.script_output = Some(t),
                 Msg::Script(Err(e)) => self.set_error(e),
+                Msg::NysDone(res) => self.take_nys_done(res),
                 Msg::Size(out) => self.take_size(generation, out),
                 Msg::Polarization { physics, result, analysis } => self.take_polarization(&physics, &result, analysis),
             }
@@ -904,6 +920,179 @@ impl App {
         crate::pyscript::spawn(script, json, self.result_csv(), self.tx.clone(), self.ctx.clone());
     }
 
+    pub fn fill_nys_from_model(&mut self) {
+        let _ = self.push_edits();
+        if let Ok(v) = self.engine.call("project_script", &json!({})) {
+            if let Some(s) = v["script"].as_str() {
+                self.nys.code = s.to_string();
+                self.nys.check_msg = None;
+            }
+        }
+    }
+
+    pub fn open_nys_script(&mut self) {
+        self.shell.sheet = crate::shell::Sheet::None;
+        self.nys.open = true;
+        if self.nys.code.trim().is_empty() {
+            self.fill_nys_from_model();
+        }
+    }
+
+    fn nys_root(&self) -> PathBuf {
+        if let crate::shell::Page::Workflow(id) = &self.shell.page {
+            if let Some(d) = self.shell.open.get(id).and_then(|w| w.dir.as_ref()) {
+                return d.root.clone();
+            }
+        }
+        if let Some(p) = self.nys.path.as_ref().and_then(|p| p.parent()) {
+            if !p.as_os_str().is_empty() {
+                return p.to_path_buf();
+            }
+        }
+        if let Some(ws) = &self.shell.ws {
+            return ws.root.clone();
+        }
+        std::env::temp_dir()
+    }
+
+    pub fn check_nys_script(&mut self) {
+        let _ = self.push_edits();
+        let mut eng = Engine::new();
+        if let Ok(spec) = self.spec_json() {
+            let _ = eng.call("project_load", &json!({ "json": spec }));
+        }
+        let name = self.nys.path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("script.nys");
+        let code = self.nys.code.trim_start_matches('\u{feff}');
+        let opts = nyx_script::Options::new(self.nys_root());
+        match nyx_script::host::check(&mut eng, name, code, &nyx_script::Limits::default(), &opts) {
+            Ok(()) => {
+                self.nys.check_msg = Some(Ok("Static check passed: syntax and nyx commands are valid.".into()));
+            }
+            Err(e) => {
+                self.nys.check_msg = Some(Err(e));
+            }
+        }
+    }
+
+    pub fn run_nys_script(&mut self) {
+        if self.nys.running || self.refuse_while_busy() {
+            return;
+        }
+        if nyx_script::find_worker().is_none() {
+            let msg = "nyx-script-worker was not found next to nyx (build it with `cargo build --release -p nyx-script-worker` or set NYX_SCRIPT_WORKER).".to_string();
+            self.nys.output = Some(Err(msg.clone()));
+            self.set_error(msg);
+            return;
+        }
+        let _ = self.push_edits();
+        let spec = self.spec_json().unwrap_or_else(|_| self.engine.project().to_json());
+        let code = self.nys.code.trim_start_matches('\u{feff}').to_string();
+        let name = self.nys.path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("script.nys").to_string();
+        let root = self.nys_root();
+        self.nys.running = true;
+        self.nys.check_msg = None;
+        self.nys.output = None;
+        self.status = format!("Running {name}...");
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let mut eng = Engine::new();
+            eng.set_owner("gui");
+            let _ = eng.call("project_load", &json!({ "json": spec }));
+            let opts = nyx_script::Options::new(root);
+            let mut pols: Vec<(String, Arc<SolveResult>, nyx_engine::analysis::ModeAnalysis)> = vec![];
+            let res = nyx_script::host::run(&mut eng, &name, &code, &nyx_script::Limits::default(), &opts).map(|out| {
+                let model = eng.model().cloned();
+                let mut results = vec![];
+                for s in &eng.project().physics {
+                    if let Some((r, _)) = eng.result(&s.physics) {
+                        let r = r.clone();
+                        if let Ok(a) = eng.polarization(&s.physics) {
+                            pols.push((s.physics.clone(), r.clone(), a));
+                        }
+                        results.push((s.physics.clone(), r));
+                    }
+                }
+                NysRunResult {
+                    engine: Box::new(eng),
+                    model,
+                    results,
+                    printed: out.printed,
+                    value: out.value,
+                    calls: out.calls,
+                    seconds: started.elapsed().as_secs_f64(),
+                }
+            });
+            let _ = tx.send((0, Msg::NysDone(res)));
+            for (physics, result, analysis) in pols {
+                let _ = tx.send((0, Msg::Polarization { physics, result, analysis: Ok(analysis) }));
+            }
+            ctx.request_repaint();
+        });
+    }
+
+    fn take_nys_done(&mut self, res: Result<NysRunResult, String>) {
+        self.nys.running = false;
+        match res {
+            Err(e) => {
+                self.nys.output = Some(Err(e.clone()));
+                self.set_error(e);
+            }
+            Ok(out) => {
+                let project_json = out.engine.project().to_json();
+                self.engine = *out.engine;
+                self.adopt();
+                self.forget_validated();
+                if let Some(m) = out.model {
+                    self.doc.set_model(m, "script");
+                    self.after_mesh_change();
+                } else {
+                    self.rebuild_mesh();
+                }
+                let active = self.active();
+                let mut active_res: Option<Arc<SolveResult>> = None;
+                if let Some(mesh) = self.doc.mesh.clone() {
+                    for (phys, r) in &out.results {
+                        let name = self.physics_name(phys);
+                        let rv = ResultView::new(name, Some(phys.clone()), r.clone(), &mesh);
+                        if active.as_deref() == Some(phys.as_str()) {
+                            active_res = Some(r.clone());
+                        }
+                        self.push_result(rv);
+                    }
+                }
+                if let Some(i) = active.as_ref().and_then(|a| self.results.iter().position(|r| r.physics.as_deref() == Some(a.as_str()))) {
+                    self.current = Some(i);
+                }
+                if let crate::shell::Page::Workflow(wid) = self.shell.page.clone() {
+                    if self.ensure_dir(&wid) {
+                        self.flush();
+                        if let Some(r) = active_res.or_else(|| out.results.first().map(|(_, r)| r.clone())) {
+                            let eid = self.shell.open.get(&wid).map(|w| w.exp.clone()).unwrap_or_else(|| "e1".into());
+                            let spec = self.spec_json().unwrap_or(project_json);
+                            let params = crate::shell::params_of(&spec);
+                            let rc = crate::shell::RunCtx {
+                                wf_id: wid,
+                                exp: eid,
+                                spec_json: spec,
+                                params,
+                                started: Instant::now(),
+                            };
+                            self.shell.live_run = self.record_ok(rc, &r);
+                        }
+                    }
+                }
+                let mut lines = out.printed;
+                if !out.value.is_null() {
+                    lines.push(serde_json::to_string_pretty(&out.value).unwrap_or_default());
+                }
+                lines.push(format!("{} engine commands in {:.2} s", out.calls, out.seconds));
+                self.nys.output = Some(Ok(lines.join("\n")));
+                self.status = format!("Script finished: {} engine commands in {:.2} s", out.calls, out.seconds);
+            }
+        }
+    }
+
     fn open_dialog(&mut self) {
         if let Some(p) = rfd::FileDialog::new().add_filter("nyx projects", &["json"]).pick_file() {
             self.open_path(p);
@@ -1002,7 +1191,7 @@ impl App {
     }
 
     /// Re-reads what Claude Code's and Claude Desktop's config files say about nyx.
-    fn refresh_connect(&mut self) {
+    pub(crate) fn refresh_connect(&mut self) {
         self.connect_status = match (Env::detect(), &self.mcp_server) {
             (Ok(env), Some(server)) => nyx_connect::list(&env, server).into_iter().filter(|h| h.status != Status::NotInstalled).collect(),
             _ => vec![],
@@ -1011,7 +1200,7 @@ impl App {
 
     /// The Connect menu: one row per Claude app with a Connect/Disconnect button, so the AI interface (`nyx-mcp`)
     /// is registered without editing a config file.
-    fn connect_menu(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn connect_menu(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(320.0);
         ui.label(RichText::new("Let Claude run nyx").strong());
         ui.weak("Registers the nyx MCP server with the app, so Claude can set up and solve simulations here.");
@@ -1372,9 +1561,34 @@ impl eframe::App for App {
         if let Some(p) = dropped.into_iter().next() {
             self.open_path(p);
         }
-        let (f5, esc) = ctx.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::F5), i.key_pressed(egui::Key::Escape)));
+        let (f5, esc, ctrl_shift_r, alt1, alt2, alt3, alt4, alt5, alt6) = ctx.input_mut(|i| (
+            i.consume_key(egui::Modifiers::NONE, egui::Key::F5),
+            i.key_pressed(egui::Key::Escape),
+            i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::R),
+            i.consume_key(egui::Modifiers::ALT, egui::Key::Num1),
+            i.consume_key(egui::Modifiers::ALT, egui::Key::Num2),
+            i.consume_key(egui::Modifiers::ALT, egui::Key::Num3),
+            i.consume_key(egui::Modifiers::ALT, egui::Key::Num4),
+            i.consume_key(egui::Modifiers::ALT, egui::Key::Num5),
+            i.consume_key(egui::Modifiers::ALT, egui::Key::Num6),
+        ));
         if f5 {
             self.shell_compute();
+        }
+        if ctrl_shift_r {
+            self.open_nys_script();
+        }
+        for (pressed, act) in [
+            (alt1, crate::menu::Act::ConceptGeometry),
+            (alt2, crate::menu::Act::ConceptMaterials),
+            (alt3, crate::menu::Act::BuildConditions),
+            (alt4, crate::menu::Act::BuildStudy),
+            (alt5, crate::menu::Act::BuildSweep),
+            (alt6, crate::menu::Act::AnalysisRuns),
+        ] {
+            if pressed {
+                self.do_act(ctx, act);
+            }
         }
         if esc && self.busy.is_some() {
             if self.shell.active() {
@@ -1389,10 +1603,25 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let t_ui = Instant::now();
         crate::spans::span("queue_panel", || self.queue_panel(ui.ctx()));
+        if let Some(text) = self.script_output.clone() {
+            let mut open = true;
+            egui::Window::new("Python output").open(&mut open).default_size([560.0, 320.0]).show(ui.ctx(), |ui| {
+                egui::ScrollArea::both().show(ui, |ui| {
+                    ui.add(egui::TextEdit::multiline(&mut text.as_str()).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
+                });
+            });
+            if !open {
+                self.script_output = None;
+            }
+        }
         if self.shell.active() {
+            egui::Panel::top("shell_menubar").show(ui, |ui| self.bar_ui(ui));
             crate::spans::span("shell_ui", || self.shell_ui(ui));
             self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, f64::NAN);
             return;
+        }
+        if self.nys.open {
+            self.sheets_ui(ui.ctx());
         }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
             self.new_dialog = Some(NewDialog { physics: self.active().unwrap_or_else(|| "dfs".into()), three_d: false });
@@ -1415,17 +1644,6 @@ impl eframe::App for App {
             egui::Panel::bottom("results_panel").default_size(190.0).resizable(true).show(ui, |ui| self.results_panel(ui));
         }
         self.new_dialog_ui(ui.ctx());
-        if let Some(text) = self.script_output.clone() {
-            let mut open = true;
-            egui::Window::new("Python output").open(&mut open).default_size([560.0, 320.0]).show(ui.ctx(), |ui| {
-                egui::ScrollArea::both().show(ui, |ui| {
-                    ui.add(egui::TextEdit::multiline(&mut text.as_str()).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
-                });
-            });
-            if !open {
-                self.script_output = None;
-            }
-        }
         let t_vp = Instant::now();
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.viewport_ui(ui));
         if std::env::var_os("NYX_FRAME_LOG").is_some() {
@@ -2194,5 +2412,788 @@ mod tests {
         for s in &sugg {
             assert_eq!(nyx_engine::facade::physics::LabelResolver::boundaries(a.doc.model.as_ref().unwrap().as_ref(), s).unwrap(), left, "{s}");
         }
+    }
+
+    // ------------------------------------------------------------- simulated-input E2E GUI tests
+
+    const E2E_SCREEN: egui::Vec2 = egui::vec2(1456.0, 819.0);
+
+    fn collect_shape_texts(clip: egui::Rect, shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::epaint::Shape::Text(t) => {
+                let r = t.visual_bounding_rect();
+                if clip.intersects(r) && !t.galley.job.text.is_empty() {
+                    out.push((t.galley.job.text.clone(), r));
+                }
+            }
+            egui::epaint::Shape::Vec(v) => {
+                for s in v {
+                    collect_shape_texts(clip, s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn gui_frame_sized_scroll(a: &mut App, mut raw: egui::RawInput, screen: egui::Vec2, scroll_dy: f32) -> Vec<(String, egui::Rect)> {
+        raw.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen));
+        a.poll();
+        a.run_queued();
+        if a.rules_dirty {
+            a.sync_rules();
+        }
+        let ctx = a.ctx.clone();
+        let mut out = ctx.run_ui(raw, |ui| {
+            if scroll_dy != 0.0 {
+                ui.ctx().input_mut(|i| {
+                    i.smooth_scroll_delta.y += scroll_dy;
+                });
+            }
+            let (f5, ctrl_shift_r, alt1, alt2, alt3, alt4, alt5, alt6) = ui.ctx().input_mut(|i| (
+                i.consume_key(egui::Modifiers::NONE, egui::Key::F5),
+                i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::R),
+                i.consume_key(egui::Modifiers::ALT, egui::Key::Num1),
+                i.consume_key(egui::Modifiers::ALT, egui::Key::Num2),
+                i.consume_key(egui::Modifiers::ALT, egui::Key::Num3),
+                i.consume_key(egui::Modifiers::ALT, egui::Key::Num4),
+                i.consume_key(egui::Modifiers::ALT, egui::Key::Num5),
+                i.consume_key(egui::Modifiers::ALT, egui::Key::Num6),
+            ));
+            if f5 {
+                a.shell_compute();
+            }
+            if ctrl_shift_r {
+                a.open_nys_script();
+            }
+            for (pressed, act) in [
+                (alt1, crate::menu::Act::ConceptGeometry),
+                (alt2, crate::menu::Act::ConceptMaterials),
+                (alt3, crate::menu::Act::BuildConditions),
+                (alt4, crate::menu::Act::BuildStudy),
+                (alt5, crate::menu::Act::BuildSweep),
+                (alt6, crate::menu::Act::AnalysisRuns),
+            ] {
+                if pressed {
+                    let c = ui.ctx().clone();
+                    a.do_act(&c, act);
+                }
+            }
+            if a.shell.active() {
+                egui::Panel::top("shell_menubar").show(ui, |ui| a.bar_ui(ui));
+                a.shell_ui(ui);
+            }
+        });
+        out.textures_delta.clear();
+        let mut texts = Vec::new();
+        for cs in &out.shapes {
+            collect_shape_texts(cs.clip_rect, &cs.shape, &mut texts);
+        }
+        texts
+    }
+
+    fn gui_frame_sized(a: &mut App, raw: egui::RawInput, screen: egui::Vec2) -> Vec<(String, egui::Rect)> {
+        gui_frame_sized_scroll(a, raw, screen, 0.0)
+    }
+
+    fn gui_frame(a: &mut App, raw: egui::RawInput) -> Vec<(String, egui::Rect)> {
+        gui_frame_sized(a, raw, E2E_SCREEN)
+    }
+
+    fn gui_focusable_rects(a: &App) -> Vec<(egui::Id, egui::LayerId, egui::Rect)> {
+        let candidates: Vec<(egui::Id, egui::LayerId, egui::Rect)> = a.ctx.viewport(|vp| {
+            let mut v = Vec::new();
+            for layer in vp.prev_pass.widgets.layer_ids() {
+                for w in vp.prev_pass.widgets.get_layer(layer) {
+                    if w.enabled && w.sense.is_focusable() {
+                        v.push((w.id, layer, w.rect));
+                    }
+                }
+            }
+            v
+        });
+        candidates
+            .into_iter()
+            .filter(|(id, _, _)| egui::text_edit::TextEditState::load(&a.ctx, *id).is_some())
+            .collect()
+    }
+
+    fn gui_find_text(texts: &[(String, egui::Rect)], needle: &str) -> Option<egui::Rect> {
+        texts
+            .iter()
+            .rev()
+            .find(|(t, _)| t == needle)
+            .or_else(|| texts.iter().rev().find(|(t, _)| t.contains(needle)))
+            .map(|(_, r)| *r)
+    }
+
+    fn gui_click_at(a: &mut App, pos: egui::Pos2) -> Vec<(String, egui::Rect)> {
+        let mut down = egui::RawInput::default();
+        down.events.push(egui::Event::PointerMoved(pos));
+        down.events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        gui_frame(a, down);
+
+        let mut up = egui::RawInput::default();
+        up.events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        gui_frame(a, up);
+
+        gui_frame(a, egui::RawInput::default());
+        gui_frame(a, egui::RawInput::default())
+    }
+
+    fn gui_scroll_inspector(a: &mut App, dy: f32) -> Vec<(String, egui::Rect)> {
+        let pos = egui::pos2(1200.0, 500.0);
+        let mut raw = egui::RawInput::default();
+        raw.events.push(egui::Event::PointerMoved(pos));
+        gui_frame_sized_scroll(a, raw, E2E_SCREEN, dy);
+        gui_frame(a, egui::RawInput::default())
+    }
+
+    fn gui_click_text(a: &mut App, needle: &str) -> egui::Rect {
+        let mut texts = gui_frame(a, egui::RawInput::default());
+        if gui_find_text(&texts, needle).is_none() {
+            texts = gui_scroll_inspector(a, -420.0);
+        }
+        if gui_find_text(&texts, needle).is_none() {
+            texts = gui_scroll_inspector(a, 840.0);
+        }
+        let rect = gui_find_text(&texts, needle).unwrap_or_else(|| {
+            let sample: Vec<&str> = texts.iter().map(|(t, _)| t.as_str()).collect();
+            panic!("GUI text '{needle}' not found on screen; visible texts: {sample:?}");
+        });
+        gui_click_at(a, rect.center());
+        rect
+    }
+
+    fn gui_type_in_rect(a: &mut App, rect: egui::Rect, text: &str) {
+        gui_click_at(a, rect.center());
+        let mut raw = egui::RawInput::default();
+        raw.events.push(egui::Event::Text(text.to_string()));
+        gui_frame(a, raw);
+
+        let mut enter = egui::RawInput::default();
+        enter.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: Some(egui::Key::Enter),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        enter.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: Some(egui::Key::Enter),
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        gui_frame(a, enter);
+    }
+
+    fn gui_send_key(a: &mut App, key: egui::Key, modifiers: egui::Modifiers) -> Vec<(String, egui::Rect)> {
+        let mut raw = egui::RawInput::default();
+        raw.events.push(egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        });
+        gui_frame(a, raw);
+        let mut up = egui::RawInput::default();
+        up.events.push(egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        gui_frame(a, up)
+    }
+
+    fn populate_seven_saved_workflows(root: &std::path::Path) -> (Vec<String>, String) {
+        use nyx_engine::facade::store::{Workspace, WorkflowDir};
+        std::fs::create_dir_all(root).unwrap();
+        let mut ids = Vec::new();
+        let mut sms_3d_id = String::new();
+        let specs: [(&str, &str, bool); 7] = [
+            ("wf1_cap_electrostatics", "dfs", false),
+            ("wf2_cavity_resonator", "ems", true),
+            ("wf3_waveguide_ems", "ems", false),
+            ("wf4_thermal_plate", "dfs", false),
+            ("wf5_beam_vibration", "sms", false),
+            ("wf6_rib_coupler", "ems", false),
+            ("wf7_cantilever_solid_3d", "sms", true),
+        ];
+        for (i, (title, phys, three_d)) in specs.iter().enumerate() {
+            let wid = format!("wf0{}", i + 1);
+            let spec = crate::examples::blank_json(phys, *three_d).unwrap();
+            WorkflowDir::create_with(root, Some(&wid), title, "gui", &spec, nyx_engine::store_link::card_of).unwrap();
+            if *phys == "sms" && *three_d {
+                sms_3d_id = wid.clone();
+            }
+            ids.push(wid);
+        }
+        let mut ws = Workspace::open(root).unwrap();
+        ws.settings.open_tabs = ids.clone();
+        ws.save_settings().unwrap();
+        (ids, sms_3d_id)
+    }
+
+    #[test]
+    fn e2e_gui_clicks_blank_to_soi_300nm() {
+        let root = std::env::temp_dir().join(format!("nyx-e2e-soi300-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (initial_tabs, _) = populate_seven_saved_workflows(&root);
+        assert_eq!(initial_tabs.len(), 7);
+
+        let mut a = app();
+        wait_idle(&mut a, 30);
+        a.attach_workspace(root.clone());
+        assert!(a.shell.active());
+        assert_eq!(a.shell.tabs.len(), 7, "all 7 pre-populated tabs opened");
+
+        // Render at 1456 x 819 and verify Settings and Search buttons in top_bar stay within [0.0, 1456.0]
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let settings_rect = gui_find_text(&texts, "Settings").expect("Settings button in top_bar");
+        let search_rect = gui_find_text(&texts, "Search or run anything").expect("Search button in top_bar");
+        assert!(
+            settings_rect.min.x >= 0.0 && settings_rect.max.x <= 1456.0,
+            "Settings rect {settings_rect:?} pushed outside [0, 1456] with 7 open tabs"
+        );
+        assert!(
+            search_rect.min.x >= 0.0 && search_rect.max.x <= 1456.0,
+            "Search rect {search_rect:?} pushed outside [0, 1456] with 7 open tabs"
+        );
+
+        // Also check at 900 x 600 that Settings and Search remain inside [0.0, 900.0]
+        let texts_900 = gui_frame_sized(&mut a, egui::RawInput::default(), egui::vec2(900.0, 600.0));
+        let settings_900 = gui_find_text(&texts_900, "Settings").expect("Settings at 900x600");
+        let search_900 = gui_find_text(&texts_900, "Search or run anything").expect("Search at 900x600");
+        assert!(settings_900.min.x >= 0.0 && settings_900.max.x <= 900.0, "Settings at 900x600: {settings_900:?}");
+        assert!(search_900.min.x >= 0.0 && search_900.max.x <= 900.0, "Search at 900x600: {search_900:?}");
+        gui_frame(&mut a, egui::RawInput::default());
+
+        // Click '+' in top_bar to open the New workflow sheet
+        gui_click_text(&mut a, "+");
+        assert_eq!(a.shell.sheet, crate::shell::Sheet::New);
+
+        // Click "Blank experiment", select ems and 2D, type "soi300_blank_gui" into the title field, click "Create workflow"
+        gui_click_text(&mut a, "Blank experiment");
+        gui_click_text(&mut a, "Electromagnetic waves");
+        gui_click_text(&mut a, "Electromagnetic waves");
+        gui_click_text(&mut a, "2D section");
+        let modal_inputs: Vec<egui::Rect> = gui_focusable_rects(&a)
+            .into_iter()
+            .filter(|(_, layer, _)| layer.order == egui::Order::Foreground)
+            .map(|(_, _, r)| r)
+            .collect();
+        assert!(!modal_inputs.is_empty(), "expected title TextEdit in New workflow modal");
+        gui_type_in_rect(&mut a, modal_inputs[0], "soi300_blank_gui");
+        assert_eq!(a.shell.new.title, "soi300_blank_gui");
+
+        gui_click_text(&mut a, "Create workflow");
+        wait_idle(&mut a, 30);
+        let wid = match &a.shell.page {
+            crate::shell::Page::Workflow(id) => id.clone(),
+            other => panic!("expected Workflow page, got {other:?}"),
+        };
+        assert_eq!(a.shell.open[&wid].title(), "soi300_blank_gui");
+        assert_eq!(a.active().as_deref(), Some("ems"));
+
+        // Click "+ parameter" and inspect frame-1 TextEdit rects & feedback layout stability
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let add_param_rect = gui_find_text(&texts, "+ parameter").expect("+ parameter button");
+        // Click "+ parameter" (down + up -> frame 1 of the new parameter row!)
+        let mut down = egui::RawInput::default();
+        down.events.push(egui::Event::PointerMoved(add_param_rect.center()));
+        down.events.push(egui::Event::PointerButton {
+            pos: add_param_rect.center(),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        gui_frame(&mut a, down);
+        let mut up = egui::RawInput::default();
+        up.events.push(egui::Event::PointerButton {
+            pos: add_param_rect.center(),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        gui_frame(&mut a, up);
+
+        // Frame 1 with the newly added parameter row rendered (after egui Grid's initial sizing pass):
+        gui_frame(&mut a, egui::RawInput::default());
+        let texts_f1 = gui_frame(&mut a, egui::RawInput::default());
+        let params_hdr_f1 = gui_find_text(&texts_f1, "Parameters").expect("Parameters heading");
+        let add_param_f1 = gui_find_text(&texts_f1, "+ parameter").expect("+ parameter button");
+        let features_hdr_f1 = gui_find_text(&texts_f1, "Features").expect("Features heading");
+        let mut param_boxes_f1: Vec<egui::Rect> = gui_focusable_rects(&a)
+            .into_iter()
+            .map(|(_, _, r)| r)
+            .filter(|r| r.center().y > params_hdr_f1.max.y && r.center().y < add_param_f1.min.y && r.min.x > 700.0)
+            .collect();
+        param_boxes_f1.sort_by(|a, b| a.min.x.partial_cmp(&b.min.x).unwrap());
+        assert_eq!(param_boxes_f1.len(), 2, "expected param_name and param_val boxes on frame 1: {param_boxes_f1:?}");
+        assert!(param_boxes_f1[0].width() >= 72.0, "frame-1 param_name width={}", param_boxes_f1[0].width());
+        assert!(param_boxes_f1[1].width() >= 104.0, "frame-1 param_val width={}", param_boxes_f1[1].width());
+
+        // Verify Parameters/Features y-positions shift by 0.0 px while feedback_tick transitions from Pending to Ready
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Pending), "expected Pending feedback: {:?}", a.feedback.size);
+        let y_params_pending = params_hdr_f1.min.y;
+        let y_features_pending = features_hdr_f1.min.y;
+        std::thread::sleep(crate::feedback::REST + Duration::from_millis(30));
+        let t0 = Instant::now();
+        while !matches!(a.feedback.size, crate::feedback::SizeView::Ready(_)) {
+            gui_frame(&mut a, egui::RawInput::default());
+            assert!(t0.elapsed() < Duration::from_secs(10), "feedback never became Ready: {:?}", a.feedback.size);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let texts_ready = gui_frame(&mut a, egui::RawInput::default());
+        let y_params_ready = gui_find_text(&texts_ready, "Parameters").unwrap().min.y;
+        let y_features_ready = gui_find_text(&texts_ready, "Features").unwrap().min.y;
+        assert_eq!(y_params_ready - y_params_pending, 0.0, "Parameters shifted vertically during feedback transition");
+        assert_eq!(y_features_ready - y_features_pending, 0.0, "Features shifted vertically during feedback transition");
+
+        // Set element size h (m) to "220 nm"
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let h_label = gui_find_text(&texts, "element size h (m)").expect("element size h (m) label");
+        let h_box = gui_focusable_rects(&a)
+            .into_iter()
+            .map(|(_, _, r)| r)
+            .find(|r| (r.center().y - h_label.center().y).abs() < 12.0 && r.min.x >= h_label.max.x - 4.0)
+            .expect("mesh_h TextEdit");
+        gui_type_in_rect(&mut a, h_box, "220 nm");
+        assert!((a.mesh_edit.h - 2.2e-7).abs() < 1e-18, "mesh_edit.h = {}", a.mesh_edit.h);
+
+        // Enable physics_sizing + adaptive mesh (0.85)
+        gui_click_text(&mut a, "size the mesh from the physics");
+        assert!(a.mesh_edit.physics_sizing);
+        gui_click_text(&mut a, "adaptive mesh");
+        assert_eq!(a.mesh_edit.adapt_scale, Some(1.0));
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let sf_label = gui_find_text(&texts, "size factor").expect("size factor label");
+        let sf_box = gui_focusable_rects(&a)
+            .into_iter()
+            .map(|(_, _, r)| r)
+            .find(|r| (r.center().y - sf_label.center().y).abs() < 12.0 && r.min.x >= sf_label.max.x - 4.0)
+            .expect("adapt_s TextEdit");
+        gui_type_in_rect(&mut a, sf_box, "0.85");
+        assert_eq!(a.mesh_edit.adapt_scale, Some(0.85));
+
+        // Add 2nd parameter and set w = 500 nm (5e-7) and h_si = 300 nm (3e-7)
+        gui_click_text(&mut a, "+ parameter");
+        assert_eq!(a.geom_edit.params.len(), 2);
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let params_hdr = gui_find_text(&texts, "Parameters").unwrap();
+        let add_param = gui_find_text(&texts, "+ parameter").unwrap();
+        let mut pboxes: Vec<egui::Rect> = gui_focusable_rects(&a)
+            .into_iter()
+            .map(|(_, _, r)| r)
+            .filter(|r| r.center().y > params_hdr.max.y && r.center().y < add_param.min.y && r.min.x > 700.0)
+            .collect();
+        pboxes.sort_by_key(|a| (a.center().y as i32 / 14, a.min.x as i32));
+        assert_eq!(pboxes.len(), 4, "expected 4 parameter boxes (2 rows x 2 cols): {pboxes:?}");
+        gui_type_in_rect(&mut a, pboxes[0], "w");
+        gui_type_in_rect(&mut a, pboxes[1], "500 nm");
+        gui_type_in_rect(&mut a, pboxes[2], "h_si");
+        gui_type_in_rect(&mut a, pboxes[3], "300 nm");
+        assert_eq!(a.geom_edit.params[0].name, "w");
+        assert_eq!(a.geom_edit.params[0].value, nyx_engine::facade::geom::expr::Expr::Num(5e-7));
+        assert_eq!(a.geom_edit.params[1].name, "h_si");
+        assert_eq!(a.geom_edit.params[1].value, nyx_engine::facade::geom::expr::Expr::Num(3e-7));
+
+        // Scroll the Geometry inspector down so the Features section is in the centre of the viewport
+        gui_scroll_inspector(&mut a, -420.0);
+
+        // Remove the default 'regions' overlay and 'plate_box' rectangle via GUI clicks
+        // (clicking the bottom-most "remove" button first removes 'regions', then 'plate_box')
+        for _ in 0..2 {
+            let texts = gui_frame(&mut a, egui::RawInput::default());
+            let rm_rect = texts
+                .iter()
+                .filter(|(t, _)| t == "remove")
+                .map(|(_, r)| *r)
+                .max_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap())
+                .expect("remove feature button");
+            gui_click_at(&mut a, rm_rect.center());
+        }
+        assert!(a.geom_edit.features.is_empty(), "default features removed");
+
+        // Build the 3 rectangles: r_box, r_clad, r_si via GUI clicks/edits
+        let rect_specs = [
+            ("r_box", ["-2e-6", "-2e-6"], ["2e-6", "0"]),
+            ("r_clad", ["-2e-6", "0"], ["2e-6", "2e-6"]),
+            ("r_si", ["-w/2", "0"], ["w/2", "h_si"]),
+        ];
+        for (fname, min_xz, max_xz) in rect_specs {
+            gui_click_text(&mut a, "+ add feature");
+            gui_click_text(&mut a, "Rect");
+
+            let texts = gui_frame(&mut a, egui::RawInput::default());
+            let active_chk = texts
+                .iter()
+                .filter(|(t, _)| t == "active")
+                .map(|(_, r)| *r)
+                .max_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap())
+                .expect("active checkbox in Rect feature");
+            let min_lbl = texts
+                .iter()
+                .filter(|(t, _)| t == "min (x, z)")
+                .map(|(_, r)| *r)
+                .max_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap())
+                .expect("min (x, z) label");
+            let max_lbl = texts
+                .iter()
+                .filter(|(t, _)| t == "max (x, z)")
+                .map(|(_, r)| *r)
+                .max_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap())
+                .expect("max (x, z) label");
+
+            let fboxes: Vec<egui::Rect> = gui_focusable_rects(&a).into_iter().map(|(_, _, r)| r).filter(|r| r.min.x > 700.0).collect();
+            let name_box = fboxes
+                .iter()
+                .copied()
+                .find(|r| (r.center().y - active_chk.center().y).abs() < 12.0 && r.max.x <= active_chk.min.x + 8.0)
+                .expect("feat_name box");
+            let mut min_boxes: Vec<egui::Rect> = fboxes
+                .iter()
+                .copied()
+                .filter(|r| (r.center().y - min_lbl.center().y).abs() < 12.0 && r.min.x >= min_lbl.max.x - 4.0)
+                .collect();
+            min_boxes.sort_by(|a, b| a.min.x.partial_cmp(&b.min.x).unwrap());
+            let mut max_boxes: Vec<egui::Rect> = fboxes
+                .iter()
+                .copied()
+                .filter(|r| (r.center().y - max_lbl.center().y).abs() < 12.0 && r.min.x >= max_lbl.max.x - 4.0)
+                .collect();
+            max_boxes.sort_by(|a, b| a.min.x.partial_cmp(&b.min.x).unwrap());
+            assert_eq!(min_boxes.len(), 2, "expected 2 min (x, z) boxes for {fname}");
+            assert_eq!(max_boxes.len(), 2, "expected 2 max (x, z) boxes for {fname}");
+
+            gui_type_in_rect(&mut a, name_box, fname);
+            gui_type_in_rect(&mut a, min_boxes[0], min_xz[0]);
+            gui_type_in_rect(&mut a, min_boxes[1], min_xz[1]);
+            gui_type_in_rect(&mut a, max_boxes[0], max_xz[0]);
+            gui_type_in_rect(&mut a, max_boxes[1], max_xz[1]);
+
+            // Collapse this Rect feature header so the inspector stays compact for the next feature
+            let hdr_needle = format!("{fname}  ·  Rect");
+            gui_click_text(&mut a, &hdr_needle);
+        }
+
+        // Add Overlay feature and name the 3 regions BOX, Clad, Si
+        gui_scroll_inspector(&mut a, -500.0);
+        gui_click_text(&mut a, "+ add feature");
+        let mut texts = gui_frame(&mut a, egui::RawInput::default());
+        if !texts.iter().any(|(t, _)| t == "Overlay") {
+            let popup_pos = gui_find_text(&texts, "Rect")
+                .or_else(|| gui_find_text(&texts, "Profiles"))
+                .expect("ComboBox popup open with Profiles/Rect")
+                .center();
+            let mut raw = egui::RawInput::default();
+            raw.events.push(egui::Event::PointerMoved(popup_pos));
+            gui_frame_sized_scroll(&mut a, raw, E2E_SCREEN, -260.0);
+            texts = gui_frame(&mut a, egui::RawInput::default());
+        }
+        let ov_rect = texts
+            .iter()
+            .rev()
+            .find(|(t, _)| t == "Overlay")
+            .map(|(_, r)| *r)
+            .unwrap_or_else(|| panic!("exact 'Overlay' item not found; texts={texts:?}"));
+        gui_click_at(&mut a, ov_rect.center());
+        assert_eq!(a.geom_edit.features.len(), 4, "expected 3 Rects + 1 Overlay");
+        gui_scroll_inspector(&mut a, -400.0);
+        let mut all_boxes: Vec<egui::Rect> = gui_focusable_rects(&a)
+            .into_iter()
+            .map(|(_, _, r)| r)
+            .filter(|r| r.min.x > 700.0)
+            .collect();
+        all_boxes.sort_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap());
+        assert!(all_boxes.len() >= 3, "expected at least 3 region name boxes in Overlay: {all_boxes:?}");
+        let rboxes = &all_boxes[all_boxes.len() - 3..];
+        gui_type_in_rect(&mut a, rboxes[0], "BOX");
+        gui_type_in_rect(&mut a, rboxes[1], "Clad");
+        gui_type_in_rect(&mut a, rboxes[2], "Si");
+
+        // Click "Build mesh"
+        gui_click_text(&mut a, "Build mesh");
+        wait_idle(&mut a, 60);
+        assert!(a.error.is_none(), "mesh build error: {:?}", a.error);
+        assert!(a.doc.mesh.is_some());
+
+        // Click "Materials" pill and assign silica / silica / silicon
+        gui_click_text(&mut a, "Materials");
+        assert_eq!(a.shell.open[&wid].concept_tab, Tab::Materials);
+        // Assign "silica" to all regions via "apply material...", then override "Si" to "silicon"
+        gui_click_text(&mut a, "apply material...");
+        gui_click_text(&mut a, "silica");
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let si_label = texts
+            .iter()
+            .filter(|(t, r)| t == "Si" && r.min.x > 700.0)
+            .map(|(_, r)| *r)
+            .next()
+            .expect("Si region label in Materials tab");
+        let si_combo = texts
+            .iter()
+            .filter(|(t, r)| t == "silica" && (r.center().y - si_label.center().y).abs() < 12.0 && r.min.x > si_label.max.x)
+            .map(|(_, r)| *r)
+            .next()
+            .expect("Si material combo");
+        gui_click_at(&mut a, si_combo.center());
+        gui_click_text(&mut a, "silicon");
+
+        // Click "2 · Build", then click the rendered "Study and solver" pill rect
+        gui_click_text(&mut a, "2 · Build");
+        assert_eq!(a.shell.open[&wid].part, crate::shell::Part::Build);
+        gui_click_text(&mut a, "Study and solver");
+        assert_eq!(a.shell.open[&wid].build_tab, Tab::Study);
+
+        // Set wavelength 1550 nm (freq ≈ 193.414e12), n_target = 2.85, n_modes = 4, P2
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let lam_lbl = gui_find_text(&texts, "wavelength λ₀ (vacuum) [m]").expect("wavelength helper label");
+        let lam_box = gui_focusable_rects(&a)
+            .into_iter()
+            .map(|(_, _, r)| r)
+            .find(|r| (r.center().y - lam_lbl.center().y).abs() < 12.0 && r.min.x >= lam_lbl.max.x - 4.0)
+            .expect("wavelength lambda0 TextEdit");
+        gui_type_in_rect(&mut a, lam_box, "1550 nm");
+        let freq = a.engine.project().spec("ems").unwrap().study.params["freq"].as_f64().unwrap();
+        assert!((freq - 299_792_458.0 / 1.55e-6).abs() < 1e6, "freq={freq}");
+
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let nt_lbl = gui_find_text(&texts, "Effective index near").expect("Effective index near label");
+        let nt_box = gui_focusable_rects(&a)
+            .into_iter()
+            .map(|(_, _, r)| r)
+            .find(|r| (r.center().y - nt_lbl.center().y).abs() < 12.0 && r.min.x >= nt_lbl.max.x - 4.0)
+            .expect("n_target TextEdit");
+        gui_type_in_rect(&mut a, nt_box, "2.85");
+        assert_eq!(a.engine.project().spec("ems").unwrap().study.params["n_target"].as_f64(), Some(2.85));
+
+        // Number of modes starts at default 4 in ems modes study; also click P2
+        gui_click_text(&mut a, "P2");
+        assert_eq!(a.engine.project().spec("ems").unwrap().order, 2);
+        let n_modes = a.engine.project().spec("ems").unwrap().study.params.get("n_modes").and_then(Value::as_i64).unwrap_or(4);
+        assert_eq!(n_modes, 4);
+
+        // Press F5 and wait for solve
+        gui_send_key(&mut a, egui::Key::F5, egui::Modifiers::NONE);
+        assert!(a.busy.is_some(), "F5 started solve: {} / {:?}", a.status, a.error);
+        wait_idle(&mut a, 120);
+        frames(&mut a, 4, 0.05);
+        assert!(a.error.is_none(), "solve error: {:?}", a.error);
+        assert_eq!(a.results.len(), 1);
+        let sols = &a.results[0].sols;
+        assert_eq!(sols.len(), 4, "expected 4 modes");
+        let te0 = sols[0].neff.expect("TE0 neff").0;
+        let tm0 = sols[1].neff.expect("TM0 neff").0;
+        assert!((te0 - 2.67175).abs() < 1e-4, "TE0 n_eff = {te0}, expected 2.67175 ± 1e-4");
+        assert!((tm0 - 2.33382).abs() < 1e-4, "TM0 n_eff = {tm0}, expected 2.33382 ± 1e-4");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn e2e_gui_draft_tab_switch_and_ctrl_w_isolation() {
+        let root = std::env::temp_dir().join(format!("nyx-e2e-draft-iso-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (_, sms_id) = populate_seven_saved_workflows(&root);
+        {
+            let mut ws = nyx_engine::facade::store::Workspace::open(&root).unwrap();
+            ws.settings.open_tabs = vec![sms_id.clone()];
+            ws.save_settings().unwrap();
+        }
+
+        let mut a = app();
+        wait_idle(&mut a, 30);
+        a.attach_workspace(root.clone());
+
+        // Open the saved 3D sms workflow tab and record its spec on disk
+        a.show_workflow(&sms_id);
+        wait_idle(&mut a, 30);
+        assert_eq!(a.active().as_deref(), Some("sms"));
+        assert_eq!(a.doc.mesh.as_ref().map(|m| m.dim), Some(3));
+        let sms_spec_path = a.shell.open[&sms_id].dir.as_ref().unwrap().spec_path("e1");
+        let sms_spec_before = std::fs::read_to_string(&sms_spec_path).unwrap();
+
+        // Create an unsaved 2D ems draft via the GUI ('+' in top_bar -> Blank experiment -> Create workflow)
+        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let top_plus = texts
+            .iter()
+            .filter(|(t, r)| t == "+" && r.center().y < 85.0)
+            .map(|(_, r)| *r)
+            .next()
+            .expect("'+' button in top_bar");
+        gui_click_at(&mut a, top_plus.center());
+        assert_eq!(a.shell.sheet, crate::shell::Sheet::New);
+        gui_click_text(&mut a, "Blank experiment");
+        gui_click_text(&mut a, "2D section");
+        let modal_inputs: Vec<egui::Rect> = gui_focusable_rects(&a)
+            .into_iter()
+            .filter(|(_, layer, _)| layer.order == egui::Order::Foreground)
+            .map(|(_, _, r)| r)
+            .collect();
+        gui_type_in_rect(&mut a, modal_inputs[0], "Draft2DEms");
+        gui_click_text(&mut a, "Create workflow");
+        wait_idle(&mut a, 30);
+
+        let draft_id = match &a.shell.page {
+            crate::shell::Page::Workflow(id) => id.clone(),
+            other => panic!("expected draft workflow page, got {other:?}"),
+        };
+        assert!(a.shell.open[&draft_id].dir.is_none(), "draft has no folder on disk yet");
+        assert_eq!(a.active().as_deref(), Some("ems"));
+        assert_eq!(a.doc.mesh.as_ref().map(|m| m.dim), Some(2));
+
+        // Click the saved 3D sms tab in top_bar
+        gui_click_text(&mut a, "wf7_cantilever_solid_…");
+        wait_idle(&mut a, 30);
+        assert_eq!(a.shell.page, crate::shell::Page::Workflow(sms_id.clone()));
+        assert_eq!(a.shell.loaded, Some((sms_id.clone(), "e1".into())));
+        assert_eq!(a.active().as_deref(), Some("sms"));
+        assert_eq!(a.doc.mesh.as_ref().map(|m| m.dim), Some(3));
+
+        // Click back to the unsaved 2D ems draft tab in top_bar
+        gui_click_text(&mut a, "Draft2DEms");
+        wait_idle(&mut a, 30);
+        assert_eq!(a.shell.page, crate::shell::Page::Workflow(draft_id.clone()));
+        assert_eq!(a.shell.loaded, Some((draft_id.clone(), "e1".into())));
+        assert_eq!(a.active().as_deref(), Some("ems"), "2D ems draft must not be overwritten by 3D sms model");
+        assert_eq!(a.doc.mesh.as_ref().map(|m| m.dim), Some(2), "doc must not hold the 3D mesh after switching back to 2D draft");
+        assert!(a.shell.open[&draft_id].dir.is_none(), "switching back without edits keeps draft unsaved");
+
+        // Modify the draft via GUI click ("+ parameter") and flush: creates its own folder while leaving 3D sms untouched
+        gui_click_text(&mut a, "+ parameter");
+        a.flush();
+        assert!(a.shell.open[&draft_id].dir.is_some(), "modifying the draft creates its own folder");
+        let sms_spec_after = std::fs::read_to_string(&sms_spec_path).unwrap();
+        assert_eq!(sms_spec_after, sms_spec_before, "saved 3D sms workflow on disk must remain completely untouched");
+
+        // Send Ctrl+W and assert the newly active tab immediately reloads its own project and mesh
+        gui_send_key(&mut a, egui::Key::W, egui::Modifiers::COMMAND);
+        wait_idle(&mut a, 30);
+        assert!(!a.shell.tabs.contains(&draft_id));
+        let active_after_close = match &a.shell.page {
+            crate::shell::Page::Workflow(id) => id.clone(),
+            other => panic!("expected remaining workflow tab active after Ctrl+W, got {other:?}"),
+        };
+        assert_eq!(a.shell.loaded, Some((active_after_close.clone(), "e1".into())));
+        assert!(a.doc.mesh.is_some(), "remaining tab reloaded its mesh after Ctrl+W");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn e2e_gui_nys_script_sheet_check_run_and_param_units() {
+        let root = std::env::temp_dir().join(format!("nyx-e2e-nys-sheet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let mut a = app();
+        wait_idle(&mut a, 30);
+        a.attach_workspace(root.clone());
+        a.new_draft("soi300_script_wf", crate::shell::Start::Blank { physics: "ems".into(), three_d: false });
+        wait_idle(&mut a, 30);
+        let wid = match &a.shell.page {
+            crate::shell::Page::Workflow(id) => id.clone(),
+            other => panic!("expected workflow page, got {other:?}"),
+        };
+
+        // Test Ctrl+Shift+R opens the ScriptSheet modal, then close it
+        gui_send_key(&mut a, egui::Key::R, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
+        assert!(a.nys.open, "Ctrl+Shift+R should open ScriptSheet");
+        a.nys.open = false;
+
+        // Click "3 · Analysis" -> click "Your script..."
+        gui_click_text(&mut a, "3 · Analysis");
+        assert_eq!(a.shell.open[&wid].part, crate::shell::Part::Analysis);
+        gui_click_text(&mut a, "Your script...");
+        assert!(a.nys.open, "Clicking 'Your script...' in Analysis opens ScriptSheet");
+
+        // Put the exact 15-command soi300_by_script.nys script into the script editor
+        let script = "\
+c0 = 299792458.0
+f0 = c0 / 1.55e-6
+nyx.project_new(title=\"soi300_by_script\", dim=2, h=2.2e-7)
+nyx.set_param(name=\"w\", value=5.0e-7)
+nyx.set_param(name=\"h_si\", value=3.0e-7)
+nyx.add_rect(name=\"r_box\", min=[-2.0e-6, -2.0e-6], max=[2.0e-6, 0.0])
+nyx.add_rect(name=\"r_clad\", min=[-2.0e-6, 0.0], max=[2.0e-6, 2.0e-6])
+nyx.add_rect(name=\"r_si\", min=[\"-w/2\", \"0\"], max=[\"w/2\", \"h_si\"])
+nyx.add_overlay(name=\"regions\", regions=[
+    {\"name\": \"BOX\", \"input\": \"r_box\"},
+    {\"name\": \"Clad\", \"input\": \"r_clad\"},
+    {\"name\": \"Si\", \"input\": \"r_si\"},
+])
+nyx.add_physics(physics=\"ems\", order=2, study=\"modes\", study_params={\"freq\": f0, \"n_target\": 2.85, \"n_modes\": 4})
+nyx.set_material(physics=\"ems\", region=\"BOX\", material=\"silica\")
+nyx.set_material(physics=\"ems\", region=\"Clad\", material=\"silica\")
+nyx.set_material(physics=\"ems\", region=\"Si\", material=\"silicon\")
+nyx.set_mesh(h=2.2e-7, physics_sizing=True, adapt_scale=0.85)
+nyx.mesh_build()
+nyx.solve_run()
+nyx.result_info(physics=\"ems\")
+";
+        a.nys.code = script.to_string();
+        gui_frame(&mut a, egui::RawInput::default());
+
+        // Click "Check" and assert check_msg is Ok
+        gui_click_text(&mut a, "Check");
+        assert!(
+            matches!(&a.nys.check_msg, Some(Ok(msg)) if msg.contains("Static check passed")),
+            "expected static check Ok, got {:?}",
+            a.nys.check_msg
+        );
+
+        // Click "Run .nys script" and poll until done
+        gui_click_text(&mut a, "Run .nys script");
+        let t0 = Instant::now();
+        while a.nys.running {
+            gui_frame(&mut a, egui::RawInput::default());
+            assert!(t0.elapsed() < Duration::from_secs(120), "script run timed out");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        wait_idle(&mut a, 60);
+        gui_frame(&mut a, egui::RawInput::default());
+        assert!(a.error.is_none(), "unexpected error after script run: {:?}", a.error);
+        let out_text = a.nys.output.as_ref().expect("script output present").as_ref().expect("script run succeeded");
+        assert!(out_text.contains("15 engine commands"), "expected 15 engine commands in output: {out_text}");
+
+        // Assert all 4 modes (2.671750, 2.333823, 1.631230, 1.611151) and result freshness
+        assert_eq!(a.results.len(), 1);
+        assert_eq!(a.stale_reason(0), None, "script result must be current in self.engine");
+        let sols = &a.results[0].sols;
+        assert_eq!(sols.len(), 4);
+        let expected_modes = [2.671750, 2.333823, 1.631230, 1.611151];
+        for (i, want) in expected_modes.iter().enumerate() {
+            let got = sols[i].neff.expect("mode neff").0;
+            assert!((got - want).abs() < 1e-5, "mode {} neff: got {got:.6}, expected {want:.6}", i + 1);
+        }
+
+        // Assert run is recorded in w.runs with params["w"] == 5e-7 and params["h_si"] == 3e-7
+        let w = &a.shell.open[&wid];
+        assert_eq!(w.runs.len(), 1, "expected 1 recorded run in w.runs");
+        assert_eq!(w.runs[0].params.get("w").copied(), Some(5e-7));
+        assert_eq!(w.runs[0].params.get("h_si").copied(), Some(3e-7));
+        assert!(!w.runs[0].params.contains_key("parameter_w"));
+
+        // Assert fmt::key_label and fmt::value never render w as Watts ("500 nW" / "Parameter [W]")
+        assert_eq!(crate::fmt::key_label("w"), "W");
+        assert_eq!(crate::fmt::value("w", 5e-7), "500 nm");
+        assert_ne!(crate::fmt::key_label("parameter_w"), "Parameter [W]");
+        assert_eq!(crate::fmt::value("parameter_w", 5e-7), "500 nm");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

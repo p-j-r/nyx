@@ -98,7 +98,7 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             let mut a = app::App::new(cc);
             #[cfg(windows)]
-            if script.is_none() {
+            if script.is_none() && std::env::var_os("NYX_NATIVE_MENU").is_some() {
                 a.shell.native_menu = menu::Native::install(cc);
             }
             a.solve_in_child_processes();

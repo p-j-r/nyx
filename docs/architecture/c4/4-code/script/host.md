@@ -28,7 +28,7 @@ C4 level 4 (code) of the component **Script host** (`script.host`) in the contai
 | Component | Modules | Items |
 |---|---|---|
 | [app: Scripts and batch](../app/headless.md) | crate root, host | Limits, Options, check, run |
-| [app: Window](../app/window.md) | crate root | mcp_dir |
+| [app: Window](../app/window.md) | crate root, host | Limits, Options, check, find_worker, mcp_dir, run |
 | [Script kernel](./kernel.md) | convert, crate root | Limits, Options, Outcome, args_json, find_worker, from_object, to_object |
 
 ## Class diagram

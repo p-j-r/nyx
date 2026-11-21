@@ -5,23 +5,38 @@
 //! handled by the window (`shell_shortcuts`, and egui's own Ctrl +/- for the zoom), so nothing fires twice.
 
 use crate::app::App;
-use crate::shell::{Page, Sheet};
+use crate::shell::{Page, Part, Sheet, Sub};
+use crate::state::Tab;
 use eframe::egui;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Act {
     New,
     Open,
+    ScriptEditor,
+    ExportScript,
     CloseTab,
     Quit,
     Palette,
     Dashboard,
+    ConceptGeometry,
+    ConceptMaterials,
+    BuildConditions,
+    BuildStudy,
+    BuildSweep,
+    AnalysisRuns,
     Settings,
     ZoomIn,
     ZoomOut,
     ZoomReset,
     Compute,
+    BuildMesh,
+    CheckConvergence,
     Stop,
+    Versions,
+    Share,
+    Notes,
+    OpenFolder,
     About,
 }
 
@@ -35,19 +50,33 @@ pub struct Item {
 }
 
 /// Menus in order; the items of a menu in the order of this table.
-pub const ACTIONS: [Item; 13] = [
+pub const ACTIONS: [Item; 27] = [
     Item { menu: "File", label: "New workflow", keys: "Ctrl+N", act: Act::New },
     Item { menu: "File", label: "Open a .nyx file", keys: "Ctrl+O", act: Act::Open },
+    Item { menu: "File", label: "Script (.nys)...", keys: "Ctrl+Shift+R", act: Act::ScriptEditor },
+    Item { menu: "File", label: "Export as .nys script...", keys: "", act: Act::ExportScript },
     Item { menu: "File", label: "Close tab", keys: "Ctrl+W", act: Act::CloseTab },
     Item { menu: "File", label: "Quit", keys: "", act: Act::Quit },
     Item { menu: "Edit", label: "Search or run anything", keys: "Ctrl+K", act: Act::Palette },
     Item { menu: "View", label: "Dashboard", keys: "", act: Act::Dashboard },
+    Item { menu: "View", label: "1 · Concept: Geometry", keys: "Alt+1", act: Act::ConceptGeometry },
+    Item { menu: "View", label: "1 · Concept: Materials", keys: "Alt+2", act: Act::ConceptMaterials },
+    Item { menu: "View", label: "2 · Build: Boundaries & conditions", keys: "Alt+3", act: Act::BuildConditions },
+    Item { menu: "View", label: "2 · Build: Study & solver", keys: "Alt+4", act: Act::BuildStudy },
+    Item { menu: "View", label: "2 · Build: Sweep", keys: "Alt+5", act: Act::BuildSweep },
+    Item { menu: "View", label: "3 · Analysis", keys: "Alt+6", act: Act::AnalysisRuns },
     Item { menu: "View", label: "Settings", keys: "", act: Act::Settings },
     Item { menu: "View", label: "Zoom in", keys: "Ctrl+=", act: Act::ZoomIn },
     Item { menu: "View", label: "Zoom out", keys: "Ctrl+-", act: Act::ZoomOut },
     Item { menu: "View", label: "Actual size", keys: "Ctrl+0", act: Act::ZoomReset },
     Item { menu: "Run", label: "Compute the open experiment", keys: "F5", act: Act::Compute },
+    Item { menu: "Run", label: "Build mesh", keys: "", act: Act::BuildMesh },
+    Item { menu: "Run", label: "Check mesh convergence", keys: "", act: Act::CheckConvergence },
     Item { menu: "Run", label: "Stop the run", keys: "Esc", act: Act::Stop },
+    Item { menu: "Workflow", label: "Versions...", keys: "", act: Act::Versions },
+    Item { menu: "Workflow", label: "Share / Export .nyx...", keys: "", act: Act::Share },
+    Item { menu: "Workflow", label: "Workflow notes", keys: "", act: Act::Notes },
+    Item { menu: "Workflow", label: "Open workflow folder", keys: "", act: Act::OpenFolder },
     Item { menu: "Help", label: "About nyx and licences", keys: "", act: Act::About },
 ];
 
@@ -63,6 +92,49 @@ pub fn menus() -> Vec<&'static str> {
 }
 
 impl App {
+    fn ensure_active_workflow(&mut self) -> Option<String> {
+        if let Page::Workflow(id) = self.shell.page.clone() {
+            return Some(id);
+        }
+        if let Some(id) = self.shell.tabs.last().cloned() {
+            self.show_workflow(&id);
+            return Some(id);
+        }
+        self.status = "Open or create a workflow first (Ctrl+N).".into();
+        None
+    }
+
+    /// In-window themed menu bar generated from `ACTIONS`, plus the Connect menu.
+    pub fn bar_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let mut chosen: Option<Act> = None;
+        egui::MenuBar::new().ui(ui, |ui| {
+            for name in menus() {
+                ui.menu_button(name, |ui| {
+                    ui.set_min_width(240.0);
+                    for it in ACTIONS.iter().filter(|it| it.menu == name) {
+                        let text = if it.keys.is_empty() {
+                            it.label.to_string()
+                        } else {
+                            format!("{:<34}  {}", it.label, it.keys)
+                        };
+                        if ui.button(text).clicked() {
+                            chosen = Some(it.act);
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            let connect_menu = ui.menu_button("Connect", |ui| self.connect_menu(ui));
+            if connect_menu.response.clicked() {
+                self.refresh_connect();
+            }
+        });
+        if let Some(act) = chosen {
+            self.do_act(&ctx, act);
+        }
+    }
+
     /// Does what a menu entry or a palette entry says.
     pub fn do_act(&mut self, ctx: &egui::Context, act: Act) {
         match act {
@@ -70,6 +142,11 @@ impl App {
             Act::Open => {
                 self.shell.sheet = Sheet::None;
                 self.pick_nyx_file();
+            }
+            Act::ScriptEditor => self.open_nys_script(),
+            Act::ExportScript => {
+                self.shell.sheet = Sheet::None;
+                self.export_script();
             }
             Act::CloseTab => {
                 if let Page::Workflow(id) = self.shell.page.clone() {
@@ -86,6 +163,76 @@ impl App {
                 self.flush();
                 self.shell.page = Page::Dashboard;
             }
+            Act::ConceptGeometry => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(w) = self.shell.open.get_mut(&id) {
+                        w.part = Part::Concept;
+                        w.sub = Sub::Main;
+                        w.concept_tab = Tab::Geometry;
+                    }
+                    self.tab = Tab::Geometry;
+                    self.picking = None;
+                }
+            }
+            Act::ConceptMaterials => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(w) = self.shell.open.get_mut(&id) {
+                        w.part = Part::Concept;
+                        w.sub = Sub::Main;
+                        w.concept_tab = Tab::Materials;
+                    }
+                    self.tab = Tab::Materials;
+                    self.picking = None;
+                }
+            }
+            Act::BuildConditions => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(w) = self.shell.open.get_mut(&id) {
+                        w.part = Part::Build;
+                        w.sub = Sub::Main;
+                        w.build_tab = Tab::Physics;
+                        w.sweep.shown = false;
+                    }
+                    self.tab = Tab::Physics;
+                }
+            }
+            Act::BuildStudy => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(w) = self.shell.open.get_mut(&id) {
+                        w.part = Part::Build;
+                        w.sub = Sub::Main;
+                        w.build_tab = Tab::Study;
+                        w.sweep.shown = false;
+                    }
+                    self.tab = Tab::Study;
+                    self.picking = None;
+                }
+            }
+            Act::BuildSweep => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(w) = self.shell.open.get_mut(&id) {
+                        w.part = Part::Build;
+                        w.sub = Sub::Main;
+                        w.sweep.shown = true;
+                    }
+                    self.picking = None;
+                }
+            }
+            Act::AnalysisRuns => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(w) = self.shell.open.get_mut(&id) {
+                        w.part = Part::Analysis;
+                        w.sub = Sub::Main;
+                    }
+                    self.picking = None;
+                }
+            }
             Act::Settings => {
                 self.shell.sheet = Sheet::None;
                 self.shell.page = Page::Settings;
@@ -95,11 +242,54 @@ impl App {
             Act::ZoomReset => ctx.set_zoom_factor(1.0),
             Act::Compute => {
                 self.shell.sheet = Sheet::None;
+                let _ = self.ensure_active_workflow();
                 self.shell_compute();
+            }
+            Act::BuildMesh => {
+                self.shell.sheet = Sheet::None;
+                self.rebuild_mesh();
+            }
+            Act::CheckConvergence => {
+                self.shell.sheet = Sheet::None;
+                self.check_convergence();
             }
             Act::Stop => {
                 if self.busy.is_some() {
                     self.shell.confirm_cancel = true;
+                }
+            }
+            Act::Versions => {
+                if let Some(id) = self.ensure_active_workflow() {
+                    if self.shell.open.get(&id).is_some_and(|w| w.dir.is_some()) {
+                        self.shell.sheet = Sheet::Versions;
+                        self.shell.version_sel = None;
+                    } else {
+                        self.shell.sheet = Sheet::None;
+                        self.status = "Versions start with the first saved change.".into();
+                    }
+                }
+            }
+            Act::Share => {
+                if self.ensure_active_workflow().is_some() {
+                    self.shell.sheet = Sheet::Share;
+                }
+            }
+            Act::Notes => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(w) = self.shell.open.get_mut(&id) {
+                        w.notes_open = !w.notes_open;
+                    }
+                }
+            }
+            Act::OpenFolder => {
+                self.shell.sheet = Sheet::None;
+                if let Some(id) = self.ensure_active_workflow() {
+                    if let Some(d) = self.shell.open.get(&id).and_then(|w| w.dir.as_ref()).map(|d| d.root.clone()) {
+                        self.reveal(&d);
+                    } else {
+                        self.status = "Nothing is saved yet: the folder appears with the first change.".into();
+                    }
                 }
             }
             Act::About => self.shell.sheet = Sheet::About,
@@ -160,11 +350,49 @@ mod tests {
 
     #[test]
     fn the_table_has_every_menu_and_no_empty_label() {
-        assert_eq!(menus(), vec!["File", "Edit", "View", "Run", "Help"]);
+        assert_eq!(menus(), vec!["File", "Edit", "View", "Run", "Workflow", "Help"]);
         assert!(ACTIONS.iter().all(|a| !a.label.is_empty()));
         // each action appears once: the palette and the menu show one entry per action
         for (i, a) in ACTIONS.iter().enumerate() {
             assert!(ACTIONS.iter().skip(i + 1).all(|b| b.act != a.act), "{:?} twice", a.act);
         }
+    }
+
+    #[test]
+    fn menu_navigation_actions_switch_sections_and_tabs() {
+        let ctx = egui::Context::default();
+        let mut a = App::with_context(ctx.clone());
+        a.new_draft("NavTest", crate::shell::Start::Blank { physics: "ems".into(), three_d: false });
+        let wid = match &a.shell.page {
+            Page::Workflow(id) => id.clone(),
+            other => panic!("expected workflow page, got {other:?}"),
+        };
+        a.do_act(&ctx, Act::BuildStudy);
+        assert_eq!(a.shell.open[&wid].part, Part::Build);
+        assert_eq!(a.shell.open[&wid].build_tab, Tab::Study);
+        assert!(!a.shell.open[&wid].sweep.shown);
+
+        a.do_act(&ctx, Act::BuildSweep);
+        assert_eq!(a.shell.open[&wid].part, Part::Build);
+        assert!(a.shell.open[&wid].sweep.shown);
+
+        a.do_act(&ctx, Act::ConceptMaterials);
+        assert_eq!(a.shell.open[&wid].part, Part::Concept);
+        assert_eq!(a.shell.open[&wid].concept_tab, Tab::Materials);
+
+        a.do_act(&ctx, Act::AnalysisRuns);
+        assert_eq!(a.shell.open[&wid].part, Part::Analysis);
+
+        a.do_act(&ctx, Act::Dashboard);
+        assert_eq!(a.shell.page, Page::Dashboard);
+        // Running a workflow navigation action from Dashboard jumps back to the open workflow tab
+        a.do_act(&ctx, Act::ConceptGeometry);
+        assert_eq!(a.shell.page, Page::Workflow(wid.clone()));
+        assert_eq!(a.shell.open[&wid].part, Part::Concept);
+        assert_eq!(a.shell.open[&wid].concept_tab, Tab::Geometry);
+
+        a.do_act(&ctx, Act::ScriptEditor);
+        assert!(a.nys.open);
+        assert!(!a.nys.code.trim().is_empty());
     }
 }

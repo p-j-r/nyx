@@ -29,10 +29,115 @@ pub fn fmt_num(n: f64) -> String {
     }
 }
 
-/// A number field: drag to change, or double-click and type (scientific notation accepted).
+/// Parses a float or scientific-notation number, with optional SI unit suffixes (`nm`, `um`, `µm`, `mm`, `THz`, `GPa`, ...).
+pub fn parse_si_f64(s: &str) -> Option<f64> {
+    let norm = s.trim().replace(',', ".");
+    let s = norm.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(v) = s.parse::<f64>() {
+        return v.is_finite().then_some(v);
+    }
+    const UNITS: [(&str, i32); 18] = [
+        ("THz", 12),
+        ("GHz", 9),
+        ("MHz", 6),
+        ("kHz", 3),
+        ("GPa", 9),
+        ("MPa", 6),
+        ("kPa", 3),
+        ("fm", -15),
+        ("pm", -12),
+        ("nm", -9),
+        ("um", -6),
+        ("µm", -6),
+        ("μm", -6),
+        ("mm", -3),
+        ("cm", -2),
+        ("Hz", 0),
+        ("Pa", 0),
+        ("m", 0),
+    ];
+    for (unit, exp) in UNITS {
+        if let Some(num) = s.strip_suffix(unit) {
+            let num = num.trim();
+            if let Ok(base) = num.parse::<f64>() {
+                if base.is_finite() && !num.contains(['e', 'E']) {
+                    return format!("{num}e{exp}").parse::<f64>().ok().filter(|v| v.is_finite());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn select_all_text(ctx: &egui::Context, id: egui::Id, text: &str) {
+    let mut state = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+        egui::text::CCursor::new(0),
+        egui::text::CCursor::new(text.chars().count()),
+    )));
+    state.store(ctx, id);
+}
+
+pub fn select_all_on_focus_gain(ctx: &egui::Context, r: &egui::Response, text: &str) {
+    let flag = r.id.with("just_focused");
+    if r.gained_focus() {
+        select_all_text(ctx, r.id, text);
+        ctx.data_mut(|d| d.insert_temp(flag, true));
+    } else if r.clicked() && ctx.data_mut(|d| d.get_temp::<bool>(flag).unwrap_or(false)) {
+        select_all_text(ctx, r.id, text);
+        ctx.data_mut(|d| d.remove::<bool>(flag));
+    } else if !r.has_focus() {
+        ctx.data_mut(|d| d.remove::<bool>(flag));
+    }
+}
+
+fn num_with_id(ui: &mut Ui, id: egui::Id, v: &mut f64) -> egui::Response {
+    let focused = ui.memory(|m| m.has_focus(id));
+    let cached = if focused { ui.data_mut(|d| d.get_temp::<String>(id)) } else { None };
+    let mut text = cached.clone().unwrap_or_else(|| fmt_num(*v));
+    if focused && cached.is_none() {
+        select_all_text(ui.ctx(), id, &text);
+    }
+    let mut r = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(id)
+            .min_size(egui::vec2(104.0, 28.0))
+            .desired_width(116.0)
+            .clip_text(false)
+            .font(egui::TextStyle::Monospace),
+    );
+    select_all_on_focus_gain(ui.ctx(), &r, &text);
+    if r.changed() || r.lost_focus() {
+        if let Some(parsed) = parse_si_f64(&text) {
+            if parsed != *v {
+                *v = parsed;
+                r.mark_changed();
+            }
+        }
+    }
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+    } else if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(id));
+    }
+    r
+}
+
+/// A single-click-focusable number field with a persistent ID: accepts scientific notation and SI unit suffixes (`220 nm`, `193.414 THz`).
+pub fn num_id(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, v: &mut f64) -> egui::Response {
+    let id = ui.make_persistent_id(salt);
+    num_with_id(ui, id, v)
+}
+
+/// A number field: single-click and type (scientific notation and SI suffixes accepted).
+#[allow(dead_code)]
 pub fn num(ui: &mut Ui, v: &mut f64) -> egui::Response {
-    let speed = if *v == 0.0 { 0.01 } else { v.abs() * 0.005 };
-    ui.add(DragValue::new(v).speed(speed).custom_formatter(|n, _| fmt_num(n)).custom_parser(|s| s.trim().replace(',', ".").parse::<f64>().ok()))
+    let id = ui.next_auto_id();
+    ui.skip_ahead_auto_ids(1);
+    num_with_id(ui, id, v)
 }
 
 /// A plate `lx` wide (x) and `lz` high (z), one region `plate`: the geometry a person starts from.
@@ -55,7 +160,7 @@ fn sweep_editor(ui: &mut Ui, sweep: &mut Option<Vec<SweepLayer>>) {
             ui.horizontal(|ui| {
                 ui.label(format!("layer {}", i + 1));
                 ui.label("thickness");
-                num(ui, &mut l.thickness);
+                num_id(ui, ("sweep_layer", i), &mut l.thickness);
                 ui.label("elements");
                 ui.add(DragValue::new(&mut l.n).range(1..=200));
                 ui.label("domain +");
@@ -153,7 +258,7 @@ impl App {
         });
         ui.horizontal(|ui| {
             ui.label("element size h (m)");
-            num(ui, &mut m.h);
+            num_id(ui, "mesh_h", &mut m.h);
             ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", g.dim));
         });
         ui.checkbox(&mut m.physics_sizing, "size the mesh from the physics")
@@ -162,7 +267,7 @@ impl App {
             let mut ppw = m.points_per_wavelength.unwrap_or(0.0);
             ui.horizontal(|ui| {
                 ui.label("points per wavelength (0 = by element order)");
-                if num(ui, &mut ppw).changed() {
+                if num_id(ui, "ppw", &mut ppw).changed() {
                     m.points_per_wavelength = (ppw > 0.0).then_some(ppw);
                 }
             });
@@ -174,14 +279,11 @@ impl App {
             }
             if let Some(s) = &mut m.adapt_scale {
                 ui.label("size factor");
-                num(ui, s);
+                num_id(ui, "adapt_s", s);
             }
         });
         ui.checkbox(&mut m.structured_pml, "structured absorbing layers").on_hover_text("Rebuild the absorbing layers of the model as structured layers (quadrilaterals, prisms, hexahedra) cut into simplices.");
         sweep_editor(ui, &mut m.sweep);
-        // as you type: the problem of the edits, or their size and cost from a trial mesh (nothing is built: `feedback.rs`); right under the
-        // controls it answers, not below the feature list (the lines show the state of the frame before, which is the edit being typed)
-        self.feedback_lines(ui);
         ui.add_space(4.0);
         crate::geomui::show(ui, &mut self.geom_ui, &mut g);
         ui.add_space(6.0);
@@ -190,12 +292,14 @@ impl App {
         self.mesh_edit = m;
         if changed {
             self.geometry_dirty = true;
+            self.prune_stale_materials();
             let ctx = ui.ctx().clone();
             self.edits_changed(&ctx);
         }
         let ctx = ui.ctx().clone();
         self.feedback_tick(&ctx);
-        ui.add_space(6.0);
+        self.feedback_lines(ui);
+        ui.add_space(4.0);
         let dirty = self.geometry_dirty || self.geom_edit != self.engine.project().geometry || self.mesh_edit != self.engine.project().mesh;
         ui.horizontal(|ui| {
             let b = ui.add_enabled(self.busy.is_none(), egui::Button::new(RichText::new("Build mesh").strong().color(if dirty { crate::theme::on_accent(ui.ctx()) } else { crate::theme::text(ui.ctx()) })).fill(if dirty { crate::theme::accent(ui.ctx()) } else { crate::theme::raised(ui.ctx()) }));
@@ -243,8 +347,19 @@ impl App {
     // ------------------------------------------------------------------ materials
 
     /// The regions of the model by base name (the absorbing pieces `name.pml_*` belong to `name`), with the key a material is stored under.
-    fn material_regions(&self) -> Vec<(String, String)> {
-        let all = &self.domain_names;
+    pub(crate) fn material_regions(&self) -> Vec<(String, String)> {
+        let from_geom: Vec<(i32, String)> = nyx_engine::facade::geomdrive::evaluate(&self.geom_edit)
+            .ok()
+            .and_then(|ev| ev.label_map().ok())
+            .map(|lm| {
+                lm.domains
+                    .into_iter()
+                    .filter(|d| matches!(d.kind, nyx_engine::facade::geom::model::RegionKind::Material | nyx_engine::facade::geom::model::RegionKind::Pml))
+                    .map(|d| (d.id, d.name))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let all = if !from_geom.is_empty() { &from_geom } else { &self.domain_names };
         let mut seen: Vec<(String, String)> = vec![];
         for (_, n) in all {
             let base = n.split('.').next().unwrap_or(n).to_string();
@@ -254,6 +369,29 @@ impl App {
             }
         }
         seen
+    }
+
+    /// Removes material assignments for region names that no longer exist in `geom_edit`.
+    pub fn prune_stale_materials(&mut self) {
+        let regions = self.material_regions();
+        if regions.is_empty() {
+            return;
+        }
+        let specs: Vec<(String, ProblemSpec)> = self
+            .engine
+            .project()
+            .physics
+            .iter()
+            .filter_map(|s| {
+                let mut sp = s.clone();
+                let before = sp.materials.len();
+                sp.materials.retain(|k, _| regions.iter().any(|(base, key)| k == key || k == base));
+                (sp.materials.len() != before).then_some((sp.physics.clone(), sp))
+            })
+            .collect();
+        for (phys, sp) in specs {
+            self.set_problem(&phys, &sp);
+        }
     }
 
     fn tab_materials(&mut self, ui: &mut Ui) {
@@ -281,7 +419,7 @@ impl App {
         let mut apply_all: Option<String> = None;
         ui.horizontal(|ui| {
             ui.label("All regions:");
-            egui::ComboBox::from_id_salt("mat_all").selected_text("apply material...").show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("mat_all").height(320.0).selected_text("apply material...").show_ui(ui, |ui| {
                 for n in &lib_names {
                     if ui.selectable_label(false, n).clicked() {
                         apply_all = Some(n.clone());
@@ -305,7 +443,7 @@ impl App {
                         Some(MaterialAssign::Props(_)) => "numbers".into(),
                         None => "none".into(),
                     };
-                    egui::ComboBox::from_id_salt(format!("mat_{key}")).selected_text(shown).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt(format!("mat_{key}")).height(320.0).selected_text(shown).show_ui(ui, |ui| {
                         if ui.selectable_label(matches!(cur, Some(MaterialAssign::Props(_))), "numbers").clicked() && !matches!(cur, Some(MaterialAssign::Props(_))) {
                             let map: BTreeMap<String, f64> = props.iter().map(|p| (p.name.clone(), p.default.unwrap_or_else(|| crate::examples::typical(&p.name)))).collect();
                             spec.materials.insert(key.clone(), MaterialAssign::Props(map));
@@ -336,8 +474,8 @@ impl App {
                         let mut edited = false;
                         ui.horizontal(|ui| {
                             ui.label("Bunge angles (degrees)");
-                            for a in euler_deg.iter_mut() {
-                                edited |= num(ui, a).changed();
+                            for (i, a) in euler_deg.iter_mut().enumerate() {
+                                edited |= num_id(ui, ("bunge_angle", key, i), a).changed();
                             }
                         });
                         if !keep {
@@ -353,7 +491,7 @@ impl App {
                             for p in &props {
                                 let mut v = map.get(&p.name).copied().unwrap_or_else(|| p.default.unwrap_or_else(|| crate::examples::typical(&p.name)));
                                 ui.label(&p.label);
-                                if num(ui, &mut v).changed() {
+                                if num_id(ui, ("mat_prop", key, &p.name), &mut v).changed() {
                                     map.insert(p.name.clone(), v);
                                     edited = true;
                                 }
@@ -591,6 +729,29 @@ impl App {
                 ui.colored_label(crate::theme::activity_text(ui.ctx()), format!("This study runs on a {}D mesh; the model on show is {}D.", if dim == 2 { 3 } else { 2 }, dim));
             }
             forms::param_form(ui, &format!("study_{active}_{}", s.kind), &s.params, &mut spec.study.params);
+            if let Some(fd) = s.params.iter().find(|d| d.name == "freq" && d.unit == "Hz") {
+                let freq = spec
+                    .study
+                    .params
+                    .get("freq")
+                    .and_then(Value::as_f64)
+                    .unwrap_or_else(|| forms::default_value(fd).as_f64().unwrap_or(193.414e12));
+                if freq > 0.0 && freq.is_finite() {
+                    let lam0 = 299_792_458.0 / freq;
+                    let mut lam = lam0;
+                    ui.horizontal(|ui| {
+                        ui.label("wavelength λ₀ (vacuum) [m]")
+                            .on_hover_text("Free-space wavelength c₀ / freq (e.g. type 1550 nm); updates Frequency [Hz] above.");
+                        if num_id(ui, ("study_lambda0", &active, &s.kind), &mut lam).changed() && (lam - lam0).abs() > 0.0 && lam > 0.0 && lam.is_finite() {
+                            if !spec.study.params.is_object() {
+                                spec.study.params = Value::Object(serde_json::Map::new());
+                            }
+                            spec.study.params["freq"] = json!(299_792_458.0 / lam);
+                        }
+                        ui.weak(crate::fmt::si(lam, "m"));
+                    });
+                }
+            }
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -609,9 +770,9 @@ impl App {
         let mut start = false;
         ui.horizontal(|ui| {
             ui.label("finer by");
-            num(ui, &mut self.conv_factor);
+            num_id(ui, "conv_f", &mut self.conv_factor);
             ui.label("tolerance");
-            num(ui, &mut self.conv_tol);
+            num_id(ui, "conv_tol", &mut self.conv_tol);
             start = ui.add_enabled(self.job_kind != Some(crate::app::JobKind::Open), egui::Button::new(if self.busy.is_some() { "Queue convergence check" } else { "Check convergence" })).clicked();
         });
         self.conv_factor = self.conv_factor.clamp(0.1, 0.95);
@@ -728,9 +889,9 @@ impl App {
                         rv.range()
                     });
                     let (mut a, mut b) = (lo as f64, hi as f64);
-                    let c1 = num(ui, &mut a).changed();
+                    let c1 = num_id(ui, "manual_range_lo", &mut a).changed();
                     ui.label("to");
-                    let c2 = num(ui, &mut b).changed();
+                    let c2 = num_id(ui, "manual_range_hi", &mut b).changed();
                     if c1 || c2 || rv.manual_range.is_none() {
                         rv.manual_range = Some((a as f32, b as f32));
                     }
@@ -1155,5 +1316,84 @@ pub fn reduce_number(v: &Value) -> String {
     match v {
         Value::Array(a) if a.len() == 2 => format!("{:.6e} + {:.6e} i", a[0].as_f64().unwrap_or(f64::NAN), a[1].as_f64().unwrap_or(f64::NAN)),
         other => format!("{:.6e}", other.as_f64().unwrap_or(f64::NAN)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_si_f64_handles_units_and_rejects_expressions() {
+        assert_eq!(parse_si_f64("220 nm"), Some(2.2e-7));
+        assert_eq!(parse_si_f64("500nm"), Some(5e-7));
+        assert_eq!(parse_si_f64("1.55 µm"), Some(1.55e-6));
+        assert_eq!(parse_si_f64("1.55 um"), Some(1.55e-6));
+        assert_eq!(parse_si_f64("193.414 THz"), Some(193.414e12));
+        assert_eq!(parse_si_f64("2.85"), Some(2.85));
+        assert_eq!(parse_si_f64("2,85"), Some(2.85));
+        assert_eq!(parse_si_f64("100 GPa"), Some(100e9));
+        assert_eq!(parse_si_f64("-w/2"), None);
+        assert_eq!(parse_si_f64("NaN"), None);
+        assert_eq!(parse_si_f64("inf"), None);
+    }
+
+    #[test]
+    fn geomui_parameter_boxes_have_readable_widths_and_num_id_accepts_si_text() {
+        let ctx = egui::Context::default();
+        let mut m = Model::new_2d();
+        m.param("w", 5.0e-7);
+        m.param("h_si", 2.2e-7);
+        let r = m.rect("core", ("-w/2", 0.0), ("w/2", "h_si"));
+        m.overlay(&[("Si", r)]);
+        let mut list = m.list;
+        let mut st = crate::geomui::State::default();
+
+        let mut num_box_id = egui::Id::NULL;
+        let mut num_rect = egui::Rect::NOTHING;
+        let mut auto_num_rect = egui::Rect::NOTHING;
+        let mut v = 0.05_f64;
+        let mut v_auto = 1.0_f64;
+
+        for _ in 0..2 {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.set_max_width(350.0);
+                    crate::geomui::show(ui, &mut st, &mut list);
+                    let resp = num_id(ui, "test_si_input", &mut v);
+                    num_box_id = resp.id;
+                    num_rect = resp.rect;
+                    auto_num_rect = num(ui, &mut v_auto).rect;
+                });
+            });
+        }
+        assert!(num_rect.width() >= 104.0, "num_id width={}", num_rect.width());
+        assert!(auto_num_rect.width() >= 104.0, "num width={}", auto_num_rect.width());
+        let focusable: Vec<egui::Rect> = ctx.viewport(|vp| {
+            vp.prev_pass
+                .widgets
+                .get_layer(egui::LayerId::background())
+                .filter(|w| w.enabled && w.sense.is_focusable())
+                .map(|w| w.rect)
+                .collect()
+        });
+        assert!(focusable.len() >= 2, "expected param_name and param_val focusable widgets");
+        let name_rect = focusable[0];
+        let val_rect = focusable[1];
+        assert!(name_rect.width() >= 72.0, "param_name width={}", name_rect.width());
+        assert!(val_rect.width() >= 104.0, "param_val width={}", val_rect.width());
+
+        // Focus num_id and simulate typing "220 nm"
+        ctx.memory_mut(|mem| mem.request_focus(num_box_id));
+        let mut raw = egui::RawInput::default();
+        raw.events.push(egui::Event::Text("220 nm".into()));
+        let mut changed = false;
+        let _ = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                changed = num_id(ui, "test_si_input", &mut v).changed();
+            });
+        });
+        assert!(changed, "typing '220 nm' into focused num_id should mark changed");
+        assert!((v - 2.2e-7).abs() < 1e-18, "v={v}");
     }
 }

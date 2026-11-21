@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 > The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 5 files, 1262 lines.
+**Size:** 5 files, 1308 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/app/src/cvd.rs` | 90 |  |
-| `crates/app/src/fmt.rs` | 177 |  |
+| `crates/app/src/fmt.rs` | 223 |  |
 | `crates/app/src/kit.rs` | 334 |  |
 | `crates/app/src/theme.rs` | 334 |  |
 | `crates/app/src/tokens.rs` | 327 |  |
@@ -26,7 +26,7 @@ Nothing outside the component (the standard library and external crates are not 
 | Component | Modules | Items |
 |---|---|---|
 | [Scripts and batch](./headless.md) | cvd | Kind, simulate_rgba |
-| [Inspector tabs](./inspector.md) | fmt, theme | accent, activity_text, danger, on_accent, plural, raised, success, text |
+| [Inspector tabs](./inspector.md) | fmt, theme | accent, activity_text, danger, on_accent, plural, raised, si, success +1 |
 | [Shell and dashboard](./shell.md) | fmt, kit, theme | State, card, danger, ellipsize, key_label, modal, muted, plural +3 |
 | [Viewport](./viewport.md) | fmt, theme, tokens | Ink, Mode, ellipsize, rgb, with_alpha |
 | [Window](./window.md) | cvd, fmt, kit, theme | Kind, State, accent, activity_text, apply, card, danger, edge +9 |
@@ -166,9 +166,9 @@ classDiagram
 | fn | `ellipsize` | `fmt.rs:13` | `pub fn ellipsize(s: &str, max: usize) -> String` —  The text cut to `max` characters with an ellipsis; text that fits is returned as it is. |
 | fn | `seconds` | `fmt.rs:21` | `pub fn seconds(s: f64) -> String` —  A time that has passed: "0.4 s", "12 s", "1:05", "1:02:09" (seconds below ten show a decimal; a minute and more show minutes and seconds). |
 | fn | `si` | `fmt.rs:38` | `pub fn si(v: f64, unit: &str) -> String` —  A value with an SI prefix and four significant digits: `si(2.017e-4, "m")` is "201.7 µm", `si(6.175e6, "Pa")` is "6.175 MPa". |
-| fn | `unit_of` | `fmt.rs:59` | `pub fn unit_of(key: &str) -> Option<&'static str>` —  The unit a metric or parameter key ends with ("max_u_m" is in metres), when the last word is a unit. |
-| fn | `key_label` | `fmt.rs:66` | `pub fn key_label(key: &str) -> String` —  "max_von_mises_pa" as "Max von Mises [Pa]": first word capitalised, a few names spelled right, the unit in brackets. |
-| fn | `value` | `fmt.rs:102` | `pub fn value(key: &str, v: f64) -> String` —  A number as the runs table shows it: SI prefixes when the key names a unit, whole numbers without decimals, lengths of a parameter in nm, |
+| fn | `unit_of` | `fmt.rs:60` | `pub fn unit_of(key: &str) -> Option<&'static str>` —  The unit a metric key ends with ("max_u_m" is in metres), when the last word is a physical unit. |
+| fn | `key_label` | `fmt.rs:89` | `pub fn key_label(key: &str) -> String` —  "max_von_mises_pa" as "Max von Mises [Pa]": first word capitalised, a few names spelled right, the unit in brackets. |
+| fn | `value` | `fmt.rs:134` | `pub fn value(key: &str, v: f64) -> String` —  A number as the runs table shows it: SI prefixes when the key names a unit, whole numbers without decimals, lengths of a parameter in nm, |
 | fn | `card` | `kit.rs:8` | `pub fn card<R>(ui: &mut Ui, fill: Color32, stroke: Color32, pad: i8, f: impl FnOnce(&mut Ui) -> R) -> R` |
 | fn | `plain_card` | `kit.rs:13` | `pub fn plain_card<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R` —  A white card with the line colour. |
 | fn | `primary` | `kit.rs:19` | `pub fn primary(ui: &mut Ui, text: impl Into<String>) -> Response` —  The one filled accent button of a view, with the text colour that has contrast on it (`on_accent`). |

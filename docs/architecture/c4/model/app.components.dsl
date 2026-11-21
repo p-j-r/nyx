@@ -3,7 +3,7 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57, 92"
         "code" "crates/app/src: app.rs, feedback.rs, main.rs, spans.rs, state.rs"
-        "lines" "2815"
+        "lines" "3821"
         "codeDiagram" "4-code/app/window.md"
     }
 }
@@ -11,7 +11,7 @@ shell = component "Shell and dashboard" "The tab bar, the native menu and the ta
     properties {
         "adr" "14, 23, 87, 88"
         "code" "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs"
-        "lines" "4441"
+        "lines" "5092"
         "codeDiagram" "4-code/app/shell.md"
     }
 }
@@ -19,7 +19,7 @@ inspector = component "Inspector tabs" "The tabs beside the viewport: geometry e
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: forms.rs, geomui.rs, tabs.rs"
-        "lines" "2216"
+        "lines" "2523"
         "codeDiagram" "4-code/app/inspector.md"
     }
 }
@@ -35,7 +35,7 @@ style = component "Look and widgets" "The nyx look (the colour tokens as data, f
     properties {
         "adr" "23, 88"
         "code" "crates/app/src: cvd.rs, fmt.rs, kit.rs, theme.rs, tokens.rs"
-        "lines" "1262"
+        "lines" "1308"
         "codeDiagram" "4-code/app/style.md"
     }
 }

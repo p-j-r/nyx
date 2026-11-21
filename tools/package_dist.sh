@@ -15,4 +15,7 @@ for exe in nyx nyx-mcp nyx-worker nyx-script-worker nyx-connect; do
 done
 cp LICENSE NOTICE "$out/"
 cp crates/app/assets/fonts/OFL-EBGaramond.txt "$out/"
+rm -rf "$out/materials" "$out/examples" "$out/fonts"
+cp -r materials examples "$out/"
+cp -r crates/app/assets/fonts "$out/"
 echo "packaged: $out"

@@ -3,7 +3,7 @@
 //! Forms drawn from descriptors: a study, a condition or the options of a physics are a list of `ParamDesc`s (name, label, unit, type and
 //! range, default), and the form for them is made here, the same for every physics. A new physics needs no change in the window.
 
-use crate::tabs::num;
+use crate::tabs::num_id;
 use eframe::egui::{self, DragValue, Ui};
 use nyx_engine::facade::physics::{ParamDesc, ParamKind};
 use serde_json::{json, Map, Value};
@@ -62,8 +62,9 @@ pub fn param_form(ui: &mut Ui, salt: &str, descs: &[ParamDesc], value: &mut Valu
             }
             match &d.kind {
                 ParamKind::Number { default, min, max } => {
-                    let mut v = given.as_ref().and_then(Value::as_f64).unwrap_or(*default);
-                    if num(ui, &mut v).changed() {
+                    let prev = given.as_ref().and_then(Value::as_f64).unwrap_or(*default);
+                    let mut v = prev;
+                    if num_id(ui, (&d.name, 0usize), &mut v).changed() && v != prev {
                         if let Some(lo) = min {
                             v = v.max(*lo);
                         }
@@ -75,14 +76,14 @@ pub fn param_form(ui: &mut Ui, salt: &str, descs: &[ParamDesc], value: &mut Valu
                 }
                 ParamKind::Integer { default, min, max } => {
                     let mut v = given.as_ref().and_then(Value::as_i64).unwrap_or(*default);
-                    let r = ui.add(DragValue::new(&mut v).range(min.unwrap_or(i64::MIN / 2)..=max.unwrap_or(i64::MAX / 2)));
+                    let r = ui.push_id((&d.name, "int"), |ui| ui.add(DragValue::new(&mut v).range(min.unwrap_or(i64::MIN / 2)..=max.unwrap_or(i64::MAX / 2)))).inner;
                     if r.changed() {
                         set = Some(json!(v));
                     }
                 }
                 ParamKind::Bool { default } => {
                     let mut v = given.as_ref().and_then(Value::as_bool).unwrap_or(*default);
-                    if ui.checkbox(&mut v, "").changed() {
+                    if ui.push_id((&d.name, "bool"), |ui| ui.checkbox(&mut v, "")).inner.changed() {
                         set = Some(json!(v));
                     }
                 }
@@ -99,27 +100,28 @@ pub fn param_form(ui: &mut Ui, salt: &str, descs: &[ParamDesc], value: &mut Valu
                     }
                 }
                 ParamKind::Vector { len, default } => {
-                    let mut v: Vec<f64> = given.as_ref().and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect()).filter(|v: &Vec<f64>| v.len() == *len).unwrap_or_else(|| default.clone());
+                    let prev: Vec<f64> = given.as_ref().and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect()).filter(|v: &Vec<f64>| v.len() == *len).unwrap_or_else(|| default.clone());
+                    let mut v = prev.clone();
                     let mut edited = false;
                     ui.horizontal(|ui| {
-                        for x in v.iter_mut() {
-                            edited |= num(ui, x).changed();
+                        for (k, x) in v.iter_mut().enumerate() {
+                            edited |= num_id(ui, (&d.name, k), x).changed();
                         }
                     });
-                    if edited {
+                    if edited && v != prev {
                         set = Some(json!(v));
                     }
                 }
                 ParamKind::Text { default } => {
                     let mut s = given.as_ref().and_then(Value::as_str).unwrap_or(default).to_string();
-                    if ui.add(egui::TextEdit::singleline(&mut s).desired_width(180.0)).changed() {
+                    if ui.add(egui::TextEdit::singleline(&mut s).id(ui.make_persistent_id((&d.name, "text"))).min_size(egui::vec2(110.0, 28.0)).desired_width(180.0)).changed() {
                         set = Some(json!(s));
                     }
                 }
                 ParamKind::Names { default } => {
                     let cur: Vec<String> = given.as_ref().and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_else(|| default.clone());
                     let mut s = cur.join(", ");
-                    if ui.add(egui::TextEdit::singleline(&mut s).desired_width(180.0).hint_text("region names, comma separated")).changed() {
+                    if ui.add(egui::TextEdit::singleline(&mut s).id(ui.make_persistent_id((&d.name, "names"))).min_size(egui::vec2(110.0, 28.0)).desired_width(180.0).hint_text("region names, comma separated")).changed() {
                         let names: Vec<String> = s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
                         set = Some(json!(names));
                     }
