@@ -61,7 +61,9 @@ pub fn write_snapshot(snapshot: &Snapshot, path: &str, parallel: bool, atomic: b
     #[cfg(not(feature = "hdf5"))]
     {
         let _ = (snapshot, path, parallel, atomic);
-        Err(Error::Unsupported("this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature; the HDF5 library must be installed)".into()))
+        Err(Error::Unsupported(
+            "this build of nyx was made without HDF5 support (rebuild nyx-engine with the `hdf5` feature)".into(),
+        ))
     }
 }
 
@@ -159,16 +161,16 @@ impl Engine {
     pub fn results_file_info(&self, path: &str) -> Result<Value, Error> {
         #[cfg(feature = "hdf5")]
         {
-            let s = crate::h5io::read_results(std::path::Path::new(path)).map_err(Error::invalid)?;
+            let s = crate::h5io::read_results_summary(std::path::Path::new(path)).map_err(Error::invalid)?;
             let title = serde_json::from_str::<Value>(&s.project)
                 .ok()
                 .and_then(|v| v.get("title").cloned())
                 .unwrap_or(Value::Null);
             Ok(json!({
-                "title": title, "dim": s.mesh.dim, "cells": s.mesh.n_cells(), "points": s.mesh.n_points(),
+                "title": title, "dim": s.dim, "cells": s.cells, "points": s.points,
                 "results": s.results.iter().map(|(c, r)| json!({
                     "physics": c, "study": r.study, "order": r.order, "dofs": r.dofs, "seconds": r.seconds,
-                    "solutions": r.solutions.len(), "scalars": r.scalars,
+                    "solutions": r.solutions, "scalars": r.scalars,
                 })).collect::<Vec<_>>(),
             }))
         }

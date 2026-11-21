@@ -24,6 +24,7 @@ use crate::estimate::{Estimate, History, MemoryProbe};
 use nyx_physics::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(feature = "hdf5")]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -786,6 +787,22 @@ pub(crate) fn run_shared(
     q.remove(&id);
     forget(&id);
     result
+}
+
+#[cfg(not(feature = "hdf5"))]
+pub(crate) fn run_shared(
+    _q: &SharedQueue,
+    _program: &Path,
+    _n: &NewItem,
+    _spec: &crate::worker::RemoteSpec,
+    _progress: &std::sync::Arc<femcore::progress::Progress>,
+    _id_slot: &std::sync::Mutex<Option<String>>,
+    _own: &std::sync::Mutex<std::collections::BTreeSet<String>>,
+) -> Result<crate::worker::RemoteDone, Error> {
+    Err(Error::Unsupported(
+        "this build of nyx has no HDF5 support, which the shared queue needs to hand results back; solve in this process"
+            .into(),
+    ))
 }
 
 // ------------------------------------------------------------------------------------------------------------------ the command line
