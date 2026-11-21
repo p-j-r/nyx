@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 5 files, 3821 lines.
+**Size:** 5 files, 3851 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 3200 |  |
+| `crates/app/src/app.rs` | 3230 |  |
 | `crates/app/src/feedback.rs` | 221 |  |
 | `crates/app/src/main.rs` | 122 |  |
 | `crates/app/src/spans.rs` | 42 |  |

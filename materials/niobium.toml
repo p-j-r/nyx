@@ -1,0 +1,14 @@
+# Niobium: superconducting thin-film BCS and London parameters (Park et al. 2026, Maxfield & McLean 1965).
+format = 1
+name = "niobium"
+description = "Niobium sputtered superconducting film"
+source = { cite = "Compiled from the per-table sources below. Density 8570 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)", verified = "2026-11-21" }
+density = "8570 kg/m^3"
+
+[superconducting]
+tc = "9.2 K"
+gap_0 = "1.395 meV"
+lambda_L = "33.3 nm"
+xi_0 = "39.0 nm"
+sigma_n = "5.5e7 S/m"
+source = { cite = "J. Park et al., npj Quantum Information (2026), Fig. 1d-e and B. W. Maxfield, W. L. McLean, Superconducting penetration depth of niobium, Phys. Rev. 139, A1515 (1965): Nb film T_c = 9.2 K, Delta(0) = 1.395 meV, London depth lambda_L(0) = 33.3 nm, BCS coherence length xi_0 = 39.0 nm, cryogenic normal conductivity sigma_n = 5.5e7 S/m", doi = "10.1103/PhysRev.139.A1515", verified = "2026-11-21" }

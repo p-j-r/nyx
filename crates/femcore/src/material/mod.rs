@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod bcs;
 pub mod elastic;
 pub mod optics;
 pub mod reader;
@@ -20,11 +21,15 @@ pub mod spec;
 pub mod tensor;
 pub mod units;
 
+pub use bcs::{
+    bcs_gap, bcs_surface_impedance, surface_impedance_from_params, BcsEval, FilmModel,
+    BCS_GAP_RATIO, EV_TO_J, HBAR, K_B, MU0,
+};
 pub use elastic::{Class, Elastic, Unique};
 pub use optics::{Dispersion, Optical, OpticsError};
 pub use reader::MaterialError;
 pub use source::Source;
-pub use spec::{merge_over, Library, MaterialSpec};
+pub use spec::{merge_over, Library, MaterialSpec, Superconducting};
 pub use tensor::TensorProp;
 
 pub type M3 = [[f64; 3]; 3];

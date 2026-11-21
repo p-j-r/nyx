@@ -137,6 +137,15 @@ impl<const D: usize> CellMesh<D> {
         &self.facet_conn[self.facet_offsets[f] as usize..self.facet_offsets[f + 1] as usize]
     }
 
+    /// Facets carrying the given 1-based boundary label from `LabelMap`.
+    ///
+    /// In a 3D sheet-stack mesh (`meshing::sheet3d`), each interior 2D conductive sheet triangle (`Op::Sheet`)
+    /// appears **exactly once** in `facet_conn` / `facet_label` (and `SimplexMesh::facets` / `facet_labels`)
+    /// with its 1-based boundary label, shared conformally by the lower and upper tetrahedra.
+    pub fn sheet_facets(&self, label: i32) -> Vec<&[u32]> {
+        (0..self.n_facets()).filter(|&f| self.facet_label[f] == label).map(|f| self.facet(f)).collect()
+    }
+
     /// Append a cell.
     pub fn push_cell(&mut self, t: CellType, vs: &[u32], label: i32) {
         assert_eq!(t.dim(), D, "cell dimension does not match mesh dimension");

@@ -359,6 +359,11 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&
                 c = true;
             }
         }
+        Op::Polygons { polygons, holes, simplify_tol, min_hole_area } => {
+            ui.label(RichText::new(format!("{} outer ring(s), {} hole ring(s)", polygons.len(), holes.len())).weak());
+            c |= one(ui, "simplify tolerance", simplify_tol);
+            c |= one(ui, "min hole area", min_hole_area);
+        }
         Op::Box { min, max } => {
             c |= exprs(ui, "min (x, y, z)", min);
             c |= exprs(ui, "max (x, y, z)", max);
@@ -396,6 +401,10 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&
             c |= one(ui, "from", from);
             c |= one(ui, "to", to);
             c |= optional(ui, "taper (deg)", taper_deg);
+        }
+        Op::Sheet { input, z } => {
+            c |= feature_combo(ui, "2D profile", input, prior);
+            c |= one(ui, "z", z);
         }
         Op::Transform { input, steps } => {
             c |= feature_combo(ui, "of", input, prior);
@@ -585,8 +594,8 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&
 
 /// The kinds the Add menu offers, grouped.
 const GROUPS: [(&str, &[&str]); 5] = [
-    ("Profiles", &["Rect", "RoundedRect", "Circle", "Ellipse", "Polygon"]),
-    ("Solids", &["Box", "Cylinder", "Cone", "Sphere", "Torus", "Extrude", "Revolve"]),
+    ("Profiles", &["Rect", "RoundedRect", "Circle", "Ellipse", "Polygon", "Polygons"]),
+    ("Solids", &["Box", "Cylinder", "Cone", "Sphere", "Torus", "Extrude", "Revolve", "Sheet"]),
     ("Combine", &["Union", "Difference", "Intersect", "Transform", "Pattern"]),
     ("Regions", &["Overlay"]),
     ("Simulation", &["Pml", "Size", "Tag", "Cut", "Periodic"]),
@@ -607,6 +616,7 @@ fn default_op(kind: &str, list: &FeatureList) -> Option<Op> {
         "Circle" => Op::Circle { center: e2(0.5, 0.5), r: Expr::Num(0.25) },
         "Ellipse" => Op::Ellipse { center: e2(0.5, 0.5), radii: e2(0.4, 0.2), angle_deg: Expr::Num(0.0) },
         "Polygon" => Op::Polygon { pts: vec![e2(0.0, 0.0), e2(1.0, 0.0), e2(0.5, 1.0)], names: vec![] },
+        "Polygons" => Op::Polygons { polygons: vec![vec![e2(0.0, 0.0), e2(1.0, 0.0), e2(0.5, 1.0)]], holes: vec![], simplify_tol: Expr::Num(50e-9), min_hole_area: Expr::Num(0.0) },
         "Box" => Op::Box { min: three(0.0), max: three(1.0) },
         "Cylinder" => Op::Cylinder { base: [Expr::Num(0.5), Expr::Num(0.5), Expr::Num(0.0)], axis: Axis::Z, r: Expr::Num(0.25), h: Expr::Num(1.0) },
         "Cone" => Op::Cone { base: [Expr::Num(0.5), Expr::Num(0.5), Expr::Num(0.0)], axis: Axis::Z, r0: Expr::Num(0.3), r1: Expr::Num(0.1), h: Expr::Num(1.0) },
@@ -614,6 +624,7 @@ fn default_op(kind: &str, list: &FeatureList) -> Option<Op> {
         "Torus" => Op::Torus { center: three(0.5), major: Expr::Num(0.3), minor: Expr::Num(0.1) },
         "Extrude" => Op::Extrude { profile: last?, axis: Axis::Y, from: Expr::Num(0.0), to: Expr::Num(1.0), taper_deg: None },
         "Revolve" => Op::Revolve { profile: last?, axis: Axis::Z, center: zero3() },
+        "Sheet" => Op::Sheet { input: last?, z: Expr::Num(0.0) },
         "Union" => Op::Union { ids: vec![before?, last?] },
         "Intersect" => Op::Intersect { ids: vec![before?, last?] },
         "Difference" => Op::Difference { a: before?, b: vec![last?] },
@@ -638,7 +649,7 @@ fn default_op(kind: &str, list: &FeatureList) -> Option<Op> {
 }
 
 fn is_3d_kind(kind: &str) -> bool {
-    matches!(kind, "Box" | "Cylinder" | "Cone" | "Sphere" | "Torus" | "Extrude" | "Revolve")
+    matches!(kind, "Box" | "Cylinder" | "Cone" | "Sphere" | "Torus" | "Extrude" | "Revolve" | "Sheet")
 }
 
 fn summary(op: &Op) -> String {
@@ -647,6 +658,8 @@ fn summary(op: &Op) -> String {
         Op::Rect { min, max } => format!("({}, {}) to ({}, {})", v(&min[0]), v(&min[1]), v(&max[0]), v(&max[1])),
         Op::Circle { center, r } => format!("r {}  at ({}, {})", v(r), v(&center[0]), v(&center[1])),
         Op::Polygon { pts, .. } => format!("{} points", pts.len()),
+        Op::Polygons { polygons, holes, .. } => format!("{} ring(s), {} hole(s)", polygons.len(), holes.len()),
+        Op::Sheet { z, .. } => format!("z {}", v(z)),
         Op::Union { ids } | Op::Intersect { ids } => crate::fmt::plural(ids.len(), "feature"),
         Op::Overlay { regions, .. } => crate::fmt::plural(regions.len(), "region"),
         Op::Size { h: Some(h), .. } => format!("h {}", v(h)),

@@ -94,7 +94,7 @@ pub fn check_params(value: &Value, descs: &[ParamDesc], what: &str) -> Result<()
     }
     for d in descs {
         match obj.get(&d.name) {
-            None => {
+            None | Some(Value::Null) => {
                 if d.required {
                     return Err(Error::invalid(format!("{what}: parameter '{}' ({}) is required", d.name, d.label)));
                 }

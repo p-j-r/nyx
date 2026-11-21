@@ -33,7 +33,9 @@ C4 level 4 (code) of the component **Time, nonlinear, sweeps** (`femcore.laother
 
 ## Used by
 
-Nothing else in the workspace names this component (entry points are reached by the program or by tests).
+| Component | Modules | Items |
+|---|---|---|
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::expm | expm |
 
 ## Class diagram
 

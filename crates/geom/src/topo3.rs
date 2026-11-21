@@ -94,7 +94,7 @@ pub fn build(cx: &Complex) -> (Vec<Edge3>, Vec<Vertex>) {
             }
             f.sort_unstable();
             f.dedup();
-            if f.len() >= 2 {
+            if f.len() >= 2 || (f.len() == 1 && cx.faces[f[0] as usize].is_sheet()) {
                 raws.push(Raw {
                     key: (f[0], 0, e as u32, li),
                     geom: EdgeGeom::Horizontal { edge: e as u32, z },
@@ -251,7 +251,7 @@ impl Complex {
         let scale = self.regions.iter().map(|r| r.bbox.diagonal()).fold(0.0, f64::max).max(1e-300);
         let mut sum = vec![0.0f64; self.faces.len()];
         for e in &self.edges3 {
-            if e.faces.len() < 2 {
+            if e.faces.len() < 2 && !(e.faces.len() == 1 && self.faces[e.faces[0] as usize].is_sheet()) {
                 return Err(format!("edge '{}' is used by a single face", e.name));
             }
             for &f in &e.faces {

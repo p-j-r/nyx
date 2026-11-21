@@ -23,11 +23,12 @@
 //! gradients of edge bubbles, 2 interior) with P2 phi, the accuracy of quadratic
 //! elements on the same mesh.
 
-use crate::problem::{Problem, Study};
+use crate::ibc::{add_ibc_2d_waveguide, pec_edges_and_nodes_2d};
+use crate::problem::{Problem, Study, SurfaceImpedanceBc};
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
-use femcore::linalg::csr::{Coo, RCsr as Csr};
+use femcore::linalg::csr::{CCoo, Coo, RCsr as Csr};
 use femcore::linalg::driver::eigs_general;
 use femcore::linalg::driver::EigOpts;
 use femcore::props::TensorKind;
@@ -114,6 +115,19 @@ pub fn assemble_modes(
     mu_r: &[f64],
     order: usize,
 ) -> Result<ModeAssembly, String> {
+    assemble_modes_with_bcs(mesh, freq, eps_r, mu_r, order, &[], &[], &[])
+}
+
+pub fn assemble_modes_with_bcs(
+    mesh: &Discretisation,
+    freq: f64,
+    eps_r: &[EpsCell],
+    mu_r: &[f64],
+    order: usize,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    pmc_labels: &[i32],
+) -> Result<ModeAssembly, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -194,25 +208,43 @@ pub fn assemble_modes(
         let pp: Vec<f64> = (0..nl * nl).map(|i| (kp[i] * imu - k0 * k0 * tp[i] * eps) * area).collect();
         b_coo.push_block(&cols_p, &cols_p, &pp);
     }
-    let a_full = a_coo.to_csr();
-    let b_full = b_coo.to_csr();
+    let mut a_full = a_coo.to_csr();
+    let mut b_full = b_coo.to_csr();
+    if !ibc_bcs.is_empty() {
+        let mut a_ibc = CCoo::new(n_tot, n_tot);
+        let mut b_ibc = CCoo::new(n_tot, n_tot);
+        add_ibc_2d_waveguide(mesh, order, freq, pec_labels, ibc_bcs, &mut a_ibc, &mut b_ibc)?;
+        let ar = a_ibc.to_csr().real_part();
+        let br = b_ibc.to_csr().real_part();
+        if ar.nnz() > 0 {
+            a_full = a_full.add_scaled(&ar, 1.0);
+        }
+        if br.nnz() > 0 {
+            b_full = b_full.add_scaled(&br, 1.0);
+        }
+    }
 
     // PEC: tangential Et = 0 on boundary edges (both edge functions of order 2), phi = 0 on
     // boundary nodes (and boundary edge midpoints for P2)
-    // walls are the exterior facets only: facets on interfaces between domains are not conductors
-    let exterior = mesh.exterior_facets();
-    let mut be: Vec<usize> = (0..mesh.n_facets())
-        .filter(|&f| exterior[f])
-        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
-        .collect();
-    be.sort_unstable();
-    be.dedup();
-    let mut bn: Vec<usize> = (0..mesh.n_facets())
-        .filter(|&f| exterior[f])
-        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
-        .collect();
-    bn.sort_unstable();
-    bn.dedup();
+    let (be, bn) = if pec_labels.is_empty() && ibc_bcs.is_empty() && pmc_labels.is_empty() {
+        // walls are the exterior facets only: facets on interfaces between domains are not conductors
+        let exterior = mesh.exterior_facets();
+        let mut be: Vec<usize> = (0..mesh.n_facets())
+            .filter(|&f| exterior[f])
+            .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
+            .collect();
+        be.sort_unstable();
+        be.dedup();
+        let mut bn: Vec<usize> = (0..mesh.n_facets())
+            .filter(|&f| exterior[f])
+            .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
+            .collect();
+        bn.sort_unstable();
+        bn.dedup();
+        (be, bn)
+    } else {
+        pec_edges_and_nodes_2d(mesh, pec_labels, ibc_bcs, pmc_labels)
+    };
     let mut fixed: Vec<usize> = be.clone();
     if order == 2 {
         fixed.extend(be.iter().map(|&e| ne + e));
@@ -362,7 +394,7 @@ pub fn mode_fields_cells(
 /// when the problem has absorbing layers, a tilted crystal, or a complex pair among the wanted eigenvalues. The result carries the
 /// polarization of the modes (scalars and log, as before the move; the analysis itself is in `Solved::analysis`).
 pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
-    if problem.materials.has_pml() {
+    if problem.materials.has_pml() || problem.surface_impedance.iter().any(|b| b.r_s > 0.0) {
         return crate::modes_complex::solve_waveguide_complex(mesh, problem);
     }
     let t0 = Instant::now();
@@ -388,7 +420,21 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
     let eps: Vec<EpsCell> =
         tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    let modes = solve_modes_tensor(mesh, freq, &eps, &mur, n_target, evanescent, n_modes, problem.order)?;
+    let modes = if problem.pec.is_empty() && problem.surface_impedance.is_empty() && problem.pmc.is_empty() {
+        solve_modes_tensor(mesh, freq, &eps, &mur, n_target, evanescent, n_modes, problem.order)?
+    } else {
+        let asm = assemble_modes_with_bcs(
+            mesh,
+            freq,
+            &eps,
+            &mur,
+            problem.order,
+            &problem.pec,
+            &problem.surface_impedance,
+            &problem.pmc,
+        )?;
+        solve_mode_pairs(&asm, n_target, evanescent, n_modes)?
+    };
     if modes.complex_wanted {
         // a leaky or complex-propagation-constant mode is among the nearest eigenvalues: the complex solver represents it (complex vectors)
         femcore::progress::note(

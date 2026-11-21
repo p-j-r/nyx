@@ -2,23 +2,23 @@
 
 C4 level 4 (code) of the component **Electrostatics kernel** (`dfs.electro`) in the container **nyx-dfs** (crate `nyx_dfs`). [Component view of the container](../../3-components/dfs.md) · [All code pages](../README.md)
 
-> Electrostatics on P1/P2 simplices with fixed-potential and surface-charge conditions.
+> Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions.
 
-**Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md)  
-**Size:** 1 file, 138 lines.
+**Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md)  
+**Size:** 1 file, 607 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/electro.rs` | 138 |  |
+| `crates/nyx-dfs/src/electro.rs` | 607 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fields, linalg::csr::assembly, props, section | CellFields, RCsr, TensorKind, component_names, node_average |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | Discretisation, Field, Scalar, Solution, SolveResult, cell_fields_of |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fields, linalg::csr::assembly, linalg::driver, material, props, section | CellFields, DirectSolver, LinearSolver, M3, RCsr, TensorKind, component_names, dense_eigh, node_average |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, result | CapacitanceMatrixData, Discretisation, Field, Scalar, Solution, SolveResult, TlsMeta, cell_fields_of |
 | [Shared helpers](./common.md) | common | cell_gradient, components, minmax, norm_of, plane_tensors |
 | [Typed problem](./problem.md) | problem | BcKind, Problem |
 
@@ -56,9 +56,9 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| const | `EPS0` | `electro.rs:16` | `f64` |
-| struct | `ElectroAssembly` | `electro.rs:21` | fields: `k`, `f`, `fixed`, `vals`, `volt` —  Stage 1 of electrostatics: the stiffness matrix, the load and the Dirichlet dofs. |
-| fn | `assemble_electrostatics` | `electro.rs:30` | `pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String>` |
-| fn | `solve_potential` | `electro.rs:73` | `pub fn solve_potential( mesh: &Discretisation, spec: &Problem, asm: &ElectroAssembly, ) -> Result<(Vec<f64>, Option<String>), String>` —  Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one |
-| fn | `electrostatics_fields` | `electro.rs:83` | `pub fn electrostatics_fields(mesh: &Discretisation, order: usize, v: &[f64]) -> (Vec<Field>, CellFields)` —  Stage 3: the fields `V` and `E` (the flat names `\|E\|`, `Ex`, `Ez` come from `Solution::flat_fields`) and the same without averaging over |
-| fn | `solve_electrostatics` | `electro.rs:96` | `pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
+| const | `EPS0` | `electro.rs:20` | `f64` |
+| struct | `ElectroAssembly` | `electro.rs:27` | fields: `k`, `f`, `fixed`, `vals`, `volt` —  Stage 1 of electrostatics: the stiffness matrix, the load and the Dirichlet dofs. |
+| fn | `assemble_electrostatics` | `electro.rs:164` | `pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String>` |
+| fn | `solve_potential` | `electro.rs:222` | `pub fn solve_potential( mesh: &Discretisation, spec: &Problem, asm: &ElectroAssembly, ) -> Result<(Vec<f64>, Option<String>), String>` —  Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one |
+| fn | `electrostatics_fields` | `electro.rs:232` | `pub fn electrostatics_fields(mesh: &Discretisation, order: usize, v: &[f64]) -> (Vec<Field>, CellFields)` —  Stage 3: the fields `V` and `E` (the flat names `\|E\|`, `Ex`, `Ez` come from `Solution::flat_fields`) and the same without averaging over |
+| fn | `solve_electrostatics` | `electro.rs:322` | `pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |

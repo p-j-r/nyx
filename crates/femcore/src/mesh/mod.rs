@@ -324,6 +324,14 @@ impl SimplexMesh {
     pub fn facet(&self, f: usize) -> &[u32] {
         &self.facets[f * self.dim..(f + 1) * self.dim]
     }
+    /// Facets carrying the given 1-based boundary label from `LabelMap`.
+    ///
+    /// In a 3D sheet-stack mesh (`meshing::sheet3d`), each interior 2D conductive sheet triangle (`Op::Sheet`)
+    /// appears **exactly once** in `facets` / `facet_labels` with its 1-based boundary label, shared conformally
+    /// by the lower and upper tetrahedra.
+    pub fn sheet_facets(&self, label: i32) -> Vec<&[u32]> {
+        (0..self.n_facets()).filter(|&f| self.facet_labels[f] == label).map(|f| self.facet(f)).collect()
+    }
     /// Local pair edges of cell `c` (index into `edges()`), pairs (0,1),(0,2),...
     pub fn cell_edge_ids(&self, c: usize) -> &[u32] {
         let npair = self.dim * (self.dim + 1) / 2;

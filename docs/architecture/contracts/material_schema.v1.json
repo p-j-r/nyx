@@ -1881,6 +1881,193 @@
     "source": {
       "$ref": "#/$defs/source"
     },
+    "superconducting": {
+      "additionalProperties": false,
+      "description": "BCS and London superconducting parameters for complex conductivity and thin-film kinetic inductance",
+      "properties": {
+        "gap_0": {
+          "description": "zero-temperature BCS energy gap Delta(0), eV/meV/ueV/J (defaults to 1.7638 k_B T_c)",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "gap_0_unit": {
+          "type": "string"
+        },
+        "lambda_L": {
+          "description": "zero-temperature London penetration depth lambda_L(0), m/um/nm",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "lambda_L_unit": {
+          "type": "string"
+        },
+        "mean_free_path": {
+          "description": "normal-state electron mean free path ell, m/um/nm",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "mean_free_path_unit": {
+          "type": "string"
+        },
+        "sigma_n": {
+          "description": "normal-state electrical conductivity sigma_n, S/m",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "sigma_n_unit": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "tc": {
+          "description": "critical temperature T_c, K",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "tc_unit": {
+          "type": "string"
+        },
+        "xi_0": {
+          "description": "BCS coherence length xi_0, m/um/nm",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "xi_0_unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tc"
+      ],
+      "type": "object"
+    },
     "thermal": {
       "additionalProperties": false,
       "properties": {

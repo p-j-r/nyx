@@ -34,6 +34,7 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 | Component | Modules | Items |
 |---|---|---|
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::amg_elastic | spmm |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::amg_elastic | spmm |
 | [Finite-element basics](./fem.md) | linalg::amg_elastic | Amg, AmgOptions, pcg |
 
 ## Class diagram

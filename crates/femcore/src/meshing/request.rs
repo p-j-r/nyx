@@ -184,10 +184,11 @@ fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, si
     // size rules that a 3D mesh cannot honour are named, not dropped in silence (ADR 83)
     let mut warnings = vec![];
     if m.dim == 3 {
+        let has_sheets = g.eval.complex().has_sheets();
         for rule in g.eval.size_rules() {
             let name = g.eval.list.features.iter().find(|f| f.id == rule.feature).map_or(String::new(), |f| f.name.clone());
             let what = match rule.entities.kind {
-                geom::select::EntityKind::Edges => Some("crease edges"),
+                geom::select::EntityKind::Edges if !has_sheets => Some("crease edges"),
                 geom::select::EntityKind::Vertices => Some("vertices"),
                 _ => None,
             };

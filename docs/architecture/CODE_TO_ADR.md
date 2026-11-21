@@ -14,6 +14,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `Cargo.lock` | 13 | |
 | `rust-toolchain.toml` | 13 | pinned compiler |
 | `CLAUDE.md` | 1, 10, 12, 13, 20 | conventions |
+| `AGENTS.md` | 1, 10, 12, 13, 20 | agent-neutral repository guide |
 | `README.md` | 13 | |
 | `LICENSE` | 100 | the AGPL-3.0 text |
 | `NOTICE` | 100 | the dual licence and the parts that keep their own |
@@ -64,7 +65,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/src/query.rs` | 3, 18 | exact queries, closest point |
 | `crates/geom/src/curve.rs` | 3, 18 | |
 | `crates/geom/src/tess.rs` | 3 | display only |
-| `crates/geom/src/*` | 3 | arrangement, complex, planar, prim, scene, math, lib |
+| `crates/geom/src/poly_batch.rs` | 102, 2 | batch polygon cleanup and shared-corner-pinned RDP simplification |
+| `crates/geom/src/*` | 3 | arrangement, complex, planar, prim, scene, synth, math, lib |
 | `crates/geom/tests/contracts.rs` | 19, 3 | |
 | `crates/geom/tests/goldens.rs` | 10, 2 | |
 | `crates/geom/tests/wafer.rs` | 1 | |
@@ -100,14 +102,15 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
 | `crates/femcore/src/meshing/sizing.rs` | 17, 25 | the neutral Sizing a physics reports to the mesher (re-exported by nyx-physics) |
 | `crates/femcore/src/meshing/validate/*` | 7 | |
+| `crates/femcore/src/meshing/sheet3d.rs` | 102 | conformal 3D sheet-stack mesher (`Op::Sheet`, `<sheet>:edge`, Dompierre prism splitting, single-facet interior boundaries) |
 | `crates/femcore/src/par.rs` | 11 | R03; the fixed-chunk reductions of the adaptation live here too (was `adapt/par.rs`) |
 | `crates/femcore/src/adapt/estimate*.rs` | 7, 17, 53 | |
 | `crates/femcore/src/adapt/work.rs` | 5, 4, 7 | the adaptation's private simplex working mesh and its conversion from and to the solver mesh (was `mesh/native.rs`, `mesh/interop.rs`) |
 | `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
-| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101 | spec, units, elastic, tensor, optics, schema (phase 6) |
-| `materials/*` | 29, 30, 34, 35, 101 | the shipped material library (TOML) |
+| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101, 104 | spec, units, elastic, tensor, optics, schema (phase 6), Zimmermann BCS conductivity (`bcs.rs`) |
+| `materials/*` | 29, 30, 34, 35, 101, 104 | the shipped material library (TOML, including superconductors) |
 | `docs/MATERIALS.md` | 29, 30, 34, 35, 101 | |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
@@ -132,7 +135,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
-| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19, 101 | behaviour and contract tests of the material format |
+| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19, 101, 104 | behaviour, BCS, and contract tests of the material format |
+| `crates/femcore/tests/sheet_mesh3d.rs` | 102 | tests of conformal 3D sheet-stack meshing and `<sheet>:edge` tags |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
 | `crates/femcore/tests/ring_frame.rs` | 1 | |
@@ -168,9 +172,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |
 | `crates/nyx-physics/src/testkit.rs` | 41, 10 | the golden-file harness |
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
+| `crates/nyx-physics/src/cqed.rs` | 103, 104, 105, 106 | typed cQED payloads (`CapacitanceMatrixData`, `InductanceMatrixData`, `TlsMeta`, `CircuitRom`, `DrivenPortData`) |
 | `crates/nyx-physics/*` | 25, 19 | the Physics trait, envelope, descriptors, registry |
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
-| `crates/nyx-dfs/*` | 41, 25, 12, 9 | diffusion: typed problem, electrostatics and heat kernels (moved from femcore::dfs), descriptors |
+| `crates/nyx-dfs/src/magneto.rs` | 103 | gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`) and inductance matrix extraction |
+| `crates/nyx-dfs/tests/capacitance_qubit.rs` | 103 | multi-terminal capacitance matrix & magnetostatic inductance benchmarks (Test 1) |
+| `crates/nyx-dfs/*` | 41, 25, 12, 9, 103 | diffusion: typed problem, multi-RHS electrostatics, magnetostatics, and heat kernels, descriptors |
 | `crates/nyx-sms/tests/golden/*` | 10, 42 | the sms goldens (and `ring_model_axes`), moved unchanged from femcore |
 | `crates/nyx-sms/src/{axisym,cross_section,waveguide}.rs` | 43, 42, 68, 69, 80, 101 | bodies of revolution on their half-plane and 2.5D waveguide cross-sections (`exp(-j q y)`): the library entries (`solve_solid_axisym`, `solve_solid_waveguide`), the `axisymmetric_eigenfrequency` and `modes` studies, axis conditions, cylindrical and planar layers, the scalars that identify a mode (numeric frequency parts, energy shares per component and domain) |
 | `crates/nyx-sms/tests/axisym_mode_scalars.rs` | 80 | the numeric frequency parts and the energy shares against closed forms whose family is known |
@@ -181,8 +188,15 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
-| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
-| `crates/nyx-analysis/*` | 56, 25, 21, 99 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
+| `crates/nyx-ems/src/{ibc,rom}.rs` | 104 | superconducting thin-film IBC, rank-1 `lumped_jj`, physical $H$/$K$ normalization, passive `CircuitRom`, and `TlsMeta` |
+| `crates/nyx-ems/tests/kicq_cpw_bcs.rs` | 104 | 3D CPW BCS kinetic inductance shift and lumped JJ equipartition tests (Test 3) |
+| `crates/nyx-ems/src/{driven,ports}.rs` | 106 | driven frequency-domain solver, `lumped_port`, 2D boundary-mode `waveport`, and Hermite Tangential Galerkin PROM |
+| `crates/nyx-ems/tests/driven_prom.rs` | 106 | 3D driven PROM, waveport, and BBQ admittance verification (Test 6) |
+| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, and driven kernels |
+| `crates/nyx-analysis/src/capacitance.rs` | 103 | `capacitance_matrix` and `inductance_matrix` analyses of `dfs` results |
+| `crates/nyx-analysis/src/{epr,hamiltonian,tls}.rs` | 105 | `epr` KICQ analysis, `hamiltonian` (`normal_fock` / `craig_bampton`), and `tls_participation` |
+| `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
+| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, mode figures) |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |
@@ -209,7 +223,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/src/scriptout.rs` | 94 | export as script (`project_script`): the project as a command list replayed on a scratch engine to verify it, then rendered as Python; three forms (`commands`, `geometry_json`, `project_json`) |
 | `crates/nyx-engine/src/shared_queue.rs` | 95 | the queue in the workspace folder: items and markers, the lease, the queue worker (`--worker`), `run_shared` for the job that waits for an item, the `nyx queue` commands |
 | `crates/nyx-engine/tests/shared_queue.rs` | 95 | two front-ends on one queue, a submitter that exits, a solver killed, a queue worker killed, cancel and steering from another program |
-| `crates/nyx-engine/*` | 37, 38, 25, 26 | `Project`, commands, jobs, store wiring and geometry descriptors (phase 7, early); the registry from cargo features |
+| `crates/nyx-engine/tests/cqed_validated.rs` | 102, 103, 105, 91 | end-to-end superconducting CPW `Engine` workflow reaching `validated: checked` and running `capacitance_matrix` & `tls_participation` |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 102, 103, 104, 105 | `Project`, commands, jobs, store wiring and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57 | scripts: the host (run and check a script through a worker process), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93 | tracing of script functions (N3): the Python prelude the worker is fed, the formula functions, the `nyx` wrapper that turns a function given as a formula into its text, and the static guard against a branch on a value of the point |
 | `crates/nyx-script/src/kernel.rs` | 94, 93 | the kernel: one Monty session that outlives a script; commands that wait for a job served by polling so no call blocks for ever; `nyx.aio` futures; the refusal of the destructive commands; a dead worker replaced from a dump; `host::run` and `check` are one script on a kernel of their own |

@@ -290,6 +290,132 @@
   },
   {
     "dims": [
+      2,
+      3
+    ],
+    "doc": "A batch of outer polygon rings and optional hole rings in 2D or 3D, with Ramer-Douglas-Peucker closed-ring simplification (shared corners pinned) and minimum hole area filtering.",
+    "fields": [
+      {
+        "default": null,
+        "doc": "outer polygon rings, each a list of 2D corners in metres",
+        "name": "polygons",
+        "required": true,
+        "type": "Rings(2)"
+      },
+      {
+        "default": [],
+        "doc": "hole polygon rings to subtract",
+        "name": "holes",
+        "required": false,
+        "type": "Rings(2)"
+      },
+      {
+        "default": 5e-8,
+        "doc": "Ramer-Douglas-Peucker simplification tolerance in metres",
+        "name": "simplify_tol",
+        "required": false,
+        "type": "Expr"
+      },
+      {
+        "default": 0.0,
+        "doc": "drop hole rings with unsigned shoelace area below this threshold in m^2",
+        "name": "min_hole_area",
+        "required": false,
+        "type": "Expr"
+      }
+    ],
+    "group": "shape",
+    "kind": "Polygons",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "holes": {
+          "default": [],
+          "items": {
+            "items": {
+              "items": {
+                "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "minItems": 3,
+            "type": "array"
+          },
+          "title": "hole polygon rings to subtract",
+          "type": "array"
+        },
+        "min_hole_area": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "drop hole rings with unsigned shoelace area below this threshold in m^2"
+        },
+        "polygons": {
+          "items": {
+            "items": {
+              "items": {
+                "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "minItems": 3,
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "outer polygon rings, each a list of 2D corners in metres",
+          "type": "array"
+        },
+        "simplify_tol": {
+          "default": 5e-8,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Ramer-Douglas-Peucker simplification tolerance in metres"
+        }
+      },
+      "required": [
+        "polygons"
+      ],
+      "type": "object"
+    },
+    "title": "Polygon batch",
+    "tool": "add_polygons"
+  },
+  {
+    "dims": [
       2
     ],
     "doc": "A rectangle with quarter-circle corners.",
@@ -1016,6 +1142,66 @@
     },
     "title": "Extrude",
     "tool": "add_extrude"
+  },
+  {
+    "dims": [
+      3
+    ],
+    "doc": "Embeds a 2D profile or boolean feature as a zero-thickness conductive sheet at plane z (3D).",
+    "fields": [
+      {
+        "default": null,
+        "doc": "the 2D profile or boolean feature",
+        "name": "input",
+        "required": true,
+        "type": "Feature"
+      },
+      {
+        "default": 0.0,
+        "doc": "z coordinate of the sheet plane in metres",
+        "name": "z",
+        "required": false,
+        "type": "Expr"
+      }
+    ],
+    "group": "build",
+    "kind": "Sheet",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the 2D profile or boolean feature"
+        },
+        "z": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "z coordinate of the sheet plane in metres"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "title": "2D sheet in 3D",
+    "tool": "add_sheet"
   },
   {
     "dims": [

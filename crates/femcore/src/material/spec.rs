@@ -44,6 +44,32 @@ pub struct Electrical {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Superconducting {
+    #[serde(default)]
+    pub source: Vec<Source>,
+    /// critical temperature T_c in K (> 0)
+    pub tc: f64,
+    /// zero-temperature BCS energy gap Delta(0) in J (> 0); defaults to 1.7638 * k_B * T_c when None
+    pub gap_0: Option<f64>,
+    /// zero-temperature London penetration depth lambda_L(0) in m (> 0); written as `lambda_L` in TOML
+    pub lambda_l: Option<f64>,
+    /// BCS coherence length xi_0 in m (> 0)
+    pub xi_0: Option<f64>,
+    /// normal-state electron mean free path ell in m (> 0)
+    pub mean_free_path: Option<f64>,
+    /// normal-state electrical conductivity sigma_n in S/m (> 0)
+    pub sigma_n: Option<f64>,
+}
+
+impl Superconducting {
+    /// Zero-temperature BCS energy gap Delta(0) in J: `gap_0` if given, otherwise the weak-coupling
+    /// BCS relation `1.7638 * k_B * T_c`.
+    pub fn effective_gap_0(&self) -> f64 {
+        self.gap_0.unwrap_or(super::bcs::BCS_GAP_RATIO * super::bcs::K_B * self.tc)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MaterialSpec {
     pub name: String,
     pub description: Option<String>,
@@ -56,12 +82,29 @@ pub struct MaterialSpec {
     pub thermal: Thermal,
     pub electrical: Electrical,
     pub optical: Option<Optical>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superconducting: Option<Superconducting>,
 }
 
-const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "extends", "density", "density_unit", "elastic", "thermal", "electrical", "optical"];
+const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "extends", "density", "density_unit", "elastic", "thermal", "electrical", "optical", "superconducting"];
 const ELASTIC_KEYS: &[&str] = &["source", "unit", "compliance_unit", "class", "unique_axis", "matrix", "compliance", "E", "nu", "lambda", "mu", "K", "G", "c11", "c12", "c44"];
 const THERMAL_KEYS: &[&str] = &["source", "conductivity", "conductivity_unit", "specific_heat", "specific_heat_unit", "expansion", "expansion_unit"];
 const ELECTRICAL_KEYS: &[&str] = &["source", "permittivity", "permeability", "conductivity", "conductivity_unit"];
+pub const SUPERCONDUCTING_KEYS: &[&str] = &[
+    "source",
+    "tc",
+    "tc_unit",
+    "gap_0",
+    "gap_0_unit",
+    "lambda_L",
+    "lambda_L_unit",
+    "xi_0",
+    "xi_0_unit",
+    "mean_free_path",
+    "mean_free_path_unit",
+    "sigma_n",
+    "sigma_n_unit",
+];
 
 fn positive(s: &Section, key: &str, v: Option<f64>, what: &str) -> Result<Option<f64>, MaterialError> {
     match v {
@@ -145,8 +188,31 @@ impl MaterialSpec {
                 Some(opt)
             }
         };
+
+        let superconducting = match s.sub("superconducting")? {
+            None => None,
+            Some(mut sc) => {
+                let source = read_sources(&mut sc, "source")?;
+                let tc = sc
+                    .quantity("tc", Dim::Temperature, None)?
+                    .ok_or_else(|| sc.err("tc", "is missing; a [superconducting] table needs tc (the critical temperature, for example tc = \"9.2 K\")"))?;
+                let tc = positive(&sc, "tc", Some(tc), "the critical temperature tc")?.unwrap();
+                let gap_0 = sc.quantity("gap_0", Dim::Energy, None)?;
+                let gap_0 = positive(&sc, "gap_0", gap_0, "the superconducting gap gap_0")?;
+                let lambda_l = sc.quantity("lambda_L", Dim::Length, None)?;
+                let lambda_l = positive(&sc, "lambda_L", lambda_l, "the London penetration depth lambda_L")?;
+                let xi_0 = sc.quantity("xi_0", Dim::Length, None)?;
+                let xi_0 = positive(&sc, "xi_0", xi_0, "the BCS coherence length xi_0")?;
+                let mean_free_path = sc.quantity("mean_free_path", Dim::Length, None)?;
+                let mean_free_path = positive(&sc, "mean_free_path", mean_free_path, "the mean free path")?;
+                let sigma_n = sc.quantity("sigma_n", Dim::ElectricalConductivity, None)?;
+                let sigma_n = positive(&sc, "sigma_n", sigma_n, "the normal-state conductivity sigma_n")?;
+                sc.finish(SUPERCONDUCTING_KEYS)?;
+                Some(Superconducting { source, tc, gap_0, lambda_l, xi_0, mean_free_path, sigma_n })
+            }
+        };
         s.finish(TOP_KEYS)?;
-        Ok(MaterialSpec { name, description, source, notes, density, elastic, thermal, electrical, optical })
+        Ok(MaterialSpec { name, description, source, notes, density, elastic, thermal, electrical, optical, superconducting })
     }
 
     pub fn from_toml(text: &str) -> Result<MaterialSpec, MaterialError> {
@@ -211,6 +277,29 @@ impl MaterialSpec {
         }
         if let Some(o) = &self.optical {
             t.insert("optical".into(), toml::Value::Table(o.write()));
+        }
+        if let Some(sc) = &self.superconducting {
+            let mut s = toml::Table::new();
+            if let Some(v) = write_sources(&sc.source) {
+                s.insert("source".into(), v);
+            }
+            s.insert("tc".into(), format!("{} K", sc.tc).into());
+            if let Some(g) = sc.gap_0 {
+                s.insert("gap_0".into(), format!("{g} J").into());
+            }
+            if let Some(l) = sc.lambda_l {
+                s.insert("lambda_L".into(), format!("{l} m").into());
+            }
+            if let Some(x) = sc.xi_0 {
+                s.insert("xi_0".into(), format!("{x} m").into());
+            }
+            if let Some(m) = sc.mean_free_path {
+                s.insert("mean_free_path".into(), format!("{m} m").into());
+            }
+            if let Some(sn) = sc.sigma_n {
+                s.insert("sigma_n".into(), format!("{sn} S/m").into());
+            }
+            t.insert("superconducting".into(), toml::Value::Table(s));
         }
         toml::to_string(&t).expect("a table of plain values always serialises")
     }
@@ -488,8 +577,17 @@ pub struct Keys {
     pub electrical: &'static [&'static str],
     pub optical: &'static [&'static str],
     pub model: &'static [&'static str],
+    pub superconducting: &'static [&'static str],
 }
 
 pub fn keys() -> Keys {
-    Keys { top: TOP_KEYS, elastic: ELASTIC_KEYS, thermal: THERMAL_KEYS, electrical: ELECTRICAL_KEYS, optical: optics::OPTICAL_KEYS, model: optics::MODEL_KEYS }
+    Keys {
+        top: TOP_KEYS,
+        elastic: ELASTIC_KEYS,
+        thermal: THERMAL_KEYS,
+        electrical: ELECTRICAL_KEYS,
+        optical: optics::OPTICAL_KEYS,
+        model: optics::MODEL_KEYS,
+        superconducting: SUPERCONDUCTING_KEYS,
+    }
 }

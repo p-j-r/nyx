@@ -63,6 +63,7 @@ fn the_schema_lists_exactly_the_keys_the_loader_knows() {
     let mut optical = set(k.optical);
     optical.extend(set(k.model));
     assert_eq!(keys(&s["properties"]["optical"]), optical, "[optical]");
+    assert_eq!(keys(&s["properties"]["superconducting"]), set(k.superconducting), "[superconducting]");
     assert_eq!(keys(&s["$defs"]["model"]), set(k.model), "model table");
 }
 

@@ -135,6 +135,11 @@ impl Face {
     pub fn u_clamp(&self, u: f64) -> f64 {
         u.clamp(0.0, 1.0)
     }
+
+    /// True when this face fragment comes from a 2D zero-thickness `Op::Sheet` feature.
+    pub fn is_sheet(&self) -> bool {
+        self.prov.iter().any(|p| p.role == "sheet")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -157,29 +162,29 @@ pub struct Loop {
 
 #[derive(Clone, Debug, Default)]
 pub struct Complex {
-    pub(crate) dim: u8,
-    pub(crate) tol: f64,
+    pub dim: u8,
+    pub tol: f64,
     /// point about which area integrals are taken (centre of the model)
-    pub(crate) origin: V2,
-    pub(crate) curves: Vec<Curve>,
-    pub(crate) regions: Vec<Region>,
-    pub(crate) edges: Vec<Edge>,
-    pub(crate) vertices: Vec<Vertex>,
-    pub(crate) loops: Vec<Loop>,
+    pub origin: V2,
+    pub curves: Vec<Curve>,
+    pub regions: Vec<Region>,
+    pub edges: Vec<Edge>,
+    pub vertices: Vec<Vertex>,
+    pub loops: Vec<Loop>,
     /// scene region index -> final region id (`None` for holes and for dropped empty generated regions)
-    pub(crate) scene_to_region: Vec<Option<u32>>,
+    pub scene_to_region: Vec<Option<u32>>,
     /// 3D only: named face fragments, and the layer stack they were derived from
-    pub(crate) faces: Vec<Face>,
+    pub faces: Vec<Face>,
     /// 3D only: crease edges between face fragments (see `topo3.rs`); `vertices` holds their end points
-    pub(crate) edges3: Vec<Edge3>,
+    pub edges3: Vec<Edge3>,
     /// polyhedral models: the planes that carry faces, each with the 2D complex of its cells
-    pub(crate) planar: Vec<PlaneData>,
+    pub planar: Vec<PlaneData>,
     /// The sweep axis (0, 1, 2) of a 3D stack model, or the out-of-plane axis (y) of a 2D model. Overlay, layers and body data are
     /// stored in the sweep frame of `scene::axis_perm` (profile plane first, sweep axis last); everything the API returns is in world coordinates
     /// (`wv` / `iv` convert). A 2D model's world frame is the wafer cross-section: `(x, 0, z)`, with the curves themselves
     /// parametrised in `(x, z)`.
-    pub(crate) axis: usize,
-    pub(crate) stack: Option<Box<crate::stack::LayerStack>>,
+    pub axis: usize,
+    pub stack: Option<Box<crate::stack::LayerStack>>,
 }
 
 pub fn curve_kind(c: &Curve) -> &'static str {
@@ -237,7 +242,7 @@ impl Complex {
     }
 
     /// Internal-frame vector to world coordinates.
-    pub(crate) fn wv(&self, v: V3) -> V3 {
+    pub fn wv(&self, v: V3) -> V3 {
         let p = crate::scene::axis_perm(self.axis);
         let mut o = [0.0; 3];
         for i in 0..3 {
@@ -246,9 +251,41 @@ impl Complex {
         o
     }
     /// World vector to the internal frame.
-    pub(crate) fn iv(&self, v: V3) -> V3 {
+    pub fn iv(&self, v: V3) -> V3 {
         let p = crate::scene::axis_perm(self.axis);
         [v[p[0]], v[p[1]], v[p[2]]]
+    }
+    /// True when the complex contains at least one 2D sheet cap face.
+    pub fn has_sheets(&self) -> bool {
+        self.faces.iter().any(|f| f.is_sheet())
+    }
+    /// Sorted, deduplicated names of all 2D sheet features present in the complex.
+    pub fn sheet_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.faces.iter().filter(|f| f.is_sheet()).map(|f| f.name.clone()).collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+    /// 3D edge indices (`edges3`) forming the exterior 1D perimeter of `<sheet>`'s union of cap cells
+    /// at its plane `z0` (excluding internal fragment seams shared by two cap cells of the same sheet).
+    pub fn sheet_perimeter_edges(&self, sheet: &str) -> Vec<u32> {
+        if self.dim != 3 {
+            return vec![];
+        }
+        (0..self.edges3.len() as u32)
+            .filter(|&ei| {
+                let e = &self.edges3[ei as usize];
+                matches!(e.geom, EdgeGeom::Horizontal { .. })
+                    && e.faces
+                        .iter()
+                        .filter(|&&fi| {
+                            let f = &self.faces[fi as usize];
+                            f.is_sheet() && f.name == sheet
+                        })
+                        .count()
+                        == 1
+            })
+            .collect()
     }
     /// Converts the stored boxes and points of a freshly built stack complex to world coordinates and records the axis.
     pub(crate) fn set_world_frame(&mut self, axis: usize) {
@@ -540,7 +577,7 @@ impl Complex {
         let scale = self.regions.iter().map(|r| r.bbox.diagonal()).fold(0.0, f64::max).max(1e-300);
         let mut flux = vec![[0.0f64; 3]; self.regions.len()];
         for f in &self.faces {
-            if f.first == f.second {
+            if f.first == f.second && !f.is_sheet() {
                 return Err(format!("face '{}' has the same region on both sides", f.name));
             }
             let v = match f.geom {

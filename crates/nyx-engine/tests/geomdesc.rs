@@ -12,6 +12,7 @@ fn sample(t: Ty) -> Value {
         Ty::Expr => json!(1.0),
         Ty::Exprs(n) => json!(vec![1.0; n]),
         Ty::Points(_) => json!([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
+        Ty::Rings(_) => json!([[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]]),
         Ty::Axis => json!("Z"),
         Ty::Feature => json!("p"),
         Ty::Features => json!(["p"]),
@@ -44,7 +45,7 @@ fn every_kind_is_described_once_with_its_serde_fields() {
     let all = all();
     let kinds: BTreeSet<_> = all.iter().map(|d| d.kind).collect();
     assert_eq!(kinds.len(), all.len(), "a kind is described twice");
-    assert_eq!(all.len(), 23, "the number of Op variants");
+    assert_eq!(all.len(), 25, "the number of Op variants");
     for d in &all {
         let op = build_op(&list, d.kind, &required_args(d)).unwrap_or_else(|e| panic!("{}: {e}", d.kind));
         assert_eq!(kind_of(&op), d.kind);

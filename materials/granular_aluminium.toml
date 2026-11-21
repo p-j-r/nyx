@@ -1,0 +1,12 @@
+# Granular aluminium (grAl) dirty-limit high-kinetic-inductance superconducting film.
+format = 1
+name = "granular_aluminium"
+description = "Granular aluminium (grAl) dirty-limit superinductor film"
+source = { cite = "Compiled from the per-table sources below (dirty-limit grAl film parameters from Maleeva et al. 2018 and Gruenhaupt et al. 2019)", verified = "2026-11-21" }
+density = "2700 kg/m^3"
+
+[superconducting]
+tc = "1.90 K"
+gap_0 = "0.30 meV"
+sigma_n = "2.5e4 S/m"
+source = { cite = "N. Maleeva et al., Circuit quantum electrodynamics of granular aluminum resonators, Nat. Commun. 9, 3889 (2018) and L. Gruenhaupt et al., Granular aluminium as a superconducting material for high-impedance quantum circuits, Nat. Mater. 18, 816-820 (2019): dirty-limit grAl film T_c = 1.90 K, Delta(0) = 0.30 meV, normal conductivity sigma_n = 2.5e4 S/m (rho_n = 4000 uOhm cm, APPROXIMATE representative oxygenation point)", doi = "10.1038/s41467-018-06386-9", verified = "2026-11-21" }

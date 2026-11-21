@@ -1,0 +1,14 @@
+# White tin (beta-Sn) superconducting film.
+format = 1
+name = "tin"
+description = "White tin (beta-Sn) superconducting film"
+source = { cite = "Compiled from the per-table sources below. Density 7265 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)", verified = "2026-11-21" }
+density = "7265 kg/m^3"
+
+[superconducting]
+tc = "3.72 K"
+gap_0 = "0.575 meV"
+lambda_L = "34.0 nm"
+xi_0 = "230.0 nm"
+sigma_n = "4.0e7 S/m"
+source = { cite = "M. Tinkham, Introduction to Superconductivity, 2nd ed. (McGraw-Hill, 1996) and C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005): beta-Sn T_c = 3.72 K, Delta(0) = 0.575 meV, London penetration depth lambda_L(0) = 34 nm, BCS coherence length xi_0 = 230 nm; APPROXIMATE cryogenic film normal conductivity sigma_n = 4.0e7 S/m", verified = "2026-11-21" }

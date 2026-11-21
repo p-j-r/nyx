@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 > Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data.
 
 **Decisions:** [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md)  
-**Size:** 4 files, 1905 lines.
+**Size:** 4 files, 1915 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 |---|---:|---|
 | `crates/geom/src/labels.rs` | 230 | `LabelMap`: the compiled, deterministic mapping between names and the integer labels the solvers consume. Domain label = region (1-based in overlay order, pins honoured and checked); boundary label = one per facet (ordered by provenance,... |
 | `crates/geom/src/query.rs` | 405 | Exact queries on an evaluated 2D model: measures, curve evaluation with first and second derivatives, curvature radii, chord / facet deviation, edge discretisation by deviation and size, midpoint projection (where a quadratic element put... |
-| `crates/geom/src/select.rs` | 1024 | Selectors: small serialisable rules that resolve against an evaluated complex to typed entity sets (regions, facets, vertices). The text form (`name(core.top) \| interface(Si, BOX)`) parses to the serde form and prints back deterministica... |
+| `crates/geom/src/select.rs` | 1034 | Selectors: small serialisable rules that resolve against an evaluated complex to typed entity sets (regions, facets, vertices). The text form (`name(core.top) \| interface(Si, BOX)`) parses to the serde form and prints back deterministica... |
 | `crates/geom/src/sim.rs` | 246 | Simulation operations as *data*: absorbing-layer regions, mesh size rules, periodic face pairs (verified congruent), and the projection oracle. geom describes which entities and how; femcore decides what a condition means and applies it. |
 
 ## What it uses
@@ -33,7 +33,7 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 | [engine: Meshing seam](../engine/meshing.md) | labels, select | EntityKind, EntitySet, LabelMap, Selector |
 | [femcore: Fixtures and test kit](../femcore/fixtures.md) | select | Selector |
 | [femcore: Meshing facade](../femcore/meshing.md) | labels, query, select | DiscretizeOpts, EntityKind, LabelMap, Selector |
-| [femcore: 3D meshing](../femcore/meshing3d.md) | labels, select | EntityKind, LabelMap |
+| [femcore: 3D meshing](../femcore/meshing3d.md) | labels, query, select | DiscretizeOpts, EntityKind, LabelMap |
 | [Evaluation](./evaluation.md) | sim | SimData |
 | [Feature list](./featurelist.md) | select | Selector |
 | [Display tessellation](./tessellation.md) | query | DiscretizeOpts |
@@ -287,14 +287,14 @@ classDiagram
 | struct | `EntitySet` | `select.rs:88` | fields: `kind`, `ids` |
 | struct | `Resolved` | `select.rs:103` | fields: `set`, `warnings` |
 | fn | `EntitySet::new` | `select.rs:95` | `pub fn new(kind: EntityKind, mut ids: Vec<u32>) -> EntitySet` |
-| fn | `Selector::parse` | `select.rs:489` | `pub fn parse(text: &str) -> GeomResult<Selector>` |
-| fn | `Selector::atoms` | `select.rs:492` | `pub fn atoms(&self) -> usize` |
-| fn | `Selector::or` | `select.rs:499` | `pub fn or(self, o: Selector) -> Selector` |
-| fn | `Selector::and` | `select.rs:502` | `pub fn and(self, o: Selector) -> Selector` |
-| fn | `Selector::minus` | `select.rs:505` | `pub fn minus(self, o: Selector) -> Selector` |
-| fn | `Evaluated::resolve` | `select.rs:872` | `pub fn resolve(&self, sel: &Selector) -> GeomResult<Resolved>` —  Resolves a selector to an entity set plus warnings (an empty result is a warning, not an error). |
-| fn | `Evaluated::resolve_inner` | `select.rs:876` | `pub(crate) fn resolve_inner(&self, sel: &Selector, no_id: bool) -> GeomResult<Resolved>` |
-| fn | `Evaluated::suggest` | `select.rs:887` | `pub fn suggest(&self, picked: &EntitySet) -> Vec<Selector>` —  Selectors, simplest first, that each resolve to exactly `picked`; empty if none does. |
+| fn | `Selector::parse` | `select.rs:495` | `pub fn parse(text: &str) -> GeomResult<Selector>` |
+| fn | `Selector::atoms` | `select.rs:498` | `pub fn atoms(&self) -> usize` |
+| fn | `Selector::or` | `select.rs:505` | `pub fn or(self, o: Selector) -> Selector` |
+| fn | `Selector::and` | `select.rs:508` | `pub fn and(self, o: Selector) -> Selector` |
+| fn | `Selector::minus` | `select.rs:511` | `pub fn minus(self, o: Selector) -> Selector` |
+| fn | `Evaluated::resolve` | `select.rs:882` | `pub fn resolve(&self, sel: &Selector) -> GeomResult<Resolved>` —  Resolves a selector to an entity set plus warnings (an empty result is a warning, not an error). |
+| fn | `Evaluated::resolve_inner` | `select.rs:886` | `pub(crate) fn resolve_inner(&self, sel: &Selector, no_id: bool) -> GeomResult<Resolved>` |
+| fn | `Evaluated::suggest` | `select.rs:897` | `pub fn suggest(&self, picked: &EntitySet) -> Vec<Selector>` —  Selectors, simplest first, that each resolve to exactly `picked`; empty if none does. |
 | struct | `PmlRegion` | `sim.rs:11` | fields: `region`, `parent`, `window`, `sides`, `thickness`, `layers`, `grading` |
 | struct | `SizeRule` | `sim.rs:24` | fields: `feature`, `entities`, `h`, `max_dev`, `min_layers` |
 | struct | `PeriodicPair` | `sim.rs:33` | fields: `feature`, `a`, `b`, `translation`, `checked_congruent` |

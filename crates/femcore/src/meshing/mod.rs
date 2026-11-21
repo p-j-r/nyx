@@ -25,6 +25,7 @@ pub mod pml3;
 pub mod pml_box;
 pub mod refine3d;
 pub mod request;
+pub mod sheet3d;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
@@ -208,6 +209,9 @@ pub fn wave_sizes_by_region(ev: &Evaluated, labels: &LabelMap, sizing: &Sizing, 
 /// Meshes a 3D model (ADR 40, 50, 51, 52): the lattice mesher with the sizes of the model and, when `waves` is given, of the study; then
 /// the metric adaptation of `adapt3` for `Mesher::Adaptive`; then the structured absorbing layers for `PmlMode::Structured`.
 fn mesh_3d_plan(ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    if ev.complex().has_sheets() {
+        return sheet3d::mesh_sheet_stack_3d(ev, plan, waves);
+    }
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let nr = ev.regions().len();
     let want = match waves {

@@ -24,8 +24,9 @@
 //! `(A0 + j b_prev A1) x = -b^2 B x`, and the iteration stops when `b` changes by less than
 //! `COUPLED_BETA_TOL` (relative) between two steps.
 
+use crate::ibc::{add_ibc_2d_waveguide, pec_edges_and_nodes_2d};
 use crate::modes::C0;
-use crate::problem::{Problem, Study};
+use crate::problem::{Problem, Study, SurfaceImpedanceBc};
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
@@ -86,6 +87,19 @@ pub fn assemble_modes_complex(
     eps: &[EpsC],
     mu: &[MuC],
     order: usize,
+) -> Result<ModeAssemblyC, String> {
+    assemble_modes_complex_with_bcs(mesh, freq, eps, mu, order, &[], &[], &[])
+}
+
+pub fn assemble_modes_complex_with_bcs(
+    mesh: &Discretisation,
+    freq: f64,
+    eps: &[EpsC],
+    mu: &[MuC],
+    order: usize,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    pmc_labels: &[i32],
 ) -> Result<ModeAssemblyC, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
@@ -180,23 +194,29 @@ pub fn assemble_modes_complex(
             a1_coo.push_block(&cols_p, rows_e, &mgt);
         }
     }
+    add_ibc_2d_waveguide(mesh, order, freq, pec_labels, ibc_bcs, &mut a_coo, &mut b_coo)?;
     let a_full = a_coo.to_csr();
     let mut b_full = b_coo.to_csr();
     // PEC walls
-    // walls are the exterior facets only: facets on interfaces between domains are not conductors
-    let exterior = mesh.exterior_facets();
-    let mut be: Vec<usize> = (0..mesh.n_facets())
-        .filter(|&f| exterior[f])
-        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
-        .collect();
-    be.sort_unstable();
-    be.dedup();
-    let mut bn: Vec<usize> = (0..mesh.n_facets())
-        .filter(|&f| exterior[f])
-        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
-        .collect();
-    bn.sort_unstable();
-    bn.dedup();
+    let (be, bn) = if pec_labels.is_empty() && ibc_bcs.is_empty() && pmc_labels.is_empty() {
+        // walls are the exterior facets only: facets on interfaces between domains are not conductors
+        let exterior = mesh.exterior_facets();
+        let mut be: Vec<usize> = (0..mesh.n_facets())
+            .filter(|&f| exterior[f])
+            .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
+            .collect();
+        be.sort_unstable();
+        be.dedup();
+        let mut bn: Vec<usize> = (0..mesh.n_facets())
+            .filter(|&f| exterior[f])
+            .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
+            .collect();
+        bn.sort_unstable();
+        bn.dedup();
+        (be, bn)
+    } else {
+        pec_edges_and_nodes_2d(mesh, pec_labels, ibc_bcs, pmc_labels)
+    };
     let mut fixed: Vec<usize> = be.clone();
     if order == 2 {
         fixed.extend(be.iter().map(|&e| ne + e));
@@ -425,7 +445,21 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
     }
     let (eps, mu) = cell_materials(mesh, &problem.materials)?;
     let target = if evanescent { c(0.0, n_target) } else { c(n_target, 0.0) };
-    let modes = solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, problem.order)?;
+    let modes = if problem.pec.is_empty() && problem.surface_impedance.is_empty() && problem.pmc.is_empty() {
+        solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, problem.order)?
+    } else {
+        let asm = assemble_modes_complex_with_bcs(
+            mesh,
+            freq,
+            &eps,
+            &mu,
+            problem.order,
+            &problem.pec,
+            &problem.surface_impedance,
+            &problem.pmc,
+        )?;
+        solve_mode_pairs_complex(&asm, target, n_modes)?
+    };
     let mut solutions = vec![];
     let mut scalars = vec![];
     for j in 0..modes.neff.len() {

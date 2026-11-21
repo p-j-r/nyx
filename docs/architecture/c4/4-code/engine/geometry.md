@@ -4,15 +4,15 @@ C4 level 4 (code) of the component **Geometry operations** (`engine.geometry`) i
 
 > Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only).
 
-**Decisions:** [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md)  
-**Size:** 2 files, 734 lines.
+**Decisions:** [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
+**Size:** 2 files, 771 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/geomdesc.rs` | 529 |  |
-| `crates/nyx-engine/src/geometry.rs` | 205 |  |
+| `crates/nyx-engine/src/geomdesc.rs` | 563 |  |
+| `crates/nyx-engine/src/geometry.rs` | 208 |  |
 
 ## What it uses
 
@@ -40,6 +40,7 @@ classDiagram
         Expr
         Exprs
         Points
+        Rings
         Axis
         Feature
         Features
@@ -48,8 +49,7 @@ classDiagram
         Selector
         Sides
         Keep
-        Naming
-        more_4_variants
+        more_5_variants
     }
     class FieldDesc {
         <<struct>>
@@ -112,18 +112,18 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| enum | `Ty` | `geomdesc.rs:24` | variants: `Expr`, `Exprs`, `Points`, `Axis`, `Feature`, `Features`, `Text`, `TextList`, `Selector`, `Sides`, `Keep`, `Naming`, ... —  How the value of one field is written in a tool call. |
-| struct | `FieldDesc` | `geomdesc.rs:58` | fields: `name`, `ty`, `doc`, `required`, `default` |
-| enum | `Group` | `geomdesc.rs:69` | variants: `Shape`, `Build`, `Labels`, `Boundary` —  What an operation makes, for grouping tools. |
-| struct | `OpDesc` | `geomdesc.rs:92` | fields: `kind`, `title`, `doc`, `group`, `dims`, `fields` |
-| fn | `all` | `geomdesc.rs:114` | `pub fn all() -> Vec<OpDesc>` —  Every operation, in a fixed order (shapes, builders, naming, boundary). |
-| fn | `kind_of` | `geomdesc.rs:234` | `pub fn kind_of(op: &Op) -> &'static str` —  The kind name of an operation. Exhaustive on purpose: a new `Op` variant does not compile until it is added here and in `all`. |
-| fn | `find` | `geomdesc.rs:262` | `pub fn find(kind: &str) -> Option<OpDesc>` |
-| fn | `tool_name` | `geomdesc.rs:267` | `pub fn tool_name(kind: &str) -> String` —  The tool name for an operation: `add_` and the snake_case kind (`add_rounded_rect`). |
-| fn | `schema` | `geomdesc.rs:340` | `pub fn schema(d: &OpDesc) -> Value` —  The JSON Schema of the arguments of one operation (the `inputSchema` of its tool, without the fields every add tool shares). |
-| fn | `build_op` | `geomdesc.rs:438` | `pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op>` —  Builds the operation `kind` from the arguments of a tool call. Features are named by name (or id), selectors are text; optional |
-| fn | `args_of` | `geomdesc.rs:480` | `pub fn args_of(list: &FeatureList, op: &Op) -> Value` —  The arguments of an existing operation in the form `build_op` takes (features by name, selectors as text): what an editing tool shows |
-| fn | `Group::name` | `geomdesc.rs:81` | `pub fn name(self) -> &'static str` |
+| enum | `Ty` | `geomdesc.rs:24` | variants: `Expr`, `Exprs`, `Points`, `Rings`, `Axis`, `Feature`, `Features`, `Text`, `TextList`, `Selector`, `Sides`, `Keep`, ... —  How the value of one field is written in a tool call. |
+| struct | `FieldDesc` | `geomdesc.rs:60` | fields: `name`, `ty`, `doc`, `required`, `default` |
+| enum | `Group` | `geomdesc.rs:71` | variants: `Shape`, `Build`, `Labels`, `Boundary` —  What an operation makes, for grouping tools. |
+| struct | `OpDesc` | `geomdesc.rs:94` | fields: `kind`, `title`, `doc`, `group`, `dims`, `fields` |
+| fn | `all` | `geomdesc.rs:116` | `pub fn all() -> Vec<OpDesc>` —  Every operation, in a fixed order (shapes, builders, naming, boundary). |
+| fn | `kind_of` | `geomdesc.rs:246` | `pub fn kind_of(op: &Op) -> &'static str` —  The kind name of an operation. Exhaustive on purpose: a new `Op` variant does not compile until it is added here and in `all`. |
+| fn | `find` | `geomdesc.rs:276` | `pub fn find(kind: &str) -> Option<OpDesc>` |
+| fn | `tool_name` | `geomdesc.rs:281` | `pub fn tool_name(kind: &str) -> String` —  The tool name for an operation: `add_` and the snake_case kind (`add_rounded_rect`). |
+| fn | `schema` | `geomdesc.rs:357` | `pub fn schema(d: &OpDesc) -> Value` —  The JSON Schema of the arguments of one operation (the `inputSchema` of its tool, without the fields every add tool shares). |
+| fn | `build_op` | `geomdesc.rs:472` | `pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op>` —  Builds the operation `kind` from the arguments of a tool call. Features are named by name (or id), selectors are text; optional |
+| fn | `args_of` | `geomdesc.rs:514` | `pub fn args_of(list: &FeatureList, op: &Op) -> Value` —  The arguments of an existing operation in the form `build_op` takes (features by name, selectors as text): what an editing tool shows |
+| fn | `Group::name` | `geomdesc.rs:83` | `pub fn name(self) -> &'static str` |
 | fn | `add_feature` | `geometry.rs:46` | `pub fn add_feature(list: &mut FeatureList, kind: &str, name: Option<&str>, args: &Value) -> Result<String, Error>` —  Adds the feature `kind` built from `args` (see `geomdesc`); returns the name it was given. |
 | fn | `update_feature` | `geometry.rs:67` | `pub fn update_feature(list: &mut FeatureList, name: &str, fields: &Value) -> Result<(), Error>` —  Changes some fields of a feature; `fields` holds only the fields to change, in the same form `add_feature` takes. |
 | fn | `remove_feature` | `geometry.rs:86` | `pub fn remove_feature(list: &mut FeatureList, name: &str) -> Result<(), Error>` —  Removes a feature that no later feature uses. |
@@ -134,4 +134,4 @@ classDiagram
 | fn | `remove_param` | `geometry.rs:155` | `pub fn remove_param(list: &mut FeatureList, name: &str) -> Result<(), Error>` |
 | fn | `describe` | `geometry.rs:167` | `pub fn describe(list: &FeatureList) -> Value` —  The feature list as a host reads it: each feature with its kind and its arguments in the form the add tools take. |
 | fn | `names` | `geometry.rs:182` | `pub fn names(list: &FeatureList) -> Result<Value, Error>` —  Evaluates the model and returns the names a problem can refer to: regions and boundaries, before any mesh exists. |
-| fn | `set_all` | `geometry.rs:200` | `pub fn set_all(list: &mut FeatureList, new: FeatureList) -> Result<(), Error>` —  Replaces the whole feature list (the window edits it as a whole); it must be a valid list of the same dimension class (2 or 3). |
+| fn | `set_all` | `geometry.rs:203` | `pub fn set_all(list: &mut FeatureList, new: FeatureList) -> Result<(), Error>` —  Replaces the whole feature list (the window edits it as a whole); it must be a valid list of the same dimension class (2 or 3). |

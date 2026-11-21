@@ -3,7 +3,7 @@ featurelist = component "Feature list" "The serialisable feature list (single so
     properties {
         "adr" "2, 3, 63"
         "code" "crates/geom/src: error.rs, expr.rs, lib.rs, model.rs, print.rs"
-        "lines" "1410"
+        "lines" "1468"
         "codeDiagram" "4-code/geom/featurelist.md"
     }
 }
@@ -11,15 +11,15 @@ evaluation = component "Evaluation" "The Evaluator turns a feature list into an 
     properties {
         "adr" "2, 6"
         "code" "crates/geom/src: diff.rs, eval.rs, scene.rs"
-        "lines" "1306"
+        "lines" "1456"
         "codeDiagram" "4-code/geom/evaluation.md"
     }
 }
-kernel2d = component "2D kernel" "Primitives, planar curves, the planar arrangement of all boundary pieces and the evaluated region complex." "Rust modules" {
+kernel2d = component "2D kernel" "Primitives, planar curves, the planar arrangement of all boundary pieces, the evaluated region complex, and batch polygon ring cleanup with shared-corner-pinned RDP simplification." "Rust modules" {
     properties {
-        "adr" "3, 18"
-        "code" "crates/geom/src: arrange.rs, complex.rs, curve.rs, prim.rs"
-        "lines" "3025"
+        "adr" "3, 18, 102"
+        "code" "crates/geom/src: arrange.rs, complex.rs, curve.rs, poly_batch.rs, prim.rs"
+        "lines" "3323"
         "codeDiagram" "4-code/geom/kernel2d.md"
     }
 }
@@ -27,7 +27,7 @@ kernel3d = component "3D kernel" "Prismatic models as a layer stack, general pla
     properties {
         "adr" "3, 1"
         "code" "crates/geom/src: planar.rs, stack.rs, topo3.rs"
-        "lines" "2202"
+        "lines" "2245"
         "codeDiagram" "4-code/geom/kernel3d.md"
     }
 }
@@ -35,7 +35,7 @@ queries = component "Queries and selectors" "Exact queries on an evaluated model
     properties {
         "adr" "2, 3, 7, 18"
         "code" "crates/geom/src: labels.rs, query.rs, select.rs, sim.rs"
-        "lines" "1905"
+        "lines" "1915"
         "codeDiagram" "4-code/geom/queries.md"
     }
 }

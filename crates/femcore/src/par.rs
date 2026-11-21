@@ -113,6 +113,17 @@ where
     })
 }
 
+/// Evaluates `f` on fixed `chunk`-sized slices of `data` on the shared worker pool, returning results in chunk order.
+pub fn map_chunks<T: Sync, R: Send, F: Fn(&[T]) -> R + Sync>(data: &[T], chunk: usize, f: F) -> Vec<R> {
+    use rayon::prelude::*;
+    let c = chunk.max(1);
+    if threads() <= 1 || data.len() <= c {
+        data.chunks(c).map(f).collect()
+    } else {
+        data.par_chunks(c).map(&f).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

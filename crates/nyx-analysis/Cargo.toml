@@ -16,3 +16,9 @@ png = "0.18"
 ab_glyph = "0.2"
 epaint_default_fonts = { version = "0.37", default-features = false }
 base64 = "0.22"
+
+[dev-dependencies]
+geom = { path = "../geom" }
+nyx-dfs = { path = "../nyx-dfs" }
+nyx-ems = { path = "../nyx-ems" }
+

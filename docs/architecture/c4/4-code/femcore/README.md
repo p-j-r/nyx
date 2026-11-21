@@ -4,11 +4,11 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Mesh](./mesh.md) | 5 | 1707 | 83 | 9 |
+| [Mesh](./mesh.md) | 5 | 1724 | 85 | 9 |
 | [Mesh files](./meshio.md) | 3 | 878 | 18 | 5 |
 | [Fixtures and test kit](./fixtures.md) | 3 | 586 | 25 | 8 |
-| [Meshing facade](./meshing.md) | 6 | 1818 | 74 | 25 |
-| [3D meshing](./meshing3d.md) | 5 | 2090 | 41 | 10 |
+| [Meshing facade](./meshing.md) | 6 | 1823 | 74 | 25 |
+| [3D meshing](./meshing3d.md) | 6 | 2690 | 43 | 10 |
 | [Structured absorbing layers](./structpml.md) | 4 | 1408 | 24 | 8 |
 | [Meshing validation harness](./meshcheck.md) | 4 | 980 | 28 | 6 |
 | [Metric fields](./metric.md) | 6 | 1846 | 71 | 9 |
@@ -23,8 +23,8 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 | [Preconditioners](./laprecond.md) | 8 | 2516 | 57 | 19 |
 | [Time, nonlinear, sweeps](./laother.md) | 10 | 3627 | 82 | 28 |
 | [Finite-element basics](./fem.md) | 6 | 2025 | 100 | 17 |
-| [Material specification](./material.md) | 9 | 3538 | 127 | 25 |
+| [Material specification](./material.md) | 10 | 4406 | 142 | 28 |
 | [Optical mode sets](./optical.md) | 1 | 233 | 12 | 4 |
 | [Frame and sections](./section.md) | 1 | 223 | 15 | 0 |
 | [Expressions](./expr.md) | 3 | 1568 | 20 | 8 |
-| [Runtime services](./runtime.md) | 5 | 837 | 44 | 8 |
+| [Runtime services](./runtime.md) | 5 | 848 | 45 | 8 |

@@ -174,12 +174,22 @@ pub struct RegionX {
     pub pml: Option<PmlInfo>,
 }
 
+/// An evaluated 2D zero-thickness sheet embedded at plane `z` in a 3D layer-stack model.
+#[derive(Clone, Debug)]
+pub struct SheetX {
+    pub name: String,
+    pub feature: FeatureId,
+    pub z: f64,
+    pub expr: Node,
+}
+
 #[derive(Debug)]
 pub struct Scene {
     pub dim: u8,
     pub env: Env,
     pub prims: Vec<Arc<Prim>>,
     pub regions: Vec<RegionX>,
+    pub sheets: Vec<SheetX>,
     pub pins: Vec<LabelPin>,
     /// union of the non-auxiliary primitives
     pub bounds: Aabb,
@@ -295,17 +305,23 @@ pub fn cap_role(axis: usize, top: bool) -> String {
     }
 }
 
+type MemoKey = (FeatureId, [u64; 8], String, u64, u64, u8);
+
 struct Builder<'a> {
     perm: [usize; 3],
     list: &'a FeatureList,
     env: &'a Env,
     cache: &'a mut Cache,
     prims: Vec<Arc<Prim>>,
-    memo: HashMap<(FeatureId, [u64; 8], String), usize>,
+    memo: HashMap<MemoKey, usize>,
     index: HashMap<FeatureId, usize>,
     depth: usize,
     /// z interval and naming style while instantiating the profile of an `Extrude`
     extrude: Option<(f64, f64)>,
+    /// z coordinate while instantiating the 2D profile/boolean input of a `Sheet`
+    sheet_z: Option<f64>,
+    /// raw 2D polygon/rect corners per feature id, used to pin shared vertices across sibling `Polygons` features
+    polygon_pins: Vec<(FeatureId, Vec<V2>)>,
 }
 
 const MAX_INSTANCES: f64 = 100_000.0;
@@ -326,7 +342,7 @@ impl Builder<'_> {
     }
 
     fn step_xf(&self, s: &TStep, f: &Feature) -> GeomResult<Xf3> {
-        let three = self.dim() == 3;
+        let three = self.dim() == 3 && self.sheet_z.is_none();
         let xy = |x: Xf2| Xf3 { xy: x, zs: 1.0, zt: 0.0 };
         Ok(match s {
             TStep::Translate(v) => {
@@ -390,12 +406,20 @@ impl Builder<'_> {
         style: Style,
         zl: (f64, f64),
     ) -> GeomResult<Node> {
-        let key = (f.id, xf.key(), suffix.to_string());
+        let z = if self.sheet_z.is_some() {
+            zl
+        } else if self.dim() == 3 {
+            xf.interval(zl)
+        } else {
+            (0.0, 0.0)
+        };
+        let z0_bits = if z.0 == 0.0 { 0 } else { z.0.to_bits() };
+        let z1_bits = if z.1 == 0.0 { 0 } else { z.1.to_bits() };
+        let key = (f.id, xf.key(), suffix.to_string(), z0_bits, z1_bits, style as u8);
         if let Some(&i) = self.memo.get(&key) {
             return Ok(Node::Prim(i));
         }
         let name = format!("{}{}", f.name, suffix);
-        let z = if self.dim() == 3 { xf.interval(zl) } else { (0.0, 0.0) };
         let prim = Prim::new_styled(f.id, name, shape, xf.xy, false, style, z, self.perm[2])?;
         let prim = match self.cache.prims.get(&prim.key) {
             Some(p) => {
@@ -466,13 +490,14 @@ impl Builder<'_> {
         r
     }
 
-    /// A 2D profile leaf: plain in a 2D model, extruded (with a z interval) in a 3D model.
+    /// A 2D profile leaf: plain in a 2D model or inside a `Sheet`, extruded (with a z interval) inside an `Extrude`.
     fn profile(&mut self, f: &Feature, shape: LShape, xf: Xf3, suffix: &str) -> GeomResult<Node> {
-        match (self.dim(), self.extrude) {
-            (2, _) => self.leaf(f, shape, xf, suffix, Style::Plain, (0.0, 0.0)),
-            (_, Some(z)) => self.leaf(f, shape, xf, suffix, Style::Extrude, z),
+        match (self.dim(), self.extrude, self.sheet_z) {
+            (2, _, _) => self.leaf(f, shape, xf, suffix, Style::Plain, (0.0, 0.0)),
+            (_, Some(z), _) => self.leaf(f, shape, xf, suffix, Style::Extrude, z),
+            (_, None, Some(z0)) => self.leaf(f, shape, xf, suffix, Style::Plain, (z0, z0)),
             _ => Err(GeomError(format!(
-                "{} '{}' is a 2D profile: in a 3D model it must be the input of an Extrude",
+                "{} '{}' is a 2D profile: in a 3D model it must be the input of an Extrude or Sheet",
                 f.op.kind(),
                 f.name
             ))),
@@ -488,7 +513,13 @@ impl Builder<'_> {
             }
         };
         let solid_only = |this: &Self| -> GeomResult<()> {
-            if this.dim() == 3 {
+            if this.sheet_z.is_some() {
+                Err(GeomError(format!(
+                    "{} '{}' is a 3D solid; a Sheet requires a 2D profile or 2D boolean",
+                    f.op.kind(),
+                    f.name
+                )))
+            } else if this.dim() == 3 {
                 Ok(())
             } else {
                 Err(GeomError(format!("{} '{}' is a 3D solid; this is a 2D model", f.op.kind(), f.name)))
@@ -562,6 +593,55 @@ impl Builder<'_> {
                 let (pts, names) = ccw_polygon(&p, &nm);
                 self.profile(f, LShape::Poly { pts, names }, xf, suffix)
             }
+            Op::Polygons { polygons, holes, simplify_tol, min_hole_area } => {
+                if polygons.is_empty() {
+                    return Err(GeomError(format!("Polygons '{}' needs at least one outer polygon", f.name)));
+                }
+                let tol = self.ev(simplify_tol, f, "simplify_tol")?;
+                let min_hole = self.ev(min_hole_area, f, "min_hole_area")?;
+                let mut raw_polys = Vec::with_capacity(polygons.len());
+                for ring in polygons {
+                    let pts: Vec<V2> = ring.iter().map(|q| self.ev2(q, f, "point")).collect::<GeomResult<_>>()?;
+                    raw_polys.push(pts);
+                }
+                let mut raw_holes = Vec::with_capacity(holes.len());
+                for ring in holes {
+                    let pts: Vec<V2> = ring.iter().map(|q| self.ev2(q, f, "hole point")).collect::<GeomResult<_>>()?;
+                    raw_holes.push(pts);
+                }
+                let external_pins: Vec<V2> = self
+                    .polygon_pins
+                    .iter()
+                    .filter(|(id, _)| *id != f.id)
+                    .flat_map(|(_, pts)| pts.iter().copied())
+                    .collect();
+                let (outers, surviving_holes) =
+                    crate::poly_batch::simplify_rings_with_pins(&raw_polys, &raw_holes, &external_pins, tol, min_hole)?;
+                let mut outer_nodes = Vec::with_capacity(outers.len());
+                for (pi, p) in outers.iter().enumerate() {
+                    let nm: Vec<String> = (0..p.len()).map(|i| format!("e{i}")).collect();
+                    let (pts, names) = ccw_polygon(p, &nm);
+                    let sfx = if outers.len() == 1 && surviving_holes.is_empty() {
+                        suffix.to_string()
+                    } else {
+                        format!("{suffix}[{pi}]")
+                    };
+                    outer_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
+                }
+                let mut hole_nodes = Vec::with_capacity(surviving_holes.len());
+                for (hi, h) in surviving_holes.iter().enumerate() {
+                    let nm: Vec<String> = (0..h.len()).map(|i| format!("e{i}")).collect();
+                    let (pts, names) = ccw_polygon(h, &nm);
+                    let sfx = format!("{suffix}[h{hi}]");
+                    hole_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
+                }
+                let outer = if outer_nodes.len() == 1 { outer_nodes.remove(0) } else { Node::Union(outer_nodes) };
+                if hole_nodes.is_empty() {
+                    Ok(outer)
+                } else {
+                    Ok(Node::Diff(Box::new(outer), hole_nodes))
+                }
+            }
             Op::Box { min, max } => {
                 solid_only(self)?;
                 let (a, b) = (self.ev3(min, f, "min corner")?, self.ev3(max, f, "max corner")?);
@@ -605,7 +685,7 @@ impl Builder<'_> {
                 } else {
                     Body::Sphere { c, r: a * k }
                 };
-                let key = (f.id, xf.key(), suffix.to_string());
+                let key = (f.id, xf.key(), suffix.to_string(), 0, 0, 100);
                 if let Some(&i) = self.memo.get(&key) {
                     return Ok(Node::Prim(i));
                 }
@@ -649,7 +729,7 @@ impl Builder<'_> {
                 let moved: Vec<V2> = pts.iter().map(|p| [p[0] * k, xf.zs * p[1]]).collect();
                 let (pts2, roles2) = ccw_polygon(&moved, &roles);
                 let rev = Revolved { c: [o[0], o[1], xf.zs * c[2] + xf.zt], pts: pts2, roles: roles2 };
-                let key = (f.id, xf.key(), suffix.to_string());
+                let key = (f.id, xf.key(), suffix.to_string(), 0, 0, 101);
                 if let Some(&i) = self.memo.get(&key) {
                     return Ok(Node::Prim(i));
                 }
@@ -672,7 +752,7 @@ impl Builder<'_> {
                 // a negative height or a mirror in z turns the cone over
                 let (zlo, zhi, ra, rb) = if z_a <= z_b { (z_a, z_b, a * k, b * k) } else { (z_b, z_a, b * k, a * k) };
                 let body = Body::Cone { c: [cx, cy, zlo], r0: ra, r1: rb, h: zhi - zlo };
-                let key = (f.id, xf.key(), suffix.to_string());
+                let key = (f.id, xf.key(), suffix.to_string(), 0, 0, 102);
                 if let Some(&i) = self.memo.get(&key) {
                     return Ok(Node::Prim(i));
                 }
@@ -780,6 +860,39 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
     let Op::Overlay { regions, pins, naming } = &overlay.op else { unreachable!() };
     let index = list.features.iter().enumerate().map(|(i, f)| (f.id, i)).collect();
     let axis = if list.dim == 3 { stack_axis(list)? } else { 1 };
+    let mut polygon_pins: Vec<(FeatureId, Vec<V2>)> = Vec::new();
+    for f in list.features.iter().filter(|f| !f.suppressed) {
+        let mut pts = Vec::new();
+        match &f.op {
+            Op::Rect { min, max } | Op::RoundedRect { min, max, .. } => {
+                if let (Ok(x0), Ok(y0), Ok(x1), Ok(y1)) =
+                    (env.eval(&min[0], ""), env.eval(&min[1], ""), env.eval(&max[0], ""), env.eval(&max[1], ""))
+                {
+                    pts.extend([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+                }
+            }
+            Op::Polygon { pts: ring, .. } => {
+                for q in ring {
+                    if let (Ok(x), Ok(y)) = (env.eval(&q[0], ""), env.eval(&q[1], "")) {
+                        pts.push([x, y]);
+                    }
+                }
+            }
+            Op::Polygons { polygons, holes, .. } => {
+                for ring in polygons.iter().chain(holes.iter()) {
+                    for q in ring {
+                        if let (Ok(x), Ok(y)) = (env.eval(&q[0], ""), env.eval(&q[1], "")) {
+                            pts.push([x, y]);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if !pts.is_empty() {
+            polygon_pins.push((f.id, pts));
+        }
+    }
     let mut b = Builder {
         perm: axis_perm(axis),
         list,
@@ -790,8 +903,11 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         index,
         depth: 0,
         extrude: None,
+        sheet_z: None,
+        polygon_pins,
     };
     let mut rx: Vec<RegionX> = vec![];
+    let mut sheets: Vec<SheetX> = vec![];
     let mut warnings = vec![];
     for r in regions {
         let expr = b.inst(r.input, Xf3::ID, "")?;
@@ -807,6 +923,22 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
             parent: None,
             pml: None,
         });
+    }
+    for f in list.features.iter().filter(|f| !f.suppressed) {
+        let Op::Sheet { input, z } = &f.op else { continue };
+        if dim != 3 {
+            return Err(GeomError(format!("Sheet '{}' is a 3D operation; this is a 2D model", f.name)));
+        }
+        let z0 = b.ev(z, f, "z")?;
+        b.sheet_z = Some(z0);
+        let expr = b.inst(*input, Xf3::ID, "");
+        b.sheet_z = None;
+        let expr = expr?;
+        if expr == Node::Empty {
+            warnings.push(format!("sheet '{}' is built from a suppressed or empty feature", f.name));
+        } else {
+            sheets.push(SheetX { name: f.name.clone(), feature: f.id, z: z0, expr });
+        }
     }
     let model_box = |prims: &[Arc<Prim>]| prims.iter().filter(|p| !p.aux).fold(Aabb::EMPTY, |a, p| a.union(&p.bbox3()));
     let diag = model_box(&b.prims).diagonal();
@@ -898,6 +1030,13 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         for r in &mut rx {
             if r.expr != Node::Empty {
                 r.expr = Node::Inter(vec![std::mem::replace(&mut r.expr, Node::Empty), h.clone()]);
+            }
+        }
+        if !zcut {
+            for s in &mut sheets {
+                if s.expr != Node::Empty {
+                    s.expr = Node::Inter(vec![std::mem::replace(&mut s.expr, Node::Empty), h.clone()]);
+                }
             }
         }
         auto_tags.push((f.id, role.to_string(), "symmetry".to_string()));
@@ -1012,15 +1151,22 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         }
         rx = out;
     }
-    // normalise, then drop primitives that no region refers to any more
+    // normalise, then drop primitives that no region or sheet refers to any more
     let mut prims = b.prims;
     for r in &mut rx {
         r.expr = std::mem::replace(&mut r.expr, Node::Empty).simplify(&prims);
     }
+    for s in &mut sheets {
+        s.expr = std::mem::replace(&mut s.expr, Node::Empty).simplify(&prims);
+    }
+    sheets.retain(|s| s.expr != Node::Empty);
     let mut used = vec![false; prims.len()];
     let mut leaves = vec![];
     for r in &rx {
         r.expr.leaves(&mut leaves);
+    }
+    for s in &sheets {
+        s.expr.leaves(&mut leaves);
     }
     for l in leaves {
         used[l] = true;
@@ -1036,6 +1182,9 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
     for r in &mut rx {
         r.expr.remap(&map);
     }
+    for s in &mut sheets {
+        s.expr.remap(&map);
+    }
     let prims = kept;
     let bounds = model_box(&prims);
     Ok(Scene {
@@ -1043,6 +1192,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         env,
         prims,
         regions: rx,
+        sheets,
         pins: pins.clone(),
         bounds,
         warnings,

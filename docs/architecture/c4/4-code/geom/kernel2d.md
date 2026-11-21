@@ -2,18 +2,19 @@
 
 C4 level 4 (code) of the component **2D kernel** (`geom.kernel2d`) in the container **geom** (crate `geom`). [Component view of the container](../../3-components/geom.md) · [All code pages](../README.md)
 
-> Primitives, planar curves, the planar arrangement of all boundary pieces and the evaluated region complex.
+> Primitives, planar curves, the planar arrangement of all boundary pieces, the evaluated region complex, and batch polygon ring cleanup with shared-corner-pinned RDP simplification.
 
-**Decisions:** [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md)  
-**Size:** 4 files, 3025 lines.
+**Decisions:** [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
+**Size:** 5 files, 3323 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/geom/src/arrange.rs` | 981 | The planar arrangement: all primitive boundary pieces are interned onto shared curves, split at every crossing and touching point, identical pieces merge (keeping every origin), each piece is classified on both sides with the painter rul... |
-| `crates/geom/src/complex.rs` | 670 | The evaluated region complex of a 2D model: regions (planar faces, possibly with holes), the edges that separate them (each used by exactly two region sides, one of which may be the void), vertices, and the closed boundary loops of every... |
+| `crates/geom/src/complex.rs` | 707 | The evaluated region complex of a 2D model: regions (planar faces, possibly with holes), the edges that separate them (each used by exactly two region sides, one of which may be the void), vertices, and the closed boundary loops of every... |
 | `crates/geom/src/curve.rs` | 439 | Planar curves of the 2D kernel: lines, circles and ellipses in one canonical parametrisation each (so that coincident curves compare equal), with evaluation, tangent, curvature, closest point, bounding boxes, length, the Green-theorem bo... |
+| `crates/geom/src/poly_batch.rs` | 261 | Batch polygon preprocessing for `Op::Polygons`: closed-ring Ramer-Douglas-Peucker (RDP) simplification with cross-ring shared-vertex pinning and minimum-hole-area filtering. |
 | `crates/geom/src/prim.rs` | 935 | 2D primitives in the world frame: a local shape (rectangle, rounded rectangle, circle, ellipse, polygon), the similarity transform that placed it, its directed boundary pieces with role names (interior always on the left), an exact signe... |
 
 ## What it uses
@@ -29,7 +30,8 @@ C4 level 4 (code) of the component **2D kernel** (`geom.kernel2d`) in the contai
 
 | Component | Modules | Items |
 |---|---|---|
-| [Evaluation](./evaluation.md) | arrange, complex, prim | Complex, Edge, Edge3, Face, PairRes, Region, Vertex, arrange |
+| [femcore: 3D meshing](../femcore/meshing3d.md) | complex | EdgeGeom, FaceGeom |
+| [Evaluation](./evaluation.md) | arrange, complex, poly_batch, prim | Complex, Edge, Edge3, Face, PairRes, Region, Vertex, arrange +1 |
 | [3D kernel](./kernel3d.md) | arrange, complex, curve, prim | Body, Curve, GRAZE_K, Prim, Revolved, arrange, arrange_with |
 | [Queries and selectors](./queries.md) | complex, curve | Complex, Curve, FaceGeom, curve_kind |
 | [Display tessellation](./tessellation.md) | complex | Complex, FaceGeom, Loop |
@@ -105,6 +107,7 @@ classDiagram
         +area f64
         +bbox Aabb
         +u_clamp(u) f64
+        +is_sheet() bool
     }
     class PlaneData {
         <<struct>>
@@ -162,9 +165,9 @@ classDiagram
         +project_edge(e, p) V2
         +edge_normal(e, t) V2
         +outward_normal(e, t) V2
-        ~wv(v) V3
-        ~iv(v) V3
-        +more_19_methods()
+        +wv(v) V3
+        +iv(v) V3
+        +more_22_methods()
     }
     class fns_complex_rs {
         <<module complex.rs>>
@@ -205,6 +208,17 @@ classDiagram
         +canonical_line(p, dir) tuple
         +canonical_ellipse(c, a, b, phi, tol) Curve
         +intersect(ca, cb, ra, rb, tol, k) Inter
+    }
+  }
+  namespace poly_batch_rs {
+    class fns_poly_batch_rs {
+        <<module poly_batch.rs>>
+        +shoelace_area(ring) f64
+        +clean_ring(ring, eps) Vec~V2~
+        +simplify_closed_ring(ring, pinned, tol) Vec~V2~
+        +simplify_rings_with_pins(polygons, holes, external_pins, simplify_tol, min_hole_area) GeomResult~RingBatch~
+        +simplify_rings(polygons, holes, simplify_tol, min_hole_area) GeomResult~RingBatch~
+        +RingBatch type
     }
   }
   namespace prim_rs {
@@ -352,39 +366,43 @@ classDiagram
 | struct | `PlaneData` | `complex.rs:87` | fields: `n`, `d`, `o`, `u`, `v`, `cx` —  A plane of a polyhedral model with the 2D complex of the cells on it (coordinates `(u, v)` from the origin `o`). |
 | enum | `EdgeGeom` | `complex.rs:98` | variants: `Vertical`, `Horizontal`, `Circle`, `Segment` —  Where a 3D edge lies: a vertical run above an overlay vertex, or an overlay edge at a level. |
 | struct | `Edge3` | `complex.rs:122` | fields: `name`, `geom`, `v0`, `v1`, `faces`, `length`, `bbox` —  A 3D edge: shared by two or more face fragments (three or more at a junction of regions). |
-| struct | `Vertex` | `complex.rs:141` | fields: `p`, `name`, `edges` |
-| struct | `Loop` | `complex.rs:148` | fields: `region`, `edges`, `area`, `outer` |
-| struct | `Complex` | `complex.rs:159` | fields: `dim`, `tol`, `origin`, `curves`, `regions`, `edges`, `vertices`, `loops`, `scene_to_region`, `faces`, `edges3`, `planar`, ... |
-| fn | `curve_kind` | `complex.rs:185` | `pub fn curve_kind(c: &Curve) -> &'static str` |
+| struct | `Vertex` | `complex.rs:146` | fields: `p`, `name`, `edges` |
+| struct | `Loop` | `complex.rs:153` | fields: `region`, `edges`, `area`, `outer` |
+| struct | `Complex` | `complex.rs:164` | fields: `dim`, `tol`, `origin`, `curves`, `regions`, `edges`, `vertices`, `loops`, `scene_to_region`, `faces`, `edges3`, `planar`, ... |
+| fn | `curve_kind` | `complex.rs:190` | `pub fn curve_kind(c: &Curve) -> &'static str` |
 | fn | `Prov::name` | `complex.rs:22` | `pub fn name(&self) -> String` |
 | fn | `Face::u_clamp` | `complex.rs:135` | `pub fn u_clamp(&self, u: f64) -> f64` —  Clamps a fraction to `[0, 1]`. |
-| fn | `Complex::curve_of` | `complex.rs:194` | `pub fn curve_of(&self, e: u32) -> (&Curve, f64, f64)` |
-| fn | `Complex::edge_point` | `complex.rs:199` | `pub fn edge_point(&self, e: u32, t: f64) -> V3` |
-| fn | `Complex::edge_closest` | `complex.rs:205` | `pub fn edge_closest(&self, e: u32, p: V2) -> (f64, V2)` —  Exact closest point of edge `e` (the arc between its end points, not the whole curve) to `p`, with its parameter |
-| fn | `Complex::project_edge` | `complex.rs:220` | `pub fn project_edge(&self, e: u32, p: V2) -> V2` |
-| fn | `Complex::edge_normal` | `complex.rs:225` | `pub fn edge_normal(&self, e: u32, t: f64) -> V2` —  Unit normal at parameter `t` pointing from the left region to the right region. |
-| fn | `Complex::outward_normal` | `complex.rs:231` | `pub fn outward_normal(&self, e: u32, t: f64) -> V2` —  Outward normal for boundary edges (towards the void), the left-to-right normal for interfaces. |
-| fn | `Complex::wv` | `complex.rs:240` | `pub(crate) fn wv(&self, v: V3) -> V3` —  Internal-frame vector to world coordinates. |
-| fn | `Complex::iv` | `complex.rs:249` | `pub(crate) fn iv(&self, v: V3) -> V3` —  World vector to the internal frame. |
-| fn | `Complex::set_world_frame` | `complex.rs:254` | `pub(crate) fn set_world_frame(&mut self, axis: usize)` —  Converts the stored boxes and points of a freshly built stack complex to world coordinates and records the axis. |
-| fn | `Complex::facet_count` | `complex.rs:277` | `pub fn facet_count(&self) -> usize` |
-| fn | `Complex::facet_name` | `complex.rs:284` | `pub fn facet_name(&self, i: u32) -> &str` |
-| fn | `Complex::facet_prov` | `complex.rs:291` | `pub fn facet_prov(&self, i: u32) -> &[Prov]` |
-| fn | `Complex::facet_sides` | `complex.rs:299` | `pub fn facet_sides(&self, i: u32) -> (Option<u32>, Option<u32>)` —  `(first, second)`: the facet normal points from the first region to the second. |
-| fn | `Complex::facet_bbox` | `complex.rs:308` | `pub fn facet_bbox(&self, i: u32) -> Aabb` |
-| fn | `Complex::facet_measure` | `complex.rs:316` | `pub fn facet_measure(&self, i: u32) -> f64` —  Length (2D) or area (3D). |
-| fn | `Complex::facet_kind` | `complex.rs:340` | `pub fn facet_kind(&self, i: u32) -> &'static str` —  `plane`, `cylinder` (3D) or `line`, `circle`, `ellipse` (2D). |
-| fn | `Complex::facet_radius` | `complex.rs:354` | `pub fn facet_radius(&self, i: u32) -> Option<f64>` |
-| fn | `Complex::facet_normals` | `complex.rs:366` | `pub fn facet_normals(&self, i: u32) -> Vec<V3>` —  Outward normals (towards the void; for interfaces from first to second) sampled at the ends and the middle. |
-| fn | `Complex::facet_vertices` | `complex.rs:393` | `pub fn facet_vertices(&self, i: u32) -> Vec<u32>` |
-| fn | `Complex::facet_project` | `complex.rs:409` | `pub fn facet_project(&self, i: u32, p: V3) -> V3` —  The point of the facet closest to `p`. |
-| fn | `Complex::facet_samples` | `complex.rs:447` | `pub fn facet_samples(&self, i: u32) -> Vec<V3>` —  Representative points of the facet (corners, edge middles, an interior point), used for congruence checks. |
-| fn | `Complex::plane_lift` | `complex.rs:510` | `pub fn plane_lift(&self, plane: u32, q: V2) -> V3` |
-| fn | `Complex::locate` | `complex.rs:579` | `pub fn locate(&self, p: V2) -> Option<u32>` —  Region containing `p` by testing the boundary loops (chord-flattened); agrees with `Evaluated::classify` away from the boundary. |
-| fn | `Complex::region_area` | `complex.rs:591` | `pub fn region_area(&self, r: u32) -> f64` |
-| fn | `Complex::interface_length` | `complex.rs:596` | `pub fn interface_length(&self, a: u32, b: u32) -> f64` —  Total length of the interface between two regions. |
-| fn | `Complex::edge_green` | `complex.rs:607` | `pub fn edge_green(&self, e: u32) -> f64` —  Twice-signed-area integral of one edge in its canonical direction. |
-| fn | `Complex::check` | `complex.rs:615` | `pub fn check(&self) -> Result<(), String>` —  Always-on self-checks (cheap): every edge separates two different sides, loops are closed and consistently oriented, |
+| fn | `Face::is_sheet` | `complex.rs:140` | `pub fn is_sheet(&self) -> bool` —  True when this face fragment comes from a 2D zero-thickness `Op::Sheet` feature. |
+| fn | `Complex::curve_of` | `complex.rs:199` | `pub fn curve_of(&self, e: u32) -> (&Curve, f64, f64)` |
+| fn | `Complex::edge_point` | `complex.rs:204` | `pub fn edge_point(&self, e: u32, t: f64) -> V3` |
+| fn | `Complex::edge_closest` | `complex.rs:210` | `pub fn edge_closest(&self, e: u32, p: V2) -> (f64, V2)` —  Exact closest point of edge `e` (the arc between its end points, not the whole curve) to `p`, with its parameter |
+| fn | `Complex::project_edge` | `complex.rs:225` | `pub fn project_edge(&self, e: u32, p: V2) -> V2` |
+| fn | `Complex::edge_normal` | `complex.rs:230` | `pub fn edge_normal(&self, e: u32, t: f64) -> V2` —  Unit normal at parameter `t` pointing from the left region to the right region. |
+| fn | `Complex::outward_normal` | `complex.rs:236` | `pub fn outward_normal(&self, e: u32, t: f64) -> V2` —  Outward normal for boundary edges (towards the void), the left-to-right normal for interfaces. |
+| fn | `Complex::wv` | `complex.rs:245` | `pub fn wv(&self, v: V3) -> V3` —  Internal-frame vector to world coordinates. |
+| fn | `Complex::iv` | `complex.rs:254` | `pub fn iv(&self, v: V3) -> V3` —  World vector to the internal frame. |
+| fn | `Complex::has_sheets` | `complex.rs:259` | `pub fn has_sheets(&self) -> bool` —  True when the complex contains at least one 2D sheet cap face. |
+| fn | `Complex::sheet_names` | `complex.rs:263` | `pub fn sheet_names(&self) -> Vec<String>` —  Sorted, deduplicated names of all 2D sheet features present in the complex. |
+| fn | `Complex::sheet_perimeter_edges` | `complex.rs:271` | `pub fn sheet_perimeter_edges(&self, sheet: &str) -> Vec<u32>` —  3D edge indices (`edges3`) forming the exterior 1D perimeter of `<sheet>`'s union of cap cells |
+| fn | `Complex::set_world_frame` | `complex.rs:291` | `pub(crate) fn set_world_frame(&mut self, axis: usize)` —  Converts the stored boxes and points of a freshly built stack complex to world coordinates and records the axis. |
+| fn | `Complex::facet_count` | `complex.rs:314` | `pub fn facet_count(&self) -> usize` |
+| fn | `Complex::facet_name` | `complex.rs:321` | `pub fn facet_name(&self, i: u32) -> &str` |
+| fn | `Complex::facet_prov` | `complex.rs:328` | `pub fn facet_prov(&self, i: u32) -> &[Prov]` |
+| fn | `Complex::facet_sides` | `complex.rs:336` | `pub fn facet_sides(&self, i: u32) -> (Option<u32>, Option<u32>)` —  `(first, second)`: the facet normal points from the first region to the second. |
+| fn | `Complex::facet_bbox` | `complex.rs:345` | `pub fn facet_bbox(&self, i: u32) -> Aabb` |
+| fn | `Complex::facet_measure` | `complex.rs:353` | `pub fn facet_measure(&self, i: u32) -> f64` —  Length (2D) or area (3D). |
+| fn | `Complex::facet_kind` | `complex.rs:377` | `pub fn facet_kind(&self, i: u32) -> &'static str` —  `plane`, `cylinder` (3D) or `line`, `circle`, `ellipse` (2D). |
+| fn | `Complex::facet_radius` | `complex.rs:391` | `pub fn facet_radius(&self, i: u32) -> Option<f64>` |
+| fn | `Complex::facet_normals` | `complex.rs:403` | `pub fn facet_normals(&self, i: u32) -> Vec<V3>` —  Outward normals (towards the void; for interfaces from first to second) sampled at the ends and the middle. |
+| fn | `Complex::facet_vertices` | `complex.rs:430` | `pub fn facet_vertices(&self, i: u32) -> Vec<u32>` |
+| fn | `Complex::facet_project` | `complex.rs:446` | `pub fn facet_project(&self, i: u32, p: V3) -> V3` —  The point of the facet closest to `p`. |
+| fn | `Complex::facet_samples` | `complex.rs:484` | `pub fn facet_samples(&self, i: u32) -> Vec<V3>` —  Representative points of the facet (corners, edge middles, an interior point), used for congruence checks. |
+| fn | `Complex::plane_lift` | `complex.rs:547` | `pub fn plane_lift(&self, plane: u32, q: V2) -> V3` |
+| fn | `Complex::locate` | `complex.rs:616` | `pub fn locate(&self, p: V2) -> Option<u32>` —  Region containing `p` by testing the boundary loops (chord-flattened); agrees with `Evaluated::classify` away from the boundary. |
+| fn | `Complex::region_area` | `complex.rs:628` | `pub fn region_area(&self, r: u32) -> f64` |
+| fn | `Complex::interface_length` | `complex.rs:633` | `pub fn interface_length(&self, a: u32, b: u32) -> f64` —  Total length of the interface between two regions. |
+| fn | `Complex::edge_green` | `complex.rs:644` | `pub fn edge_green(&self, e: u32) -> f64` —  Twice-signed-area integral of one edge in its canonical direction. |
+| fn | `Complex::check` | `complex.rs:652` | `pub fn check(&self) -> Result<(), String>` —  Always-on self-checks (cheap): every edge separates two different sides, loops are closed and consistently oriented, |
 | enum | `Curve` | `curve.rs:11` | variants: `Line`, `Circle`, `Ellipse` |
 | struct | `Hit` | `curve.rs:19` | fields: `p`, `ta`, `tb` —  One intersection point with its parameter on each curve. |
 | struct | `Inter` | `curve.rs:28` | fields: `hits`, `graze`, `near` —  Result of intersecting two curves. `graze` lists tangent contacts (grazing within the tolerance band), `near` is set when |
@@ -406,6 +424,12 @@ classDiagram
 | fn | `Curve::green` | `curve.rs:223` | `pub fn green(&self, a: f64, b: f64, o: V2) -> f64` —  `integral of (x dy - y dx)` along `[a, b]` about the point `o` (twice the signed area swept); Green's theorem gives exact |
 | fn | `Curve::mid_point` | `curve.rs:242` | `pub fn mid_point(&self, a: f64, b: f64) -> V2` —  `integral of x dA`-type first moments are not needed; centroid of the boundary curve for naming and ordering. |
 | fn | `Curve::hash_into` | `curve.rs:247` | `pub fn hash_into(&self, h: &mut Hasher64)` —  Stable content hash of the geometry (cache keys). |
+| fn | `shoelace_area` | `poly_batch.rs:16` | `pub fn shoelace_area(ring: &[V2]) -> f64` —  Unsigned shoelace area of a closed 2D polygon ring. |
+| fn | `clean_ring` | `poly_batch.rs:21` | `pub fn clean_ring(ring: &[V2], eps: f64) -> Vec<V2>` —  Removes consecutive duplicate vertices (and a closing duplicate of the first vertex). |
+| fn | `simplify_closed_ring` | `poly_batch.rs:68` | `pub fn simplify_closed_ring(ring: &[V2], pinned: &[bool], tol: f64) -> Vec<V2>` —  Simplifies a single closed ring with mandatory `pinned` vertices using Ramer-Douglas-Peucker |
+| type | `RingBatch` | `poly_batch.rs:125` |  Simplified outer polygon rings and surviving hole rings. |
+| fn | `simplify_rings_with_pins` | `poly_batch.rs:130` | `pub fn simplify_rings_with_pins( polygons: &[Vec<V2>], holes: &[Vec<V2>], external_pins: &[V2], simplify_tol: f64, min_hole_area: f64, ) -> GeomResult<RingBatch>` —  Simplifies outer polygon rings and hole rings while pinning vertices shared across distinct |
+| fn | `simplify_rings` | `poly_batch.rs:219` | `pub fn simplify_rings( polygons: &[Vec<V2>], holes: &[Vec<V2>], simplify_tol: f64, min_hole_area: f64, ) -> GeomResult<RingBatch>` —  Simplifies outer polygon rings and hole rings with cross-ring vertex pinning and hole area filtering. |
 | enum | `LShape` | `prim.rs:12` | variants: `Rect`, `Rounded`, `Circle`, `Ellipse`, `Poly` —  Local-frame shape. Polygons are counter-clockwise with `names[i]` the role of the edge `pts[i] -> pts[i+1]`. |
 | enum | `DGeom` | `prim.rs:22` | variants: `Line`, `Arc`, `Ell` —  A directed boundary piece in world coordinates; the primitive's interior is on the left of the travel direction. |
 | struct | `DSeg` | `prim.rs:44` | fields: `geom`, `role` |

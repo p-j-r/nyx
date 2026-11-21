@@ -3,7 +3,7 @@ trait = component "Physics trait and registry" "The Physics trait (everything th
     properties {
         "adr" "25"
         "code" "crates/nyx-physics/src: error.rs, lib.rs, physics.rs, registry.rs"
-        "lines" "302"
+        "lines" "308"
         "codeDiagram" "4-code/physics/trait.md"
     }
 }
@@ -11,7 +11,7 @@ envelope = component "Problem envelope" "The one shape every physics is given (P
     properties {
         "adr" "25, 41, 63"
         "code" "crates/nyx-physics/src: decode.rs, spec.rs, validate.rs"
-        "lines" "540"
+        "lines" "566"
         "codeDiagram" "4-code/physics/envelope.md"
     }
 }
@@ -19,7 +19,7 @@ descriptors = component "Descriptors and schemas" "What a physics tells nyx abou
     properties {
         "adr" "25"
         "code" "crates/nyx-physics/src: desc.rs, schema.rs"
-        "lines" "336"
+        "lines" "344"
         "codeDiagram" "4-code/physics/descriptors.md"
     }
 }
@@ -29,6 +29,14 @@ result = component "Result and frame" "SolveResult as plain serialisable data, a
         "code" "crates/nyx-physics/src: frame.rs, result.rs"
         "lines" "290"
         "codeDiagram" "4-code/physics/result.md"
+    }
+}
+cqed = component "cQED result payloads" "Typed superconducting quantum-circuit payloads (capacitance and inductance matrices, TLS geometry metadata, passive CircuitRom, driven port parameters)." "Rust modules" {
+    properties {
+        "adr" "103, 104, 105, 106"
+        "code" "crates/nyx-physics/src: cqed.rs"
+        "lines" "254"
+        "codeDiagram" "4-code/physics/cqed.md"
     }
 }
 testsupport = component "Test support" "The golden-file harness and the contract-test helpers shared by every physics crate." "Rust modules" {

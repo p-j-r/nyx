@@ -21,16 +21,16 @@ graph LR
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      111["<div style='font-weight: bold'>geom</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Lean CSG-over-B-rep geometry<br />kernel: feature lists, named<br />regions and boundaries,<br />selectors, exact projection<br />oracles. Depends on serde and<br />optional rayon only.</div>"]
-      style 111 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      119[("<div style='font-weight: bold'>Project file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .nyx.json]</div><div style='font-size: 80%; margin-top:10px'>Everything saved for one<br />model: geometry, materials,<br />boundary conditions, studies.<br />JSON with a format key.</div>")]
-      style 119 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      120[("<div style='font-weight: bold'>Results file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .h5 and .xdmf]</div><div style='font-size: 80%; margin-top:10px'>Project, mesh and every<br />solution of every solved<br />physics, compressed, exact;<br />with an XDMF description next<br />to it.</div>")]
-      style 120 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      121[("<div style='font-weight: bold'>Workspace data</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files and folders]</div><div style='font-size: 80%; margin-top:10px'>workspace.json,<br />workflow.json, history.jsonl,<br />runs.jsonl, specs/<br />(experiment.nyx.json,<br />specs/<hash>.nyx.json), run<br />folders with results.h5, .nyx<br />archives.</div>")]
-      style 121 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      122[("<div style='font-weight: bold'>Material library</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files]</div><div style='font-size: 80%; margin-top:10px'>materials/*.toml next to the<br />program: silicon, silica,<br />sapphire, metals, nitrides,<br />niobate and more, with<br />sources.</div>")]
-      style 122 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      117["<div style='font-weight: bold'>geom</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Lean CSG-over-B-rep geometry<br />kernel: feature lists, named<br />regions and boundaries,<br />selectors, exact projection<br />oracles. Depends on serde and<br />optional rayon only.</div>"]
+      style 117 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      125[("<div style='font-weight: bold'>Project file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .nyx.json]</div><div style='font-size: 80%; margin-top:10px'>Everything saved for one<br />model: geometry, materials,<br />boundary conditions, studies.<br />JSON with a format key.</div>")]
+      style 125 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      126[("<div style='font-weight: bold'>Results file</div><div style='font-size: 70%; margin-top: 0px'>[Container: File .h5 and .xdmf]</div><div style='font-size: 80%; margin-top:10px'>Project, mesh and every<br />solution of every solved<br />physics, compressed, exact;<br />with an XDMF description next<br />to it.</div>")]
+      style 126 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      127[("<div style='font-weight: bold'>Workspace data</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files and folders]</div><div style='font-size: 80%; margin-top:10px'>workspace.json,<br />workflow.json, history.jsonl,<br />runs.jsonl, specs/<br />(experiment.nyx.json,<br />specs/<hash>.nyx.json), run<br />folders with results.h5, .nyx<br />archives.</div>")]
+      style 127 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      128[("<div style='font-weight: bold'>Material library</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files]</div><div style='font-size: 80%; margin-top:10px'>materials/*.toml next to the<br />program: silicon, silica,<br />sapphire, metals, nitrides,<br />niobate and more, with<br />sources.</div>")]
+      style 128 fill:#438dd5,stroke:#2e6295,color:#ffffff
       13("<div style='font-weight: bold'>nyx-mcp</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust binary]</div><div style='font-size: 80%; margin-top:10px'>The MCP server (stdio,<br />JSON-RPC 2.0): four script<br />tools (script_run,<br />script_wait, script_check,<br />api) over one script kernel;<br />the agent writes Python that<br />calls the engine commands and<br />only what it prints comes<br />back.</div>")
       style 13 fill:#438dd5,stroke:#2e6295,color:#ffffff
       16("<div style='font-weight: bold'>nyx-script</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library and worker binary]</div><div style='font-size: 80%; margin-top:10px'>Scripts, a third front-end of<br />the engine: Python-syntax<br />text (*.nys) run by Monty in<br />a worker process; each<br />nyx.<command>(...) is one<br />Engine::call. Limits, no<br />ambient access, the engine's<br />path guard.</div>")
@@ -41,26 +41,26 @@ graph LR
       style 28 fill:#438dd5,stroke:#2e6295,color:#ffffff
       41["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
       style 41 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      47["<div style='font-weight: bold'>nyx-dfs</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Diffusion physics: heat and<br />electrostatics. Typed<br />problem, three-stage kernels,<br />descriptors, goldens.</div>"]
-      style 47 fill:#2e7d32,stroke:#205723,color:#ffffff
-      53["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric eigenfrequency<br />study (bodies of revolution,<br />axis conditions, cylindrical<br />layers).</div>"]
-      style 53 fill:#2e7d32,stroke:#205723,color:#ffffff
+      48["<div style='font-weight: bold'>nyx-dfs</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Diffusion physics: heat and<br />electrostatics. Typed<br />problem, three-stage kernels,<br />descriptors, goldens.</div>"]
+      style 48 fill:#2e7d32,stroke:#205723,color:#ffffff
+      55["<div style='font-weight: bold'>nyx-sms</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Solid mechanics: static,<br />eigenfrequency, PML, Floquet,<br />low-reflecting boundaries,<br />axisymmetric eigenfrequency<br />study (bodies of revolution,<br />axis conditions, cylindrical<br />layers).</div>"]
+      style 55 fill:#2e7d32,stroke:#205723,color:#ffffff
       6("<div style='font-weight: bold'>app</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust, eframe/egui]</div><div style='font-size: 80%; margin-top:10px'>The egui window (binary nyx):<br />geometry editor, mesh view,<br />Study, Physics and Materials<br />tabs drawn from the physics<br />descriptors, results,<br />analysis, workflow dashboard.<br />A front-end of the engine: it<br />holds an Engine and calls<br />commands.</div>")
       style 6 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      63["<div style='font-weight: bold'>nyx-ems</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>EM waves: waveguide modes<br />(real and complex),<br />axisymmetric, cavity in 3D.</div>"]
-      style 63 fill:#2e7d32,stroke:#205723,color:#ffffff
-      71["<div style='font-weight: bold'>nyx-analysis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Analyses of results: the<br />polarization (Stokes<br />parameters, Poincare sphere,<br />classes, degenerate groups)<br />as a function of a<br />SolveResult and its mesh.</div>"]
-      style 71 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      77["<div style='font-weight: bold'>nyx-store</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Workspace, workflow,<br />experiment and run storage:<br />manifests, append-only run<br />log, versions, search, .nyx<br />archives. Knows nothing of a<br />project.</div>"]
-      style 77 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      86["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 86 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      65["<div style='font-weight: bold'>nyx-ems</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>EM waves: waveguide modes<br />(real and complex),<br />axisymmetric, cavity in 3D.</div>"]
+      style 65 fill:#2e7d32,stroke:#205723,color:#ffffff
+      75["<div style='font-weight: bold'>nyx-analysis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Analyses of results: the<br />polarization (Stokes<br />parameters, Poincare sphere,<br />classes, degenerate groups)<br />as a function of a<br />SolveResult and its mesh.</div>"]
+      style 75 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      83["<div style='font-weight: bold'>nyx-store</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Workspace, workflow,<br />experiment and run storage:<br />manifests, append-only run<br />log, versions, search, .nyx<br />archives. Knows nothing of a<br />project.</div>"]
+      style 83 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      92["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 92 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
     1-. "<div>Edits models, runs studies,<br />reads results</div><div style='font-size: 70%'></div>" .->6
     1-. "<div>Asks in words</div><div style='font-size: 70%'></div>" .->2
     2-. "<div>Calls tools</div><div style='font-size: 70%'>[MCP over stdio (JSON-RPC 2.0)]</div>" .->13
-    3-. "<div>Reads</div><div style='font-size: 70%'>[XDMF / HDF5]</div>" .->120
+    3-. "<div>Reads</div><div style='font-size: 70%'>[XDMF / HDF5]</div>" .->126
     6-. "<div>Reads and writes</div><div style='font-size: 70%'></div>" .->4
     6-. "<div>Calls commands, polls jobs,<br />draws results</div><div style='font-size: 70%'>[Rust API]</div>" .->28
     6-. "<div>Connect menu</div><div style='font-size: 70%'>[Rust API]</div>" .->22
@@ -69,27 +69,27 @@ graph LR
     16-. "<div>One engine command per script<br />call; the path guard</div><div style='font-size: 70%'>[Rust API]</div>" .->28
     6-. "<div>nyx check and nyx run on a<br />script</div><div style='font-size: 70%'>[Rust API]</div>" .->16
     28-. "<div>Registry, ProblemSpec,<br />SolveResult</div><div style='font-size: 70%'>[Rust API]</div>" .->41
-    28-. "<div>Compiled-in physics (feature<br />dfs)</div><div style='font-size: 70%'>[Rust API]</div>" .->47
-    28-. "<div>Compiled-in physics (feature<br />sms)</div><div style='font-size: 70%'>[Rust API]</div>" .->53
-    28-. "<div>Compiled-in physics (feature<br />ems)</div><div style='font-size: 70%'>[Rust API]</div>" .->63
-    28-. "<div>Analyses of results</div><div style='font-size: 70%'>[Rust API]</div>" .->71
-    28-. "<div>Workflows and runs; passes<br />spec text and a card</div><div style='font-size: 70%'>[Rust API]</div>" .->77
-    28-. "<div>Meshing, materials, plots</div><div style='font-size: 70%'>[Rust API]</div>" .->86
-    28-. "<div>Feature lists, labels,<br />selectors</div><div style='font-size: 70%'>[Rust API]</div>" .->111
-    47-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->41
-    53-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->41
-    63-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->41
-    47-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->86
-    53-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->86
-    63-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->86
-    71-. "<div>Reads SolveResult</div><div style='font-size: 70%'>[Rust API]</div>" .->41
-    71-. "<div>Mesh geometry, quadrature</div><div style='font-size: 70%'>[Rust API]</div>" .->86
-    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->86
-    86-. "<div>Evaluates models, reads<br />selectors and labels</div><div style='font-size: 70%'>[Rust API]</div>" .->111
-    28-. "<div>Saves and loads</div><div style='font-size: 70%'>[serde JSON]</div>" .->119
-    28-. "<div>Writes and opens</div><div style='font-size: 70%'>[HDF5 (serial or MPI-IO), XDMF]</div>" .->120
-    28-. "<div>Loads</div><div style='font-size: 70%'>[TOML]</div>" .->122
-    77-. "<div>Reads and writes</div><div style='font-size: 70%'></div>" .->121
+    28-. "<div>Compiled-in physics (feature<br />dfs)</div><div style='font-size: 70%'>[Rust API]</div>" .->48
+    28-. "<div>Compiled-in physics (feature<br />sms)</div><div style='font-size: 70%'>[Rust API]</div>" .->55
+    28-. "<div>Compiled-in physics (feature<br />ems)</div><div style='font-size: 70%'>[Rust API]</div>" .->65
+    28-. "<div>Analyses of results</div><div style='font-size: 70%'>[Rust API]</div>" .->75
+    28-. "<div>Workflows and runs; passes<br />spec text and a card</div><div style='font-size: 70%'>[Rust API]</div>" .->83
+    28-. "<div>Meshing, materials, plots</div><div style='font-size: 70%'>[Rust API]</div>" .->92
+    28-. "<div>Feature lists, labels,<br />selectors</div><div style='font-size: 70%'>[Rust API]</div>" .->117
+    48-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->41
+    55-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->41
+    65-. "<div>Implements Physics</div><div style='font-size: 70%'>[Rust API]</div>" .->41
+    48-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->92
+    55-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->92
+    65-. "<div>Mesh, assembly, linear<br />algebra</div><div style='font-size: 70%'>[Rust API]</div>" .->92
+    75-. "<div>Reads SolveResult</div><div style='font-size: 70%'>[Rust API]</div>" .->41
+    75-. "<div>Mesh geometry, quadrature</div><div style='font-size: 70%'>[Rust API]</div>" .->92
+    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->92
+    92-. "<div>Evaluates models, reads<br />selectors and labels</div><div style='font-size: 70%'>[Rust API]</div>" .->117
+    28-. "<div>Saves and loads</div><div style='font-size: 70%'>[serde JSON]</div>" .->125
+    28-. "<div>Writes and opens</div><div style='font-size: 70%'>[HDF5 (serial or MPI-IO), XDMF]</div>" .->126
+    28-. "<div>Loads</div><div style='font-size: 70%'>[TOML]</div>" .->128
+    83-. "<div>Reads and writes</div><div style='font-size: 70%'></div>" .->127
 
   end```
 

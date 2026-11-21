@@ -263,5 +263,6 @@ fn example_unit(dim: Dim) -> &'static str {
         Dim::ElectricalConductivity => "S/m",
         Dim::Dimensionless => "",
         Dim::Frequency => "eV",
+        Dim::Energy => "meV",
     }
 }

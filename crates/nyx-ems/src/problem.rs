@@ -9,10 +9,13 @@
 //! its (r, z) half plane) or `Cavity` (3D eigenfrequencies). It is not guessed from the dimension of the mesh (ROUGH_SPOTS R10): a study
 //! on a mesh of the other dimension is refused by name.
 
+use crate::ibc::resolve_jj_l_and_ej;
 use crate::Ems;
+use femcore::material::{bcs_surface_impedance, FilmModel};
 use femcore::props::{Materials, Periodic, Pml, PmlDir};
-use nyx_physics::decode::{materials_by_label, resolve_conditions, Params};
+use nyx_physics::decode::{domain_names_by_label, materials_by_label, resolve_conditions, Params};
 use nyx_physics::{Ctx, Error, Physics, ProblemSpec};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Study {
@@ -25,6 +28,9 @@ pub enum Study {
     /// Eigenfrequencies of a 3D cavity or Floquet cell nearest `f_search` (Hz; a value of zero or less takes the fundamental of a box of
     /// the size of the mesh).
     Cavity { n_modes: usize, f_search: f64 },
+    /// Driven frequency-domain multi-port S/Z/Y sweep over `[f_min, f_max]` (`n_points`), solved with Hermite/Galerkin PROM
+    /// (`prom_tol = Some(tol)`) or direct point-by-point HDM (`prom_tol = None`).
+    Driven { f_min: f64, f_max: f64, n_points: usize, prom_tol: Option<f64> },
 }
 
 impl Study {
@@ -34,8 +40,63 @@ impl Study {
             Study::Modes { .. } => "modes",
             Study::AxisymmetricModes { .. } => "axisymmetric_modes",
             Study::Cavity { .. } => "cavity",
+            Study::Driven { .. } => "driven",
         }
     }
+
+    /// Reference frequency of the study (Hz): `freq` for `Modes`, `f_search` for `AxisymmetricModes` and `Cavity`, midband for `Driven`.
+    pub fn reference_freq(&self) -> f64 {
+        match *self {
+            Study::Modes { freq, .. } => freq,
+            Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => f_search,
+            Study::Driven { f_min, f_max, .. } => 0.5 * (f_min + f_max),
+        }
+    }
+}
+
+/// Kinetic-inductance / surface-impedance sheet boundary condition (`Z_s = R_s + i omega L_k_sq`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceImpedanceBc {
+    pub labels: Vec<i32>,
+    pub l_k_sq: f64,
+    pub r_s: f64,
+    pub material: String,
+    pub thickness: f64,
+    pub temperature: f64,
+    pub f_ref: f64,
+    pub film_model: String,
+}
+
+/// Lumped Josephson junction / nonlinear port boundary condition (`cavity` and `driven` studies).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LumpedJjBc {
+    pub labels: Vec<i32>,
+    pub name: String,
+    pub l_j: f64,
+    pub e_j_hz: f64,
+    pub c_j: f64,
+    pub e_l_hz: f64,
+    pub phi_ext_rad: f64,
+    pub n_g: f64,
+    pub direction: [f64; 3],
+    pub formulation: String,
+}
+
+/// Lumped sheet port boundary condition (`driven` study).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LumpedPortBc {
+    pub labels: Vec<i32>,
+    pub name: String,
+    pub z0: f64,
+    pub direction: [f64; 3],
+}
+
+/// 2D boundary-mode waveguide port boundary condition (`driven` study).
+#[derive(Clone, Debug, PartialEq)]
+pub struct WavePortBc {
+    pub labels: Vec<i32>,
+    pub name: String,
+    pub mode: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -51,11 +112,35 @@ pub struct Problem {
     /// the field is left free on them instead of having its tangential part set to zero. A mirror plane that keeps the modes even
     /// under the reflection (tangential E even, E normal odd) is one of these.
     pub pmc: Vec<i32>,
+    /// boundary numbers of explicit PEC walls or interior 2D PEC sheets
+    pub pec: Vec<i32>,
+    /// superconducting / resistive surface-impedance boundary conditions
+    pub surface_impedance: Vec<SurfaceImpedanceBc>,
+    /// lumped Josephson junction boundary conditions (cavity / driven study)
+    pub lumped_jj: Vec<LumpedJjBc>,
+    /// lumped port boundary conditions (driven study)
+    pub lumped_ports: Vec<LumpedPortBc>,
+    /// waveguide port boundary conditions (driven study)
+    pub waveports: Vec<WavePortBc>,
+    /// optional 1-based domain label -> region name mapping from `ProblemSpec::materials`
+    pub domain_names: BTreeMap<i32, String>,
 }
 
 impl Problem {
     pub fn new(study: Study, order: usize) -> Problem {
-        Problem { order, study, materials: Materials::default(), periodic: vec![], pmc: vec![] }
+        Problem {
+            order,
+            study,
+            materials: Materials::default(),
+            periodic: vec![],
+            pmc: vec![],
+            pec: vec![],
+            surface_impedance: vec![],
+            lumped_jj: vec![],
+            lumped_ports: vec![],
+            waveports: vec![],
+            domain_names: BTreeMap::new(),
+        }
     }
 
     /// Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field.
@@ -84,9 +169,58 @@ impl Problem {
             Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => {
                 (!f_search.is_finite()).then_some("search frequency")
             }
+            Study::Driven { f_min, f_max, prom_tol, .. } => (!f_min.is_finite())
+                .then_some("minimum frequency")
+                .or((!f_max.is_finite()).then_some("maximum frequency"))
+                .or(prom_tol.is_some_and(|t| !t.is_finite()).then_some("PROM tolerance")),
         };
         if let Some(what) = study_bad {
             return Err(format!("the study's {what} is NaN or infinite"));
+        }
+        for ibc in &self.surface_impedance {
+            for (k, v) in [
+                ("L_k_sq", ibc.l_k_sq),
+                ("R_s", ibc.r_s),
+                ("thickness", ibc.thickness),
+                ("temperature", ibc.temperature),
+                ("f_ref", ibc.f_ref),
+            ] {
+                if !v.is_finite() {
+                    return Err(format!("surface_impedance parameter '{k}' is {v}: it must be a finite number"));
+                }
+            }
+        }
+        for jj in &self.lumped_jj {
+            for (k, v) in [
+                ("L_j", jj.l_j),
+                ("E_j_Hz", jj.e_j_hz),
+                ("C_j", jj.c_j),
+                ("E_l_Hz", jj.e_l_hz),
+                ("phi_ext_rad", jj.phi_ext_rad),
+                ("n_g", jj.n_g),
+                ("direction[0]", jj.direction[0]),
+                ("direction[1]", jj.direction[1]),
+                ("direction[2]", jj.direction[2]),
+            ] {
+                if !v.is_finite() {
+                    return Err(format!("lumped_jj '{}' parameter '{k}' is {v}: it must be a finite number", jj.name));
+                }
+            }
+        }
+        for lp in &self.lumped_ports {
+            for (k, v) in [
+                ("Z_0", lp.z0),
+                ("direction[0]", lp.direction[0]),
+                ("direction[1]", lp.direction[1]),
+                ("direction[2]", lp.direction[2]),
+            ] {
+                if !v.is_finite() {
+                    return Err(format!(
+                        "lumped_port '{}' parameter '{k}' is {v}: it must be a finite number",
+                        lp.name
+                    ));
+                }
+            }
         }
         // tensors of anisotropic domains, layers and Floquet phases: scan the printed form, outside quoted strings, for NaN and inf
         let text = format!("{:?} {:?} {:?}", m.aniso, m.pml, self.periodic);
@@ -131,11 +265,29 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             n_modes: sp.integer("n_modes").max(0) as usize,
         },
         "cavity" => Study::Cavity { n_modes: sp.integer("n_modes").max(0) as usize, f_search: sp.number("f_search") },
+        "driven" => {
+            let f_min = sp.number("f_min");
+            let f_max = sp.number("f_max");
+            if !(f_min > 0.0 && f_max >= f_min) {
+                return Err(Error::invalid(format!(
+                    "driven study requires 0 < f_min <= f_max (got f_min = {f_min}, f_max = {f_max})"
+                )));
+            }
+            let n_points = sp.integer("n_points").max(1) as usize;
+            let prom_tol = sp.optional_number("prom_tol").filter(|&t| t > 0.0);
+            Study::Driven { f_min, f_max, n_points, prom_tol }
+        }
         other => return Err(Error::Unsupported(format!("ems has no study '{other}'"))),
     };
     let mut materials = materials_by_label(spec, ctx, &ems.properties())?;
+    let domain_names = domain_names_by_label(spec, ctx)?;
     let mut periodic = vec![];
     let mut pmc: Vec<i32> = vec![];
+    let mut pec: Vec<i32> = vec![];
+    let mut surface_impedance: Vec<SurfaceImpedanceBc> = vec![];
+    let mut lumped_jj: Vec<LumpedJjBc> = vec![];
+    let mut lumped_ports: Vec<LumpedPortBc> = vec![];
+    let mut waveports: Vec<WavePortBc> = vec![];
     let kinds = ems.bc_kinds();
     for r in resolve_conditions(&spec.bcs, &kinds, ctx)? {
         let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
@@ -155,7 +307,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
             }
             "periodic" => {
-                if !matches!(study, Study::Cavity { .. }) {
+                if !matches!(study, Study::Cavity { .. } | Study::Driven { .. }) {
                     return Err(Error::invalid(format!(
                         "a Floquet-periodic pair belongs to the cavity study, not to '{}'",
                         study.kind()
@@ -171,7 +323,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase") });
             }
             "pmc" => {
-                if !matches!(study, Study::Cavity { .. }) {
+                if !matches!(study, Study::Cavity { .. } | Study::Driven { .. }) {
                     return Err(Error::invalid(format!(
                         "a magnetic wall belongs to the cavity study, not to '{}'",
                         study.kind()
@@ -179,10 +331,179 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
                 pmc.extend(r.labels);
             }
+            "pec" => {
+                pec.extend(r.labels);
+            }
+            "surface_impedance" => {
+                let mut l_k_sq = p.number("L_k_sq");
+                let mut r_s = p.number("R_s");
+                let material = p.text("material");
+                let thickness = p.number("thickness");
+                let temperature = p.number("temperature");
+                let f_ref_given = p.optional_number("f_ref").unwrap_or(0.0);
+                let f_ref = if f_ref_given > 0.0 { f_ref_given } else { study.reference_freq() };
+                let film_model = p.text("film_model");
+                let fm = FilmModel::parse(&film_model).ok_or_else(|| {
+                    Error::invalid(format!(
+                        "surface_impedance: unknown film_model '{film_model}' (expected 'two_sided', 'kerr' or 'thin_limit')"
+                    ))
+                })?;
+                if !material.trim().is_empty() {
+                    let lib = ctx.library.as_ref().ok_or_else(|| {
+                        Error::Unsupported(format!(
+                            "surface_impedance: material '{material}' needs a material library, and this run has none"
+                        ))
+                    })?;
+                    let mat =
+                        lib.require(material.trim()).map_err(|e| Error::invalid(format!("surface_impedance: {e}")))?;
+                    let sc = mat.superconducting.as_ref().ok_or_else(|| {
+                        Error::invalid(format!(
+                            "surface_impedance: material '{}' has no [superconducting] section",
+                            material.trim()
+                        ))
+                    })?;
+                    if f_ref <= 0.0 {
+                        return Err(Error::invalid(
+                            "surface_impedance with a superconducting material requires a positive f_ref or study search frequency",
+                        ));
+                    }
+                    let eval = bcs_surface_impedance(sc, f_ref, temperature, thickness, fm)
+                        .map_err(|e| Error::invalid(format!("surface_impedance ('{}'): {e}", material.trim())))?;
+                    l_k_sq = eval.l_k_sq;
+                    r_s = eval.r_s;
+                }
+                if l_k_sq < 0.0 || r_s < 0.0 {
+                    return Err(Error::invalid("surface_impedance requires non-negative L_k_sq and R_s"));
+                }
+                surface_impedance.push(SurfaceImpedanceBc {
+                    labels: r.labels,
+                    l_k_sq,
+                    r_s,
+                    material,
+                    thickness,
+                    temperature,
+                    f_ref,
+                    film_model: fm.as_str().to_string(),
+                });
+            }
+            "lumped_jj" => {
+                if !matches!(study, Study::Cavity { .. } | Study::Driven { .. }) {
+                    return Err(Error::invalid(format!(
+                        "a lumped_jj condition belongs to the cavity or driven study, not to '{}'",
+                        study.kind()
+                    )));
+                }
+                let name = p.text("name");
+                if name.trim().is_empty() {
+                    return Err(Error::invalid("lumped_jj requires a non-empty 'name'"));
+                }
+                if lumped_jj.iter().any(|j| j.name == name) {
+                    return Err(Error::invalid(format!("duplicate lumped_jj name '{name}'")));
+                }
+                let l_j_in = p.number("L_j");
+                let e_j_in = p.number("E_j_Hz");
+                let c_j = p.number("C_j");
+                let e_l_hz = p.number("E_l_Hz");
+                let phi_ext_rad = p.number("phi_ext_rad");
+                let n_g = p.number("n_g");
+                let (l_j, e_j_hz) = resolve_jj_l_and_ej(l_j_in, e_j_in);
+                if l_j <= 0.0 && e_l_hz <= 0.0 && c_j <= 0.0 {
+                    return Err(Error::invalid(format!(
+                        "lumped_jj '{name}' requires a positive L_j, E_j_Hz, E_l_Hz, or C_j"
+                    )));
+                }
+                let dir_vec = p.vector("direction");
+                if dir_vec.len() != 3 {
+                    return Err(Error::invalid(format!("lumped_jj '{name}': direction must have 3 components")));
+                }
+                let dnorm = (dir_vec[0] * dir_vec[0] + dir_vec[1] * dir_vec[1] + dir_vec[2] * dir_vec[2]).sqrt();
+                if !(dnorm > 0.0 && dnorm.is_finite()) {
+                    return Err(Error::invalid(format!("lumped_jj '{name}': direction vector must be non-zero")));
+                }
+                let direction = [dir_vec[0] / dnorm, dir_vec[1] / dnorm, dir_vec[2] / dnorm];
+                let formulation = p.text("formulation");
+                if formulation != "rank1" && formulation != "distributed_sheet" {
+                    return Err(Error::invalid(format!(
+                        "lumped_jj '{name}': unknown formulation '{formulation}' (expected 'rank1' or 'distributed_sheet')"
+                    )));
+                }
+                lumped_jj.push(LumpedJjBc {
+                    labels: r.labels,
+                    name,
+                    l_j,
+                    e_j_hz,
+                    c_j,
+                    e_l_hz,
+                    phi_ext_rad,
+                    n_g,
+                    direction,
+                    formulation,
+                });
+            }
+            "lumped_port" => {
+                if !matches!(study, Study::Driven { .. }) {
+                    return Err(Error::invalid(format!(
+                        "a lumped_port condition belongs to the driven study, not to '{}'",
+                        study.kind()
+                    )));
+                }
+                let name = p.text("name");
+                if name.trim().is_empty() {
+                    return Err(Error::invalid("lumped_port requires a non-empty 'name'"));
+                }
+                if lumped_ports.iter().any(|lp| lp.name == name) || waveports.iter().any(|wp| wp.name == name) {
+                    return Err(Error::invalid(format!("duplicate port name '{name}'")));
+                }
+                let z0 = p.number("Z_0");
+                if !(z0 > 0.0 && z0.is_finite()) {
+                    return Err(Error::invalid(format!("lumped_port '{name}': Z_0 must be positive (got {z0})")));
+                }
+                let dir_vec = p.vector("direction");
+                if dir_vec.len() != 3 {
+                    return Err(Error::invalid(format!("lumped_port '{name}': direction must have 3 components")));
+                }
+                let dnorm = (dir_vec[0] * dir_vec[0] + dir_vec[1] * dir_vec[1] + dir_vec[2] * dir_vec[2]).sqrt();
+                if !(dnorm > 0.0 && dnorm.is_finite()) {
+                    return Err(Error::invalid(format!("lumped_port '{name}': direction vector must be non-zero")));
+                }
+                let direction = [dir_vec[0] / dnorm, dir_vec[1] / dnorm, dir_vec[2] / dnorm];
+                lumped_ports.push(LumpedPortBc { labels: r.labels, name, z0, direction });
+            }
+            "waveport" => {
+                if !matches!(study, Study::Driven { .. }) {
+                    return Err(Error::invalid(format!(
+                        "a waveport condition belongs to the driven study, not to '{}'",
+                        study.kind()
+                    )));
+                }
+                let name = p.text("name");
+                if name.trim().is_empty() {
+                    return Err(Error::invalid("waveport requires a non-empty 'name'"));
+                }
+                if lumped_ports.iter().any(|lp| lp.name == name) || waveports.iter().any(|wp| wp.name == name) {
+                    return Err(Error::invalid(format!("duplicate port name '{name}'")));
+                }
+                let mode = p.integer("mode").max(1) as usize;
+                waveports.push(WavePortBc { labels: r.labels, name, mode });
+            }
             other => return Err(Error::Unsupported(format!("ems has no condition '{other}'"))),
         }
     }
     pmc.sort_unstable();
     pmc.dedup();
-    Ok(Problem { order: spec.order as usize, study, materials, periodic, pmc })
+    pec.sort_unstable();
+    pec.dedup();
+    Ok(Problem {
+        order: spec.order as usize,
+        study,
+        materials,
+        periodic,
+        pmc,
+        pec,
+        surface_impedance,
+        lumped_jj,
+        lumped_ports,
+        waveports,
+        domain_names,
+    })
 }

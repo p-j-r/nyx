@@ -35,7 +35,26 @@ fn close6(a: &[[f64; 6]; 6], b: &[[f64; 6]; 6], tol: f64) {
 #[test]
 fn the_library_has_its_materials() {
     let lib = library();
-    assert_eq!(lib.names(), vec!["air", "aluminium", "copper", "gold", "lithium_niobate", "sapphire", "silica", "silicon", "silicon_nitride", "silver"]);
+    assert_eq!(
+        lib.names(),
+        vec![
+            "air",
+            "aluminium",
+            "copper",
+            "gold",
+            "granular_aluminium",
+            "lithium_niobate",
+            "nbn",
+            "niobium",
+            "sapphire",
+            "silica",
+            "silicon",
+            "silicon_nitride",
+            "silver",
+            "tantalum",
+            "tin",
+        ]
+    );
     assert!(lib.get("Silicon").is_some(), "lookup ignores case");
     let e = lib.require("platinum").unwrap_err().to_string();
     assert!(e.contains("available: air, aluminium, copper, gold"), "{e}");

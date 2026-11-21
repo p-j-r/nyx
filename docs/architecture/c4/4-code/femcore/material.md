@@ -2,24 +2,25 @@
 
 C4 level 4 (code) of the component **Material specification** (`femcore.material`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader.
+> TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, Zimmermann BCS superconducting conductivity, provenance and the library loader.
 
-**Decisions:** [ADR 29](../../../adr/0029-material-files-are-toml-with-explicit-units.md), [ADR 30](../../../adr/0030-optical-dispersion-models-evaluated-at-the-study-wavelength.md), [ADR 34](../../../adr/0034-a-material-may-extend-another-and-replaces-whole-tables.md), [ADR 35](../../../adr/0035-material-provenance-oscillator-models-and-the-checked-library.md)  
-**Size:** 9 files, 3538 lines.
+**Decisions:** [ADR 29](../../../adr/0029-material-files-are-toml-with-explicit-units.md), [ADR 30](../../../adr/0030-optical-dispersion-models-evaluated-at-the-study-wavelength.md), [ADR 34](../../../adr/0034-a-material-may-extend-another-and-replaces-whole-tables.md), [ADR 35](../../../adr/0035-material-provenance-oscillator-models-and-the-checked-library.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
+**Size:** 10 files, 4406 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
+| `crates/femcore/src/material/bcs.rs` | 721 |  |
 | `crates/femcore/src/material/elastic.rs` | 784 |  |
-| `crates/femcore/src/material/mod.rs` | 397 |  |
+| `crates/femcore/src/material/mod.rs` | 402 |  |
 | `crates/femcore/src/material/optics.rs` | 916 |  |
-| `crates/femcore/src/material/reader.rs` | 268 |  |
-| `crates/femcore/src/material/schema.rs` | 170 |  |
+| `crates/femcore/src/material/reader.rs` | 269 |  |
+| `crates/femcore/src/material/schema.rs` | 192 |  |
 | `crates/femcore/src/material/source.rs` | 136 |  |
-| `crates/femcore/src/material/spec.rs` | 496 |  |
+| `crates/femcore/src/material/spec.rs` | 594 |  |
 | `crates/femcore/src/material/tensor.rs` | 171 |  |
-| `crates/femcore/src/material/units.rs` | 200 |  |
+| `crates/femcore/src/material/units.rs` | 221 |  |
 
 ## What it uses
 
@@ -31,11 +32,15 @@ Nothing outside the component (the standard library and external crates are not 
 |---|---|---|
 | [dfs: Physics adapter](../dfs/adapter.md) | material::spec | Library |
 | [dfs: Shared helpers](../dfs/common.md) | material | M3 |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | material | M3 |
 | [dfs: Heat kernel](../dfs/heat.md) | material | M3 |
+| [dfs: Typed problem](../dfs/problem.md) | material, material::bcs | FilmModel, bcs_surface_impedance |
 | [ems: Physics adapter](../ems/adapter.md) | material, material::spec | Library, tensor_global |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | material | tensor_global |
+| [ems: Typed problem](../ems/problem.md) | material, material::bcs | FilmModel, bcs_surface_impedance |
 | [engine: Commands](../engine/commands.md) | material, material::spec | Anisotropy, Library |
 | [engine: Job runner and queue](../engine/jobs.md) | material::spec | Library |
-| [engine: Materials](../engine/materials.md) | material, material::spec | Library, MaterialSpec |
+| [engine: Materials](../engine/materials.md) | material, material::bcs, material::spec | EV_TO_J, FilmModel, Library, MaterialSpec, bcs_surface_impedance, surface_impedance_from_params |
 | [engine: Results files](../engine/resultsIO.md) | material::spec | Library |
 | [Finite-element basics](./fem.md) | material | Anisotropy, M3, M6 |
 | [Meshing facade](./meshing.md) | material | M6 |
@@ -55,6 +60,39 @@ Public types with their public fields (or variants) and methods, free functions 
 
 ```mermaid
 classDiagram
+  namespace material_bcs_rs {
+    class FilmModel {
+        <<enumeration>>
+        TwoSided
+        Kerr
+        ThinLimit
+        +parse(s) Option~FilmModel~
+        +as_str() str
+    }
+    class BcsEval {
+        <<struct>>
+        +sigma Complex64
+        +sigma_n f64
+        +delta_j f64
+        +lambda_eff f64
+        +z_s Complex64
+        +r_s f64
+        +l_k_sq f64
+        +l_eff f64
+        +more_1_fields
+    }
+    class fns_material_bcs_rs {
+        <<module material/bcs.rs>>
+        +bcs_gap(tc, gap_0_j, temperature) Result
+        +surface_impedance_from_params(tc, gap_0_j, lambda_l, xi_0, mean_free_path, sigma_n, freq_hz, temperature, thickness, film_model) Result
+        +bcs_surface_impedance(sc, freq_hz, temperature, thickness, film_model) Result
+        +K_B const
+        +HBAR const
+        +EV_TO_J const
+        +MU0 const
+        +more_1_items
+    }
+  }
   namespace material_elastic_rs {
     class Unique {
         <<enumeration>>
@@ -279,6 +317,17 @@ classDiagram
         +permeability Option~f64~
         +conductivity Option~TensorProp~
     }
+    class Superconducting {
+        <<struct>>
+        +source Vec~Source~
+        +tc f64
+        +gap_0 Option~f64~
+        +lambda_l Option~f64~
+        +xi_0 Option~f64~
+        +mean_free_path Option~f64~
+        +sigma_n Option~f64~
+        +effective_gap_0() f64
+    }
     class MaterialSpec {
         <<struct>>
         +name String
@@ -289,7 +338,7 @@ classDiagram
         +elastic Option~Elastic~
         +thermal Thermal
         +electrical Electrical
-        +more_1_fields
+        +more_2_fields
         +from_toml_named(text, fallback_name) Result
         +from_table(table, fallback_name) Result
         +from_toml(text) Result
@@ -319,12 +368,14 @@ classDiagram
         +electrical slice
         +optical slice
         +model slice
+        +superconducting slice
     }
     class fns_material_spec_rs {
         <<module material/spec.rs>>
         +merge_over(base, over) Table
         +keys() Keys
         +FORMAT const
+        +SUPERCONDUCTING_KEYS const
     }
   }
   namespace material_tensor_rs {
@@ -364,6 +415,7 @@ classDiagram
         Compliance
         ElectricalConductivity
         Frequency
+        Energy
         +describe() str
     }
     class fns_material_units_rs {
@@ -389,6 +441,7 @@ classDiagram
   Thermal --> TensorProp
   Electrical --> Source
   Electrical --> TensorProp
+  Superconducting --> Source
   MaterialSpec --> Source
   MaterialSpec --> Elastic
   MaterialSpec --> Thermal
@@ -399,6 +452,18 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
+| const | `K_B` | `material/bcs.rs:18` | `f64` —  Boltzmann constant `k_B` in J/K (SI exact). |
+| const | `HBAR` | `material/bcs.rs:20` | `f64` —  Reduced Planck constant `hbar` in J*s. |
+| const | `EV_TO_J` | `material/bcs.rs:22` | `f64` —  Elementary charge / eV-to-Joule conversion factor in J/eV (SI exact). |
+| const | `MU0` | `material/bcs.rs:24` | `f64` —  Vacuum magnetic permeability `mu_0` in H/m. |
+| const | `BCS_GAP_RATIO` | `material/bcs.rs:26` | `f64` —  Default weak-coupling BCS zero-temperature gap ratio `Delta(0) / (k_B T_c)`. |
+| enum | `FilmModel` | `material/bcs.rs:75` | variants: `TwoSided`, `Kerr`, `ThinLimit` —  Thin-film boundary model mapping bulk complex conductivity `sigma` and film thickness `d` |
+| struct | `BcsEval` | `material/bcs.rs:106` | fields: `sigma`, `sigma_n`, `delta_j`, `lambda_eff`, `z_s`, `r_s`, `l_k_sq`, `l_eff`, `g_eff` —  Result of a BCS complex conductivity and thin-film surface impedance evaluation. |
+| fn | `bcs_gap` | `material/bcs.rs:173` | `pub fn bcs_gap(tc: f64, gap_0_j: Option<f64>, temperature: f64) -> Result<f64, String>` —  Solves the exact self-consistent BCS gap equation for `Delta(T)` in Joules. |
+| fn | `surface_impedance_from_params` | `material/bcs.rs:488` | `pub fn surface_impedance_from_params( tc: f64, gap_0_j: Option<f64>, lambda_l: Option<f64>, xi_0: Option<f64>, mean_free_path: Option<f64>, sigma_n: Option<f64>, freq_hz: f64, temperature: f64, thickness: f64, film_model: FilmModel, ) -> Result<BcsEval, String>` —  Evaluates arbitrary-purity BCS complex conductivity and thin-film surface impedance from explicit parameters. |
+| fn | `bcs_surface_impedance` | `material/bcs.rs:616` | `pub fn bcs_surface_impedance( sc: &Superconducting, freq_hz: f64, temperature: f64, thickness: f64, film_model: FilmModel, ) -> Result<BcsEval, String>` —  Evaluates arbitrary-purity BCS complex conductivity and thin-film surface impedance for a `[superconducting]` block. |
+| fn | `FilmModel::parse` | `material/bcs.rs:86` | `pub fn parse(s: &str) -> Option<FilmModel>` |
+| fn | `FilmModel::as_str` | `material/bcs.rs:95` | `pub fn as_str(self) -> &'static str` |
 | enum | `Unique` | `material/elastic.rs:14` | variants: `Y`, `Z` |
 | enum | `Class` | `material/elastic.rs:21` | variants: `Isotropic`, `Cubic`, `Hexagonal`, `Trigonal`, `Tetragonal`, `Orthotropic`, `Monoclinic`, `Triclinic` —  Crystal class of the stiffness (the elastic symmetry group, not the full point group). |
 | const | `NAMES` | `material/elastic.rs:54` | `[[&str` |
@@ -417,26 +482,26 @@ classDiagram
 | fn | `Elastic::eigenvalue_range` | `material/elastic.rs:397` | `pub fn eigenvalue_range(&self) -> (f64, f64)` —  Smallest and largest eigenvalue of the stiffness in the normalised (Mandel) form, Pa. |
 | fn | `Elastic::read` | `material/elastic.rs:403` | `pub fn read(s: &mut Section) -> Result<Elastic, MaterialError>` —  Reads the `[elastic]` table. |
 | fn | `Elastic::write` | `material/elastic.rs:566` | `pub fn write(&self) -> toml::Table` —  The `[elastic]` table written from this value: constants if the file gave them, otherwise the matrix (upper triangle), in GPa. |
-| type | `M3` | `material/mod.rs:30` |  |
-| type | `M6` | `material/mod.rs:31` |  |
-| enum | `Stiffness` | `material/mod.rs:35` | variants: `Cubic`, `Hexagonal`, `Trigonal`, `Orthotropic`, `General` |
-| enum | `Tensor` | `material/mod.rs:146` | variants: `Uniaxial`, `Diagonal`, `Symmetric` —  A symmetric second-rank tensor property in the crystal frame. |
-| struct | `Anisotropy` | `material/mod.rs:178` | fields: `stiffness`, `conductivity`, `permittivity`, `expansion`, `euler_deg` |
-| fn | `rotation` | `material/mod.rs:187` | `pub fn rotation(euler_deg: [f64; 3]) -> M3` |
-| fn | `euler_from_rotation` | `material/mod.rs:202` | `pub fn euler_from_rotation(m: &M3) -> [f64` —  Bunge angles (degrees) of a rotation matrix whose columns are the crystal axes in the global |
-| fn | `rotate_tensor` | `material/mod.rs:226` | `pub fn rotate_tensor(t: &M3, r: &M3) -> M3` |
-| fn | `stiffness_global` | `material/mod.rs:279` | `pub fn stiffness_global(s: &Stiffness, euler_deg: [f64; 3]) -> M6` —  Stiffness in the global frame (solver Voigt order). |
-| fn | `isotropic_stiffness` | `material/mod.rs:284` | `pub fn isotropic_stiffness(e: f64, nu: f64) -> M6` —  Isotropic stiffness (solver Voigt order). |
-| fn | `tensor_global` | `material/mod.rs:298` | `pub fn tensor_global(t: &Tensor, euler_deg: [f64; 3]) -> M3` |
-| fn | `iso_tensor` | `material/mod.rs:302` | `pub fn iso_tensor(v: f64) -> M3` |
-| fn | `is_positive_definite` | `material/mod.rs:307` | `pub fn is_positive_definite(c: &M6) -> bool` —  Positive definiteness check by Cholesky on the 6x6 matrix. |
-| fn | `sapphire` | `material/mod.rs:329` | `pub fn sapphire() -> (Stiffness, Tensor, Tensor, Tensor, f64)` —  Typical room-temperature crystal data for the material library (GPa converted to Pa). |
-| fn | `silicon` | `material/mod.rs:339` | `pub fn silicon() -> Stiffness` |
-| fn | `Stiffness::name` | `material/mod.rs:47` | `pub fn name(&self) -> &'static str` |
-| fn | `Stiffness::constants_mut` | `material/mod.rs:121` | `pub fn constants_mut(&mut self) -> Vec<(&'static str, &mut f64)>` —  The constants as `(label, value)` for editing. |
-| fn | `Tensor::name` | `material/mod.rs:154` | `pub fn name(&self) -> &'static str` |
-| fn | `Tensor::matrix` | `material/mod.rs:161` | `pub fn matrix(&self) -> M3` |
-| fn | `Tensor::constants_mut` | `material/mod.rs:168` | `pub fn constants_mut(&mut self) -> Vec<(&'static str, &mut f64)>` |
+| type | `M3` | `material/mod.rs:35` |  |
+| type | `M6` | `material/mod.rs:36` |  |
+| enum | `Stiffness` | `material/mod.rs:40` | variants: `Cubic`, `Hexagonal`, `Trigonal`, `Orthotropic`, `General` |
+| enum | `Tensor` | `material/mod.rs:151` | variants: `Uniaxial`, `Diagonal`, `Symmetric` —  A symmetric second-rank tensor property in the crystal frame. |
+| struct | `Anisotropy` | `material/mod.rs:183` | fields: `stiffness`, `conductivity`, `permittivity`, `expansion`, `euler_deg` |
+| fn | `rotation` | `material/mod.rs:192` | `pub fn rotation(euler_deg: [f64; 3]) -> M3` |
+| fn | `euler_from_rotation` | `material/mod.rs:207` | `pub fn euler_from_rotation(m: &M3) -> [f64` —  Bunge angles (degrees) of a rotation matrix whose columns are the crystal axes in the global |
+| fn | `rotate_tensor` | `material/mod.rs:231` | `pub fn rotate_tensor(t: &M3, r: &M3) -> M3` |
+| fn | `stiffness_global` | `material/mod.rs:284` | `pub fn stiffness_global(s: &Stiffness, euler_deg: [f64; 3]) -> M6` —  Stiffness in the global frame (solver Voigt order). |
+| fn | `isotropic_stiffness` | `material/mod.rs:289` | `pub fn isotropic_stiffness(e: f64, nu: f64) -> M6` —  Isotropic stiffness (solver Voigt order). |
+| fn | `tensor_global` | `material/mod.rs:303` | `pub fn tensor_global(t: &Tensor, euler_deg: [f64; 3]) -> M3` |
+| fn | `iso_tensor` | `material/mod.rs:307` | `pub fn iso_tensor(v: f64) -> M3` |
+| fn | `is_positive_definite` | `material/mod.rs:312` | `pub fn is_positive_definite(c: &M6) -> bool` —  Positive definiteness check by Cholesky on the 6x6 matrix. |
+| fn | `sapphire` | `material/mod.rs:334` | `pub fn sapphire() -> (Stiffness, Tensor, Tensor, Tensor, f64)` —  Typical room-temperature crystal data for the material library (GPa converted to Pa). |
+| fn | `silicon` | `material/mod.rs:344` | `pub fn silicon() -> Stiffness` |
+| fn | `Stiffness::name` | `material/mod.rs:52` | `pub fn name(&self) -> &'static str` |
+| fn | `Stiffness::constants_mut` | `material/mod.rs:126` | `pub fn constants_mut(&mut self) -> Vec<(&'static str, &mut f64)>` —  The constants as `(label, value)` for editing. |
+| fn | `Tensor::name` | `material/mod.rs:159` | `pub fn name(&self) -> &'static str` |
+| fn | `Tensor::matrix` | `material/mod.rs:166` | `pub fn matrix(&self) -> M3` |
+| fn | `Tensor::constants_mut` | `material/mod.rs:173` | `pub fn constants_mut(&mut self) -> Vec<(&'static str, &mut f64)>` |
 | enum | `Interp` | `material/optics.rs:17` | variants: `Pchip`, `Linear` |
 | enum | `Extrapolate` | `material/optics.rs:23` | variants: `Error`, `Linear` |
 | enum | `Dispersion` | `material/optics.rs:32` | variants: `Constant`, `Sellmeier`, `Cauchy`, `Tabulated`, `Schott`, `Herzberger`, `Oscillators` —  One dispersion model. Parameters are in the file's wavelength unit (`x` below is the wavelength in that unit). |
@@ -489,28 +554,31 @@ classDiagram
 | const | `FORMAT` | `material/spec.rs:20` | `i64` —  The version of the material file format this code reads and writes. |
 | struct | `Thermal` | `material/spec.rs:23` | fields: `source`, `conductivity`, `specific_heat`, `expansion` |
 | struct | `Electrical` | `material/spec.rs:35` | fields: `source`, `permittivity`, `permeability`, `conductivity` |
-| struct | `MaterialSpec` | `material/spec.rs:47` | fields: `name`, `description`, `source`, `notes`, `density`, `elastic`, `thermal`, `electrical`, `optical` |
-| struct | `Library` | `material/spec.rs:278` |  A folder of material files, loaded at run time. Materials are found by file name (without `.toml`), ignoring case. |
-| fn | `merge_over` | `material/spec.rs:467` | `pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table` —  `over` laid over `base`: every top-level key of `over` replaces the one of `base`, and a table (`elastic`, `thermal`, `electrical`, |
-| struct | `Keys` | `material/spec.rs:484` | fields: `top`, `elastic`, `thermal`, `electrical`, `optical`, `model` —  The keys each table of a material file accepts (the contract test compares them with the JSON Schema). |
-| fn | `keys` | `material/spec.rs:493` | `pub fn keys() -> Keys` |
-| fn | `MaterialSpec::from_toml_named` | `material/spec.rs:75` | `pub fn from_toml_named(text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from TOML text. `fallback_name` is used when the file has no `name`. |
-| fn | `MaterialSpec::from_table` | `material/spec.rs:85` | `pub fn from_table(table: &toml::Table, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from a parsed table (already merged with its base if it had `extends`). |
-| fn | `MaterialSpec::from_toml` | `material/spec.rs:152` | `pub fn from_toml(text: &str) -> Result<MaterialSpec, MaterialError>` |
-| fn | `MaterialSpec::load` | `material/spec.rs:157` | `pub fn load(path: &Path) -> Result<MaterialSpec, MaterialError>` —  Reads a file; the file name (without `.toml`) is the name if the file has none. |
-| fn | `MaterialSpec::to_toml` | `material/spec.rs:169` | `pub fn to_toml(&self) -> String` —  The material as TOML text, in the same format (comments of an original file are not kept). |
-| fn | `MaterialSpec::anisotropy` | `material/spec.rs:221` | `pub fn anisotropy(&self, euler_deg: [f64; 3]) -> Anisotropy` —  The material in the older `Anisotropy` form (stiffness as a general matrix, tensors), placed with Bunge angles in degrees. |
-| fn | `MaterialSpec::legacy_scalars` | `material/spec.rs:232` | `pub fn legacy_scalars(&self) -> BTreeMap<String, f64>` —  Scalar properties under the older names (`rho`, `Cp`, `mu_r`, and `eps_r`, `k`, `alpha`, `E`, `nu` where the data are isotropic). |
-| fn | `MaterialSpec::optical_permittivity` | `material/spec.rs:256` | `pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles. |
-| fn | `Library::load_dir` | `material/spec.rs:296` | `pub fn load_dir(dir: &Path) -> Result<Library, Vec<MaterialError>>` —  Loads every `*.toml` file of the folder (not its subfolders). All files with problems are reported together. |
-| fn | `Library::read` | `material/spec.rs:351` | `pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder, |
-| fn | `Library::with_texts` | `material/spec.rs:357` | `pub fn with_texts(&self, texts: &BTreeMap<String, String>) -> Result<Library, Vec<MaterialError>>` —  A copy of the library with more materials given as TOML text by name (the materials a project carries). A text may extend a material |
-| fn | `Library::read_table` | `material/spec.rs:378` | `pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError>` —  `read`, with the table after `extends` was resolved. |
-| fn | `Library::get` | `material/spec.rs:396` | `pub fn get(&self, name: &str) -> Option<&MaterialSpec>` |
-| fn | `Library::require` | `material/spec.rs:401` | `pub fn require(&self, name: &str) -> Result<&MaterialSpec, MaterialError>` —  Like `get`, with an error that lists the available names. |
-| fn | `Library::names` | `material/spec.rs:409` | `pub fn names(&self) -> Vec<String>` |
-| fn | `Library::len` | `material/spec.rs:413` | `pub fn len(&self) -> usize` |
-| fn | `Library::is_empty` | `material/spec.rs:417` | `pub fn is_empty(&self) -> bool` |
+| struct | `Superconducting` | `material/spec.rs:47` | fields: `source`, `tc`, `gap_0`, `lambda_l`, `xi_0`, `mean_free_path`, `sigma_n` |
+| struct | `MaterialSpec` | `material/spec.rs:73` | fields: `name`, `description`, `source`, `notes`, `density`, `elastic`, `thermal`, `electrical`, `optical`, `superconducting` |
+| const | `SUPERCONDUCTING_KEYS` | `material/spec.rs:93` | `&[&str]` |
+| struct | `Library` | `material/spec.rs:367` |  A folder of material files, loaded at run time. Materials are found by file name (without `.toml`), ignoring case. |
+| fn | `merge_over` | `material/spec.rs:556` | `pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table` —  `over` laid over `base`: every top-level key of `over` replaces the one of `base`, and a table (`elastic`, `thermal`, `electrical`, |
+| struct | `Keys` | `material/spec.rs:573` | fields: `top`, `elastic`, `thermal`, `electrical`, `optical`, `model`, `superconducting` —  The keys each table of a material file accepts (the contract test compares them with the JSON Schema). |
+| fn | `keys` | `material/spec.rs:583` | `pub fn keys() -> Keys` |
+| fn | `Superconducting::effective_gap_0` | `material/spec.rs:67` | `pub fn effective_gap_0(&self) -> f64` —  Zero-temperature BCS energy gap Delta(0) in J: `gap_0` if given, otherwise the weak-coupling |
+| fn | `MaterialSpec::from_toml_named` | `material/spec.rs:118` | `pub fn from_toml_named(text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from TOML text. `fallback_name` is used when the file has no `name`. |
+| fn | `MaterialSpec::from_table` | `material/spec.rs:128` | `pub fn from_table(table: &toml::Table, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from a parsed table (already merged with its base if it had `extends`). |
+| fn | `MaterialSpec::from_toml` | `material/spec.rs:218` | `pub fn from_toml(text: &str) -> Result<MaterialSpec, MaterialError>` |
+| fn | `MaterialSpec::load` | `material/spec.rs:223` | `pub fn load(path: &Path) -> Result<MaterialSpec, MaterialError>` —  Reads a file; the file name (without `.toml`) is the name if the file has none. |
+| fn | `MaterialSpec::to_toml` | `material/spec.rs:235` | `pub fn to_toml(&self) -> String` —  The material as TOML text, in the same format (comments of an original file are not kept). |
+| fn | `MaterialSpec::anisotropy` | `material/spec.rs:310` | `pub fn anisotropy(&self, euler_deg: [f64; 3]) -> Anisotropy` —  The material in the older `Anisotropy` form (stiffness as a general matrix, tensors), placed with Bunge angles in degrees. |
+| fn | `MaterialSpec::legacy_scalars` | `material/spec.rs:321` | `pub fn legacy_scalars(&self) -> BTreeMap<String, f64>` —  Scalar properties under the older names (`rho`, `Cp`, `mu_r`, and `eps_r`, `k`, `alpha`, `E`, `nu` where the data are isotropic). |
+| fn | `MaterialSpec::optical_permittivity` | `material/spec.rs:345` | `pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles. |
+| fn | `Library::load_dir` | `material/spec.rs:385` | `pub fn load_dir(dir: &Path) -> Result<Library, Vec<MaterialError>>` —  Loads every `*.toml` file of the folder (not its subfolders). All files with problems are reported together. |
+| fn | `Library::read` | `material/spec.rs:440` | `pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder, |
+| fn | `Library::with_texts` | `material/spec.rs:446` | `pub fn with_texts(&self, texts: &BTreeMap<String, String>) -> Result<Library, Vec<MaterialError>>` —  A copy of the library with more materials given as TOML text by name (the materials a project carries). A text may extend a material |
+| fn | `Library::read_table` | `material/spec.rs:467` | `pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError>` —  `read`, with the table after `extends` was resolved. |
+| fn | `Library::get` | `material/spec.rs:485` | `pub fn get(&self, name: &str) -> Option<&MaterialSpec>` |
+| fn | `Library::require` | `material/spec.rs:490` | `pub fn require(&self, name: &str) -> Result<&MaterialSpec, MaterialError>` —  Like `get`, with an error that lists the available names. |
+| fn | `Library::names` | `material/spec.rs:498` | `pub fn names(&self) -> Vec<String>` |
+| fn | `Library::len` | `material/spec.rs:502` | `pub fn len(&self) -> usize` |
+| fn | `Library::is_empty` | `material/spec.rs:506` | `pub fn is_empty(&self) -> bool` |
 | enum | `TensorProp` | `material/tensor.rs:15` | variants: `Scalar`, `Diagonal`, `Uniaxial`, `Symmetric` |
 | enum | `Requirement` | `material/tensor.rs:26` | variants: `PositiveDefinite`, `NonNegative`, `SymmetricOnly` —  What a physical tensor must satisfy. |
 | fn | `TensorProp::matrix` | `material/tensor.rs:36` | `pub fn matrix(&self) -> M3` |
@@ -521,10 +589,10 @@ classDiagram
 | fn | `TensorProp::from_tree` | `material/tensor.rs:85` | `pub fn from_tree(s: &Section, key: &str, tree: &Tree) -> Result<TensorProp, MaterialError>` |
 | fn | `TensorProp::read` | `material/tensor.rs:126` | `pub fn read(s: &mut Section, key: &str, dim: Dim, req: Requirement, label: &str) -> Result<Option<TensorProp>, MaterialError>` —  Reads `key` of the section, converts to SI, checks the requirement. |
 | fn | `TensorProp::write` | `material/tensor.rs:134` | `pub fn write(&self, unit: f64) -> toml::Value` —  The value as TOML, numbers divided by `unit` (SI factor of the unit written next to it). |
-| enum | `Dim` | `material/units.rs:9` | variants: `Dimensionless`, `Pressure`, `Density`, `Length`, `Temperature`, `ThermalConductivity`, `SpecificHeat`, `PerKelvin`, `Compliance`, `ElectricalConductivity`, `Frequency` —  The kind of quantity an entry holds; a unit of another kind is refused. |
-| fn | `lookup` | `material/units.rs:82` | `pub fn lookup(unit: &str) -> Option<(Dim, f64)>` —  Dimension and factor to SI of a unit name. `None` if the unit is unknown. |
-| fn | `to_si` | `material/units.rs:134` | `pub fn to_si(value: f64, unit: &str, expect: Dim) -> Result<f64, String>` —  `value` in `unit` converted to SI, if `unit` is a unit of dimension `expect`. |
-| fn | `split_quantity` | `material/units.rs:147` | `pub fn split_quantity(s: &str) -> Result<(f64, String), String>` —  Splits `"496.8 GPa"` (or `"496.8GPa"`) into the number and the unit text. |
-| fn | `Dim::describe` | `material/units.rs:28` | `pub fn describe(self) -> &'static str` |
+| enum | `Dim` | `material/units.rs:9` | variants: `Dimensionless`, `Pressure`, `Density`, `Length`, `Temperature`, `ThermalConductivity`, `SpecificHeat`, `PerKelvin`, `Compliance`, `ElectricalConductivity`, `Frequency`, `Energy` —  The kind of quantity an entry holds; a unit of another kind is refused. |
+| fn | `lookup` | `material/units.rs:85` | `pub fn lookup(unit: &str) -> Option<(Dim, f64)>` —  Dimension and factor to SI of a unit name. `None` if the unit is unknown. |
+| fn | `to_si` | `material/units.rs:142` | `pub fn to_si(value: f64, unit: &str, expect: Dim) -> Result<f64, String>` —  `value` in `unit` converted to SI, if `unit` is a unit of dimension `expect`. |
+| fn | `split_quantity` | `material/units.rs:160` | `pub fn split_quantity(s: &str) -> Result<(f64, String), String>` —  Splits `"496.8 GPa"` (or `"496.8GPa"`) into the number and the unit text. |
+| fn | `Dim::describe` | `material/units.rs:30` | `pub fn describe(self) -> &'static str` |
 
 Trait implementations in this component: `OpticsError: Display`, `OpticsError: Error`, `MaterialError: Display`, `MaterialError: Error`

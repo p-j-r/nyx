@@ -235,6 +235,12 @@ impl Parser<'_> {
         if word == "outer" && self.peek() != Some('(') {
             return Ok(Selector::Outer);
         }
+        if self.s[self.i..].starts_with(":edge")
+            && !self.s[self.i + 5..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+        {
+            self.i += 5;
+            return Ok(Selector::Name(format!("{word}:edge")));
+        }
         if self.peek() != Some('(') {
             return bad(format!("'{word}' needs arguments in parentheses, like {word}(...)"));
         }
@@ -595,6 +601,10 @@ impl Ctx<'_> {
         let facets = self.facets();
         Ok(match s {
             Selector::Name(n) => {
+                if let Some(sheet) = n.strip_suffix(":edge") {
+                    let es = cx.sheet_perimeter_edges(sheet);
+                    return Ok(self.empty_warn(s, EntitySet::new(EntityKind::Edges, es)));
+                }
                 let ids: Vec<u32> = self.all_facets().into_iter().filter(|&i| cx.facet_name(i) == n).collect();
                 if ids.is_empty() {
                     let es: Vec<u32> =

@@ -684,3 +684,114 @@ fn revolved_profiles() {
     assert!(e.contains("revolve 'ring'") && e.contains("air.zmin"), "{e}");
     assert_eq!(common::interp::build(&m.list.to_rust()).list, m.list);
 }
+
+#[test]
+fn polygons_and_sheets_complement_subtraction_and_edge_selectors() {
+    use geom::expr::Expr;
+    use geom::select::EntityKind;
+
+    // 1. Touching pad_1, jj_1, pad_2 sheets via Op::Polygons + Op::Sheet on substrate|vacuum (z = 0).
+    // Include a subtle 20 nm deflection at the pad_1/jj_1 contact corner (0.0, -10e-6 + 20e-9)
+    // to verify cross-feature RDP vertex pinning with simplify_tol = 50e-9, plus two holes in pad_1
+    // (one 1 um^2 < min_hole_area = 4 um^2 dropped, one 4 um x 4 um = 16 um^2 kept).
+    let pt = |x: f64, y: f64| [Expr::Num(x), Expr::Num(y)];
+    let mut m = Model::new_3d();
+    let sub = m.box_("sub", (-200e-6, -200e-6, -100e-6), (200e-6, 200e-6, 0.0));
+    let vac = m.box_("vac", (-200e-6, -200e-6, 0.0), (200e-6, 200e-6, 100e-6));
+    // A 3D pillar inside vacuum above part of pad_2 (x in [0, 50e-6], y in [20e-6, 60e-6], z in [0, 50e-6])
+    // to force an internal overlay seam inside pad_2 and verify that `pad_2:edge` excludes internal seams.
+    let pillar = m.box_("pillar", (0.0, 20e-6, 0.0), (50e-6, 60e-6, 50e-6));
+
+    let y_contact1 = -10e-6;
+    let y_deflect = y_contact1 + 20e-9; // 20 nm deflection < 50 nm simplify_tol
+    let pad1_outer = vec![
+        pt(-60e-6, -90e-6),
+        pt(0.0, -90e-6 + 10e-9), // unshared 10 nm jitter -> simplified away by RDP
+        pt(60e-6, -90e-6),
+        pt(60e-6, y_contact1),
+        pt(2e-6, y_deflect),  // shared contact corner with jj_1 -> pinned!
+        pt(-2e-6, y_deflect), // shared contact corner with jj_1 -> pinned!
+        pt(-60e-6, y_contact1),
+    ];
+    let hole_small = vec![pt(-30e-6, -60e-6), pt(-29e-6, -60e-6), pt(-29e-6, -59e-6), pt(-30e-6, -59e-6)]; // 1e-12 m^2
+    let hole_flux = vec![pt(20e-6, -60e-6), pt(24e-6, -60e-6), pt(24e-6, -56e-6), pt(20e-6, -56e-6)]; // 16e-12 m^2
+    let p1_poly = m.polygons_with("pad_1_poly", vec![pad1_outer], vec![hole_small, hole_flux], 50e-9, 4e-12);
+
+    let jj_outer = vec![pt(-2e-6, y_deflect), pt(2e-6, y_deflect), pt(2e-6, 10e-6), pt(-2e-6, 10e-6)];
+    let jj_poly = m.polygons_with("jj_1_poly", vec![jj_outer], vec![], 50e-9, 0.0);
+
+    let pad2_outer = vec![pt(-60e-6, 10e-6), pt(60e-6, 10e-6), pt(60e-6, 90e-6), pt(-60e-6, 90e-6)];
+    let p2_poly = m.polygons("pad_2_poly", vec![pad2_outer], vec![]);
+
+    // Also add an airbridge sheet at z = 25e-6 wholly inside homogeneous vacuum (rb == ra)
+    let bridge_rect = m.rect("bridge_rect", (-10e-6, -15e-6), (10e-6, 15e-6));
+
+    m.sheet("pad_1", p1_poly, 0.0);
+    m.sheet("jj_1", jj_poly, 0.0);
+    m.sheet("pad_2", p2_poly, 0.0);
+    m.sheet("bridge", bridge_rect, 25e-6);
+
+    // Note: pillar is painted with the same region name or a dielectric cap; let's use two regions substrate & vacuum,
+    // plus an auxiliary cut/feature or third region to split pad_2 into 2 overlay cells.
+    let vac_main = m.difference("vac_main", vac, &[pillar]);
+    let vac_union = m.union("vac_all", &[vac_main, pillar]);
+    m.overlay(&[("substrate", sub), ("vacuum", vac_union)]);
+    m.size("jj_edge_sz", Selector::parse("jj_1:edge").unwrap(), Some(Expr::Num(500e-9)), None, None);
+
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+
+    // Check Complement Interface Subtraction (SA) at z = 0:
+    // area("substrate|vacuum") + area("pad_1") + area("jj_1") + area("pad_2") == die_area (400 um x 400 um)
+    let die_area = 400e-6 * 400e-6;
+    let face_area = |name: &str| -> f64 { ev.faces().iter().filter(|f| f.name == name).map(|f| f.area).sum() };
+    let a_iface = face_area("substrate|vacuum");
+    let a_pad1 = face_area("pad_1");
+    let a_jj1 = face_area("jj_1");
+    let a_pad2 = face_area("pad_2");
+    let a_bridge = face_area("bridge");
+
+    assert!(a_pad1 > 0.0 && a_jj1 > 0.0 && a_pad2 > 0.0 && a_bridge > 0.0);
+    // pad_2 is 120 um x 80 um = 9.6e-9 m^2
+    assert!(close(a_pad2, 120e-6 * 80e-6), "a_pad2 = {a_pad2:e}");
+    // bridge is 20 um x 30 um = 6e-10 m^2 inside homogeneous vacuum (first == second == Some(1))
+    assert!(close(a_bridge, 20e-6 * 30e-6), "a_bridge = {a_bridge:e}");
+    for f in ev.faces().iter().filter(|f| f.name == "bridge") {
+        assert_eq!(f.first, Some(1));
+        assert_eq!(f.second, Some(1));
+    }
+    // pad_1 outer area has the 16 um^2 flux hole subtracted, but the 1 um^2 small hole filtered out
+    // Exact outer area of pad_1: rectangle 120x80 um + triangle/trapezoid deflection on [-60..60] with [-2..2] at +20 nm
+    let pad1_outer_exact = 120e-6 * 80e-6 + 0.5 * (120e-6 + 4e-6) * 20e-9;
+    let pad1_expected = pad1_outer_exact - 16e-12;
+    assert!(close(a_pad1, pad1_expected), "a_pad1 = {a_pad1:e} vs {pad1_expected:e}");
+    // jj_1 area: 4 um x (20 um - 20 nm)
+    let jj1_expected = 4e-6 * (20e-6 - 20e-9);
+    assert!(close(a_jj1, jj1_expected), "a_jj1 = {a_jj1:e} vs {jj1_expected:e}");
+    // Complement subtraction invariant to < 1e-12
+    let total_z0 = a_iface + a_pad1 + a_jj1 + a_pad2;
+    assert!(
+        (total_z0 - die_area).abs() < 1e-12 * die_area,
+        "complement subtraction mismatch: {total_z0:e} vs {die_area:e} (diff = {:e})",
+        (total_z0 - die_area).abs()
+    );
+
+    // Check `<sheet>:edge` selectors (both `name(pad_2:edge)` and bare `pad_2:edge`):
+    // Even though `pad_2` is split into multiple cap cells by `pillar` and `bridge`,
+    // `pad_2:edge` must select ONLY the exterior 1D perimeter of `pad_2` (2*(120 + 80) = 400 um),
+    // excluding internal fragment seams!
+    let p2_faces_count = ev.faces().iter().filter(|f| f.name == "pad_2").count();
+    assert!(p2_faces_count >= 2, "pad_2 should be split into multiple cap fragments by pillar/bridge");
+    let p2_edge_sel1 = ev.resolve(&Selector::parse("name(pad_2:edge)").unwrap()).unwrap().set;
+    let p2_edge_sel2 = ev.resolve(&Selector::parse("pad_2:edge").unwrap()).unwrap().set;
+    assert_eq!(p2_edge_sel1.kind, EntityKind::Edges);
+    assert_eq!(p2_edge_sel1, p2_edge_sel2);
+    let p2_perim: f64 = p2_edge_sel1.ids.iter().map(|&e| ev.edges3()[e as usize].length).sum();
+    assert!(close(p2_perim, 2.0 * (120e-6 + 80e-6)), "pad_2 exterior perimeter = {p2_perim:e}");
+
+    // And `bridge:edge` inside homogeneous vacuum also resolves cleanly to its 100 um perimeter
+    let br_edges = ev.resolve(&Selector::parse("bridge:edge").unwrap()).unwrap().set;
+    assert_eq!(br_edges.kind, EntityKind::Edges);
+    let br_perim: f64 = br_edges.ids.iter().map(|&e| ev.edges3()[e as usize].length).sum();
+    assert!(close(br_perim, 2.0 * (20e-6 + 30e-6)), "bridge exterior perimeter = {br_perim:e}");
+}

@@ -1,0 +1,15 @@
+# Niobium nitride (NbN) high-kinetic-inductance superconducting film.
+format = 1
+name = "nbn"
+description = "Niobium nitride (NbN) disordered superconducting thin film"
+source = { cite = "Compiled from the per-table sources below. Density 8470 kg/m^3 (APPROXIMATE stoichiometric delta-NbN density)", verified = "2026-11-21" }
+density = "8470 kg/m^3"
+
+[superconducting]
+tc = "14.5 K"
+gap_0 = "2.40 meV"
+lambda_L = "50.0 nm"
+xi_0 = "5.0 nm"
+mean_free_path = "0.5 nm"
+sigma_n = "5.0e5 S/m"
+source = { cite = "A. D. Semenov et al., Spectral design of superconducting nanowire single-photon detectors, Phys. Rev. B 80, 054510 (2009) and Z. Wang et al., Superconducting properties of NbN thin films, J. Appl. Phys. 79, 7837 (1996): NbN film T_c = 14.5 K, Delta(0) = 2.40 meV, lambda_L(0) = 50 nm, xi_0 = 5.0 nm, mean_free_path = 0.5 nm, sigma_n = 5.0e5 S/m (APPROXIMATE film values depending on stoichiometry and thickness)", doi = "10.1103/PhysRevB.80.054510", verified = "2026-11-21" }

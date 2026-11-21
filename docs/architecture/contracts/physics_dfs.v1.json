@@ -23,7 +23,7 @@
     },
     {
       "applies": "boundary",
-      "doc": "Zero potential (electrostatics).",
+      "doc": "Zero potential (electrostatics, magnetostatics).",
       "kind": "ground",
       "name": "Ground",
       "params": []
@@ -46,6 +46,25 @@
           "name": "density",
           "required": false,
           "unit": "C/m^2"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Named conductor terminal for capacitance matrix extraction (electrostatics).",
+      "kind": "terminal",
+      "name": "Terminal",
+      "params": [
+        {
+          "doc": "unique terminal identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Terminal name",
+          "name": "name",
+          "required": true,
+          "unit": ""
         }
       ]
     },
@@ -124,6 +143,160 @@
           "unit": "K"
         }
       ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Thin superconducting film with sheet kinetic inductance L_k,sq (magnetostatics).",
+      "kind": "london_sheet",
+      "name": "London superconducting sheet",
+      "params": [
+        {
+          "doc": "direct L_k,sq in H/sq when > 0",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Sheet kinetic inductance",
+          "name": "L_k_sq",
+          "required": false,
+          "unit": "H"
+        },
+        {
+          "doc": "material name from library when L_k_sq is 0",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Superconducting material",
+          "name": "material",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "film thickness for BCS evaluation",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Film thickness",
+          "name": "thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "temperature for BCS evaluation",
+          "kind": {
+            "default": 0.01,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Temperature",
+          "name": "temperature",
+          "required": false,
+          "unit": "K"
+        },
+        {
+          "doc": "thin-film kinetic inductance formula",
+          "kind": {
+            "default": "two_sided",
+            "options": [
+              "two_sided",
+              "kerr",
+              "thin_limit"
+            ],
+            "type": "choice"
+          },
+          "label": "Thin-film model",
+          "name": "film_model",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Current excitation port on a conductor or sheet (magnetostatics).",
+      "kind": "current_terminal",
+      "name": "Current terminal",
+      "params": [
+        {
+          "doc": "unique terminal identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Terminal name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "excitation current",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Terminal current",
+          "name": "current",
+          "required": false,
+          "unit": "A"
+        },
+        {
+          "doc": "unit direction vector of current flow",
+          "kind": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Current direction",
+          "name": "direction",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Superconducting loop or hole carrying trapped flux or circulatory stream excitation (magnetostatics).",
+      "kind": "flux_loop",
+      "name": "Fluxoid / hole loop",
+      "params": [
+        {
+          "doc": "unique loop identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Loop name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "fluxoid value in Webers",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Trapped flux",
+          "name": "flux_wb",
+          "required": false,
+          "unit": "Wb"
+        }
+      ]
     }
   ],
   "exports": [
@@ -138,6 +311,10 @@
     {
       "field": "dfs.E",
       "role": "electric_field"
+    },
+    {
+      "field": "dfs.B",
+      "role": "magnetic_field"
     }
   ],
   "fields": {
@@ -194,11 +371,29 @@
         "name": "q",
         "unit": "W/m^2"
       }
+    ],
+    "magnetostatic": [
+      {
+        "components": [],
+        "doc": "magnetic vector potential / stream magnitude",
+        "name": "A",
+        "unit": "T m"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "magnetic flux density (2D: x and z)",
+        "name": "B",
+        "unit": "T"
+      }
     ]
   },
   "id": "dfs",
   "imports": [],
-  "name": "Diffusion (electrostatics, heat transfer)",
+  "name": "Diffusion (electrostatics, heat transfer, magnetostatics)",
   "params": [
     {
       "doc": "auto: sparse direct for small systems, multigrid-preconditioned CG for large 3D ones; direct: Cholesky; iterative: AMG-CG",
@@ -279,6 +474,16 @@
         "heat_transient"
       ],
       "unit": "W/m^3"
+    },
+    {
+      "default": 1.0,
+      "kind": "scalar",
+      "label": "Relative permeability",
+      "name": "mu_r",
+      "needed_by": [
+        "magnetostatic"
+      ],
+      "unit": ""
     }
   ],
   "schema": {
@@ -320,7 +525,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "Zero potential (electrostatics).",
+              "description": "Zero potential (electrostatics, magnetostatics).",
               "properties": {
                 "kind": {
                   "const": "ground"
@@ -363,6 +568,38 @@
                     }
                   },
                   "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Named conductor terminal for capacitance matrix extraction (electrostatics).",
+              "properties": {
+                "kind": {
+                  "const": "terminal"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "default": "",
+                      "description": "Terminal name. unique terminal identifier",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
                   "type": "object"
                 }
               },
@@ -466,6 +703,152 @@
                 "kind"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Thin superconducting film with sheet kinetic inductance L_k,sq (magnetostatics).",
+              "properties": {
+                "kind": {
+                  "const": "london_sheet"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "L_k_sq": {
+                      "default": 0.0,
+                      "description": "Sheet kinetic inductance [H]. direct L_k,sq in H/sq when > 0",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "film_model": {
+                      "default": "two_sided",
+                      "description": "Thin-film model. thin-film kinetic inductance formula",
+                      "enum": [
+                        "two_sided",
+                        "kerr",
+                        "thin_limit"
+                      ],
+                      "type": "string"
+                    },
+                    "material": {
+                      "default": "",
+                      "description": "Superconducting material. material name from library when L_k_sq is 0",
+                      "type": "string"
+                    },
+                    "temperature": {
+                      "default": 0.01,
+                      "description": "Temperature [K]. temperature for BCS evaluation",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "thickness": {
+                      "default": 0.0,
+                      "description": "Film thickness [m]. film thickness for BCS evaluation",
+                      "minimum": 0.0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Current excitation port on a conductor or sheet (magnetostatics).",
+              "properties": {
+                "kind": {
+                  "const": "current_terminal"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "current": {
+                      "default": 1.0,
+                      "description": "Terminal current [A]. excitation current",
+                      "type": "number"
+                    },
+                    "direction": {
+                      "default": [
+                        1.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Current direction. unit direction vector of current flow",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Terminal name. unique terminal identifier",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Superconducting loop or hole carrying trapped flux or circulatory stream excitation (magnetostatics).",
+              "properties": {
+                "kind": {
+                  "const": "flux_loop"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "flux_wb": {
+                      "default": 0.0,
+                      "description": "Trapped flux [Wb]. fluxoid value in Webers",
+                      "type": "number"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Loop name. unique loop identifier",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -495,6 +878,10 @@
                 },
                 "k": {
                   "description": "Thermal conductivity [W/(m K)]",
+                  "type": "number"
+                },
+                "mu_r": {
+                  "description": "Relative permeability []",
                   "type": "number"
                 },
                 "rho": {
@@ -542,7 +929,7 @@
         "oneOf": [
           {
             "additionalProperties": false,
-            "description": "Potential and field of fixed potentials and charges: div(eps grad V) = -rho_v.",
+            "description": "Potential, field, and multi-terminal capacitance matrix: div(eps grad V) = -rho_v.",
             "properties": {
               "kind": {
                 "const": "electrostatic"
@@ -616,6 +1003,37 @@
               "kind"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Magnetic vector potential, London supercurrent sheets and multi-terminal inductance matrix.",
+            "properties": {
+              "kind": {
+                "const": "magnetostatic"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "formulation": {
+                    "default": "auto",
+                    "description": "Formulation. auto: cross_section in 2D, mixed_3d in 3D",
+                    "enum": [
+                      "auto",
+                      "cross_section",
+                      "planar_stream",
+                      "mixed_3d"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
           }
         ]
       }
@@ -625,13 +1043,13 @@
       "order",
       "study"
     ],
-    "title": "nyx problem for Diffusion (electrostatics, heat transfer) (dfs)",
+    "title": "nyx problem for Diffusion (electrostatics, heat transfer, magnetostatics) (dfs)",
     "type": "object"
   },
   "studies": [
     {
       "dims": "both",
-      "doc": "Potential and field of fixed potentials and charges: div(eps grad V) = -rho_v.",
+      "doc": "Potential, field, and multi-terminal capacitance matrix: div(eps grad V) = -rho_v.",
       "kind": "electrostatic",
       "name": "Electrostatics",
       "params": []
@@ -683,6 +1101,31 @@
           },
           "label": "Initial temperature",
           "name": "t0",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "both",
+      "doc": "Magnetic vector potential, London supercurrent sheets and multi-terminal inductance matrix.",
+      "kind": "magnetostatic",
+      "name": "Magnetostatics (London / inductance)",
+      "params": [
+        {
+          "doc": "auto: cross_section in 2D, mixed_3d in 3D",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "cross_section",
+              "planar_stream",
+              "mixed_3d"
+            ],
+            "type": "choice"
+          },
+          "label": "Formulation",
+          "name": "formulation",
           "required": false,
           "unit": ""
         }

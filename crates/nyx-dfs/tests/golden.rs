@@ -15,8 +15,12 @@ fn dir() -> std::path::PathBuf {
 
 /// Solves and checks that the cell fields of the fields stage reproduce the plot fields.
 fn checked(mesh: &Discretisation, p: &Problem) -> SolveResult {
-    let r = common::solve(mesh, p);
+    let mut r = common::solve(mesh, p);
     cell_fields_reproduce_the_plot_fields(mesh, &r);
+    if p.study == Study::Electrostatic {
+        assert!(nyx_physics::TlsMeta::of(&r).is_some(), "electrostatic result must carry TlsMeta");
+        r.scalars.retain(|(k, _)| k != nyx_physics::TLS_META_KEY);
+    }
     r
 }
 

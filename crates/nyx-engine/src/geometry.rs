@@ -184,7 +184,10 @@ pub fn names(list: &FeatureList) -> Result<Value, Error> {
         .eval(list, geom::eval::Tier::Complex)
         .map_err(|e| Error::invalid(format!("the geometry does not evaluate: {e}")))?;
     let labels = ev.label_map().map_err(|e| Error::invalid(format!("the geometry has no consistent names: {e}")))?;
-    let mut boundaries: Vec<&str> = labels.boundaries.iter().map(|b| b.name.as_str()).collect();
+    let mut boundaries: Vec<String> = labels.boundaries.iter().map(|b| b.name.clone()).collect();
+    for s in ev.complex().sheet_names() {
+        boundaries.push(format!("{s}:edge"));
+    }
     boundaries.sort_unstable();
     boundaries.dedup();
     let b = ev.bounds();

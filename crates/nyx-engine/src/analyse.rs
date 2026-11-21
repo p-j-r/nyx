@@ -4,13 +4,23 @@
 //! (`nyx-analysis`, ADR 56). The window draws the typed `ModeAnalysis`; the MCP server gets the same through `analyse`, as plain JSON.
 
 use crate::engine::Engine;
-use nyx_analysis::{Analysis, ModeAnalysis, PolarizationAnalysis};
+use nyx_analysis::{
+    Analysis, CapacitanceMatrixAnalysis, EprAnalysis, HamiltonianAnalysis, InductanceMatrixAnalysis, ModeAnalysis,
+    PolarizationAnalysis, TlsParticipationAnalysis,
+};
 use nyx_physics::Error;
 use serde_json::{json, Value};
 
 /// The analyses of this build.
 pub fn analyses() -> Vec<Box<dyn Analysis>> {
-    vec![Box::new(PolarizationAnalysis)]
+    vec![
+        Box::new(PolarizationAnalysis),
+        Box::new(CapacitanceMatrixAnalysis),
+        Box::new(InductanceMatrixAnalysis),
+        Box::new(EprAnalysis),
+        Box::new(HamiltonianAnalysis),
+        Box::new(TlsParticipationAnalysis),
+    ]
 }
 
 impl Engine {
@@ -57,6 +67,11 @@ impl Engine {
 
     /// Runs one analysis on the latest result of `physics` and returns its JSON.
     pub fn analyse(&self, analysis: &str, physics: &str) -> Result<Value, Error> {
+        self.analyse_with(analysis, physics, &Value::Null)
+    }
+
+    /// Runs one analysis on the latest result of `physics` with optional `params` and returns its JSON.
+    pub fn analyse_with(&self, analysis: &str, physics: &str, params: &Value) -> Result<Value, Error> {
         let all = analyses();
         let a = all.iter().find(|a| a.id() == analysis).ok_or_else(|| {
             Error::invalid(format!(
@@ -71,7 +86,7 @@ impl Engine {
                 result.study
             )));
         }
-        let mut v = a.run(model.mesh(), &result)?;
+        let mut v = a.run_with_params(model.mesh(), &result, params)?;
         if let Some(o) = v.as_object_mut() {
             o.insert("analysis".into(), json!(analysis));
             o.insert("physics".into(), json!(physics));

@@ -85,6 +85,7 @@ fn describe(m: &MaterialSpec) -> Value {
         "optical": m.optical.is_some(),
         "thermal": m.thermal.conductivity.is_some() || m.thermal.specific_heat.is_some() || m.thermal.expansion.is_some(),
         "electrical": m.electrical.permittivity.is_some() || m.electrical.permeability.is_some() || m.electrical.conductivity.is_some(),
+        "superconducting": m.superconducting.is_some(),
         "toml": m.to_toml(),
     })
 }
@@ -120,6 +121,7 @@ impl Engine {
                 "in_project": self.project.materials.keys().any(|k| k.eq_ignore_ascii_case(&m.name)),
                 "optical": m.optical.is_some(),
                 "elastic": m.elastic.is_some(),
+                "superconducting": m.superconducting.is_some(),
             }))
             .collect::<Vec<_>>()))
     }
@@ -152,5 +154,91 @@ impl Engine {
             return Err(Error::invalid(format!("the project carries no material '{name}'")));
         }
         Ok(())
+    }
+
+    /// Evaluates Zimmermann arbitrary-purity BCS complex conductivity and thin-film surface impedance.
+    pub fn bcs_surface_impedance(&self, args: &Value) -> Result<Value, Error> {
+        use femcore::material::{bcs_surface_impedance, surface_impedance_from_params, FilmModel, EV_TO_J};
+        let obj = args.as_object().ok_or_else(|| Error::invalid("`args` must be an object"))?;
+        let freq = obj
+            .get("freq")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| Error::invalid("`freq` (Hz) is required and must be a number"))?;
+        let thickness = obj
+            .get("thickness")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| Error::invalid("`thickness` (m) is required and must be a number"))?;
+        let temperature = obj.get("temperature").and_then(Value::as_f64).unwrap_or(0.01);
+        let film_str = obj.get("film_model").and_then(Value::as_str).unwrap_or("kerr");
+        let film_model = FilmModel::parse(film_str).ok_or_else(|| {
+            Error::invalid(format!("unknown film_model '{film_str}'; use two_sided, kerr or thin_limit"))
+        })?;
+        let opt_f64 = |k: &str| obj.get(k).and_then(Value::as_f64);
+        let gap_override = opt_f64("gap_0").or_else(|| opt_f64("gap_0_eV").map(|e| e * EV_TO_J));
+
+        let eval = if let Some(mat_name) = obj.get("material").and_then(Value::as_str) {
+            let lib = self.library()?;
+            let mat = lib.require(mat_name).map_err(|e| Error::invalid(e.to_string()))?;
+            let sc_base = mat
+                .superconducting
+                .as_ref()
+                .ok_or_else(|| Error::invalid(format!("material '{mat_name}' has no [superconducting] block")))?;
+            let has_override = ["tc", "gap_0", "gap_0_eV", "lambda_L", "xi_0", "mean_free_path", "sigma_n"]
+                .iter()
+                .any(|k| obj.contains_key(*k));
+            if has_override {
+                let mut sc = sc_base.clone();
+                if let Some(tc) = opt_f64("tc") {
+                    sc.tc = tc;
+                }
+                if let Some(g) = gap_override {
+                    sc.gap_0 = Some(g);
+                }
+                if let Some(ll) = opt_f64("lambda_L") {
+                    sc.lambda_l = Some(ll);
+                }
+                if let Some(xi) = opt_f64("xi_0") {
+                    sc.xi_0 = Some(xi);
+                }
+                if let Some(mfp) = opt_f64("mean_free_path") {
+                    sc.mean_free_path = Some(mfp);
+                }
+                if let Some(sn) = opt_f64("sigma_n") {
+                    sc.sigma_n = Some(sn);
+                }
+                bcs_surface_impedance(&sc, freq, temperature, thickness, film_model).map_err(Error::invalid)?
+            } else {
+                bcs_surface_impedance(sc_base, freq, temperature, thickness, film_model).map_err(Error::invalid)?
+            }
+        } else {
+            let tc = opt_f64("tc")
+                .ok_or_else(|| Error::invalid("provide either `material` or `tc` (K) for bcs_surface_impedance"))?;
+            surface_impedance_from_params(
+                tc,
+                gap_override,
+                opt_f64("lambda_L"),
+                opt_f64("xi_0"),
+                opt_f64("mean_free_path"),
+                opt_f64("sigma_n"),
+                freq,
+                temperature,
+                thickness,
+                film_model,
+            )
+            .map_err(Error::invalid)?
+        };
+        Ok(json!({
+            "sigma_re": eval.sigma.re,
+            "sigma_im": eval.sigma.im,
+            "sigma_n": eval.sigma_n,
+            "delta_J": eval.delta_j,
+            "delta_meV": eval.delta_j / (EV_TO_J * 1e-3),
+            "lambda_eff": eval.lambda_eff,
+            "R_s": eval.r_s,
+            "L_k_sq": eval.l_k_sq,
+            "L_eff": eval.l_eff,
+            "G_eff": eval.g_eff,
+            "film_model": film_model.as_str(),
+        }))
     }
 }

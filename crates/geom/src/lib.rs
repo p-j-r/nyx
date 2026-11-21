@@ -10,6 +10,7 @@ pub mod labels;
 pub mod math;
 pub mod model;
 pub mod planar;
+pub mod poly_batch;
 pub mod prim;
 pub mod print;
 pub mod query;

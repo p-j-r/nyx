@@ -1,8 +1,8 @@
-# Aluminium: optical data only (Lorentz-Drude fit of Rakic et al. 1998).
+# Aluminium: optical (Lorentz-Drude fit of Rakic et al. 1998) and superconducting BCS parameters.
 format = 1
 name = "aluminium"
-description = "Aluminium, evaporated film, room temperature (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Aluminium, evaporated film (room-temperature optical and cryogenic superconducting data)"
+source = { cite = "Compiled from the per-table sources below (optical data from Rakic et al. 1998; superconducting BCS parameters from Tinkham 1996 and Kittel 2005)", verified = "2026-11-21" }
 
 [optical]
 wavelength_unit = "um"
@@ -19,3 +19,11 @@ oscillators = [
   [0.030, 3.473, 3.382],
 ]
 source = { cite = "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them", url = "https://refractiveindex.info/?shelf=main&book=Al&page=Rakic-LD", doi = "10.1364/AO.37.005271", verified = "2026-11-04" }
+
+[superconducting]
+tc = "1.20 K"
+gap_0 = "180 ueV"
+lambda_L = "16.0 nm"
+xi_0 = "1600.0 nm"
+sigma_n = "3.8e7 S/m"
+source = { cite = "M. Tinkham, Introduction to Superconductivity, 2nd ed. (McGraw-Hill, 1996) and C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005): Al T_c = 1.20 K, Delta(0) = 180 ueV, London depth lambda_L(0) = 16 nm, BCS coherence length xi_0 = 1600 nm; APPROXIMATE thin-film cryogenic normal conductivity sigma_n = 3.8e7 S/m", verified = "2026-11-21" }

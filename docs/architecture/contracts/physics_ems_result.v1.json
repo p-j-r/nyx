@@ -52,7 +52,10 @@
         "cell_fields": [
           "Ex",
           "Ey",
-          "Ez"
+          "Ez",
+          "Hx",
+          "Hy",
+          "Hz"
         ],
         "fields": [
           {
@@ -84,7 +87,10 @@
         "cell_fields": [
           "Ex",
           "Ey",
-          "Ez"
+          "Ez",
+          "Hx",
+          "Hy",
+          "Hz"
         ],
         "fields": [
           {

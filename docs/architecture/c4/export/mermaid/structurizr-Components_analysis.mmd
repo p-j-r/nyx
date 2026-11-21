@@ -7,37 +7,48 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 71 ["nyx-analysis"]
-        style 71 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 75 ["nyx-analysis"]
+        style 75 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        72["<div style='font-weight: bold'>Analysis API</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The entry points an engine<br />calls: an analysis is a<br />function of a SolveResult and<br />its mesh.</div>"]
-        style 72 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        73["<div style='font-weight: bold'>Field samples</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The modes of a SolveResult as<br />weighted samples of the<br />field, which is what the<br />polarization analysis<br />integrates.</div>"]
-        style 73 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        74["<div style='font-weight: bold'>Polarization</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Stokes parameters, Poincare<br />sphere and the classification<br />of an optical mode.</div>"]
-        style 74 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        75["<div style='font-weight: bold'>Mode report</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One report per mode, a table,<br />the Poincare picture and the<br />degenerate groups.</div>"]
-        style 75 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        76["<div style='font-weight: bold'>Mode figures</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The cross-section of a<br />result, the phase, sign and<br />scale of a mode, and the<br />figure of its modes (items<br />drawn as SVG or by a small<br />software rasteriser as PNG);<br />no physics is named.</div>"]
+        76["<div style='font-weight: bold'>Analysis API</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The entry points an engine<br />calls: an analysis is a<br />function of a SolveResult and<br />its mesh.</div>"]
         style 76 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        77["<div style='font-weight: bold'>Capacitance and inductance matrices</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Maxwell/mutual capacitance<br />and magnetostatic inductance<br />matrix extraction from<br />multi-RHS dfs results.</div>"]
+        style 77 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        78["<div style='font-weight: bold'>cQED quantization and TLS participation</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>KICQ energy participation<br />ratios, normal-Fock and<br />hierarchical Craig-Bampton<br />Josephson quantization, and<br />edge-regularized 3D TLS<br />participation ratios.</div>"]
+        style 78 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        79["<div style='font-weight: bold'>Field samples</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The modes of a SolveResult as<br />weighted samples of the<br />field, which is what the<br />polarization analysis<br />integrates.</div>"]
+        style 79 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        80["<div style='font-weight: bold'>Polarization</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Stokes parameters, Poincare<br />sphere and the classification<br />of an optical mode.</div>"]
+        style 80 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        81["<div style='font-weight: bold'>Mode report</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>One report per mode, a table,<br />the Poincare picture and the<br />degenerate groups.</div>"]
+        style 81 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        82["<div style='font-weight: bold'>Mode figures</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The cross-section of a<br />result, the phase, sign and<br />scale of a mode, and the<br />figure of its modes (items<br />drawn as SVG or by a small<br />software rasteriser as PNG);<br />no physics is named.</div>"]
+        style 82 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
       41["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
       style 41 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      86["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 86 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      92["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 92 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->86
-    72-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    72-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->75
-    72-. "<div>uses samples</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
-    76-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
+    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->92
     76-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    75-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
-    73-. "<div>uses femcore: fem, fields +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    73-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    73-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->75
-    73-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
+    76-. "<div>uses capacitance</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
+    76-. "<div>uses tls</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    76-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
+    76-. "<div>uses samples</div><div style='font-size: 70%'>[Rust paths]</div>" .->79
+    77-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    77-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
+    78-. "<div>uses femcore: fem,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    78-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    78-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
+    82-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    82-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    81-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->80
+    79-. "<div>uses femcore: fem, fields +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    79-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    79-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
+    79-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->80
 
   end

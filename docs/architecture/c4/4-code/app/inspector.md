@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 > The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 2523 lines.
+**Size:** 3 files, 2536 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/app/src/forms.rs` | 139 |  |
-| `crates/app/src/geomui.rs` | 984 |  |
+| `crates/app/src/geomui.rs` | 997 |  |
 | `crates/app/src/tabs.rs` | 1400 |  |
 
 ## What it uses
@@ -88,7 +88,7 @@ classDiagram
 | fn | `fill_required` | `forms.rs:25` | `pub fn fill_required(descs: &[ParamDesc], value: &mut Value)` —  Makes `value` an object holding every required parameter (with its default): a study or condition that is created must be complete. |
 | fn | `param_form` | `forms.rs:47` | `pub fn param_form(ui: &mut Ui, salt: &str, descs: &[ParamDesc], value: &mut Value) -> bool` —  Draws one row per parameter and writes what the person changes into `value` (an object; `Null` becomes one). A parameter that was not |
 | struct | `State` | `geomui.rs:21` | fields: `preview`, `last_added` —  What the editor remembers between frames: the last list it evaluated and the outcome. |
-| fn | `show` | `geomui.rs:658` | `pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool` —  The model editor. `list` is edited in place; the return value says whether it changed. |
+| fn | `show` | `geomui.rs:671` | `pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool` —  The model editor. `list` is edited in place; the return value says whether it changed. |
 | fn | `fmt_num` | `tabs.rs:20` | `pub fn fmt_num(n: f64) -> String` |
 | fn | `parse_si_f64` | `tabs.rs:33` | `pub fn parse_si_f64(s: &str) -> Option<f64>` —  Parses a float or scientific-notation number, with optional SI unit suffixes (`nm`, `um`, `µm`, `mm`, `THz`, `GPa`, ...). |
 | fn | `select_all_text` | `tabs.rs:75` | `pub fn select_all_text(ctx: &egui::Context, id: egui::Id, text: &str)` |

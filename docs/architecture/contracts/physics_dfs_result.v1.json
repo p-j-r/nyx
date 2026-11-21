@@ -6,7 +6,8 @@
       "max |E| (V/m)",
       "V min (V)",
       "V max (V)",
-      "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)"
+      "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)",
+      "tls metadata"
     ],
     "solutions": [
       {

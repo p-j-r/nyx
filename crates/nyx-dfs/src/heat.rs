@@ -232,7 +232,9 @@ pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem
             }
             Ok(HeatStates { times, temps: out, log })
         }
-        Study::Electrostatic => Err("heat transfer supports the stationary and transient studies".into()),
+        Study::Electrostatic | Study::Magnetostatic { .. } => {
+            Err("heat transfer supports the stationary and transient studies".into())
+        }
     }
 }
 

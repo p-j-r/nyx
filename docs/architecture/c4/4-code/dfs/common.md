@@ -26,6 +26,7 @@ C4 level 4 (code) of the component **Shared helpers** (`dfs.common`) in the cont
 |---|---|---|
 | [Electrostatics kernel](./electro.md) | common | cell_gradient, components, minmax, norm_of, plane_tensors |
 | [Heat kernel](./heat.md) | common | cell_tensor_gradient, components, minmax, plane_tensors |
+| [Magnetostatics kernel](./magneto.md) | common | cell_gradient, components, minmax, norm_of |
 
 ## Class diagram
 

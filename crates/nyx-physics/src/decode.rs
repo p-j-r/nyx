@@ -32,10 +32,25 @@ impl<'a> Params<'a> {
     }
 
     fn given(&self, name: &str) -> Option<&Value> {
-        self.value.get(name)
+        self.value.get(name).filter(|v| !v.is_null())
     }
 
-    /// Whether the parameter was given in the problem (not defaulted).
+    /// True if the parameter key was explicitly passed with JSON `null`.
+    pub fn is_null(&self, name: &str) -> bool {
+        self.value.get(name).is_some_and(Value::is_null)
+    }
+
+    /// Optional numeric parameter: returns `None` when explicitly passed as `null`,
+    /// otherwise the given value or the descriptor default.
+    pub fn optional_number(&self, name: &str) -> Option<f64> {
+        if self.is_null(name) {
+            None
+        } else {
+            Some(self.number(name))
+        }
+    }
+
+    /// Whether the parameter was given with a non-null value in the problem (not defaulted).
     pub fn has(&self, name: &str) -> bool {
         self.given(name).is_some()
     }
@@ -117,6 +132,17 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
         }
     }
     Ok(m)
+}
+
+/// Resolves each material assignment region key in `spec.materials` to its domain labels.
+pub fn domain_names_by_label(spec: &ProblemSpec, ctx: &Ctx) -> Result<std::collections::BTreeMap<i32, String>, Error> {
+    let mut out = std::collections::BTreeMap::new();
+    for region in spec.materials.keys() {
+        for l in ctx.resolver.domains(region)? {
+            out.entry(l).or_insert_with(|| region.clone());
+        }
+    }
+    Ok(out)
 }
 
 fn named(

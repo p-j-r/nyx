@@ -55,6 +55,9 @@ fn every_library_file_and_table_has_a_source() {
                 }
             }
         }
+        if let Some(sc) = &m.superconducting {
+            check_sources(&format!("{name}: [superconducting]"), &sc.source);
+        }
     }
 }
 
@@ -68,6 +71,7 @@ fn sources_survive_writing_and_reading() {
         assert_eq!(back.elastic.as_ref().map(|e| e.source.clone()), m.elastic.as_ref().map(|e| e.source.clone()), "{name}");
         assert_eq!(back.thermal.source, m.thermal.source, "{name}");
         assert_eq!(back.optical.as_ref().map(|o| o.source.clone()), m.optical.as_ref().map(|o| o.source.clone()), "{name}");
+        assert_eq!(back.superconducting.as_ref().map(|s| s.source.clone()), m.superconducting.as_ref().map(|s| s.source.clone()), "{name}");
     }
 }
 

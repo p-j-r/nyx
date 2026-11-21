@@ -25,12 +25,16 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: Analysis API](../analysis/api.md) | result | SolveResult |
+| [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | result | SolveResult |
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | result | CellField, Solution, SolveResult |
 | [analysis: Mode figures](../analysis/figures.md) | result | Scalar, Solution, SolveResult |
 | [analysis: Field samples](../analysis/samples.md) | frame, result | CellField, FieldFrame, Solution, SolveResult |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [dfs: Heat kernel](../dfs/heat.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: 3D cavity kernel](../ems/cavity.md) | frame, result | Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | frame, result | Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Mode kernel](../ems/modes.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Complex-mode kernel](../ems/modescx.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Optical mode sets](../ems/optical.md) | frame | FieldFrame |
@@ -40,6 +44,7 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [engine: Meshing seam](../engine/meshing.md) | result | SolveResult |
 | [engine: Results files](../engine/resultsIO.md) | result | CellField, Field, Scalar, Solution, SolveResult |
 | [engine: Store link](../engine/storeLink.md) | result | Scalar, SolveResult |
+| [cQED result payloads](./cqed.md) | result | Scalar, SolveResult |
 | [Problem envelope](./envelope.md) | result | SolveResult |
 | [Test support](./testsupport.md) | result | Scalar, SolveResult |
 | [Physics trait and registry](./trait.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_back +1 |

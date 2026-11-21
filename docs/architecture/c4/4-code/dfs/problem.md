@@ -4,21 +4,21 @@ C4 level 4 (code) of the component **Typed problem** (`dfs.problem`) in the cont
 
 > The typed dfs problem the kernels read, decoded from the ProblemSpec envelope.
 
-**Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md)  
-**Size:** 1 file, 197 lines.
+**Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md)  
+**Size:** 1 file, 314 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/problem.rs` | 197 |  |
+| `crates/nyx-dfs/src/problem.rs` | 314 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | props | LinearSolver, Materials |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | decode, error, physics, spec | Ctx, Error, Params, Physics, ProblemSpec, materials_by_label, resolve_conditions |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | material, material::bcs, props | FilmModel, LinearSolver, Materials, bcs_surface_impedance |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | decode, error, physics, spec | Ctx, Error, Params, Physics, ProblemSpec, domain_names_by_label, materials_by_label, resolve_conditions |
 | [Physics adapter](./adapter.md) | crate root | Dfs |
 
 ## Used by
@@ -28,6 +28,7 @@ C4 level 4 (code) of the component **Typed problem** (`dfs.problem`) in the cont
 | [Physics adapter](./adapter.md) | problem | Bc, BcKind, Problem, Study, decode |
 | [Electrostatics kernel](./electro.md) | problem | BcKind, Problem |
 | [Heat kernel](./heat.md) | problem | BcKind, Problem, Study |
+| [Magnetostatics kernel](./magneto.md) | problem | BcKind, Problem, Study |
 
 ## Class diagram
 
@@ -40,10 +41,17 @@ classDiagram
       Potential
       Ground
       SurfaceCharge
+      Terminal
       Temperature
       Flux
       Convection
+      LondonSheet
+      CurrentTerminal
+      FluxLoop
       +name() str
+      +is_electrostatic() bool
+      +is_heat() bool
+      +is_magnetostatic() bool
   }
   class Bc {
       <<struct>>
@@ -55,6 +63,7 @@ classDiagram
       Electrostatic
       HeatStationary
       HeatTransient
+      Magnetostatic
       +kind() str
   }
   class Problem {
@@ -62,6 +71,7 @@ classDiagram
       +order usize
       +study Study
       +materials Materials
+      +domain_names BTreeMap
       +bcs Vec~Bc~
       +solver LinearSolver
       +new(study, order) Problem
@@ -80,12 +90,15 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| enum | `BcKind` | `problem.rs:14` | variants: `Potential`, `Ground`, `SurfaceCharge`, `Temperature`, `Flux`, `Convection` |
-| struct | `Bc` | `problem.rs:47` | fields: `labels`, `kind` —  A condition on boundary numbers of the mesh. |
-| enum | `Study` | `problem.rs:53` | variants: `Electrostatic`, `HeatStationary`, `HeatTransient` |
-| struct | `Problem` | `problem.rs:76` | fields: `order`, `study`, `materials`, `bcs`, `solver` |
-| fn | `decode` | `problem.rs:140` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
-| fn | `BcKind::name` | `problem.rs:29` | `pub fn name(&self) -> &'static str` |
-| fn | `Study::kind` | `problem.rs:66` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
-| fn | `Problem::new` | `problem.rs:86` | `pub fn new(study: Study, order: usize) -> Problem` |
-| fn | `Problem::check_finite` | `problem.rs:91` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field. |
+| enum | `BcKind` | `problem.rs:16` | variants: `Potential`, `Ground`, `SurfaceCharge`, `Terminal`, `Temperature`, `Flux`, `Convection`, `LondonSheet`, `CurrentTerminal`, `FluxLoop` |
+| struct | `Bc` | `problem.rs:81` | fields: `labels`, `kind` —  A condition on boundary numbers of the mesh. |
+| enum | `Study` | `problem.rs:87` | variants: `Electrostatic`, `HeatStationary`, `HeatTransient`, `Magnetostatic` |
+| struct | `Problem` | `problem.rs:115` | fields: `order`, `study`, `materials`, `domain_names`, `bcs`, `solver` |
+| fn | `decode` | `problem.rs:192` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
+| fn | `BcKind::name` | `problem.rs:48` | `pub fn name(&self) -> &'static str` |
+| fn | `BcKind::is_electrostatic` | `problem.rs:63` | `pub fn is_electrostatic(&self) -> bool` |
+| fn | `BcKind::is_heat` | `problem.rs:67` | `pub fn is_heat(&self) -> bool` |
+| fn | `BcKind::is_magnetostatic` | `problem.rs:71` | `pub fn is_magnetostatic(&self) -> bool` |
+| fn | `Study::kind` | `problem.rs:104` | `pub fn kind(&self) -> &'static str` —  The `study.kind` of the envelope. |
+| fn | `Problem::new` | `problem.rs:126` | `pub fn new(study: Study, order: usize) -> Problem` |
+| fn | `Problem::check_finite` | `problem.rs:138` | `pub fn check_finite(&self) -> Result<(), String>` —  Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field. |

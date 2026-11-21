@@ -2,16 +2,16 @@
 
 C4 level 4 (code) of the component **3D cavity kernel** (`ems.cavity`) in the container **nyx-ems** (crate `nyx_ems`). [Component view of the container](../../3-components/ems.md) · [All code pages](../README.md)
 
-> Electromagnetic eigenmodes of 3D cavities and resonators.
+> Electromagnetic eigenmodes of 3D cavities and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export.
 
-**Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md)  
-**Size:** 1 file, 791 lines.
+**Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
+**Size:** 1 file, 1145 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/cavity.rs` | 791 |  |
+| `crates/nyx-ems/src/cavity.rs` | 1145 |  |
 
 ## What it uses
 
@@ -19,6 +19,7 @@ C4 level 4 (code) of the component **3D cavity kernel** (`ems.cavity`) in the co
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fields, linalg::amg_elastic, linalg::arnoldi_real, linalg::csr, linalg::csr::assembly, linalg::driver, par +5 | C, CCoo, CCsr, CellFields, Coo, DirectSolver, EigOpts, Match, RCsr, Reduction +17 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, frame, result | Discretisation, Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_of |
+| [Thin-film IBC and Josephson ROM](./ibc.md) | ibc, rom | AssembledJjPort, MU0, SheetCellKind, assemble_ibc_and_jj_3d, build_circuit_rom, build_tls_meta, compute_mode_energy_and_scale, reduce_real_csr, reduce_real_vec, ruiz_equilibrate +1 |
 | [Mode kernel](./modes.md) | crate root | C0 |
 | [Typed problem](./problem.md) | problem | Problem, Study |
 
@@ -27,6 +28,8 @@ C4 level 4 (code) of the component **3D cavity kernel** (`ems.cavity`) in the co
 | Component | Modules | Items |
 |---|---|---|
 | [Physics adapter](./adapter.md) | cavity | EmwAssembly, EmwSolve, assemble_emw_eigen, emw_eigen_fields, solve_cavity, solve_emw_modes |
+| [Driven frequency-domain and PROM](./driven.md) | cavity | Ned3, assemble_maxwell, basis3 |
+| [Thin-film IBC and Josephson ROM](./ibc.md) | cavity | EmwAssembly, Ned3, basis3, gradient_full |
 
 ## Class diagram
 
@@ -59,7 +62,7 @@ classDiagram
       +kc CCsr
       +mc CCsr
       +g_red CCsr
-      +more_5_fields
+      +more_15_fields
   }
   class EmwSolve {
       <<struct>>
@@ -72,6 +75,7 @@ classDiagram
       <<module cavity.rs>>
       +basis3(order, lam, g, gid, w, curl)
       +assemble_maxwell(mesh, ned, eps, mu_inv) tuple
+      ~gradient_full(mesh, ned) Csr
       +solve_cavity(mesh, problem) Result
       +assemble_emw_eigen(mesh, problem) Result
       +solve_emw_modes(asm) Result
@@ -85,19 +89,20 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Ned3` | `cavity.rs:40` | fields: `order`, `n_edges`, `n_faces`, `faces`, `cell_dofs`, `vkey` —  Global numbering of the degrees of freedom. |
-| fn | `basis3` | `cavity.rs:168` | `pub fn basis3( order: usize, lam: &[f64; 4], g: &[[f64; 3]; 4], gid: &[u32; 4], w: &mut Vec<[f64; 3]>, curl: &mut Vec<[f64; 3]>, )` —  Basis functions and their curls at the barycentric point `lam` of a tetrahedron with vertex |
-| const | `CURVED_QUAD_DEGREE` | `cavity.rs:233` | `usize` —  Degree of the quadrature rule on cells with a curved edge (ADR 82): the integrand is rational in the barycentric coordinates there. |
-| fn | `assemble_maxwell` | `cavity.rs:277` | `pub fn assemble_maxwell(mesh: &Discretisation, ned: &Ned3, eps: &[C3], mu_inv: &[[C; 3]]) -> (CCsr, CCsr)` —  The curl-curl matrix `K` (weights `1/mu` per axis) and the mass matrix `M` (permittivity tensor) |
-| fn | `solve_cavity` | `cavity.rs:424` | `pub fn solve_cavity(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  Eigenfrequencies of the cavity for a `Cavity` study: the three stages in order. The result carries the complex field of every mode and |
-| struct | `EmwAssembly` | `cavity.rs:435` | fields: `order`, `n`, `nred`, `ned`, `red`, `kc`, `mc`, `g_red`, `g_h`, `f0`, `sigma`, `n_modes`, ... —  Stage 1 of the 3D EM eigenfrequency kernel: Nedelec numbering, `K` and `M` (PML stretch, anisotropy) reduced by the PEC |
-| struct | `EmwSolve` | `cavity.rs:452` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: complex frequencies (Hz) with the index of their reduced vector, sorted by real part. |
-| fn | `assemble_emw_eigen` | `cavity.rs:459` | `pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<EmwAssembly, String>` |
-| fn | `solve_emw_modes` | `cavity.rs:587` | `pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String>` —  Stage 2: the eigenpairs `K x = k0^2 M x` nearest the shift with the gradients projected out (real symmetric route with |
-| fn | `emw_eigen_fields` | `cavity.rs:660` | `pub fn emw_eigen_fields( mesh: &Discretisation, problem: &Problem, asm: &EmwAssembly, solved: &EmwSolve, ) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex E of every mode at the quadratic nodes, the frequencies and Q, and the frame of the |
-| fn | `Ned3::new` | `cavity.rs:62` | `pub fn new(mesh: &Discretisation, order: usize, vkey: Vec<u32>) -> Ned3` |
-| fn | `Ned3::n_dofs` | `cavity.rs:103` | `pub fn n_dofs(&self) -> usize` |
-| fn | `Ned3::keys` | `cavity.rs:112` | `pub fn keys(&self, mesh: &Discretisation, ci: usize) -> [u32` —  Ordering keys of the vertices of cell `ci`. |
-| fn | `Ned3::face_dofs` | `cavity.rs:118` | `pub fn face_dofs(&self, v: [u32; 3]) -> [usize` —  Dofs of the functions of face `v` (sorted triple of vertex numbers). |
-| fn | `Ned3::nb` | `cavity.rs:123` | `pub fn nb(&self) -> usize` |
-| fn | `Ned3::boundary_dofs` | `cavity.rs:133` | `pub fn boundary_dofs(&self, mesh: &Discretisation, v: [u32; 3]) -> Vec<usize>` —  Dofs of the tangential trace on a boundary face with vertices `v`: the face functions and the |
+| struct | `Ned3` | `cavity.rs:48` | fields: `order`, `n_edges`, `n_faces`, `faces`, `cell_dofs`, `vkey` —  Global numbering of the degrees of freedom. |
+| fn | `basis3` | `cavity.rs:176` | `pub fn basis3( order: usize, lam: &[f64; 4], g: &[[f64; 3]; 4], gid: &[u32; 4], w: &mut Vec<[f64; 3]>, curl: &mut Vec<[f64; 3]>, )` —  Basis functions and their curls at the barycentric point `lam` of a tetrahedron with vertex |
+| const | `CURVED_QUAD_DEGREE` | `cavity.rs:241` | `usize` —  Degree of the quadrature rule on cells with a curved edge (ADR 82): the integrand is rational in the barycentric coordinates there. |
+| fn | `assemble_maxwell` | `cavity.rs:285` | `pub fn assemble_maxwell(mesh: &Discretisation, ned: &Ned3, eps: &[C3], mu_inv: &[[C; 3]]) -> (CCsr, CCsr)` —  The curl-curl matrix `K` (weights `1/mu` per axis) and the mass matrix `M` (permittivity tensor) |
+| fn | `gradient_full` | `cavity.rs:336` | `pub(crate) fn gradient_full(mesh: &Discretisation, ned: &Ned3) -> Csr` —  The discrete gradient over all nodes: one column per vertex (the Whitney edge coefficients |
+| fn | `solve_cavity` | `cavity.rs:432` | `pub fn solve_cavity(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  Eigenfrequencies of the cavity for a `Cavity` study: the three stages in order. The result carries the complex field of every mode and |
+| struct | `EmwAssembly` | `cavity.rs:443` | fields: `order`, `n`, `nred`, `ned`, `red`, `kc`, `mc`, `g_red`, `g_h`, `f0`, `sigma`, `n_modes`, ... —  Stage 1 of the 3D EM eigenfrequency kernel: Nedelec numbering, `K` and `M` (PML stretch, anisotropy, IBC, JJ) reduced by the PEC |
+| struct | `EmwSolve` | `cavity.rs:470` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: complex frequencies (Hz) with the index of their reduced vector, sorted by real part. |
+| fn | `assemble_emw_eigen` | `cavity.rs:477` | `pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<EmwAssembly, String>` |
+| fn | `solve_emw_modes` | `cavity.rs:771` | `pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String>` —  Stage 2: the eigenpairs `K x = k0^2 M x` nearest the shift with the gradients projected out (real symmetric route with |
+| fn | `emw_eigen_fields` | `cavity.rs:927` | `pub fn emw_eigen_fields( mesh: &Discretisation, problem: &Problem, asm: &EmwAssembly, solved: &EmwSolve, ) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex E and H (plus sheet K when sheets are present) of every mode at the quadratic nodes, |
+| fn | `Ned3::new` | `cavity.rs:70` | `pub fn new(mesh: &Discretisation, order: usize, vkey: Vec<u32>) -> Ned3` |
+| fn | `Ned3::n_dofs` | `cavity.rs:111` | `pub fn n_dofs(&self) -> usize` |
+| fn | `Ned3::keys` | `cavity.rs:120` | `pub fn keys(&self, mesh: &Discretisation, ci: usize) -> [u32` —  Ordering keys of the vertices of cell `ci`. |
+| fn | `Ned3::face_dofs` | `cavity.rs:126` | `pub fn face_dofs(&self, v: [u32; 3]) -> [usize` —  Dofs of the functions of face `v` (sorted triple of vertex numbers). |
+| fn | `Ned3::nb` | `cavity.rs:131` | `pub fn nb(&self) -> usize` |
+| fn | `Ned3::boundary_dofs` | `cavity.rs:141` | `pub fn boundary_dofs(&self, mesh: &Discretisation, v: [u32; 3]) -> Vec<usize>` —  Dofs of the tangential trace on a boundary face with vertices `v`: the face functions and the |

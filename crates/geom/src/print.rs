@@ -73,6 +73,7 @@ pub fn to_rust(l: &FeatureList) -> String {
             Op::Extrude { profile, axis: Axis::Y, from: z0, to: z1, taper_deg: None } => {
                 format!("m.extrude({n}, f{profile}, {}, {})", e(z0), e(z1))
             }
+            Op::Sheet { input, z } => format!("m.sheet({n}, f{input}, {})", e(z)),
             Op::Ellipse { center, radii, angle_deg } => {
                 format!("m.ellipse({n}, {}, {}, {})", t2(center), t2(radii), e(angle_deg))
             }

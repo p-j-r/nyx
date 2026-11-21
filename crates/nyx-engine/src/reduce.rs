@@ -109,6 +109,15 @@ struct Leaf {
     unit: String,
 }
 
+/// How the side of an interior boundary or sheet is chosen in `integrate`.
+enum SideSpec {
+    /// Domain label(s) of the region on one side of the interface/sheet.
+    Domains(Vec<i32>),
+    /// Signed wafer axis `(axis: 0=x, 1=y, 2=z, positive: true for +axis side, false for -axis side)`
+    /// for a sheet embedded inside a single homogeneous region (`rb == ra`).
+    Axis(usize, bool),
+}
+
 /// A face of a boundary: its vertices (the first `dim` used) and the cells next to it as (cell, local number of its vertex opposite the face).
 struct Face {
     v: [u32; 3],
@@ -1034,7 +1043,7 @@ impl Prep {
     /// carries none and reads `a|b` with `a` and `b` regions, the faces are those shared by a cell of `a` and a cell of `b`, which is what the
     /// geometry names `a|b`. A face with one cell is read there. A face with two cells is read in the one whose domain is in `side`; with no
     /// `side`, or with both cells in it, that is an error, because the fields and the materials are not continuous across an interface.
-    fn boundary_faces(&self, labels: &[i32], side: Option<&[i32]>, name: &str) -> Result<Vec<Face>, Error> {
+    fn boundary_faces(&self, labels: &[i32], side: Option<&SideSpec>, name: &str) -> Result<Vec<Face>, Error> {
         use std::collections::HashMap;
         let dim = self.mesh.dim;
         let key = |v: &[u32]| -> [u32; 3] {
@@ -1122,8 +1131,33 @@ impl Prep {
                         near()
                     ))
                 }
-                Some(s) => {
-                    let pick: Vec<(usize, usize)> = f.cells.iter().copied().filter(|(c, _)| s.contains(&self.mesh.cell_labels[*c])).collect();
+                Some(SideSpec::Axis(ax, pos)) => {
+                    // A cell on the +ax side of the facet has its outward normal across the facet pointing in -ax (n[ax] < 0).
+                    let want_sign = if *pos { -1.0 } else { 1.0 };
+                    let pick: Vec<(usize, usize)> = f
+                        .cells
+                        .iter()
+                        .copied()
+                        .filter(|&(c, opp)| self.face_geometry(&f.v, c, opp).1[*ax] * want_sign > 1e-6)
+                        .collect();
+                    match pick.as_slice() {
+                        [one, ..] => *one,
+                        [] => {
+                            return invalid(format!(
+                                "the boundary '{name}' has no adjacent cell on the `{}{}` side",
+                                if *pos { "+" } else { "-" },
+                                ["x", "y", "z"][*ax]
+                            ))
+                        }
+                    }
+                }
+                Some(SideSpec::Domains(s)) => {
+                    let pick: Vec<(usize, usize)> = f
+                        .cells
+                        .iter()
+                        .copied()
+                        .filter(|(c, _)| s.contains(&self.mesh.cell_labels[*c]))
+                        .collect();
                     match pick.as_slice() {
                         [one] => *one,
                         [] => {
@@ -1131,6 +1165,14 @@ impl Prep {
                                 "the boundary '{name}' has a face next to {} only, not to the `side` region you gave",
                                 near()
                             ))
+                        }
+                        [a, b] if self.mesh.cell_labels[a.0] == self.mesh.cell_labels[b.0] => {
+                            // Sheet embedded inside a single homogeneous region (rb == ra): pick the -z cell (outward normal +z)
+                            if self.face_geometry(&f.v, a.0, a.1).1[2] >= 0.0 {
+                                *a
+                            } else {
+                                *b
+                            }
                         }
                         _ => {
                             return invalid(format!(
@@ -1529,10 +1571,21 @@ impl Engine {
         let side_arg = match args.get("side") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) if !s.trim().is_empty() => Some(s.as_str()),
-            Some(_) => return invalid("`side` is the name of a region"),
+            Some(_) => {
+                return invalid("`side` is the name of a region (or \"+z\" / \"-z\" for a sheet inside one region)")
+            }
         };
-        let side = side_arg.map(|s| p.model.domains(s)).transpose()?;
-        let facets = p.boundary_faces(&labels, side.as_deref(), name)?;
+        let side = match side_arg.map(str::trim) {
+            None => None,
+            Some("+x") => Some(SideSpec::Axis(0, true)),
+            Some("-x") => Some(SideSpec::Axis(0, false)),
+            Some("+y") => Some(SideSpec::Axis(1, true)),
+            Some("-y") => Some(SideSpec::Axis(1, false)),
+            Some("+z") => Some(SideSpec::Axis(2, true)),
+            Some("-z") => Some(SideSpec::Axis(2, false)),
+            Some(s) => Some(SideSpec::Domains(p.model.domains(s)?)),
+        };
+        let facets = p.boundary_faces(&labels, side.as_ref(), name)?;
         let s = p.integrate_boundary(tree, &facets, rev)?;
         let real = tree.is_real_valued(&p.complex_flags());
         let mut out = json!({
@@ -1728,5 +1781,82 @@ impl Engine {
         self.axisym_note(&p, rev, &mut out);
         self.decorate(&mut out, &p);
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integrate_works_on_both_sides_of_interior_sheets_and_geometry_names_exposes_sheet_edges() {
+        let mut e = Engine::new();
+        let mut call =
+            |cmd: &str, args: Value| -> Value { e.call(cmd, &args).unwrap_or_else(|err| panic!("{cmd}: {err}")) };
+        call("project_new", json!({ "title": "3D sheet integrate", "dim": 3, "h": 40e-6 }));
+        call("add_box", json!({ "name": "sub", "min": [-100e-6, -100e-6, -80e-6], "max": [100e-6, 100e-6, 0.0] }));
+        call("add_box", json!({ "name": "vac", "min": [-100e-6, -100e-6, 0.0], "max": [100e-6, 100e-6, 80e-6] }));
+        call(
+            "add_polygons",
+            json!({
+                "name": "pad_1_poly",
+                "polygons": [[[-40e-6, -40e-6], [40e-6, -40e-6], [40e-6, 40e-6], [-40e-6, 40e-6]]]
+            }),
+        );
+        call("add_sheet", json!({ "name": "pad_1", "input": "pad_1_poly", "z": 0.0 }));
+        call("add_rect", json!({ "name": "bridge_rect", "min": [-20e-6, -20e-6], "max": [20e-6, 20e-6] }));
+        call("add_sheet", json!({ "name": "bridge", "input": "bridge_rect", "z": 30e-6 }));
+        call(
+            "add_overlay",
+            json!({
+                "regions": [
+                    { "name": "substrate", "input": "sub" },
+                    { "name": "vacuum", "input": "vac" }
+                ]
+            }),
+        );
+
+        let names = call("geometry_names", json!({}));
+        let bnds: Vec<&str> = names["boundaries"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(bnds.contains(&"pad_1") && bnds.contains(&"pad_1:edge"), "boundaries: {bnds:?}");
+        assert!(bnds.contains(&"bridge") && bnds.contains(&"bridge:edge"), "boundaries: {bnds:?}");
+
+        call("add_physics", json!({ "physics": "dfs", "study": "heat_stationary", "order": 1 }));
+        call("set_material", json!({ "physics": "dfs", "region": "substrate", "material": { "k": 10.0 } }));
+        call("set_material", json!({ "physics": "dfs", "region": "vacuum", "material": { "k": 1.0 } }));
+        call(
+            "add_condition",
+            json!({ "physics": "dfs", "on": "pad_1", "kind": "temperature", "params": { "value": 1.0 } }),
+        );
+        call(
+            "add_condition",
+            json!({ "physics": "dfs", "on": "outer", "kind": "temperature", "params": { "value": 0.0 } }),
+        );
+        call("solve_run", json!({}));
+
+        // 1. Sheet on substrate|vacuum interface (z = 0): side="substrate" vs side="vacuum"
+        let pad_area = 80e-6 * 80e-6;
+        let r_sub = call("integrate", json!({ "expr": "nz", "boundary": "pad_1", "side": "substrate" }));
+        let r_vac = call("integrate", json!({ "expr": "nz", "boundary": "pad_1", "side": "vacuum" }));
+        // Out of substrate (-z side) points in +z (+pad_area); out of vacuum (+z side) points in -z (-pad_area)
+        assert!((r_sub["measure"].as_f64().unwrap() - pad_area).abs() < 1e-12 * pad_area);
+        assert!((r_vac["measure"].as_f64().unwrap() - pad_area).abs() < 1e-12 * pad_area);
+        assert!((r_sub["value"].as_f64().unwrap() - pad_area).abs() < 1e-11 * pad_area);
+        assert!((r_vac["value"].as_f64().unwrap() + pad_area).abs() < 1e-11 * pad_area);
+
+        // Material property k differs across pad_1 (10 in substrate, 1 in vacuum)
+        let k_sub = call("integrate", json!({ "expr": "k", "boundary": "pad_1", "side": "substrate" }));
+        let k_vac = call("integrate", json!({ "expr": "k", "boundary": "pad_1", "side": "vacuum" }));
+        assert!((k_sub["value"].as_f64().unwrap() - 10.0 * pad_area).abs() < 1e-11 * pad_area);
+        assert!((k_vac["value"].as_f64().unwrap() - 1.0 * pad_area).abs() < 1e-11 * pad_area);
+
+        // 2. Sheet embedded inside homogeneous vacuum (z = 30e-6, rb == ra): side="-z", side="+z", and side="vacuum"
+        let br_area = 40e-6 * 40e-6;
+        let br_mz = call("integrate", json!({ "expr": "nz", "boundary": "bridge", "side": "-z" }));
+        let br_pz = call("integrate", json!({ "expr": "nz", "boundary": "bridge", "side": "+z" }));
+        let br_vac = call("integrate", json!({ "expr": "nz", "boundary": "bridge", "side": "vacuum" }));
+        assert!((br_mz["value"].as_f64().unwrap() - br_area).abs() < 1e-11 * br_area);
+        assert!((br_pz["value"].as_f64().unwrap() + br_area).abs() < 1e-11 * br_area);
+        assert!((br_vac["value"].as_f64().unwrap() - br_area).abs() < 1e-11 * br_area);
     }
 }

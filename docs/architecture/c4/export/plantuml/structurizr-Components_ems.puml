@@ -75,7 +75,9 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==Mode kernel\n<size:16>[Component: Rust modules]</size>\n\nFull-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.Modekernel
     rectangle "==Complex-mode kernel\n<size:16>[Component: Rust modules]</size>\n\nComplex-valued mode analysis: lossy media and perfectly matched layers." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.Complexmodekernel
     rectangle "==Axisymmetric kernel\n<size:16>[Component: Rust modules]</size>\n\nElectromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.Axisymmetrickernel
-    rectangle "==3D cavity kernel\n<size:16>[Component: Rust modules]</size>\n\nElectromagnetic eigenmodes of 3D cavities and resonators." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.3Dcavitykernel
+    rectangle "==3D cavity kernel\n<size:16>[Component: Rust modules]</size>\n\nElectromagnetic eigenmodes of 3D cavities and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.3Dcavitykernel
+    rectangle "==Thin-film IBC and Josephson ROM\n<size:16>[Component: Rust modules]</size>\n\nSuperconducting thin-film surface impedance boundary condition (Leontovich/two-fluid), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.ThinfilmIBCandJosephsonROM
+    rectangle "==Driven frequency-domain and PROM\n<size:16>[Component: Rust modules]</size>\n\nDriven 3D frequency-domain curl-curl solver with lumped/waveport excitations and Hermite Tangential Galerkin PROM sweep acceleration." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.DrivenfrequencydomainandPROM
     rectangle "==Optical mode sets\n<size:16>[Component: Rust modules]</size>\n\nThe mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxems.Opticalmodesets
   }
 
@@ -88,25 +90,42 @@ nyx.nyxems.Physicsadapter --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "u
 nyx.nyxems.Physicsadapter --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, decode\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Physicsadapter --> nyx.nyxems.Axisymmetrickernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses axisym\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Physicsadapter --> nyx.nyxems.3Dcavitykernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses cavity\n<size:16>[Rust paths]</size>"
+nyx.nyxems.Physicsadapter --> nyx.nyxems.DrivenfrequencydomainandPROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses driven, ports\n<size:16>[Rust paths]</size>"
+nyx.nyxems.Physicsadapter --> nyx.nyxems.ThinfilmIBCandJosephsonROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses rom\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Physicsadapter --> nyx.nyxems.Modekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root, modes\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Physicsadapter --> nyx.nyxems.Complexmodekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses modes_complex\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Physicsadapter --> nyx.nyxems.Opticalmodesets <<Relationship-UmVsYXRpb25zaGlw>> : "uses optical\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Physicsadapter --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Axisymmetrickernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: edge, fem +7\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Axisymmetrickernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
+nyx.nyxems.Axisymmetrickernel --> nyx.nyxems.ThinfilmIBCandJosephsonROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses ibc\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Axisymmetrickernel --> nyx.nyxems.Modekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Axisymmetrickernel --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxems.3Dcavitykernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +11\n<size:16>[Rust paths]</size>"
 nyx.nyxems.3Dcavitykernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, frame +1\n<size:16>[Rust paths]</size>"
+nyx.nyxems.3Dcavitykernel --> nyx.nyxems.ThinfilmIBCandJosephsonROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses ibc, rom\n<size:16>[Rust paths]</size>"
 nyx.nyxems.3Dcavitykernel --> nyx.nyxems.Modekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
 nyx.nyxems.3Dcavitykernel --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
+nyx.nyxems.DrivenfrequencydomainandPROM --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: edge, fem +10\n<size:16>[Rust paths]</size>"
+nyx.nyxems.DrivenfrequencydomainandPROM --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: cqed, crate root +2\n<size:16>[Rust paths]</size>"
+nyx.nyxems.DrivenfrequencydomainandPROM --> nyx.nyxems.3Dcavitykernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses cavity\n<size:16>[Rust paths]</size>"
+nyx.nyxems.DrivenfrequencydomainandPROM --> nyx.nyxems.ThinfilmIBCandJosephsonROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses ibc, rom\n<size:16>[Rust paths]</size>"
+nyx.nyxems.DrivenfrequencydomainandPROM --> nyx.nyxems.Modekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root, modes\n<size:16>[Rust paths]</size>"
+nyx.nyxems.DrivenfrequencydomainandPROM --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
+nyx.nyxems.ThinfilmIBCandJosephsonROM --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: edge, fem +6\n<size:16>[Rust paths]</size>"
+nyx.nyxems.ThinfilmIBCandJosephsonROM --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: cqed, crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxems.ThinfilmIBCandJosephsonROM --> nyx.nyxems.3Dcavitykernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses cavity\n<size:16>[Rust paths]</size>"
+nyx.nyxems.ThinfilmIBCandJosephsonROM --> nyx.nyxems.Modekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxems.ThinfilmIBCandJosephsonROM --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Modekernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: edge, fem +9\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Modekernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
+nyx.nyxems.Modekernel --> nyx.nyxems.ThinfilmIBCandJosephsonROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses ibc\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Modekernel --> nyx.nyxems.Complexmodekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses modes_complex\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Modekernel --> nyx.nyxems.Opticalmodesets <<Relationship-UmVsYXRpb25zaGlw>> : "uses optical\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Modekernel --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Complexmodekernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: edge, fem +7\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Complexmodekernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
+nyx.nyxems.Complexmodekernel --> nyx.nyxems.ThinfilmIBCandJosephsonROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses ibc\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Complexmodekernel --> nyx.nyxems.Modekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Complexmodekernel --> nyx.nyxems.Opticalmodesets <<Relationship-UmVsYXRpb25zaGlw>> : "uses optical\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Complexmodekernel --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
@@ -115,8 +134,9 @@ nyx.nyxems.Opticalmodesets --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> 
 nyx.nyxems.Opticalmodesets --> nyx.nyxems.Modekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses modes\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Opticalmodesets --> nyx.nyxems.Complexmodekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses modes_complex\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Opticalmodesets --> nyx.nyxems.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
-nyx.nyxems.Typedproblem --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: props\n<size:16>[Rust paths]</size>"
+nyx.nyxems.Typedproblem --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material, material::bcs +1\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Typedproblem --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: decode, error +2\n<size:16>[Rust paths]</size>"
 nyx.nyxems.Typedproblem --> nyx.nyxems.Physicsadapter <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxems.Typedproblem --> nyx.nyxems.ThinfilmIBCandJosephsonROM <<Relationship-UmVsYXRpb25zaGlw>> : "uses ibc\n<size:16>[Rust paths]</size>"
 
 @enduml

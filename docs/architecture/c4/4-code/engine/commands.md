@@ -4,18 +4,18 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 
 > The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries.
 
-**Decisions:** [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 90](../../../adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md), [ADR 91](../../../adr/0091-validated-is-a-state-checked-against-the-problem-key.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md)  
-**Size:** 7 files, 4441 lines.
+**Decisions:** [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 90](../../../adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md), [ADR 91](../../../adr/0091-validated-is-a-state-checked-against-the-problem-key.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
+**Size:** 7 files, 4591 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/commands.rs` | 778 |  |
+| `crates/nyx-engine/src/commands.rs` | 798 |  |
 | `crates/nyx-engine/src/engine.rs` | 1168 |  |
 | `crates/nyx-engine/src/guide.rs` | 35 |  |
 | `crates/nyx-engine/src/path_guard.rs` | 159 |  |
-| `crates/nyx-engine/src/reduce.rs` | 1733 |  |
+| `crates/nyx-engine/src/reduce.rs` | 1863 |  |
 | `crates/nyx-engine/src/scriptout.rs` | 331 |  |
 | `crates/nyx-engine/src/validated.rs` | 237 |  |
 
@@ -234,7 +234,7 @@ classDiagram
 | enum | `Access` | `commands.rs:20` | variants: `Read`, `Edit`, `Expensive` —  How much a command changes or costs; a host may ask the person before an expensive or editing command. |
 | struct | `CommandDesc` | `commands.rs:30` | fields: `name`, `title`, `description`, `access`, `schema` |
 | fn | `Engine::catalog` | `commands.rs:112` | `pub fn catalog(&self) -> Vec<CommandDesc>` —  Every command of this build, with its schema. The geometry `add_*` commands come from `geomdesc`; the choices of physics from |
-| fn | `Engine::call` | `commands.rs:277` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
+| fn | `Engine::call` | `commands.rs:292` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
 | struct | `Stored` | `engine.rs:24` | fields: `result`, `key`, `job`, `at`, `model`, `run` |
 | enum | `Purpose` | `engine.rs:40` | variants: `Current`, `Point` —  What a solve job is for: the engine's own project, or one point of a sweep. |
 | enum | `Pending` | `engine.rs:45` | variants: `Mesh`, `Solve`, `Point`, `Convergence`, `Open`, `Export` |
@@ -298,18 +298,18 @@ classDiagram
 | enum | `What` | `reduce.rs:60` | variants: `Field`, `Coord`, `Material`, `Region`, `Normal` —  What a leaf reads (N2): a field, a coordinate, a material value or the indicator of a region. All of them live on the mesh of one result. |
 | struct | `Spec` | `reduce.rs:74` | fields: `physics`, `solution`, `name`, `what` —  One leaf of an expression: a named field of one solution of one physics (or, with `what`, a coordinate, a material value, a region). |
 | struct | `Defaults` | `reduce.rs:82` |  Where the arguments say a bare name comes from. |
-| struct | `Prep` | `reduce.rs:119` |  The leaves of one request resolved against the stored results, and the mesh they live on. |
-| fn | `Engine::prepare` | `reduce.rs:602` | `pub(crate) fn prepare(&self, specs: &[Spec]) -> Result<Prep, Error>` —  Resolves the leaves against the stored results. |
-| fn | `Engine::expressions` | `reduce.rs:713` | `pub(crate) fn expressions(&self, args: &Value, exprs: &[&Value]) -> Result<(Vec<Tree>, Prep), Error>` —  Parses expressions that share one leaf table (each a handle, a name or a number), resolved against the stored results. |
-| fn | `Engine::result_regions` | `reduce.rs:763` | `pub fn result_regions(&self, physics: &str) -> Vec<String>` —  The names of the regions of the mesh a result was solved on (what the Results tab offers to reduce over). |
-| fn | `Engine::cmd_field` | `reduce.rs:769` | `pub(crate) fn cmd_field(&self, args: &Value) -> R` —  `field`: a handle to a field of a solution, with what it holds. A vector name (`E` when `Ex`, `Ez` exist) answers one handle per component. |
-| fn | `Engine::cmd_field_op` | `reduce.rs:830` | `pub(crate) fn cmd_field_op(&self, args: &Value) -> R` —  `field_op`: arithmetic on handles. The operation is checked against the results (every leaf must resolve) and the handle comes back. |
-| fn | `Engine::cmd_integrate` | `reduce.rs:1497` | `pub(crate) fn cmd_integrate(&self, args: &Value) -> R` |
-| fn | `Engine::cmd_extremum` | `reduce.rs:1549` | `pub(crate) fn cmd_extremum(&self, args: &Value) -> R` |
-| fn | `Engine::cmd_probe` | `reduce.rs:1603` | `pub(crate) fn cmd_probe(&self, args: &Value) -> R` |
-| fn | `Engine::cmd_line_cut` | `reduce.rs:1621` | `pub(crate) fn cmd_line_cut(&self, args: &Value) -> R` |
-| fn | `Engine::cmd_overlap` | `reduce.rs:1658` | `pub(crate) fn cmd_overlap(&self, args: &Value) -> R` |
-| fn | `Engine::cmd_confinement` | `reduce.rs:1692` | `pub(crate) fn cmd_confinement(&self, args: &Value) -> R` |
+| struct | `Prep` | `reduce.rs:128` |  The leaves of one request resolved against the stored results, and the mesh they live on. |
+| fn | `Engine::prepare` | `reduce.rs:611` | `pub(crate) fn prepare(&self, specs: &[Spec]) -> Result<Prep, Error>` —  Resolves the leaves against the stored results. |
+| fn | `Engine::expressions` | `reduce.rs:722` | `pub(crate) fn expressions(&self, args: &Value, exprs: &[&Value]) -> Result<(Vec<Tree>, Prep), Error>` —  Parses expressions that share one leaf table (each a handle, a name or a number), resolved against the stored results. |
+| fn | `Engine::result_regions` | `reduce.rs:772` | `pub fn result_regions(&self, physics: &str) -> Vec<String>` —  The names of the regions of the mesh a result was solved on (what the Results tab offers to reduce over). |
+| fn | `Engine::cmd_field` | `reduce.rs:778` | `pub(crate) fn cmd_field(&self, args: &Value) -> R` —  `field`: a handle to a field of a solution, with what it holds. A vector name (`E` when `Ex`, `Ez` exist) answers one handle per component. |
+| fn | `Engine::cmd_field_op` | `reduce.rs:839` | `pub(crate) fn cmd_field_op(&self, args: &Value) -> R` —  `field_op`: arithmetic on handles. The operation is checked against the results (every leaf must resolve) and the handle comes back. |
+| fn | `Engine::cmd_integrate` | `reduce.rs:1539` | `pub(crate) fn cmd_integrate(&self, args: &Value) -> R` |
+| fn | `Engine::cmd_extremum` | `reduce.rs:1602` | `pub(crate) fn cmd_extremum(&self, args: &Value) -> R` |
+| fn | `Engine::cmd_probe` | `reduce.rs:1656` | `pub(crate) fn cmd_probe(&self, args: &Value) -> R` |
+| fn | `Engine::cmd_line_cut` | `reduce.rs:1674` | `pub(crate) fn cmd_line_cut(&self, args: &Value) -> R` |
+| fn | `Engine::cmd_overlap` | `reduce.rs:1711` | `pub(crate) fn cmd_overlap(&self, args: &Value) -> R` |
+| fn | `Engine::cmd_confinement` | `reduce.rs:1745` | `pub(crate) fn cmd_confinement(&self, args: &Value) -> R` |
 | struct | `Exported` | `scriptout.rs:27` | fields: `script`, `form`, `commands` —  The script and how it was made. |
 | fn | `export` | `scriptout.rs:35` | `pub fn export(p: &Project) -> Result<Exported, Error>` —  The project as a script that rebuilds it (it does not solve). |
 | const | `PLANNED_FACTOR` | `validated.rs:22` | `f64` —  The element-size ratio a check is planned with when none was made (the step the command's own help recommends). |

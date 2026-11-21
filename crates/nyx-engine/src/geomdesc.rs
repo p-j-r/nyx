@@ -28,6 +28,8 @@ pub enum Ty {
     Exprs(usize),
     /// a list of points with this many expressions each
     Points(usize),
+    /// a list of closed rings, each a list of points with this many expressions
+    Rings(usize),
     /// `"X"`, `"Y"` or `"Z"`
     Axis,
     /// another feature: its name (or its id)
@@ -114,8 +116,8 @@ const SWEEP_AXIS_DOC: &str = "the axis of the sweep";
 pub fn all() -> Vec<OpDesc> {
     use Group::{Boundary, Build, Labels, Shape};
     use Ty::{
-        Axis, Expr, Exprs, Feature, Features, Keep, Naming, Pattern, Pins, Points, Regions, Selector, Sides, Steps,
-        Text, TextList,
+        Axis, Expr, Exprs, Feature, Features, Keep, Naming, Pattern, Pins, Points, Regions, Rings, Selector, Sides,
+        Steps, Text, TextList,
     };
     let d = |kind, title, doc, group, dims, fields| OpDesc { kind, title, doc, group, dims, fields };
     vec![
@@ -135,6 +137,12 @@ pub fn all() -> Vec<OpDesc> {
         d("Polygon", "Polygon", "A closed polygon in the x-z cross-section; counter-clockwise or clockwise. Edge i goes from point i to point i+1.", Shape, &[2], vec![
             req("pts", Points(2), "the corners (x, z)"),
             opt("names", TextList, "role names of the edges (default e0, e1, ...), used in boundary names", json!([])),
+        ]),
+        d("Polygons", "Polygon batch", "A batch of outer polygon rings and optional hole rings in 2D or 3D, with Ramer-Douglas-Peucker closed-ring simplification (shared corners pinned) and minimum hole area filtering.", Shape, &[2, 3], vec![
+            req("polygons", Rings(2), "outer polygon rings, each a list of 2D corners in metres"),
+            opt("holes", Rings(2), "hole polygon rings to subtract", json!([])),
+            opt("simplify_tol", Expr, "Ramer-Douglas-Peucker simplification tolerance in metres", json!(50e-9)),
+            opt("min_hole_area", Expr, "drop hole rings with unsigned shoelace area below this threshold in m^2", json!(0.0)),
         ]),
         d("RoundedRect", "Rounded rectangle", "A rectangle with quarter-circle corners.", Shape, &[2], vec![
             req("min", Exprs(2), "lower-left corner (x, z)"),
@@ -178,6 +186,10 @@ pub fn all() -> Vec<OpDesc> {
             req("from", Expr, "start coordinate along the axis"),
             req("to", Expr, "end coordinate along the axis"),
             opt("taper_deg", Expr, "wall angle in degrees (positive narrows towards `to`); makes the solid polyhedral", Value::Null),
+        ]),
+        d("Sheet", "2D sheet in 3D", "Embeds a 2D profile or boolean feature as a zero-thickness conductive sheet at plane z (3D).", Build, &[3], vec![
+            req("input", Feature, "the 2D profile or boolean feature"),
+            opt("z", Expr, "z coordinate of the sheet plane in metres", json!(0.0)),
         ]),
         d("Transform", "Transform", "Moves, rotates, mirrors or scales a feature; the steps apply in order.", Build, &[2, 3], vec![
             req("input", Feature, "the feature to transform"),
@@ -237,6 +249,7 @@ pub fn kind_of(op: &Op) -> &'static str {
         Op::Circle { .. } => "Circle",
         Op::Ellipse { .. } => "Ellipse",
         Op::Polygon { .. } => "Polygon",
+        Op::Polygons { .. } => "Polygons",
         Op::RoundedRect { .. } => "RoundedRect",
         Op::Box { .. } => "Box",
         Op::Cylinder { .. } => "Cylinder",
@@ -245,6 +258,7 @@ pub fn kind_of(op: &Op) -> &'static str {
         Op::Revolve { .. } => "Revolve",
         Op::Torus { .. } => "Torus",
         Op::Extrude { .. } => "Extrude",
+        Op::Sheet { .. } => "Sheet",
         Op::Transform { .. } => "Transform",
         Op::Pattern { .. } => "Pattern",
         Op::Union { .. } => "Union",
@@ -291,6 +305,9 @@ fn ty_schema(t: Ty) -> Value {
         Ty::Exprs(n) => json!({ "type": "array", "items": expr_schema(), "minItems": n, "maxItems": n }),
         Ty::Points(n) => {
             json!({ "type": "array", "items": { "type": "array", "items": expr_schema(), "minItems": n, "maxItems": n }, "minItems": 3 })
+        }
+        Ty::Rings(n) => {
+            json!({ "type": "array", "items": { "type": "array", "items": { "type": "array", "items": expr_schema(), "minItems": n, "maxItems": n }, "minItems": 3 } })
         }
         Ty::Axis => json!({ "enum": ["X", "Y", "Z"] }),
         Ty::Feature => {
@@ -344,6 +361,9 @@ pub fn schema(d: &OpDesc) -> Value {
         let mut s = ty_schema(f.ty);
         if let Value::Object(o) = &mut s {
             o.insert("title".into(), json!(f.doc));
+            if f.required && matches!(f.ty, Ty::Rings(_)) {
+                o.insert("minItems".into(), json!(1));
+            }
             if !f.required {
                 o.insert("default".into(), f.default.clone());
             }
@@ -427,6 +447,20 @@ fn convert(list: &FeatureList, f: &FieldDesc, v: &Value, kind: &str) -> GeomResu
                 out.push(Value::Object(o));
             }
             Value::Array(out)
+        }
+        Ty::Rings(_) => {
+            let arr = items(v)?;
+            // Accept both a list of rings `[[[x, y], ...], ...]` and a single ring `[[x, y], ...]`.
+            let is_single_ring = arr
+                .first()
+                .and_then(Value::as_array)
+                .and_then(|pt| pt.first())
+                .is_some_and(|coord| coord.is_number() || coord.is_string());
+            if is_single_ring {
+                Value::Array(vec![Value::Array(arr)])
+            } else {
+                Value::Array(arr)
+            }
         }
         _ => v.clone(),
     })

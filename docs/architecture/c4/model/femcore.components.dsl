@@ -3,7 +3,7 @@ mesh = component "Mesh" "The native mixed-cell mesh, the exchange mesh the physi
     properties {
         "adr" "4, 5, 32"
         "code" "crates/femcore/src: mesh/cells.rs, mesh/exchange.rs, mesh/mod.rs, mesh/quality.rs, mesh/view.rs"
-        "lines" "1707"
+        "lines" "1724"
         "codeDiagram" "4-code/femcore/mesh.md"
     }
 }
@@ -27,15 +27,15 @@ meshing = component "Meshing facade" "MeshPlan and mesh_model (the one way to me
     properties {
         "adr" "6, 17, 54"
         "code" "crates/femcore/src: meshing/geomdrive.rs, meshing/mesher.rs, meshing/mod.rs, meshing/physics_size.rs, meshing/request.rs, meshing/sizing.rs"
-        "lines" "1818"
+        "lines" "1823"
         "codeDiagram" "4-code/femcore/meshing.md"
     }
 }
-meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, and the curved (quadratic) edges of boundary cells." "Rust modules" {
+meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing." "Rust modules" {
     properties {
-        "adr" "40, 50, 51, 55, 82, 83"
-        "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/curve3.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs"
-        "lines" "2090"
+        "adr" "40, 50, 51, 55, 82, 83, 102"
+        "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/curve3.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs, meshing/sheet3d.rs"
+        "lines" "2690"
         "codeDiagram" "4-code/femcore/meshing3d.md"
     }
 }
@@ -151,11 +151,11 @@ fem = component "Finite-element basics" "Lagrange P1/P2 elements and quadrature,
         "codeDiagram" "4-code/femcore/fem.md"
     }
 }
-material = component "Material specification" "TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader." "Rust modules" {
+material = component "Material specification" "TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, Zimmermann BCS superconducting conductivity, provenance and the library loader." "Rust modules" {
     properties {
-        "adr" "29, 30, 34, 35"
-        "code" "crates/femcore/src: material/elastic.rs, material/mod.rs, material/optics.rs, material/reader.rs, material/schema.rs, material/source.rs, ... (9 files)"
-        "lines" "3538"
+        "adr" "29, 30, 34, 35, 101, 104"
+        "code" "crates/femcore/src: material/bcs.rs, material/elastic.rs, material/mod.rs, material/optics.rs, material/reader.rs, material/schema.rs, ... (10 files)"
+        "lines" "4406"
         "codeDiagram" "4-code/femcore/material.md"
     }
 }
@@ -187,7 +187,7 @@ runtime = component "Runtime services" "The shared worker pool, stage log and ca
     properties {
         "adr" "9, 11, 96"
         "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, warm.rs"
-        "lines" "837"
+        "lines" "848"
         "codeDiagram" "4-code/femcore/runtime.md"
     }
 }

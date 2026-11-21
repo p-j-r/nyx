@@ -23,6 +23,10 @@ fn every_path_like_argument_of_the_catalog_is_guarded() {
     for c in e.catalog() {
         let Some(props) = c.schema.get("properties").and_then(|p| p.as_object()) else { continue };
         for (key, def) in props {
+            // Primitive numbers and booleans cannot carry filesystem paths (e.g. `bcs_surface_impedance.mean_free_path`).
+            if matches!(def.get("type").and_then(|t| t.as_str()), Some("number" | "integer" | "boolean")) {
+                continue;
+            }
             let doc = def.get("description").and_then(|d| d.as_str()).unwrap_or("").to_lowercase();
             // whole words of the name (`profile` is not a file), and words in the description that say a file or a folder is meant
             let words: Vec<String> = key.to_lowercase().split('_').map(str::to_string).collect();

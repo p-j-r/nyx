@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 5 files, 837 lines.
+**Size:** 5 files, 848 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/lib.rs` | 50 |  |
-| `crates/femcore/src/par.rs` | 152 |  |
+| `crates/femcore/src/par.rs` | 163 |  |
 | `crates/femcore/src/progress.rs` | 297 |  |
 | `crates/femcore/src/validate.rs` | 48 |  |
 | `crates/femcore/src/warm.rs` | 290 |  |
@@ -27,9 +27,11 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 
 | Component | Modules | Items |
 |---|---|---|
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | par | map_chunks, threads_up_to |
 | [dfs: Physics adapter](../dfs/adapter.md) | progress | Progress |
 | [ems: Physics adapter](../ems/adapter.md) | progress | Progress |
 | [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads_up_to |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | progress | check |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
 | [engine: Commands](../engine/commands.md) | par, progress | install, note, stage, threads |
@@ -66,6 +68,7 @@ classDiagram
         +on_factor_pool(f) R
         +fold_chunks_mut(data, chunk, nthreads, f) f64
         +sum_range(n, chunk, nthreads, f) f64
+        +map_chunks(data, chunk, f) Vec~R~
         +CHUNK const
     }
   }
@@ -163,6 +166,7 @@ classDiagram
 | const | `CHUNK` | `par.rs:64` | `usize` —  Chunk length used by default. |
 | fn | `fold_chunks_mut` | `par.rs:69` | `pub fn fold_chunks_mut<T: Send, F>(data: &mut [T], chunk: usize, nthreads: usize, f: F) -> f64` —  `f` must only touch its own chunk. With `nthreads == 1`, or fewer than two chunks, everything |
 | fn | `sum_range` | `par.rs:102` | `pub fn sum_range<F>(n: usize, chunk: usize, nthreads: usize, f: F) -> f64` —  Sum of `f(i)` over `0..n`, evaluated in fixed chunks and combined in chunk order. |
+| fn | `map_chunks` | `par.rs:117` | `pub fn map_chunks<T: Sync, R: Send, F: Fn(&[T]) -> R + Sync>(data: &[T], chunk: usize, f: F) -> Vec<R>` —  Evaluates `f` on fixed `chunk`-sized slices of `data` on the shared worker pool, returning results in chunk order. |
 | const | `CANCELLED` | `progress.rs:30` | `&str` —  The error text of a cancelled solve. |
 | struct | `Progress` | `progress.rs:44` |  Shared state of one job. Create with `Progress::new()`. |
 | struct | `Status` | `progress.rs:53` | fields: `stage`, `stage_seconds`, `total_seconds`, `fraction`, `cancelled` —  A snapshot for display. |

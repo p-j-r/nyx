@@ -33,6 +33,7 @@ C4 level 4 (code) of the component **Structured absorbing layers** (`femcore.str
 |---|---|---|
 | [Meshing validation harness](./meshcheck.md) | meshing::pml_box | PmlMesh |
 | [Meshing facade](./meshing.md) | meshing::pml_geom | PmlMode, PmlReport, structured_pml |
+| [3D meshing](./meshing3d.md) | meshing::pml_geom, meshing::pml_geom3 | PmlMode, structured_pml_3d |
 
 ## Class diagram
 

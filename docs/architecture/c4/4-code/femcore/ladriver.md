@@ -28,9 +28,14 @@ C4 level 4 (code) of the component **Linear algebra driver** (`femcore.ladriver`
 
 | Component | Modules | Items |
 |---|---|---|
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::driver | dense_eigh, dense_gen_eigh |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | linalg::driver | DirectSolver, dense_eigh |
 | [dfs: Heat kernel](../dfs/heat.md) | linalg::driver | DirectSolver, dense_gen_eigh |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | linalg::driver | DirectSolver, dense_eigh |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | linalg::driver | eigs_complex |
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::driver | DirectSolver, eigs_complex_projected, eigs_sym_indefinite |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::driver | DirectSolver |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::driver | DirectSolver, dense_gen_eigh |
 | [ems: Mode kernel](../ems/modes.md) | linalg::driver | eigs_general |
 | [ems: Complex-mode kernel](../ems/modescx.md) | linalg::driver | eigs_complex |
 | [Finite-element basics](./fem.md) | linalg::driver | DirectSolver |

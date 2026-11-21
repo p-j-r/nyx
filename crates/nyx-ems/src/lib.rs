@@ -17,26 +17,33 @@
 
 pub mod axisym;
 pub mod cavity;
+pub mod driven;
+pub mod ibc;
 pub mod modes;
 pub mod modes_complex;
 pub mod optical;
+pub mod ports;
 pub mod problem;
+pub mod rom;
 
 pub use axisym::{
-    assemble_axisym, axisym_fields_cells, power_along_theta, solve_axisym_modes, solve_axisym_pairs,
-    solve_axisymmetric, AxiAssembly, AxiMaterial, AxiModes,
+    assemble_axisym, assemble_axisym_with_bcs, axisym_fields_cells, power_along_theta, solve_axisym_modes,
+    solve_axisym_pairs, solve_axisymmetric, AxiAssembly, AxiMaterial, AxiModes,
 };
 pub use cavity::{assemble_emw_eigen, emw_eigen_fields, solve_cavity, solve_emw_modes, EmwAssembly, EmwSolve};
+pub use driven::{assemble_emw_driven, solve_driven, DrivenAssembly};
 pub use modes::{
-    assemble_modes, mode_fields, mode_fields_cells, n_unknowns, solve_mode_pairs, solve_modes, solve_modes_tensor,
-    solve_waveguide, EpsCell, ModeAssembly, Modes, C0,
+    assemble_modes, assemble_modes_with_bcs, mode_fields, mode_fields_cells, n_unknowns, solve_mode_pairs, solve_modes,
+    solve_modes_tensor, solve_waveguide, EpsCell, ModeAssembly, Modes, C0,
 };
 pub use modes_complex::{
-    assemble_modes_complex, mode_fields_complex, mode_fields_complex_cells, solve_mode_pairs_complex,
-    solve_modes_complex, solve_waveguide_complex, ModeAssemblyC, ModesC,
+    assemble_modes_complex, assemble_modes_complex_with_bcs, mode_fields_complex, mode_fields_complex_cells,
+    solve_mode_pairs_complex, solve_modes_complex, solve_waveguide_complex, ModeAssemblyC, ModesC,
 };
 pub use optical::{solve_optical, solve_optical_wafer};
-pub use problem::{decode, Problem, Study};
+pub use ports::{assemble_lumped_ports_3d, assemble_waveports_3d, AssembledLumpedPort, AssembledWavePort};
+pub use problem::{decode, LumpedJjBc, LumpedPortBc, Problem, Study, SurfaceImpedanceBc, WavePortBc};
+pub use rom::rom_eigenfrequencies;
 
 use femcore::progress::{self, Progress};
 use nyx_physics::Mesh;
@@ -92,6 +99,18 @@ impl Physics for Ems {
                     ParamDesc::number("f_search", "Search around", "Hz", 10e9, "").required().range(Some(f64::MIN_POSITIVE), None),
                 ],
             },
+            StudyDesc {
+                kind: "driven".into(),
+                name: "Driven frequency sweep".into(),
+                doc: "Driven frequency-domain multi-port S/Z/Y sweep on a 3D mesh with lumped and waveguide ports, accelerated by greedy Hermite/Galerkin reduced-order modeling.".into(),
+                dims: Dims::Three,
+                params: vec![
+                    ParamDesc::number("f_min", "Start frequency", "Hz", 4.0e9, "minimum sweep frequency").required().range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::number("f_max", "Stop frequency", "Hz", 8.0e9, "maximum sweep frequency (>= f_min)").required().range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::integer("n_points", "Frequency points", 201, 1, "number of uniformly spaced frequencies in [f_min, f_max]"),
+                    ParamDesc::number("prom_tol", "PROM residual tolerance", "", 1e-3, "relative residual tolerance for Hermite/Galerkin PROM fast sweep (0 or null disables PROM and solves point-by-point HDM)").range(Some(0.0), None),
+                ],
+            },
         ]
     }
 
@@ -134,6 +153,66 @@ impl Physics for Ems {
                 applies: Applies::Boundary,
                 params: vec![],
             },
+            BcDesc {
+                kind: "pec".into(),
+                name: "Perfect electric conductor".into(),
+                doc: "Perfect electric conductor (tangential E = 0) on an interior 2D conductive sheet or outer boundary face.".into(),
+                applies: Applies::Boundary,
+                params: vec![],
+            },
+            BcDesc {
+                kind: "surface_impedance".into(),
+                name: "Superconducting / resistive surface impedance".into(),
+                doc: "Kinetic-inductance and surface-resistance sheet impedance Z_s = R_s + i omega L_k_sq on a 2D sheet or boundary face. When `material` is given, evaluates arbitrary-purity BCS surface impedance at `(temperature, thickness, f_ref, film_model)`.".into(),
+                applies: Applies::Boundary,
+                params: vec![
+                    ParamDesc::number("L_k_sq", "Sheet kinetic inductance", "H/sq", 0.0, "sheet kinetic inductance per square").range(Some(0.0), None),
+                    ParamDesc::number("R_s", "Surface resistance", "Ohm/sq", 0.0, "sheet surface resistance per square").range(Some(0.0), None),
+                    ParamDesc::text("material", "Superconducting material", "", "optional material from the library with a [superconducting] block"),
+                    ParamDesc::number("thickness", "Film thickness", "m", 0.0, "film thickness for BCS surface impedance").range(Some(0.0), None),
+                    ParamDesc::number("temperature", "Temperature", "K", 0.01, "operating temperature for BCS surface impedance").range(Some(0.0), None),
+                    ParamDesc::number("f_ref", "Reference frequency", "Hz", 0.0, "reference frequency for Z_s evaluation (0 or null uses the study frequency)").range(Some(0.0), None),
+                    ParamDesc::choice("film_model", "Thin-film model", &["two_sided", "kerr", "thin_limit"], "two_sided", "thin-film current distribution model"),
+                ],
+            },
+            BcDesc {
+                kind: "lumped_jj".into(),
+                name: "Lumped Josephson junction".into(),
+                doc: "Lumped Josephson junction / nonlinear port sheet across two conductors in a 3D cavity study, assembled as a rank-1 terminal operator (or distributed sheet) and exported in the passive Craig-Bampton CircuitRom.".into(),
+                applies: Applies::Boundary,
+                params: vec![
+                    ParamDesc::text("name", "Port name", "", "unique terminal identifier").required(),
+                    ParamDesc::number("L_j", "Josephson inductance", "H", 0.0, "linearized Josephson inductance").range(Some(0.0), None),
+                    ParamDesc::number("E_j_Hz", "Josephson energy E_J / h", "Hz", 0.0, "Josephson energy in Hz (alternative to L_j)").range(Some(0.0), None),
+                    ParamDesc::number("C_j", "Junction capacitance", "F", 0.0, "intrinsic parallel junction capacitance").range(Some(0.0), None),
+                    ParamDesc::number("E_l_Hz", "Parallel inductive energy E_L / h", "Hz", 0.0, "parallel superinductance energy in Hz").range(Some(0.0), None),
+                    ParamDesc::number("phi_ext_rad", "External flux bias", "rad", 0.0, "external reduced flux bias phi_ext = 2 pi Phi_ext / Phi_0"),
+                    ParamDesc::number("n_g", "Offset charge", "2e", 0.0, "gate offset charge in Cooper-pair units"),
+                    ParamDesc::vector("direction", "Direction", "", 3, "unit vector along junction current flow").default_vector(vec![1.0, 0.0, 0.0]),
+                    ParamDesc::choice("formulation", "Formulation", &["rank1", "distributed_sheet"], "rank1", "lumped terminal operator formulation"),
+                ],
+            },
+            BcDesc {
+                kind: "lumped_port".into(),
+                name: "Lumped sheet port".into(),
+                doc: "Lumped voltage/current sheet port with reference impedance Z_0 across two conductors in a 3D driven frequency sweep.".into(),
+                applies: Applies::Boundary,
+                params: vec![
+                    ParamDesc::text("name", "Port name", "", "unique port identifier").required(),
+                    ParamDesc::number("Z_0", "Reference impedance", "Ohm", 50.0, "reference port impedance").range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::vector("direction", "Direction", "", 3, "unit vector along port current flow").default_vector(vec![1.0, 0.0, 0.0]),
+                ],
+            },
+            BcDesc {
+                kind: "waveport".into(),
+                name: "Waveguide boundary port".into(),
+                doc: "2D boundary-mode waveguide port on an exterior face in a 3D driven frequency sweep.".into(),
+                applies: Applies::Boundary,
+                params: vec![
+                    ParamDesc::text("name", "Port name", "", "unique port identifier").required(),
+                    ParamDesc::integer("mode", "Mode index", 1, 1, "1-based index of the guided/TEM boundary mode"),
+                ],
+            },
         ]
     }
 
@@ -164,7 +243,7 @@ impl Physics for Ems {
                 FieldDesc::new("Ey", "a.u.", &[], "component along the propagation (real solver; `Re Ey` for a complex mode)"),
                 FieldDesc::new("Ez", "a.u.", &[], "surface-normal component (real solver; `Re Ez` for a complex mode)"),
             ],
-            "axisymmetric_modes" | "cavity" => vec![
+            "axisymmetric_modes" | "cavity" | "driven" => vec![
                 FieldDesc::new("|E|", "a.u.", &[], "magnitude of the electric field, scaled to a maximum of 1"),
                 FieldDesc::new("Re Ex", "a.u.", &[], "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real"),
                 FieldDesc::new("Re Ey", "a.u.", &[], "real part of the y component (2D axisymmetric: azimuthal)"),
@@ -218,6 +297,7 @@ impl Physics for Ems {
         let (freq, headroom) = match spec.study.kind.as_str() {
             "modes" => (sp.number("freq"), 1.0),
             "cavity" | "axisymmetric_modes" => (sp.number("f_search"), 1.5),
+            "driven" => (sp.number("f_max"), 1.0),
             _ => return empty,
         };
         if !(freq > 0.0 && freq.is_finite()) {
@@ -285,6 +365,7 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             Study::Modes { .. } => solve_waveguide(&d, problem),
             Study::AxisymmetricModes { .. } => solve_axisymmetric(&d, problem),
             Study::Cavity { .. } => solve_cavity(&d, problem),
+            Study::Driven { .. } => solve_driven(&d, problem),
         }
         .map_err(Error::from_kernel)?
     };

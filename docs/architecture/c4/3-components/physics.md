@@ -25,27 +25,31 @@ graph TB
         style 44 fill:#85bbf0,stroke:#5d82a8,color:#000000
         45["<div style='font-weight: bold'>Result and frame</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>SolveResult as plain<br />serialisable data, and the<br />frame a result states for the<br />analysis of its vector<br />fields.</div>"]
         style 45 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        46["<div style='font-weight: bold'>Test support</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The golden-file harness and<br />the contract-test helpers<br />shared by every physics<br />crate.</div>"]
+        46["<div style='font-weight: bold'>cQED result payloads</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Typed superconducting<br />quantum-circuit payloads<br />(capacitance and inductance<br />matrices, TLS geometry<br />metadata, passive CircuitRom,<br />driven port parameters).</div>"]
         style 46 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        47["<div style='font-weight: bold'>Test support</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The golden-file harness and<br />the contract-test helpers<br />shared by every physics<br />crate.</div>"]
+        style 47 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      86["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 86 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      92["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 92 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    44-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
+    46-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
+    44-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
     44-. "<div>uses physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    43-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
+    43-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
     43-. "<div>uses desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
     43-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
     43-. "<div>uses error, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    45-. "<div>uses femcore: adapt, fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    46-. "<div>uses femcore: fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    46-. "<div>uses schema</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
-    46-. "<div>uses spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
-    46-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
-    46-. "<div>uses crate root, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    42-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
+    45-. "<div>uses femcore: adapt, fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    47-. "<div>uses femcore: fields</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    47-. "<div>uses schema</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
+    47-. "<div>uses spec</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
+    47-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
+    47-. "<div>uses crate root, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
+    42-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    42-. "<div>uses cqed</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
     42-. "<div>uses crate root, desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
     42-. "<div>uses spec, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
     42-. "<div>uses frame, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
@@ -54,8 +58,9 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Physics trait and registry](../4-code/physics/trait.md) | 4 | 302 | 25 | The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns. |
-| [Problem envelope](../4-code/physics/envelope.md) | 3 | 540 | 25, 41, 63 | The one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation. |
-| [Descriptors and schemas](../4-code/physics/descriptors.md) | 2 | 336 | 25 | What a physics tells nyx about itself (studies, conditions, parameters) and the JSON Schemas generated from it for the window, the MCP server and the documentation. |
+| [Physics trait and registry](../4-code/physics/trait.md) | 4 | 308 | 25 | The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns. |
+| [Problem envelope](../4-code/physics/envelope.md) | 3 | 566 | 25, 41, 63 | The one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation. |
+| [Descriptors and schemas](../4-code/physics/descriptors.md) | 2 | 344 | 25 | What a physics tells nyx about itself (studies, conditions, parameters) and the JSON Schemas generated from it for the window, the MCP server and the documentation. |
 | [Result and frame](../4-code/physics/result.md) | 2 | 290 | 25, 56 | SolveResult as plain serialisable data, and the frame a result states for the analysis of its vector fields. |
+| [cQED result payloads](../4-code/physics/cqed.md) | 1 | 254 | 103, 104, 105, 106 | Typed superconducting quantum-circuit payloads (capacitance and inductance matrices, TLS geometry metadata, passive CircuitRom, driven port parameters). |
 | [Test support](../4-code/physics/testsupport.md) | 2 | 233 | 10, 19 | The golden-file harness and the contract-test helpers shared by every physics crate. |

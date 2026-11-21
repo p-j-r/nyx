@@ -74,12 +74,14 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==Problem envelope\n<size:16>[Component: Rust modules]</size>\n\nThe one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxphysics.Problemenvelope
     rectangle "==Descriptors and schemas\n<size:16>[Component: Rust modules]</size>\n\nWhat a physics tells nyx about itself (studies, conditions, parameters) and the JSON Schemas generated from it for the window, the MCP server and the documentation." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxphysics.Descriptorsandschemas
     rectangle "==Result and frame\n<size:16>[Component: Rust modules]</size>\n\nSolveResult as plain serialisable data, and the frame a result states for the analysis of its vector fields." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxphysics.Resultandframe
+    rectangle "==cQED result payloads\n<size:16>[Component: Rust modules]</size>\n\nTyped superconducting quantum-circuit payloads (capacitance and inductance matrices, TLS geometry metadata, passive CircuitRom, driven port parameters)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxphysics.cQEDresultpayloads
     rectangle "==Test support\n<size:16>[Component: Rust modules]</size>\n\nThe golden-file harness and the contract-test helpers shared by every physics crate." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxphysics.Testsupport
   }
 
   component "==femcore\n<size:16>[Container: Rust library]</size>\n\nThe FEM core: meshes, meshing and adaptation, linear algebra behind one driver, finite-element basics, the material specification and library, expressions." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.femcore
 }
 
+nyx.nyxphysics.cQEDresultpayloads --> nyx.nyxphysics.Resultandframe <<Relationship-UmVsYXRpb25zaGlw>> : "uses result\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Descriptorsandschemas --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: meshing::sizing\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Descriptorsandschemas --> nyx.nyxphysics.Physicstraitandregistry <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Problemenvelope --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material, material::elastic +2\n<size:16>[Rust paths]</size>"
@@ -93,6 +95,7 @@ nyx.nyxphysics.Testsupport --> nyx.nyxphysics.Problemenvelope <<Relationship-UmV
 nyx.nyxphysics.Testsupport --> nyx.nyxphysics.Resultandframe <<Relationship-UmVsYXRpb25zaGlw>> : "uses result\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Testsupport --> nyx.nyxphysics.Physicstraitandregistry <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root, physics\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Physicstraitandregistry --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material::spec, mesh +2\n<size:16>[Rust paths]</size>"
+nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.cQEDresultpayloads <<Relationship-UmVsYXRpb25zaGlw>> : "uses cqed\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.Descriptorsandschemas <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root, desc\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.Problemenvelope <<Relationship-UmVsYXRpb25zaGlw>> : "uses spec, validate\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.Resultandframe <<Relationship-UmVsYXRpb25zaGlw>> : "uses frame, result\n<size:16>[Rust paths]</size>"

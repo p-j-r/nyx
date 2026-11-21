@@ -90,6 +90,14 @@ impl ParamDesc {
     pub fn vector(name: &str, label: &str, unit: &str, len: usize, doc: &str) -> ParamDesc {
         Self::make(name, label, unit, ParamKind::Vector { len, default: vec![0.0; len] }, doc)
     }
+    /// Sets the default vector for a `ParamKind::Vector` descriptor.
+    pub fn default_vector(mut self, vals: Vec<f64>) -> ParamDesc {
+        if let ParamKind::Vector { len, default } = &mut self.kind {
+            assert_eq!(vals.len(), *len, "default vector length mismatch");
+            *default = vals;
+        }
+        self
+    }
     pub fn text(name: &str, label: &str, default: &str, doc: &str) -> ParamDesc {
         Self::make(name, label, "", ParamKind::Text { default: default.into() }, doc)
     }

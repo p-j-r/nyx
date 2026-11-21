@@ -1,0 +1,14 @@
+# Alpha-phase tantalum (alpha-Ta) superconducting film for high-coherence quantum circuits.
+format = 1
+name = "tantalum"
+description = "Alpha-phase tantalum (alpha-Ta) superconducting film"
+source = { cite = "Compiled from the per-table sources below. Density 16650 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)", verified = "2026-11-21" }
+density = "16650 kg/m^3"
+
+[superconducting]
+tc = "4.38 K"
+gap_0 = "0.70 meV"
+lambda_L = "35.0 nm"
+xi_0 = "92.0 nm"
+sigma_n = "2.5e7 S/m"
+source = { cite = "A. P. M. Place et al., New material platform for superconducting transmon qubits with coherence times exceeding 0.3 milliseconds, Nat. Commun. 12, 1779 (2021) and C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005): alpha-Ta film T_c = 4.38 K, Delta(0) = 0.70 meV, lambda_L(0) = 35 nm, xi_0 = 92 nm; APPROXIMATE cryogenic film normal conductivity sigma_n = 2.5e7 S/m", doi = "10.1038/s41467-021-22030-5", verified = "2026-11-21" }

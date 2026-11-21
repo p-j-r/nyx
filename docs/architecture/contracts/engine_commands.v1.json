@@ -1926,6 +1926,78 @@
     "title": "Remove a project material"
   },
   {
+    "access": "read",
+    "description": "Evaluates Zimmermann arbitrary-purity BCS complex conductivity and thin-film surface impedance (Z_s = R_s + i omega L_k_sq) for a superconducting material or parameter set.",
+    "name": "bcs_surface_impedance",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "film_model": {
+          "default": "kerr",
+          "description": "thin-film boundary convention: two_sided (interior sheet jump), kerr (one-sided backed wall) or thin_limit (Pearl d << lambda_eff)",
+          "enum": [
+            "two_sided",
+            "kerr",
+            "thin_limit"
+          ],
+          "type": "string"
+        },
+        "freq": {
+          "description": "frequency in Hz",
+          "minimum": 1.0,
+          "type": "number"
+        },
+        "gap_0": {
+          "description": "zero-temperature energy gap Delta(0) in J",
+          "type": "number"
+        },
+        "gap_0_eV": {
+          "description": "zero-temperature energy gap Delta(0) in eV",
+          "type": "number"
+        },
+        "lambda_L": {
+          "description": "clean zero-temperature London penetration depth in metres",
+          "type": "number"
+        },
+        "material": {
+          "description": "name of a library or project material with a [superconducting] block",
+          "type": "string"
+        },
+        "mean_free_path": {
+          "description": "electron mean free path in metres",
+          "type": "number"
+        },
+        "sigma_n": {
+          "description": "normal-state conductivity in S/m",
+          "type": "number"
+        },
+        "tc": {
+          "description": "critical temperature T_c in K (when material is omitted or overridden)",
+          "type": "number"
+        },
+        "temperature": {
+          "description": "temperature in K, default 0.01",
+          "type": "number"
+        },
+        "thickness": {
+          "description": "film thickness in metres",
+          "minimum": 1e-12,
+          "type": "number"
+        },
+        "xi_0": {
+          "description": "BCS coherence length in metres",
+          "type": "number"
+        }
+      },
+      "required": [
+        "freq",
+        "thickness"
+      ],
+      "type": "object"
+    },
+    "title": "BCS thin-film surface impedance"
+  },
+  {
     "access": "expensive",
     "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.",
     "name": "convergence_check",
@@ -2077,7 +2149,7 @@
   },
   {
     "access": "read",
-    "description": "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups. The reply carries `stale` and `age_s` of the result it was run on.",
+    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, or tls_participation. The reply carries `stale` and `age_s` of the result it was run on.",
     "name": "analyse",
     "schema": {
       "additionalProperties": false,
@@ -2085,6 +2157,10 @@
         "analysis": {
           "description": "analysis id (list_analyses)",
           "type": "string"
+        },
+        "params": {
+          "description": "optional analysis parameters",
+          "type": "object"
         },
         "physics": {
           "description": "the three-letter code of the physics",
@@ -2468,6 +2544,101 @@
       "type": "object"
     },
     "title": "Polygon"
+  },
+  {
+    "access": "edit",
+    "description": "A batch of outer polygon rings and optional hole rings in 2D or 3D, with Ramer-Douglas-Peucker closed-ring simplification (shared corners pinned) and minimum hole area filtering. [shape; dimensions [2, 3]]",
+    "name": "add_polygons",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "holes": {
+          "default": [],
+          "items": {
+            "items": {
+              "items": {
+                "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "minItems": 3,
+            "type": "array"
+          },
+          "title": "hole polygon rings to subtract",
+          "type": "array"
+        },
+        "min_hole_area": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "drop hole rings with unsigned shoelace area below this threshold in m^2"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "polygons": {
+          "items": {
+            "items": {
+              "items": {
+                "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "minItems": 3,
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "outer polygon rings, each a list of 2D corners in metres",
+          "type": "array"
+        },
+        "simplify_tol": {
+          "default": 5e-8,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Ramer-Douglas-Peucker simplification tolerance in metres"
+        }
+      },
+      "required": [
+        "polygons"
+      ],
+      "type": "object"
+    },
+    "title": "Polygon batch"
   },
   {
     "access": "edit",
@@ -2992,6 +3163,50 @@
       "type": "object"
     },
     "title": "Extrude"
+  },
+  {
+    "access": "edit",
+    "description": "Embeds a 2D profile or boolean feature as a zero-thickness conductive sheet at plane z (3D). [build; dimensions [3]]",
+    "name": "add_sheet",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "the name of an earlier feature (or its id)",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "the 2D profile or boolean feature"
+        },
+        "name": {
+          "description": "a name for the feature; default the kind and a number (`rect1`)",
+          "type": "string"
+        },
+        "z": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "z coordinate of the sheet plane in metres"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "title": "2D sheet in 3D"
   },
   {
     "access": "edit",

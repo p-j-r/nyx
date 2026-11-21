@@ -17,6 +17,14 @@ fn y_axis() -> Axis {
     Axis::Y
 }
 
+fn default_simplify_tol() -> Expr {
+    Expr::Num(50e-9)
+}
+
+fn default_zero_expr() -> Expr {
+    Expr::Num(0.0)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Axis {
     X,
@@ -171,6 +179,16 @@ pub enum Op {
         pts: Vec<[Expr; 2]>,
         names: Vec<String>,
     },
+    /// batch of outer polygon rings and optional hole rings, with closed-ring RDP simplification and minimum hole area filtering
+    Polygons {
+        polygons: Vec<Vec<[Expr; 2]>>,
+        #[serde(default)]
+        holes: Vec<Vec<[Expr; 2]>>,
+        #[serde(default = "default_simplify_tol")]
+        simplify_tol: Expr,
+        #[serde(default = "default_zero_expr")]
+        min_hole_area: Expr,
+    },
     RoundedRect {
         min: [Expr; 2],
         max: [Expr; 2],
@@ -232,6 +250,12 @@ pub enum Op {
         /// wall angle from the sweep direction in degrees (positive narrows towards `to`); makes the solid polyhedral
         #[serde(default)]
         taper_deg: Option<Expr>,
+    },
+    /// 3D: a 2D profile or boolean feature embedded as a zero-thickness conductive sheet at plane `z` (default 0.0)
+    Sheet {
+        input: FeatureId,
+        #[serde(default = "default_zero_expr")]
+        z: Expr,
     },
     Transform {
         input: FeatureId,
@@ -299,6 +323,7 @@ impl Op {
             Op::Circle { .. } => "Circle",
             Op::Ellipse { .. } => "Ellipse",
             Op::Polygon { .. } => "Polygon",
+            Op::Polygons { .. } => "Polygons",
             Op::RoundedRect { .. } => "RoundedRect",
             Op::Box { .. } => "Box",
             Op::Sphere { .. } => "Sphere",
@@ -307,6 +332,7 @@ impl Op {
             Op::Torus { .. } => "Torus",
             Op::Cylinder { .. } => "Cylinder",
             Op::Extrude { .. } => "Extrude",
+            Op::Sheet { .. } => "Sheet",
             Op::Transform { .. } => "Transform",
             Op::Pattern { .. } => "Pattern",
             Op::Union { .. } => "Union",
@@ -338,6 +364,14 @@ impl Op {
             }
             Op::Ellipse { center, radii, angle_deg } => center.iter().chain(radii).chain([angle_deg]).collect(),
             Op::Polygon { pts, .. } => pts.iter().flatten().collect(),
+            Op::Polygons { polygons, holes, simplify_tol, min_hole_area } => polygons
+                .iter()
+                .flatten()
+                .chain(holes.iter().flatten())
+                .flatten()
+                .chain([simplify_tol, min_hole_area])
+                .collect(),
+            Op::Sheet { z, .. } => vec![z],
             Op::Transform { steps, .. } => steps
                 .iter()
                 .flat_map(|s| match s {
@@ -366,7 +400,7 @@ impl Op {
     /// Features this operation refers to (all must come earlier in the list).
     pub fn inputs(&self) -> Vec<FeatureId> {
         match self {
-            Op::Transform { input, .. } | Op::Pattern { input, .. } => vec![*input],
+            Op::Transform { input, .. } | Op::Pattern { input, .. } | Op::Sheet { input, .. } => vec![*input],
             Op::Extrude { profile, .. } | Op::Revolve { profile, .. } => vec![*profile],
             Op::Union { ids } | Op::Intersect { ids } => ids.clone(),
             Op::Difference { a, b } => std::iter::once(*a).chain(b.iter().copied()).collect(),
@@ -741,6 +775,28 @@ impl Model {
     ) -> FeatureId {
         let pts = pts.iter().cloned().map(e2).collect();
         self.push(name, Op::Polygon { pts, names: edge_names.iter().map(|s| s.to_string()).collect() })
+    }
+    pub fn polygons(&mut self, name: &str, polygons: Vec<Vec<[Expr; 2]>>, holes: Vec<Vec<[Expr; 2]>>) -> FeatureId {
+        self.push(
+            name,
+            Op::Polygons { polygons, holes, simplify_tol: default_simplify_tol(), min_hole_area: default_zero_expr() },
+        )
+    }
+    pub fn polygons_with(
+        &mut self,
+        name: &str,
+        polygons: Vec<Vec<[Expr; 2]>>,
+        holes: Vec<Vec<[Expr; 2]>>,
+        simplify_tol: impl Into<Expr>,
+        min_hole_area: impl Into<Expr>,
+    ) -> FeatureId {
+        self.push(
+            name,
+            Op::Polygons { polygons, holes, simplify_tol: simplify_tol.into(), min_hole_area: min_hole_area.into() },
+        )
+    }
+    pub fn sheet(&mut self, name: &str, input: FeatureId, z: impl Into<Expr>) -> FeatureId {
+        self.push(name, Op::Sheet { input, z: z.into() })
     }
     pub fn transform(&mut self, name: &str, input: FeatureId, steps: Vec<TStep>) -> FeatureId {
         self.push(name, Op::Transform { input, steps })

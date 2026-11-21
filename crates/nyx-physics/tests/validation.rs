@@ -134,3 +134,14 @@ fn the_schema_and_the_validator_agree_on_the_example() {
     b.sort();
     assert_eq!(a, b);
 }
+
+#[test]
+fn optional_null_parameters_use_default_while_required_null_is_refused() {
+    let mut s = good();
+    // optional parameter `n_modes` is passed explicitly as JSON `null`
+    s.study.params = json!({ "freq": 2e14, "n_modes": null });
+    validate_spec(&Mock::new("tst"), &s).unwrap();
+    // required parameter `freq` passed as `null` must still be rejected
+    s.study.params = json!({ "freq": null });
+    assert!(err(&s).contains("'freq'") && err(&s).contains("required"));
+}

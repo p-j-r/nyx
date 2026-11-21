@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:61d7e227fa5ee34f4d454b86ecd384df` · 101 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:165aa461168752274288afe5a2e79e7f` · 104 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -24,9 +24,11 @@ Catalog hash: `b3:61d7e227fa5ee34f4d454b86ecd384df` · 101 commands. `nyx api li
 | [`add_pml`](add_pml.md) | edit | Absorbing layers |
 | [`add_pml_conditions`](add_pml_conditions.md) | edit | Add the absorbing-layer conditions |
 | [`add_polygon`](add_polygon.md) | edit | Polygon |
+| [`add_polygons`](add_polygons.md) | edit | Polygon batch |
 | [`add_rect`](add_rect.md) | edit | Rectangle |
 | [`add_revolve`](add_revolve.md) | edit | Revolve |
 | [`add_rounded_rect`](add_rounded_rect.md) | edit | Rounded rectangle |
+| [`add_sheet`](add_sheet.md) | edit | 2D sheet in 3D |
 | [`add_size`](add_size.md) | edit | Mesh size |
 | [`add_sphere`](add_sphere.md) | edit | Sphere |
 | [`add_tag`](add_tag.md) | edit | Tag |
@@ -34,6 +36,7 @@ Catalog hash: `b3:61d7e227fa5ee34f4d454b86ecd384df` · 101 commands. `nyx api li
 | [`add_transform`](add_transform.md) | edit | Transform |
 | [`add_union`](add_union.md) | edit | Union |
 | [`analyse`](analyse.md) | read | Analyse a result |
+| [`bcs_surface_impedance`](bcs_surface_impedance.md) | read | BCS thin-film surface impedance |
 | [`check_project`](check_project.md) | read | Check the project |
 | [`confinement`](confinement.md) | read | Fraction of a field in a region |
 | [`convergence_check`](convergence_check.md) | expensive | Check mesh convergence |

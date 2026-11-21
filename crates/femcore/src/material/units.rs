@@ -22,6 +22,8 @@ pub enum Dim {
     ElectricalConductivity,
     /// angular frequency, frequency or photon energy; the SI value is rad/s
     Frequency,
+    /// energy; the SI value is J
+    Energy,
 }
 
 impl Dim {
@@ -38,6 +40,7 @@ impl Dim {
             Dim::Compliance => "a compliance, for example 1/GPa",
             Dim::ElectricalConductivity => "an electrical conductivity, for example S/m",
             Dim::Frequency => "a frequency or energy, for example eV, THz or rad/s",
+            Dim::Energy => "an energy, for example meV, eV or J",
         }
     }
 }
@@ -92,7 +95,6 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
         "ppm/K" | "1e-6/K" | "10^-6/K" | "e-6/K" | "ppm/degC" | "1e-6/degC" => return Some((Dim::PerKelvin, 1e-6)),
         "1e-5/K" | "10^-5/K" => return Some((Dim::PerKelvin, 1e-5)),
         "m^2/N" | "m2/N" => return Some((Dim::Compliance, 1.0)),
-        "K" => return Some((Dim::Temperature, 1.0)),
         "degC" | "C" => return Some((Dim::Temperature, 1.0)),
         "angstrom" => return Some((Dim::Length, 1e-10)),
         "S/m" => return Some((Dim::ElectricalConductivity, 1.0)),
@@ -102,6 +104,12 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
     }
     if let Some(f) = with_prefix(&u, "eV") {
         return Some((Dim::Frequency, f * 1.602_176_634e-19 / 1.054_571_817e-34));
+    }
+    if let Some(f) = with_prefix(&u, "J") {
+        return Some((Dim::Energy, f));
+    }
+    if let Some(f) = with_prefix(&u, "K") {
+        return Some((Dim::Temperature, f));
     }
     if let Some(f) = with_prefix(&u, "Hz") {
         return Some((Dim::Frequency, f * 2.0 * std::f64::consts::PI));
@@ -132,13 +140,18 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
 
 /// `value` in `unit` converted to SI, if `unit` is a unit of dimension `expect`.
 pub fn to_si(value: f64, unit: &str, expect: Dim) -> Result<f64, String> {
+    let u = normalise(unit);
+    if expect == Dim::Energy {
+        if let Some(f) = with_prefix(&u, "eV") {
+            return Ok(value * f * 1.602_176_634e-19);
+        }
+    }
     let (dim, f) = lookup(unit).ok_or_else(|| format!("the unit '{unit}' is not known; expected {}", expect.describe()))?;
     if dim != expect {
         return Err(format!("the unit '{unit}' does not fit here; expected {}", expect.describe()));
     }
     if expect == Dim::Temperature {
-        let u = normalise(unit);
-        return Ok(if u == "K" { value } else { value + 273.15 });
+        return Ok(if u == "degC" || u == "C" { value + 273.15 } else { value * f });
     }
     Ok(value * f)
 }
@@ -177,6 +190,14 @@ mod tests {
         assert_eq!(to_si(1.55, "\u{b5}m", Dim::Length).unwrap(), 1.55e-6);
         assert!((to_si(5.0, "ppm/K", Dim::PerKelvin).unwrap() - 5.0e-6).abs() < 1e-18);
         assert!((to_si(20.0, "degC", Dim::Temperature).unwrap() - 293.15).abs() < 1e-12);
+        assert_eq!(to_si(9.2, "K", Dim::Temperature).unwrap(), 9.2);
+        assert!((to_si(10.0, "mK", Dim::Temperature).unwrap() - 0.01).abs() < 1e-15);
+        assert!((to_si(1.0, "eV", Dim::Energy).unwrap() - 1.602_176_634e-19).abs() < 1e-32);
+        assert!((to_si(1.395, "meV", Dim::Energy).unwrap() - 1.395e-3 * 1.602_176_634e-19).abs() < 1e-35);
+        assert!((to_si(180.0, "ueV", Dim::Energy).unwrap() - 180.0e-6 * 1.602_176_634e-19).abs() < 1e-35);
+        assert_eq!(to_si(2.5e-22, "J", Dim::Energy).unwrap(), 2.5e-22);
+        assert!((to_si(33.3, "nm", Dim::Length).unwrap() - 33.3e-9).abs() < 1e-21);
+        assert_eq!(to_si(5.5e7, "S/m", Dim::ElectricalConductivity).unwrap(), 5.5e7);
         assert_eq!(to_si(1.0, "1/GPa", Dim::Compliance).unwrap(), 1e-9);
         assert_eq!(to_si(3.0, "W/(m*K)", Dim::ThermalConductivity).unwrap(), 3.0);
     }

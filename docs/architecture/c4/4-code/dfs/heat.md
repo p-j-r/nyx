@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Heat kernel** (`dfs.heat`) in the container
 > Heat transfer on P1/P2 simplices, stationary and transient.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md)  
-**Size:** 1 file, 275 lines.
+**Size:** 1 file, 277 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/heat.rs` | 275 |  |
+| `crates/nyx-dfs/src/heat.rs` | 277 |  |
 
 ## What it uses
 
@@ -67,4 +67,4 @@ classDiagram
 | fn | `heat_fields` | `heat.rs:72` | `pub fn heat_fields(mesh: &Discretisation, t: &[f64], ktensor: &[M3], order: usize) -> (Vec<Field>, CellFields)` —  Stage 3 of heat transfer: `T` and `q` (flat names `\|q\|`, `qx`, `qz` come from `Solution::flat_fields`) and the same per cell without |
 | struct | `HeatStates` | `heat.rs:86` | fields: `times`, `temps`, `log` —  Stage 2 of heat transfer: the temperature at every dof, for the stationary study (one state) or at each output |
 | fn | `solve_heat_states` | `heat.rs:93` | `pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem) -> Result<HeatStates, String>` |
-| fn | `solve_heat` | `heat.rs:239` | `pub fn solve_heat(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
+| fn | `solve_heat` | `heat.rs:241` | `pub fn solve_heat(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |

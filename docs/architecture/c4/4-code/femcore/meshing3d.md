@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, and the curved (quadratic) edges of boundary cells.
+> The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing.
 
-**Decisions:** [ADR 40](../../../adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md), [ADR 55](../../../adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md), [ADR 82](../../../adr/0082-curved-order-2-geometry.md), [ADR 83](../../../adr/0083-face-size-rules-and-max-dev-in-the-lattice-mesher.md)  
-**Size:** 5 files, 2090 lines.
+**Decisions:** [ADR 40](../../../adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md), [ADR 55](../../../adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md), [ADR 82](../../../adr/0082-curved-order-2-geometry.md), [ADR 83](../../../adr/0083-face-size-rules-and-max-dev-in-the-lattice-mesher.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
+**Size:** 6 files, 2690 lines.
 
 ## Files
 
@@ -16,19 +16,21 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 | `crates/femcore/src/meshing/geomdrive3.rs` | 338 | From a 3D `geom` model to a tetrahedral mesh: the adapter between `geom::Evaluated` and the lattice mesher (`mesher3d`), which only knows the trait `Domain3`. |
 | `crates/femcore/src/meshing/mesher3d.rs` | 912 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
 | `crates/femcore/src/meshing/refine3d.rs` | 244 | Local refinement of a tetrahedral mesh by longest-edge (Rivara) bisection. |
+| `crates/femcore/src/meshing/sheet3d.rs` | 600 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `geom` (geom)](../../3-components/geom.md) | eval, labels, math, model, select | Aabb, EntityKind, Evaluated, LabelMap, Model, RegionKind |
+| [container `geom` (geom)](../../3-components/geom.md) | complex, eval, labels, math, model, query, select | Aabb, DiscretizeOpts, EdgeGeom, EntityKind, Evaluated, FaceGeom, LabelMap, Model, RegionKind, V2 +5 |
 | [Adaptation drivers](./adaptdrive.md) | adapt::drive, adapt::drive3, adapt::geom3 | AdaptReport, FacetGeometry, Geometry3, adapt3_with |
 | [Adaptation operators](./adaptops.md) | adapt::ops3, adapt::topo, adapt::topo3 | AdaptOptions3, Sig, TopoOptions3, Work3 |
 | [Finite-element basics](./fem.md) | fem | CurvedTet, quad_rule_collapsed |
 | [Mesh](./mesh.md) | mesh, mesh::cells | CellMesh, CellType, SimplexMesh |
-| [Meshing facade](./meshing.md) | meshing, meshing::geomdrive | Adaptive, GeomMeshOpts, MeshedGeom, evaluate, periodic_labels |
+| [Meshing facade](./meshing.md) | meshing, meshing::geomdrive, meshing::mesher, meshing::physics_size, meshing::sizing | Adaptive, Chain, Fill, GeomMeshOpts, MeshParams, MeshPlan, MeshedGeom, Mesher, PhysicsSizing, Sizing +4 |
 | [Metric fields](./metric.md) | adapt::field3, adapt::metric, adapt::work | BackgroundMetric3, SimplexMesh, Sym, isotropic, simplex_to_adapt |
 | [Runtime services](./runtime.md) | par, progress | check, lap, threads |
+| [Structured absorbing layers](./structpml.md) | meshing::pml_geom, meshing::pml_geom3 | PmlMode, structured_pml_3d |
 
 ## Used by
 
@@ -161,6 +163,13 @@ classDiagram
         +refine_to_size(mesh, size, project, ratio, max_cells) Result
     }
   }
+  namespace meshing_sheet3d_rs {
+    class fns_meshing_sheet3d_rs {
+        <<module meshing/sheet3d.rs>>
+        +subdivide_z_interval(z0, z1, dz0, dz1, h_max, ratio) Vec~f64~
+        +mesh_sheet_stack_3d(ev, plan, waves) Result
+    }
+  }
   GeomDomain3 ..|> Domain3
   Report3d --> CurveReport
 ```
@@ -210,5 +219,7 @@ classDiagram
 | enum | `EdgeKind` | `meshing/refine3d.rs:18` | variants: `Interior`, `Boundary`, `Interface` —  Where an edge that is being split lies. |
 | struct | `RefineReport` | `meshing/refine3d.rs:27` | fields: `rounds`, `bisections`, `cells_before`, `cells_after` |
 | fn | `refine_to_size` | `meshing/refine3d.rs:72` | `pub fn refine_to_size( mesh: &CellMesh<3>, size: &(dyn Fn(P3) -> f64 + Sync), project: &(dyn Fn(P3, P3, P3, EdgeKind) -> P3 + Sync), ratio: f64, max_cells: usize, ) -> Result<(CellMesh<3>, RefineReport), String>` —  Refines `mesh` until no cell has an edge longer than `ratio` times `size(centroid)`. |
+| fn | `subdivide_z_interval` | `meshing/sheet3d.rs:55` | `pub fn subdivide_z_interval(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64, ratio: f64) -> Vec<f64>` —  Subdivides `[z0, z1]` into graded z-levels starting at step `dz0` near `z0` and `dz1` near `z1`, |
+| fn | `mesh_sheet_stack_3d` | `meshing/sheet3d.rs:107` | `pub fn mesh_sheet_stack_3d( ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<(MeshedGeom, Option<AdaptReport>), String>` —  Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a conformal tetrahedral `MeshedGeom`. |
 
 Trait implementations in this component: `GeomOracle3: Geometry3`, `CurveReport: Default`, `GeomDomain3: Domain3`

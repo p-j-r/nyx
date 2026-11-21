@@ -32,8 +32,8 @@ pub struct Layer {
 pub struct LayerStack {
     pub axis: Axis,
     pub layers: Vec<Layer>,
-    /// the common refinement of all layer partitions
-    pub(crate) overlay: Complex,
+    /// the common refinement of all layer partitions and 2D sheets
+    pub overlay: Complex,
 }
 
 impl LayerStack {
@@ -125,23 +125,24 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
     let prims = &scene.prims;
     let np = prims.len();
 
-    // z levels
-    let mut zs: Vec<(f64, usize)> = prims
+    // z levels (from 3D primitives and 2D sheets)
+    let mut zs: Vec<(f64, String)> = prims
         .iter()
-        .enumerate()
-        .filter(|(_, p)| !p.is_curved_solid())
-        .flat_map(|(i, p)| [(p.z.0, i), (p.z.1, i)])
+        .filter(|p| !p.is_curved_solid())
+        .flat_map(|p| [(p.z.0, p.name.clone()), (p.z.1, p.name.clone())])
+        .chain(scene.sheets.iter().map(|s| (s.z, s.name.clone())))
         .collect();
     zs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     let mut levels: Vec<f64> = vec![];
-    for (k, &(z, i)) in zs.iter().enumerate() {
+    for (k, (z, name)) in zs.iter().enumerate() {
+        let z = *z;
         match levels.last() {
             Some(&l) if z - l <= tol => {}
             Some(&l) if z - l <= band => {
-                let other = zs[..k].iter().rev().find(|x| (x.0 - l).abs() <= tol).map_or(0, |x| x.1);
+                let other = zs[..k].iter().rev().find(|x| (x.0 - l).abs() <= tol).map_or("", |x| x.1.as_str());
                 return Err(GeomError(format!(
-                    "the z levels of '{}' and '{}' differ by {:.3e} m, close to but not within the tolerance {:.1e} m: make them equal or move them apart",
-                    prims[other].name, prims[i].name, z - l, tol
+                    "the z levels of '{other}' and '{name}' differ by {:.3e} m, close to but not within the tolerance {:.1e} m: make them equal or move them apart",
+                    z - l, tol
                 )));
             }
             _ => levels.push(z),
@@ -188,6 +189,7 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
             env: scene.env.clone(),
             prims: kept,
             regions,
+            sheets: vec![],
             pins: vec![],
             bounds: scene.bounds,
             warnings: vec![],
@@ -248,17 +250,33 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         }
     }
 
-    // overlay: classes are tuples of the per-layer regions
-    let classes: RefCell<Vec<Vec<Option<u32>>>> = RefCell::new(vec![]);
+    // group 2D sheets by their snapped z level (later add_sheet has higher painter priority)
+    let mut sheet_levels: Vec<(f64, Vec<usize>)> = vec![];
+    for (si, s) in scene.sheets.iter().enumerate() {
+        let sz = snap(s.z);
+        match sheet_levels.iter_mut().find(|(lz, _)| (*lz - sz).abs() <= tol) {
+            Some((_, list)) => list.push(si),
+            None => sheet_levels.push((sz, vec![si])),
+        }
+    }
+    let sheet_painter = |indices: &[usize], bit: &dyn Fn(usize) -> bool| -> Option<usize> {
+        indices.iter().rev().copied().find(|&si| scene.sheets[si].expr.eval(bit))
+    };
+
+    // overlay: classes are pairs of (per-layer 3D region tuple, per-sheet-level winning 2D sheet tuple)
+    type ClassTuple = (Vec<Option<u32>>, Vec<Option<usize>>);
+    let classes: RefCell<Vec<ClassTuple>> = RefCell::new(vec![]);
     let classify = |bit: &dyn Fn(usize) -> bool| -> Option<usize> {
-        let tuple: Vec<Option<u32>> =
+        let rtuple: Vec<Option<u32>> =
             raws.iter().map(|l| painter(&scene.regions, &l.exprs, bit).and_then(|s| fin[s])).collect();
-        if tuple.iter().all(|t| t.is_none()) {
+        let stuple: Vec<Option<usize>> = sheet_levels.iter().map(|(_, idxs)| sheet_painter(idxs, bit)).collect();
+        if rtuple.iter().all(|t| t.is_none()) && stuple.iter().all(|t| t.is_none()) {
             return None;
         }
+        let pair = (rtuple, stuple);
         let mut c = classes.borrow_mut();
-        Some(c.iter().position(|t| *t == tuple).unwrap_or_else(|| {
-            c.push(tuple);
+        Some(c.iter().position(|t| *t == pair).unwrap_or_else(|| {
+            c.push(pair);
             c.len() - 1
         }))
     };
@@ -280,6 +298,7 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         env: scene.env.clone(),
         prims: prims.clone(),
         regions: vec![],
+        sheets: vec![],
         pins: vec![],
         bounds: scene.bounds,
         warnings: vec![],
@@ -290,7 +309,8 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
     let mut overlay = arrange_with(&ov_scene, cache, &classify, &synth)?;
     let tuples = classes.into_inner();
     let ncell = overlay.regions.len();
-    let cell_tuple: Vec<&Vec<Option<u32>>> = overlay.regions.iter().map(|r| &tuples[r.scene_index]).collect();
+    let cell_tuple: Vec<&Vec<Option<u32>>> = overlay.regions.iter().map(|r| &tuples[r.scene_index].0).collect();
+    let cell_sheets: Vec<&Vec<Option<usize>>> = overlay.regions.iter().map(|r| &tuples[r.scene_index].1).collect();
     for r in &mut overlay.regions {
         r.name = format!("cell{}", r.scene_index);
     }
@@ -406,9 +426,30 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
             (None, None) => {}
         }
         for (b, a, z) in jobs {
+            let sl_idx = sheet_levels.iter().position(|(lz, _)| (*lz - z).abs() <= tol);
             #[allow(clippy::needless_range_loop)]
             for c in 0..ncell {
                 let (rb, ra) = (b.and_then(|b| layers[b].region_of[c]), a.and_then(|a| layers[a].region_of[c]));
+                if rb.is_none() && ra.is_none() {
+                    continue;
+                }
+                if let Some(si) = sl_idx.and_then(|sl| cell_sheets[c][sl]) {
+                    let sh = &scene.sheets[si];
+                    let cell = &overlay.regions[c];
+                    let mut bbox = cell.bbox;
+                    bbox.lo[2] = z;
+                    bbox.hi[2] = z;
+                    faces.push(Face {
+                        name: sh.name.clone(),
+                        geom: FaceGeom::Cap { cell: c as u32, z },
+                        first: rb,
+                        second: ra,
+                        prov: vec![Prov { feature: sh.feature, instance: sh.name.clone(), role: "sheet".to_string() }],
+                        area: cell.measure,
+                        bbox,
+                    });
+                    continue;
+                }
                 if rb == ra {
                     continue;
                 }
@@ -500,7 +541,7 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
     let mut faces: Vec<Face> = keyed.into_iter().map(|x| x.1).collect();
     if scene.naming == NameScheme::Numbered {
         let mut count = vec![0usize; regions.len()];
-        for f in faces.iter_mut().filter(|f| f.first.is_none() || f.second.is_none()) {
+        for f in faces.iter_mut().filter(|f| !f.is_sheet() && (f.first.is_none() || f.second.is_none())) {
             let r = f.first.or(f.second).unwrap() as usize;
             count[r] += 1;
             f.name = format!("{}.{}", regions[r].name, count[r]);

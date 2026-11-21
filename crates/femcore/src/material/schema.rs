@@ -91,6 +91,27 @@ pub fn material_schema() -> Value {
             elastic_props.insert(format!("s{i}{j}"), quantity("independent compliance constant of the class"));
         }
     }
+    let superconducting = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": "BCS and London superconducting parameters for complex conductivity and thin-film kinetic inductance",
+        "required": ["tc"],
+        "properties": {
+            "source": source_ref(),
+            "tc": quantity("critical temperature T_c, K"),
+            "tc_unit": { "type": "string" },
+            "gap_0": quantity("zero-temperature BCS energy gap Delta(0), eV/meV/ueV/J (defaults to 1.7638 k_B T_c)"),
+            "gap_0_unit": { "type": "string" },
+            "lambda_L": quantity("zero-temperature London penetration depth lambda_L(0), m/um/nm"),
+            "lambda_L_unit": { "type": "string" },
+            "xi_0": quantity("BCS coherence length xi_0, m/um/nm"),
+            "xi_0_unit": { "type": "string" },
+            "mean_free_path": quantity("normal-state electron mean free path ell, m/um/nm"),
+            "mean_free_path_unit": { "type": "string" },
+            "sigma_n": quantity("normal-state electrical conductivity sigma_n, S/m"),
+            "sigma_n_unit": { "type": "string" }
+        }
+    });
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://nyx.local/schemas/material.v1.json",
@@ -140,7 +161,8 @@ pub fn material_schema() -> Value {
                 "additionalProperties": false,
                 "description": "wavelength-dependent index; time convention e^{j omega t}, complex index n - j k. Put the model keys here (isotropic) or in per-axis tables",
                 "properties": optical_props
-            }
+            },
+            "superconducting": superconducting
         },
         "$defs": {
             "model": model(),

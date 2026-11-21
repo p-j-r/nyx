@@ -68,13 +68,9 @@ impl Spec {
     }
 
     pub fn problem(&self) -> Problem {
-        Problem {
-            order: self.order,
-            study: self.study.clone(),
-            materials: self.materials.clone(),
-            periodic: vec![],
-            pmc: vec![],
-        }
+        let mut p = Problem::new(self.study.clone(), self.order);
+        p.materials = self.materials.clone();
+        p
     }
 
     /// The wavelength of every domain in `domains`, and the headroom of the study.

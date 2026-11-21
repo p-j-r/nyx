@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 > The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 4 files, 302 lines.
+**Size:** 4 files, 308 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-physics/src/error.rs` | 66 |  |
-| `crates/nyx-physics/src/lib.rs` | 60 |  |
+| `crates/nyx-physics/src/lib.rs` | 66 |  |
 | `crates/nyx-physics/src/physics.rs` | 83 |  |
 | `crates/nyx-physics/src/registry.rs` | 93 |  |
 
@@ -21,6 +21,7 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | Target | Modules | Items |
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, mesh, mesh::exchange, progress | Library, Mesh, Progress, SimplexMesh |
+| [cQED result payloads](./cqed.md) | cqed | CAPACITANCE_KEY, CIRCUIT_ROM_KEY, CapacitanceMatrixData, CircuitRom, DRIVEN_PORT_KEY, DrivenPortData, INDUCTANCE_KEY, InductanceMatrixData, ModeEnergyRow, RomPort +2 |
 | [Descriptors and schemas](./descriptors.md) | crate root, desc | BcDesc, FieldDesc, FieldLink, ParamDesc, PropDesc, Sizing, StudyDesc |
 | [Problem envelope](./envelope.md) | spec, validate | BcSpec, FORMAT, MaterialAssign, ProblemSpec, StudySpec, canonical_json, check_params, check_result_finite, validate_spec |
 | [Result and frame](./result.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_back, cell_fields_of |
@@ -30,16 +31,21 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: Analysis API](../analysis/api.md) | crate root, error | Error, Mesh |
+| [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | crate root, error | Error, Mesh |
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | crate root, error | Discretisation, Error, Mesh, discretise |
 | [analysis: Mode figures](../analysis/figures.md) | crate root, error | Discretisation, Error, Mesh, discretise |
 | [analysis: Field samples](../analysis/samples.md) | crate root, error | Error, Mesh, discretise |
 | [dfs: Physics adapter](../dfs/adapter.md) | crate root |  |
 | [dfs: Shared helpers](../dfs/common.md) | crate root | Discretisation |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | crate root | Discretisation |
 | [dfs: Heat kernel](../dfs/heat.md) | crate root | Discretisation |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | crate root | Discretisation |
 | [dfs: Typed problem](../dfs/problem.md) | error, physics | Ctx, Error, Physics |
 | [ems: Physics adapter](../ems/adapter.md) | crate root | Mesh |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | crate root | Discretisation |
 | [ems: 3D cavity kernel](../ems/cavity.md) | crate root | Discretisation |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | crate root | Discretisation |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | crate root | Discretisation |
 | [ems: Mode kernel](../ems/modes.md) | crate root | Discretisation |
 | [ems: Complex-mode kernel](../ems/modescx.md) | crate root | Discretisation |
 | [ems: Optical mode sets](../ems/optical.md) | crate root | Discretisation |
@@ -152,9 +158,9 @@ classDiagram
 | fn | `Error::code` | `error.rs:25` | `pub fn code(&self) -> &'static str` —  A stable short name for the kind, for logs, JSON and MCP error codes. |
 | fn | `Error::from_kernel` | `error.rs:37` | `pub fn from_kernel(text: String) -> Error` —  Maps the `String` errors of the kernels in `femcore` (the text `"cancelled"` is the cancel signal there). |
 | fn | `Error::invalid` | `error.rs:47` | `pub fn invalid(text: impl Into<String>) -> Error` |
-| type | `Discretisation` | `lib.rs:39` |  The numbering of unknowns (edges, P2 dofs) a kernel assembles on. Each solve builds its own from the `Mesh` with `discretise`. The type |
-| fn | `discretise` | `lib.rs:42` | `pub fn discretise(mesh: &Mesh) -> Result<Discretisation, Error>` —  The `Discretisation` a physics assembles on, made from the `Mesh` it was given (non-simplex cells are cut into simplices). |
-| fn | `check_mesh` | `lib.rs:47` | `pub fn check_mesh(mesh: &Mesh) -> Result<(), Error>` —  Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis. |
+| type | `Discretisation` | `lib.rs:45` |  The numbering of unknowns (edges, P2 dofs) a kernel assembles on. Each solve builds its own from the `Mesh` with `discretise`. The type |
+| fn | `discretise` | `lib.rs:48` | `pub fn discretise(mesh: &Mesh) -> Result<Discretisation, Error>` —  The `Discretisation` a physics assembles on, made from the `Mesh` it was given (non-simplex cells are cut into simplices). |
+| fn | `check_mesh` | `lib.rs:53` | `pub fn check_mesh(mesh: &Mesh) -> Result<(), Error>` —  Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis. |
 | trait | `LabelResolver` | `physics.rs:21` | methods: `domains`, `boundaries` —  Turns the names of a problem (`geom` region names and boundary selectors) into the integer labels of the mesh being solved. |
 | struct | `Ctx` | `physics.rs:30` | fields: `resolver`, `progress`, `library`, `wavelength`, `inputs` —  What a solve may use besides the mesh and the problem: the label resolver, progress and cancellation, and the fields that other |
 | trait | `Physics` | `physics.rs:56` | methods: `id`, `name`, `studies`, `bc_kinds`, `properties`, `params`, `fields`, `exports`, `imports`, `validate`, `sizing`, `solve` |

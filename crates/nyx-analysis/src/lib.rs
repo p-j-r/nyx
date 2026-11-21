@@ -6,22 +6,39 @@
 //! * `polarization`: Stokes parameters, Poincare sphere, mode classes and the drawings of them (was `femcore::polarization`)
 //! * `modes`: the polarization of a set of modes, the table, the CSV and the degenerate groups (was `femcore::analysis`)
 //! * `samples`: the modes of a `SolveResult` as weighted samples of the field (what a mode study of `ems` states in its result)
+//! * `capacitance`: multi-terminal Maxwell/mutual capacitance matrix and charging energy matrix (`capacitance_matrix`) and magnetostatic
+//!   inductance matrix (`inductance_matrix`) from `dfs` results
 //!
 //! `polarization(mesh, result)` is the typed entry point (the window draws from it); `PolarizationAnalysis` is the same through the
 //! `Analysis` trait, which returns plain JSON, so that the engine, the window and the MCP server can list and run analyses uniformly. Group
 //! index is a later analysis.
 
 pub mod canvas;
+pub mod capacitance;
+pub mod epr;
 pub mod figure;
+pub mod hamiltonian;
 pub mod modes;
 pub mod modeview;
 pub mod polarization;
 pub mod raster;
 pub mod samples;
 pub mod section;
+pub mod tls;
 
+pub use capacitance::{
+    capacitance_matrix, capacitance_matrix_applies, inductance_matrix, inductance_matrix_applies,
+    CapacitanceMatrixAnalysis, InductanceMatrixAnalysis,
+};
+pub use epr::{epr, epr_applies, epr_with_params, EprAnalysis, EprReport};
+pub use hamiltonian::{
+    hamiltonian, hamiltonian_applies, hamiltonian_with_params, FluxSweepPoint, HamiltonianAnalysis, HamiltonianReport,
+};
 pub use modes::{analyze_modes, AnalysisOptions, GroupReport, ModeAnalysis, ModeInput, ModeRow, ResolveAxis, Resolved};
 pub use samples::{polarization_input, PolarizationInput};
+pub use tls::{
+    tls_participation, tls_participation_applies, tls_participation_with_params, TlsParticipationAnalysis, TlsReport,
+};
 
 use nyx_physics::{Error, Mesh, SolveResult};
 use serde_json::{json, Value};
@@ -34,6 +51,10 @@ pub trait Analysis: Send + Sync {
     /// True when the result has what the analysis needs (a mode study with an electric field, ...).
     fn applies_to(&self, result: &SolveResult) -> bool;
     fn run(&self, mesh: &Mesh, result: &SolveResult) -> Result<Value, Error>;
+    /// Runs the analysis with optional JSON parameters (`params`); defaults to `self.run`.
+    fn run_with_params(&self, mesh: &Mesh, result: &SolveResult, _params: &Value) -> Result<Value, Error> {
+        self.run(mesh, result)
+    }
 }
 
 /// The polarization of the modes of `result`, solved on `mesh`.

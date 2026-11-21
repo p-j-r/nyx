@@ -7,42 +7,42 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 86 ["femcore"]
-        style 86 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 92 ["femcore"]
+        style 92 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        100["<div style='font-weight: bold'>Direct solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Shifted sparse direct solves<br />with symbolic reuse, LU with<br />a user ordering, block<br />low-rank factorisation, mixed<br />precision, nested dissection.</div>"]
-        style 100 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        101["<div style='font-weight: bold'>Krylov solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>CG, MINRES, GMRES, BiCGStab,<br />COCR, QMR, IDR(s), GCRO-DR<br />for real and complex systems.</div>"]
-        style 101 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        102["<div style='font-weight: bold'>Eigensolvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Krylov-Schur, LOBPCG,<br />Jacobi-Davidson, quadratic<br />and nonlinear eigenproblems,<br />contour integral, Chebyshev<br />filtering, real Arnoldi for<br />the 2D modes, sensitivities.</div>"]
-        style 102 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        103["<div style='font-weight: bold'>Preconditioners</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Smoothed-aggregation<br />multigrid (scalar and<br />elastic), auxiliary-space<br />Maxwell and divergence<br />solvers, Schwarz, field-split<br />and incomplete<br />factorisations.</div>"]
-        style 103 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        104["<div style='font-weight: bold'>Time, nonlinear, sweeps</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Time integration, Newton and<br />optimisation, matrix<br />exponential action,<br />reduced-order frequency<br />sweeps and matrix-free<br />high-order operators.</div>"]
+        104["<div style='font-weight: bold'>Matrices and vectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one matrix type Csr over<br />a generic scalar, block<br />storage, multivector kernels,<br />operator interfaces, dense<br />helpers, Matrix Market,<br />problem bundles and<br />test-problem generators.</div>"]
         style 104 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        98["<div style='font-weight: bold'>Matrices and vectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one matrix type Csr over<br />a generic scalar, block<br />storage, multivector kernels,<br />operator interfaces, dense<br />helpers, Matrix Market,<br />problem bundles and<br />test-problem generators.</div>"]
-        style 98 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        99["<div style='font-weight: bold'>Linear algebra driver</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The door the physics kernels<br />use: a direct solve,<br />eigenpairs near a shift, and<br />the solver interface for<br />models.</div>"]
-        style 99 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        105["<div style='font-weight: bold'>Linear algebra driver</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The door the physics kernels<br />use: a direct solve,<br />eigenpairs near a shift, and<br />the solver interface for<br />models.</div>"]
+        style 105 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        106["<div style='font-weight: bold'>Direct solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Shifted sparse direct solves<br />with symbolic reuse, LU with<br />a user ordering, block<br />low-rank factorisation, mixed<br />precision, nested dissection.</div>"]
+        style 106 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        107["<div style='font-weight: bold'>Krylov solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>CG, MINRES, GMRES, BiCGStab,<br />COCR, QMR, IDR(s), GCRO-DR<br />for real and complex systems.</div>"]
+        style 107 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        108["<div style='font-weight: bold'>Eigensolvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Krylov-Schur, LOBPCG,<br />Jacobi-Davidson, quadratic<br />and nonlinear eigenproblems,<br />contour integral, Chebyshev<br />filtering, real Arnoldi for<br />the 2D modes, sensitivities.</div>"]
+        style 108 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        109["<div style='font-weight: bold'>Preconditioners</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Smoothed-aggregation<br />multigrid (scalar and<br />elastic), auxiliary-space<br />Maxwell and divergence<br />solvers, Schwarz, field-split<br />and incomplete<br />factorisations.</div>"]
+        style 109 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        110["<div style='font-weight: bold'>Time, nonlinear, sweeps</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Time integration, Newton and<br />optimisation, matrix<br />exponential action,<br />reduced-order frequency<br />sweeps and matrix-free<br />high-order operators.</div>"]
+        style 110 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
     end
 
-    100-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    99-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    99-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    99-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
-    102-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    102-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    102-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    102-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
-    101-. "<div>uses linalg::basis,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    104-. "<div>uses linalg::csr,<br />linalg::dense +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    104-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    104-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
-    104-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
-    103-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    103-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    103-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    106-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
+    105-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
+    105-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    105-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    108-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
+    108-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    108-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    108-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    107-. "<div>uses linalg::basis,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
+    110-. "<div>uses linalg::csr,<br />linalg::dense +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
+    110-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    110-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    110-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
+    109-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
+    109-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    109-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
 
   end

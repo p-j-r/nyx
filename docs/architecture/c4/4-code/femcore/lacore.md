@@ -39,11 +39,15 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 
 | Component | Modules | Items |
 |---|---|---|
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::dense, linalg::scalar | C64, Dense, Scalar, hermitian_eig, solve_small |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | linalg::csr::assembly | RCsr |
 | [dfs: Heat kernel](../dfs/heat.md) | linalg::csr::assembly | RCsr |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | linalg::csr::assembly | Coo |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
-| [ems: Mode kernel](../ems/modes.md) | linalg::csr, linalg::csr::assembly | Coo, RCsr |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Coo, RCsr, c |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
+| [ems: Mode kernel](../ems/modes.md) | linalg::csr, linalg::csr::assembly | CCoo, Coo, RCsr |
 | [ems: Complex-mode kernel](../ems/modescx.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [ems: Optical mode sets](../ems/optical.md) | linalg::csr::assembly | c |
 | [engine: Commands](../engine/commands.md) | linalg::csr::assembly | C |

@@ -34,14 +34,18 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 
 | Component | Modules | Items |
 |---|---|---|
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | fem | facet_rule, geometry, quad_rule, shape |
 | [analysis: Field samples](../analysis/samples.md) | fem, fields | geometry, local_bary, shape |
 | [dfs: Shared helpers](../dfs/common.md) | fields | gradients_at_nodes |
-| [dfs: Electrostatics kernel](../dfs/electro.md) | fem, fields, props | CellFields, TensorKind, node_average |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | fem, fields, props | CellFields, LinearSolver, TensorKind, node_average |
 | [dfs: Heat kernel](../dfs/heat.md) | fem, fields, props | AmgSystem, CellFields, LinearSolver, TensorKind, amg_wanted, node_average |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | fem, fields, props | CellFields, LinearSolver, local_bary, node_average |
 | [dfs: Typed problem](../dfs/problem.md) | props | LinearSolver, Materials |
 | [ems: Physics adapter](../ems/adapter.md) | props | PmlDir |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | edge, fem, fields, pml, props | CellData, CellFields, Materials, Pml, PmlDir, cell_data, edge_basis, local_bary +4 |
 | [ems: 3D cavity kernel](../ems/cavity.md) | fem, fields, periodic, pml, props | CellFields, Match, Reduction, TensorKind, ccsr_adjoint, ccsr_mul, cell_stretches, congruence +5 |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | edge, fem, fields, periodic, pml, props | CellFields, CurvedTet, Geometry, Match, Reduction, TensorKind, cell_data, cell_stretches +9 |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | edge, fem, periodic | CurvedTet, Geometry, Reduction, ccsr_adjoint, cell_data, congruence, edge_basis, facet_rule +5 |
 | [ems: Mode kernel](../ems/modes.md) | edge, fem, fields, props | CellFields, TensorKind, cell_data, edge_basis, local_bary, node_average, tri_g |
 | [ems: Complex-mode kernel](../ems/modescx.md) | edge, fem, fields | CellFields, cell_data, edge_basis, local_bary, node_average, tri_g |
 | [ems: Optical mode sets](../ems/optical.md) | props | PmlDir, TensorKind |

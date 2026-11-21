@@ -2280,6 +2280,12 @@ mod tests {
         }
 
         // the frames really drew the Geometry tab and the trial mesh really ran (otherwise "nothing started" would prove nothing)
+        for _ in 0..40 {
+            if matches!(a.feedback.size, crate::feedback::SizeView::Ready(_)) {
+                break;
+            }
+            frames(&mut a, 1, 0.05);
+        }
         assert!(matches!(a.feedback.size, crate::feedback::SizeView::Ready(_)), "the last edit's trial mesh did not come back: {:?}", a.feedback.size);
 
         // the sweep form of the Build page: its values and its count changed, the plan redrawn; only Run sweep submits
@@ -2572,6 +2578,30 @@ mod tests {
         });
         gui_click_at(a, rect.center());
         rect
+    }
+
+    fn gui_click_combo_item(a: &mut App, item: &str) {
+        let mut texts = gui_frame(a, egui::RawInput::default());
+        if let Some(rect) = texts.iter().rev().find(|(t, _)| t == item).map(|(_, r)| *r) {
+            gui_click_at(a, rect.center());
+            return;
+        }
+        let popup_pos = gui_find_text(&texts, "air")
+            .or_else(|| gui_find_text(&texts, "numbers"))
+            .or_else(|| gui_find_text(&texts, "aluminium"))
+            .unwrap_or_else(|| panic!("open material ComboBox popup not found while looking for '{item}'; texts={texts:?}"))
+            .center();
+        for _ in 0..8 {
+            let mut raw = egui::RawInput::default();
+            raw.events.push(egui::Event::PointerMoved(popup_pos));
+            gui_frame_sized_scroll(a, raw, E2E_SCREEN, -200.0);
+            texts = gui_frame(a, egui::RawInput::default());
+            if let Some(rect) = texts.iter().rev().find(|(t, _)| t == item).map(|(_, r)| *r) {
+                gui_click_at(a, rect.center());
+                return;
+            }
+        }
+        panic!("ComboBox item '{item}' not found after scrolling popup; texts={texts:?}");
     }
 
     fn gui_type_in_rect(a: &mut App, rect: egui::Rect, text: &str) {
@@ -2937,7 +2967,7 @@ mod tests {
         assert_eq!(a.shell.open[&wid].concept_tab, Tab::Materials);
         // Assign "silica" to all regions via "apply material...", then override "Si" to "silicon"
         gui_click_text(&mut a, "apply material...");
-        gui_click_text(&mut a, "silica");
+        gui_click_combo_item(&mut a, "silica");
         let texts = gui_frame(&mut a, egui::RawInput::default());
         let si_label = texts
             .iter()
@@ -2952,7 +2982,7 @@ mod tests {
             .next()
             .expect("Si material combo");
         gui_click_at(&mut a, si_combo.center());
-        gui_click_text(&mut a, "silicon");
+        gui_click_combo_item(&mut a, "silicon");
 
         // Click "2 · Build", then click the rendered "Study and solver" pill rect
         gui_click_text(&mut a, "2 · Build");

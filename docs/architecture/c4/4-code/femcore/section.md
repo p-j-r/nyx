@@ -28,7 +28,9 @@ C4 level 4 (code) of the component **Frame and sections** (`femcore.section`) in
 | [dfs: Shared helpers](../dfs/common.md) | section | plane_tensor |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | section | component_names |
 | [dfs: Heat kernel](../dfs/heat.md) | section | component_names |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | section | component_names |
 | [ems: 3D cavity kernel](../ems/cavity.md) | section | axes_of_3d_periodic |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | section | axes_of_3d_periodic |
 | [ems: Mode kernel](../ems/modes.md) | section | local_component, local_tensor |
 | [ems: Complex-mode kernel](../ems/modescx.md) | section | local_component |
 | [ems: Optical mode sets](../ems/optical.md) | section | PROP_SIGN, is_left_handed, local_tensor_signed |

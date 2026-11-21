@@ -221,6 +221,21 @@ impl Engine {
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
                 schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
             cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
+            cmd("bcs_surface_impedance", "BCS thin-film surface impedance", "Evaluates Zimmermann arbitrary-purity BCS complex conductivity and thin-film surface impedance (Z_s = R_s + i omega L_k_sq) for a superconducting material or parameter set.", Read,
+                schema(vec![
+                    ("material", text("name of a library or project material with a [superconducting] block")),
+                    ("freq", json!({ "type": "number", "minimum": 1.0, "description": "frequency in Hz" })),
+                    ("thickness", json!({ "type": "number", "minimum": 1e-12, "description": "film thickness in metres" })),
+                    ("temperature", number("temperature in K, default 0.01")),
+                    ("film_model", json!({ "type": "string", "enum": ["two_sided", "kerr", "thin_limit"], "default": "kerr", "description": "thin-film boundary convention: two_sided (interior sheet jump), kerr (one-sided backed wall) or thin_limit (Pearl d << lambda_eff)" })),
+                    ("tc", number("critical temperature T_c in K (when material is omitted or overridden)")),
+                    ("gap_0", number("zero-temperature energy gap Delta(0) in J")),
+                    ("gap_0_eV", number("zero-temperature energy gap Delta(0) in eV")),
+                    ("lambda_L", number("clean zero-temperature London penetration depth in metres")),
+                    ("xi_0", number("BCS coherence length in metres")),
+                    ("mean_free_path", number("electron mean free path in metres")),
+                    ("sigma_n", number("normal-state conductivity in S/m")),
+                ], &["freq", "thickness"])),
             cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.", Expensive,
                 schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report")),
                     ("match", json!({ "type": "string", "enum": ["index", "nearest"], "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner" })),
@@ -233,8 +248,8 @@ impl Engine {
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
             cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support. With `wait` false it starts a job (reading and meshing happen on it; the project is replaced when job_wait or poll_jobs applies it).", Edit, schema(vec![("path", text("file path, .h5")), ("wait", boolean("wait for it, default true"))], &["path"])),
             cmd("list_analyses", "List the analyses", "The analyses of results (polarization of the modes), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
-            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: the polarization of the modes gives each mode its class (quasi-TE, quasi-TM, hybrid), Stokes parameters, degree of polarization and the degenerate groups. The reply carries `stale` and `age_s` of the result it was run on.", Read,
-                schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys())], &["analysis", "physics"])),
+            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, or tls_participation. The reply carries `stale` and `age_s` of the result it was run on.", Read,
+                schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys()), ("params", object("optional analysis parameters"))], &["analysis", "physics"])),
             cmd("figure", "Draw the modes of a result", "Writes a figure of the modes of the latest result of a physics as SVG or PNG (the extension of `path` decides). Each mode is put in a fixed phase first (its in-plane motion largest in Re u, sign fixed, peak 1) and drawn on the section of the mesh (the whole mesh of a 2D result, the first y-plane of a 3D one; a displacement deforms it by Re u), with the outline of the regions and arrows of the in-plane motion. `gallery` shows |u| for each mode; `components` a row per mode with |u|, the in-plane components and the propagation component in quadrature. The reply says, per mode, the angle it was turned by and `quadrature`: the share of the propagation component's energy still in Re after the phase step (near 0 when the mode is in the expected phase). A vector field is found by the names of the cell fields (ux uy uz, Ex Ey Ez).", Read,
                 schema(vec![("physics", phys()), ("path", text("file to write, .svg or .png")),
                     ("kind", text("gallery (default) or components")),
@@ -527,6 +542,7 @@ impl Engine {
                 self.remove_material(get_str(args, "name")?)?;
                 ok()
             }
+            "bcs_surface_impedance" => self.bcs_surface_impedance(args),
             "convergence_check" => {
                 let (physics, factor, tolerance) = (
                     get_str(args, "physics")?,
@@ -568,7 +584,11 @@ impl Engine {
             }
             "figure" => self.figure(args),
             "list_analyses" => Ok(self.list_analyses()),
-            "analyse" => self.analyse(get_str(args, "analysis")?, get_str(args, "physics")?),
+            "analyse" => self.analyse_with(
+                get_str(args, "analysis")?,
+                get_str(args, "physics")?,
+                args.get("params").unwrap_or(&Value::Null),
+            ),
             "store_save" => self.save_to_workspace(opt_str(args, "workspace").map(Into::into)),
             "store_open" => {
                 let folder = get_str(args, "folder")?.to_string();

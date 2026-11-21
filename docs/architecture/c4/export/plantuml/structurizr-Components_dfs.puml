@@ -73,7 +73,8 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==Physics adapter\n<size:16>[Component: Rust modules]</size>\n\nThe Physics implementation of dfs: descriptors, validation, solve entry." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxdfs.Physicsadapter
     rectangle "==Typed problem\n<size:16>[Component: Rust modules]</size>\n\nThe typed dfs problem the kernels read, decoded from the ProblemSpec envelope." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxdfs.Typedproblem
     rectangle "==Heat kernel\n<size:16>[Component: Rust modules]</size>\n\nHeat transfer on P1/P2 simplices, stationary and transient." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxdfs.Heatkernel
-    rectangle "==Electrostatics kernel\n<size:16>[Component: Rust modules]</size>\n\nElectrostatics on P1/P2 simplices with fixed-potential and surface-charge conditions." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxdfs.Electrostaticskernel
+    rectangle "==Electrostatics kernel\n<size:16>[Component: Rust modules]</size>\n\nElectrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxdfs.Electrostaticskernel
+    rectangle "==Magnetostatics kernel\n<size:16>[Component: Rust modules]</size>\n\nGauge-stabilized London magnetostatics (2D cross-section, planar stream function, mixed 3D A-phi) and inductance matrix extraction." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxdfs.Magnetostaticskernel
     rectangle "==Shared helpers\n<size:16>[Component: Rust modules]</size>\n\nPer-cell gradients and values shared by the heat and electrostatics kernels." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxdfs.Sharedhelpers
   }
 
@@ -86,18 +87,23 @@ nyx.nyxdfs.Physicsadapter --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "u
 nyx.nyxdfs.Physicsadapter --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Physicsadapter --> nyx.nyxdfs.Electrostaticskernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses electro\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Physicsadapter --> nyx.nyxdfs.Heatkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses heat\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Physicsadapter --> nyx.nyxdfs.Magnetostaticskernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses magneto\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Physicsadapter --> nyx.nyxdfs.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Sharedhelpers --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fields, material +1\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Sharedhelpers --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root\n<size:16>[Rust paths]</size>"
-nyx.nyxdfs.Electrostaticskernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +3\n<size:16>[Rust paths]</size>"
-nyx.nyxdfs.Electrostaticskernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Electrostaticskernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +5\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Electrostaticskernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: cqed, crate root +1\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Electrostaticskernel --> nyx.nyxdfs.Sharedhelpers <<Relationship-UmVsYXRpb25zaGlw>> : "uses common\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Electrostaticskernel --> nyx.nyxdfs.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Heatkernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: expr, fem +6\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Heatkernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Heatkernel --> nyx.nyxdfs.Sharedhelpers <<Relationship-UmVsYXRpb25zaGlw>> : "uses common\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Heatkernel --> nyx.nyxdfs.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
-nyx.nyxdfs.Typedproblem --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: props\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Magnetostaticskernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +4\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Magnetostaticskernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: cqed, crate root +1\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Magnetostaticskernel --> nyx.nyxdfs.Sharedhelpers <<Relationship-UmVsYXRpb25zaGlw>> : "uses common\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Magnetostaticskernel --> nyx.nyxdfs.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
+nyx.nyxdfs.Typedproblem --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material, material::bcs +1\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Typedproblem --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: decode, error +2\n<size:16>[Rust paths]</size>"
 nyx.nyxdfs.Typedproblem --> nyx.nyxdfs.Physicsadapter <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
 

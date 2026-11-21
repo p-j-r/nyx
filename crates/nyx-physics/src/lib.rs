@@ -8,6 +8,7 @@
 //! * `desc`: descriptors of studies, conditions, properties, fields, couplings and the sizing hint
 //! * `result`: `SolveResult`, `Solution`, `Field`, plain serialisable data
 //! * `frame`: the frame (lateral, normal, propagation axes, absorbing domains) a result states for the analyses of its vector fields
+//! * `cqed`: cross-crate result payloads (`CapacitanceMatrixData`, `InductanceMatrixData`, `CircuitRom`, `TlsMeta`, `DrivenPortData`)
 //! * `validate`, `schema`: structural validation against the descriptors and JSON Schemas generated from them
 //! * `decode`: typed parameters with the descriptor defaults, names and selectors resolved to mesh numbers (what every physics does first)
 //! * `registry`: the physics a build contains; solve order of a one-way chain
@@ -17,6 +18,7 @@
 //! It depends on `femcore` for the mesh type and the progress handle, and on nothing else of nyx.
 
 pub mod contract;
+pub mod cqed;
 pub mod decode;
 pub mod desc;
 pub mod error;
@@ -29,6 +31,10 @@ pub mod spec;
 pub mod testkit;
 pub mod validate;
 
+pub use cqed::{
+    CapacitanceMatrixData, CircuitRom, DrivenPortData, InductanceMatrixData, ModeEnergyRow, RomPort, TlsMeta,
+    CAPACITANCE_KEY, CIRCUIT_ROM_KEY, DRIVEN_PORT_KEY, INDUCTANCE_KEY, TLS_META_KEY,
+};
 pub use desc::*;
 pub use error::Error;
 /// The mesh a physics is given: the one native cell mesh, 2D or 3D (restructure phase 4, ADR 32 and 41; it was `SimplexMesh`).

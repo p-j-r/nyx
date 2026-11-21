@@ -12,12 +12,14 @@
 mod common;
 pub mod electro;
 pub mod heat;
+pub mod magneto;
 pub mod problem;
 
 pub use electro::{
     assemble_electrostatics, electrostatics_fields, solve_electrostatics, solve_potential, ElectroAssembly, EPS0,
 };
 pub use heat::{assemble_heat, heat_fields, solve_heat, solve_heat_states, HeatStates, HeatSystem};
+pub use magneto::{solve_magnetostatics, MU0};
 pub use problem::{decode, Bc, BcKind, Problem, Study};
 
 use femcore::progress::{self, Progress};
@@ -34,7 +36,7 @@ impl Physics for Dfs {
     }
 
     fn name(&self) -> &'static str {
-        "Diffusion (electrostatics, heat transfer)"
+        "Diffusion (electrostatics, heat transfer, magnetostatics)"
     }
 
     fn studies(&self) -> Vec<StudyDesc> {
@@ -42,7 +44,7 @@ impl Physics for Dfs {
             StudyDesc {
                 kind: "electrostatic".into(),
                 name: "Electrostatics".into(),
-                doc: "Potential and field of fixed potentials and charges: div(eps grad V) = -rho_v.".into(),
+                doc: "Potential, field, and multi-terminal capacitance matrix: div(eps grad V) = -rho_v.".into(),
                 dims: Dims::Both,
                 params: vec![],
             },
@@ -72,6 +74,20 @@ impl Physics for Dfs {
                     ),
                 ],
             },
+            StudyDesc {
+                kind: "magnetostatic".into(),
+                name: "Magnetostatics (London / inductance)".into(),
+                doc: "Magnetic vector potential, London supercurrent sheets and multi-terminal inductance matrix."
+                    .into(),
+                dims: Dims::Both,
+                params: vec![ParamDesc::choice(
+                    "formulation",
+                    "Formulation",
+                    &["auto", "cross_section", "planar_stream", "mixed_3d"],
+                    "auto",
+                    "auto: cross_section in 2D, mixed_3d in 3D",
+                )],
+            },
         ]
     }
 
@@ -90,12 +106,18 @@ impl Physics for Dfs {
                 "Fixed potential (electrostatics).",
                 vec![ParamDesc::number("value", "Potential", "V", 1.0, "")],
             ),
-            b("ground", "Ground", "Zero potential (electrostatics).", vec![]),
+            b("ground", "Ground", "Zero potential (electrostatics, magnetostatics).", vec![]),
             b(
                 "surface_charge",
                 "Surface charge",
                 "Surface charge density (electrostatics).",
                 vec![ParamDesc::number("density", "Surface charge density", "C/m^2", 0.0, "")],
+            ),
+            b(
+                "terminal",
+                "Terminal",
+                "Named conductor terminal for capacitance matrix extraction (electrostatics).",
+                vec![ParamDesc::text("name", "Terminal name", "", "unique terminal identifier").required()],
             ),
             b(
                 "temperature",
@@ -118,6 +140,52 @@ impl Physics for Dfs {
                     ParamDesc::number("t_ext", "Outside temperature", "K", 293.15, ""),
                 ],
             ),
+            b(
+                "london_sheet",
+                "London superconducting sheet",
+                "Thin superconducting film with sheet kinetic inductance L_k,sq (magnetostatics).",
+                vec![
+                    ParamDesc::number("L_k_sq", "Sheet kinetic inductance", "H", 0.0, "direct L_k,sq in H/sq when > 0")
+                        .range(Some(0.0), None),
+                    ParamDesc::text(
+                        "material",
+                        "Superconducting material",
+                        "",
+                        "material name from library when L_k_sq is 0",
+                    ),
+                    ParamDesc::number("thickness", "Film thickness", "m", 0.0, "film thickness for BCS evaluation")
+                        .range(Some(0.0), None),
+                    ParamDesc::number("temperature", "Temperature", "K", 0.01, "temperature for BCS evaluation")
+                        .range(Some(0.0), None),
+                    ParamDesc::choice(
+                        "film_model",
+                        "Thin-film model",
+                        &["two_sided", "kerr", "thin_limit"],
+                        "two_sided",
+                        "thin-film kinetic inductance formula",
+                    ),
+                ],
+            ),
+            b(
+                "current_terminal",
+                "Current terminal",
+                "Current excitation port on a conductor or sheet (magnetostatics).",
+                vec![
+                    ParamDesc::text("name", "Terminal name", "", "unique terminal identifier").required(),
+                    ParamDesc::number("current", "Terminal current", "A", 1.0, "excitation current"),
+                    ParamDesc::vector("direction", "Current direction", "", 3, "unit direction vector of current flow")
+                        .default_vector(vec![1.0, 0.0, 0.0]),
+                ],
+            ),
+            b(
+                "flux_loop",
+                "Fluxoid / hole loop",
+                "Superconducting loop or hole carrying trapped flux or circulatory stream excitation (magnetostatics).",
+                vec![
+                    ParamDesc::text("name", "Loop name", "", "unique loop identifier").required(),
+                    ParamDesc::number("flux_wb", "Trapped flux", "Wb", 0.0, "fluxoid value in Webers"),
+                ],
+            ),
         ]
     }
 
@@ -130,6 +198,7 @@ impl Physics for Dfs {
             PropDesc::new("rho", "Density", "kg/m^3", Scalar, &["heat_transient"], None),
             PropDesc::new("Cp", "Specific heat", "J/(kg K)", Scalar, &["heat_transient"], None),
             PropDesc::new("Q", "Heat source", "W/m^3", Scalar, &["heat_stationary", "heat_transient"], Some(0.0)),
+            PropDesc::new("mu_r", "Relative permeability", "", Scalar, &["magnetostatic"], Some(1.0)),
         ]
     }
 
@@ -153,6 +222,10 @@ impl Physics for Dfs {
                 FieldDesc::new("T", "K", &[], "temperature"),
                 FieldDesc::new("q", "W/m^2", &WAFER, "heat flux (2D: x and z)"),
             ],
+            "magnetostatic" => vec![
+                FieldDesc::new("A", "T m", &[], "magnetic vector potential / stream magnitude"),
+                FieldDesc::new("B", "T", &WAFER, "magnetic flux density (2D: x and z)"),
+            ],
             _ => vec![],
         }
     }
@@ -162,6 +235,7 @@ impl Physics for Dfs {
             FieldLink::new("dfs.T", "temperature"),
             FieldLink::new("dfs.V", "potential"),
             FieldLink::new("dfs.E", "electric_field"),
+            FieldLink::new("dfs.B", "magnetic_field"),
         ]
     }
 
@@ -208,7 +282,8 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
         let d = discretise(mesh)?;
         match problem.study {
             Study::Electrostatic => solve_electrostatics(&d, problem),
-            _ => solve_heat(&d, problem),
+            Study::Magnetostatic { .. } => solve_magnetostatics(&d, problem),
+            Study::HeatStationary | Study::HeatTransient { .. } => solve_heat(&d, problem),
         }
         .map_err(Error::from_kernel)?
     };

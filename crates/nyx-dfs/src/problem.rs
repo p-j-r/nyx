@@ -6,9 +6,11 @@
 //! `materials` directly until the material files exist (phase 6).
 
 use crate::Dfs;
+use femcore::material::{bcs_surface_impedance, FilmModel};
 use femcore::props::{LinearSolver, Materials};
-use nyx_physics::decode::{materials_by_label, resolve_conditions, Params};
+use nyx_physics::decode::{domain_names_by_label, materials_by_label, resolve_conditions, Params};
 use nyx_physics::{Ctx, Error, Physics, ProblemSpec};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum BcKind {
@@ -16,12 +18,29 @@ pub enum BcKind {
     Ground,
     /// surface charge density, C/m^2
     SurfaceCharge(f64),
+    /// named conductor terminal for multi-RHS capacitance matrix extraction
+    Terminal(String),
     Temperature(f64),
     /// inward heat flux, W/m^2
     Flux(f64),
     Convection {
         h: f64,
         text: f64,
+    },
+    /// thin superconducting sheet with sheet kinetic inductance L_k,sq (H/sq)
+    LondonSheet {
+        l_k_sq: f64,
+    },
+    /// current terminal excitation (A) and direction vector
+    CurrentTerminal {
+        name: String,
+        current: f64,
+        direction: [f64; 3],
+    },
+    /// superconducting fluxoid / hole loop carrying trapped flux (Wb)
+    FluxLoop {
+        name: String,
+        flux_wb: f64,
     },
 }
 
@@ -31,14 +50,29 @@ impl BcKind {
             BcKind::Potential(_) => "Electric potential",
             BcKind::Ground => "Ground",
             BcKind::SurfaceCharge(_) => "Surface charge",
+            BcKind::Terminal(_) => "Terminal",
             BcKind::Temperature(_) => "Temperature",
             BcKind::Flux(_) => "Heat flux",
             BcKind::Convection { .. } => "Convective cooling",
+            BcKind::LondonSheet { .. } => "London superconducting sheet",
+            BcKind::CurrentTerminal { .. } => "Current terminal",
+            BcKind::FluxLoop { .. } => "Fluxoid / hole loop",
         }
     }
 
-    fn is_electrostatic(&self) -> bool {
-        matches!(self, BcKind::Potential(_) | BcKind::Ground | BcKind::SurfaceCharge(_))
+    pub fn is_electrostatic(&self) -> bool {
+        matches!(self, BcKind::Potential(_) | BcKind::Ground | BcKind::SurfaceCharge(_) | BcKind::Terminal(_))
+    }
+
+    pub fn is_heat(&self) -> bool {
+        matches!(self, BcKind::Temperature(_) | BcKind::Flux(_) | BcKind::Convection { .. })
+    }
+
+    pub fn is_magnetostatic(&self) -> bool {
+        matches!(
+            self,
+            BcKind::LondonSheet { .. } | BcKind::CurrentTerminal { .. } | BcKind::FluxLoop { .. } | BcKind::Ground
+        )
     }
 }
 
@@ -59,6 +93,10 @@ pub enum Study {
         n_out: usize,
         t0: String,
     },
+    /// Gauge-stabilized London magnetostatics (`"auto" | "cross_section" | "planar_stream" | "mixed_3d"`)
+    Magnetostatic {
+        formulation: String,
+    },
 }
 
 impl Study {
@@ -68,6 +106,7 @@ impl Study {
             Study::Electrostatic => "electrostatic",
             Study::HeatStationary => "heat_stationary",
             Study::HeatTransient { .. } => "heat_transient",
+            Study::Magnetostatic { .. } => "magnetostatic",
         }
     }
 }
@@ -78,13 +117,21 @@ pub struct Problem {
     pub order: usize,
     pub study: Study,
     pub materials: Materials,
+    pub domain_names: BTreeMap<i32, String>,
     pub bcs: Vec<Bc>,
     pub solver: LinearSolver,
 }
 
 impl Problem {
     pub fn new(study: Study, order: usize) -> Problem {
-        Problem { order, study, materials: Materials::default(), bcs: vec![], solver: LinearSolver::Auto }
+        Problem {
+            order,
+            study,
+            materials: Materials::default(),
+            domain_names: BTreeMap::new(),
+            bcs: vec![],
+            solver: LinearSolver::Auto,
+        }
     }
 
     /// Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field.
@@ -110,7 +157,12 @@ impl Problem {
             let vals: Vec<f64> = match &bc.kind {
                 BcKind::Potential(v) | BcKind::SurfaceCharge(v) | BcKind::Temperature(v) | BcKind::Flux(v) => vec![*v],
                 BcKind::Convection { h, text } => vec![*h, *text],
-                BcKind::Ground => vec![],
+                BcKind::LondonSheet { l_k_sq } => vec![*l_k_sq],
+                BcKind::CurrentTerminal { current, direction, .. } => {
+                    vec![*current, direction[0], direction[1], direction[2]]
+                }
+                BcKind::FluxLoop { flux_wb, .. } => vec![*flux_wb],
+                BcKind::Ground | BcKind::Terminal(_) => vec![],
             };
             if vals.iter().any(|v| !v.is_finite()) {
                 return Err(format!(
@@ -153,6 +205,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             n_out: sp.integer("n_out").max(0) as usize,
             t0: sp.text("t0"),
         },
+        "magnetostatic" => Study::Magnetostatic { formulation: sp.text("formulation") },
         other => return Err(Error::Unsupported(format!("dfs has no study '{other}'"))),
     };
     let kinds = dfs.bc_kinds();
@@ -164,18 +217,81 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             "potential" => BcKind::Potential(p.number("value")),
             "ground" => BcKind::Ground,
             "surface_charge" => BcKind::SurfaceCharge(p.number("density")),
+            "terminal" => {
+                let name = p.text("name").trim().to_string();
+                if name.is_empty() {
+                    return Err(Error::invalid("terminal condition requires a non-empty 'name'"));
+                }
+                BcKind::Terminal(name)
+            }
             "temperature" => BcKind::Temperature(p.number("value")),
             "flux" => BcKind::Flux(p.number("value")),
             "convection" => BcKind::Convection { h: p.number("h"), text: p.number("t_ext") },
+            "london_sheet" => {
+                let l_k_sq_given = p.number("L_k_sq");
+                let mat_name = p.text("material");
+                let mat_trim = mat_name.trim();
+                let l_k_sq = if !mat_trim.is_empty() {
+                    let thickness = p.number("thickness");
+                    let temperature = p.number("temperature");
+                    let fm_str = p.text("film_model");
+                    let film_model = FilmModel::parse(&fm_str)
+                        .ok_or_else(|| Error::invalid(format!("unknown london_sheet film_model '{fm_str}'")))?;
+                    let lib = ctx.library.as_ref().ok_or_else(|| {
+                        Error::Unsupported(format!(
+                            "london_sheet material '{mat_trim}' needs a material library, and this run has none"
+                        ))
+                    })?;
+                    let mat = lib.require(mat_trim).map_err(|e| Error::invalid(e.to_string()))?;
+                    let sc = mat.superconducting.as_ref().ok_or_else(|| {
+                        Error::invalid(format!("material '{mat_trim}' has no [superconducting] block"))
+                    })?;
+                    let eval =
+                        bcs_surface_impedance(sc, 1.0e9, temperature, thickness, film_model).map_err(Error::invalid)?;
+                    eval.l_k_sq
+                } else {
+                    if l_k_sq_given < 0.0 {
+                        return Err(Error::invalid("london_sheet L_k_sq must be non-negative"));
+                    }
+                    l_k_sq_given
+                };
+                BcKind::LondonSheet { l_k_sq }
+            }
+            "current_terminal" => {
+                let name = p.text("name").trim().to_string();
+                if name.is_empty() {
+                    return Err(Error::invalid("current_terminal condition requires a non-empty 'name'"));
+                }
+                let current = p.number("current");
+                let dir_v = p.vector("direction");
+                let direction = [
+                    dir_v.first().copied().unwrap_or(1.0),
+                    dir_v.get(1).copied().unwrap_or(0.0),
+                    dir_v.get(2).copied().unwrap_or(0.0),
+                ];
+                BcKind::CurrentTerminal { name, current, direction }
+            }
+            "flux_loop" => {
+                let name = p.text("name").trim().to_string();
+                if name.is_empty() {
+                    return Err(Error::invalid("flux_loop condition requires a non-empty 'name'"));
+                }
+                BcKind::FluxLoop { name, flux_wb: p.number("flux_wb") }
+            }
             other => return Err(Error::Unsupported(format!("dfs has no condition '{other}'"))),
         };
-        let electro = matches!(study, Study::Electrostatic);
-        if kind.is_electrostatic() != electro {
-            return Err(Error::invalid(format!(
-                "'{}' is not {} boundary condition",
-                kind.name(),
-                if electro { "an electrostatics" } else { "a heat-transfer" }
-            )));
+        let ok = match &study {
+            Study::Electrostatic => kind.is_electrostatic(),
+            Study::HeatStationary | Study::HeatTransient { .. } => kind.is_heat(),
+            Study::Magnetostatic { .. } => kind.is_magnetostatic(),
+        };
+        if !ok {
+            let expected = match &study {
+                Study::Electrostatic => "an electrostatics",
+                Study::HeatStationary | Study::HeatTransient { .. } => "a heat-transfer",
+                Study::Magnetostatic { .. } => "a magnetostatics",
+            };
+            return Err(Error::invalid(format!("'{}' is not {expected} boundary condition", kind.name())));
         }
         bcs.push(Bc { labels: r.labels, kind });
     }
@@ -190,6 +306,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         order: spec.order as usize,
         study,
         materials: materials_by_label(spec, ctx, &dfs.properties())?,
+        domain_names: domain_names_by_label(spec, ctx)?,
         bcs,
         solver,
     })

@@ -21,7 +21,7 @@ Nothing outside the component (the standard library and external crates are not 
 
 | Component | Modules | Items |
 |---|---|---|
-| [femcore: 3D meshing](../femcore/meshing3d.md) | math | Aabb |
+| [femcore: 3D meshing](../femcore/meshing3d.md) | math | Aabb, V2, V3, cross3, dist2, dot3, sub3 |
 | [Evaluation](./evaluation.md) | math | Hasher64 |
 | [2D kernel](./kernel2d.md) | math |  |
 | [3D kernel](./kernel3d.md) | math |  |
