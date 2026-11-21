@@ -26,6 +26,7 @@ pub mod pml_box;
 pub mod refine3d;
 pub mod request;
 pub mod sheet3d;
+pub mod sheet3d_curve;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};

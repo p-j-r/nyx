@@ -179,7 +179,7 @@ pub enum Op {
         pts: Vec<[Expr; 2]>,
         names: Vec<String>,
     },
-    /// batch of outer polygon rings and optional hole rings, with closed-ring RDP simplification and minimum hole area filtering
+    /// batch of outer polygon rings and optional hole rings, with closed-ring RDP simplification, minimum hole area filtering, and optional circular-arc fitting
     Polygons {
         polygons: Vec<Vec<[Expr; 2]>>,
         #[serde(default)]
@@ -188,6 +188,8 @@ pub enum Op {
         simplify_tol: Expr,
         #[serde(default = "default_zero_expr")]
         min_hole_area: Expr,
+        #[serde(default = "default_zero_expr")]
+        arc_tol: Expr,
     },
     RoundedRect {
         min: [Expr; 2],
@@ -364,12 +366,12 @@ impl Op {
             }
             Op::Ellipse { center, radii, angle_deg } => center.iter().chain(radii).chain([angle_deg]).collect(),
             Op::Polygon { pts, .. } => pts.iter().flatten().collect(),
-            Op::Polygons { polygons, holes, simplify_tol, min_hole_area } => polygons
+            Op::Polygons { polygons, holes, simplify_tol, min_hole_area, arc_tol } => polygons
                 .iter()
                 .flatten()
                 .chain(holes.iter().flatten())
                 .flatten()
-                .chain([simplify_tol, min_hole_area])
+                .chain([simplify_tol, min_hole_area, arc_tol])
                 .collect(),
             Op::Sheet { z, .. } => vec![z],
             Op::Transform { steps, .. } => steps
@@ -779,7 +781,13 @@ impl Model {
     pub fn polygons(&mut self, name: &str, polygons: Vec<Vec<[Expr; 2]>>, holes: Vec<Vec<[Expr; 2]>>) -> FeatureId {
         self.push(
             name,
-            Op::Polygons { polygons, holes, simplify_tol: default_simplify_tol(), min_hole_area: default_zero_expr() },
+            Op::Polygons {
+                polygons,
+                holes,
+                simplify_tol: default_simplify_tol(),
+                min_hole_area: default_zero_expr(),
+                arc_tol: default_zero_expr(),
+            },
         )
     }
     pub fn polygons_with(
@@ -792,7 +800,33 @@ impl Model {
     ) -> FeatureId {
         self.push(
             name,
-            Op::Polygons { polygons, holes, simplify_tol: simplify_tol.into(), min_hole_area: min_hole_area.into() },
+            Op::Polygons {
+                polygons,
+                holes,
+                simplify_tol: simplify_tol.into(),
+                min_hole_area: min_hole_area.into(),
+                arc_tol: default_zero_expr(),
+            },
+        )
+    }
+    pub fn polygons_with_arcs(
+        &mut self,
+        name: &str,
+        polygons: Vec<Vec<[Expr; 2]>>,
+        holes: Vec<Vec<[Expr; 2]>>,
+        simplify_tol: impl Into<Expr>,
+        min_hole_area: impl Into<Expr>,
+        arc_tol: impl Into<Expr>,
+    ) -> FeatureId {
+        self.push(
+            name,
+            Op::Polygons {
+                polygons,
+                holes,
+                simplify_tol: simplify_tol.into(),
+                min_hole_area: min_hole_area.into(),
+                arc_tol: arc_tol.into(),
+            },
         )
     }
     pub fn sheet(&mut self, name: &str, input: FeatureId, z: impl Into<Expr>) -> FeatureId {

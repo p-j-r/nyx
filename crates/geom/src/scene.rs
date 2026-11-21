@@ -593,12 +593,19 @@ impl Builder<'_> {
                 let (pts, names) = ccw_polygon(&p, &nm);
                 self.profile(f, LShape::Poly { pts, names }, xf, suffix)
             }
-            Op::Polygons { polygons, holes, simplify_tol, min_hole_area } => {
+            Op::Polygons { polygons, holes, simplify_tol, min_hole_area, arc_tol } => {
                 if polygons.is_empty() {
                     return Err(GeomError(format!("Polygons '{}' needs at least one outer polygon", f.name)));
                 }
                 let tol = self.ev(simplify_tol, f, "simplify_tol")?;
                 let min_hole = self.ev(min_hole_area, f, "min_hole_area")?;
+                let atol = self.ev(arc_tol, f, "arc_tol")?;
+                if atol < 0.0 || !atol.is_finite() {
+                    return Err(GeomError(format!(
+                        "Polygons '{}' has arc_tol ({atol}); it must be non-negative and finite",
+                        f.name
+                    )));
+                }
                 let mut raw_polys = Vec::with_capacity(polygons.len());
                 for ring in polygons {
                     let pts: Vec<V2> = ring.iter().map(|q| self.ev2(q, f, "point")).collect::<GeomResult<_>>()?;
@@ -615,31 +622,66 @@ impl Builder<'_> {
                     .filter(|(id, _)| *id != f.id)
                     .flat_map(|(_, pts)| pts.iter().copied())
                     .collect();
-                let (outers, surviving_holes) =
-                    crate::poly_batch::simplify_rings_with_pins(&raw_polys, &raw_holes, &external_pins, tol, min_hole)?;
-                let mut outer_nodes = Vec::with_capacity(outers.len());
-                for (pi, p) in outers.iter().enumerate() {
-                    let nm: Vec<String> = (0..p.len()).map(|i| format!("e{i}")).collect();
-                    let (pts, names) = ccw_polygon(p, &nm);
-                    let sfx = if outers.len() == 1 && surviving_holes.is_empty() {
-                        suffix.to_string()
+                if atol > 0.0 {
+                    let (outers, surviving_holes) = crate::poly_batch::fit_rings_with_pins(
+                        &raw_polys,
+                        &raw_holes,
+                        &external_pins,
+                        tol,
+                        min_hole,
+                        atol,
+                    )?;
+                    let n_out = outers.len();
+                    let n_holes = surviving_holes.len();
+                    let mut outer_nodes = Vec::with_capacity(n_out);
+                    for (pi, segs) in outers.into_iter().enumerate() {
+                        let sfx =
+                            if n_out == 1 && n_holes == 0 { suffix.to_string() } else { format!("{suffix}[{pi}]") };
+                        outer_nodes.push(self.profile(f, LShape::Contour { segs }, xf, &sfx)?);
+                    }
+                    let mut hole_nodes = Vec::with_capacity(n_holes);
+                    for (hi, segs) in surviving_holes.into_iter().enumerate() {
+                        let sfx = format!("{suffix}[h{hi}]");
+                        hole_nodes.push(self.profile(f, LShape::Contour { segs }, xf, &sfx)?);
+                    }
+                    let outer = if outer_nodes.len() == 1 { outer_nodes.remove(0) } else { Node::Union(outer_nodes) };
+                    if hole_nodes.is_empty() {
+                        Ok(outer)
                     } else {
-                        format!("{suffix}[{pi}]")
-                    };
-                    outer_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
-                }
-                let mut hole_nodes = Vec::with_capacity(surviving_holes.len());
-                for (hi, h) in surviving_holes.iter().enumerate() {
-                    let nm: Vec<String> = (0..h.len()).map(|i| format!("e{i}")).collect();
-                    let (pts, names) = ccw_polygon(h, &nm);
-                    let sfx = format!("{suffix}[h{hi}]");
-                    hole_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
-                }
-                let outer = if outer_nodes.len() == 1 { outer_nodes.remove(0) } else { Node::Union(outer_nodes) };
-                if hole_nodes.is_empty() {
-                    Ok(outer)
+                        Ok(Node::Diff(Box::new(outer), hole_nodes))
+                    }
                 } else {
-                    Ok(Node::Diff(Box::new(outer), hole_nodes))
+                    let (outers, surviving_holes) = crate::poly_batch::simplify_rings_with_pins(
+                        &raw_polys,
+                        &raw_holes,
+                        &external_pins,
+                        tol,
+                        min_hole,
+                    )?;
+                    let mut outer_nodes = Vec::with_capacity(outers.len());
+                    for (pi, p) in outers.iter().enumerate() {
+                        let nm: Vec<String> = (0..p.len()).map(|i| format!("e{i}")).collect();
+                        let (pts, names) = ccw_polygon(p, &nm);
+                        let sfx = if outers.len() == 1 && surviving_holes.is_empty() {
+                            suffix.to_string()
+                        } else {
+                            format!("{suffix}[{pi}]")
+                        };
+                        outer_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
+                    }
+                    let mut hole_nodes = Vec::with_capacity(surviving_holes.len());
+                    for (hi, h) in surviving_holes.iter().enumerate() {
+                        let nm: Vec<String> = (0..h.len()).map(|i| format!("e{i}")).collect();
+                        let (pts, names) = ccw_polygon(h, &nm);
+                        let sfx = format!("{suffix}[h{hi}]");
+                        hole_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
+                    }
+                    let outer = if outer_nodes.len() == 1 { outer_nodes.remove(0) } else { Node::Union(outer_nodes) };
+                    if hole_nodes.is_empty() {
+                        Ok(outer)
+                    } else {
+                        Ok(Node::Diff(Box::new(outer), hole_nodes))
+                    }
                 }
             }
             Op::Box { min, max } => {

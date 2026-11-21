@@ -205,11 +205,13 @@ pub struct GdsImportOptions {
     pub pin_layer: Option<(i16, i16)>,
     /// Closed-ring Ramer-Douglas-Peucker simplification tolerance in metres (`0.0` disables).
     pub simplify_tol: f64,
+    /// Circular-arc fitting tolerance in metres (`0.0` disables, keeping polygons).
+    pub arc_tol: f64,
 }
 
 impl Default for GdsImportOptions {
     fn default() -> Self {
-        Self { layers: Vec::new(), cell: None, split_islands: true, pin_layer: None, simplify_tol: 0.0 }
+        Self { layers: Vec::new(), cell: None, split_islands: true, pin_layer: None, simplify_tol: 0.0, arc_tol: 0.0 }
     }
 }
 
@@ -1741,6 +1743,9 @@ pub fn import_gds_library(lib: &GdsLibrary, opts: &GdsImportOptions) -> GeomResu
     if opts.simplify_tol < 0.0 || !opts.simplify_tol.is_finite() {
         return Err(GeomError(format!("simplify_tol ({}) must be non-negative and finite", opts.simplify_tol)));
     }
+    if opts.arc_tol < 0.0 || !opts.arc_tol.is_finite() {
+        return Err(GeomError(format!("arc_tol ({}) must be non-negative and finite", opts.arc_tol)));
+    }
     for (key, _) in &opts.layers {
         check_name("layer", key)?;
     }
@@ -1806,7 +1811,8 @@ pub fn import_gds_library(lib: &GdsLibrary, opts: &GdsImportOptions) -> GeomResu
     }
 
     // 2. Optional RDP simplification with cross-island / cross-layer shared-vertex pinning.
-    if opts.simplify_tol > 0.0 {
+    // When `arc_tol > 0.0`, preserve raw circular-arc vertices so `Op::Polygons` fits exact arcs.
+    if opts.simplify_tol > 0.0 && opts.arc_tol == 0.0 {
         let all_island_pts: Vec<Vec<V2>> = raw_layers
             .iter()
             .flat_map(|l| {

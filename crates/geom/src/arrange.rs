@@ -232,11 +232,15 @@ pub fn arrange_with(
                 }
                 DGeom::Arc { c, r, a0, sweep } => {
                     let id = curves.add(Curve::Circle { c: *c, r: *r });
-                    let a0 = a0.rem_euclid(TAU);
-                    closed = *sweep >= TAU - 1e-12;
+                    let (a_lo, span, left) = if *sweep >= 0.0 {
+                        (a0.rem_euclid(TAU), *sweep, true)
+                    } else {
+                        ((a0 + sweep).rem_euclid(TAU), -*sweep, false)
+                    };
+                    closed = span >= TAU - 1e-12;
                     let cv = &curves.list[id as usize];
-                    ends = if closed { None } else { Some((cv.eval(a0), cv.eval(a0 + sweep))) };
-                    (cid, a, b, in_left) = (id, a0, a0 + sweep, true);
+                    ends = if closed { None } else { Some((cv.eval(a_lo), cv.eval(a_lo + span))) };
+                    (cid, a, b, in_left) = (id, a_lo, a_lo + span, left);
                 }
                 DGeom::Ell { c, a: ea, b: eb, phi } => {
                     let id = curves.add(canonical_ellipse(*c, *ea, *eb, *phi, tol));

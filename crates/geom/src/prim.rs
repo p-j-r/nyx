@@ -15,6 +15,7 @@ pub enum LShape {
     Circle { c: V2, r: f64 },
     Ellipse { c: V2, a: f64, b: f64 },
     Poly { pts: Vec<V2>, names: Vec<String> },
+    Contour { segs: Vec<DSeg> },
 }
 
 /// A directed boundary piece in world coordinates; the primitive's interior is on the left of the travel direction.
@@ -614,6 +615,7 @@ impl LShape {
             LShape::Poly { pts, names } => (0..pts.len())
                 .map(|i| (DGeom::Line { p0: pts[i], p1: pts[(i + 1) % pts.len()] }, names[i].clone()))
                 .collect(),
+            LShape::Contour { segs } => segs.iter().map(|s| (s.geom.clone(), s.role.clone())).collect(),
         }
     }
 
@@ -649,6 +651,91 @@ impl LShape {
                     d2.sqrt()
                 }
             }
+            LShape::Contour { segs } => {
+                let (mut d, mut inside) = (f64::INFINITY, false);
+                for s in segs {
+                    match &s.geom {
+                        DGeom::Line { p0, p1 } => {
+                            let (a, b) = (*p0, *p1);
+                            let ab = sub2(b, a);
+                            let l2 = dot2(ab, ab);
+                            let t = if l2 > 0.0 { (dot2(sub2(p, a), ab) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                            let q = add2(a, mul2(ab, t));
+                            d = d.min(dist2(p, q));
+                            if (a[1] > p[1]) != (b[1] > p[1])
+                                && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
+                            {
+                                inside = !inside;
+                            }
+                        }
+                        DGeom::Arc { c, r, a0, sweep } => {
+                            let span = sweep.abs();
+                            if span >= TAU - 1e-12 {
+                                let dc = dist2(p, *c);
+                                d = d.min((dc - *r).abs());
+                                if dc < *r {
+                                    inside = !inside;
+                                }
+                            } else {
+                                let (a_lo, a_hi) = if *sweep >= 0.0 {
+                                    let lo = a0.rem_euclid(TAU);
+                                    (lo, lo + *sweep)
+                                } else {
+                                    let lo = (a0 + *sweep).rem_euclid(TAU);
+                                    (lo, lo - *sweep)
+                                };
+                                let p_start = [c[0] + r * a0.cos(), c[1] + r * a0.sin()];
+                                let p_end = [c[0] + r * (a0 + sweep).cos(), c[1] + r * (a0 + sweep).sin()];
+                                let (p_lo, p_hi) = if *sweep >= 0.0 { (p_start, p_end) } else { (p_end, p_start) };
+                                d = d.min(dist2(p, p_lo)).min(dist2(p, p_hi));
+                                let v = sub2(p, *c);
+                                if v != [0.0, 0.0] {
+                                    let th = v[1].atan2(v[0]).rem_euclid(TAU);
+                                    if (Curve::Circle { c: *c, r: *r }).in_range(th, a_lo, a_hi, 0.0) {
+                                        d = d.min((norm2(v) - *r).abs());
+                                    }
+                                }
+                                let hpi = std::f64::consts::FRAC_PI_2;
+                                let mut cuts = [a_lo, a_hi, 0.0, 0.0, 0.0, 0.0];
+                                let mut n_cuts = 2usize;
+                                for k in 0..4 {
+                                    let tk = hpi * (1 + 2 * k) as f64;
+                                    if tk > a_lo + 1e-12 && tk < a_hi - 1e-12 {
+                                        cuts[n_cuts] = tk;
+                                        n_cuts += 1;
+                                    }
+                                }
+                                cuts[..n_cuts].sort_by(|x, y| x.total_cmp(y));
+                                for w in cuts[..n_cuts].windows(2) {
+                                    let (t0, t1) = (w[0], w[1]);
+                                    let q0 = if t0 == a_lo { p_lo } else { [c[0] + r * t0.cos(), c[1] + r * t0.sin()] };
+                                    let q1 = if t1 == a_hi { p_hi } else { [c[0] + r * t1.cos(), c[1] + r * t1.sin()] };
+                                    if (q0[1] > p[1]) != (q1[1] > p[1]) {
+                                        let dy = p[1] - c[1];
+                                        let dx = (r * r - dy * dy).max(0.0).sqrt();
+                                        let sgn = if (0.5 * (t0 + t1)).cos() >= 0.0 { 1.0 } else { -1.0 };
+                                        if p[0] < c[0] + sgn * dx {
+                                            inside = !inside;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        DGeom::Ell { c, a, b, phi } => {
+                            let ed = Curve::Ellipse { c: *c, a: *a, b: *b, phi: *phi }.sdf(p).unwrap_or(0.0);
+                            d = d.min(ed.abs());
+                            if ed < 0.0 {
+                                inside = !inside;
+                            }
+                        }
+                    }
+                }
+                if inside {
+                    -d
+                } else {
+                    d
+                }
+            }
         }
     }
 
@@ -672,6 +759,23 @@ impl LShape {
                     h.f64(p[0]).f64(p[1]).str(n);
                 }
             }
+            LShape::Contour { segs } => {
+                h.u64(6);
+                for s in segs {
+                    match &s.geom {
+                        DGeom::Line { p0, p1 } => {
+                            h.u64(1).f64(p0[0]).f64(p0[1]).f64(p1[0]).f64(p1[1]);
+                        }
+                        DGeom::Arc { c, r, a0, sweep } => {
+                            h.u64(2).f64(c[0]).f64(c[1]).f64(*r).f64(*a0).f64(*sweep);
+                        }
+                        DGeom::Ell { c, a, b, phi } => {
+                            h.u64(3).f64(c[0]).f64(c[1]).f64(*a).f64(*b).f64(*phi);
+                        }
+                    }
+                    h.str(&s.role);
+                }
+            }
         }
     }
 }
@@ -686,8 +790,13 @@ impl DGeom {
                 (c, a.min(b), a.max(b))
             }
             DGeom::Arc { c, r, a0, sweep } => {
-                let a = a0.rem_euclid(TAU);
-                (Curve::Circle { c: *c, r: *r }, a, a + sweep)
+                if *sweep >= 0.0 {
+                    let a = a0.rem_euclid(TAU);
+                    (Curve::Circle { c: *c, r: *r }, a, a + sweep)
+                } else {
+                    let a = (a0 + sweep).rem_euclid(TAU);
+                    (Curve::Circle { c: *c, r: *r }, a, a - sweep)
+                }
             }
             DGeom::Ell { c, a, b, phi } => (crate::curve::canonical_ellipse(*c, *a, *b, *phi, 0.0), 0.0, TAU),
         }
