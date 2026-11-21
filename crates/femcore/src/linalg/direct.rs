@@ -83,10 +83,27 @@ pub enum Threads {
 impl Threads {
     pub(crate) fn par(self) -> Par {
         match self {
-            Threads::Global => faer::get_global_parallelism(),
+            Threads::Global => {
+                if crate::par::factor_threads() <= 1 {
+                    Par::Seq
+                } else {
+                    faer::get_global_parallelism()
+                }
+            }
             Threads::Sequential => Par::Seq,
             Threads::Fixed(n) if n <= 1 => Par::Seq,
             Threads::Fixed(n) => Par::rayon(n),
+        }
+    }
+
+    /// Parallelism for factorising a sparse matrix of dimension `n`: under [`Threads::Global`],
+    /// systems up to 60,000 unknowns factorise with `Par::Seq` so direct solves below the 3D AMG
+    /// crossover threshold are 100% bit-deterministic across `NYX_THREADS` while avoiding supernode
+    /// thread-synchronisation overhead on small/medium problems.
+    pub(crate) fn par_for_factor(self, n: usize) -> Par {
+        match self {
+            Threads::Global if n <= 60_000 || crate::par::factor_threads() <= 1 => Par::Seq,
+            _ => self.par(),
         }
     }
 }
@@ -376,7 +393,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
 
     fn try_cholesky(&mut self, sigma: T) -> Result<bool, SolverError> {
         let n = self.n;
-        let par = self.threads.factor.par();
+        let par = self.threads.factor.par_for_factor(n);
         let lower = self.lower.as_ref().expect("lower pattern exists for PositiveDefinite");
         if self.sym_llt.is_none() {
             let t0 = Instant::now();
@@ -452,7 +469,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     fn do_lu(&mut self, sigma: T) -> Result<(), SolverError> {
         self.ensure_full()?;
         let n = self.n;
-        let par = self.threads.factor.par();
+        let par = self.threads.factor.par_for_factor(n);
         if self.sym_lu.is_none() {
             let t0 = Instant::now();
             self.sym_lu = Some(

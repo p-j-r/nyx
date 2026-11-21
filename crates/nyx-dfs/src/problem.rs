@@ -120,6 +120,16 @@ pub struct Problem {
     pub domain_names: BTreeMap<i32, String>,
     pub bcs: Vec<Bc>,
     pub solver: LinearSolver,
+    /// iterative solver relative residual tolerance (default `1e-10`)
+    pub tol: f64,
+    /// Thomas tridiagonal vertical-line AMG smoother on 3D prismatic meshes (default `true`)
+    pub amg_line_smooth: bool,
+    /// electrostatics formulation (`"volumetric_fem" | "planar_bem" | "auto"`, default `"volumetric_fem"`)
+    pub formulation: String,
+    /// 3D P2 singular conductor-sheet perimeter edge enrichment (`"none" | "quarter_point"`, default `"none"`)
+    pub singular_edges: String,
+    /// 1->4 panel subdivision + log-space SPD Richardson extrapolation in `planar_bem` (default `false`)
+    pub richardson: bool,
 }
 
 impl Problem {
@@ -131,7 +141,37 @@ impl Problem {
             domain_names: BTreeMap::new(),
             bcs: vec![],
             solver: LinearSolver::Auto,
+            tol: 1e-10,
+            amg_line_smooth: true,
+            formulation: "volumetric_fem".into(),
+            singular_edges: "none".into(),
+            richardson: false,
         }
+    }
+
+    pub fn with_formulation(mut self, formulation: impl Into<String>) -> Self {
+        self.formulation = formulation.into();
+        self
+    }
+
+    pub fn with_singular_edges(mut self, singular_edges: impl Into<String>) -> Self {
+        self.singular_edges = singular_edges.into();
+        self
+    }
+
+    pub fn with_richardson(mut self, richardson: bool) -> Self {
+        self.richardson = richardson;
+        self
+    }
+
+    pub fn with_amg_line_smooth(mut self, amg_line_smooth: bool) -> Self {
+        self.amg_line_smooth = amg_line_smooth;
+        self
+    }
+
+    pub fn with_tol(mut self, tol: f64) -> Self {
+        self.tol = tol;
+        self
     }
 
     /// Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field.
@@ -197,8 +237,16 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         .find(|s| s.kind == spec.study.kind)
         .ok_or_else(|| Error::Unsupported(format!("dfs has no study '{}'", spec.study.kind)))?;
     let sp = Params::new(&spec.study.params, &sd.params);
+    let mut formulation = "volumetric_fem".to_string();
+    let mut singular_edges = "none".to_string();
+    let mut richardson = false;
     let study = match sd.kind.as_str() {
-        "electrostatic" => Study::Electrostatic,
+        "electrostatic" => {
+            formulation = sp.text("formulation");
+            singular_edges = sp.text("singular_edges");
+            richardson = sp.boolean("richardson");
+            Study::Electrostatic
+        }
         "heat_stationary" => Study::HeatStationary,
         "heat_transient" => Study::HeatTransient {
             t_end: sp.number("t_end"),
@@ -302,6 +350,8 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         "iterative" => LinearSolver::Iterative,
         _ => LinearSolver::Auto,
     };
+    let tol = pp.number("tol");
+    let amg_line_smooth = pp.boolean("amg_line_smooth");
     Ok(Problem {
         order: spec.order as usize,
         study,
@@ -309,5 +359,10 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         domain_names: domain_names_by_label(spec, ctx)?,
         bcs,
         solver,
+        tol,
+        amg_line_smooth,
+        formulation,
+        singular_edges,
+        richardson,
     })
 }

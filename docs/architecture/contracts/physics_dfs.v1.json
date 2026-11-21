@@ -410,6 +410,30 @@
       "name": "solver",
       "required": false,
       "unit": ""
+    },
+    {
+      "doc": "relative residual tolerance for AMG-preconditioned conjugate gradients",
+      "kind": {
+        "default": 1e-10,
+        "max": 0.01,
+        "min": 1e-15,
+        "type": "number"
+      },
+      "label": "Iterative solver tolerance",
+      "name": "tol",
+      "required": false,
+      "unit": ""
+    },
+    {
+      "doc": "auto-detect vertical prismatic columns in 3D meshes and apply tridiagonal Thomas line smoothing",
+      "kind": {
+        "default": true,
+        "type": "bool"
+      },
+      "label": "Vertical-line AMG smoother",
+      "name": "amg_line_smooth",
+      "required": false,
+      "unit": ""
     }
   ],
   "properties": [
@@ -908,6 +932,11 @@
       "params": {
         "additionalProperties": false,
         "properties": {
+          "amg_line_smooth": {
+            "default": true,
+            "description": "Vertical-line AMG smoother. auto-detect vertical prismatic columns in 3D meshes and apply tridiagonal Thomas line smoothing",
+            "type": "boolean"
+          },
           "solver": {
             "default": "auto",
             "description": "Linear solver. auto: sparse direct for small systems, multigrid-preconditioned CG for large 3D ones; direct: Cholesky; iterative: AMG-CG",
@@ -917,6 +946,13 @@
               "iterative"
             ],
             "type": "string"
+          },
+          "tol": {
+            "default": 1e-10,
+            "description": "Iterative solver tolerance. relative residual tolerance for AMG-preconditioned conjugate gradients",
+            "maximum": 0.01,
+            "minimum": 1e-15,
+            "type": "number"
           }
         },
         "required": [],
@@ -936,7 +972,32 @@
               },
               "params": {
                 "additionalProperties": false,
-                "properties": {},
+                "properties": {
+                  "formulation": {
+                    "default": "volumetric_fem",
+                    "description": "Formulation. volumetric_fem: 2D/3D finite elements; planar_bem: 2D layered-dielectric boundary elements on planar conductor sheets; auto: planar_bem when applicable, otherwise volumetric_fem",
+                    "enum": [
+                      "volumetric_fem",
+                      "planar_bem",
+                      "auto"
+                    ],
+                    "type": "string"
+                  },
+                  "richardson": {
+                    "default": false,
+                    "description": "Richardson extrapolation. in planar_bem, solve on 1->4 subdivided sheet panels and apply log-space SPD Richardson extrapolation",
+                    "type": "boolean"
+                  },
+                  "singular_edges": {
+                    "default": "none",
+                    "description": "Singular edge enrichment. quarter_point: Barsoum 1/4-point mid-edge node shift on 3D P2 elements meeting open conductor sheet perimeter edges",
+                    "enum": [
+                      "none",
+                      "quarter_point"
+                    ],
+                    "type": "string"
+                  }
+                },
                 "required": [],
                 "type": "object"
               }
@@ -1052,7 +1113,50 @@
       "doc": "Potential, field, and multi-terminal capacitance matrix: div(eps grad V) = -rho_v.",
       "kind": "electrostatic",
       "name": "Electrostatics",
-      "params": []
+      "params": [
+        {
+          "doc": "volumetric_fem: 2D/3D finite elements; planar_bem: 2D layered-dielectric boundary elements on planar conductor sheets; auto: planar_bem when applicable, otherwise volumetric_fem",
+          "kind": {
+            "default": "volumetric_fem",
+            "options": [
+              "volumetric_fem",
+              "planar_bem",
+              "auto"
+            ],
+            "type": "choice"
+          },
+          "label": "Formulation",
+          "name": "formulation",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "quarter_point: Barsoum 1/4-point mid-edge node shift on 3D P2 elements meeting open conductor sheet perimeter edges",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "quarter_point"
+            ],
+            "type": "choice"
+          },
+          "label": "Singular edge enrichment",
+          "name": "singular_edges",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "in planar_bem, solve on 1->4 subdivided sheet panels and apply log-space SPD Richardson extrapolation",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Richardson extrapolation",
+          "name": "richardson",
+          "required": false,
+          "unit": ""
+        }
+      ]
     },
     {
       "dims": "both",

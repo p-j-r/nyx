@@ -161,29 +161,150 @@ fn assemble_laplace_tensor_curved_3d(mesh: &Discretisation, order: usize, kt: &[
     })
 }
 
+/// Enriches a 3D mesh for P2 Barsoum quarter-point singularity capture (`singular_edges = "quarter_point"`):
+/// finds all open perimeter vertices of interior conductor sheet facets (edges shared by exactly 1
+/// interior conductor facet carrying `Terminal`, `Ground`, or `Potential`), shifts mid-edge geometry
+/// nodes on tet edges `(a, b)` with `is_rim[a] ^ is_rim[b]` to `0.75 * p_rim + 0.25 * p_other`, and
+/// validates positive `CurvedTet` Jacobians across all collapsed-quadrature points on every affected cell.
+pub fn enrich_quarter_point_mesh(mesh: &Discretisation, spec: &Problem) -> Option<(Discretisation, usize, usize)> {
+    if spec.order != 2 || mesh.dim != 3 || spec.singular_edges != "quarter_point" {
+        return None;
+    }
+    let mut cond_labels = BTreeSet::new();
+    for bc in &spec.bcs {
+        if matches!(bc.kind, BcKind::Potential(_) | BcKind::Ground | BcKind::Terminal(_)) {
+            cond_labels.extend(bc.labels.iter().copied());
+        }
+    }
+    if cond_labels.is_empty() {
+        return None;
+    }
+    let exterior = mesh.exterior_facets();
+    let mut edge_count: BTreeMap<(u32, u32), usize> = BTreeMap::new();
+    for f in 0..mesh.n_facets() {
+        if !exterior[f] && cond_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            for &(i, j) in &[(0, 1), (1, 2), (2, 0)] {
+                let (a, b) = (fv[i].min(fv[j]), fv[i].max(fv[j]));
+                *edge_count.entry((a, b)).or_insert(0) += 1;
+            }
+        }
+    }
+    if edge_count.is_empty() {
+        return None;
+    }
+    let nv = mesh.n_points();
+    let mut is_rim = vec![false; nv];
+    for (&(a, b), &cnt) in &edge_count {
+        if cnt == 1 {
+            is_rim[a as usize] = true;
+            is_rim[b as usize] = true;
+        }
+    }
+    let n_rim_verts = is_rim.iter().filter(|&&r| r).count();
+    if n_rim_verts == 0 {
+        return None;
+    }
+
+    let mut edge_map: BTreeMap<[u32; 2], [f64; 3]> = mesh.edge_node_list().into_iter().collect();
+    let mut qp_edges: BTreeSet<[u32; 2]> = BTreeSet::new();
+    for &(a, b) in mesh.edges() {
+        let (ua, ub) = (a as usize, b as usize);
+        if (is_rim[ua] ^ is_rim[ub]) && !edge_map.contains_key(&[a, b]) {
+            let (p_rim, p_other) =
+                if is_rim[ua] { (mesh.point(ua), mesh.point(ub)) } else { (mesh.point(ub), mesh.point(ua)) };
+            let qpt = [
+                0.75 * p_rim[0] + 0.25 * p_other[0],
+                0.75 * p_rim[1] + 0.25 * p_other[1],
+                0.75 * p_rim[2] + 0.25 * p_other[2],
+            ];
+            edge_map.insert([a, b], qpt);
+            qp_edges.insert([a, b]);
+        }
+    }
+    if qp_edges.is_empty() {
+        return None;
+    }
+
+    let mut enriched = mesh.clone();
+    let nodes_vec: Vec<([u32; 2], [f64; 3])> = edge_map.iter().map(|(&k, &v)| (k, v)).collect();
+    enriched.set_edge_nodes(&nodes_vec);
+
+    // Validate positive CurvedTet Jacobian across all quadrature points on every affected cell
+    let cquad = quad_rule_collapsed(6);
+    let mut bad_edges: BTreeSet<[u32; 2]> = BTreeSet::new();
+    for c in 0..enriched.n_cells() {
+        if !enriched.cell_is_curved(c) {
+            continue;
+        }
+        let cv = enriched.cell(c);
+        let mut v4 = [[0.0; 3]; 4];
+        for i in 0..4 {
+            let p = enriched.point(cv[i] as usize);
+            v4[i] = [p[0], p[1], p[2]];
+        }
+        let det0 = CurvedTet::straight(v4).jacobian(&[0.25, 0.25, 0.25, 0.25]).1;
+        let ct = CurvedTet::new(enriched.cell_geometry_nodes(c));
+        let mut valid = det0.abs() > 1e-30;
+        if valid {
+            for lam in &cquad.lam {
+                let (_, det) = ct.jacobian(&[lam[0], lam[1], lam[2], lam[3]]);
+                if det * det0 <= 1e-12 * det0 * det0 {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+        if !valid {
+            for i in 0..4 {
+                for j in (i + 1)..4 {
+                    let key = [cv[i].min(cv[j]), cv[i].max(cv[j])];
+                    if qp_edges.contains(&key) {
+                        bad_edges.insert(key);
+                    }
+                }
+            }
+        }
+    }
+    if !bad_edges.is_empty() {
+        for k in &bad_edges {
+            edge_map.remove(k);
+            qp_edges.remove(k);
+        }
+        if qp_edges.is_empty() {
+            return None;
+        }
+        let nodes_vec: Vec<([u32; 2], [f64; 3])> = edge_map.iter().map(|(&k, &v)| (k, v)).collect();
+        enriched.set_edge_nodes(&nodes_vec);
+    }
+    Some((enriched, n_rim_verts, qp_edges.len()))
+}
+
 pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
     let order = spec.order;
     check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
-    let eps = spec.materials.cell_values(mesh, "eps_r", Some(1.0))?;
-    let rho = spec.materials.cell_values(mesh, "rho_v", Some(0.0))?;
+    let qp_mesh = enrich_quarter_point_mesh(mesh, spec);
+    let m_work = qp_mesh.as_ref().map_or(mesh, |(m, _, _)| m);
+    let eps = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
+    let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
     let k = if spec.materials.has_tensor(TensorKind::Permittivity) {
-        let mut t = plane_tensors(mesh, spec.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?);
+        let mut t = plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?);
         t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
-        if mesh.dim == 3 && mesh.has_curved() {
-            assemble_laplace_tensor_curved_3d(mesh, order, &t)
+        if m_work.dim == 3 && m_work.has_curved() {
+            assemble_laplace_tensor_curved_3d(m_work, order, &t)
         } else {
-            assemble_laplace_tensor(mesh, order, &t)
+            assemble_laplace_tensor(m_work, order, &t)
         }
     } else {
         let coeff: Vec<f64> = eps.iter().map(|e| EPS0 * e).collect();
-        if mesh.dim == 3 && mesh.has_curved() {
-            assemble_laplace_curved_3d(mesh, order, &coeff)
+        if m_work.dim == 3 && m_work.has_curved() {
+            assemble_laplace_curved_3d(m_work, order, &coeff)
         } else {
-            assemble_laplace(mesh, order, &coeff)
+            assemble_laplace(m_work, order, &coeff)
         }
     };
     let n = k.nrows();
-    let mut f = if rho.iter().any(|&r| r != 0.0) { assemble_source(mesh, order, &rho) } else { vec![0.0; n] };
+    let mut f = if rho.iter().any(|&r| r != 0.0) { assemble_source(m_work, order, &rho) } else { vec![0.0; n] };
     let mut volt: BTreeMap<i32, f64> = BTreeMap::new();
     for bc in &spec.bcs {
         for &lab in &bc.labels {
@@ -202,7 +323,7 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
                 }
                 BcKind::SurfaceCharge(s) => {
                     if *s != 0.0 {
-                        let l = assemble_boundary_load(mesh, &[lab], *s, order);
+                        let l = assemble_boundary_load(m_work, &[lab], *s, order);
                         f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
                     }
                 }
@@ -213,7 +334,7 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
     if volt.is_empty() {
         return Err("electrostatics needs at least one potential, ground or terminal boundary".into());
     }
-    let (fixed, vals) = dirichlet_constraints(mesh, &volt, order);
+    let (fixed, vals) = dirichlet_constraints(m_work, &volt, order);
     Ok(ElectroAssembly { k, f, fixed, vals, volt })
 }
 
@@ -224,7 +345,8 @@ pub fn solve_potential(
     spec: &Problem,
     asm: &ElectroAssembly,
 ) -> Result<(Vec<f64>, Option<String>), String> {
-    solve_spd(mesh, spec.order, 1, spec.solver, &asm.k, &asm.f, &asm.fixed, &asm.vals)
+    let tol = if spec.tol > 0.0 { spec.tol } else { 1e-10 };
+    solve_spd_with(mesh, spec.order, 1, spec.solver, &asm.k, &asm.f, &asm.fixed, &asm.vals, tol, spec.amg_line_smooth)
 }
 
 /// Stage 3: the fields `V` and `E` (the flat names `|E|`, `Ex`, `Ez` come from `Solution::flat_fields`) and the same without averaging over
@@ -320,8 +442,19 @@ fn invert_spd_ec_matrix(maxwell: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, String> {
 }
 
 pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+    match spec.formulation.as_str() {
+        "" | "volumetric_fem" => {}
+        "planar_bem" => return crate::planar_bem::solve_planar_bem(mesh, spec),
+        "auto" => {
+            if crate::planar_bem::can_use_planar_bem(mesh, spec) {
+                return crate::planar_bem::solve_planar_bem(mesh, spec);
+            }
+        }
+        other => return Err(format!("unknown electrostatics formulation '{other}'")),
+    }
     let t0 = Instant::now();
     let order = spec.order;
+    let qp_info = enrich_quarter_point_mesh(mesh, spec);
     let asm = assemble_electrostatics(mesh, spec)?;
 
     // Group terminal facets by unique terminal name in first-seen order
@@ -431,6 +564,11 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         && n_free > 0;
 
     let mut log = Vec::new();
+    if let Some((_, n_rim, n_edges)) = &qp_info {
+        log.push(format!(
+            "singular_edges=quarter_point: shifted {n_edges} tet edges meeting {n_rim} conductor sheet perimeter vertices to Barsoum 1/4-points (all affected cells verified det(J) > 0)"
+        ));
+    }
     let mut v_all = vec![vec![0.0; n]; n_term];
     for j in 0..n_term {
         for (&d, &val) in fixed.iter().zip(&vals_list[j]) {
@@ -458,30 +596,36 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         };
 
         if use_amg {
-            let sys = AmgSystem::new(mesh, order, 1, &asm.k, &fixed)?;
-            let mut amg_ok = true;
-            let mut total_its = 0usize;
-            let mut worst_rel = 0.0_f64;
+            let opts =
+                femcore::linalg::amg_elastic::AmgOptions { line_smooth: spec.amg_line_smooth, ..Default::default() };
+            let sys = AmgSystem::new_with(mesh, order, 1, &asm.k, &fixed, opts)?;
+            let tol = if spec.tol > 0.0 { spec.tol } else { 1e-10 };
+            let mut rhs_list = Vec::with_capacity(n_term);
+            let mut fv_list = Vec::with_capacity(n_term);
             for j in 0..n_term {
                 let ku = asm.k.matvec(&v_all[j]);
                 let rhs: Vec<f64> = (0..n).map(|i| asm.f[i] - ku[i]).collect();
                 let fv: Vec<(usize, f64)> = fixed.iter().copied().zip(vals_list[j].iter().copied()).collect();
-                let (u, its, rel) = sys.solve_with(None, &rhs, &fv, 1e-10, 600);
-                total_its += its;
-                worst_rel = worst_rel.max(rel);
-                if rel > 1e-7 {
-                    amg_ok = false;
-                    break;
-                }
-                for &i in &free {
-                    v_all[j][i] = u[i];
-                }
+                rhs_list.push(rhs);
+                fv_list.push(fv);
             }
+            let (u_all, its, worst_rel) = sys.solve_block_with(None, &rhs_list, &fv_list, tol, 600);
+            let amg_ok = worst_rel <= (tol * 1e3).max(1e-7);
             if amg_ok {
+                for j in 0..n_term {
+                    for &i in &free {
+                        v_all[j][i] = u_all[j][i];
+                    }
+                }
                 log.push(format!(
-                    "AMG-CG: 1 hierarchy setup ({} levels {:?}, {:.1} s) served {n_term} terminal right-hand side(s) ({total_its} total iterations, max residual {worst_rel:.1e})",
+                    "AMG-CG: 1 hierarchy setup ({} levels {:?}{}, {:.1} s) served {n_term} terminal right-hand side(s) ({its} block iterations, max residual {worst_rel:.1e})",
                     sys.n_levels(),
                     sys.sizes(),
+                    if sys.line_smooth_active() {
+                        format!(", {} vertical-line columns", sys.n_line_columns())
+                    } else {
+                        String::new()
+                    },
                     sys.setup_seconds
                 ));
             } else if spec.solver == LinearSolver::Auto {
@@ -512,8 +656,8 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
     let mut maxwell_matrix_f = vec![vec![0.0; n_term]; n_term];
     for i in 0..n_term {
         for j in i..n_term {
-            let cij = v_all[i].iter().zip(&kv_all[j]).map(|(a, b)| a * b).sum::<f64>();
-            let cji = if i == j { cij } else { v_all[j].iter().zip(&kv_all[i]).map(|(a, b)| a * b).sum::<f64>() };
+            let cij = femcore::linalg::vecops::dotu(&v_all[i], &kv_all[j]);
+            let cji = if i == j { cij } else { femcore::linalg::vecops::dotu(&v_all[j], &kv_all[i]) };
             let sym = 0.5 * (cij + cji);
             maxwell_matrix_f[i][j] = sym;
             maxwell_matrix_f[j][i] = sym;
