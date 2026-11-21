@@ -43,6 +43,10 @@ component nyx.store "Components_store" "The components of nyx-store and what the
     include *
     autolayout tb
 }
+component nyx.storage "Components_storage" "The components of nyx-storage and what they use." {
+    include *
+    autolayout tb
+}
 component nyx.geom "Components_geom" "The components of geom and what they use." {
     include *
     autolayout tb

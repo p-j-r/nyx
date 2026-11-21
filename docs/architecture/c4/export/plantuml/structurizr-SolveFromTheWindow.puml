@@ -83,7 +83,7 @@ hide stereotype
 </style>
 
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
-  database "==Results file\n<size:16>[Container: File .h5 and .xdmf]</size>\n\nProject, mesh and every solution of every solved physics, compressed, exact; with an XDMF description next to it." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Resultsfile
+  database "==Results file\n<size:16>[Container: File .h5 and .xdmf]</size>\n\nProject, mesh and every solution of every solved physics, compressed (packed 5D Shuffle+LZF or Deflate), exact; with an XDMF description next to it." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Resultsfile
   component "==nyx-engine\n<size:16>[Container: Rust library]</size>\n\nThe Engine: one project, the mesh built for it, the latest result of each physics, the jobs that produce them, and the binding to a workflow. Every action is a named command with a JSON Schema." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxengine
   rectangle "==app\n<size:16>[Container: Rust, eframe/egui]</size>\n\nThe egui window (binary nyx): geometry editor, mesh view, Study, Physics and Materials tabs drawn from the physics descriptors, results, analysis, workflow dashboard. A front-end of the engine: it holds an Engine and calls commands." <<Element-RWxlbWVudCxDb250YWluZXIsRXhlY3V0YWJsZQ==>> as nyx.app
   component "==nyx-ems\n<size:16>[Container: Rust library]</size>\n\nEM waves: waveguide modes (real and complex), axisymmetric, cavity in 3D." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeSxLZXJuZWw=>> as nyx.nyxems
@@ -96,7 +96,7 @@ nyx.nyxengine --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "2: mesh the m
 nyx.nyxengine --> nyx.nyxems <<Relationship-UmVsYXRpb25zaGlw>> : "3: Physics::solve(mesh, spec, ctx)\n<size:16>[Rust API]</size>"
 nyx.nyxems --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "4: assemble, shift-invert eigensolve\n<size:16>[Rust API]</size>"
 nyx.nyxengine --> nyx.nyxstore <<Relationship-UmVsYXRpb25zaGlw>> : "5: record the run, freeze the spec\n<size:16>[Rust API]</size>"
-nyx.nyxengine --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "6: write results.h5 and results.xdmf\n<size:16>[HDF5 (serial or MPI-IO), XDMF]</size>"
+nyx.nyxengine --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "6: write results.h5 and results.xdmf\n<size:16>[HDF5 (hdf5-pure), XDMF]</size>"
 nyx.app --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "7: poll: take the mesh and the results\n<size:16>[Rust API]</size>"
 
 @enduml

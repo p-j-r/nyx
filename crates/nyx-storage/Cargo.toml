@@ -1,0 +1,15 @@
+[package]
+name = "nyx-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pure-Rust HDF5 storage engine, packed 5D Shuffle+LZF layout, streaming reader/writer, XDMF generator, and parameter-sweep appender for nyx"
+
+[dependencies]
+hdf5-pure.workspace = true
+flate2.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true

@@ -10,8 +10,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 <!-- map:begin -->
 | Glob | ADRs | Note |
 |---|---|---|
-| `Cargo.toml` | 13, 20 | workspace, profile choices |
-| `Cargo.lock` | 13 | |
+| `Cargo.toml` | 13, 20, 107 | workspace, profile choices, pure-Rust `hdf5-pure` + `zlib-rs` |
+| `Cargo.lock` | 13, 107 | |
 | `rust-toolchain.toml` | 13 | pinned compiler |
 | `CLAUDE.md` | 1, 10, 12, 13, 20 | conventions |
 | `AGENTS.md` | 1, 10, 12, 13, 20 | agent-neutral repository guide |
@@ -41,7 +41,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/GDSFACTORY_INTEGRATION.md` | 57, 94 | design note: a gdsfactory plugin that drives the engine; not built |
 | `docs/MARKET_NOTE.md` | - | market note; no architecture decision |
 | `docs/results_format_measure.py.txt` | 62 | the measurement script of the results format study (`.py.txt`: `*.py` is git-ignored) |
-| `docs/RESULTS_FORMAT_STUDY.md` | 62, 99 | study of the results file layout |
+| `docs/RESULTS_FORMAT_STUDY.md` | 62, 99, 107 | study of the results file layout and pure-Rust `hdf5-pure` decision |
 | `docs/figures/example_modes_gallery.png` | 99 | example output of the `figure` command |
 | `docs/chip_report.md` | 22 | |
 | `docs/photonic_use_cases.md` | 21, 22 | |
@@ -156,7 +156,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/fs_*.rs` | 8 | ported CLI tools |
 | `crates/femcore/examples/mesh_*.rs` | 7, 16 | mesher studies |
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
-| `crates/femcore/Cargo.toml` | 13, 8, 11 | features `hdf5-metno`, `phdf5`, `portable-kernels` |
+| `crates/femcore/Cargo.toml` | 13, 8, 11 | feature `portable-kernels` |
+| `crates/nyx-storage/*` | 107, 62, 99 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer, XDMF, sweep checkpoint |
 | `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
 | `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88 | colour tokens as data, the looks built from them, the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
@@ -168,7 +169,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-mcp/*` | 94, 97, 15 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over one script kernel, no tool per command (S7; ADR 15 amended); moved from `ai/` into the root workspace (ADR 26) |
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
-| `.cargo/*` | 26, 27 | shared target directory |
+| `.cargo/*` | 26, 27, 107 | shared target directory (no `HDF5_DIR` C dependency) |
 | `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |
 | `crates/nyx-physics/src/testkit.rs` | 41, 10 | the golden-file harness |
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
@@ -197,7 +198,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-analysis/src/{epr,hamiltonian,tls}.rs` | 105 | `epr` KICQ analysis, `hamiltonian` (`normal_fock` / `craig_bampton`), and `tls_participation` |
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
 | `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, mode figures) |
-| `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
+| `crates/nyx-engine/tests/layering.rs` | 26, 107 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |
 | `crates/nyx-engine/tests/commandlist.rs` | 89 | command lists: static check against the catalog schemas, the dry-run plan, a bad line named and nothing run, the P0 workflows from their files |
@@ -224,7 +225,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/src/shared_queue.rs` | 95 | the queue in the workspace folder: items and markers, the lease, the queue worker (`--worker`), `run_shared` for the job that waits for an item, the `nyx queue` commands |
 | `crates/nyx-engine/tests/shared_queue.rs` | 95 | two front-ends on one queue, a submitter that exits, a solver killed, a queue worker killed, cancel and steering from another program |
 | `crates/nyx-engine/tests/cqed_validated.rs` | 102, 103, 105, 91 | end-to-end superconducting CPW `Engine` workflow reaching `validated: checked` and running `capacitance_matrix` & `tls_participation` |
-| `crates/nyx-engine/*` | 37, 38, 25, 26, 102, 103, 104, 105 | `Project`, commands, jobs, store wiring and geometry descriptors; the registry from cargo features |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57 | scripts: the host (run and check a script through a worker process), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93 | tracing of script functions (N3): the Python prelude the worker is fed, the formula functions, the `nyx` wrapper that turns a function given as a formula into its text, and the static guard against a branch on a value of the point |
 | `crates/nyx-script/src/kernel.rs` | 94, 93 | the kernel: one Monty session that outlives a script; commands that wait for a job served by polling so no call blocks for ever; `nyx.aio` futures; the refusal of the destructive commands; a dead worker replaced from a dump; `host::run` and `check` are one script on a kernel of their own |

@@ -23,7 +23,21 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("nyx-ems", &["nyx-physics", "femcore"]),
     ("nyx-analysis", &["nyx-physics", "femcore"]), // femcore: the mesh geometry and the quadrature rule the modes are sampled with
     ("nyx-store", &[]),
-    ("nyx-engine", &["nyx-physics", "nyx-dfs", "nyx-sms", "nyx-ems", "nyx-analysis", "nyx-store", "femcore", "geom"]),
+    ("nyx-storage", &[]),
+    (
+        "nyx-engine",
+        &[
+            "nyx-physics",
+            "nyx-dfs",
+            "nyx-sms",
+            "nyx-ems",
+            "nyx-analysis",
+            "nyx-store",
+            "nyx-storage",
+            "femcore",
+            "geom",
+        ],
+    ),
     ("nyx-connect", &[]),
     ("nyx-mcp", &["nyx-engine", "nyx-script"]), // the script tools (S7, ADR 94)
     ("nyx-script", &["nyx-engine"]),            // a third front-end (S4): scripts over Engine::call

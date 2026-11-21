@@ -4,7 +4,4 @@
 [build]
 target-dir = "../nyx2-target"
 
-# The HDF5 library (feature `hdf5`, on by default, ADR 63). `force = false`: an HDF5_DIR already set in the environment wins. This is the
-# Anaconda install of the development machine; on another machine set HDF5_DIR to the prefix of its HDF5 library (and put its bin folder on PATH).
-[env]
-HDF5_DIR = { value = "C:/Users/robin-adm/anaconda3/Library", force = false }
+# HDF5 support is 100% pure Rust (hdf5-pure + flate2/zlib-rs); no external HDF5_DIR or hdf5.dll is required.

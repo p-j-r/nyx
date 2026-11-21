@@ -125,6 +125,13 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                 }
                 !include c4/model/store.components.dsl
             }
+            storage = container "nyx-storage" "Pure-Rust HDF5 storage engine (hdf5-pure + zlib-rs): packed 5D Shuffle+LZF and contiguous layouts, bounded-memory streaming reader/writer, direct-path XDMF, and in-place parameter-sweep appender." "Rust library" "Library" {
+                properties {
+                    "adr" "0107, 0062, 0099"
+                    "code" "crates/nyx-storage/src"
+                }
+                !include c4/model/storage.components.dsl
+            }
 
             femcore = container "femcore" "The FEM core: meshes, meshing and adaptation, linear algebra behind one driver, finite-element basics, the material specification and library, expressions." "Rust library" "Library" {
                 properties {
@@ -148,10 +155,10 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
                     "contract" "contracts/engine_project.v2.json"
                 }
             }
-            resultsFile = container "Results file" "Project, mesh and every solution of every solved physics, compressed, exact; with an XDMF description next to it." "File .h5 and .xdmf" "Store" {
+            resultsFile = container "Results file" "Project, mesh and every solution of every solved physics, compressed (packed 5D Shuffle+LZF or Deflate), exact; with an XDMF description next to it." "File .h5 and .xdmf" "Store" {
                 properties {
-                    "adr" "0062"
-                    "contract" "contracts/VERSIONS.md (results_file, layout 3)"
+                    "adr" "0062, 0099, 0107"
+                    "contract" "contracts/VERSIONS.md (results_file, layout 4)"
                 }
             }
             workspaceStore = container "Workspace data" "workspace.json, workflow.json, history.jsonl, runs.jsonl, specs/ (experiment.nyx.json, specs/<hash>.nyx.json), run folders with results.h5, .nyx archives." "Files and folders" "Store" {
@@ -187,6 +194,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
         nyx.engine -> nyx.ems "Compiled-in physics (feature ems)" "Rust API"
         nyx.engine -> nyx.analysis "Analyses of results" "Rust API"
         nyx.engine -> nyx.store "Workflows and runs; passes spec text and a card" "Rust API"
+        nyx.engine -> nyx.storage "Reads and writes HDF5 results and sweep checkpoints" "Rust API"
         nyx.engine -> nyx.femcore "Meshing, materials, plots" "Rust API"
         nyx.engine -> nyx.geom "Feature lists, labels, selectors" "Rust API"
         nyx.dfs -> nyx.physics "Implements Physics" "Rust API"
@@ -202,7 +210,7 @@ workspace "nyx" "Desktop finite-element application for photonics and phononics,
 
         # containers and data
         nyx.engine -> nyx.projectFile "Saves and loads" "serde JSON"
-        nyx.engine -> nyx.resultsFile "Writes and opens" "HDF5 (serial or MPI-IO), XDMF"
+        nyx.engine -> nyx.resultsFile "Writes and opens" "HDF5 (hdf5-pure), XDMF"
         nyx.engine -> nyx.materialLibrary "Loads" "TOML"
         nyx.store -> nyx.workspaceStore "Reads and writes"
 

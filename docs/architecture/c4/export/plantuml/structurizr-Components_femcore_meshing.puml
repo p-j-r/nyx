@@ -58,17 +58,17 @@ hide stereotype
 
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "femcore\n<size:16>[Container: Rust library]</size>" <<Boundary-ZmVtY29yZQ==>> {
-    rectangle "==Metric fields\n<size:16>[Component: Rust modules]</size>\n\nRiemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Metricfields
-    rectangle "==Adaptation operators\n<size:16>[Component: Rust modules]</size>\n\nEdge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Adaptationoperators
-    rectangle "==Adaptation drivers\n<size:16>[Component: Rust modules]</size>\n\nPasses of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Adaptationdrivers
-    rectangle "==Error estimators\n<size:16>[Component: Rust modules]</size>\n\nError estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Errorestimators
-    rectangle "==Mesh\n<size:16>[Component: Rust modules]</size>\n\nThe native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Mesh
     rectangle "==Mesh files\n<size:16>[Component: Rust modules]</size>\n\nThe compact lossless .fmsh format for meshes and results and its entropy coder." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Meshfiles
     rectangle "==Fixtures and test kit\n<size:16>[Component: Rust modules]</size>\n\nTest meshes and the SOI wire cross-section used by the tests of every physics crate." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Fixturesandtestkit
     rectangle "==Meshing facade\n<size:16>[Component: Rust modules]</size>\n\nMeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Meshingfacade
     rectangle "==3D meshing\n<size:16>[Component: Rust modules]</size>\n\nThe lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.3Dmeshing
     rectangle "==Structured absorbing layers\n<size:16>[Component: Rust modules]</size>\n\nStructured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Structuredabsorbinglayers
     rectangle "==Meshing validation harness\n<size:16>[Component: Rust modules]</size>\n\nA small independent scalar Helmholtz solver with PML used to validate meshes." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Meshingvalidationharness
+    rectangle "==Metric fields\n<size:16>[Component: Rust modules]</size>\n\nRiemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Metricfields
+    rectangle "==Adaptation operators\n<size:16>[Component: Rust modules]</size>\n\nEdge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Adaptationoperators
+    rectangle "==Adaptation drivers\n<size:16>[Component: Rust modules]</size>\n\nPasses of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Adaptationdrivers
+    rectangle "==Error estimators\n<size:16>[Component: Rust modules]</size>\n\nError estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Errorestimators
+    rectangle "==Mesh\n<size:16>[Component: Rust modules]</size>\n\nThe native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.femcore.Mesh
   }
 
 }

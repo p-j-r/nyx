@@ -35,11 +35,11 @@ graph TB
 
       41["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
       style 41 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      92["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 92 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      98["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 98 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->92
+    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->98
     76-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     76-. "<div>uses capacitance</div><div style='font-size: 70%'>[Rust paths]</div>" .->77
     76-. "<div>uses tls</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
@@ -47,13 +47,13 @@ graph TB
     76-. "<div>uses samples</div><div style='font-size: 70%'>[Rust paths]</div>" .->79
     77-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     77-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    78-. "<div>uses femcore: fem,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    78-. "<div>uses femcore: fem,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     78-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     78-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    82-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    82-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     82-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     81-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->80
-    79-. "<div>uses femcore: fem, fields +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    79-. "<div>uses femcore: fem, fields +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     79-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     79-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
     79-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->80

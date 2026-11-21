@@ -11,5 +11,6 @@
 * [nyx-ems](./ems.md): 9 components
 * [nyx-analysis](./analysis.md): 7 components
 * [nyx-store](./store.md): 8 components
+* [nyx-storage](./storage.md): 5 components
 * [geom](./geom.md): 7 components
 * [femcore](./femcore.md): 24 components

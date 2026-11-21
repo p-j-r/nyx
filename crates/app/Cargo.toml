@@ -22,7 +22,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 femcore = { path = "../femcore" }
 
 [features]
-# the results of every run in HDF5 files (needs the HDF5 library; set HDF5_DIR to its install prefix)
+# the results of every run in HDF5 files (pure-Rust hdf5-pure + zlib-rs; requires no external HDF5_DIR or DLL)
 hdf5 = ["nyx-engine/hdf5"]
 
 [target."cfg(windows)".dependencies]

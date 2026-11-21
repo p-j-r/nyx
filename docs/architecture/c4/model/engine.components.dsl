@@ -27,7 +27,7 @@ jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs 
     properties {
         "adr" "61, 80, 85, 87, 86, 11, 95, 96"
         "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)"
-        "lines" "4551"
+        "lines" "4568"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -71,11 +71,11 @@ analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest 
         "codeDiagram" "4-code/engine/analyse.md"
     }
 }
-resultsIO = component "Results files" "HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results." "Rust modules" {
+resultsIO = component "Results files" "HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description, and opening a results file as a project with its results." "Rust modules" {
     properties {
-        "adr" "62, 63"
+        "adr" "62, 63, 99, 107"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "999"
+        "lines" "1501"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }
