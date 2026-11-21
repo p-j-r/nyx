@@ -463,7 +463,8 @@ impl Elastic {
                 let g = q(s, "G")?.ok_or_else(|| s.err("G", "K is given without G"))?;
                 (k - 2.0 * g / 3.0, g)
             };
-            Elastic::from_constants(Class::Isotropic, &[("c11", lam + 2.0 * mu), ("c12", lam)]).map_err(|m| s.err("", m))?
+            let gpa_round = |x: f64| (x / 1e9) * 1e9;
+            Elastic::from_constants(Class::Isotropic, &[("c11", gpa_round(lam + 2.0 * mu)), ("c12", gpa_round(lam))]).map_err(|m| s.err("", m))?
         } else if !ckeys.is_empty() || !skeys.is_empty() {
             let letter = if ckeys.is_empty() { 's' } else { 'c' };
             let given: Vec<String> = if ckeys.is_empty() { skeys.iter().map(|k| k.to_string()).collect() } else { ckeys.iter().map(|k| k.to_string()).collect() };

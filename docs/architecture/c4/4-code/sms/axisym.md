@@ -24,7 +24,7 @@ C4 level 4 (code) of the component **Axisymmetric kernel** (`sms.axisym`) in the
 
 | Component | Modules | Items |
 |---|---|---|
-| [Axisymmetric study kernel](./crosssection.md) | axisym | assemble_mass_axisym, assemble_stiffness_axisym, average_about_axis, axis_constraints, cylindrical_stretches, mode_energy_axisym |
+| [Cross-section study kernel](./crosssection.md) | axisym | assemble_mass_axisym, assemble_stiffness_axisym, average_about_axis, axis_constraints, cylindrical_stretches, mode_energy_axisym |
 
 ## Class diagram
 

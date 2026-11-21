@@ -257,6 +257,38 @@
         "unit": "a.u."
       }
     ],
+    "modes": [
+      {
+        "components": [],
+        "doc": "magnitude of the displacement of a mode, scaled to a maximum of 1",
+        "name": "|u|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral (x) component, phase chosen so that the largest component is real",
+        "name": "Re ux",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the vertical (z) component",
+        "name": "Re uz",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the longitudinal (y) component",
+        "name": "Re uy",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the longitudinal (y) component",
+        "name": "|uy|",
+        "unit": "a.u."
+      }
+    ],
     "static": [
       {
         "components": [
@@ -835,6 +867,43 @@
               "kind"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.",
+            "properties": {
+              "kind": {
+                "const": "modes"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "f_search": {
+                    "default": 0.0,
+                    "description": "Search around [Hz]. 0 finds the lowest modes",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "n_modes": {
+                    "default": 6,
+                    "description": "Number of modes",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "wavevector": {
+                    "default": 0.0,
+                    "description": "Longitudinal wavevector [rad/m]. wavevector q along +y; the displacement goes as exp(-j q y)",
+                    "type": "number"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
           }
         ]
       }
@@ -933,6 +1002,53 @@
           "name": "azimuthal_order",
           "required": false,
           "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "two",
+      "doc": "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.",
+      "kind": "modes",
+      "name": "Waveguide modes",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 6,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "0 finds the lowest modes",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Search around",
+          "name": "f_search",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "wavevector q along +y; the displacement goes as exp(-j q y)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Longitudinal wavevector",
+          "name": "wavevector",
+          "required": false,
+          "unit": "rad/m"
         }
       ]
     }

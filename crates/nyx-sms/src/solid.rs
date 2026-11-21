@@ -562,11 +562,32 @@ pub fn solve_static(
 
 pub(crate) use femcore::progress::lap_since as lap;
 
+/// Density per cell; domains in `inactive` get `0.0` without requiring `"rho"`, while active domains without `"rho"` return an error.
+pub(crate) fn cell_rho(
+    materials: &femcore::props::Materials,
+    mesh: &Discretisation,
+    inactive: &[i32],
+) -> Result<Vec<f64>, String> {
+    let mut by_domain = std::collections::BTreeMap::new();
+    for d in mesh.domain_labels() {
+        let v = if inactive.contains(&d) {
+            0.0
+        } else {
+            materials.get(d, "rho").ok_or_else(|| format!("domain {d} has no value for 'rho'"))?
+        };
+        by_domain.insert(d, v);
+    }
+    Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
+}
+
 /// Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting
 /// boundaries in their own modules. The result carries `physics`, `study`, `order`, `dim`, the solutions, scalars, log, time and dofs.
 pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
     if matches!(spec.study, Study::AxisymmetricEigenfrequency { .. }) {
         return crate::cross_section::solve_axisymmetric(mesh, spec);
+    }
+    if matches!(spec.study, Study::Modes { .. }) {
+        return crate::cross_section::solve_waveguide_modes(mesh, spec);
     }
     let t0 = Instant::now();
     let mut tl = Instant::now();
@@ -582,6 +603,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
         return match spec.study {
             Study::Eigenfrequency { .. } => crate::pml::solve_solid_pml(mesh, spec),
             Study::AxisymmetricEigenfrequency { .. } => crate::cross_section::solve_axisymmetric(mesh, spec),
+            Study::Modes { .. } => crate::cross_section::solve_waveguide_modes(mesh, spec),
             _ => Err(
                 "perfectly matched layers are used with the Eigenfrequency study (they give complex frequencies and Q)"
                     .into(),
@@ -598,6 +620,9 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
     match &spec.study {
         Study::AxisymmetricEigenfrequency { .. } => {
             Err("the axisymmetric study is solved by cross_section::solve_axisymmetric".into())
+        }
+        Study::Modes { .. } => {
+            Err("the waveguide modes study is solved by cross_section::solve_waveguide_modes".into())
         }
         Study::Static => {
             let asm = assemble_static(mesh, spec, &st, k)?;
@@ -630,12 +655,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
             })
         }
         Study::Eigenfrequency { n_modes, f_search } => {
-            let mut rho = spec.materials.cell_values(mesh, "rho", None)?;
-            for (c, r) in rho.iter_mut().enumerate() {
-                if spec.inactive.contains(&mesh.cell_labels[c]) {
-                    *r = 0.0;
-                }
-            }
+            let rho = cell_rho(&spec.materials, mesh, &spec.inactive)?;
             let rho_t: Vec<f64> = rho.iter().map(|r| r * if d == 2 { thk } else { 1.0 }).collect();
             let m1 = assemble_mass(mesh, order, &rho_t);
             let blocks: Vec<&Csr> = (0..d).map(|_| &m1).collect();

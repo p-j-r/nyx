@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **Low-reflecting boundary** (`sms.lrb`) in th
 
 | Component | Modules | Items |
 |---|---|---|
-| [Axisymmetric study kernel](./crosssection.md) | lrb | damping_matrix, quadratic_modes |
+| [Cross-section study kernel](./crosssection.md) | lrb | damping_matrix, quadratic_modes |
 | [Solid kernel](./solid.md) | lrb | solve_lrb |
 
 ## Class diagram

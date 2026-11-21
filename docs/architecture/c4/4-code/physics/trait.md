@@ -60,12 +60,13 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [Test support](./testsupport.md) | crate root, physics | Discretisation, Physics |
 | [sms: Physics adapter](../sms/adapter.md) | crate root | Mesh |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | crate root | Discretisation |
-| [sms: Axisymmetric study kernel](../sms/crosssection.md) | crate root | Discretisation |
+| [sms: Cross-section study kernel](../sms/crosssection.md) | crate root | Discretisation |
 | [sms: Floquet kernel](../sms/floquet.md) | crate root | Discretisation |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | crate root | Discretisation |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | crate root | Discretisation |
 | [sms: Typed problem](../sms/problem.md) | error, physics | Ctx, Error, Physics |
 | [sms: Solid kernel](../sms/solid.md) | crate root | Discretisation |
+| [sms: Waveguide kernel](../sms/waveguide.md) | crate root | Discretisation |
 
 ## Class diagram
 

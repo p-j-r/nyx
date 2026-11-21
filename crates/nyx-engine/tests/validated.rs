@@ -174,3 +174,54 @@ fn the_verdict_is_written_into_the_run_that_solved_the_problem() {
     assert_eq!(e.call("store_runs", &json!({})).unwrap()[0]["convergence"]["passed"], json!(false));
     let _ = std::fs::remove_dir_all(&ws);
 }
+
+#[test]
+fn a_lossless_tilted_crystal_waveguide_passes_convergence_check_with_coupled_beta_rounding_marked_as_noise() {
+    let mut e = Engine::new();
+    for (cmd, args) in [
+        ("project_new", json!({ "title": "si_on_r_sapphire", "h": 1.2e-7 })),
+        ("add_rect", json!({ "name": "sub", "min": [-1.2e-6, -1.2e-6], "max": [1.2e-6, 0.0] })),
+        ("add_rect", json!({ "name": "clad", "min": [-1.2e-6, 0.0], "max": [1.2e-6, 0.8e-6] })),
+        ("add_rect", json!({ "name": "core", "min": [-2.25e-7, 0.0], "max": [2.25e-7, 2.3e-7] })),
+        (
+            "add_overlay",
+            json!({ "name": "regions", "regions": [
+                { "name": "sapphire", "input": "sub" },
+                { "name": "air", "input": "clad" },
+                { "name": "silicon", "input": "core" }
+            ] }),
+        ),
+        (
+            "add_physics",
+            json!({
+                "physics": "ems",
+                "study": "modes",
+                "study_params": { "freq": 299792458.0 / 1.55e-6, "n_target": 2.4, "n_modes": 2 },
+                "order": 2
+            }),
+        ),
+        (
+            "set_material",
+            json!({
+                "physics": "ems",
+                "region": "sapphire",
+                "material": { "material": "sapphire", "euler_deg": [0.0, 57.6, 0.0] }
+            }),
+        ),
+        ("set_material", json!({ "physics": "ems", "region": "air", "material": "air" })),
+        ("set_material", json!({ "physics": "ems", "region": "silicon", "material": "silicon" })),
+    ] {
+        e.call(cmd, &args).unwrap_or_else(|err| panic!("{cmd}: {err}"));
+    }
+    e.call("solve_run", &json!({})).unwrap();
+    let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.6, "tolerance": 1e-3 })).unwrap();
+    assert_eq!(r["converged"], json!(true), "{r}");
+    assert!(!r["noise_modes"].as_array().unwrap().is_empty(), "lossless tilted-crystal modes are in noise_modes: {r}");
+    for row in r["rows"].as_array().unwrap() {
+        let q = row["quantity"].as_str().unwrap();
+        if q.starts_with("scalar Q ") || q.ends_with(".im") {
+            assert_eq!(row["noise"], json!(true), "lossless Q/im row must be marked noise: {row}");
+        }
+    }
+    assert_eq!(r["validated"]["state"], "checked", "{r}");
+}

@@ -56,16 +56,28 @@ pub struct CrossModes {
 }
 
 /// What the third displacement component and the third dimension are: the azimuth of an axisymmetric body with azimuthal order `m`
-/// (mesh coordinates x = r, y = z).
+/// (mesh coordinates x = r, y = z), or the longitudinal propagation axis `+y` of a 2.5D waveguide cross-section with wavevector `q`
+/// (rad/m, displacement `exp(-i q y)`).
 #[derive(Clone, Copy, Debug)]
 pub enum CrossSection {
     Axisymmetric(f64),
+    Waveguide(f64),
 }
 
 /// Elastic modes of a body of revolution with azimuthal dependence `exp(-i m theta)` on the (r, z) half
 /// plane (mesh x = r, y = z): the displacement components are (u_r, u_z, u_theta) in this order.
 pub fn solve_solid_axisym(mesh: &Discretisation, spec: &Problem, m: f64) -> Result<(SolveResult, CrossModes), String> {
     solve_cross_section(mesh, spec, CrossSection::Axisymmetric(m))
+}
+
+/// Elastic modes of a 2D `(x, z)` waveguide cross-section with longitudinal dependence `exp(-i q y)`:
+/// the displacement components are `(u_x, u_z, u_y)` in this order.
+pub fn solve_solid_waveguide(
+    mesh: &Discretisation,
+    spec: &Problem,
+    q: f64,
+) -> Result<(SolveResult, CrossModes), String> {
+    solve_cross_section(mesh, spec, CrossSection::Waveguide(q))
 }
 
 /// The axisymmetric eigenfrequency study (ADR 68): the azimuthal order is taken from the study, the result carries `physics` and `study`.
@@ -83,6 +95,24 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
     // the study reads neither the plane assumption nor the thickness: say so when one was set
     if problem.plane != Plane::Strain || problem.thickness != 1.0 {
         result.log.push("axisymmetric study: the 2D parameters plane and thickness are not used".into());
+    }
+    Ok(result)
+}
+
+/// The 2.5D elastic waveguide modes study: the longitudinal wavevector `q` is taken from the study, the result carries `physics` and `study`.
+/// Refuses what the study cannot say (`Problem::check_modes`); with absorbing layers or low-reflecting boundaries the frequencies are complex
+/// (`Q` and `layer fraction` scalars, `eigenvalue` on every mode).
+pub fn solve_waveguide_modes(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    let Study::Modes { wavevector, .. } = problem.study else {
+        return Err("solve_waveguide_modes needs the modes study".into());
+    };
+    problem.check_modes().map_err(|e| e.to_string())?;
+    let (mut result, _) = solve_cross_section(mesh, problem, CrossSection::Waveguide(wavevector))?;
+    result.physics = "sms".into();
+    result.study = problem.study.kind().into();
+    // the study reads neither the plane assumption nor the thickness: say so when one was set
+    if problem.plane != Plane::Strain || problem.thickness != 1.0 {
+        result.log.push("waveguide modes study: the 2D parameters plane and thickness are not used".into());
     }
     Ok(result)
 }
@@ -134,6 +164,8 @@ pub struct CrossAssembly {
     pub axis_dofs: usize,
     /// per cell: the cell belongs to a perfectly matched layer (for the `layer fraction` scalar)
     pub pml_cells: Vec<bool>,
+    /// Floquet-periodic reduction when lateral periodic boundary pairs are active in a waveguide model
+    pub red: Option<femcore::periodic::Reduction>,
 }
 
 pub fn assemble_cross_section(
@@ -144,8 +176,9 @@ pub fn assemble_cross_section(
     if mesh.dim != 2 {
         return Err("a cross-section model needs a 2D mesh".into());
     }
-    let (Study::Eigenfrequency { n_modes, f_search } | Study::AxisymmetricEigenfrequency { n_modes, f_search, .. }) =
-        spec.study.clone()
+    let (Study::Eigenfrequency { n_modes, f_search }
+    | Study::AxisymmetricEigenfrequency { n_modes, f_search, .. }
+    | Study::Modes { n_modes, f_search, .. }) = spec.study.clone()
     else {
         return Err("the cross-section solid models need an eigenfrequency study".into());
     };
@@ -154,7 +187,7 @@ pub fn assemble_cross_section(
     let mut c6 = spec.materials.cell_stiffness_skipping(mesh, &spec.inactive)?;
     // the blocks of the displacement are (x, z, y) (for a ring: r, z, theta): the stiffness in the Voigt order of those axes
     c6 = c6.iter().map(|c| femcore::section::plane_stiffness(c, 2)).collect();
-    {
+    if matches!(kind, CrossSection::Axisymmetric(_)) {
         // a crystal's axes stay fixed while the local frame turns around the ring: the stiffness of the axisymmetric
         // model is the average over rotations about the ring axis (the y direction of the (r, z) plane); exact for isotropic materials
         for m in c6.iter_mut() {
@@ -180,12 +213,20 @@ pub fn assemble_cross_section(
         }
     }
     // the axis of a body of revolution: regularity conditions on the dofs at r = 0 (axisym header, ADR 69)
-    let CrossSection::Axisymmetric(m_az) = kind;
-    let (axis_pairs, axis_dofs) = crate::axisym::axis_constraints(mesh, order, m_az)?;
-    fixed_set.extend(axis_pairs.into_iter().map(|(k, dof)| dof + k * n1));
+    let axis_dofs = match kind {
+        CrossSection::Axisymmetric(m_az) => {
+            let (axis_pairs, axis_dofs) = crate::axisym::axis_constraints(mesh, order, m_az)?;
+            fixed_set.extend(axis_pairs.into_iter().map(|(k, dof)| dof + k * n1));
+            axis_dofs
+        }
+        CrossSection::Waveguide(_) => 0,
+    };
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
     let stretch = if spec.materials.has_pml() {
-        Some(crate::axisym::cylindrical_stretches(mesh, &spec.materials.pml))
+        Some(match kind {
+            CrossSection::Axisymmetric(_) => crate::axisym::cylindrical_stretches(mesh, &spec.materials.pml),
+            CrossSection::Waveguide(_) => femcore::pml::cell_stretches(mesh, &spec.materials.pml),
+        })
     } else {
         None
     };
@@ -193,13 +234,11 @@ pub fn assemble_cross_section(
         CrossSection::Axisymmetric(m) => {
             crate::axisym::assemble_stiffness_axisym(mesh, &c6, order, m, stretch.as_deref())?
         }
-    };
-    let mut rho = spec.materials.cell_values(mesh, "rho", None)?;
-    for (c, r) in rho.iter_mut().enumerate() {
-        if spec.inactive.contains(&mesh.cell_labels[c]) {
-            *r = 0.0;
+        CrossSection::Waveguide(q) => {
+            crate::waveguide::assemble_stiffness_waveguide(mesh, &c6, order, q, stretch.as_deref())?
         }
-    }
+    };
+    let rho = crate::solid::cell_rho(&spec.materials, mesh, &spec.inactive)?;
     // mass: weighted by the determinant of the stretch in the layers (complex there)
     let mc = match &stretch {
         _ if matches!(kind, CrossSection::Axisymmetric(_)) => {
@@ -221,12 +260,6 @@ pub fn assemble_cross_section(
             ccsr_block_diag(&blocks)
         }
     };
-    let free = free_dofs(n, &fixed);
-    if n_modes < 1 || n_modes + 1 >= free.len() {
-        return Err("number of modes must be between 1 and the number of free dofs".into());
-    }
-    let kf = k.submatrix(&free, &free);
-    let mf = mc.submatrix(&free, &free);
     let lrb_labels: Vec<i32> = spec
         .bcs
         .iter()
@@ -238,10 +271,36 @@ pub fn assemble_cross_section(
             "low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into()
         );
     }
-    let cf = if lrb_labels.is_empty() {
-        None
+    let (free, kf, mf, cf, red) = if matches!(kind, CrossSection::Waveguide(_)) && !spec.periodic.is_empty() {
+        if !lrb_labels.is_empty() {
+            return Err("low-reflecting boundaries cannot be combined with periodic conditions yet".into());
+        }
+        let mut relations = vec![];
+        for p in &spec.periodic {
+            let mt = femcore::periodic::match_vertices(mesh, p)?;
+            relations.extend(femcore::periodic::nodal_relations(mesh, order, 3, &mt, p.phase)?);
+        }
+        let red = femcore::periodic::Reduction::build(n, &relations, &fixed);
+        if n_modes < 1 || n_modes + 1 >= red.n_reduced() {
+            return Err("number of modes must be between 1 and the number of free dofs".into());
+        }
+        let pm = red.prolong();
+        let kf = femcore::periodic::congruence(&pm, &k);
+        let mf = femcore::periodic::congruence(&pm, &mc);
+        (vec![], kf, mf, None, Some(red))
     } else {
-        Some(crate::lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free))
+        let free = free_dofs(n, &fixed);
+        if n_modes < 1 || n_modes + 1 >= free.len() {
+            return Err("number of modes must be between 1 and the number of free dofs".into());
+        }
+        let kf = k.submatrix(&free, &free);
+        let mf = mc.submatrix(&free, &free);
+        let cf = if lrb_labels.is_empty() {
+            None
+        } else {
+            Some(crate::lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free))
+        };
+        (free, kf, mf, cf, None)
     };
     let has_loss = stretch.is_some() || !lrb_labels.is_empty();
     let pml_cells: Vec<bool> = (0..mesh.n_cells())
@@ -269,6 +328,7 @@ pub fn assemble_cross_section(
         has_loss,
         axis_dofs,
         pml_cells,
+        red,
     })
 }
 
@@ -282,7 +342,7 @@ pub struct CrossSolve {
 /// Stage 2: the complex eigenpairs (`K - w^2 M` or the quadratic problem with the low-reflecting damping) nearest the
 /// search frequency, as complex frequencies in Hz with their displacement over all dofs, sorted by real part.
 pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, String> {
-    let CrossSection::Axisymmetric(m_az) = asm.kind;
+    let (CrossSection::Axisymmetric(m_az) | CrossSection::Waveguide(m_az)) = asm.kind;
     let (n_modes, f_search, free, n) = (asm.n_modes, asm.f_search, &asm.free, asm.n);
     let (kf, mf) = (&asm.kf, &asm.mf);
     // the shift: the requested frequency, or just below the spectrum for the lowest modes
@@ -315,10 +375,15 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
     let mut out_freqs: Vec<C> = vec![];
     let mut out_vectors: Vec<Vec<C>> = vec![];
     for &(fz, i) in modes.iter() {
-        let mut u = vec![C::new(0.0, 0.0); n];
-        for (a, &dof) in free.iter().enumerate() {
-            u[dof] = vectors[i][a];
-        }
+        let u = if let Some(red) = &asm.red {
+            red.expand(&vectors[i])
+        } else {
+            let mut u = vec![C::new(0.0, 0.0); n];
+            for (a, &dof) in free.iter().enumerate() {
+                u[dof] = vectors[i][a];
+            }
+            u
+        };
         out_freqs.push(fz);
         out_vectors.push(u);
     }
@@ -348,11 +413,11 @@ fn mass_norm(m: &CCsr, u: &[C]) -> f64 {
     acc
 }
 
-/// Stage 3: the plot fields `|u|`, `Re ux` (radial), `Re uz` (axial), `Re uy` (azimuthal), `|uy|` of every mode (largest component
+/// Stage 3: the plot fields `|u|`, `Re ux` (radial/lateral), `Re uz` (axial/vertical), `Re uy` (azimuthal/longitudinal), `|uy|` of every mode (largest component
 /// real, unit maximum), the displacement of the (x, z) blocks, and the un-averaged per-cell complex components `ux`, `uz`, `uy`.
-/// Every solution carries `eigenvalue = [Re f, Im f]` (Hz); the scalar `layer fraction N` is the share of `int rho |u|^2 r` that lies in
-/// absorbing layers (0 without layers), which tells a resonator mode from a layer mode. What identifies a mode (ADR 80): `f re N (Hz)` and
-/// `f im N (Hz)`, always numbers; `radial share N`, `axial share N`, `azimuthal share N`, the split of `int rho |u|^2 r` outside the layers
+/// Every solution carries `eigenvalue = [Re f, Im f]` (Hz); the scalar `layer fraction N` is the share of kinetic energy that lies in
+/// absorbing layers (0 without layers), which tells a resonator/guided mode from a layer mode. What identifies a mode (ADR 80): `f re N (Hz)` and
+/// `f im N (Hz)`, always numbers; component shares (`radial`/`axial`/`azimuthal` or `lateral`/`vertical`/`longitudinal`), the split of kinetic energy outside the layers
 /// over the three components (sum 1); `share in domain <label> N`, the same integral per domain outside the layers (sum 1).
 pub fn cross_section_fields(
     mesh: &Discretisation,
@@ -363,18 +428,28 @@ pub fn cross_section_fields(
     let modes = &solved.modes;
     let mut solutions = vec![];
     let mut scalars = vec![];
-    // mass weights `rho r` over all cells and over the cells of the layers only
+    // mass weights over all cells and over the cells of the layers only
     let any_pml = asm.pml_cells.iter().any(|&p| p);
     let (m_all, m_pml) = if any_pml {
         let rho_pml: Vec<f64> = asm.rho.iter().zip(&asm.pml_cells).map(|(r, &p)| if p { *r } else { 0.0 }).collect();
-        (
-            Some(crate::axisym::assemble_mass_axisym(mesh, &asm.rho, order, None)),
-            Some(crate::axisym::assemble_mass_axisym(mesh, &rho_pml, order, None)),
-        )
+        match asm.kind {
+            CrossSection::Axisymmetric(_) => (
+                Some(crate::axisym::assemble_mass_axisym(mesh, &asm.rho, order, None)),
+                Some(crate::axisym::assemble_mass_axisym(mesh, &rho_pml, order, None)),
+            ),
+            CrossSection::Waveguide(_) => {
+                let m1_all = assemble_mass(mesh, order, &asm.rho);
+                let m1_pml = assemble_mass(mesh, order, &rho_pml);
+                (
+                    Some(to_complex(&Csr::block_diag(&[&m1_all, &m1_all, &m1_all]))),
+                    Some(to_complex(&Csr::block_diag(&[&m1_pml, &m1_pml, &m1_pml]))),
+                )
+            }
+        }
     } else {
         (None, None)
     };
-    // what identifies a mode (ADR 80): the split of `int rho |u|^2 r` outside the layers over the three components and over the domains
+    // what identifies a mode (ADR 80): the split of kinetic energy outside the layers over the three components and over the domains
     let mut domains: Vec<i32> = (0..mesh.n_cells())
         .filter(|&ci| !asm.pml_cells[ci] && asm.rho[ci] != 0.0)
         .map(|ci| mesh.cell_labels[ci])
@@ -390,7 +465,18 @@ pub fn cross_section_fields(
             }
         })
         .collect();
-    let energy = crate::axisym::mode_energy_axisym(mesh, &asm.rho, order, &class, domains.len(), &modes.vectors);
+    let energy = match asm.kind {
+        CrossSection::Axisymmetric(_) => {
+            crate::axisym::mode_energy_axisym(mesh, &asm.rho, order, &class, domains.len(), &modes.vectors)
+        }
+        CrossSection::Waveguide(_) => {
+            crate::waveguide::mode_energy_waveguide(mesh, &asm.rho, order, &class, domains.len(), &modes.vectors)
+        }
+    };
+    let share_names = match asm.kind {
+        CrossSection::Axisymmetric(_) => ["radial", "axial", "azimuthal"],
+        CrossSection::Waveguide(_) => ["lateral", "vertical", "longitudinal"],
+    };
     for (j, &fz) in modes.freqs.iter().enumerate() {
         let freq = fz.re;
         let u = &modes.vectors[j];
@@ -466,7 +552,7 @@ pub fn cross_section_fields(
         scalars.push((format!("f im {} (Hz)", j + 1), Scalar::Num(fz.im)));
         let total: f64 = energy[j].iter().map(|e| e[0] + e[1] + e[2]).sum();
         let share = |x: f64| if total > 0.0 { x / total } else { 0.0 };
-        for (k, name) in ["radial", "axial", "azimuthal"].iter().enumerate() {
+        for (k, name) in share_names.iter().enumerate() {
             let part: f64 = energy[j].iter().map(|e| e[k]).sum();
             scalars.push((format!("{name} share {}", j + 1), Scalar::Num(share(part))));
         }
@@ -482,6 +568,7 @@ pub fn cross_section_fields(
     let m_az = modes.m_az;
     let what = match asm.kind {
         CrossSection::Axisymmetric(_) => format!("axisymmetric, azimuthal order m = {m_az}"),
+        CrossSection::Waveguide(q) => format!("waveguide modes, longitudinal wavevector q = {q} rad/m"),
     };
     let mut log = vec![format!(
         "{what}; complex Hermitian eigenproblem, Krylov dimension {}{}",

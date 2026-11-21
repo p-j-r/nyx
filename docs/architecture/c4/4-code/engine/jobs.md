@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 11 files, 4507 lines.
+**Size:** 11 files, 4551 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-engine/src/bin/nyx-worker.rs` | 14 |  |
-| `crates/nyx-engine/src/convergence.rs` | 655 |  |
+| `crates/nyx-engine/src/convergence.rs` | 699 |  |
 | `crates/nyx-engine/src/estimate.rs` | 324 |  |
 | `crates/nyx-engine/src/jobs.rs` | 595 |  |
 | `crates/nyx-engine/src/process.rs` | 318 |  |
@@ -472,17 +472,17 @@ classDiagram
 | fn | `main` | `bin/nyx-worker.rs:5` | `fn main()` |
 | fn | `numbers` | `convergence.rs:45` | `pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)>` —  Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars. |
 | enum | `Matching` | `convergence.rs:70` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
-| struct | `ConvergenceJob` | `convergence.rs:243` | fields: `reuse`, `limits` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
-| struct | `Limits` | `convergence.rs:259` | fields: `max_cells`, `max_seconds` —  What a convergence check may cost: it is refused, before any solve, when the finer mesh has more cells than `max_cells` or when the solves it |
+| struct | `ConvergenceJob` | `convergence.rs:258` | fields: `reuse`, `limits` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
+| struct | `Limits` | `convergence.rs:274` | fields: `max_cells`, `max_seconds` —  What a convergence check may cost: it is refused, before any solve, when the finer mesh has more cells than `max_cells` or when the solves it |
 | fn | `Matching::from_args` | `convergence.rs:84` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` is `{ "f": <value> }` and implies `nearest`. |
-| fn | `Limits::from_args` | `convergence.rs:266` | `pub fn from_args(args: &Value) -> Result<Limits, Error>` —  `max_cells` and `max_seconds` of the arguments of the command. |
-| fn | `ConvergenceJob::run` | `convergence.rs:296` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
-| fn | `ConvergenceJob::run_matched` | `convergence.rs:301` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
-| fn | `ConvergenceJob::run_with` | `convergence.rs:312` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either. |
-| fn | `ConvergenceJob::plan` | `convergence.rs:368` | `pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error>` —  What the check would cost, without solving anything: the present mesh and the finer one are built (milliseconds against a solve), and the |
-| fn | `Engine::convergence_job` | `convergence.rs:399` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
-| fn | `Engine::convergence_check` | `convergence.rs:415` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
-| fn | `Engine::convergence_check_matched` | `convergence.rs:422` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
+| fn | `Limits::from_args` | `convergence.rs:281` | `pub fn from_args(args: &Value) -> Result<Limits, Error>` —  `max_cells` and `max_seconds` of the arguments of the command. |
+| fn | `ConvergenceJob::run` | `convergence.rs:311` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
+| fn | `ConvergenceJob::run_matched` | `convergence.rs:316` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
+| fn | `ConvergenceJob::run_with` | `convergence.rs:327` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either. |
+| fn | `ConvergenceJob::plan` | `convergence.rs:383` | `pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error>` —  What the check would cost, without solving anything: the present mesh and the finer one are built (milliseconds against a solve), and the |
+| fn | `Engine::convergence_job` | `convergence.rs:414` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
+| fn | `Engine::convergence_check` | `convergence.rs:430` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
+| fn | `Engine::convergence_check_matched` | `convergence.rs:437` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
 | struct | `Row` | `estimate.rs:19` | fields: `chain`, `dim`, `cells`, `dofs`, `peak_working_set`, `peak_commit`, `seconds` —  One finished worker run. |
 | struct | `Estimate` | `estimate.rs:33` | fields: `bytes`, `bytes_with_margin`, `seconds`, `runs`, `extrapolated`, `exponent` —  An estimate with its basis. |
 | fn | `estimate` | `estimate.rs:63` | `pub fn estimate(rows: &[Row], chain: &str, dim: u8, cells: u64) -> Option<Estimate>` —  The estimate for a solve of `chain` in `dim` dimensions on `cells` cells from `rows`, or `None` when the rows do not support one. |

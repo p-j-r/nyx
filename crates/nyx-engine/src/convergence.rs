@@ -168,24 +168,45 @@ fn numbers_of(r: &SolveResult, i: usize, as_index: usize) -> Vec<(String, f64)> 
     out
 }
 
-/// An imaginary part below this times the real part of its eigenvalue, on both meshes, is rounding (a quality factor above 5e8).
-const IM_FLOOR: f64 = 1e-9;
+/// An imaginary part below this times the real part of its eigenvalue, on both meshes, is rounding (a quality factor above 5e7).
+const IM_FLOOR: f64 = 1e-8;
 
-/// The modes (by the index their rows carry) whose `eigenvalue[i].im` is at the rounding level on both meshes.
+/// Zero-based mode index of a quality-factor scalar name (after `"scalar "`), such as `"Q1"` or `"Q 1 = Re/(2|Im|) of neff"`.
+fn q_mode(rest: &str) -> Option<usize> {
+    // the waveguide study names it `Q 1 = Re/(2|Im|) of neff`: the quality factor of mode 1, with the formula after the number
+    if let Some(n) = rest
+        .strip_prefix("Q ")
+        .map(|r| r.chars().take_while(char::is_ascii_digit).collect::<String>())
+        .and_then(|d| d.parse::<usize>().ok())
+    {
+        return (n >= 1).then(|| n - 1);
+    }
+    mode_scalar(rest, usize::MAX).and_then(|(head, _, mode)| (head.trim() == "Q").then_some(mode))
+}
+
+/// The modes (by the index their rows carry) whose `eigenvalue[i].im` (or quality factor `Q`, when the solver reports no
+/// imaginary eigenvalue) is at the rounding level on both meshes.
 fn noise_modes(compared: &[(String, f64, f64)]) -> std::collections::BTreeSet<usize> {
     let mut out = std::collections::BTreeSet::new();
+    let q_floor = 1.0 / (2.0 * IM_FLOOR);
     for (name, x, y) in compared {
-        let Some(i) =
+        if let Some(i) =
             name.strip_prefix("eigenvalue[").and_then(|s| s.strip_suffix("].im")).and_then(|s| s.parse::<usize>().ok())
-        else {
+        {
+            let re_name = format!("eigenvalue[{i}].re");
+            let Some(re) = compared.iter().find(|(n, _, _)| *n == re_name).map(|(_, a, b)| a.abs().max(b.abs())) else {
+                continue;
+            };
+            if re > 0.0 && x.abs() <= IM_FLOOR * re && y.abs() <= IM_FLOOR * re {
+                out.insert(i);
+            }
             continue;
-        };
-        let re_name = format!("eigenvalue[{i}].re");
-        let Some(re) = compared.iter().find(|(n, _, _)| *n == re_name).map(|(_, a, b)| a.abs().max(b.abs())) else {
-            continue;
-        };
-        if re > 0.0 && x.abs() <= IM_FLOOR * re && y.abs() <= IM_FLOOR * re {
-            out.insert(i);
+        }
+        if let Some(i) = name.strip_prefix("scalar ").and_then(q_mode) {
+            let im_name = format!("eigenvalue[{i}].im");
+            if !compared.iter().any(|(n, _, _)| *n == im_name) && *x >= q_floor && *y >= q_floor {
+                out.insert(i);
+            }
         }
     }
     out
@@ -202,16 +223,10 @@ fn is_noise(name: &str, noise: &std::collections::BTreeSet<usize>) -> bool {
         return noise.contains(&i);
     }
     let Some(rest) = name.strip_prefix("scalar ") else { return false };
-    // the waveguide study names it `Q 1 = Re/(2|Im|) of neff`: the quality factor of mode 1, with the formula after the number
-    if let Some(n) = rest
-        .strip_prefix("Q ")
-        .map(|r| r.chars().take_while(char::is_ascii_digit).collect::<String>())
-        .and_then(|d| d.parse::<usize>().ok())
-    {
-        return n >= 1 && noise.contains(&(n - 1));
+    if let Some(i) = q_mode(rest) {
+        return noise.contains(&i);
     }
-    mode_scalar(rest, usize::MAX)
-        .is_some_and(|(head, _, mode)| matches!(head.trim(), "Q" | "f im") && noise.contains(&mode))
+    mode_scalar(rest, usize::MAX).is_some_and(|(head, _, mode)| head.trim() == "f im" && noise.contains(&mode))
 }
 
 /// A pair of solutions: index on the present mesh, index on the finer mesh, distance of the eigenvalues.
@@ -539,7 +554,7 @@ fn check(
         // L2: a mode whose imaginary part is zero up to rounding (a lossless guide solved by the complex solver, because a crystal axis is tilted)
         // has `im` of 1e-10 or so that differs between two meshes by 100 percent, and a quality factor of 1e10 made of it. Such a mode is not a
         // failure of the mesh: its `im` and its quality factors are listed but not counted. The floor is what the eigensolver resolves: an `im`
-        // below it times the real part on both meshes (a Q above 5e8) is not told from rounding.
+        // below it times the real part on both meshes (a Q above 5e7) is not told from rounding.
         let noise = noise_modes(&compared);
         let mut rows = vec![];
         let mut worst = 0.0f64;
@@ -650,5 +665,34 @@ mod tests {
         let n = noise_modes(&s);
         assert_eq!(n.len(), 1);
         assert!(is_noise("scalar f im 1 (Hz)", &n) && !is_noise("scalar f re 1 (Hz)", &n));
+    }
+
+    #[test]
+    fn coupled_beta_rounding_and_quality_factors_without_imaginary_eigenvalue_are_noise() {
+        // |im / re| = 5e-9 (between 1e-9 and 1e-8, from coupled-beta fixed-point rounding on a tilted crystal) is noise,
+        // while |im / re| = 5e-7 is a physical loss and never noise
+        let c = rows(&[
+            ("eigenvalue[0].re", 2.4, 2.4001),
+            ("eigenvalue[0].im", 1.2e-8, -1.2e-8),
+            ("scalar Q 1 = Re/(2|Im|) of neff", 1.0e8, 1.0e8),
+            ("eigenvalue[1].re", 2.0, 2.0),
+            ("eigenvalue[1].im", 1.0e-6, 1.0e-6),
+            ("scalar Q 2 = Re/(2|Im|) of neff", 1.0e6, 1.0e6),
+        ]);
+        let n = noise_modes(&c);
+        assert_eq!(n.iter().copied().collect::<Vec<_>>(), vec![0], "{n:?}");
+        assert!(is_noise("eigenvalue[0].im", &n) && is_noise("scalar Q 1 = Re/(2|Im|) of neff", &n));
+        assert!(!is_noise("eigenvalue[1].im", &n) && !is_noise("scalar Q 2 = Re/(2|Im|) of neff", &n));
+
+        // a solver that reports `scalar Q1` without `eigenvalue[0].im` (such as solid PML) marks Q >= 5e7 as noise
+        let pml = rows(&[
+            ("value[0]", 9.47e9, 9.4701e9),
+            ("scalar Q1", 6.0e7, 1.5e8),
+            ("value[1]", 9.55e9, 9.5501e9),
+            ("scalar Q2", 1.2e4, 1.1e4),
+        ]);
+        let np = noise_modes(&pml);
+        assert_eq!(np.iter().copied().collect::<Vec<_>>(), vec![0], "{np:?}");
+        assert!(is_noise("scalar Q1", &np) && !is_noise("value[0]", &np) && !is_noise("scalar Q2", &np));
     }
 }

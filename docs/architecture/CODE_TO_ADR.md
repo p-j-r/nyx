@@ -106,9 +106,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
-| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35 | spec, units, elastic, tensor, optics, schema (phase 6) |
-| `materials/*` | 29, 30, 34, 35 | the shipped material library (TOML) |
-| `docs/MATERIALS.md` | 29, 30, 34, 35 | |
+| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101 | spec, units, elastic, tensor, optics, schema (phase 6) |
+| `materials/*` | 29, 30, 34, 35, 101 | the shipped material library (TOML) |
+| `docs/MATERIALS.md` | 29, 30, 34, 35, 101 | |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
 | `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |
@@ -132,7 +132,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
-| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19 | behaviour and contract tests of the material format |
+| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19, 101 | behaviour and contract tests of the material format |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
 | `crates/femcore/tests/ring_frame.rs` | 1 | |
@@ -172,11 +172,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
 | `crates/nyx-dfs/*` | 41, 25, 12, 9 | diffusion: typed problem, electrostatics and heat kernels (moved from femcore::dfs), descriptors |
 | `crates/nyx-sms/tests/golden/*` | 10, 42 | the sms goldens (and `ring_model_axes`), moved unchanged from femcore |
-| `crates/nyx-sms/src/{axisym,cross_section}.rs` | 43, 42, 68, 69, 80 | bodies of revolution on their half-plane: the library entry and the axisymmetric eigenfrequency study, axis conditions, cylindrical layers, the scalars that identify a mode (numeric frequency parts, energy shares per component and domain) |
+| `crates/nyx-sms/src/{axisym,cross_section,waveguide}.rs` | 43, 42, 68, 69, 80, 101 | bodies of revolution on their half-plane and 2.5D waveguide cross-sections (`exp(-j q y)`): the library entries (`solve_solid_axisym`, `solve_solid_waveguide`), the `axisymmetric_eigenfrequency` and `modes` studies, axis conditions, cylindrical and planar layers, the scalars that identify a mode (numeric frequency parts, energy shares per component and domain) |
 | `crates/nyx-sms/tests/axisym_mode_scalars.rs` | 80 | the numeric frequency parts and the energy shares against closed forms whose family is known |
-| `crates/nyx-engine/src/convergence.rs` | 61, 80 | mesh convergence on a scratch engine; solutions compared by index, paired by nearest eigenvalue, or one mode followed |
+| `crates/nyx-sms/tests/{pml_floquet,waveguide_modes}.rs` | 101 | Floquet-periodic absorbing layers (`P^H K P` congruence, inactive mass skip) and native 2.5D elastic waveguide modes (`study = "modes"`, closed-form SH cutoff, 3D swept Floquet agreement, PML complex frequencies and shares) |
+| `crates/nyx-engine/src/convergence.rs` | 61, 80, 97, 101 | mesh convergence on a scratch engine; solutions compared by index, paired by nearest eigenvalue, or one mode followed; lossless imaginary floor and quality-factor noise rows |
 | `crates/nyx-engine/src/solve.rs` | 61, 80 | the solve chain in coupling order; puts the region names into the scalars a kernel names by domain number |
-| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
+| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68, 101 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
@@ -195,7 +196,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/worker_crash.rs` | 86 | a worker that dies fails its job only and the next job runs |
 | `crates/nyx-engine/tests/preview.rs` | 92 | the problem of an edit, the trial mesh and its estimate, the polarization task: none of them changes the engine |
 | `crates/nyx-engine/src/preview.rs` | 92 | feedback while editing: check an edit, size and cost from a trial mesh, the polarization as a function that owns its inputs |
-| `crates/nyx-engine/tests/validated.rs` | 91 | the three states of a result, a stale result never checked, the verdict kept by problem key, check not affordable from the memory estimate, the verdict in the run record |
+| `crates/nyx-engine/tests/validated.rs` | 91, 101 | the three states of a result, a stale result never checked, the verdict kept by problem key, check not affordable from the memory estimate, the verdict in the run record, lossless tilted-crystal waveguide convergence with coupled-beta rounding marked as noise |
 | `crates/nyx-engine/tests/reduce.rs` | 90 | the reductions against closed forms and against loops on the raw arrays, to the bit, for any thread count, on a worker's result and on real physics |
 | `crates/nyx-engine/tests/stale.rs` | 84, 64 | staleness per physics, late jobs, the `stale` fields of the replies |
 | `crates/nyx-engine/tests/format.rs` | 63 | the `format` key at project, feature list and problem level; old and foreign files refused |

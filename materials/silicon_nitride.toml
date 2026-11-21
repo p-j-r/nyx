@@ -1,8 +1,15 @@
-# Silicon nitride (LPCVD Si3N4 film for integrated photonics): optical data only.
+# Silicon nitride (LPCVD Si3N4 thin film for integrated photonics and optomechanics): isotropic.
 format = 1
 name = "silicon_nitride"
-description = "Silicon nitride film, 340 nm Si3N4 on thermal SiO2 (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Silicon nitride (LPCVD Si3N4 thin film)"
+source = { cite = "Compiled from the per-table sources below; approximate LPCVD Si3N4 thin-film density 3100 kg/m^3 (film density and stiffness depend on deposition stress and stoichiometry)", verified = "2026-11-20" }
+density = "3100 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 290.0
+nu = 0.27
+source = { cite = "APPROXIMATE stoichiometric LPCVD Si3N4 thin-film values: Young's modulus E = 290 GPa, Poisson's ratio nu = 0.27, density 3100 kg/m^3; film stiffness depends on deposition stress and stoichiometry", verified = "2026-11-20" }
 
 [optical]
 wavelength_unit = "um"

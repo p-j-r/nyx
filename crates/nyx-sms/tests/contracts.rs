@@ -47,15 +47,35 @@ fn axisymmetric_example() -> ProblemSpec {
     s
 }
 
+fn modes_example() -> ProblemSpec {
+    let mut s = ProblemSpec::new("sms", 2, "modes");
+    s.study.params = json!({ "n_modes": 6, "f_search": 7.45e9, "wavevector": 2.3468e7 });
+    s.materials.insert(
+        "core".into(),
+        MaterialAssign::Props([("E".to_string(), 169e9), ("nu".to_string(), 0.22), ("rho".to_string(), 2329.0)].into()),
+    );
+    s.bcs.push(BcSpec { on: "outer".into(), kind: "fixed".into(), params: json!({ "ux": 0.0, "uz": 0.0, "uy": 0.0 }) });
+    s.bcs.push(BcSpec {
+        on: "substrate_pml".into(),
+        kind: "pml".into(),
+        params: json!({ "x": "plus", "z": "minus", "strength": 3.0, "order": 2.0 }),
+    });
+    s
+}
+
 #[test]
 fn the_axisymmetric_study_example_passes_validation() {
     validate_spec(&Sms, &axisymmetric_example()).unwrap();
+    validate_spec(&Sms, &modes_example()).unwrap();
     // its parameters are checked against the descriptors: a fractional azimuthal order and an unknown parameter are refused
     let mut bad = axisymmetric_example();
     bad.study.params = json!({ "n_modes": 6, "f_search": 715e6, "azimuthal_order": 0.5 });
     assert!(validate_spec(&Sms, &bad).is_err());
     let mut bad = axisymmetric_example();
     bad.study.params = json!({ "n_modes": 6, "wave_number": 1.0 });
+    assert!(validate_spec(&Sms, &bad).is_err());
+    let mut bad = modes_example();
+    bad.study.params = json!({ "n_modes": 6, "azimuthal_order": 0 });
     assert!(validate_spec(&Sms, &bad).is_err());
 }
 
@@ -294,7 +314,7 @@ fn the_envelope_is_refused_where_it_is_wrong() {
 #[test]
 fn kernel_stage_api_is_public() {
     // ADR 9: naming the functions makes removing or renaming one a compile error here (contract `kernel_stages`)
-    use nyx_sms::{axisym, cross_section, floquet, lrb, pml, solid};
+    use nyx_sms::{axisym, cross_section, floquet, lrb, pml, solid, waveguide};
     let _ = (solid::setup, solid::assemble_solid, solid::assemble_static, solid::solve_static, solid::solve_real_modes);
     let _ = (pml::assemble_solid_pml, pml::solve_pml_modes, pml::pml_fields);
     let _ = (floquet::assemble_floquet, floquet::solve_floquet_modes, floquet::floquet_fields);
@@ -304,9 +324,18 @@ fn kernel_stage_api_is_public() {
         cross_section::solve_cross_section_modes,
         cross_section::cross_section_fields,
         cross_section::solve_axisymmetric,
+        cross_section::solve_waveguide_modes,
     );
     let _ = (axisym::assemble_stiffness_axisym, axisym::assemble_mass_axisym, axisym::average_about_axis);
-    let _ = (nyx_sms::solve_solid, nyx_sms::solve_solid_axisym, nyx_sms::run, nyx_sms::decode);
+    let _ = (waveguide::assemble_stiffness_waveguide, waveguide::mode_energy_waveguide);
+    let _ = (
+        nyx_sms::solve_solid,
+        nyx_sms::solve_solid_axisym,
+        nyx_sms::solve_solid_waveguide,
+        nyx_sms::solve_waveguide_modes,
+        nyx_sms::run,
+        nyx_sms::decode,
+    );
 }
 
 /// The shape of a result, without numbers: what a front-end, the store and the analyses may rely on (names, units, components, the per-cell
@@ -362,6 +391,11 @@ fn result_shape_exemplar_is_stable() {
     axi.bcs = vec![clamp.clone()];
     let mut axi_pml = axi.clone();
     axi_pml.materials.pml.insert(1, Pml { x: PmlDir::Plus, strength: 0.1, order: 0.0, ..Pml::default() });
+    let mut wg = eigen.clone();
+    wg.study = Study::Modes { n_modes: 2, f_search: 0.0, wavevector: 10.0 };
+    wg.bcs = vec![clamp.clone()];
+    let mut wg_pml = wg.clone();
+    wg_pml.materials.pml.insert(1, Pml { x: PmlDir::Plus, strength: 0.1, order: 0.0, ..Pml::default() });
     // the half plane must lie in x >= 0: the same bar moved to r = 1 .. 2
     let ring = {
         let flat = femcore::testkit::rect(1.0, 0.1, 12, 2);
@@ -392,6 +426,8 @@ fn result_shape_exemplar_is_stable() {
         "eigenfrequency_floquet": run(&floquet),
         "axisymmetric_eigenfrequency": run_ring(&axi),
         "axisymmetric_eigenfrequency_pml": run_ring(&axi_pml),
+        "modes": run(&wg),
+        "modes_pml": run(&wg_pml),
     });
     contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_sms_result.v1.json", &got);
 }

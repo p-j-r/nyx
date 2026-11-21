@@ -90,3 +90,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 98 | [Connect knows Antigravity and gives an AI the instructions](adr/0098-connect-knows-antigravity-and-gives-an-ai-the-instructions.md) | `nyx-connect::{hosts,server}`, `nyx-connect` command, the app's Connect menu |
 | 99 | [Figures of modes, and one node order in the results file](adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md) | `nyx-analysis::{section,modeview,canvas,raster,figure}`, `nyx-engine::{figure,h5io,xdmf}` |
 | 100 | [nyx is dual licensed: AGPL-3.0 or a commercial licence](adr/0100-nyx-is-dual-licensed-agpl-3-or-commercial.md) | `LICENSE`, `NOTICE`, the `license` of the crates, the About sheet |
+| 101 | [Solid waveguide modes, Floquet-periodic absorbing layers, and lossless convergence floor](adr/0101-sms-waveguide-modes-and-floquet-pml.md) | `nyx-sms::{pml,waveguide,cross_section,problem,lib,solid}`, `nyx-engine::convergence`, `materials/` |

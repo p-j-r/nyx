@@ -14,149 +14,149 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 85 ["femcore"]
-        style 85 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 86 ["femcore"]
+        style 86 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        100["<div style='font-weight: bold'>Krylov solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>CG, MINRES, GMRES, BiCGStab,<br />COCR, QMR, IDR(s), GCRO-DR<br />for real and complex systems.</div>"]
+        100["<div style='font-weight: bold'>Direct solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Shifted sparse direct solves<br />with symbolic reuse, LU with<br />a user ordering, block<br />low-rank factorisation, mixed<br />precision, nested dissection.</div>"]
         style 100 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        101["<div style='font-weight: bold'>Eigensolvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Krylov-Schur, LOBPCG,<br />Jacobi-Davidson, quadratic<br />and nonlinear eigenproblems,<br />contour integral, Chebyshev<br />filtering, real Arnoldi for<br />the 2D modes, sensitivities.</div>"]
+        101["<div style='font-weight: bold'>Krylov solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>CG, MINRES, GMRES, BiCGStab,<br />COCR, QMR, IDR(s), GCRO-DR<br />for real and complex systems.</div>"]
         style 101 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        102["<div style='font-weight: bold'>Preconditioners</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Smoothed-aggregation<br />multigrid (scalar and<br />elastic), auxiliary-space<br />Maxwell and divergence<br />solvers, Schwarz, field-split<br />and incomplete<br />factorisations.</div>"]
+        102["<div style='font-weight: bold'>Eigensolvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Krylov-Schur, LOBPCG,<br />Jacobi-Davidson, quadratic<br />and nonlinear eigenproblems,<br />contour integral, Chebyshev<br />filtering, real Arnoldi for<br />the 2D modes, sensitivities.</div>"]
         style 102 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        103["<div style='font-weight: bold'>Time, nonlinear, sweeps</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Time integration, Newton and<br />optimisation, matrix<br />exponential action,<br />reduced-order frequency<br />sweeps and matrix-free<br />high-order operators.</div>"]
+        103["<div style='font-weight: bold'>Preconditioners</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Smoothed-aggregation<br />multigrid (scalar and<br />elastic), auxiliary-space<br />Maxwell and divergence<br />solvers, Schwarz, field-split<br />and incomplete<br />factorisations.</div>"]
         style 103 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        104["<div style='font-weight: bold'>Finite-element basics</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Lagrange P1/P2 elements and<br />quadrature, the 2D<br />edge-element basis, derived<br />fields, PML coordinate<br />stretching, Floquet pairs and<br />material properties per<br />domain.</div>"]
+        104["<div style='font-weight: bold'>Time, nonlinear, sweeps</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Time integration, Newton and<br />optimisation, matrix<br />exponential action,<br />reduced-order frequency<br />sweeps and matrix-free<br />high-order operators.</div>"]
         style 104 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        105["<div style='font-weight: bold'>Material specification</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>TOML material files with<br />explicit units, tensors,<br />dispersion models evaluated<br />at the wavelength, provenance<br />and the library loader.</div>"]
+        105["<div style='font-weight: bold'>Finite-element basics</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Lagrange P1/P2 elements and<br />quadrature, the 2D<br />edge-element basis, derived<br />fields, PML coordinate<br />stretching, Floquet pairs and<br />material properties per<br />domain.</div>"]
         style 105 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        106["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Optical modes of a 2D<br />cross-section as a<br />field-evaluable set with the<br />material data to evaluate<br />them.</div>"]
+        106["<div style='font-weight: bold'>Material specification</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>TOML material files with<br />explicit units, tensors,<br />dispersion models evaluated<br />at the wavelength, provenance<br />and the library loader.</div>"]
         style 106 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        107["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
+        107["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Optical modes of a 2D<br />cross-section as a<br />field-evaluable set with the<br />material data to evaluate<br />them.</div>"]
         style 107 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        108["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate, and the<br />text formulas parsed into it<br />(ADR 90).</div>"]
+        108["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
         style 108 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        109["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, the<br />warm-start context of the<br />shift-and-invert eigensolvers<br />(ADR 96), and refusal of NaN<br />and infinity.</div>"]
+        109["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate, and the<br />text formulas parsed into it<br />(ADR 90).</div>"]
         style 109 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        86["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
-        style 86 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        87["<div style='font-weight: bold'>Mesh files</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The compact lossless .fmsh<br />format for meshes and results<br />and its entropy coder.</div>"]
+        110["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, the<br />warm-start context of the<br />shift-and-invert eigensolvers<br />(ADR 96), and refusal of NaN<br />and infinity.</div>"]
+        style 110 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        87["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
         style 87 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        88["<div style='font-weight: bold'>Fixtures and test kit</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Test meshes and the SOI wire<br />cross-section used by the<br />tests of every physics crate.</div>"]
+        88["<div style='font-weight: bold'>Mesh files</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The compact lossless .fmsh<br />format for meshes and results<br />and its entropy coder.</div>"]
         style 88 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        89["<div style='font-weight: bold'>Meshing facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshPlan and mesh_model (the<br />one way to mesh a geom<br />model), the serialisable<br />request and report, sizing<br />from the physics, and the 2D<br />triangulation core.</div>"]
+        89["<div style='font-weight: bold'>Fixtures and test kit</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Test meshes and the SOI wire<br />cross-section used by the<br />tests of every physics crate.</div>"]
         style 89 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        90["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, adaptive<br />meshing driven by exact<br />faces, face sizes and<br />max_dev, and the curved<br />(quadratic) edges of boundary<br />cells.</div>"]
+        90["<div style='font-weight: bold'>Meshing facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshPlan and mesh_model (the<br />one way to mesh a geom<br />model), the serialisable<br />request and report, sizing<br />from the physics, and the 2D<br />triangulation core.</div>"]
         style 90 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        91["<div style='font-weight: bold'>Structured absorbing layers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Structured PML around a<br />box-shaped or geom-model<br />mesh: prisms, hexahedra,<br />quads, labels.</div>"]
+        91["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, adaptive<br />meshing driven by exact<br />faces, face sizes and<br />max_dev, and the curved<br />(quadratic) edges of boundary<br />cells.</div>"]
         style 91 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        92["<div style='font-weight: bold'>Meshing validation harness</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small independent scalar<br />Helmholtz solver with PML<br />used to validate meshes.</div>"]
+        92["<div style='font-weight: bold'>Structured absorbing layers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Structured PML around a<br />box-shaped or geom-model<br />mesh: prisms, hexahedra,<br />quads, labels.</div>"]
         style 92 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        93["<div style='font-weight: bold'>Metric fields</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Riemannian metrics in 2D and<br />3D, metric fields, the<br />simplex working mesh and<br />per-phase timers.</div>"]
+        93["<div style='font-weight: bold'>Meshing validation harness</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small independent scalar<br />Helmholtz solver with PML<br />used to validate meshes.</div>"]
         style 93 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        94["<div style='font-weight: bold'>Adaptation operators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Edge split, collapse, flip<br />and smoothing on the working<br />meshes in 2D and 3D, with the<br />vertex classification.</div>"]
+        94["<div style='font-weight: bold'>Metric fields</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Riemannian metrics in 2D and<br />3D, metric fields, the<br />simplex working mesh and<br />per-phase timers.</div>"]
         style 94 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        95["<div style='font-weight: bold'>Adaptation drivers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Passes of operators until the<br />mesh conforms to the metric,<br />with geometry oracles saying<br />where a boundary vertex may<br />go.</div>"]
+        95["<div style='font-weight: bold'>Adaptation operators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Edge split, collapse, flip<br />and smoothing on the working<br />meshes in 2D and 3D, with the<br />vertex classification.</div>"]
         style 95 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        96["<div style='font-weight: bold'>Error estimators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Error estimation and the<br />solve-estimate-adapt loop;<br />the Maxwell residual<br />estimator for edge elements.</div>"]
+        96["<div style='font-weight: bold'>Adaptation drivers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Passes of operators until the<br />mesh conforms to the metric,<br />with geometry oracles saying<br />where a boundary vertex may<br />go.</div>"]
         style 96 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        97["<div style='font-weight: bold'>Matrices and vectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one matrix type Csr over<br />a generic scalar, block<br />storage, multivector kernels,<br />operator interfaces, dense<br />helpers, Matrix Market,<br />problem bundles and<br />test-problem generators.</div>"]
+        97["<div style='font-weight: bold'>Error estimators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Error estimation and the<br />solve-estimate-adapt loop;<br />the Maxwell residual<br />estimator for edge elements.</div>"]
         style 97 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        98["<div style='font-weight: bold'>Linear algebra driver</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The door the physics kernels<br />use: a direct solve,<br />eigenpairs near a shift, and<br />the solver interface for<br />models.</div>"]
+        98["<div style='font-weight: bold'>Matrices and vectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one matrix type Csr over<br />a generic scalar, block<br />storage, multivector kernels,<br />operator interfaces, dense<br />helpers, Matrix Market,<br />problem bundles and<br />test-problem generators.</div>"]
         style 98 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        99["<div style='font-weight: bold'>Direct solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Shifted sparse direct solves<br />with symbolic reuse, LU with<br />a user ordering, block<br />low-rank factorisation, mixed<br />precision, nested dissection.</div>"]
+        99["<div style='font-weight: bold'>Linear algebra driver</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The door the physics kernels<br />use: a direct solve,<br />eigenpairs near a shift, and<br />the solver interface for<br />models.</div>"]
         style 99 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      110["<div style='font-weight: bold'>geom</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Lean CSG-over-B-rep geometry<br />kernel: feature lists, named<br />regions and boundaries,<br />selectors, exact projection<br />oracles. Depends on serde and<br />optional rayon only.</div>"]
-      style 110 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      111["<div style='font-weight: bold'>geom</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>Lean CSG-over-B-rep geometry<br />kernel: feature lists, named<br />regions and boundaries,<br />selectors, exact projection<br />oracles. Depends on serde and<br />optional rayon only.</div>"]
+      style 111 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    95-. "<div>uses adapt::ops, adapt::ops3<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    95-. "<div>uses adapt::field,<br />adapt::metric +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    95-. "<div>uses progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    94-. "<div>uses adapt::drive,<br />adapt::geom +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    94-. "<div>uses mesh::quality</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    94-. "<div>uses adapt::field,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    96-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
-    96-. "<div>uses adapt::drive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    96-. "<div>uses adapt::ops3,<br />adapt::topo3</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    96-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    96-. "<div>uses linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    96-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    96-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    96-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    108-. "<div>uses linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    108-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
-    104-. "<div>uses linalg::csr,<br />linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    104-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    104-. "<div>uses linalg::amg_elastic</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
-    104-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
-    104-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    104-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    104-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
-    88-. "<div>uses geom: model, select</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
-    88-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    88-. "<div>uses meshing,<br />meshing::geomdrive +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    88-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    97-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    99-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    98-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    98-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    98-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
-    98-. "<div>uses par, progress +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    101-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    101-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    101-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    101-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    101-. "<div>uses par, progress +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    100-. "<div>uses linalg::basis,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    103-. "<div>uses linalg::csr,<br />linalg::dense +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    103-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    103-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
-    103-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    102-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    102-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    102-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    102-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    86-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    86-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    92-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    92-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    92-. "<div>uses meshing::pml_box</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
-    89-. "<div>uses geom: diff, eval +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
-    89-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    89-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    89-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    89-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
-    89-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    89-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
-    89-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    89-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
-    90-. "<div>uses geom: eval, labels +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
-    90-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    90-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    90-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    90-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    90-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    90-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    90-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    87-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    93-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    93-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    106-. "<div>uses edge, fem +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    106-. "<div>uses linalg::csr,<br />linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    106-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    106-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
-    109-. "<div>uses linalg::scalar</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    107-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    107-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
-    107-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    91-. "<div>uses geom: eval, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
-    91-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    91-. "<div>uses mesh, mesh::cells +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    91-. "<div>uses meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    91-. "<div>uses meshing::adapt3d</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
-    91-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
+    96-. "<div>uses adapt::ops, adapt::ops3<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    96-. "<div>uses adapt::field,<br />adapt::metric +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    96-. "<div>uses progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    95-. "<div>uses adapt::drive,<br />adapt::geom +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    95-. "<div>uses mesh::quality</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    95-. "<div>uses adapt::field,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    97-. "<div>uses geom: model</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
+    97-. "<div>uses adapt::drive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    97-. "<div>uses adapt::ops3,<br />adapt::topo3</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    97-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    97-. "<div>uses linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    97-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    97-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    97-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    109-. "<div>uses linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    109-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    105-. "<div>uses linalg::csr,<br />linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    105-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    105-. "<div>uses linalg::amg_elastic</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
+    105-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    105-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    105-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    105-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    89-. "<div>uses geom: model, select</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
+    89-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    89-. "<div>uses meshing,<br />meshing::geomdrive +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    89-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    98-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    100-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    99-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    99-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    99-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
+    99-. "<div>uses par, progress +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    102-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    102-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    102-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    102-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
+    102-. "<div>uses par, progress +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    101-. "<div>uses linalg::basis,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    104-. "<div>uses linalg::csr,<br />linalg::dense +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    104-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    104-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
+    104-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
+    103-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    103-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    103-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    103-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    87-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    87-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    93-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    93-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    93-. "<div>uses meshing::pml_box</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    90-. "<div>uses geom: diff, eval +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
+    90-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    90-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    90-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    90-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    90-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    90-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
+    90-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    90-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    91-. "<div>uses geom: eval, labels +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
+    91-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    91-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    91-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    91-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    91-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    91-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    91-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    88-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    94-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    94-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    107-. "<div>uses edge, fem +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    107-. "<div>uses linalg::csr,<br />linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    107-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    107-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    110-. "<div>uses linalg::scalar</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    108-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    108-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    108-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    92-. "<div>uses geom: eval, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
+    92-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    92-. "<div>uses mesh, mesh::cells +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    92-. "<div>uses meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    92-. "<div>uses meshing::adapt3d</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
+    92-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
 
   end```
 
@@ -201,69 +201,69 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 85 ["femcore"]
-        style 85 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 86 ["femcore"]
+        style 86 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        86["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
-        style 86 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        87["<div style='font-weight: bold'>Mesh files</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The compact lossless .fmsh<br />format for meshes and results<br />and its entropy coder.</div>"]
+        87["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
         style 87 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        88["<div style='font-weight: bold'>Fixtures and test kit</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Test meshes and the SOI wire<br />cross-section used by the<br />tests of every physics crate.</div>"]
+        88["<div style='font-weight: bold'>Mesh files</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The compact lossless .fmsh<br />format for meshes and results<br />and its entropy coder.</div>"]
         style 88 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        89["<div style='font-weight: bold'>Meshing facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshPlan and mesh_model (the<br />one way to mesh a geom<br />model), the serialisable<br />request and report, sizing<br />from the physics, and the 2D<br />triangulation core.</div>"]
+        89["<div style='font-weight: bold'>Fixtures and test kit</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Test meshes and the SOI wire<br />cross-section used by the<br />tests of every physics crate.</div>"]
         style 89 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        90["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, adaptive<br />meshing driven by exact<br />faces, face sizes and<br />max_dev, and the curved<br />(quadratic) edges of boundary<br />cells.</div>"]
+        90["<div style='font-weight: bold'>Meshing facade</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>MeshPlan and mesh_model (the<br />one way to mesh a geom<br />model), the serialisable<br />request and report, sizing<br />from the physics, and the 2D<br />triangulation core.</div>"]
         style 90 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        91["<div style='font-weight: bold'>Structured absorbing layers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Structured PML around a<br />box-shaped or geom-model<br />mesh: prisms, hexahedra,<br />quads, labels.</div>"]
+        91["<div style='font-weight: bold'>3D meshing</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The lattice tetrahedral<br />mesher on Domain3, Rivara<br />refinement, the adapter from<br />a 3D geom model, adaptive<br />meshing driven by exact<br />faces, face sizes and<br />max_dev, and the curved<br />(quadratic) edges of boundary<br />cells.</div>"]
         style 91 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        92["<div style='font-weight: bold'>Meshing validation harness</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small independent scalar<br />Helmholtz solver with PML<br />used to validate meshes.</div>"]
+        92["<div style='font-weight: bold'>Structured absorbing layers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Structured PML around a<br />box-shaped or geom-model<br />mesh: prisms, hexahedra,<br />quads, labels.</div>"]
         style 92 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        93["<div style='font-weight: bold'>Metric fields</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Riemannian metrics in 2D and<br />3D, metric fields, the<br />simplex working mesh and<br />per-phase timers.</div>"]
+        93["<div style='font-weight: bold'>Meshing validation harness</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small independent scalar<br />Helmholtz solver with PML<br />used to validate meshes.</div>"]
         style 93 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        94["<div style='font-weight: bold'>Adaptation operators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Edge split, collapse, flip<br />and smoothing on the working<br />meshes in 2D and 3D, with the<br />vertex classification.</div>"]
+        94["<div style='font-weight: bold'>Metric fields</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Riemannian metrics in 2D and<br />3D, metric fields, the<br />simplex working mesh and<br />per-phase timers.</div>"]
         style 94 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        95["<div style='font-weight: bold'>Adaptation drivers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Passes of operators until the<br />mesh conforms to the metric,<br />with geometry oracles saying<br />where a boundary vertex may<br />go.</div>"]
+        95["<div style='font-weight: bold'>Adaptation operators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Edge split, collapse, flip<br />and smoothing on the working<br />meshes in 2D and 3D, with the<br />vertex classification.</div>"]
         style 95 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        96["<div style='font-weight: bold'>Error estimators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Error estimation and the<br />solve-estimate-adapt loop;<br />the Maxwell residual<br />estimator for edge elements.</div>"]
+        96["<div style='font-weight: bold'>Adaptation drivers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Passes of operators until the<br />mesh conforms to the metric,<br />with geometry oracles saying<br />where a boundary vertex may<br />go.</div>"]
         style 96 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        97["<div style='font-weight: bold'>Error estimators</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Error estimation and the<br />solve-estimate-adapt loop;<br />the Maxwell residual<br />estimator for edge elements.</div>"]
+        style 97 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
     end
 
-    95-. "<div>uses adapt::ops, adapt::ops3<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    95-. "<div>uses adapt::field,<br />adapt::metric +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    94-. "<div>uses adapt::drive,<br />adapt::geom +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    94-. "<div>uses mesh::quality</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    94-. "<div>uses adapt::field,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    96-. "<div>uses adapt::drive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    96-. "<div>uses adapt::ops3,<br />adapt::topo3</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    96-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    96-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    96-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    88-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    88-. "<div>uses meshing,<br />meshing::geomdrive +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    88-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    86-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    92-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    92-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    92-. "<div>uses meshing::pml_box</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
-    89-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    89-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    89-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    89-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
-    89-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    89-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
-    90-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
-    90-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
-    90-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    90-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    90-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
-    87-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    93-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    91-. "<div>uses mesh, mesh::cells +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    91-. "<div>uses meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->89
-    91-. "<div>uses meshing::adapt3d</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
-    91-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->93
+    96-. "<div>uses adapt::ops, adapt::ops3<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    96-. "<div>uses adapt::field,<br />adapt::metric +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    95-. "<div>uses adapt::drive,<br />adapt::geom +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    95-. "<div>uses mesh::quality</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    95-. "<div>uses adapt::field,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    97-. "<div>uses adapt::drive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    97-. "<div>uses adapt::ops3,<br />adapt::topo3</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    97-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    97-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    97-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    89-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    89-. "<div>uses meshing,<br />meshing::geomdrive +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    89-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    87-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    93-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    93-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    93-. "<div>uses meshing::pml_box</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    90-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    90-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    90-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    90-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
+    90-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    90-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
+    91-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->96
+    91-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->95
+    91-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    91-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    91-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
+    88-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    94-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    92-. "<div>uses mesh, mesh::cells +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    92-. "<div>uses meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->90
+    92-. "<div>uses meshing::adapt3d</div><div style='font-size: 70%'>[Rust paths]</div>" .->91
+    92-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->94
 
   end```
 
@@ -281,43 +281,43 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 85 ["femcore"]
-        style 85 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 86 ["femcore"]
+        style 86 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        100["<div style='font-weight: bold'>Krylov solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>CG, MINRES, GMRES, BiCGStab,<br />COCR, QMR, IDR(s), GCRO-DR<br />for real and complex systems.</div>"]
+        100["<div style='font-weight: bold'>Direct solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Shifted sparse direct solves<br />with symbolic reuse, LU with<br />a user ordering, block<br />low-rank factorisation, mixed<br />precision, nested dissection.</div>"]
         style 100 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        101["<div style='font-weight: bold'>Eigensolvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Krylov-Schur, LOBPCG,<br />Jacobi-Davidson, quadratic<br />and nonlinear eigenproblems,<br />contour integral, Chebyshev<br />filtering, real Arnoldi for<br />the 2D modes, sensitivities.</div>"]
+        101["<div style='font-weight: bold'>Krylov solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>CG, MINRES, GMRES, BiCGStab,<br />COCR, QMR, IDR(s), GCRO-DR<br />for real and complex systems.</div>"]
         style 101 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        102["<div style='font-weight: bold'>Preconditioners</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Smoothed-aggregation<br />multigrid (scalar and<br />elastic), auxiliary-space<br />Maxwell and divergence<br />solvers, Schwarz, field-split<br />and incomplete<br />factorisations.</div>"]
+        102["<div style='font-weight: bold'>Eigensolvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Krylov-Schur, LOBPCG,<br />Jacobi-Davidson, quadratic<br />and nonlinear eigenproblems,<br />contour integral, Chebyshev<br />filtering, real Arnoldi for<br />the 2D modes, sensitivities.</div>"]
         style 102 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        103["<div style='font-weight: bold'>Time, nonlinear, sweeps</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Time integration, Newton and<br />optimisation, matrix<br />exponential action,<br />reduced-order frequency<br />sweeps and matrix-free<br />high-order operators.</div>"]
+        103["<div style='font-weight: bold'>Preconditioners</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Smoothed-aggregation<br />multigrid (scalar and<br />elastic), auxiliary-space<br />Maxwell and divergence<br />solvers, Schwarz, field-split<br />and incomplete<br />factorisations.</div>"]
         style 103 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        97["<div style='font-weight: bold'>Matrices and vectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one matrix type Csr over<br />a generic scalar, block<br />storage, multivector kernels,<br />operator interfaces, dense<br />helpers, Matrix Market,<br />problem bundles and<br />test-problem generators.</div>"]
-        style 97 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        98["<div style='font-weight: bold'>Linear algebra driver</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The door the physics kernels<br />use: a direct solve,<br />eigenpairs near a shift, and<br />the solver interface for<br />models.</div>"]
+        104["<div style='font-weight: bold'>Time, nonlinear, sweeps</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Time integration, Newton and<br />optimisation, matrix<br />exponential action,<br />reduced-order frequency<br />sweeps and matrix-free<br />high-order operators.</div>"]
+        style 104 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        98["<div style='font-weight: bold'>Matrices and vectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one matrix type Csr over<br />a generic scalar, block<br />storage, multivector kernels,<br />operator interfaces, dense<br />helpers, Matrix Market,<br />problem bundles and<br />test-problem generators.</div>"]
         style 98 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        99["<div style='font-weight: bold'>Direct solvers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Shifted sparse direct solves<br />with symbolic reuse, LU with<br />a user ordering, block<br />low-rank factorisation, mixed<br />precision, nested dissection.</div>"]
+        99["<div style='font-weight: bold'>Linear algebra driver</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The door the physics kernels<br />use: a direct solve,<br />eigenpairs near a shift, and<br />the solver interface for<br />models.</div>"]
         style 99 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
     end
 
-    99-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    98-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    98-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    98-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
-    101-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    101-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    101-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    101-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    100-. "<div>uses linalg::basis,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    103-. "<div>uses linalg::csr,<br />linalg::dense +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    103-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    103-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
-    103-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
-    102-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->97
-    102-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    102-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    100-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    99-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    99-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    99-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
+    102-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    102-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    102-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
+    102-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
+    101-. "<div>uses linalg::basis,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    104-. "<div>uses linalg::csr,<br />linalg::dense +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    104-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    104-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
+    104-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->101
+    103-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    103-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->100
+    103-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
 
   end```
 
@@ -335,38 +335,38 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 85 ["femcore"]
-        style 85 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 86 ["femcore"]
+        style 86 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        104["<div style='font-weight: bold'>Finite-element basics</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Lagrange P1/P2 elements and<br />quadrature, the 2D<br />edge-element basis, derived<br />fields, PML coordinate<br />stretching, Floquet pairs and<br />material properties per<br />domain.</div>"]
-        style 104 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        105["<div style='font-weight: bold'>Material specification</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>TOML material files with<br />explicit units, tensors,<br />dispersion models evaluated<br />at the wavelength, provenance<br />and the library loader.</div>"]
+        105["<div style='font-weight: bold'>Finite-element basics</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Lagrange P1/P2 elements and<br />quadrature, the 2D<br />edge-element basis, derived<br />fields, PML coordinate<br />stretching, Floquet pairs and<br />material properties per<br />domain.</div>"]
         style 105 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        106["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Optical modes of a 2D<br />cross-section as a<br />field-evaluable set with the<br />material data to evaluate<br />them.</div>"]
+        106["<div style='font-weight: bold'>Material specification</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>TOML material files with<br />explicit units, tensors,<br />dispersion models evaluated<br />at the wavelength, provenance<br />and the library loader.</div>"]
         style 106 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        107["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
+        107["<div style='font-weight: bold'>Optical mode sets</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Optical modes of a 2D<br />cross-section as a<br />field-evaluable set with the<br />material data to evaluate<br />them.</div>"]
         style 107 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        108["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate, and the<br />text formulas parsed into it<br />(ADR 90).</div>"]
+        108["<div style='font-weight: bold'>Frame and sections</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The one place that knows the<br />wafer axes (x lateral, z<br />normal, waves along +y).</div>"]
         style 108 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        109["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, the<br />warm-start context of the<br />shift-and-invert eigensolvers<br />(ADR 96), and refusal of NaN<br />and infinity.</div>"]
+        109["<div style='font-weight: bold'>Expressions</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>A small safe expression<br />evaluator for user input (a<br />copy of geom's kept equal by<br />a corpus test), and the typed<br />tree over complex field<br />values that the reductions of<br />results evaluate, and the<br />text formulas parsed into it<br />(ADR 90).</div>"]
         style 109 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        86["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
-        style 86 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        110["<div style='font-weight: bold'>Runtime services</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The shared worker pool, stage<br />log and cancel, the<br />warm-start context of the<br />shift-and-invert eigensolvers<br />(ADR 96), and refusal of NaN<br />and infinity.</div>"]
+        style 110 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        87["<div style='font-weight: bold'>Mesh</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The native mixed-cell mesh,<br />the exchange mesh the physics<br />take, simplex meshes with<br />their numbering of unknowns,<br />draw-only meshes and quality<br />statistics.</div>"]
+        style 87 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
     end
 
-    108-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
-    104-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
-    104-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    104-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    104-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
-    86-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->109
-    106-. "<div>uses edge, fem +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    106-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
-    106-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
-    107-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    107-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
-    107-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
+    109-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    105-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    105-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    105-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    105-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    87-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    107-. "<div>uses edge, fem +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    107-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
+    107-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
+    108-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->105
+    108-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    108-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->87
 
   end```

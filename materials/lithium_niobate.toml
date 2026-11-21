@@ -1,8 +1,20 @@
-# Lithium niobate, congruently grown, uniaxial about the crystal z (optic) axis: optical data only.
+# Lithium niobate (LiNbO3), congruently grown, trigonal 3m class, optic axis = crystal z.
 format = 1
 name = "lithium_niobate"
-description = "Congruent lithium niobate, 21 degC (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Congruent lithium niobate, room temperature"
+source = { cite = "Compiled from the per-table sources below (Weis and Gaylord 1985 for density and constant-E stiffness; Zelmon, Small and Jundt 1997 for refractive indices)", verified = "2026-11-20" }
+density = "4640 kg/m^3"
+
+[elastic]
+class = "trigonal"
+unit = "GPa"
+c11 = 203.0
+c12 = 57.3
+c13 = 75.2
+c14 = 8.5
+c33 = 242.4
+c44 = 59.5
+source = { cite = "R. S. Weis and T. K. Gaylord, Lithium niobate: Summary of physical properties and crystal structure, Appl. Phys. A 37, 191-203 (1985), Table 1 constant-E stiffness tensor at room temperature", doi = "10.1007/BF00614817", verified = "2026-11-20" }
 
 [optical]
 wavelength_unit = "um"

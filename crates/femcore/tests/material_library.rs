@@ -132,10 +132,27 @@ fn metals_refuse_wavelengths_outside_the_fit() {
 #[test]
 fn silicon_nitride_and_lithium_niobate() {
     let lib = library();
-    let sn = lib.get("silicon_nitride").unwrap().optical.as_ref().unwrap();
+    let sn_spec = lib.get("silicon_nitride").unwrap();
+    assert_eq!(sn_spec.density, Some(3100.0));
+    let sn_el = sn_spec.elastic.as_ref().unwrap();
+    assert_eq!(sn_el.detect_class(), Class::Isotropic);
+    let sn_scalars = sn_spec.legacy_scalars();
+    assert!((sn_scalars["E"] - 290.0e9).abs() < 1e-6 * 290.0e9 && (sn_scalars["nu"] - 0.27).abs() < 1e-12 && sn_scalars["rho"] == 3100.0);
+    let sn = sn_spec.optical.as_ref().unwrap();
     let n = sn.nk(0, 1.55e-6, None).unwrap().0;
     assert!((n - 1.9963).abs() < 5e-4, "{n}");
-    let ln = lib.get("lithium_niobate").unwrap().optical.as_ref().unwrap();
+
+    let ln_spec = lib.get("lithium_niobate").unwrap();
+    assert_eq!(ln_spec.density, Some(4640.0));
+    let ln_el = ln_spec.elastic.as_ref().unwrap();
+    assert_eq!(ln_el.class, Some(Class::Trigonal));
+    assert_eq!(ln_el.detect_class(), Class::Trigonal);
+    assert_eq!(
+        (ln_el.c[0][0], ln_el.c[0][1], ln_el.c[0][2], ln_el.c[0][3], ln_el.c[2][2], ln_el.c[3][3]),
+        (203.0e9, 57.3e9, 75.2e9, 8.5e9, 242.4e9, 59.5e9),
+        "Weis and Gaylord 1985"
+    );
+    let ln = ln_spec.optical.as_ref().unwrap();
     let (no, ne) = (ln.nk(0, 1.55e-6, None).unwrap().0, ln.nk(2, 1.55e-6, None).unwrap().0);
     assert!((no - 2.2111).abs() < 1e-3 && (ne - 2.1379).abs() < 1e-3, "{no} {ne}");
     assert!(no > ne, "lithium niobate is a negative uniaxial crystal");

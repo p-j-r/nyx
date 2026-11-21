@@ -58,12 +58,13 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [physics: Result and frame](../physics/result.md) | fields | CellField, CellFields |
 | [physics: Test support](../physics/testsupport.md) | fields | node_average |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | fem, pml, props | Pml, PmlDir, cell_stretches, radial_coordinate |
-| [sms: Axisymmetric study kernel](../sms/crosssection.md) | fem, fields, props | CellFields, PmlDir, check_boundary_labels |
+| [sms: Cross-section study kernel](../sms/crosssection.md) | fem, fields, periodic, pml, props | CellFields, PmlDir, Reduction, cell_stretches, check_boundary_labels, congruence, match_vertices, nodal_relations |
 | [sms: Floquet kernel](../sms/floquet.md) | periodic | Reduction, congruence, match_vertices, nodal_relations |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | fem |  |
-| [sms: Absorbing-layer kernel](../sms/pml.md) | fem, pml | cell_stretches |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | fem, periodic, pml | Reduction, cell_stretches, congruence, match_vertices, nodal_relations |
 | [sms: Typed problem](../sms/problem.md) | props | LinearSolver, Materials, Periodic, Pml, PmlDir |
-| [sms: Solid kernel](../sms/solid.md) | fem, fields, props | AMG_THRESHOLD, AmgSystem, CellFields, FACTORISE_MAX_FREE, LOBPCG_MAX_FACTOR, LOBPCG_MIN_FREE, LinearSolver, TensorKind +4 |
+| [sms: Solid kernel](../sms/solid.md) | fem, fields, props | AMG_THRESHOLD, AmgSystem, CellFields, FACTORISE_MAX_FREE, LOBPCG_MAX_FACTOR, LOBPCG_MIN_FREE, LinearSolver, Materials +5 |
+| [sms: Waveguide kernel](../sms/waveguide.md) | fem |  |
 
 ## Class diagram
 

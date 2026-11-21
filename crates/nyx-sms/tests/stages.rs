@@ -107,6 +107,36 @@ fn axisymmetric_study_stages_compose_to_the_one_call_solver() {
     assert!(matches!(lf.1, nyx_physics::Scalar::Num(v) if (v - 1.0).abs() < 1e-9), "{:?}", lf.1);
 }
 
+#[test]
+fn waveguide_study_stages_compose_to_the_one_call_solver() {
+    use nyx_sms::cross_section::*;
+    let mesh = common::rect(1.0e-3, 0.2e-3, 8, 3);
+    let mut s = Problem::new(Study::Modes { n_modes: 4, f_search: 0.0, wavevector: 1500.0 }, 2);
+    for (k, v) in [("E", 70e9), ("nu", 0.33), ("rho", 2700.0)] {
+        s.materials.default.insert(k.into(), v);
+    }
+    s.bcs.push(Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } });
+    s.materials.pml.insert(1, Pml { x: PmlDir::Plus, strength: 0.1, order: 0.0, ..Pml::default() });
+    let whole = solve_waveguide_modes(&mesh, &s).unwrap();
+    assert_eq!((whole.physics.as_str(), whole.study.as_str()), ("sms", "modes"));
+    let asm = assemble_cross_section(&mesh, &s, CrossSection::Waveguide(1500.0)).unwrap();
+    let solved = solve_cross_section_modes(&asm).unwrap();
+    let staged = cross_section_fields(&mesh, &asm, &solved).unwrap();
+    assert_eq!(whole.solutions.len(), staged.solutions.len());
+    for (a, b) in whole.solutions.iter().zip(&staged.solutions) {
+        assert_eq!(a.eigenvalue, b.eigenvalue);
+        assert_eq!(a.value, b.value);
+        for (f, g) in a.fields.iter().zip(&b.fields) {
+            assert_eq!((&f.name, &f.values), (&g.name, &g.values));
+        }
+    }
+    let lf = whole.scalars.iter().find(|(k, _)| k == "layer fraction 1").unwrap();
+    assert!(matches!(lf.1, nyx_physics::Scalar::Num(v) if (v - 1.0).abs() < 1e-9), "{:?}", lf.1);
+    for name in ["lateral share 1", "vertical share 1", "longitudinal share 1"] {
+        assert!(whole.scalars.iter().any(|(k, _)| k == name), "missing {name}");
+    }
+}
+
 fn same_solution_fields(a: &SolveResult, b: &SolveResult) {
     assert_eq!(a.solutions.len(), b.solutions.len());
     for (x, y) in a.solutions.iter().zip(&b.solutions) {

@@ -44,9 +44,10 @@ Nothing outside the component (the standard library and external crates are not 
 | [physics: Physics trait and registry](../physics/trait.md) | material::spec | Library |
 | [sms: Physics adapter](../sms/adapter.md) | material, material::spec | Library, isotropic_stiffness, stiffness_global |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | material | M6 |
-| [sms: Axisymmetric study kernel](../sms/crosssection.md) | material | M6 |
+| [sms: Cross-section study kernel](../sms/crosssection.md) | material | M6 |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | material | M6 |
 | [sms: Solid kernel](../sms/solid.md) | material | M3, M6 |
+| [sms: Waveguide kernel](../sms/waveguide.md) | material | M6 |
 
 ## Class diagram
 

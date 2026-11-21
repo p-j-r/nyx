@@ -59,11 +59,12 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [Optical mode sets](./optical.md) | linalg::csr, linalg::csr::assembly | C, c |
 | [Runtime services](./runtime.md) | linalg::scalar | C64, Scalar |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
-| [sms: Axisymmetric study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
+| [sms: Cross-section study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
 | [sms: Floquet kernel](../sms/floquet.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [sms: Solid kernel](../sms/solid.md) | linalg::csr, linalg::csr::assembly | C, RCsr, c |
+| [sms: Waveguide kernel](../sms/waveguide.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 
 ## Class diagram
 

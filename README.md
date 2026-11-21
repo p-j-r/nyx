@@ -10,7 +10,7 @@ crates/geom           geometry kernel: parametric wafer-frame models, named regi
 crates/femcore        the FEM core: meshes, meshing and adaptation, linear algebra (sparse, eigen, multigrid), finite-element basics, materials
 crates/nyx-physics    the Physics trait, the problem envelope, descriptors, SolveResult, JSON Schemas
 crates/nyx-dfs        diffusion: electrostatics, heat transfer (stationary, transient)
-crates/nyx-sms        solid mechanics: static, eigenfrequencies, axisymmetric eigenfrequencies; fixed, load, low-reflecting, PML, Floquet conditions
+crates/nyx-sms        solid mechanics: static, eigenfrequencies, axisymmetric eigenfrequencies, waveguide modes; fixed, load, low-reflecting, PML, Floquet conditions
 crates/nyx-ems        EM waves: waveguide modes, axisymmetric modes, cavity eigenfrequencies; PML, Floquet, magnetic wall
 crates/nyx-analysis   analyses of a result: polarization (Stokes, Poincare sphere), figures of modes (SVG, PNG)
 crates/nyx-store      workspaces, workflows, experiments and run records (JSON)
@@ -81,7 +81,7 @@ parent folder.
 | Physics | Studies and features |
 |---|---|
 | `dfs` | **Electrostatics** 2D/3D (per-domain eps_r, space charge, potential, ground, surface charge, energy, capacitance). **Heat transfer**, stationary and transient, 2D/3D (k, rho, Cp, Q, temperature, flux, convection; exact semi-discrete solution, BDF2 for large models) |
-| `sms` | **Static** (plane stress or strain, 3D), **eigenfrequencies**, **axisymmetric eigenfrequencies** (bodies of revolution on the (r, z) half plane, axis conditions, cylindrical absorbing layers); cross-sections with an out-of-plane wave number; fixed constraints, boundary loads, thermal expansion; low-reflecting boundaries, PML, Floquet-periodic pairs; per mode frequency parts and energy shares per component and region |
+| `sms` | **Static** (plane stress or strain, 3D), **eigenfrequencies**, **axisymmetric eigenfrequencies** (bodies of revolution on the (r, z) half plane, axis conditions, cylindrical absorbing layers), **waveguide modes** (`modes`, 2.5D elastic waves `exp(-j q y)` on the 2D (x, z) cross-section at wavevector `q`); fixed constraints, boundary loads, thermal expansion; low-reflecting boundaries, PML, Floquet-periodic pairs; per mode frequency parts and energy shares per component and region |
 | `ems` | **Waveguide modes** (full-vector Nedelec(2)+P2 on the cross-section, complex neff and Q with PML, tilted anisotropic crystals), **axisymmetric modes**, **cavity eigenfrequencies** (Nedelec edge elements of degree 1 and 2 on tetrahedra, optional curved cells), PML, Floquet-periodic pairs (Bloch dispersion), magnetic walls |
 
 Elements are P1/P2 Lagrange on triangles and tetrahedra (Nedelec for the waves). Stiffness, thermal expansion, conductivity, permittivity and the

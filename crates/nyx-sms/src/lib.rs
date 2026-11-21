@@ -20,8 +20,11 @@ pub mod lrb;
 pub mod pml;
 pub mod problem;
 pub mod solid;
+pub mod waveguide;
 
-pub use cross_section::{solve_axisymmetric, solve_solid_axisym, CrossModes};
+pub use cross_section::{
+    solve_axisymmetric, solve_solid_axisym, solve_solid_waveguide, solve_waveguide_modes, CrossModes,
+};
 pub use problem::{decode, Bc, BcKind, Plane, Problem, Study, ThermalExpansion, ThermalSource};
 pub use solid::{solve_solid, Setup};
 
@@ -80,6 +83,23 @@ impl Physics for Sms {
                     ParamDesc::number("f_search", "Search around", "Hz", 0.0, "0 finds the lowest modes").range(Some(0.0), None),
                     ParamDesc::integer("azimuthal_order", "Azimuthal order", 0, -100000, "the displacement goes as exp(-j m theta); m > 0 runs along +y")
                         .range(Some(-100000.0), Some(100000.0)),
+                ],
+            },
+            StudyDesc {
+                kind: "modes".into(),
+                name: "Waveguide modes".into(),
+                doc: "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.".into(),
+                dims: Dims::Two,
+                params: vec![
+                    ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
+                    ParamDesc::number("f_search", "Search around", "Hz", 0.0, "0 finds the lowest modes").range(Some(0.0), None),
+                    ParamDesc::number(
+                        "wavevector",
+                        "Longitudinal wavevector",
+                        "rad/m",
+                        0.0,
+                        "wavevector q along +y; the displacement goes as exp(-j q y)",
+                    ),
                 ],
             },
         ]
@@ -196,6 +216,18 @@ impl Physics for Sms {
                 FieldDesc::new("Re uy", "a.u.", &[], "real part of the azimuthal component"),
                 FieldDesc::new("|uy|", "a.u.", &[], "magnitude of the azimuthal component"),
             ],
+            "modes" => vec![
+                FieldDesc::new("|u|", "a.u.", &[], "magnitude of the displacement of a mode, scaled to a maximum of 1"),
+                FieldDesc::new(
+                    "Re ux",
+                    "a.u.",
+                    &[],
+                    "real part of the lateral (x) component, phase chosen so that the largest component is real",
+                ),
+                FieldDesc::new("Re uz", "a.u.", &[], "real part of the vertical (z) component"),
+                FieldDesc::new("Re uy", "a.u.", &[], "real part of the longitudinal (y) component"),
+                FieldDesc::new("|uy|", "a.u.", &[], "magnitude of the longitudinal (y) component"),
+            ],
             _ => vec![],
         }
     }
@@ -219,6 +251,12 @@ impl Physics for Sms {
                 mesh.dim()
             )));
         }
+        if spec.study.kind == "modes" && mesh.dim() != 2 {
+            return Err(Error::invalid(format!(
+                "the study 'modes' needs a 2D mesh (the (x, z) cross-section), this one is {}D",
+                mesh.dim()
+            )));
+        }
         Ok(())
     }
 
@@ -226,10 +264,11 @@ impl Physics for Sms {
         use femcore::material::{isotropic_stiffness, stiffness_global};
         use femcore::meshing::physics_size::elastic_wavelength;
         let empty = Sizing { order: spec.order, headroom: 1.5, wavelengths: Default::default() };
-        // only an eigenfrequency study (plain or axisymmetric) with a search frequency has a wave to resolve
+        // only an eigenfrequency study (plain, axisymmetric or waveguide modes) with a search frequency has a wave to resolve
         let studies = self.studies();
         let Some(sd) = studies.iter().find(|s| {
-            matches!(s.kind.as_str(), "eigenfrequency" | "axisymmetric_eigenfrequency") && spec.study.kind == s.kind
+            matches!(s.kind.as_str(), "eigenfrequency" | "axisymmetric_eigenfrequency" | "modes")
+                && spec.study.kind == s.kind
         }) else {
             return empty;
         };
@@ -296,6 +335,12 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             }
             problem.check_axisymmetric()?;
             solve_axisymmetric(&d, problem).map_err(Error::from_kernel)?
+        } else if matches!(problem.study, Study::Modes { .. }) {
+            if d.dim != 2 {
+                return Err(Error::invalid("the waveguide modes study needs a 2D mesh (the (x, z) cross-section)"));
+            }
+            problem.check_modes()?;
+            solve_waveguide_modes(&d, problem).map_err(Error::from_kernel)?
         } else {
             solve_solid(&d, problem).map_err(Error::from_kernel)?
         }

@@ -70,6 +70,12 @@ pub enum Study {
         f_search: f64,
         azimuthal_order: i64,
     },
+    /// elastic waveguide modes on the 2D (x, z) cross-section; the displacement goes as `exp(-j q y)`
+    Modes {
+        n_modes: usize,
+        f_search: f64,
+        wavevector: f64,
+    },
 }
 
 impl Study {
@@ -79,12 +85,13 @@ impl Study {
             Study::Static => "static",
             Study::Eigenfrequency { .. } => "eigenfrequency",
             Study::AxisymmetricEigenfrequency { .. } => "axisymmetric_eigenfrequency",
+            Study::Modes { .. } => "modes",
         }
     }
 
-    /// Whether the study finds eigenfrequencies (`Eigenfrequency` or `AxisymmetricEigenfrequency`).
+    /// Whether the study finds eigenfrequencies (`Eigenfrequency`, `AxisymmetricEigenfrequency` or `Modes`).
     pub fn is_eigen(&self) -> bool {
-        matches!(self, Study::Eigenfrequency { .. } | Study::AxisymmetricEigenfrequency { .. })
+        matches!(self, Study::Eigenfrequency { .. } | Study::AxisymmetricEigenfrequency { .. } | Study::Modes { .. })
     }
 }
 
@@ -158,10 +165,17 @@ impl Problem {
                 ));
             }
         }
-        if let Study::Eigenfrequency { f_search, .. } | Study::AxisymmetricEigenfrequency { f_search, .. } = &self.study
+        if let Study::Eigenfrequency { f_search, .. }
+        | Study::AxisymmetricEigenfrequency { f_search, .. }
+        | Study::Modes { f_search, .. } = &self.study
         {
             if !f_search.is_finite() {
                 return Err("the study's search frequency is NaN or infinite".into());
+            }
+        }
+        if let Study::Modes { wavevector, .. } = &self.study {
+            if !wavevector.is_finite() {
+                return Err("the study's longitudinal wavevector is NaN or infinite".into());
             }
         }
         if !self.thickness.is_finite() {
@@ -229,6 +243,28 @@ impl Problem {
         }
         Ok(())
     }
+
+    /// The rules of the waveguide modes study: no boundary load, and only zero constraints. Periodic lateral pairs and
+    /// absorbing layers in the cross-section plane (x and z; y is refused by `check_wafer(2)`) are allowed.
+    pub fn check_modes(&self) -> Result<(), Error> {
+        if !matches!(self.study, Study::Modes { .. }) {
+            return Ok(());
+        }
+        for bc in &self.bcs {
+            match &bc.kind {
+                BcKind::Load(_) => return Err(Error::invalid("a boundary load belongs to the static study")),
+                BcKind::LowReflecting => {}
+                BcKind::Fixed { fixed, values } => {
+                    if (0..3).any(|k| fixed[k] && values[k] != 0.0) {
+                        return Err(Error::invalid(
+                            "an eigenfrequency study takes zero constraints only: a fixed displacement must be 0",
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn pml_dir(s: &str) -> PmlDir {
@@ -259,6 +295,11 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             n_modes: sp.integer("n_modes").max(0) as usize,
             f_search: sp.number("f_search"),
             azimuthal_order: sp.integer("azimuthal_order"),
+        },
+        "modes" => Study::Modes {
+            n_modes: sp.integer("n_modes").max(0) as usize,
+            f_search: sp.number("f_search"),
+            wavevector: sp.number("wavevector"),
         },
         other => return Err(Error::Unsupported(format!("sms has no study '{other}'"))),
     };
@@ -370,5 +411,6 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         periodic,
     };
     problem.check_axisymmetric()?;
+    problem.check_modes()?;
     Ok(problem)
 }

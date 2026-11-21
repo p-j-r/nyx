@@ -27,7 +27,7 @@ jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs 
     properties {
         "adr" "61, 80, 85, 87, 86, 11, 95, 96"
         "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)"
-        "lines" "4507"
+        "lines" "4551"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }

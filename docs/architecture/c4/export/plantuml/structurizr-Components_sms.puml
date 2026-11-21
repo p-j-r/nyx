@@ -70,13 +70,14 @@ hide stereotype
 
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   rectangle "nyx-sms\n<size:16>[Container: Rust library]</size>" <<Boundary-bnl4LXNtcw==>> {
-    rectangle "==Physics adapter\n<size:16>[Component: Rust modules]</size>\n\nThe Physics implementation of sms with three studies (static, eigenfrequency, axisymmetric eigenfrequency): descriptors, validation, solve entry." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Physicsadapter
+    rectangle "==Physics adapter\n<size:16>[Component: Rust modules]</size>\n\nThe Physics implementation of sms with four studies (static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes): descriptors, validation, solve entry." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Physicsadapter
     rectangle "==Typed problem\n<size:16>[Component: Rust modules]</size>\n\nThe typed sms problem the kernels read, decoded from the envelope." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Typedproblem
     rectangle "==Solid kernel\n<size:16>[Component: Rust modules]</size>\n\nLinear elastic solid mechanics on P1/P2 triangles and tetrahedra: static solve and eigenfrequencies." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Solidkernel
-    rectangle "==Axisymmetric study kernel\n<size:16>[Component: Rust modules]</size>\n\nAxisymmetric study kernel: constraints and axis conditions, absorbing layers, complex eigensolve and fields on the (r, z) half plane (the shared cross-section stages); every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Axisymmetricstudykernel
+    rectangle "==Cross-section study kernel\n<size:16>[Component: Rust modules]</size>\n\nCross-section study kernel (`axisymmetric_eigenfrequency` on the (r, z) half plane and 2.5D `modes` on the (x, z) cross-section): constraints, axis and periodic conditions, absorbing layers, complex eigensolve and fields; every mode carries numeric frequency parts, a layer fraction and its energy shares per component and domain." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Crosssectionstudykernel
     rectangle "==Axisymmetric kernel\n<size:16>[Component: Rust modules]</size>\n\nElastic modes of a body of revolution on its half-plane cross-section, with the axis regularity conditions, the cylindrical PML stretch and the energy weight of a mode per component and class of cells." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Axisymmetrickernel
+    rectangle "==Waveguide kernel\n<size:16>[Component: Rust modules]</size>\n\nElastic modes of a 2.5D waveguide on its 2D (x, z) cross-section (`exp(-i q y)`), with full 3D anisotropic crystal orientation, planar PML coordinate stretching and the planar kinetic-energy weight of a mode per component and class of cells." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Waveguidekernel
     rectangle "==Floquet kernel\n<size:16>[Component: Rust modules]</size>\n\nEigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Floquetkernel
-    rectangle "==Absorbing-layer kernel\n<size:16>[Component: Rust modules]</size>\n\nEigenfrequencies of elastic bodies with perfectly matched layers." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Absorbinglayerkernel
+    rectangle "==Absorbing-layer kernel\n<size:16>[Component: Rust modules]</size>\n\nEigenfrequencies of elastic bodies with perfectly matched layers and optional Floquet-periodic boundaries." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Absorbinglayerkernel
     rectangle "==Low-reflecting boundary\n<size:16>[Component: Rust modules]</size>\n\nLow-reflecting boundaries for solid mechanics." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxsms.Lowreflectingboundary
   }
 
@@ -87,16 +88,18 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
 nyx.nyxphysics --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "Mesh, materials\n<size:16>[Rust API]</size>"
 nyx.nyxsms.Physicsadapter --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material, material::spec +2\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Physicsadapter --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, decode\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Physicsadapter --> nyx.nyxsms.Axisymmetricstudykernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses cross_section\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Physicsadapter --> nyx.nyxsms.Crosssectionstudykernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses cross_section\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Physicsadapter --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Physicsadapter --> nyx.nyxsms.Solidkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses solid\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Axisymmetrickernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, linalg::csr +4\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Axisymmetrickernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Axisymmetricstudykernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +6\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Axisymmetricstudykernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Axisymmetricstudykernel --> nyx.nyxsms.Axisymmetrickernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses axisym\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Axisymmetricstudykernel --> nyx.nyxsms.Lowreflectingboundary <<Relationship-UmVsYXRpb25zaGlw>> : "uses lrb\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Axisymmetricstudykernel --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Crosssectionstudykernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +8\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Crosssectionstudykernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Crosssectionstudykernel --> nyx.nyxsms.Axisymmetrickernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses axisym\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Crosssectionstudykernel --> nyx.nyxsms.Lowreflectingboundary <<Relationship-UmVsYXRpb25zaGlw>> : "uses lrb\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Crosssectionstudykernel --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Crosssectionstudykernel --> nyx.nyxsms.Solidkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses solid\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Crosssectionstudykernel --> nyx.nyxsms.Waveguidekernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses waveguide\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Floquetkernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: linalg::csr, linalg::csr::assembly +2\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Floquetkernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Floquetkernel --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
@@ -105,7 +108,7 @@ nyx.nyxsms.Lowreflectingboundary --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw
 nyx.nyxsms.Lowreflectingboundary --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Lowreflectingboundary --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Lowreflectingboundary --> nyx.nyxsms.Solidkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses solid\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Absorbinglayerkernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, linalg::csr +3\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Absorbinglayerkernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, linalg::csr +4\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Absorbinglayerkernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Absorbinglayerkernel --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Absorbinglayerkernel --> nyx.nyxsms.Solidkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses solid\n<size:16>[Rust paths]</size>"
@@ -114,10 +117,12 @@ nyx.nyxsms.Typedproblem --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "
 nyx.nyxsms.Typedproblem --> nyx.nyxsms.Physicsadapter <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Solidkernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, fields +9\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Solidkernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Solidkernel --> nyx.nyxsms.Axisymmetricstudykernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses cross_section\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Solidkernel --> nyx.nyxsms.Crosssectionstudykernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses cross_section\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Solidkernel --> nyx.nyxsms.Floquetkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses floquet\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Solidkernel --> nyx.nyxsms.Lowreflectingboundary <<Relationship-UmVsYXRpb25zaGlw>> : "uses lrb\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Solidkernel --> nyx.nyxsms.Absorbinglayerkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses pml\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Solidkernel --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Waveguidekernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, linalg::csr +2\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Waveguidekernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root\n<size:16>[Rust paths]</size>"
 
 @enduml

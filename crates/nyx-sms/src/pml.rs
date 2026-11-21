@@ -16,6 +16,7 @@ use crate::solid::{d_matrix, dof_layout, setup};
 use femcore::fem::*;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::eigs_complex;
+use femcore::periodic::{congruence, match_vertices, nodal_relations, Reduction};
 use femcore::pml::cell_stretches;
 use nyx_physics::{cell_fields_of, Discretisation, Scalar, Solution, SolveResult};
 use std::time::Instant;
@@ -57,6 +58,8 @@ pub struct PmlAssembly {
     pub kff: CCsr,
     pub mff: CCsr,
     pub free: Vec<usize>,
+    pub red: Option<Reduction>,
+    pub n_pairs: usize,
     pub n_modes: usize,
     pub f_search: f64,
     pub has_fixed: bool,
@@ -79,7 +82,16 @@ pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAs
         return Err("PML needs the Eigenfrequency study".into());
     };
     let thk = if d == 2 { spec.thickness } else { 1.0 };
-    let rho = spec.materials.cell_values(mesh, "rho", None)?;
+    let mut by_domain = std::collections::BTreeMap::new();
+    for dom in mesh.domain_labels() {
+        let v = if spec.inactive.contains(&dom) {
+            0.0
+        } else {
+            spec.materials.get(dom, "rho").ok_or_else(|| format!("domain {dom} has no value for 'rho'"))?
+        };
+        by_domain.insert(dom, v);
+    }
+    let rho: Vec<f64> = mesh.cell_labels.iter().map(|l| by_domain[l]).collect();
     let stretch = cell_stretches(mesh, &spec.materials.pml);
 
     let re = RefElement::new(d, order, if order > 1 { 2 * (order - 1) } else { 1 });
@@ -149,13 +161,31 @@ pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAs
         }
     }
     let (kfull, mfull) = (kc.to_csr(), mc.to_csr());
-    let free = free_dofs(n, &st.fixed);
-    if n_modes < 1 || n_modes + 1 >= free.len() {
-        return Err("number of modes must be between 1 and the number of free dofs".into());
-    }
-    let kff = kfull.submatrix(&free, &free);
-    let mff = mfull.submatrix(&free, &free);
-    Ok(PmlAssembly { order, d, n, kff, mff, free, n_modes, f_search, has_fixed: !st.fixed.is_empty() })
+    let (kff, mff, free, red, n_pairs) = if spec.periodic.is_empty() {
+        let free = free_dofs(n, &st.fixed);
+        if n_modes < 1 || n_modes + 1 >= free.len() {
+            return Err("number of modes must be between 1 and the number of free dofs".into());
+        }
+        let kff = kfull.submatrix(&free, &free);
+        let mff = mfull.submatrix(&free, &free);
+        (kff, mff, free, None, 0)
+    } else {
+        let mut relations = vec![];
+        for p in &spec.periodic {
+            let mt = match_vertices(mesh, p)?;
+            relations.extend(nodal_relations(mesh, order, d, &mt, p.phase)?);
+        }
+        let red = Reduction::build(n, &relations, &st.fixed);
+        let pm = red.prolong();
+        let nred = red.n_reduced();
+        if n_modes < 1 || n_modes + 1 >= nred {
+            return Err("number of modes must be between 1 and the number of free dofs".into());
+        }
+        let kff = congruence(&pm, &kfull);
+        let mff = congruence(&pm, &mfull);
+        (kff, mff, vec![], Some(red), spec.periodic.len())
+    };
+    Ok(PmlAssembly { order, d, n, kff, mff, free, red, n_pairs, n_modes, f_search, has_fixed: !st.fixed.is_empty() })
 }
 
 /// Stage 2: the complex eigenpairs nearest the search frequency.
@@ -167,6 +197,7 @@ pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String> {
         .values
         .iter()
         .enumerate()
+        .filter(|(i, _)| asm.red.is_none() || pairs.residuals.get(*i).is_none_or(|r| *r < 1e-6))
         .map(|(i, l)| {
             let mut f = l.sqrt() / (2.0 * std::f64::consts::PI);
             if f.re < 0.0 {
@@ -176,6 +207,9 @@ pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String> {
         })
         .collect();
     freqs.sort_by(|a, b| a.1.re.partial_cmp(&b.1.re).unwrap());
+    if asm.red.is_some() && freqs.is_empty() {
+        return Err("no eigenfrequencies converged near the shift".into());
+    }
     Ok(PmlSolve { freqs, vectors: pairs.vectors.clone(), dim: pairs.dim, converged: pairs.converged })
 }
 
@@ -185,10 +219,15 @@ pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -
     let mut solutions = vec![];
     let mut scalars = vec![];
     for (j, (i, f)) in solved.freqs.iter().enumerate() {
-        let mut u = vec![c(0.0, 0.0); n];
-        for (a, &dof) in asm.free.iter().enumerate() {
-            u[dof] = solved.vectors[*i][a];
-        }
+        let u = if let Some(red) = &asm.red {
+            red.expand(&solved.vectors[*i])
+        } else {
+            let mut u = vec![c(0.0, 0.0); n];
+            for (a, &dof) in asm.free.iter().enumerate() {
+                u[dof] = solved.vectors[*i][a];
+            }
+            u
+        };
         let (fields, cells) = crate::solid::complex_mode_fields(mesh, order, &u);
         let q = if f.im.abs() > 0.0 { f.re / (2.0 * f.im.abs()) } else { f64::INFINITY };
         solutions.push(Solution {
@@ -203,11 +242,22 @@ pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -
             scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
         }
     }
-    let mut log = vec![format!(
-        "complex eigenproblem with PML, Krylov dimension {}{}",
-        solved.dim,
-        if solved.converged { "" } else { " (not fully converged)" }
-    )];
+    let mut log = vec![if let Some(red) = &asm.red {
+        format!(
+            "{} Floquet-periodic pair(s) with PML: {} dofs, {} after constraints; complex eigenproblem, Krylov dimension {}{}",
+            asm.n_pairs,
+            n,
+            red.n_reduced(),
+            solved.dim,
+            if solved.converged { "" } else { " (not every pair converged)" }
+        )
+    } else {
+        format!(
+            "complex eigenproblem with PML, Krylov dimension {}{}",
+            solved.dim,
+            if solved.converged { "" } else { " (not fully converged)" }
+        )
+    }];
     if !asm.has_fixed {
         log.push("no fixed boundary: the lowest modes are rigid-body motions".into());
     }

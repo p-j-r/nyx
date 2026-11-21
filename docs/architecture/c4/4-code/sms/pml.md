@@ -2,22 +2,22 @@
 
 C4 level 4 (code) of the component **Absorbing-layer kernel** (`sms.pml`) in the container **nyx-sms** (crate `nyx_sms`). [Component view of the container](../../3-components/sms.md) · [All code pages](../README.md)
 
-> Eigenfrequencies of elastic bodies with perfectly matched layers.
+> Eigenfrequencies of elastic bodies with perfectly matched layers and optional Floquet-periodic boundaries.
 
-**Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md)  
-**Size:** 1 file, 216 lines.
+**Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md)  
+**Size:** 1 file, 266 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/pml.rs` | 216 |  |
+| `crates/nyx-sms/src/pml.rs` | 266 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, linalg::csr, linalg::csr::assembly, linalg::driver, pml | C, CCoo, CCsr, c, cell_stretches, eigs_complex |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, linalg::csr, linalg::csr::assembly, linalg::driver, periodic, pml | C, CCoo, CCsr, Reduction, c, cell_stretches, congruence, eigs_complex, match_vertices, nodal_relations |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | Discretisation, Scalar, Solution, SolveResult, cell_fields_of |
 | [Typed problem](./problem.md) | problem |  |
 | [Solid kernel](./solid.md) | solid | complex_mode_fields, d_matrix, dof_layout, setup |
@@ -42,9 +42,9 @@ classDiagram
       +kff CCsr
       +mff CCsr
       +free Vec~usize~
-      +n_modes usize
-      +f_search f64
-      +more_1_fields
+      +red Option~Reduction~
+      +n_pairs usize
+      +more_3_fields
   }
   class PmlSolve {
       <<struct>>
@@ -66,9 +66,9 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `solve_solid_pml` | `pml.rs:43` | `pub fn solve_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
-| struct | `PmlAssembly` | `pml.rs:53` | fields: `order`, `d`, `n`, `kff`, `mff`, `free`, `n_modes`, `f_search`, `has_fixed` —  Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the |
-| struct | `PmlSolve` | `pml.rs:66` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
-| fn | `assemble_solid_pml` | `pml.rs:73` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
-| fn | `solve_pml_modes` | `pml.rs:162` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
-| fn | `pml_fields` | `pml.rs:183` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q. |
+| fn | `solve_solid_pml` | `pml.rs:44` | `pub fn solve_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
+| struct | `PmlAssembly` | `pml.rs:54` | fields: `order`, `d`, `n`, `kff`, `mff`, `free`, `red`, `n_pairs`, `n_modes`, `f_search`, `has_fixed` —  Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the |
+| struct | `PmlSolve` | `pml.rs:69` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
+| fn | `assemble_solid_pml` | `pml.rs:76` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
+| fn | `solve_pml_modes` | `pml.rs:192` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
+| fn | `pml_fields` | `pml.rs:217` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q. |
