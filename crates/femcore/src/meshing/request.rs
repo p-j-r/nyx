@@ -84,6 +84,15 @@ pub struct MeshRequest {
     /// 3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub z_coarsen: bool,
+    /// 3D sheet mesher: edge singularity enrichment (`"none"` or `"quarter_point"`); absent: disabled
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_edges: Option<String>,
+    /// 3D sheet mesher: Barsoum quarter-point mid-edge parameter `xi_QP` in `[0.25, 0.50]`; absent: `0.25`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quarter_point_xi: Option<f64>,
+    /// 3D sheet mesher: radical corner grading toward sharp 2D sheet corners
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub corner_grading: bool,
 }
 
 impl MeshRequest {
@@ -94,6 +103,9 @@ impl MeshRequest {
         opts.curved = self.curved;
         opts.gap_cells = self.gap_cells;
         opts.z_coarsen = self.z_coarsen;
+        opts.singular_edges = self.singular_edges.clone();
+        opts.quarter_point_xi = self.quarter_point_xi;
+        opts.corner_grading = self.corner_grading;
         MeshPlan {
             opts,
             mesher: match self.mesher {
@@ -161,6 +173,32 @@ pub struct CurvedSummary {
     pub min_scaled_jacobian: f64,
 }
 
+impl CurvedSummary {
+    /// Summarizes the curved and/or quarter-point geometry of a 3D mesh, evaluating quarter-point cells
+    /// (`m.cell_is_qp(c)`) on the 216 interior Gauss points of `quad_rule_collapsed(8)` and regular curved
+    /// cells on the ten Lagrange nodes plus `quad_rule_collapsed(6)`.
+    pub fn from_mesh(m: &crate::mesh::SimplexMesh) -> Option<Self> {
+        (m.dim == 3 && m.has_curved()).then(|| {
+            let cells: Vec<usize> = (0..m.n_cells()).filter(|&c| m.cell_is_curved(c)).collect();
+            let min_sj = cells
+                .iter()
+                .map(|&c| {
+                    if m.cell_is_qp(c) {
+                        crate::meshing::curve3::scaled_jacobian_min_interior_q8(m, c)
+                    } else {
+                        crate::meshing::curve3::scaled_jacobian_min(m, c)
+                    }
+                })
+                .fold(f64::INFINITY, f64::min);
+            CurvedSummary {
+                edges: m.edge_node_list().len(),
+                cells: cells.len(),
+                min_scaled_jacobian: if min_sj.is_finite() { min_sj } else { 1.0 },
+            }
+        })
+    }
+}
+
 fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, sizes: &[Option<f64>]) -> MeshReport {
     let m = &g.mesh;
     let domains = g
@@ -210,8 +248,18 @@ fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, si
         }
     }
     let curved = (m.dim == 3 && m.has_curved()).then(|| {
+        let use_qp = m.has_qp() || req.singular_edges.as_deref() == Some("quarter_point");
         let cells: Vec<usize> = (0..m.n_cells()).filter(|&c| m.cell_is_curved(c)).collect();
-        let min_sj = cells.iter().map(|&c| crate::meshing::curve3::scaled_jacobian_min(m, c)).fold(f64::INFINITY, f64::min);
+        let min_sj = cells
+            .iter()
+            .map(|&c| {
+                if use_qp && (m.cell_is_qp(c) || !m.has_qp()) {
+                    crate::meshing::curve3::scaled_jacobian_min_interior_q8(m, c)
+                } else {
+                    crate::meshing::curve3::scaled_jacobian_min(m, c)
+                }
+            })
+            .fold(f64::INFINITY, f64::min);
         CurvedSummary { edges: m.edge_node_list().len(), cells: cells.len(), min_scaled_jacobian: if min_sj.is_finite() { min_sj } else { 1.0 } }
     });
     MeshReport { dim: m.dim, vertices: m.n_points(), cells: m.n_cells(), facets: m.n_facets(), domains, adaptation, structured_layers, curved, warnings }
@@ -268,6 +316,9 @@ pub fn request_schema() -> Value {
             "curved": { "type": "boolean", "default": false, "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface" },
             "gap_cells": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: target number of cells across narrow coplanar gaps" },
             "z_coarsen": { "type": "boolean", "default": false, "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes" },
+            "singular_edges": { "type": ["string", "null"], "enum": ["none", "quarter_point", null], "description": "3D sheet mesher: edge singularity enrichment ('none' or 'quarter_point')" },
+            "quarter_point_xi": { "type": ["number", "null"], "minimum": 0.25, "maximum": 0.5, "description": "3D sheet mesher: Barsoum quarter-point mid-edge parameter in [0.25, 0.50] (default 0.25)" },
+            "corner_grading": { "type": "boolean", "default": false, "description": "3D sheet mesher: radical corner grading toward sharp 2D sheet corners" },
             "waves": {
                 "type": ["object", "null"],
                 "required": ["sizing"],

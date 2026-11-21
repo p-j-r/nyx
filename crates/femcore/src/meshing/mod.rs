@@ -26,6 +26,7 @@ pub mod pml_box;
 pub mod refine3d;
 pub mod request;
 pub mod sheet3d;
+pub mod singularity;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
@@ -73,7 +74,7 @@ pub enum Mesher {
 }
 
 /// How a model is meshed: the sizes (as for `mesh_geom_2d`) and the mesher.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MeshPlan {
     pub opts: GeomMeshOpts,
     pub mesher: Mesher,
@@ -162,7 +163,7 @@ type VertexSizesFn<'a> = &'a dyn Fn(&SimplexMesh) -> Result<Vec<f64>, String>;
 type MetricsFn<'a> = &'a dyn Fn(&SimplexMesh, f64) -> Result<Vec<Sym<2>>, String>;
 
 fn mesh_waves_2d(list: &FeatureList, plan: &MeshPlan, vertex_sizes: VertexSizesFn, wave_metrics: MetricsFn) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
-    let mut opts = plan.opts;
+    let mut opts = plan.opts.clone();
     let (g, report) = match plan.mesher {
         Mesher::Simple => {
             let probe = mesh_geom_2d(evaluate(list)?, &opts)?;
@@ -236,7 +237,7 @@ fn mesh_3d_plan(ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &Physics
     // curved geometry (ADR 82) is given by the lattice mesher itself when it makes the final mesh; after an adaptation or the structured
     // layers the connectivity changes, so the edges are curved last
     let curve_last = plan.opts.curved && (matches!(plan.mesher, Mesher::Adaptive(_)) || matches!(plan.pml, PmlMode::Structured));
-    let mut start_opts = plan.opts;
+    let mut start_opts = plan.opts.clone();
     if curve_last {
         start_opts.curved = false;
     }

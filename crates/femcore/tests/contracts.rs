@@ -499,6 +499,9 @@ fn mesh_request_and_report_match_their_exemplars_and_schemas() {
         curved: false,
         gap_cells: None,
         z_coarsen: false,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
         waves: Some(WavesRequest {
             sizing: Sizing { order: 2, headroom: 1.0, wavelengths: [("air".to_string(), 4.0), ("ball".to_string(), 1.2)].into_iter().collect() },
             points_per_wavelength: None,

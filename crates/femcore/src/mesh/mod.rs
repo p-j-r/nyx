@@ -96,6 +96,8 @@ pub struct SimplexMesh {
     /// 3D: the curved edges (ADR 82), as (edge index, position of the mid-edge geometry node), sorted by edge index; an edge that is not
     /// listed is straight. Empty for every mesh made by `new`.
     edge_nodes: Vec<(u32, [f64; 3])>,
+    /// 3D: sorted edge indices carrying Barsoum quarter-point singularity nodes (`AF-2`); empty by default.
+    qp_edges: Vec<u32>,
 }
 
 /// The distinct edges of a mesh as sorted vertex pairs, and for every cell the edge index of each
@@ -217,7 +219,7 @@ impl SimplexMesh {
         assert!(dim == 2 || dim == 3);
         let nv = points.len() / dim;
         let (edges, cell_edges) = build_edges(dim, &cells, nv);
-        SimplexMesh { dim, points, cells, cell_labels, facets, facet_labels, edges, cell_edges, edge_nodes: Vec::new() }
+        SimplexMesh { dim, points, cells, cell_labels, facets, facet_labels, edges, cell_edges, edge_nodes: Vec::new(), qp_edges: Vec::new() }
     }
 
     /// Sets the curved edges of a 3D mesh: `(vertex pair, node position)`; pairs that are not an edge of the mesh are ignored (the
@@ -225,6 +227,7 @@ impl SimplexMesh {
     pub fn set_edge_nodes(&mut self, nodes: &[([u32; 2], [f64; 3])]) {
         if self.dim != 3 {
             self.edge_nodes.clear();
+            self.qp_edges.clear();
             return;
         }
         let mut v: Vec<(u32, [f64; 3])> = nodes
@@ -234,6 +237,40 @@ impl SimplexMesh {
         v.sort_by_key(|e| e.0);
         v.dedup_by_key(|e| e.0);
         self.edge_nodes = v;
+        self.qp_edges.retain(|e| self.edge_nodes.binary_search_by_key(e, |x| x.0).is_ok());
+    }
+
+    /// Marks which curved edges carry Barsoum quarter-point singularity shifts (`AF-2`), sorted by edge index.
+    pub fn set_qp_edges(&mut self, edges: &[[u32; 2]]) {
+        if self.dim != 3 {
+            self.qp_edges.clear();
+            return;
+        }
+        let mut v: Vec<u32> = edges
+            .iter()
+            .filter_map(|&[a, b]| {
+                let e = self.edges.binary_search(&(a.min(b), a.max(b))).ok()? as u32;
+                self.edge_nodes.binary_search_by_key(&e, |x| x.0).ok().map(|_| e)
+            })
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        self.qp_edges = v;
+    }
+
+    /// Whether edge `e` (index into `edges()`) carries a quarter-point singularity node.
+    pub fn edge_is_qp(&self, e: usize) -> bool {
+        self.qp_edges.binary_search(&(e as u32)).is_ok()
+    }
+
+    /// Whether the mesh carries any quarter-point shifted edge.
+    pub fn has_qp(&self) -> bool {
+        !self.qp_edges.is_empty()
+    }
+
+    /// Whether at least one edge of cell `c` is a quarter-point shifted edge (`AF-2`).
+    pub fn cell_is_qp(&self, c: usize) -> bool {
+        !self.qp_edges.is_empty() && self.dim == 3 && self.cell_edge_ids(c).iter().any(|&e| self.edge_is_qp(e as usize))
     }
     /// The curved edges as `(sorted vertex pair, node position)`, sorted by pair (the exchange form of `CellMesh::edge_nodes`).
     pub fn edge_node_list(&self) -> Vec<([u32; 2], [f64; 3])> {

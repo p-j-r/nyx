@@ -203,6 +203,9 @@ fn sheet_edge_size_rule_refines_perimeter_and_grades_z_slabs_without_warnings() 
         curved: false,
         gap_cells: None,
         z_coarsen: false,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
     let (g_coarse, rep_coarse) = mesh_request(&coarse_m.list, &req).unwrap();
     let (g_fine, rep_fine) = mesh_request(&fine_m.list, &req).unwrap();
