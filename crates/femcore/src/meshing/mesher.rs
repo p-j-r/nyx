@@ -150,27 +150,132 @@ pub(crate) fn mesh_chains(
         // overlapping shapes break; unwanted cells are dropped by the shape test below instead
         .keep_constraint_edges()
         .with_angle_limit(AngleLimit::from_deg(mp.min_angle_deg.clamp(0.0, 33.0)))
-        .with_max_allowed_area(0.5 * (h_global / scale) * (h_global / scale));
+        .with_max_allowed_area(0.5 * (h_global / scale) * (h_global / scale))
+        .with_min_required_area(1e-14);
     cdt.refine(params);
 
     // cells: faces whose centroid is inside some shape (the last containing shape wins)
     let nvert = cdt.num_vertices();
+    let weld_tol = 1e-9_f64;
+    let weld_tol2 = weld_tol * weld_tol;
+    let vpos: Vec<[f64; 2]> = (0..nvert)
+        .map(|i| {
+            let p = cdt.vertex(spade::handles::FixedVertexHandle::from_index(i)).position();
+            [p.x, p.y]
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..nvert).collect();
+    order.sort_by(|&a, &b| vpos[a][0].total_cmp(&vpos[b][0]).then_with(|| a.cmp(&b)));
+    let mut canon: Vec<usize> = (0..nvert).collect();
+    for ii in 0..nvert {
+        let i = order[ii];
+        let mut jj = ii;
+        while jj > 0 {
+            jj -= 1;
+            let j = order[jj];
+            let dx = vpos[i][0] - vpos[j][0];
+            if dx > weld_tol {
+                break;
+            }
+            let dy = vpos[i][1] - vpos[j][1];
+            if dx * dx + dy * dy <= weld_tol2 {
+                let (lo, hi) = (canon[i].min(canon[j]), canon[i].max(canon[j]));
+                canon[i] = lo;
+                canon[j] = lo;
+                canon[hi] = lo;
+            }
+        }
+    }
+    for i in 0..nvert {
+        let mut r = i;
+        while canon[r] != r {
+            r = canon[r];
+        }
+        canon[i] = r;
+    }
+
     let mut cells: Vec<u32> = vec![];
     let mut cell_labels: Vec<i32> = vec![];
+    let mut caps: Vec<(u32, u32, u32)> = vec![];
     for f in cdt.inner_faces() {
         let [a, b, c] = f.vertices();
-        let pos = [a.position(), b.position(), c.position()];
-        // a face whose vertices are collinear to rounding is not a cell: Ruppert refinement can split a
-        // boundary edge at a point a rounding error off the line, leaving such a sliver outside the shapes
-        let area2 = ((pos[1].x - pos[0].x) * (pos[2].y - pos[0].y) - (pos[2].x - pos[0].x) * (pos[1].y - pos[0].y)).abs();
-        let longest2 = (0..3).map(|i| (pos[i].x - pos[(i + 1) % 3].x).powi(2) + (pos[i].y - pos[(i + 1) % 3].y).powi(2)).fold(0.0, f64::max);
-        if area2 < 1e-8 * longest2 {
+        let (ia, ib, ic) = (canon[a.fix().index()], canon[b.fix().index()], canon[c.fix().index()]);
+        if ia == ib || ib == ic || ia == ic {
             continue;
         }
-        let cen = den([(pos[0].x + pos[1].x + pos[2].x) / 3.0, (pos[0].y + pos[1].y + pos[2].y) / 3.0]);
+        let pos = [vpos[ia], vpos[ib], vpos[ic]];
+        // a face whose vertices are collinear to rounding is not a cell: Ruppert refinement can split a
+        // boundary edge at a point a rounding error off the line, leaving such a sliver outside the shapes
+        let area2 = ((pos[1][0] - pos[0][0]) * (pos[2][1] - pos[0][1]) - (pos[2][0] - pos[0][0]) * (pos[1][1] - pos[0][1])).abs();
+        let l2 = [
+            (pos[0][0] - pos[1][0]).powi(2) + (pos[0][1] - pos[1][1]).powi(2),
+            (pos[1][0] - pos[2][0]).powi(2) + (pos[1][1] - pos[2][1]).powi(2),
+            (pos[2][0] - pos[0][0]).powi(2) + (pos[2][1] - pos[0][1]).powi(2),
+        ];
+        let longest2 = l2[0].max(l2[1]).max(l2[2]);
+        if area2 < 1e-8 * longest2 {
+            let verts = [ia as u32, ib as u32, ic as u32];
+            let k = if l2[0] >= l2[1] && l2[0] >= l2[2] {
+                0
+            } else if l2[1] >= l2[2] {
+                1
+            } else {
+                2
+            };
+            caps.push((verts[k], verts[(k + 1) % 3], verts[(k + 2) % 3]));
+            continue;
+        }
+        let cen = den([(pos[0][0] + pos[1][0] + pos[2][0]) / 3.0, (pos[0][1] + pos[1][1] + pos[2][1]) / 3.0]);
         if let Some(domain) = domain_at(cen) {
-            cells.extend_from_slice(&[a.fix().index() as u32, b.fix().index() as u32, c.fix().index() as u32]);
+            cells.extend_from_slice(&[ia as u32, ib as u32, ic as u32]);
             cell_labels.push(domain);
+        }
+    }
+    if !caps.is_empty() {
+        // An interior collinear cap `(u, v, m)` (stopped by `min_required_area`) leaves `(u, m)`, `(m, v)` and `(u, v)`
+        // mismatched across `u-v`; split the single kept triangle across `(u, v)` at `m` so no interior crack remains.
+        for _pass in 0..2 {
+            let mut e_cnt: HashMap<(u32, u32), u32> = HashMap::new();
+            for t in cells.chunks(3) {
+                for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                    *e_cnt.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+                }
+            }
+            let mut any = false;
+            for &(u, v, m) in &caps {
+                let e_uv = (u.min(v), u.max(v));
+                let e_um = (u.min(m), u.max(m));
+                let e_mv = (m.min(v), m.max(v));
+                if e_cnt.get(&e_uv).copied() == Some(1)
+                    && e_cnt.get(&e_um).copied() == Some(1)
+                    && e_cnt.get(&e_mv).copied() == Some(1)
+                {
+                    if let Some(ci) = cells.chunks(3).position(|t| {
+                        [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])].iter().any(|&(a, b)| (a.min(b), a.max(b)) == e_uv)
+                    }) {
+                        let t = [cells[3 * ci], cells[3 * ci + 1], cells[3 * ci + 2]];
+                        let (d, p, q) = if (t[0].min(t[1]), t[0].max(t[1])) == e_uv {
+                            (t[2], t[0], t[1])
+                        } else if (t[1].min(t[2]), t[1].max(t[2])) == e_uv {
+                            (t[0], t[1], t[2])
+                        } else {
+                            (t[1], t[2], t[0])
+                        };
+                        let dom = cell_labels[ci];
+                        cells[3 * ci..3 * ci + 3].copy_from_slice(&[d, p, m]);
+                        cells.extend_from_slice(&[d, m, q]);
+                        cell_labels.push(dom);
+                        *e_cnt.entry(e_uv).or_insert(0) = 0;
+                        *e_cnt.entry(e_um).or_insert(0) += 1;
+                        *e_cnt.entry(e_mv).or_insert(0) += 1;
+                        *e_cnt.entry((d.min(m), d.max(m))).or_insert(0) += 2;
+                        any = true;
+                    }
+                }
+            }
+            if !any {
+                break;
+            }
         }
     }
     if cells.is_empty() {

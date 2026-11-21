@@ -497,6 +497,8 @@ fn mesh_request_and_report_match_their_exemplars_and_schemas() {
         mesher: MesherRequest::Adaptive { scale: 0.7, grade: 0.4, max_cells: Some(200_000) },
         structured_pml: true,
         curved: false,
+        gap_cells: None,
+        z_coarsen: false,
         waves: Some(WavesRequest {
             sizing: Sizing { order: 2, headroom: 1.0, wavelengths: [("air".to_string(), 4.0), ("ball".to_string(), 1.2)].into_iter().collect() },
             points_per_wavelength: None,

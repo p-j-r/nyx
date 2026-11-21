@@ -25,6 +25,7 @@ pub mod raster;
 pub mod samples;
 pub mod section;
 pub mod tls;
+pub mod view3d;
 
 pub use capacitance::{
     capacitance_matrix, capacitance_matrix_applies, inductance_matrix, inductance_matrix_applies,

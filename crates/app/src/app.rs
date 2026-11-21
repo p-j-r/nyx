@@ -1429,7 +1429,7 @@ impl App {
                         let material = match m {
                             MaterialAssign::Named(n) => Some(n.clone()),
                             MaterialAssign::Oriented { material, .. } => Some(material.clone()),
-                            MaterialAssign::Props(_) => None,
+                            MaterialAssign::Props(_) | MaterialAssign::PropsTensor(_) => None,
                         };
                         (region.clone(), material)
                     })
@@ -2264,7 +2264,7 @@ mod tests {
             Box::new(|a| a.mesh_edit.physics_sizing = !a.mesh_edit.physics_sizing),
             Box::new(|a| a.mesh_edit.adapt_scale = Some(0.8)),
             Box::new(|a| a.mesh_edit.structured_pml = !a.mesh_edit.structured_pml),
-            Box::new(|a| a.mesh_edit.sweep = Some(vec![nyx_engine::SweepLayer { thickness: 1.0, n: 4, domain_offset: 0, fill: None }])),
+            Box::new(|a| a.mesh_edit.sweep = Some(vec![nyx_engine::SweepLayer { thickness: 1.0, n: 4, domain_offset: 0, fill: None, regions: None }])),
             Box::new(|a| a.mesh_edit.h = -1.0),
             Box::new(|a| a.mesh_edit.h = 0.02),
         ];
@@ -2971,7 +2971,10 @@ mod tests {
         // Assign "silica" to all regions via "apply material...", then override "Si" to "silicon"
         gui_click_text(&mut a, "apply material...");
         gui_click_combo_item(&mut a, "silica");
-        let texts = gui_frame(&mut a, egui::RawInput::default());
+        let mut texts = gui_frame(&mut a, egui::RawInput::default());
+        if !texts.iter().any(|(t, r)| t == "Si" && r.min.x > 700.0) {
+            texts = gui_scroll_inspector(&mut a, -350.0);
+        }
         let si_label = texts
             .iter()
             .filter(|(t, r)| t == "Si" && r.min.x > 700.0)

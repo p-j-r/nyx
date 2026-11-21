@@ -96,10 +96,34 @@ pub fn golden(dir: &std::path::Path, name: &str, r: &SolveResult, tol: f64) {
     let want: Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("missing {path:?}"))).unwrap();
     // the text of an effective index and Q = Re/(2|Im|) carry the round-off of an imaginary part that is zero: the numbers are in `neff`
-    let strip = |v: &Value| -> Value {
+    const ADDITIVE_FR3_SCALAR_PREFIXES: &[&str] = &[
+        "n_g ",
+        "v_g ",
+        "n_B ",
+        "Ex share ",
+        "Ey share ",
+        "Ez share ",
+        "share in domain ",
+        "layer fraction ",
+        "f re ",
+        "f im ",
+    ];
+    let want_scalars = want["scalars"].as_object().cloned().unwrap_or_default();
+    let strip = |v: &Value, is_got: bool| -> Value {
         let mut v = v.clone();
         if let Some(sc) = v["scalars"].as_object_mut() {
-            sc.retain(|k, x| !(k.starts_with("Q ") || x.is_string() && k.starts_with("neff")));
+            sc.retain(|k, x| {
+                if k.starts_with("Q ") || (x.is_string() && k.starts_with("neff")) {
+                    return false;
+                }
+                if is_got
+                    && !want_scalars.contains_key(k)
+                    && ADDITIVE_FR3_SCALAR_PREFIXES.iter().any(|p| k.starts_with(p))
+                {
+                    return false;
+                }
+                true
+            });
             // a Stokes parameter that is zero prints with either sign
             for x in sc.values_mut() {
                 if let Some(t) = x.as_str() {
@@ -110,7 +134,7 @@ pub fn golden(dir: &std::path::Path, name: &str, r: &SolveResult, tol: f64) {
         }
         v
     };
-    let (want, got) = (strip(&want), strip(&got));
+    let (want, got) = (strip(&want, false), strip(&got, true));
     let mut diffs = vec![];
     compare(name, &want, &got, 1.0, tol, &mut diffs);
     if !diffs.is_empty() {

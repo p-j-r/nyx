@@ -9,11 +9,12 @@
 //! * a **cross-section** (2D) is sampled at the 24 points of `femcore::optical::fine_rule` of every cell outside the absorbing domains, with
 //!   the field interpolated from the nodes (P1 or P2 shape functions); the weight is the rule weight times the cell area. The mode fields are
 //!   piecewise quadratic, so the interpolation is exact and the Stokes sums are those of the solver's own field;
-//! * a **cavity** (3D) is sampled at the four vertices of every cell, each standing for a quarter of the cell volume.
+//! * a **3D mode or cavity** is sampled at the degree-4 tetrahedral quadrature rule (`quad_rule(3, 4)`) of every cell outside the absorbing
+//!   domains, interpolated over all P1 (4) or P2 (10) nodes of the tetrahedron.
 
 use crate::modes::{AnalysisOptions, ModeInput};
 use crate::polarization::{Cx, Sample, TimeConvention};
-use femcore::fem::{geometry, shape};
+use femcore::fem::{geometry, quad_rule, shape};
 use femcore::fields::local_bary;
 use femcore::optical::fine_rule;
 use nyx_physics::{discretise, CellField, Error, FieldFrame, Mesh, Solution, SolveResult};
@@ -49,7 +50,7 @@ pub fn polarization_input(mesh: &Mesh, result: &SolveResult) -> Result<Polarizat
     }
     let geo = geometry(&disc);
     let skipped: Vec<bool> = (0..disc.n_cells()).map(|c| frame.outside.contains(&disc.cell_labels[c])).collect();
-    let cavity = dim == 3;
+    let cavity = matches!(result.study.as_str(), "cavity" | "eigenfrequency" | "axisymmetric_eigenfrequency");
     let mut modes = vec![];
     for (j, sol) in result.solutions.iter().enumerate() {
         let comp = |axis: usize| -> Result<&CellField, Error> {
@@ -99,12 +100,19 @@ pub fn polarization_input(mesh: &Mesh, result: &SolveResult) -> Result<Polarizat
             v
         };
         let mut samples = vec![];
-        if cavity {
+        if dim == 3 {
+            let quad = quad_rule(3, 4);
+            let shapes: Vec<Vec<f64>> = quad.lam.iter().map(|p| shape(p, order).0).collect();
+            debug_assert_eq!(shapes[0].len(), local_bary(3, order).len());
             for c in (0..ncell).filter(|&c| !skipped[c]) {
-                for a in 0..4 {
-                    let i = c * nloc + a;
-                    let one = |f: &CellField| -> Cx { [f.re[i], if f.im.is_empty() { 0.0 } else { f.im[i] }] };
-                    samples.push(Sample { lat: one(lat), nor: one(nor), prop: one(prop), w: geo.vol[c] / 4.0 });
+                let base = c * nloc;
+                for (n, w) in shapes.iter().zip(&quad.w) {
+                    samples.push(Sample {
+                        lat: at(lat, base, n),
+                        nor: at(nor, base, n),
+                        prop: at(prop, base, n),
+                        w: w * geo.vol[c],
+                    });
                 }
             }
         } else {

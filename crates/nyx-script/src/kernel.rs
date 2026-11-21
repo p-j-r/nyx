@@ -113,12 +113,16 @@ fn os_policy() -> OsPolicy {
     }
 }
 
+fn session_suspension_cap(limits: &Limits) -> usize {
+    limits.calls.saturating_mul(16).max(200_000)
+}
+
 fn repl_config(engine: &Engine, limits: &Limits) -> ReplConfig {
     let rl = ResourceLimits::default()
         .max_feed_duration(Duration::from_secs_f64(limits.seconds))
         .max_memory(limits.memory_bytes)
         .max_recursion_depth(limits.depth)
-        .max_suspensions(limits.calls);
+        .max_suspensions(session_suspension_cap(limits));
     ReplConfig {
         script_name: "script".to_string(),
         limits: Some(rl),
@@ -249,6 +253,7 @@ pub struct Kernel {
     paused: Option<Paused>,
     futs: HashMap<u32, Fut>,
     calls: u64,
+    session_suspensions: u64,
     allow_destructive: bool,
     /// the engine's path root before the run that is still going, to put back
     root_before: Option<Option<PathBuf>>,
@@ -295,6 +300,7 @@ impl Kernel {
             paused: None,
             futs: HashMap::new(),
             calls: 0,
+            session_suspensions: 0,
             allow_destructive: true,
             root_before: None,
         })
@@ -331,6 +337,7 @@ impl Kernel {
 
     /// Feeds `src` to the session. It returns when the script is finished, or when `wait` is spent and it is waiting for a job.
     pub fn run(&mut self, engine: &mut Engine, name: &str, src: &str, params: Option<&Value>, wait: Option<Duration>, allow_destructive: bool) -> Result<Step, String> {
+        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
         // a branch on a value of the point in a function given as a formula (S6): refused before anything runs, with the line. It reads this
         // script only: a function defined by an earlier script and given as a formula here is not seen
         trace::guard(name, src)?;
@@ -379,7 +386,25 @@ impl Kernel {
             let rt = self.rt.clone();
             let _ = rt.block_on(s.terminate());
         }
+        self.session_suspensions = 0;
         self.restore_engine(engine);
+        self.out.lock().unwrap().clear();
+        Ok(())
+    }
+
+    /// Clears the script session (variables, functions, and saved snapshot) without touching the engine.
+    pub fn reset(&mut self) -> Result<(), String> {
+        if let Some(w) = self.waiting() {
+            return Err(format!("a script is still running, waiting for {w}: continue it with script_wait, or abandon it with script_wait cancel"));
+        }
+        if let Some(s) = self.session.take() {
+            let rt = self.rt.clone();
+            let _ = rt.block_on(s.terminate());
+        }
+        self.dump = None;
+        self.session_suspensions = 0;
+        self.calls = 0;
+        self.futs.clear();
         self.out.lock().unwrap().clear();
         Ok(())
     }
@@ -387,6 +412,7 @@ impl Kernel {
     /// Parses and type-checks `src` against the commands and the variables of the session and runs nothing that matters: the session it is
     /// checked in is a copy of the kernel's, thrown away after.
     pub fn check(&mut self, engine: &mut Engine, name: &str, src: &str) -> Result<(), String> {
+        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
         trace::guard(name, src)?;
         let rt = self.rt.clone();
         rt.block_on(async {
@@ -417,6 +443,9 @@ impl Kernel {
         let mut on_print = printer!(self);
         if let Some(d) = &self.dump {
             c.restore(d.clone(), vec![], &mut on_print).await.map_err(|e| explain(e, &self.limits))?;
+            if self.session.is_none() {
+                self.session_suspensions = 0;
+            }
             return Ok(c);
         }
         match c.feed(trace::prelude(engine), nyx_module(engine), vec![], true, &mut on_print).await.map_err(|e| explain(e, &self.limits))? {
@@ -424,10 +453,21 @@ impl Kernel {
             _ => return Err("internal error: the script prelude paused".to_string()),
         }
         self.dump = c.dump().await.ok();
+        if self.session.is_none() {
+            self.session_suspensions = 0;
+        }
         Ok(c)
     }
 
     async fn start(&mut self, engine: &mut Engine, _name: &str, src: &str, params: &Value, deadline: Option<Instant>) -> Result<Step, String> {
+        self.calls = 0;
+        let session_cap = session_suspension_cap(&self.limits) as u64;
+        if self.session.is_some() && self.session_suspensions.saturating_add(self.limits.calls as u64) >= session_cap {
+            if let Some(old) = self.session.take() {
+                let _ = old.terminate().await;
+            }
+            self.session_suspensions = 0;
+        }
         let mut s = match self.session.take() {
             Some(s) => s,
             None => self.open_session(engine).await?,
@@ -460,6 +500,7 @@ impl Kernel {
             Err(Fail::Fatal(m)) => {
                 let _ = s.terminate().await;
                 self.paused = None;
+                self.session_suspensions = 0;
                 let back = if self.dump.is_some() { "; the variables of the scripts that finished are back in a new worker" } else { "" };
                 Err(format!("{m}{back}"))
             }
@@ -491,7 +532,26 @@ impl Kernel {
     }
 
     fn pool_fail(&self, e: PoolError) -> Fail {
-        let soft = matches!(e, PoolError::Runtime(_) | PoolError::Typing(_));
+        let fatal_runtime = match &e {
+            PoolError::Runtime(exc) => {
+                let text = exc.to_string().to_lowercase();
+                exc.exc_type() == ExcType::MemoryError
+                    || text.contains("memoryerror")
+                    || text.contains("memory limit")
+                    || text.contains("suspension limit")
+                    || text.contains("max_suspensions")
+                    || text.contains("timeout")
+                    || text.contains("time limit")
+                    || text.contains("duration")
+            }
+            _ => false,
+        };
+        let soft = match &e {
+            PoolError::Typing(_) => true,
+            PoolError::Runtime(_) => !fatal_runtime,
+            PoolError::Finished | PoolError::Timeout { .. } | PoolError::Crashed { .. } => false,
+            _ => false,
+        };
         let m = explain(e, &self.limits);
         if soft {
             Fail::Soft(m)
@@ -514,20 +574,29 @@ impl Kernel {
                 }
                 Next::Event(TurnEvent::FunctionCall { function_name, args, call_id, .. }) => {
                     self.calls += 1;
+                    self.session_suspensions += 1;
+                    if self.calls > self.limits.calls as u64 {
+                        return Err(Fail::Fatal(format!("call limit {} exceeded for this turn", self.limits.calls)));
+                    }
                     match self.act(engine, &function_name, call_id, &args) {
                         Act::Value(r) => Next::Event(s.resume(reply(&function_name, r), &mut on_print).await.map_err(|e| self.pool_fail(e))?),
                         Act::Future => Next::Event(s.resume(ResumeValue::Future, &mut on_print).await.map_err(|e| self.pool_fail(e))?),
                         Act::Poll(p) => Next::PollCall(p),
                     }
                 }
-                Next::Event(TurnEvent::ResolveFutures { pending_call_ids, .. }) => Next::Settle(pending_call_ids),
+                Next::Event(TurnEvent::ResolveFutures { pending_call_ids, .. }) => {
+                    self.session_suspensions += 1;
+                    Next::Settle(pending_call_ids)
+                }
                 // a name nothing defines: Python's own NameError with the line
                 Next::Event(TurnEvent::NameLookup { .. }) => {
+                    self.session_suspensions += 1;
                     Next::Event(s.resume_name_lookup(NameLookupResult::Undefined, &mut on_print).await.map_err(|e| self.pool_fail(e))?)
                 }
                 // files, imports of modules that are not built in, the clock: refused. The sandbox raises PermissionError (with the path) or
                 // ModuleNotFoundError itself; the clock gets a sentence that says why.
                 Next::Event(TurnEvent::OsCall { function_name, .. }) => {
+                    self.session_suspensions += 1;
                     let clock = function_name.contains("time") || function_name.contains("date") || function_name.contains("now") || function_name.contains("today");
                     let r = if clock {
                         refuse(ExcType::RuntimeError, "not available in nyx scripts: no clock (a run must give the same numbers every time)")

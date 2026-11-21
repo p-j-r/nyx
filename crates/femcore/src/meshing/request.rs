@@ -78,6 +78,12 @@ pub struct MeshRequest {
     /// 3D: quadratic (isoparametric) geometry for the cells on a curved surface (ADR 82)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub curved: bool,
+    /// 3D sheet mesher: target number of cells across narrow coplanar gaps; absent: disabled
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap_cells: Option<f64>,
+    /// 3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub z_coarsen: bool,
 }
 
 impl MeshRequest {
@@ -86,6 +92,8 @@ impl MeshRequest {
         let mut opts = GeomMeshOpts::new(self.h);
         opts.max_dev = self.max_dev;
         opts.curved = self.curved;
+        opts.gap_cells = self.gap_cells;
+        opts.z_coarsen = self.z_coarsen;
         MeshPlan {
             opts,
             mesher: match self.mesher {
@@ -258,6 +266,8 @@ pub fn request_schema() -> Value {
             },
             "structured_pml": { "type": "boolean", "default": false },
             "curved": { "type": "boolean", "default": false, "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface" },
+            "gap_cells": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: target number of cells across narrow coplanar gaps" },
+            "z_coarsen": { "type": "boolean", "default": false, "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes" },
             "waves": {
                 "type": ["object", "null"],
                 "required": ["sizing"],

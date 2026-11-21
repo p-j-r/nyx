@@ -196,12 +196,14 @@ fn kernel_stage_api_is_public() {
     let _ = (nyx_ems::assemble_modes_complex, nyx_ems::solve_mode_pairs_complex, nyx_ems::mode_fields_complex_cells);
     let _ = (nyx_ems::assemble_axisym, nyx_ems::solve_axisym_pairs, nyx_ems::axisym_fields_cells);
     let _ = (nyx_ems::assemble_emw_eigen, nyx_ems::solve_emw_modes, nyx_ems::emw_eigen_fields);
+    let _ = (nyx_ems::assemble_bloch, nyx_ems::solve_bloch_eigen, nyx_ems::bloch_fields_cells);
     // the one-call kernels of the studies, the run and the decoder
     let _ = (
         nyx_ems::solve_waveguide,
         nyx_ems::solve_waveguide_complex,
         nyx_ems::solve_axisymmetric,
         nyx_ems::solve_cavity,
+        nyx_ems::solve_bloch,
     );
     let _ = (nyx_ems::run, nyx_ems::decode, nyx_ems::solve_optical);
 }
@@ -244,11 +246,16 @@ fn result_shape_exemplar_is_stable() {
     let axi = nyx_ems::Problem::new(Study::AxisymmetricModes { f_search: 1.0e9, azimuthal_order: 0, n_modes: 1 }, 2);
     let boxm = common::block(0.04, 0.03, 0.02, 3, 2, 2);
     let cavity = nyx_ems::Problem::new(Study::Cavity { n_modes: 2, f_search: 6.0e9 }, 2);
+    let mut bloch =
+        nyx_ems::Problem::new(Study::Bloch { freq: 10.0e9, n_target: 1.5, n_modes: 2, brillouin_zone: 1 }, 2);
+    bloch.materials.set(1, "eps_r", 4.0);
+    bloch.periodic = vec![femcore::props::Periodic { source: vec![2], dest: vec![5], phase: 0.0 }];
     let got = json!({
         "modes_real": run(&guide, &real),
         "modes_complex": run(&split, &complex),
         "axisymmetric_modes": run(&coax, &axi),
         "cavity": run(&boxm, &cavity),
+        "bloch": run(&boxm, &bloch),
     });
     contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_ems_result.v1.json", &got);
 }

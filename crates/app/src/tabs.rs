@@ -152,7 +152,7 @@ fn plate(lx: f64, lz: f64) -> FeatureList {
 fn sweep_editor(ui: &mut Ui, sweep: &mut Option<Vec<SweepLayer>>) {
     let mut on = sweep.is_some();
     if ui.checkbox(&mut on, "Sweep along y into 3D layers").changed() {
-        *sweep = if on { Some(vec![SweepLayer { thickness: 0.1, n: 2, domain_offset: 0, fill: None }]) } else { None };
+        *sweep = if on { Some(vec![SweepLayer { thickness: 0.1, n: 2, domain_offset: 0, fill: None, regions: None }]) } else { None };
     }
     if let Some(layers) = sweep {
         let mut rm = None;
@@ -176,7 +176,7 @@ fn sweep_editor(ui: &mut Ui, sweep: &mut Option<Vec<SweepLayer>>) {
             }
         }
         if ui.small_button("+ layer").clicked() {
-            layers.push(SweepLayer { thickness: 0.1, n: 2, domain_offset: 0, fill: None });
+            layers.push(SweepLayer { thickness: 0.1, n: 2, domain_offset: 0, fill: None, regions: None });
         }
         ui.weak("The ends of the swept model are the boundaries ymin (at y = 0) and ymax.");
     }
@@ -253,7 +253,7 @@ impl App {
             if ui.button("block (plate swept along y)").clicked() {
                 g = plate(1.0, 0.5);
                 m.h = 0.1;
-                m.sweep = Some(vec![SweepLayer { thickness: 1.0, n: 8, domain_offset: 0, fill: None }]);
+                m.sweep = Some(vec![SweepLayer { thickness: 1.0, n: 8, domain_offset: 0, fill: None, regions: None }]);
             }
         });
         ui.horizontal(|ui| {
@@ -442,7 +442,7 @@ impl App {
                     let shown = match &cur {
                         Some(MaterialAssign::Named(n)) => n.clone(),
                         Some(MaterialAssign::Oriented { material, .. }) => format!("{material} (rotated)"),
-                        Some(MaterialAssign::Props(_)) => "numbers".into(),
+                        Some(MaterialAssign::Props(_)) | Some(MaterialAssign::PropsTensor(_)) => "numbers".into(),
                         None => "none".into(),
                     };
                     egui::ComboBox::from_id_salt(format!("mat_{key}")).height(320.0).selected_text(shown).show_ui(ui, |ui| {
@@ -503,6 +503,17 @@ impl App {
                         });
                         if edited {
                             spec.materials.insert(key.clone(), MaterialAssign::Props(map));
+                        }
+                    }
+                    Some(MaterialAssign::PropsTensor(map)) => {
+                        for p in &props {
+                            if let Some(v) = map.get(&p.name) {
+                                ui.horizontal(|ui| {
+                                    ui.label(&p.label);
+                                    ui.monospace(format!("{v:?}"));
+                                    ui.weak(&p.unit);
+                                });
+                            }
                         }
                     }
                     None => {

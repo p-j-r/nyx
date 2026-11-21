@@ -690,7 +690,40 @@
                 },
                 "alpha": {
                   "description": "Thermal expansion [1/K]",
-                  "type": "number"
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  ]
                 },
                 "nu": {
                   "description": "Poisson's ratio []",

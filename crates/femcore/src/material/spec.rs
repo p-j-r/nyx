@@ -249,6 +249,7 @@ fn m3_to_tensor(m: &M3) -> Tensor {
 impl MaterialSpec {
     /// Reads a material from TOML text. `fallback_name` is used when the file has no `name`.
     pub fn from_toml_named(text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError> {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let table: toml::Table = text.parse().map_err(|e: toml::de::Error| MaterialError {
             material: fallback_name.to_string(),
             path: String::new(),
@@ -855,6 +856,7 @@ impl Library {
                     continue;
                 }
             };
+            let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
             match text.parse::<toml::Table>() {
                 Ok(t) => {
                     raw.insert(stem.to_ascii_lowercase(), (stem, t));
@@ -922,6 +924,7 @@ impl Library {
 
     /// `read`, with the table after `extends` was resolved.
     pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError> {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let table: toml::Table = text.parse().map_err(|e: toml::de::Error| MaterialError {
             material: fallback_name.to_string(),
             path: String::new(),

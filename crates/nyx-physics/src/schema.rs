@@ -3,7 +3,7 @@
 //! JSON Schemas generated from descriptors, so the MCP server, the window and the documentation read the same truth. The schemas are
 //! draft 2020-12 documents; `physics_schema` describes the whole `ProblemSpec` of one physics.
 
-use crate::desc::{ParamDesc, ParamKind};
+use crate::desc::{ParamDesc, ParamKind, PropKind};
 use crate::physics::Physics;
 use serde_json::{json, Map, Value};
 
@@ -83,7 +83,25 @@ pub fn physics_schema(p: &dyn Physics) -> Value {
     let bcs: Vec<Value> = p.bc_kinds().iter().map(|k| json!({ "type": "object", "properties": { "on": { "type": "string", "description": "a region name or a boundary selector" }, "kind": { "const": k.kind }, "params": params_schema(&k.params) }, "required": ["on", "kind"], "additionalProperties": false, "description": k.doc })).collect();
     let mut props = Map::new();
     for d in p.properties() {
-        props.insert(d.name.clone(), json!({ "type": "number", "description": format!("{} [{}]", d.label, d.unit) }));
+        let desc = format!("{} [{}]", d.label, d.unit);
+        let prop_schema = match d.kind {
+            PropKind::Tensor => json!({
+                "description": desc,
+                "oneOf": [
+                    { "type": "number" },
+                    { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+                    { "type": "array", "items": { "type": "number" }, "minItems": 6, "maxItems": 6 },
+                    {
+                        "type": "array",
+                        "items": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+                        "minItems": 3,
+                        "maxItems": 3
+                    }
+                ]
+            }),
+            _ => json!({ "type": "number", "description": desc }),
+        };
+        props.insert(d.name.clone(), prop_schema);
     }
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",

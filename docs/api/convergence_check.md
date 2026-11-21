@@ -2,21 +2,32 @@
 
 **Check mesh convergence** · access `expensive`: starts a mesh build or a solve, or writes files
 
-Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` "nearest" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.
+Solves the physics on a second mesh with element sizes multiplied by `factor` (`< 1` refines, `> 1` coarsens; the active project is never mutated) and compares every eigenvalue, value and scalar between the coarse and fine grids. By default `scale_sizes` is true so non-suppressed `add_size` rules (`h`, `max_deviation`, `min_layers`) and `gap_cells` scale proportionally with `factor` on the comparison copy. With `tolerance` each row says pass or fail, `converged` summarises, and the verdict is kept (`validated` becomes `checked` or stays `exploratory`). When mode ordering changes between meshes, `match: "nearest"` pairs mutual nearest eigenvalues and `track` filters candidate modes on both meshes by target (`f`, `n_b` or `n_eff`) and/or physical mode signatures (`region`/`min_share`, `component`/`min_component`, `max_layer_fraction`). With `extrapolate` (`"richardson_log_spd"` or `"richardson_linear"`), computes two-grid Richardson extrapolation (`extrapolate_order` defaults to 1.0 on 3D/sheet capacitance matrices, else `2 * order`) and optionally promotes the extrapolated capacitance matrix onto the stored result when `apply_extrapolated` is true.
 
 ## Arguments
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
+| `apply_extrapolated` | true or false | no |  | when true, promote the extrapolated capacitance matrix onto the stored latest result of physics, default false |
 | `dry_run` | true or false | no |  | only build both meshes and answer their cells and what a solve of each is expected to cost; nothing is solved |
-| `factor` | number | no |  | finer/present element size, between 0 and 1, default 0.6 |
-| `match` | text: `index`, `nearest` | no |  | how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner |
-| `max_cells` | number | no |  | refuse, before any solve, a check whose finer mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6) |
-| `max_seconds` | number | no |  | refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the finer mesh |
+| `extrapolate` | text: `richardson_log_spd`, `richardson_linear` | no |  | optional two-grid Richardson extrapolation mode: richardson_log_spd (SPD-preserving log-space Maxwell capacitance extrapolation) or richardson_linear |
+| `extrapolate_order` | number | no |  | asymptotic convergence order p > 0 for Richardson extrapolation; default 1.0 for 3D/sheet capacitance matrices, else 2 * order |
+| `factor` | number | no |  | comparison/present element-size ratio, positive and not 1 (< 1 refines, > 1 coarsens), default 0.6 |
+| `match` | text: `index`, `nearest` | no |  | how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the other mesh in the complex plane and lists the modes without a partner |
+| `max_cells` | number | no |  | refuse, before any solve, a check whose comparison mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6) |
+| `max_seconds` | number | no |  | refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the comparison mesh |
 | `physics` | text: `dfs`, `ems`, `sms` | yes |  | the three-letter code of the physics |
+| `scale_sizes` | true or false | no |  | scale non-suppressed add_size features (h, max_deviation, min_layers) proportionally with factor on the comparison copy, default true |
 | `tolerance` | number | no |  | largest accepted relative difference, e.g. 1e-3; omit to only report |
-| `track` | object | no |  | follow one mode: { f } is a value (Hz for a vibration study); the mode whose eigenvalue is nearest it is compared with the nearest eigenvalue of the finer mesh |
-| `track.f` | number | yes |  |  |
+| `track` | object | no |  | follow mode(s) matching a target eigenvalue (f, n_b or n_eff) and/or physical mode-signature filters across both meshes |
+| `track.component` | text | no |  | field component name (e.g. Ex, Ey, Ez) whose share must be >= min_component |
+| `track.f` | number | no |  | target eigenvalue real part (e.g. frequency in Hz) |
+| `track.max_layer_fraction` | number | no |  | maximum absorbing-layer energy fraction (`layer fraction N`), in [0, 1] |
+| `track.min_component` | number | no |  | minimum component share in [0, 1] |
+| `track.min_share` | number | no |  | minimum energy share in `region`, in [0, 1] |
+| `track.n_b` | number | no |  | target Bloch index real part |
+| `track.n_eff` | number | no |  | target effective index real part |
+| `track.region` | text | no |  | region name whose energy share (`share in <region> N`) must be >= min_share |
 | `wait` | true or false | no |  | wait for the answer, default true; false starts a job that job_list, job_status and job_cancel see and job_wait answers |
 
 Lengths are in metres and every unit is SI unless the argument says otherwise.

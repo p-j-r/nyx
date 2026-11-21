@@ -26,6 +26,7 @@ pub const PLANNED_FACTOR: f64 = 0.6;
 pub struct Check {
     pub factor: f64,
     pub tolerance: f64,
+    pub matching: String,
     pub passed: bool,
     pub worst_relative: f64,
     pub worst_quantity: String,
@@ -38,8 +39,13 @@ pub struct Check {
 impl Check {
     /// What was compared and how, in words (the `observable` of the run record).
     pub fn observable(&self) -> String {
+        let how = match self.matching.as_str() {
+            "nearest" => "solutions paired by nearest eigenvalue",
+            "track" => "solutions paired by tracked mode",
+            _ => "solutions matched by index",
+        };
         format!(
-            "{} quantit{} (eigenvalues, values, numeric scalars), solutions matched by index",
+            "{} quantit{} (eigenvalues, values, numeric scalars), {how}",
             self.quantities,
             if self.quantities == 1 { "y" } else { "ies" }
         )
@@ -49,9 +55,16 @@ impl Check {
     pub(crate) fn from_answer(v: &Value) -> Option<Check> {
         let tolerance = v["tolerance"].as_f64()?;
         let rows = v["rows"].as_array()?;
+        let matching = v
+            .get("match")
+            .and_then(Value::as_str)
+            .or_else(|| v.get("matching").and_then(Value::as_str))
+            .unwrap_or("index")
+            .to_string();
         Some(Check {
             factor: v["factor"].as_f64()?,
             tolerance,
+            matching,
             // every row passed, which is what `converged` says; recomputed so a hand-made answer cannot disagree with its rows
             passed: !rows.is_empty() && rows.iter().all(|r| r["converged"] == json!(true)),
             worst_relative: v["worst_relative"].as_f64().unwrap_or(f64::NAN),
@@ -65,7 +78,7 @@ impl Check {
 
     pub fn to_json(&self) -> Value {
         json!({
-            "factor": self.factor, "tolerance": self.tolerance, "observable": self.observable(), "matching": "index", "passed": self.passed,
+            "factor": self.factor, "tolerance": self.tolerance, "observable": self.observable(), "matching": self.matching, "passed": self.passed,
             "worst_relative": self.worst_relative, "worst_quantity": self.worst_quantity,
             "cells": { "coarse": self.cells_coarse, "refined": self.cells_refined }, "seconds": self.seconds,
         })

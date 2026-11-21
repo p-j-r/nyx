@@ -63,7 +63,8 @@ fn agree(a: &[Value], b: &[Value], tol: f64) {
         for (phys, nx) in x {
             for (name, vx) in nx.as_object().unwrap() {
                 let (vx, vy) = (vx.as_f64().unwrap(), y[phys][name].as_f64().unwrap());
-                assert!((vx - vy).abs() <= tol * vy.abs().max(1e-300), "point {i} {phys} {name}: {vx} against {vy}");
+                let scale = if name.contains("share") || name.contains("fraction") { 1.0 } else { vy.abs().max(1e-12) };
+                assert!((vx - vy).abs() <= tol * scale, "point {i} {phys} {name}: {vx} against {vy}");
             }
         }
     }

@@ -145,7 +145,10 @@ fn a_finer_mesh_confirms_or_refutes_a_number_through_convergence_check() {
     e.call("set_mesh", &json!({ "h": 8e-3 })).unwrap();
     let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.5, "tolerance": 1e-6 })).unwrap();
     assert_eq!(r["converged"], false, "{r}");
-    assert!(e.call("convergence_check", &json!({ "physics": "ems", "factor": 1.5 })).is_err());
+    assert!(e.call("convergence_check", &json!({ "physics": "ems", "factor": 1.0 })).is_err());
+    assert!(e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.0 })).is_err());
+    let rc = e.call("convergence_check", &json!({ "physics": "ems", "factor": 1.5 })).unwrap();
+    assert!(rc["cells"]["refined"].as_u64().unwrap() > rc["cells"]["coarse"].as_u64().unwrap(), "{rc}");
 }
 
 #[test]

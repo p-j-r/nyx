@@ -39,6 +39,15 @@ pub struct MuC {
 }
 
 
+/// Domain labels of all active perfectly matched layers (`x`, `y`, or `z` != `PmlDir::Off`).
+pub fn absorbing_domains(m: &Materials) -> Vec<i32> {
+    m.pml
+        .iter()
+        .filter(|(_, p)| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
+        .map(|(d, _)| *d)
+        .collect()
+}
+
 /// Complex material tensors of every cell including the PML stretching, in the local axes of the mode solvers (`section::local_tensor`).
 /// The layers of a cross-section absorb along the wafer axes x and z.
 pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, Vec<MuC>), String> {

@@ -85,9 +85,17 @@ fn a_command_cannot_write_outside_the_root() {
     // a folder argument is guarded the same way
     assert!(e.call("store_open", &json!({ "folder": outside.to_str().unwrap() })).is_err());
 
-    // reading: a file outside the root is not opened
+    // reading: a file outside the root is not opened (including `import_gds`)
     std::fs::write(outside.join("secret.nyx.json"), "{}").unwrap();
     assert!(e.call("project_open", &json!({ "path": outside.join("secret.nyx.json").to_str().unwrap() })).is_err());
+    std::fs::write(outside.join("secret.gds"), b"\0\x06\0\x02\x02\x58").unwrap();
+    assert!(e
+        .call(
+            "import_gds",
+            &json!({ "path": outside.join("secret.gds").to_str().unwrap(), "layers": { "gnd": [1, 0] } }),
+        )
+        .is_err());
+    assert!(e.call("import_gds", &json!({ "path": "../escaped.gds", "layers": { "gnd": [1, 0] } })).is_err());
 
     // and with the guard off the same command works
     e.set_path_root(None).unwrap();

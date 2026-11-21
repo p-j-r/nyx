@@ -140,6 +140,8 @@ def _nyx_trace(f):
 
 def trace(f):
     """The formula text a function of the point stands for (it is called once)."""
+    if isinstance(f, dict) or type(f).__name__ == "list" or type(f).__name__ == "tuple":
+        return _nyx_conv(f)
     return _nyx_trace(f)
 
 
@@ -151,6 +153,8 @@ def _nyx_conv(v):
         return v.t
     if k == "list" or k == "tuple":
         return [_nyx_conv(i) for i in v]
+    if isinstance(v, dict):
+        return {k: _nyx_conv(val) for k, val in v.items()}
     return v
 
 

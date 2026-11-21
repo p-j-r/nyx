@@ -492,13 +492,13 @@
   },
   {
     "access": "edit",
-    "description": "A material by name (library or project: list_materials), a named material placed at an angle (`{\"material\": \"sapphire\", \"euler_deg\": [0, 57.6, 0]}`, Bunge angles in degrees), or scalar properties by descriptor name (`{\"E\": 1.7e11, \"nu\": 0.28}`).",
+    "description": "A material by name (library or project: list_materials), a named material placed at an angle (`{\"material\": \"sapphire\", \"euler_deg\": [0, 57.6, 0]}`, Bunge angles in degrees), or inline scalar/tensor properties by descriptor name (`{\"E\": 1.7e11, \"nu\": 0.28}`, diagonal `{\"eps_r\": [9.4, 9.4, 11.6]}`, symmetric 6-vector `{\"eps_r\": [xx, yy, zz, xy, xz, yz]}`, or symmetric 3x3 matrix `{\"eps_r\": [[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]]}`).",
     "name": "set_material",
     "schema": {
       "additionalProperties": false,
       "properties": {
         "material": {
-          "description": "material name or properties",
+          "description": "material name, { material, euler_deg }, or inline scalar/tensor property map (scalar, [xx, yy, zz], [xx, yy, zz, xy, xz, yz], or symmetric 3x3 matrix)",
           "oneOf": [
             {
               "type": "string"
@@ -689,7 +689,60 @@
   },
   {
     "access": "edit",
-    "description": "Give only what changes. `adapt_scale` or `sweep` set to null return to the simple mesher / a 2D mesh.",
+    "description": "Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, pins }`.",
+    "name": "import_gds",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "cell": {
+          "description": "top structure cell name to flatten; omit to auto-select the unreferenced root cell",
+          "type": "string"
+        },
+        "layer_bbox": {
+          "description": "when true (default), return bbox over imported layers only; when false, return full top-cell bbox",
+          "type": "boolean"
+        },
+        "layers": {
+          "description": "map from base sheet name to [layer, datatype] GDSII integer pair, e.g. {\"gnd\": [1, 0], \"sig\": [1, 10]}",
+          "type": "object"
+        },
+        "path": {
+          "description": "file path to the binary GDSII (.gds) stream",
+          "type": "string"
+        },
+        "pin_layer": {
+          "description": "[layer, texttype] GDSII pair whose TEXT labels rename matching conductive islands",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "simplify_tol": {
+          "description": "collinear/chord vertex simplification tolerance in metres (shared cross-layer contact vertices stay pinned), default 0",
+          "type": "number"
+        },
+        "split_islands": {
+          "description": "split disconnected polygons on each layer into separate sheets (<name>_0, <name>_1, ... or matched TEXT pin names), default true",
+          "type": "boolean"
+        },
+        "z": {
+          "description": "wafer-normal z height of the imported conductive sheets in metres, default 0",
+          "type": "number"
+        }
+      },
+      "required": [
+        "path",
+        "layers"
+      ],
+      "type": "object"
+    },
+    "title": "Import GDSII conductive sheets"
+  },
+  {
+    "access": "edit",
+    "description": "Give only what changes. `adapt_scale`, `gap_cells` or `sweep` set to null return to the simple mesher / explicit-only sheet sizing / an unswept mesh. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
     "name": "set_mesh",
     "schema": {
       "additionalProperties": false,
@@ -702,8 +755,15 @@
           ]
         },
         "curved": {
-          "description": "3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity study, default false",
+          "description": "3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity and bloch studies, default false",
           "type": "boolean"
+        },
+        "gap_cells": {
+          "description": "3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "h": {
           "description": "global element size in metres",
@@ -732,7 +792,7 @@
           "type": "boolean"
         },
         "sweep": {
-          "description": "layers to sweep the 2D mesh along y",
+          "description": "layers to sweep a 2D cross-section or 3D geometry model along y",
           "items": {
             "properties": {
               "domain_offset": {
@@ -746,6 +806,10 @@
               "n": {
                 "description": "cells across the thickness",
                 "type": "integer"
+              },
+              "regions": {
+                "description": "optional per-layer region remap { source_region: target_region } in this layer",
+                "type": "object"
               },
               "thickness": {
                 "description": "thickness of the layer along y, metres",
@@ -762,6 +826,10 @@
             "array",
             "null"
           ]
+        },
+        "z_coarsen": {
+          "description": "3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false",
+          "type": "boolean"
         }
       },
       "required": [],
@@ -1389,7 +1457,7 @@
   },
   {
     "access": "read",
-    "description": "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), troubleshooting (errors).",
+    "description": "Read a short guide. Call with topic nyx-instructions before using other nyx tools. Other topics: geometry, optical-modes (reading mode tables), cqed (superconducting qubit capacitance, inductance, EPR, Hamiltonian and TLS participation), troubleshooting (errors).",
     "name": "get_guide",
     "schema": {
       "additionalProperties": false,
@@ -1400,6 +1468,7 @@
             "nyx-instructions",
             "geometry",
             "optical-modes",
+            "cqed",
             "troubleshooting"
           ],
           "type": "string"
@@ -1489,17 +1558,21 @@
   },
   {
     "access": "read",
-    "description": "The integral of an expression of fields over a region (a region name, comma list or `name*`; default the whole mesh), with the degree-4 rule of the finite elements (exact for the product of two P2 fields). A real expression answers a number, a complex one [re, im]. `measure` is the area or volume of the region. `revolution: true` weights by 2 pi r for a body of revolution (a 2D r-z mesh). Answers `stale` and `age_s` of what it read. FORMULAS (every `expr` of the reductions takes one): a text such as `abs(Ex)^2 * eps_r` or `where(x > 0, T, 0)`, parsed once and evaluated at each point in Rust. Numbers (`2j` is imaginary), `pi`, `e`, `+ - * / ^`, comparisons, `and or not`; functions `abs abs2 re im conj sqrt exp sin cos arg log log10 tan sinh cosh tanh atan step min max atan2` and `where(cond, a, b)` (only the branch that applies is evaluated, so `where(x != 0, 1/x, 0)` is safe). Names: the coordinates `x y z`; the fields of the result (`Ex`, `T`; in backticks when the name is not an identifier, `` `|E|` ``; `` `ems:Ex` `` or `` `ems:1:Ex` `` in backticks for another physics or solution); material values by their descriptor name (`eps_r`, `rho`; `eps` means `eps_r`; `material(\"rho\")` to be explicit); `region(\"Si\")` is 1 inside the region and 0 outside. A name like `E` stands for the vector (Ex, Ey, Ez) when the solution has those components: `dot(a, b)`, `inner(a, b)` (conjugates a), `cross`, `norm(v)`, `norm2(v)`, `E.x`. Orders, comparisons, `log` and `tan` read real values: wrap a complex one in `abs`, `re` or `im`. A material value is the one the solver saw in each cell. A tensor property (`eps_r`, `k`, `alpha`) has its entries as `eps_r_xx`, `eps_r_yy`, `eps_r_zz`, `eps_r_xy`, `eps_r_xz`, `eps_r_yz` in wafer axes with the crystal orientation applied (an isotropic material is the scalar times the identity); the plain `eps_r` is refused on a mesh where some material is a tensor. BOUNDARY INTEGRALS: with `boundary` (an outer boundary such as \"window.top\", or an interface \"oxide|silicon\" between two regions) the sum is over the facets of the boundary instead of the cells: a line integral on a 2D mesh, a surface integral on a 3D one, with `revolution` weighting by 2 pi r. The formula may use `nx`, `ny`, `nz`, the unit normal in wafer axes, so the flux of a vector F is `dot(F, [nx, ny, nz])`. At an interface the fields and materials differ on the two sides, so give `side`, the region to read them in; the normal points out of it. On an outer boundary no `side` is needed. `wavelength` (m) reads the material values at that wavelength, not the study's; the fields stay those of the solve.",
+    "description": "The integral of an expression of fields over a region (a region name, comma list or `name*`; default the whole mesh), with the degree-4 rule of the finite elements (exact for the product of two P2 fields). A real expression answers a number, a complex one [re, im]. `measure` is the area or volume of the region. `revolution: true` weights by 2 pi r for a body of revolution (a 2D r-z mesh). BATCH REDUCTIONS: pass `solutions` (`\"all\"` or a list of 0-based indices), `by_region: true`, or a batch `expr` list `[\"abs2(Ex)\", \"abs2(Ey)\"]` / named map `{\"energy\": \"...\", \"ex2\": \"...\"}` to evaluate every `(solution, region, expr)` combination in a single bit-exact quadrature pass. Answers `stale` and `age_s` of what it read. FORMULAS (every `expr` of the reductions takes one): a text such as `abs(Ex)^2 * eps_r` or `where(x > 0, T, 0)`, parsed once and evaluated at each point in Rust. Numbers (`2j` is imaginary), `pi`, `e`, `+ - * / ^`, comparisons, `and or not`; functions `abs abs2 re im conj sqrt exp sin cos arg log log10 tan sinh cosh tanh atan step min max atan2` and `where(cond, a, b)` (only the branch that applies is evaluated, so `where(x != 0, 1/x, 0)` is safe). Names: the coordinates `x y z`; the fields of the result (`Ex`, `T`; in backticks when the name is not an identifier, `` `|E|` ``; `` `ems:Ex` `` or `` `ems:1:Ex` `` in backticks for another physics or solution); material values by their descriptor name (`eps_r`, `rho`; `eps` means `eps_r`; `material(\"rho\")` to be explicit); `region(\"Si\")` is 1 inside the region and 0 outside. A name like `E` stands for the vector (Ex, Ey, Ez) when the solution has those components: `dot(a, b)`, `inner(a, b)` (conjugates a), `cross`, `norm(v)`, `norm2(v)`, `E.x`. Orders, comparisons, `log` and `tan` read real values: wrap a complex one in `abs`, `re` or `im`. A material value is the one the solver saw in each cell. A tensor property (`eps_r`, `k`, `alpha`) has its entries as `eps_r_xx`, `eps_r_yy`, `eps_r_zz`, `eps_r_xy`, `eps_r_xz`, `eps_r_yz` in wafer axes with the crystal orientation applied (an isotropic material is the scalar times the identity); the plain `eps_r` is refused on a mesh where some material is a tensor. BOUNDARY INTEGRALS: with `boundary` (an outer boundary such as \"window.top\", an interface \"oxide|silicon\", or an interior 3D sheet) the sum is over the facets of the boundary instead of the cells: a line integral on a 2D mesh, a surface integral on a 3D one, with `revolution` weighting by 2 pi r. The formula may use `nx`, `ny`, `nz`, the unit normal in wafer axes, so the flux of a vector F is `dot(F, [nx, ny, nz])`. At an interface or interior sheet give `side` (a region name, or \"+z\"/\"-z\" for a sheet inside one region); the normal points out of it. On an outer boundary no `side` is needed. `wavelength` (m) reads the material values at that wavelength, not the study's; the fields stay those of the solve.",
     "name": "integrate",
     "schema": {
       "additionalProperties": false,
       "properties": {
         "boundary": {
-          "description": "integrate over the facets of this boundary (an outer boundary name, or an interface \"a|b\" between two regions) instead of over cells: a line integral on a 2D mesh, a surface integral on 3D. The formula may use nx, ny, nz, the unit normal. Not with region",
+          "description": "integrate over the facets of this boundary (an outer boundary name, an interface \"a|b\", or a 3D sheet) instead of over cells: a line integral on a 2D mesh, a surface integral on 3D. The formula may use nx, ny, nz, the unit normal. Not with region or by_region",
           "type": "string"
         },
+        "by_region": {
+          "description": "accumulate per-region integrals across every domain (or within `region`) in a single pass, default false",
+          "type": "boolean"
+        },
         "expr": {
-          "description": "a formula text such as \"abs(Ex)^2 * eps_r\" (see integrate), a handle, a field name, a number or {op, args}",
+          "description": "a formula string such as \"abs(Ex)^2 * eps_r\", a handle/AST object ({op, args}, {field, ...}), a batch list of expressions [\"abs2(Ex)\", \"abs2(Ey)\"], or a batch named map {\"energy\": \"...\", \"ex2\": \"...\"}",
           "type": [
             "string",
             "number",
@@ -1525,12 +1598,30 @@
           "type": "boolean"
         },
         "side": {
-          "description": "with boundary: the region an interface is read in (the fields and materials differ across it); the normal points out of it. Not needed on an outer boundary",
+          "description": "with boundary: the region (or \"+z\"/\"-z\" for a sheet inside one region) an interface is read in; the normal points out of it. Not needed on an outer boundary",
           "type": "string"
         },
         "solution": {
-          "description": "default 0",
+          "description": "0-based solution index, default 0 (mutually exclusive with solutions)",
           "type": "integer"
+        },
+        "solutions": {
+          "description": "\"all\" or a list of 0-based solution indices to integrate in a single pass",
+          "oneOf": [
+            {
+              "enum": [
+                "all"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          ]
         },
         "wavelength": {
           "description": "metres: where the material values of a formula (eps_r of a dispersive model) are read; default the wavelength of the study. The fields stay those of the solve",
@@ -1771,11 +1862,24 @@
   },
   {
     "access": "read",
-    "description": "The integral of sum_k |c_k|^2 over a region divided by the same over the whole mesh, for the components `fields` (e.g. [Ex, Ey, Ez]). Without `weight` it has no material weight; give `weight` a real formula such as \"eps_r\" for the energy fraction (the integrand is weight * sum_k |c_k|^2, in the region and over the whole mesh).",
+    "description": "The integral of sum_k |c_k|^2 over one or more regions divided by the same over the whole mesh, for the components `fields` (e.g. [Ex, Ey, Ez]). Without `weight` it has no material weight; give `weight` a real formula such as \"eps_r\" for the energy fraction (the integrand is weight * sum_k |c_k|^2, in each region and over the whole mesh). Pass `solutions` (`\"all\"` or a list of 0-based indices), `by_region: true`, or `regions` (`[str]`) to accumulate all requested solutions and regions in a single bit-exact quadrature pass.",
     "name": "confinement",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "by_region": {
+          "description": "compute confinement fractions across every region of the mesh (or within `region`) in a single pass, default false",
+          "type": "boolean"
+        },
+        "expr": {
+          "description": "optional alias for `fields`: a field, formula, expression, or list of components",
+          "type": [
+            "string",
+            "number",
+            "object",
+            "array"
+          ]
+        },
         "fields": {
           "description": "a field, a formula, an expression, or a list of components",
           "type": [
@@ -1795,16 +1899,51 @@
           "type": "string"
         },
         "region": {
-          "description": "the region the fraction is of",
-          "type": "string"
+          "description": "the region (or list of regions) the fraction is of; omit when `regions` or `by_region: true` is given",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "regions": {
+          "description": "batch list of region names to compute confinement fractions over in a single pass",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "revolution": {
           "description": "weight by 2 pi r, default false",
           "type": "boolean"
         },
         "solution": {
-          "description": "default 0",
+          "description": "0-based solution index, default 0 (mutually exclusive with solutions)",
           "type": "integer"
+        },
+        "solutions": {
+          "description": "\"all\" or a list of 0-based solution indices to evaluate in a single pass",
+          "oneOf": [
+            {
+              "enum": [
+                "all"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          ]
         },
         "wavelength": {
           "description": "metres: where the material values of a formula (eps_r of a dispersive model) are read; default the wavelength of the study. The fields stay those of the solve",
@@ -1816,8 +1955,7 @@
         }
       },
       "required": [
-        "fields",
-        "region"
+        "fields"
       ],
       "type": "object"
     },
@@ -2237,21 +2375,37 @@
   },
   {
     "access": "expensive",
-    "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.",
+    "description": "Solves the physics on a second mesh with element sizes multiplied by `factor` (`< 1` refines, `> 1` coarsens; the active project is never mutated) and compares every eigenvalue, value and scalar between the coarse and fine grids. By default `scale_sizes` is true so non-suppressed `add_size` rules (`h`, `max_deviation`, `min_layers`) and `gap_cells` scale proportionally with `factor` on the comparison copy. With `tolerance` each row says pass or fail, `converged` summarises, and the verdict is kept (`validated` becomes `checked` or stays `exploratory`). When mode ordering changes between meshes, `match: \"nearest\"` pairs mutual nearest eigenvalues and `track` filters candidate modes on both meshes by target (`f`, `n_b` or `n_eff`) and/or physical mode signatures (`region`/`min_share`, `component`/`min_component`, `max_layer_fraction`). With `extrapolate` (`\"richardson_log_spd\"` or `\"richardson_linear\"`), computes two-grid Richardson extrapolation (`extrapolate_order` defaults to 1.0 on 3D/sheet capacitance matrices, else `2 * order`) and optionally promotes the extrapolated capacitance matrix onto the stored result when `apply_extrapolated` is true.",
     "name": "convergence_check",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "apply_extrapolated": {
+          "description": "when true, promote the extrapolated capacitance matrix onto the stored latest result of physics, default false",
+          "type": "boolean"
+        },
         "dry_run": {
           "description": "only build both meshes and answer their cells and what a solve of each is expected to cost; nothing is solved",
           "type": "boolean"
         },
+        "extrapolate": {
+          "description": "optional two-grid Richardson extrapolation mode: richardson_log_spd (SPD-preserving log-space Maxwell capacitance extrapolation) or richardson_linear",
+          "enum": [
+            "richardson_log_spd",
+            "richardson_linear"
+          ],
+          "type": "string"
+        },
+        "extrapolate_order": {
+          "description": "asymptotic convergence order p > 0 for Richardson extrapolation; default 1.0 for 3D/sheet capacitance matrices, else 2 * order",
+          "type": "number"
+        },
         "factor": {
-          "description": "finer/present element size, between 0 and 1, default 0.6",
+          "description": "comparison/present element-size ratio, positive and not 1 (< 1 refines, > 1 coarsens), default 0.6",
           "type": "number"
         },
         "match": {
-          "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner",
+          "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the other mesh in the complex plane and lists the modes without a partner",
           "enum": [
             "index",
             "nearest"
@@ -2259,11 +2413,11 @@
           "type": "string"
         },
         "max_cells": {
-          "description": "refuse, before any solve, a check whose finer mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6)",
+          "description": "refuse, before any solve, a check whose comparison mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6)",
           "type": "number"
         },
         "max_seconds": {
-          "description": "refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the finer mesh",
+          "description": "refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the comparison mesh",
           "type": "number"
         },
         "physics": {
@@ -2275,21 +2429,51 @@
           ],
           "type": "string"
         },
+        "scale_sizes": {
+          "description": "scale non-suppressed add_size features (h, max_deviation, min_layers) proportionally with factor on the comparison copy, default true",
+          "type": "boolean"
+        },
         "tolerance": {
           "description": "largest accepted relative difference, e.g. 1e-3; omit to only report",
           "type": "number"
         },
         "track": {
           "additionalProperties": false,
-          "description": "follow one mode: { f } is a value (Hz for a vibration study); the mode whose eigenvalue is nearest it is compared with the nearest eigenvalue of the finer mesh",
+          "description": "follow mode(s) matching a target eigenvalue (f, n_b or n_eff) and/or physical mode-signature filters across both meshes",
           "properties": {
+            "component": {
+              "description": "field component name (e.g. Ex, Ey, Ez) whose share must be >= min_component",
+              "type": "string"
+            },
             "f": {
+              "description": "target eigenvalue real part (e.g. frequency in Hz)",
               "type": "number"
+            },
+            "max_layer_fraction": {
+              "description": "maximum absorbing-layer energy fraction (`layer fraction N`), in [0, 1]",
+              "type": "number"
+            },
+            "min_component": {
+              "description": "minimum component share in [0, 1]",
+              "type": "number"
+            },
+            "min_share": {
+              "description": "minimum energy share in `region`, in [0, 1]",
+              "type": "number"
+            },
+            "n_b": {
+              "description": "target Bloch index real part",
+              "type": "number"
+            },
+            "n_eff": {
+              "description": "target effective index real part",
+              "type": "number"
+            },
+            "region": {
+              "description": "region name whose energy share (`share in <region> N`) must be >= min_share",
+              "type": "string"
             }
           },
-          "required": [
-            "f"
-          ],
           "type": "object"
         },
         "wait": {
@@ -2375,7 +2559,7 @@
   },
   {
     "access": "read",
-    "description": "The analyses of results (polarization of the modes), which solved physics each applies to and, per physics, whether its result is `stale`.",
+    "description": "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation), which solved physics each applies to and, per physics, whether its result is `stale`.",
     "name": "list_analyses",
     "schema": {
       "additionalProperties": false,
@@ -2387,7 +2571,7 @@
   },
   {
     "access": "read",
-    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, or tls_participation. The reply carries `stale` and `age_s` of the result it was run on.",
+    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, or tls_participation. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), and resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`). The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
     "name": "analyse",
     "schema": {
       "additionalProperties": false,
@@ -2397,7 +2581,7 @@
           "type": "string"
         },
         "params": {
-          "description": "optional analysis parameters",
+          "description": "optional analysis parameters (for capacitance_matrix: ground, eliminate, qubits, resonators; also epr, hamiltonian, tls_participation options)",
           "type": "object"
         },
         "physics": {
@@ -2420,7 +2604,7 @@
   },
   {
     "access": "read",
-    "description": "Writes a figure of the modes of the latest result of a physics as SVG or PNG (the extension of `path` decides). Each mode is put in a fixed phase first (its in-plane motion largest in Re u, sign fixed, peak 1) and drawn on the section of the mesh (the whole mesh of a 2D result, the first y-plane of a 3D one; a displacement deforms it by Re u), with the outline of the regions and arrows of the in-plane motion. `gallery` shows |u| for each mode; `components` a row per mode with |u|, the in-plane components and the propagation component in quadrature. The reply says, per mode, the angle it was turned by and `quadrature`: the share of the propagation component's energy still in Re after the phase step (near 0 when the mode is in the expected phase). A vector field is found by the names of the cell fields (ux uy uz, Ex Ey Ez).",
+    "description": "Writes a 2D or 3D figure of the latest result of a physics as SVG or PNG (the extension of `path` decides). 2D kinds (`gallery`, `components`) align each mode's phase and draw on the mesh section with region outlines and in-plane arrows. 3D kinds (`slice3d`, `cutaway3d`, `isosurface3d`, `mesh3d`) evaluate `expr` (e.g. `re(Ex)`, `abs2(E)`) directly on un-averaged 8-subtet P2 `CellFields` so normal-field discontinuities across material interfaces stay sharp, render with Z-buffered/translucent orthographic projection (`camera`, `show_edges`), and support zero-copy Bloch unit-cell tiling (`repeat_periodic` with `exp(-i m periodic_phase)` applied before `expr`).",
     "name": "figure",
     "schema": {
       "additionalProperties": false,
@@ -2430,11 +2614,66 @@
           "type": "boolean"
         },
         "at": {
-          "description": "the y of the plane a 3D mesh is cut on, in metres; default its first plane",
+          "description": "the y of the plane a 3D mesh is cut on (or slice3d axis offset), in metres; default its first plane or midpoint",
           "type": "number"
         },
+        "camera": {
+          "description": "3D orthographic camera angles in degrees: { azimuth_deg, elevation_deg } or [azimuth_deg, elevation_deg]",
+          "oneOf": [
+            {
+              "properties": {
+                "azimuth": {
+                  "type": "number"
+                },
+                "azimuth_deg": {
+                  "type": "number"
+                },
+                "elevation": {
+                  "type": "number"
+                },
+                "elevation_deg": {
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          ]
+        },
+        "clip": {
+          "description": "3D cutaway clip bounds in metres: { xmin, xmax, ymin, ymax, zmin, zmax } (or x/y/z [min, max] pairs) or [xmin, xmax, ymin, ymax, zmin, zmax]",
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "maxItems": 6,
+              "minItems": 6,
+              "type": "array"
+            }
+          ]
+        },
         "cmap": {
-          "description": "colour map of |u|: inferno (default), viridis, cividis, coolwarm",
+          "description": "colour map: inferno (default for unsigned magnitudes), viridis, cividis, coolwarm (default symmetric map for signed 3D formulas)",
+          "enum": [
+            "inferno",
+            "viridis",
+            "cividis",
+            "coolwarm"
+          ],
           "type": "string"
         },
         "columns": {
@@ -2450,12 +2689,31 @@
           },
           "type": "array"
         },
+        "expr": {
+          "description": "3D scalar formula string evaluated per-cell without vertex averaging, e.g. \"re(Ex)\", \"abs2(E)\", \"im(Hz)\"; default |u| or |E|",
+          "type": "string"
+        },
         "family": {
           "description": "the vector field to draw, by its prefix (u, E); default the first",
           "type": "string"
         },
+        "isosurfaces": {
+          "description": "threshold levels for isosurface3d (default [0.25, 0.6] of peak, or [-0.6, -0.25, 0.25, 0.6] on signed formulas)",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
         "kind": {
-          "description": "gallery (default) or components",
+          "description": "figure layout: gallery (default), components, slice3d (3D planar slice), cutaway3d (3D clipped cutaway), isosurface3d (3D translucent marching-tets isosurfaces) or mesh3d (3D region/element surface view)",
+          "enum": [
+            "gallery",
+            "components",
+            "slice3d",
+            "cutaway3d",
+            "isosurface3d",
+            "mesh3d"
+          ],
           "type": "string"
         },
         "max_modes": {
@@ -2479,6 +2737,19 @@
           "description": "file to write, .svg or .png",
           "type": "string"
         },
+        "periodic_phase": {
+          "description": "explicit Bloch phase advance per period in radians for repeat_periodic; auto-detected from result scalars or periodic BC when omitted",
+          "type": "number"
+        },
+        "periodic_shift": {
+          "description": "explicit [dx, dy, dz] lattice translation in metres for repeat_periodic; auto-detected from periodic faces or y-extent when omitted",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
         "physics": {
           "description": "the three-letter code of the physics",
           "enum": [
@@ -2488,9 +2759,46 @@
           ],
           "type": "string"
         },
+        "plane": {
+          "description": "slice plane for slice3d: \"x\"/\"y\"/\"z\", { \"axis\": \"x\"|\"y\"|\"z\", \"at\": metres }, or { \"origin\": [x, y, z], \"normal\": [nx, ny, nz] }",
+          "oneOf": [
+            {
+              "enum": [
+                "x",
+                "y",
+                "z"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "repeat_periodic": {
+          "description": "number of unit-cell copies to tile along periodic_shift with Bloch phase exp(-i m periodic_phase) applied before expr, default 1",
+          "minimum": 1,
+          "type": "integer"
+        },
         "scale": {
           "description": "pixels per drawing unit of a PNG, default 2",
           "type": "number"
+        },
+        "show_edges": {
+          "description": "3D wireframe overlay: \"regions\" (default for field views), \"mesh\" (default for mesh3d, or true) or \"none\" (or false)",
+          "oneOf": [
+            {
+              "enum": [
+                "none",
+                "regions",
+                "mesh"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
         },
         "warp": {
           "description": "largest motion of the deformed shape as a fraction of the window width; default 0.05 for a displacement (vector field `u`) and 0 for any other field; 0 draws the undeformed section",
@@ -2511,7 +2819,7 @@
       ],
       "type": "object"
     },
-    "title": "Draw the modes of a result"
+    "title": "Draw the modes or 3D fields of a result"
   },
   {
     "access": "expensive",

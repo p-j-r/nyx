@@ -4,10 +4,10 @@
 //! domain numbers (`materials_by_label`), condition selectors resolved to boundary or domain numbers (`resolve_conditions`). Every physics
 //! crate uses these, so that the envelope is read the same way in all of them (ADR 41).
 
-use crate::desc::{Applies, BcDesc, ParamDesc, ParamKind, PropDesc};
+use crate::desc::{Applies, BcDesc, ParamDesc, ParamKind, PropDesc, PropKind};
 use crate::error::Error;
 use crate::physics::Ctx;
-use crate::spec::{BcSpec, MaterialAssign, ProblemSpec};
+use crate::spec::{BcSpec, MaterialAssign, ProblemSpec, PropValue};
 use femcore::props::Materials;
 use serde_json::Value;
 
@@ -137,6 +137,111 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                     }
                 }
             }
+            MaterialAssign::PropsTensor(map) => {
+                for (name, v) in map {
+                    let Some(desc) = props.iter().find(|d| &d.name == name) else {
+                        return Err(Error::invalid(format!("region '{region}': unknown property '{name}'")));
+                    };
+                    match v {
+                        PropValue::Scalar(s) => {
+                            if !s.is_finite() {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' is not a finite number"
+                                )));
+                            }
+                            for &l in &labels {
+                                m.set(l, name, *s);
+                            }
+                        }
+                        PropValue::Diag([x, y, z]) => {
+                            if desc.kind != PropKind::Tensor {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' must be a scalar number, not a tensor"
+                                )));
+                            }
+                            if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' has a non-finite tensor component"
+                                )));
+                            }
+                            let diag_m3 = [[*x, 0.0, 0.0], [0.0, *y, 0.0], [0.0, 0.0, *z]];
+                            if is_isotropic_m3(&diag_m3) {
+                                for &l in &labels {
+                                    m.set(l, name, *x);
+                                }
+                            } else {
+                                let tensor = femcore::material::Tensor::Diagonal { x: *x, y: *y, z: *z };
+                                set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                            }
+                        }
+                        PropValue::Sym6([xx, yy, zz, xy, xz, yz]) => {
+                            if desc.kind != PropKind::Tensor {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' must be a scalar number, not a tensor"
+                                )));
+                            }
+                            if [*xx, *yy, *zz, *xy, *xz, *yz].iter().any(|v| !v.is_finite()) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' has a non-finite tensor component"
+                                )));
+                            }
+                            let sym_m3 = [[*xx, *xy, *xz], [*xy, *yy, *yz], [*xz, *yz, *zz]];
+                            if is_isotropic_m3(&sym_m3) {
+                                for &l in &labels {
+                                    m.set(l, name, *xx);
+                                }
+                            } else {
+                                let tensor = femcore::material::Tensor::Symmetric {
+                                    xx: *xx,
+                                    yy: *yy,
+                                    zz: *zz,
+                                    xy: *xy,
+                                    yz: *yz,
+                                    xz: *xz,
+                                };
+                                set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                            }
+                        }
+                        PropValue::Matrix(mat) => {
+                            if desc.kind != PropKind::Tensor {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' must be a scalar number, not a tensor"
+                                )));
+                            }
+                            if mat.iter().flatten().any(|x| !x.is_finite()) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' has a non-finite tensor component"
+                                )));
+                            }
+                            let max_abs = mat.iter().flatten().fold(0.0_f64, |acc, x| acc.max(x.abs()));
+                            let tol = 1e-12 * max_abs.max(1.0);
+                            if (mat[0][1] - mat[1][0]).abs() > tol
+                                || (mat[0][2] - mat[2][0]).abs() > tol
+                                || (mat[1][2] - mat[2][1]).abs() > tol
+                            {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': tensor property '{name}' must be symmetric"
+                                )));
+                            }
+                            if is_isotropic_m3(mat) {
+                                for &l in &labels {
+                                    m.set(l, name, mat[0][0]);
+                                }
+                            } else {
+                                let tensor = femcore::material::Tensor::Symmetric {
+                                    xx: mat[0][0],
+                                    yy: mat[1][1],
+                                    zz: mat[2][2],
+                                    xy: 0.5 * (mat[0][1] + mat[1][0]),
+                                    yz: 0.5 * (mat[1][2] + mat[2][1]),
+                                    xz: 0.5 * (mat[0][2] + mat[2][0]),
+                                };
+                                set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                            }
+                        }
+                    }
+                }
+            }
             MaterialAssign::Named(n) => named(&mut m, region, &labels, n, [0.0; 3], ctx, freq_hz, temp_k, props)?,
             MaterialAssign::Oriented { material, euler_deg } => {
                 named(&mut m, region, &labels, material, *euler_deg, ctx, freq_hz, temp_k, props)?
@@ -155,6 +260,30 @@ pub fn domain_names_by_label(spec: &ProblemSpec, ctx: &Ctx) -> Result<std::colle
         }
     }
     Ok(out)
+}
+
+fn set_inline_tensor(
+    m: &mut Materials,
+    region: &str,
+    labels: &[i32],
+    name: &str,
+    tensor: femcore::material::Tensor,
+) -> Result<(), Error> {
+    for &l in labels {
+        let an = m.aniso.entry(l).or_default();
+        match name {
+            "eps_r" => an.permittivity = Some(tensor.clone()),
+            "eps_r_im" => an.permittivity_im = Some(tensor.clone()),
+            "k" => an.conductivity = Some(tensor.clone()),
+            "alpha" => an.expansion = Some(tensor.clone()),
+            _ => {
+                return Err(Error::invalid(format!(
+                    "region '{region}': property '{name}' must be a scalar number, not a tensor"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn m3_to_sym_tensor(m: &femcore::material::M3) -> femcore::material::Tensor {

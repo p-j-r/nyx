@@ -801,14 +801,16 @@ impl Engine {
         opts: &QueueOpts,
         limits: crate::convergence::Limits,
     ) -> Result<JobId, Error> {
-        if !(factor > 0.0 && factor < 1.0) {
-            return Err(Error::invalid("`factor` is the ratio of the finer element size to the present one, between 0 and 1 (0.6 is a good step)"));
+        if !(factor.is_finite() && factor > 0.0 && factor != 1.0) {
+            return Err(Error::invalid(
+                "`factor` is the ratio of the comparison element size to the present one: positive and not 1 (0.6 refines, 1.5 coarsens)",
+            ));
         }
+        limits.validate()?;
         if self.project.spec(physics).is_none() {
             return Err(Error::invalid(format!("the project has no problem for '{physics}'")));
         }
-        let mut job = self.convergence_job();
-        job.limits = limits;
+        let mut job = self.convergence_job().with_limits(limits);
         // the coarse solve of the check is the solve of this physics alone on the present mesh: its key is the problem key and that chain
         job.reuse = self.problem_key(physics).map(|k| (self.stages.clone(), solve_key(&k, &[physics.to_string()])));
         let (physics, matching) = (physics.to_string(), matching.clone());
@@ -987,6 +989,13 @@ impl Engine {
                 self.apply_point(id, sweep, index, *project, outcome)
             }
             (Pending::Convergence { physics, key }, Ok(JobOutput::Convergence(v))) => {
+                if crate::convergence::should_apply_extrapolated(&v) {
+                    if let Some(cap) = crate::convergence::extrapolated_capacitance(&v) {
+                        if let Some(stored) = self.results.get_mut(&physics).filter(|s| s.key == key) {
+                            crate::convergence::apply_extrapolated_capacitance(Arc::make_mut(&mut stored.result), &cap);
+                        }
+                    }
+                }
                 self.checked_answer(&physics, &key, v)
             }
             (Pending::Export, Ok(JobOutput::Exported(v))) => Ok(v),

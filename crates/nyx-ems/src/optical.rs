@@ -29,7 +29,11 @@ fn from_complex(m: &ModesC) -> Vec<OptMode> {
 fn in_pml(mesh: &Discretisation, problem: &Problem) -> Vec<bool> {
     (0..mesh.n_cells())
         .map(|ci| {
-            problem.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off)
+            problem
+                .materials
+                .pml
+                .get(&mesh.cell_labels[ci])
+                .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
         })
         .collect()
 }
@@ -82,7 +86,7 @@ pub fn solve_optical_wafer(mesh: &Discretisation, problem: &Problem, prop_sign: 
 
 /// Domains of the problem that are absorbing layers: the polarization analysis leaves their cells out.
 pub(crate) fn absorbing_domains(problem: &Problem) -> Vec<i32> {
-    problem.materials.pml.iter().filter(|(_, p)| p.x != PmlDir::Off || p.z != PmlDir::Off).map(|(d, _)| *d).collect()
+    femcore::optical::absorbing_domains(&problem.materials)
 }
 
 /// The frame of the modes of a cross-section study: lateral x, normal z, propagation y (the local triple of the mode solvers, left-handed),

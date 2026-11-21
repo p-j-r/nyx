@@ -54,6 +54,14 @@ pub struct MeshSettings {
     /// instead of a polyhedron (ADR 82). Only the `ems` cavity study uses it; the other physics see straight cells
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub curved: bool,
+    /// 3D sheet stack (`sheet3d`): target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets; `None` uses
+    /// only `h` and explicit `add_size` rules
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap_cells: Option<f64>,
+    /// 3D sheet stack (`sheet3d`): progressively coarsen the 2D sheet triangulation away from the conductor plane along `z` via crack-free
+    /// pure-tetrahedral transition slabs (default `false`)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub z_coarsen: bool,
 }
 
 impl Default for MeshSettings {
@@ -67,6 +75,8 @@ impl Default for MeshSettings {
             structured_pml: false,
             max_dev: None,
             curved: false,
+            gap_cells: None,
+            z_coarsen: false,
         }
     }
 }
@@ -147,6 +157,7 @@ impl Project {
     /// Reads a project file. The `format` key must be present (in the project, the feature list and every problem) and supported: a file of
     /// the layout before the key existed, or of a newer one, is refused (ADR 63), not converted.
     pub fn from_json(text: &str) -> Result<Project, Error> {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let v: serde_json::Value =
             serde_json::from_str(text).map_err(|e| Error::invalid(format!("not a nyx project: {e}")))?;
         let need = |what: &str, x: &serde_json::Value| -> Result<(), Error> {
@@ -192,6 +203,11 @@ impl Project {
         self.geometry.validate().map_err(|e| Error::invalid(format!("geometry: {e}")))?;
         if !(self.mesh.h > 0.0 && self.mesh.h.is_finite()) {
             return Err(Error::invalid("the element size must be a positive finite number"));
+        }
+        if let Some(gc) = self.mesh.gap_cells {
+            if !(gc > 0.0 && gc.is_finite()) {
+                return Err(Error::invalid("`gap_cells` must be a positive finite number"));
+            }
         }
         for (i, s) in self.physics.iter().enumerate() {
             if self.physics[..i].iter().any(|o| o.physics == s.physics) {

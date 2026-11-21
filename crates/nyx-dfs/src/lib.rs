@@ -13,6 +13,7 @@ mod common;
 pub mod electro;
 pub mod heat;
 pub mod magneto;
+pub mod planar_bem;
 pub mod problem;
 
 pub use electro::{
@@ -20,6 +21,7 @@ pub use electro::{
 };
 pub use heat::{assemble_heat, heat_fields, solve_heat, solve_heat_states, HeatStates, HeatSystem};
 pub use magneto::{solve_magnetostatics, MU0};
+pub use planar_bem::{layered_greens_function, solve_planar_bem, LayeredStack};
 pub use problem::{decode, Bc, BcKind, Problem, Study};
 
 use femcore::progress::{self, Progress};
@@ -46,7 +48,28 @@ impl Physics for Dfs {
                 name: "Electrostatics".into(),
                 doc: "Potential, field, and multi-terminal capacitance matrix: div(eps grad V) = -rho_v.".into(),
                 dims: Dims::Both,
-                params: vec![],
+                params: vec![
+                    ParamDesc::choice(
+                        "formulation",
+                        "Formulation",
+                        &["volumetric_fem", "planar_bem", "auto"],
+                        "volumetric_fem",
+                        "volumetric_fem: 2D/3D finite elements; planar_bem: 2D layered-dielectric boundary elements on planar conductor sheets; auto: planar_bem when applicable, otherwise volumetric_fem",
+                    ),
+                    ParamDesc::choice(
+                        "singular_edges",
+                        "Singular edge enrichment",
+                        &["none", "quarter_point"],
+                        "none",
+                        "quarter_point: Barsoum 1/4-point mid-edge node shift on 3D P2 elements meeting open conductor sheet perimeter edges",
+                    ),
+                    ParamDesc::boolean(
+                        "richardson",
+                        "Richardson extrapolation",
+                        false,
+                        "in planar_bem, solve on 1->4 subdivided sheet panels and apply log-space SPD Richardson extrapolation",
+                    ),
+                ],
             },
             StudyDesc {
                 kind: "heat_stationary".into(),
@@ -203,13 +226,29 @@ impl Physics for Dfs {
     }
 
     fn params(&self) -> Vec<ParamDesc> {
-        vec![ParamDesc::choice(
-            "solver",
-            "Linear solver",
-            &["auto", "direct", "iterative"],
-            "auto",
-            "auto: sparse direct for small systems, multigrid-preconditioned CG for large 3D ones; direct: Cholesky; iterative: AMG-CG",
-        )]
+        vec![
+            ParamDesc::choice(
+                "solver",
+                "Linear solver",
+                &["auto", "direct", "iterative"],
+                "auto",
+                "auto: sparse direct for small systems, multigrid-preconditioned CG for large 3D ones; direct: Cholesky; iterative: AMG-CG",
+            ),
+            ParamDesc::number(
+                "tol",
+                "Iterative solver tolerance",
+                "",
+                1e-10,
+                "relative residual tolerance for AMG-preconditioned conjugate gradients",
+            )
+            .range(Some(1e-15), Some(1e-2)),
+            ParamDesc::boolean(
+                "amg_line_smooth",
+                "Vertical-line AMG smoother",
+                true,
+                "auto-detect vertical prismatic columns in 3D meshes and apply tridiagonal Thomas line smoothing",
+            ),
+        ]
     }
 
     fn fields(&self, study: &str) -> Vec<FieldDesc> {

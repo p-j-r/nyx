@@ -18,6 +18,7 @@
             "nyx-instructions",
             "geometry",
             "optical-modes",
+            "cqed",
             "troubleshooting",
             "commands"
           ],
@@ -37,6 +38,9 @@
       },
       "arguments": {
         "path": {
+          "type": "string"
+        },
+        "session": {
           "type": "string"
         },
         "source": {
@@ -64,7 +68,13 @@
         "path": {
           "type": "string"
         },
+        "reset_session": {
+          "type": "boolean"
+        },
         "save_as": {
+          "type": "string"
+        },
+        "session": {
           "type": "string"
         },
         "source": {
@@ -88,6 +98,9 @@
       "arguments": {
         "cancel": {
           "type": "boolean"
+        },
+        "session": {
+          "type": "string"
         },
         "wait_s": {
           "type": "number"

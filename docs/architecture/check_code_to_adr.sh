@@ -28,7 +28,7 @@ if command -v jj >/dev/null 2>&1 && jj file list >/dev/null 2>&1; then
 elif git ls-files >/dev/null 2>&1 && [ -n "$(git ls-files | head -1)" ]; then
   files=$(git ls-files)
 else
-  files=$(find . -type f -not -path './.git/*' -not -path './.jj/*' -not -path '*/target/*' -not -path './dist/*' -not -path './runs/*' | sed 's|^\./||')
+  files=$(find . -type f -not -name '.git' -not -path './.git/*' -not -path './.jj/*' -not -path '*/target/*' -not -path './dist/*' -not -path './runs/*' | sed 's|^\./||')
 fi
 
 missing=0

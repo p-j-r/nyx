@@ -34,11 +34,15 @@ pub struct GeomMeshOpts {
     pub min_angle_deg: f64,
     /// 3D: give the cells on a curved surface quadratic (isoparametric) geometry (ADR 82). Off by default: straight-sided cells (ADR 18).
     pub curved: bool,
+    /// 3D sheet mesher: automatic coplanar gap proximity sizing (`d_gap / gap_cells`); off by default (`None`).
+    pub gap_cells: Option<f64>,
+    /// 3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes; off by default (`false`).
+    pub z_coarsen: bool,
 }
 
 impl GeomMeshOpts {
     pub fn new(h: f64) -> Self {
-        GeomMeshOpts { h, max_dev: None, min_angle_deg: 25.0, curved: false }
+        GeomMeshOpts { h, max_dev: None, min_angle_deg: 25.0, curved: false, gap_cells: None, z_coarsen: false }
     }
 }
 

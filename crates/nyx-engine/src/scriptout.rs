@@ -61,6 +61,9 @@ fn mesh_args(m: &MeshSettings) -> Value {
     put("points_per_wavelength", json!(m.points_per_wavelength), json!(d.points_per_wavelength));
     put("structured_pml", json!(m.structured_pml), json!(d.structured_pml));
     put("max_dev", json!(m.max_dev), json!(d.max_dev));
+    put("curved", json!(m.curved), json!(d.curved));
+    put("gap_cells", json!(m.gap_cells), json!(d.gap_cells));
+    put("z_coarsen", json!(m.z_coarsen), json!(d.z_coarsen));
     put("sweep", json!(m.sweep), json!(d.sweep));
     Value::Object(a)
 }

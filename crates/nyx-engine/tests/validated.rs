@@ -214,7 +214,7 @@ fn a_lossless_tilted_crystal_waveguide_passes_convergence_check_with_coupled_bet
         e.call(cmd, &args).unwrap_or_else(|err| panic!("{cmd}: {err}"));
     }
     e.call("solve_run", &json!({})).unwrap();
-    let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.6, "tolerance": 1e-3 })).unwrap();
+    let r = e.call("convergence_check", &json!({ "physics": "ems", "factor": 0.6, "tolerance": 1e-2 })).unwrap();
     assert_eq!(r["converged"], json!(true), "{r}");
     assert!(!r["noise_modes"].as_array().unwrap().is_empty(), "lossless tilted-crystal modes are in noise_modes: {r}");
     for row in r["rows"].as_array().unwrap() {

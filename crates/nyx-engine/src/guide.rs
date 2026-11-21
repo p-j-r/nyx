@@ -3,13 +3,14 @@
 //! Cards: short texts a host reads on demand through the `get_guide` command, embedded in the binary. They describe the commands, not a
 //! physics: how to build a geometry, assign materials, solve and read a result.
 
-pub const TOPICS: &[&str] = &["nyx-instructions", "geometry", "optical-modes", "troubleshooting"];
+pub const TOPICS: &[&str] = &["nyx-instructions", "geometry", "optical-modes", "cqed", "troubleshooting"];
 
 pub fn card(topic: &str) -> Option<&'static str> {
     match topic {
         "nyx-instructions" => Some(include_str!("../cards/nyx-instructions.md")),
         "geometry" => Some(include_str!("../cards/geometry.md")),
         "optical-modes" => Some(include_str!("../cards/optical-modes.md")),
+        "cqed" => Some(include_str!("../cards/cqed.md")),
         "troubleshooting" => Some(include_str!("../cards/troubleshooting.md")),
         _ => None,
     }

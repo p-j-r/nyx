@@ -13,7 +13,7 @@
 //! or `script_wait` that arrives answers the waiting call `running` at once (the host that sent it gave up on it) and is then served; a
 //! `notifications/cancelled` for the waiting call stops the wait and sends no answer; `ping` and `tools/list` are answered during a wait. A wait is
 //! never longer than `--max-wait` (default 90 s) whatever the call asked: a host's tool timeout is often 180 s or less.
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::io::{BufRead, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -64,6 +64,7 @@ fn default_root(dir_given: bool, dir: &Path) -> PathBuf {
 fn tools(max_wait: f64) -> Value {
     let default = DEFAULT_WAIT_S.min(max_wait);
     let wait = json!({ "type": "number", "maximum": max_wait, "description": format!("seconds to let the script run before answering `running` (default {default}, at most {max_wait}: a longer value is cut to it; script_wait continues, so keep it under your host's tool timeout)") });
+    let session = json!({ "type": "string", "default": "default", "description": "isolated session name (each session has its own engine project, script REPL variables, and workspace folder; default \"default\")" });
     json!([
         {
             "name": "script_run", "title": "Run a script",
@@ -74,27 +75,29 @@ fn tools(max_wait: f64) -> Value {
                 "params": { "type": "object", "description": "values for the script, which reads them as the dict `params`" },
                 "wait_s": wait,
                 "allow_destructive": { "type": "boolean", "description": "allow project_new, project_load, project_open, store_open and remove_* (they discard the project or a part of it); ask the person first" },
-                "save_as": { "type": "string", "description": "also save `source` in the workspace under this name, to run again with `path`" }
+                "save_as": { "type": "string", "description": "also save `source` in the workspace under this name, to run again with `path`" },
+                "reset_session": { "type": "boolean", "description": "clear the script session's variables and functions before running (or without `source`/`path` to reset alone); the engine project and results are kept" },
+                "session": session
             } },
             "annotations": { "title": "Run a script", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false }
         },
         {
             "name": "script_wait", "title": "Continue or cancel a waiting script",
             "description": "Continues the script that script_run left `running` (a solve or a convergence check was still going) and answers like script_run. With cancel true it abandons the script instead: its job is cancelled and the variables of the scripts that finished stay.",
-            "inputSchema": { "type": "object", "properties": { "wait_s": wait, "cancel": { "type": "boolean", "description": "abandon the waiting script" } } },
+            "inputSchema": { "type": "object", "properties": { "wait_s": wait, "cancel": { "type": "boolean", "description": "abandon the waiting script" }, "session": session } },
             "annotations": { "title": "Continue or cancel a waiting script", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false }
         },
         {
             "name": "script_check", "title": "Check a script",
             "description": "Parses and type-checks a script against the nyx commands and the variables of the session and runs nothing: a misspelled command or argument, a missing argument, a syntax error, a branch on a value of a traced function. Answers {status: ok} or the error with its line.",
-            "inputSchema": { "type": "object", "properties": { "source": { "type": "string", "description": "the script text" }, "path": { "type": "string", "description": "the name of a saved script instead of `source`" } } },
+            "inputSchema": { "type": "object", "properties": { "source": { "type": "string", "description": "the script text" }, "path": { "type": "string", "description": "the name of a saved script instead of `source`" }, "session": session } },
             "annotations": { "title": "Check a script", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
         },
         {
             "name": "api", "title": "The nyx API",
-            "description": "Read this first. Without arguments: how to work with nyx. `topic` is a guide (nyx-instructions, geometry, optical-modes, troubleshooting) or `commands` (every command with its title). `command` is one command with its Python signature, its documentation and its arguments.",
+            "description": "Read this first. Without arguments: how to work with nyx. `topic` is a guide (nyx-instructions, geometry, optical-modes, cqed, troubleshooting) or `commands` (every command with its title). `command` is one command with its Python signature, its documentation and its arguments.",
             "inputSchema": { "type": "object", "properties": {
-                "topic": { "type": "string", "enum": ["nyx-instructions", "geometry", "optical-modes", "troubleshooting", "commands"], "description": "which guide; omit for nyx-instructions" },
+                "topic": { "type": "string", "enum": ["nyx-instructions", "geometry", "optical-modes", "cqed", "troubleshooting", "commands"], "description": "which guide; omit for nyx-instructions" },
                 "command": { "type": "string", "description": "a command name, e.g. add_rect" }
             } },
             "annotations": { "title": "The nyx API", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
@@ -185,15 +188,87 @@ struct Pumped {
     cancelled: bool,
 }
 
-struct Server {
+/// Validates the optional `session` name argument (default `"default"`).
+fn session_name(args: &Value) -> Result<String, String> {
+    let Some(v) = args.get("session").filter(|v| !v.is_null()) else {
+        return Ok("default".to_string());
+    };
+    let Some(s) = v.as_str() else {
+        return Err("`session` must be a non-empty string".to_string());
+    };
+    if s.is_empty()
+        || s.len() > 80
+        || s == "."
+        || s.contains("..")
+        || s.contains('/')
+        || s.contains('\\')
+        || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!(
+            "invalid session name `{s}`: must be non-empty letters, digits, `-` or `_` (no `/`, `\\`, or `..`)"
+        ));
+    }
+    Ok(s.to_string())
+}
+
+struct McpSession {
+    name: String,
     engine: Engine,
     kernel: Option<Kernel>,
     dir: PathBuf,
     root: PathBuf,
-    proto: &'static str,
-    session: String,
-    /// counts the scripts that ran a command, so a host can tell that something moved
+    id: String,
+    /// counts the scripts that ran a command in this session, so a host can tell that something moved
     revision: u64,
+}
+
+impl McpSession {
+    fn new(name: &str, dir: PathBuf, root: PathBuf, queue: PathBuf, base_id: &str) -> McpSession {
+        let mut engine = Engine::new();
+        engine.set_workspace(dir.clone(), true);
+        engine.set_owner("ai"); // its requests queue behind a person's at the same priority (ADR 87)
+        engine.set_self_as_worker(true); // solves run in a child process: running out of memory fails the job, not the server (ADR 86)
+        engine.set_history_file(&dir.join("solve_history.jsonl")); // what solves cost, for memory estimates
+        // one queue with the window: solves are run by the queue worker of that folder, in order, whoever asked (Q3, ADR 95)
+        engine.set_shared_queue(&queue, true);
+        let id = if name == "default" { base_id.to_string() } else { format!("{base_id}:{name}") };
+        McpSession { name: name.to_string(), engine, kernel: None, dir, root, id, revision: 0 }
+    }
+
+    fn header(&self) -> Value {
+        let hash = self.engine.stamp();
+        json!({
+            "session": self.id,
+            "session_name": self.name,
+            "revision": self.revision,
+            "project_hash": hash.get(..16).unwrap_or(&hash)
+        })
+    }
+
+    fn ensure_kernel(&mut self) -> Result<&mut Kernel, String> {
+        if self.kernel.is_none() {
+            // the path guard wants its folder to exist; the workspace is made here the first time a script needs it
+            for d in [&self.dir, &self.root] {
+                std::fs::create_dir_all(d).map_err(|e| format!("cannot create {}: {e}", d.display()))?;
+            }
+            // what a script prints and returns is what costs a model's context: a smaller cap than a person's `nyx run`
+            let limits = Limits { output_bytes: 64 << 10, ..Limits::default() };
+            self.kernel = Some(Kernel::new(&self.engine, limits, Options::new(self.root.clone()))?);
+        }
+        Ok(self.kernel.as_mut().expect("the kernel was just made"))
+    }
+
+    fn scripts_dir(&self) -> PathBuf {
+        self.dir.join("scripts")
+    }
+}
+
+struct Server {
+    sessions: BTreeMap<String, McpSession>,
+    dir: PathBuf,
+    root: PathBuf,
+    proto: &'static str,
+    base_session_id: String,
     /// the longest wait of a call (`--max-wait`)
     max_wait: f64,
     /// what the reader thread took, the messages that wait their turn, the requests the host cancelled before their turn, and whether stdin ended
@@ -211,21 +286,15 @@ struct Server {
 
 impl Server {
     fn new(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64, rx: mpsc::Receiver<Incoming>) -> Server {
-        let mut engine = Engine::new();
-        engine.set_workspace(dir.clone(), true);
-        engine.set_owner("ai"); // its requests queue behind a person's at the same priority (ADR 87)
-        engine.set_self_as_worker(true); // solves run in a child process: running out of memory fails the job, not the server (ADR 86)
-        engine.set_history_file(&dir.join("solve_history.jsonl")); // what solves cost, for memory estimates
-        // one queue with the window: solves are run by the queue worker of that folder, in order, whoever asked (Q3, ADR 95)
-        engine.set_shared_queue(&queue, true);
+        let base_session_id = session_id();
+        let mut sessions = BTreeMap::new();
+        sessions.insert("default".to_string(), McpSession::new("default", dir.clone(), root.clone(), queue, &base_session_id));
         Server {
-            engine,
-            kernel: None,
+            sessions,
             dir,
             root,
             proto: PROTOCOLS[0],
-            session: session_id(),
-            revision: 0,
+            base_session_id,
             max_wait,
             rx,
             backlog: VecDeque::new(),
@@ -236,6 +305,17 @@ impl Server {
             note: None,
             suppress: false,
         }
+    }
+
+    fn session_mut(&mut self, name: &str) -> &mut McpSession {
+        if !self.sessions.contains_key(name) {
+            let s_dir = self.dir.join("sessions").join(name);
+            let s_root = if self.root == self.dir { s_dir.clone() } else { self.root.clone() };
+            let s_queue = s_dir.clone();
+            let sess = McpSession::new(name, s_dir, s_root, s_queue, &self.base_session_id);
+            self.sessions.insert(name.to_string(), sess);
+        }
+        self.sessions.get_mut(name).expect("session inserted")
     }
 
     /// Takes in what the reader thread has for the server and answers what needs no kernel at once (`ping`, `tools/list`); the rest waits its turn
@@ -307,9 +387,8 @@ impl Server {
         }
     }
 
-    fn header(&self) -> Value {
-        let hash = self.engine.stamp();
-        json!({ "session": self.session, "revision": self.revision, "project_hash": hash.get(..16).unwrap_or(&hash) })
+    fn header_for(&mut self, sname: &str) -> Value {
+        self.session_mut(sname).header()
     }
 
     fn initialize(&mut self, params: &Value) -> Value {
@@ -323,28 +402,13 @@ impl Server {
         })
     }
 
-    fn kernel(&mut self) -> Result<&mut Kernel, String> {
-        if self.kernel.is_none() {
-            // the path guard wants its folder to exist; the workspace is made here the first time a script needs it
-            for d in [&self.dir, &self.root] {
-                std::fs::create_dir_all(d).map_err(|e| format!("cannot create {}: {e}", d.display()))?;
-            }
-            // what a script prints and returns is what costs a model's context: a smaller cap than a person's `nyx run`
-            let limits = Limits { output_bytes: 64 << 10, ..Limits::default() };
-            self.kernel = Some(Kernel::new(&self.engine, limits, Options::new(self.root.clone()))?);
-        }
-        Ok(self.kernel.as_mut().expect("the kernel was just made"))
-    }
-
-    fn scripts_dir(&self) -> PathBuf {
-        self.dir.join("scripts")
-    }
-
     /// The script a call names: its text and the name its errors and its run records carry.
-    fn script_of(&self, args: &Value) -> Result<(String, String), String> {
+    fn script_of(&mut self, sname: &str, args: &Value) -> Result<(String, String), String> {
+        let scripts_dir = self.session_mut(sname).scripts_dir();
         match (args.get("source").and_then(Value::as_str), args.get("path").and_then(Value::as_str)) {
             (Some(_), Some(_)) => Err("give `source` or `path`, not both".to_string()),
             (Some(src), None) => {
+                let src = src.strip_prefix('\u{feff}').unwrap_or(src);
                 let name = match args.get("save_as").and_then(Value::as_str) {
                     Some(n) => format!("{}.nys", script_stem(n)?),
                     None => "script.nys".to_string(),
@@ -353,8 +417,9 @@ impl Server {
             }
             (None, Some(p)) => {
                 let stem = script_stem(p)?;
-                let file = self.scripts_dir().join(format!("{stem}.nys"));
-                let text = std::fs::read_to_string(&file).map_err(|_| format!("no saved script `{stem}` (they are the files of {})", self.scripts_dir().display()))?;
+                let file = scripts_dir.join(format!("{stem}.nys"));
+                let text = std::fs::read_to_string(&file).map_err(|_| format!("no saved script `{stem}` (they are the files of {})", scripts_dir.display()))?;
+                let text = text.strip_prefix('\u{feff}').unwrap_or(&text).to_string();
                 Ok((text, format!("{stem}.nys")))
             }
             (None, None) => Err("give `source` (the script text) or `path` (a saved script)".to_string()),
@@ -376,8 +441,8 @@ impl Server {
     }
 
     /// The answer of a call that may wait: the note of a wait that was cut or ended early goes with it.
-    fn answer_wait(&mut self, r: Result<Step, String>, cut: Option<f64>) -> (Value, bool) {
-        let (mut v, is_error) = self.answer(r);
+    fn answer_wait(&mut self, sname: &str, r: Result<Step, String>, cut: Option<f64>) -> (Value, bool) {
+        let (mut v, is_error) = self.answer(sname, r);
         if let Some(asked) = cut {
             v["wait_s"] = json!({ "asked": asked, "used": self.max_wait, "note": "a wait is cut to the server's longest; script_wait continues" });
         }
@@ -387,15 +452,16 @@ impl Server {
     /// Runs a script or continues the one that waits, for at most `wait`, in slices of `SLICE`. Between two slices the host's messages are looked at
     /// (`pump`): a newer `script_run` or `script_wait` or a cancellation ends the wait with the script still running (the job goes on in the
     /// engine's queue, the next `script_wait` picks it up). What was printed in every slice is kept, and a command is counted once.
-    fn drive(&mut self, go: Go, wait: Duration) -> Result<Step, String> {
+    fn drive(&mut self, sname: &str, go: Go, wait: Duration) -> Result<Step, String> {
         let started = Instant::now();
         let deadline = started + wait;
         let mut last_note = started;
         let mut printed: Vec<String> = vec![];
         let slice = wait.min(SLICE);
         let mut r = {
-            self.kernel()?;
-            let (engine, kernel) = (&mut self.engine, self.kernel.as_mut().expect("made above"));
+            let sess = self.session_mut(sname);
+            sess.ensure_kernel()?;
+            let (engine, kernel) = (&mut sess.engine, sess.kernel.as_mut().expect("made above"));
             match go {
                 Go::Run { name, src, params, allow } => kernel.run(engine, &name, &src, params.as_ref(), Some(slice), allow),
                 Go::Wait => kernel.wait(engine, Some(slice)),
@@ -426,7 +492,8 @@ impl Server {
                         }
                     }
                     let slice = SLICE.min(deadline.saturating_duration_since(now));
-                    let (engine, kernel) = (&mut self.engine, self.kernel.as_mut().expect("the kernel exists while a script waits"));
+                    let sess = self.session_mut(sname);
+                    let (engine, kernel) = (&mut sess.engine, sess.kernel.as_mut().expect("the kernel exists while a script waits"));
                     r = kernel.wait(engine, Some(slice));
                 }
                 Ok(Step::Done(mut o)) => {
@@ -440,18 +507,19 @@ impl Server {
     }
 
     /// The JSON the host gets for one answer of the kernel.
-    fn answer(&mut self, r: Result<Step, String>) -> (Value, bool) {
+    fn answer(&mut self, sname: &str, r: Result<Step, String>) -> (Value, bool) {
         let note = self.note.take();
+        let sess = self.session_mut(sname);
         let (mut v, is_error) = match r {
             Ok(Step::Done(o)) => {
                 if o.calls > 0 {
-                    self.revision += 1;
+                    sess.revision += 1;
                 }
                 (json!({ "status": "done", "value": cap_value(o.value), "printed": o.printed, "calls": o.calls }), false)
             }
             Ok(Step::Running(p)) => {
                 if p.calls > 0 {
-                    self.revision += 1;
+                    sess.revision += 1;
                 }
                 let mut v = json!({ "status": "running", "waiting_for": p.waiting, "printed": p.printed, "calls": p.calls, "next": "call script_wait to continue, or script_wait with cancel true to abandon it" });
                 if let Some(n) = note {
@@ -459,7 +527,7 @@ impl Server {
                 }
                 // what the engine says of the job: its stage, how long it has run, how much of it is done and what such a solve took on this
                 // machine before (no number when nothing was learned): enough to decide between waiting and cancelling
-                let entry = self.kernel.as_ref().and_then(Kernel::waiting_job).and_then(|id| self.engine.queue_entry(id));
+                let entry = sess.kernel.as_ref().and_then(Kernel::waiting_job).and_then(|id| sess.engine.queue_entry(id));
                 if let Some(e) = entry {
                     let mut job = serde_json::Map::new();
                     for k in ["id", "state", "stage", "stage_seconds", "seconds", "fraction", "position", "queued_seconds", "estimate"] {
@@ -473,66 +541,99 @@ impl Server {
             }
             Err(m) => (json!({ "status": "error", "message": m }), true),
         };
-        v["nyx"] = self.header();
+        v["nyx"] = sess.header();
         (v, is_error)
     }
 
     fn script_run(&mut self, args: &Value) -> (Value, bool) {
+        let sname = match session_name(args) {
+            Ok(s) => s,
+            Err(m) => return self.answer("default", Err(m)),
+        };
+        let reset = args.get("reset_session").and_then(Value::as_bool).unwrap_or(false);
+        let has_src = args.get("source").is_some_and(|v| !v.is_null());
+        let has_path = args.get("path").is_some_and(|v| !v.is_null());
+        if reset {
+            let reset_res = self.session_mut(&sname).kernel.as_mut().map_or(Ok(()), Kernel::reset);
+            if let Err(m) = reset_res {
+                return self.answer(&sname, Err(m));
+            }
+            if !has_src && !has_path {
+                let mut v = json!({ "ok": true, "reset_session": true, "status": "done" });
+                v["nyx"] = self.header_for(&sname);
+                return (v, false);
+            }
+        }
         let prepared = (|| {
-            let (src, name) = self.script_of(args)?;
+            let (src, name) = self.script_of(&sname, args)?;
             let wait = self.wait_of(args)?;
             if let (Some(_), Some(save)) = (args.get("source"), args.get("save_as").and_then(Value::as_str)) {
                 let stem = script_stem(save)?;
-                std::fs::create_dir_all(self.scripts_dir()).map_err(|e| format!("cannot create the scripts folder: {e}"))?;
-                std::fs::write(self.scripts_dir().join(format!("{stem}.nys")), &src).map_err(|e| format!("cannot save the script: {e}"))?;
+                let scripts_dir = self.session_mut(&sname).scripts_dir();
+                std::fs::create_dir_all(&scripts_dir).map_err(|e| format!("cannot create the scripts folder: {e}"))?;
+                std::fs::write(scripts_dir.join(format!("{stem}.nys")), &src).map_err(|e| format!("cannot save the script: {e}"))?;
             }
             Ok::<_, String>((src, name, wait))
         })();
         let (src, name, (wait, cut)) = match prepared {
             Ok(x) => x,
-            Err(m) => return self.answer(Err(m)),
+            Err(m) => return self.answer(&sname, Err(m)),
         };
         let params = args.get("params").cloned().filter(|p| !p.is_null());
         if params.as_ref().is_some_and(|p| !p.is_object()) {
-            return self.answer(Err("`params` is an object (a dict)".to_string()));
+            return self.answer(&sname, Err("`params` is an object (a dict)".to_string()));
         }
         let allow = args.get("allow_destructive").and_then(Value::as_bool).unwrap_or(false);
-        let r = self.drive(Go::Run { name, src, params, allow }, wait);
-        self.answer_wait(r, cut)
+        let r = self.drive(&sname, Go::Run { name, src, params, allow }, wait);
+        let (mut v, is_error) = self.answer_wait(&sname, r, cut);
+        if reset && !is_error {
+            v["reset_session"] = json!(true);
+        }
+        (v, is_error)
     }
 
     fn script_wait(&mut self, args: &Value) -> (Value, bool) {
+        let sname = match session_name(args) {
+            Ok(s) => s,
+            Err(m) => return self.answer("default", Err(m)),
+        };
         let (wait, cut) = match self.wait_of(args) {
             Ok(w) => w,
-            Err(m) => return self.answer(Err(m)),
+            Err(m) => return self.answer(&sname, Err(m)),
         };
         let cancel = args.get("cancel").and_then(Value::as_bool).unwrap_or(false);
-        let Some(kernel) = self.kernel.as_mut() else { return self.answer(Err("no script is running".to_string())) };
+        let sess = self.session_mut(&sname);
+        let Some(kernel) = sess.kernel.as_mut() else { return self.answer(&sname, Err("no script is running".to_string())) };
         if cancel {
-            return match kernel.cancel(&mut self.engine) {
+            return match kernel.cancel(&mut sess.engine) {
                 Ok(()) => {
                     let mut v = json!({ "status": "cancelled" });
-                    v["nyx"] = self.header();
+                    v["nyx"] = sess.header();
                     (v, false)
                 }
-                Err(m) => self.answer(Err(m)),
+                Err(m) => self.answer(&sname, Err(m)),
             };
         }
         if kernel.waiting().is_none() {
-            return self.answer(Err("no script is running".to_string()));
+            return self.answer(&sname, Err("no script is running".to_string()));
         }
-        let r = self.drive(Go::Wait, wait);
-        self.answer_wait(r, cut)
+        let r = self.drive(&sname, Go::Wait, wait);
+        self.answer_wait(&sname, r, cut)
     }
 
     fn script_check(&mut self, args: &Value) -> (Value, bool) {
-        let (src, name) = match self.script_of(args) {
-            Ok(x) => x,
-            Err(m) => return self.answer(Err(m)),
+        let sname = match session_name(args) {
+            Ok(s) => s,
+            Err(m) => return self.answer("default", Err(m)),
         };
-        let r = match self.kernel() {
+        let (src, name) = match self.script_of(&sname, args) {
+            Ok(x) => x,
+            Err(m) => return self.answer(&sname, Err(m)),
+        };
+        let sess = self.session_mut(&sname);
+        let r = match sess.ensure_kernel() {
             Ok(_) => {
-                let (engine, kernel) = (&mut self.engine, self.kernel.as_mut().expect("made above"));
+                let (engine, kernel) = (&mut sess.engine, sess.kernel.as_mut().expect("made above"));
                 kernel.check(engine, &name, &src)
             }
             Err(m) => Err(m),
@@ -540,21 +641,24 @@ impl Server {
         match r {
             Ok(()) => {
                 let mut v = json!({ "status": "ok" });
-                v["nyx"] = self.header();
+                v["nyx"] = self.header_for(&sname);
                 (v, false)
             }
-            Err(m) => self.answer(Err(m)),
+            Err(m) => self.answer(&sname, Err(m)),
         }
     }
 
     /// Plain text: a guide card, the list of commands, or one command.
     fn api(&self, args: &Value) -> Result<String, String> {
+        let engine = &self.sessions.get("default").expect("default session exists").engine;
         if let Some(c) = args.get("command").and_then(Value::as_str) {
-            return stubs::command_stub(&self.engine, c).ok_or_else(|| format!("no command `{c}` (api topic \"commands\" lists them)"));
+            return stubs::command_stub(engine, c).ok_or_else(|| format!("no command `{c}` (api topic \"commands\" lists them)"));
         }
         match args.get("topic").and_then(Value::as_str).unwrap_or("nyx-instructions") {
-            "commands" => Ok(stubs::command_list(&self.engine)),
-            t => guide::card(t).map(str::to_string).ok_or_else(|| format!("no topic `{t}`: nyx-instructions, geometry, optical-modes, troubleshooting, commands")),
+            "commands" => Ok(stubs::command_list(engine)),
+            t => guide::card(t)
+                .map(str::to_string)
+                .ok_or_else(|| format!("no topic `{t}`: nyx-instructions, geometry, optical-modes, cqed, troubleshooting, commands")),
         }
     }
 
@@ -579,7 +683,7 @@ impl Server {
         }));
         let Some((value, is_error)) = (match out {
             Ok(x) => x,
-            Err(_) => Some((json!({ "status": "error", "message": "nyx hit an internal fault on this call; the session is still usable", "nyx": self.header() }), true)),
+            Err(_) => Some((json!({ "status": "error", "message": "nyx hit an internal fault on this call; the session is still usable", "nyx": self.header_for("default") }), true)),
         }) else {
             return Err((-32602, format!("unknown tool '{name}'")));
         };

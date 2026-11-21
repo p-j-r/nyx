@@ -24,11 +24,11 @@
 //! elements on the same mesh.
 
 use crate::ibc::{add_ibc_2d_waveguide, pec_edges_and_nodes_2d};
-use crate::problem::{Problem, Study, SurfaceImpedanceBc};
+use crate::problem::{pec_edges_and_nodes_2d_with_symmetry, Problem, Study, SurfaceImpedanceBc, Symmetry};
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
-use femcore::linalg::csr::{CCoo, Coo, RCsr as Csr};
+use femcore::linalg::csr::{c, CCoo, Coo, RCsr as Csr};
 use femcore::linalg::driver::eigs_general;
 use femcore::linalg::driver::EigOpts;
 use femcore::props::TensorKind;
@@ -128,6 +128,30 @@ pub fn assemble_modes_with_bcs(
     ibc_bcs: &[SurfaceImpedanceBc],
     pmc_labels: &[i32],
 ) -> Result<ModeAssembly, String> {
+    assemble_modes_with_bcs_and_symmetry(
+        mesh,
+        freq,
+        eps_r,
+        mu_r,
+        order,
+        pec_labels,
+        ibc_bcs,
+        pmc_labels,
+        Symmetry::None,
+    )
+}
+
+pub(crate) fn assemble_modes_with_bcs_and_symmetry(
+    mesh: &Discretisation,
+    freq: f64,
+    eps_r: &[EpsCell],
+    mu_r: &[f64],
+    order: usize,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    pmc_labels: &[i32],
+    symmetry: Symmetry,
+) -> Result<ModeAssembly, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -226,7 +250,8 @@ pub fn assemble_modes_with_bcs(
 
     // PEC: tangential Et = 0 on boundary edges (both edge functions of order 2), phi = 0 on
     // boundary nodes (and boundary edge midpoints for P2)
-    let (be, bn) = if pec_labels.is_empty() && ibc_bcs.is_empty() && pmc_labels.is_empty() {
+    let (be, bn) = if pec_labels.is_empty() && ibc_bcs.is_empty() && pmc_labels.is_empty() && symmetry == Symmetry::None
+    {
         // walls are the exterior facets only: facets on interfaces between domains are not conductors
         let exterior = mesh.exterior_facets();
         let mut be: Vec<usize> = (0..mesh.n_facets())
@@ -242,8 +267,10 @@ pub fn assemble_modes_with_bcs(
         bn.sort_unstable();
         bn.dedup();
         (be, bn)
-    } else {
+    } else if symmetry == Symmetry::None {
         pec_edges_and_nodes_2d(mesh, pec_labels, ibc_bcs, pmc_labels)
+    } else {
+        pec_edges_and_nodes_2d_with_symmetry(mesh, pec_labels, ibc_bcs, pmc_labels, symmetry)?
     };
     let mut fixed: Vec<usize> = be.clone();
     if order == 2 {
@@ -423,10 +450,14 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
     let eps: Vec<EpsCell> =
         tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    let modes = if problem.pec.is_empty() && problem.surface_impedance.is_empty() && problem.pmc.is_empty() {
+    let modes = if problem.pec.is_empty()
+        && problem.surface_impedance.is_empty()
+        && problem.pmc.is_empty()
+        && problem.symmetry == Symmetry::None
+    {
         solve_modes_tensor(mesh, freq, &eps, &mur, n_target, evanescent, n_modes, problem.order)?
     } else {
-        let asm = assemble_modes_with_bcs(
+        let asm = assemble_modes_with_bcs_and_symmetry(
             mesh,
             freq,
             &eps,
@@ -435,6 +466,7 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
             &problem.pec,
             &problem.surface_impedance,
             &problem.pmc,
+            problem.symmetry,
         )?;
         solve_mode_pairs(&asm, n_target, evanescent, n_modes)?
     };
@@ -447,6 +479,10 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
     }
     let mut solutions = vec![];
     let mut scalars = vec![];
+    let neff_c: Vec<_> = modes.neff.iter().map(|&(re, im)| c(re, im)).collect();
+    let et_c: Vec<Vec<_>> = modes.et.iter().map(|v| v.iter().map(|&x| c(x, 0.0)).collect()).collect();
+    let phi_c: Vec<Vec<_>> = modes.phi.iter().map(|v| v.iter().map(|&x| c(x, 0.0)).collect()).collect();
+    let mode_metrics = crate::modes_complex::compute_waveguide_2d_metrics(mesh, problem, freq, &neff_c, &et_c, &phi_c)?;
     for j in 0..modes.neff.len() {
         let (re, im) = modes.neff[j];
         let txt = if im.abs() > 1e-9 * re.abs().max(1.0) { format!("{re:.6} {im:+.4}i") } else { format!("{re:.6}") };
@@ -459,6 +495,7 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
             ..Default::default()
         });
         scalars.push((format!("neff {}", j + 1), Scalar::Text(txt)));
+        mode_metrics[j].push_scalars(j + 1, &mut scalars);
     }
     let mut log = vec![];
     if !modes.converged {

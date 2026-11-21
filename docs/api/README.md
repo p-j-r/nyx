@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:8eec8f3875426d245d90bad87716462e` · 109 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:e2c9e35ff4a117f9efdeb845f5577b2f` · 110 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -48,9 +48,10 @@ Catalog hash: `b3:8eec8f3875426d245d90bad87716462e` · 109 commands. `nyx api li
 | [`fetch_material`](fetch_material.md) | expensive | Download a material from an open database |
 | [`field`](field.md) | read | A handle to a field |
 | [`field_op`](field_op.md) | read | Arithmetic on handles |
-| [`figure`](figure.md) | read | Draw the modes of a result |
+| [`figure`](figure.md) | read | Draw the modes or 3D fields of a result |
 | [`geometry_names`](geometry_names.md) | read | Evaluate the geometry and list its names |
 | [`get_guide`](get_guide.md) | read | Read a nyx guide |
+| [`import_gds`](import_gds.md) | edit | Import GDSII conductive sheets |
 | [`import_material`](import_material.md) | edit | Import an external material record |
 | [`integrate`](integrate.md) | read | Integrate an expression over a region |
 | [`job_cancel`](job_cancel.md) | expensive | Cancel a job |

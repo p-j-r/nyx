@@ -91,6 +91,7 @@ impl Report {
 
 /// Reads a list. Problems come back with the lines that parsed, so a front-end can show them all at once.
 pub fn parse(text: &str) -> (Vec<Line>, Vec<Problem>) {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let (mut lines, mut problems) = (vec![], vec![]);
     for (i, raw) in text.lines().enumerate() {
         let n = i + 1;
@@ -379,15 +380,32 @@ impl Engine {
                         report.problems.push(problem(m));
                         continue;
                     }
+                    if let Err(err) = crate::convergence::Matching::from_args(&l.args)
+                        .and_then(|_| crate::convergence::Limits::from_args(&l.args))
+                    {
+                        report.problems.push(problem(err.to_string()));
+                        continue;
+                    }
+                    let factor = l.args.get("factor").and_then(Value::as_f64).unwrap_or(0.6);
+                    if !(factor.is_finite() && factor > 0.0 && factor != 1.0) {
+                        report.problems.push(problem(
+                            "`factor` is the ratio of the comparison element size to the present one: positive and not 1 (0.6 refines, 1.5 coarsens)".into(),
+                        ));
+                        continue;
+                    }
                     let coarse_mesh = cache.need(e.mesh_key());
-                    let reused = e.problem_key(&p).is_some_and(|k| alone.contains(&k));
+                    let need_full = l.args.get("match").and_then(Value::as_str).is_some_and(|m| m != "index")
+                        || l.args.get("track").is_some_and(|v| !v.is_null())
+                        || l.args.get("extrapolate").is_some_and(|v| !v.is_null());
+                    let reused = !need_full && e.problem_key(&p).is_some_and(|k| alone.contains(&k));
                     report.meshes += usize::from(coarse_mesh) + 1;
                     report.solves += if reused { 1 } else { 2 };
                     solved.insert(p.clone());
+                    let other_adj = if factor < 1.0 { "finer" } else { "coarser" };
                     report.steps.push(step(
                         "convergence",
                         format!(
-                            "convergence check of {p}: the finer mesh and its solve{}",
+                            "convergence check of {p}: the {other_adj} mesh and its solve{}",
                             if reused {
                                 " (the solve on the present mesh is reused)"
                             } else {

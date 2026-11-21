@@ -411,44 +411,50 @@ pub fn shape_gradients(re: &RefElement, geo: &Geometry, c: usize, q: usize, out:
 
 // ------------------------------------------------------------------ parallel assembly helper
 
-/// Runs `f(range, &mut coo)` over cell chunks on all available threads and merges the results.
+/// Runs `f(range, &mut coo)` over fixed cell chunks on all available threads and merges the results
+/// in deterministic partition order so the assembled matrix is bit-identical across `NYX_THREADS`.
 pub fn assemble_parallel<F>(nc: usize, nrows: usize, ncols: usize, f: F) -> Csr
 where
     F: Fn(std::ops::Range<usize>, &mut Coo) + Sync,
 {
     let nt = crate::par::threads_up_to(16);
-    let nt = if nc < 2000 { 1 } else { nt };
-    let chunk = nc.div_ceil(nt);
+    let nparts = if nc < 2000 { 1 } else { nc.div_ceil(2048).min(16) };
+    let chunk = nc.div_ceil(nparts).max(1);
     let _stage = crate::progress::stage(format!("assembling element matrices ({nc} cells, {nt} threads)"));
     let mut tl = std::time::Instant::now();
-    // Every thread works through its cells in about 8 sub-ranges; the triplets of a sub-range (about 16 bytes per
-    // element-matrix entry, many of them duplicates) are turned into a CSR matrix and added to the thread's running
-    // sum before the next sub-range starts. Keeping all triplets of all threads alive at once took ~7 KB per unknown
-    // (22 GB for 3 million unknowns); this keeps only the sums.
-    let parts: Vec<Csr> = (0..nt)
-        .into_par_iter()
-        .map(|t| {
-            let (c0, c1) = ((t * chunk).min(nc), ((t + 1) * chunk).min(nc));
-            let sub = (c1 - c0).div_ceil(8).max(1024);
-            let mut acc: Option<Csr> = None;
-            let mut s0 = c0;
-            loop {
-                let s1 = (s0 + sub).min(c1);
-                let mut coo = Coo::new(nrows, ncols);
-                f(s0..s1, &mut coo);
-                let part = coo.to_csr();
-                acc = Some(match acc {
-                    None => part,
-                    Some(a) => a.add_scaled(&part, 1.0),
-                });
-                if s1 >= c1 {
-                    break;
-                }
-                s0 = s1;
+    // Every partition works through its cells in about 8 sub-ranges; the triplets of a sub-range (about 16 bytes per
+    // element-matrix entry, many of them duplicates) are turned into a CSR matrix and added to the partition's running
+    // sum before the next sub-range starts. Keeping `nparts` independent of `nt` guarantees bit-exact assembly across
+    // different thread counts while keeping memory bounded (~16 partial CSRs at most).
+    let build_part = |t: usize| -> Csr {
+        let (c0, c1) = ((t * chunk).min(nc), ((t + 1) * chunk).min(nc));
+        if c0 >= c1 {
+            return Csr::zeros(nrows, ncols);
+        }
+        let sub = (c1 - c0).div_ceil(8).max(1024);
+        let mut acc: Option<Csr> = None;
+        let mut s0 = c0;
+        loop {
+            let s1 = (s0 + sub).min(c1);
+            let mut coo = Coo::new(nrows, ncols);
+            f(s0..s1, &mut coo);
+            let part = coo.to_csr();
+            acc = Some(match acc {
+                None => part,
+                Some(a) => a.add_scaled(&part, 1.0),
+            });
+            if s1 >= c1 {
+                break;
             }
-            acc.unwrap()
-        })
-        .collect();
+            s0 = s1;
+        }
+        acc.unwrap()
+    };
+    let parts: Vec<Csr> = if nt <= 1 || nparts <= 1 {
+        (0..nparts).map(build_part).collect()
+    } else {
+        (0..nparts).into_par_iter().map(build_part).collect()
+    };
     crate::progress::lap_since(&mut tl, "    assembly: element loops and per-thread CSR");
     let c = Csr::sum_all(parts);
     crate::progress::lap_since(&mut tl, "    assembly: merge");
@@ -741,7 +747,7 @@ pub fn free_dofs(n: usize, fixed: &[usize]) -> Vec<usize> {
 /// is faster than a sparse factorisation from a few tens of thousands of unknowns (a drilled
 /// plate with 190,000 unknowns: 1.7 s against 28 s; 3D blocks of 680,000: 7 s against 340 s).
 pub const AMG_THRESHOLD: usize = 400_000;
-pub const AMG_THRESHOLD_3D: usize = 30_000;
+pub const AMG_THRESHOLD_3D: usize = 25_000;
 /// Free dofs above which eigenfrequency studies (Auto) try LOBPCG instead of a factorisation. Measured with the shared
 /// pool, 6 modes of a cube, P2, (factorisation / Auto): 47,000 unknowns 4.5 s / 4.9 s, 108,000: 25 s / 8.9 s, 207,000:
 /// 93 s / 19.5 s; a slender beam where multigrid stalls, 70,000: 5.3 s / 28 s. Break-even is near 80,000.
@@ -812,6 +818,79 @@ fn near_nullspace(mesh: &SimplexMesh, order: usize, ncomp: usize, is_fixed: &[bo
     ns
 }
 
+/// Auto-detects vertical prismatic columns on a 3D mesh by grouping P1 vertices with identical
+/// quantized `(x, y)` coordinates (`1e-9 * extent`) into sorted-`z` columns of length `>= 3`.
+/// When columns cover `> 50%` of P1 vertices, returns `(p1_columns, p2_columns)`.
+pub fn detect_vertical_columns(mesh: &SimplexMesh, order: usize) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
+    if mesh.dim != 3 {
+        return (Vec::new(), Vec::new());
+    }
+    let nv = mesh.n_points();
+    if nv < 3 {
+        return (Vec::new(), Vec::new());
+    }
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for v in 0..nv {
+        let p = mesh.point(v);
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    let extent = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]).max(1e-30);
+    let q_step = 1e-9 * extent;
+
+    let mut p1_groups: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
+    for v in 0..nv {
+        let p = mesh.point(v);
+        let qx = ((p[0] - lo[0]) / q_step).round() as i64;
+        let qy = ((p[1] - lo[1]) / q_step).round() as i64;
+        p1_groups.entry((qx, qy)).or_default().push(v);
+    }
+    let mut p1_cols = Vec::new();
+    let mut covered_p1 = 0usize;
+    for (_, mut col) in p1_groups {
+        if col.len() >= 3 {
+            col.sort_by(|&a, &b| {
+                mesh.point(a)[2]
+                    .partial_cmp(&mesh.point(b)[2])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.cmp(&b))
+            });
+            covered_p1 += col.len();
+            p1_cols.push(col);
+        }
+    }
+    if covered_p1 * 2 <= nv {
+        return (Vec::new(), Vec::new());
+    }
+    if order != 2 {
+        return (p1_cols, Vec::new());
+    }
+    let coords = mesh.dof_coordinates(2);
+    let n2 = mesh.n_dofs(2);
+    let mut p2_groups: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
+    for d in 0..n2 {
+        let p = &coords[d * 3..(d + 1) * 3];
+        let qx = ((p[0] - lo[0]) / q_step).round() as i64;
+        let qy = ((p[1] - lo[1]) / q_step).round() as i64;
+        p2_groups.entry((qx, qy)).or_default().push(d);
+    }
+    let mut p2_cols = Vec::new();
+    for (_, mut col) in p2_groups {
+        if col.len() >= 3 {
+            col.sort_by(|&a, &b| {
+                coords[a * 3 + 2]
+                    .partial_cmp(&coords[b * 3 + 2])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.cmp(&b))
+            });
+            p2_cols.push(col);
+        }
+    }
+    (p1_cols, p2_cols)
+}
+
 /// A symmetric positive definite system over all dofs with some dofs constrained, prepared for
 /// multigrid-preconditioned conjugate gradients: constrained rows and columns are replaced by a
 /// scaled identity (so the system keeps its scale), the dofs are ordered node by node, and the
@@ -833,6 +912,18 @@ impl AmgSystem {
     /// `a` is the matrix over all `n = ncomp * n_dofs(order)` dofs (entries in constrained rows and
     /// columns are ignored); `ncomp` is 1 for a scalar field and `dim` for displacements.
     pub fn new(mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize]) -> Result<AmgSystem, String> {
+        Self::new_with(mesh, order, ncomp, a, fixed, crate::linalg::amg_elastic::AmgOptions::default())
+    }
+
+    /// Like [`AmgSystem::new`] with explicit [`crate::linalg::amg_elastic::AmgOptions`] (such as `line_smooth`).
+    pub fn new_with(
+        mesh: &SimplexMesh,
+        order: usize,
+        ncomp: usize,
+        a: &Csr,
+        fixed: &[usize],
+        mut opts: crate::linalg::amg_elastic::AmgOptions,
+    ) -> Result<AmgSystem, String> {
         let t_setup = std::time::Instant::now();
         let n = a.nrows();
         let n1 = n / ncomp;
@@ -859,7 +950,11 @@ impl AmgSystem {
             m.submatrix(&perm, &perm)
         };
         let ns = near_nullspace(mesh, order, ncomp, &is_fixed, &perm);
-        let opts = crate::linalg::amg_elastic::AmgOptions::default();
+        if opts.line_smooth && ncomp == 1 && mesh.dim == 3 && opts.p1_columns.is_empty() {
+            let (p1_cols, p2_cols) = detect_vertical_columns(mesh, order);
+            opts.p1_columns = p1_cols;
+            opts.p2_columns = p2_cols;
+        }
         let amg = if order == 2 && !opts.no_p1_coarse {
             // linear interpolation of P1 into P2: vertex nodes are the identity, an edge node the mean of its two ends
             let nv = mesh.n_points();
@@ -917,6 +1012,16 @@ impl AmgSystem {
         self.amg.sizes()
     }
 
+    /// Whether Thomas tridiagonal vertical-line smoothing is active in the hierarchy.
+    pub fn line_smooth_active(&self) -> bool {
+        self.amg.line_smooth_active()
+    }
+
+    /// Number of vertical columns detected and smoothed on the primary P1/P2 levels.
+    pub fn n_line_columns(&self) -> usize {
+        self.amg.n_line_columns()
+    }
+
     /// Solves `A x = b` for the right-hand side over all dofs (entries at constrained dofs are taken
     /// as the prescribed values times the scale of the matrix); `matrix` is the system to solve,
     /// which may differ from the one the hierarchy was built from (it is then only the preconditioner).
@@ -945,6 +1050,56 @@ impl AmgSystem {
             x[self.perm[r]] = res.x[r];
         }
         (x, res.iterations, res.relative_residual)
+    }
+
+    /// Solves `A X = B` simultaneously for `K = b_list.len()` right-hand sides using multi-RHS
+    /// Block-CG (`block_pcg`), traversing `A` and the AMG V-cycle once per iteration across all `K`
+    /// vectors. Returns `(solutions, iterations, max_relative_residual)`.
+    pub fn solve_block_with(
+        &self,
+        matrix: Option<&Csr>,
+        b_list: &[Vec<f64>],
+        fixed_values_list: &[Vec<(usize, f64)>],
+        tol: f64,
+        max_iter: usize,
+    ) -> (Vec<Vec<f64>>, usize, f64) {
+        let k = b_list.len();
+        assert_eq!(k, fixed_values_list.len());
+        if k == 0 {
+            return (Vec::new(), 0, 0.0);
+        }
+        let mut rp = vec![0.0; self.n * k];
+        let mut rhs = vec![0.0; self.n];
+        for j in 0..k {
+            rhs.copy_from_slice(&b_list[j]);
+            for i in 0..self.n {
+                if self.is_fixed[i] {
+                    rhs[i] = 0.0;
+                }
+            }
+            for &(i, v) in &fixed_values_list[j] {
+                rhs[i] = self.dscale * v;
+            }
+            for (r, &full) in self.perm.iter().enumerate() {
+                rp[r * k + j] = rhs[full];
+            }
+        }
+        let mp_other;
+        let a = match matrix {
+            Some(m) => {
+                mp_other = Self::constrained(m, &self.is_fixed, self.dscale).submatrix(&self.perm, &self.perm);
+                &mp_other
+            }
+            None => &self.mp,
+        };
+        let res = crate::linalg::amg_elastic::block_pcg(a, &rp, k, &self.amg, tol, max_iter);
+        let mut out = vec![vec![0.0; self.n]; k];
+        for (r, &full) in self.perm.iter().enumerate() {
+            for j in 0..k {
+                out[j][full] = res.x[r * k + j];
+            }
+        }
+        (out, res.iterations, res.relative_residual)
     }
 
     /// Average residual reduction per iteration of multigrid-preconditioned CG on a random
@@ -1004,6 +1159,23 @@ impl AmgSystem {
 /// multigrid run that does not converge falls back to the direct solver.
 #[allow(clippy::too_many_arguments)]
 pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String> {
+    solve_spd_with(mesh, order, ncomp, solver, k, f, fixed, values, 1e-10, true)
+}
+
+/// Like [`solve_spd`] with explicit iterative tolerance `tol` and vertical-line smoother toggle `line_smooth`.
+#[allow(clippy::too_many_arguments)]
+pub fn solve_spd_with(
+    mesh: &SimplexMesh,
+    order: usize,
+    ncomp: usize,
+    solver: crate::props::LinearSolver,
+    k: &Csr,
+    f: &[f64],
+    fixed: &[usize],
+    values: &[f64],
+    tol: f64,
+    line_smooth: bool,
+) -> Result<(Vec<f64>, Option<String>), String> {
     use crate::props::LinearSolver;
     let n_free = k.nrows() - fixed.len();
     let iterative = match solver {
@@ -1023,14 +1195,18 @@ pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::
     }
     let ku = k.matvec(&uvec);
     let rhs: Vec<f64> = (0..n).map(|i| f[i] - ku[i]).collect();
-    let sys = AmgSystem::new(mesh, order, ncomp, k, fixed)?;
+    let opts = crate::linalg::amg_elastic::AmgOptions {
+        line_smooth,
+        ..Default::default()
+    };
+    let sys = AmgSystem::new_with(mesh, order, ncomp, k, fixed, opts)?;
     crate::progress::lap_since(&mut tl, "    spd: system and hierarchy");
     let t_solve = std::time::Instant::now();
     let fv: Vec<(usize, f64)> = fixed.iter().copied().zip(values.iter().copied()).collect();
-    let (mut u, its, rel) = sys.solve_with(None, &rhs, &fv, 1e-10, 600);
+    let (mut u, its, rel) = sys.solve_with(None, &rhs, &fv, tol, 600);
     let solve_s = t_solve.elapsed().as_secs_f64();
     crate::progress::check()?;
-    if rel > 1e-7 {
+    if rel > (tol * 1e3).max(1e-7) {
         if solver == LinearSolver::Auto {
             let u = solve_dirichlet(k, f, fixed, values)?;
             return Ok((u, Some(format!("multigrid did not converge ({its} iterations, residual {rel:.1e}); used the direct solver"))));

@@ -272,6 +272,11 @@ impl Mesher for FemcoreMesher {
         if !(s.h > 0.0 && s.h.is_finite()) {
             return Err(Error::invalid("the element size must be a positive finite number"));
         }
+        if let Some(gc) = s.gap_cells {
+            if !(gc > 0.0 && gc.is_finite()) {
+                return Err(Error::invalid("`gap_cells` must be a positive finite number"));
+            }
+        }
         if let Some(layers) = &s.sweep {
             if geometry.dim == 3 {
                 let _stage = femcore::progress::stage(format!("sweeping 3D geometry along y (element size {} m)", s.h));
@@ -335,6 +340,8 @@ impl Mesher for FemcoreMesher {
             structured_pml: s.structured_pml,
             waves,
             curved: s.curved,
+            gap_cells: s.gap_cells,
+            z_coarsen: s.z_coarsen,
         };
         // the stage a job reports while it meshes (its log gets the mesher's laps below it)
         let _stage = femcore::progress::stage(format!("meshing the geometry (element size {} m)", s.h));

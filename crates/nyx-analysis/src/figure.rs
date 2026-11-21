@@ -9,6 +9,7 @@ use crate::canvas::{Anchor, Canvas, Item, Rgba, INK, MUTED};
 use crate::modeview::{align, AlignOptions, AlignedMode};
 use crate::raster::{raster_field, text_width, ColouredTri};
 use crate::section::Section;
+pub use crate::view3d::{Camera3d, ClipBox, EdgeMode, PlaneSpec};
 use nyx_physics::{discretise, Discretisation, Error, Mesh, Scalar, SolveResult};
 
 /// Colour maps of the figures. The tables are those of the window (`crates/app/src/colormap.rs`).
@@ -96,6 +97,39 @@ pub enum Kind {
     Gallery,
     /// per chosen mode a row: `|u|`, each in-plane component, the propagation component in quadrature
     Components,
+    /// arbitrary or axis-aligned 2D slice through a 3D mesh with exact un-averaged P2 sub-tet evaluation
+    Slice3d,
+    /// 3D cutaway rendering of exterior and clipped interior faces, optional isosurfaces, and edges
+    Cutaway3d,
+    /// 3D translucent marching-tetrahedra isosurface shells
+    Isosurface3d,
+    /// 3D region-coloured exterior/cutaway mesh inspection view
+    Mesh3d,
+}
+
+impl Kind {
+    pub fn parse(s: &str) -> Option<Kind> {
+        match s {
+            "gallery" => Some(Kind::Gallery),
+            "components" => Some(Kind::Components),
+            "slice3d" => Some(Kind::Slice3d),
+            "cutaway3d" => Some(Kind::Cutaway3d),
+            "isosurface3d" => Some(Kind::Isosurface3d),
+            "mesh3d" => Some(Kind::Mesh3d),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Gallery => "gallery",
+            Kind::Components => "components",
+            Kind::Slice3d => "slice3d",
+            Kind::Cutaway3d => "cutaway3d",
+            Kind::Isosurface3d => "isosurface3d",
+            Kind::Mesh3d => "mesh3d",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +153,24 @@ pub struct FigureOptions {
     pub at: Option<f64>,
     pub core: Option<Vec<i32>>,
     pub family: Option<String>,
+    /// optional scalar formula evaluated per cell node in 3D views (`"re(Ex)"`, `"abs(Ey)"`, `"im(Ey)"`, `"abs2(E)"`)
+    pub expr: Option<String>,
+    /// slice plane for `Slice3d` (defaults to `z` midplane or `at`)
+    pub plane: Option<PlaneSpec>,
+    /// active cutaway bounds for `Cutaway3d` / `Isosurface3d` / `Mesh3d`
+    pub clip: Option<ClipBox>,
+    /// explicit isosurface levels for `Isosurface3d` or `Cutaway3d`
+    pub isosurfaces: Option<Vec<f64>>,
+    /// zero-copy Bloch tiling repeat count along `periodic_shift` (default 1)
+    pub repeat_periodic: usize,
+    /// edge overlay mode for 3D views (`None | Regions | Mesh`)
+    pub show_edges: EdgeMode,
+    /// orthographic 3D camera angles
+    pub camera: Camera3d,
+    /// lattice translation vector in metres for `repeat_periodic > 1`
+    pub periodic_shift: Option<[f64; 3]>,
+    /// Floquet phase advance per period in radians (`exp(-i * m * periodic_phase)`)
+    pub periodic_phase: f64,
 }
 
 impl Default for FigureOptions {
@@ -136,20 +188,29 @@ impl Default for FigureOptions {
             at: None,
             core: None,
             family: None,
+            expr: None,
+            plane: None,
+            clip: None,
+            isosurfaces: None,
+            repeat_periodic: 1,
+            show_edges: EdgeMode::Regions,
+            camera: Camera3d::default(),
+            periodic_shift: None,
+            periodic_phase: 0.0,
         }
     }
 }
 
-const PANEL_BG: Rgba = [17, 24, 39, 255];
-const OUTLINE: Rgba = [148, 163, 184, 230];
+pub(crate) const PANEL_BG: Rgba = [17, 24, 39, 255];
+pub(crate) const OUTLINE: Rgba = [148, 163, 184, 230];
 const ARROW: Rgba = [34, 211, 238, 235];
 
-fn bytes(c: [f32; 3]) -> Rgba {
+pub(crate) fn bytes(c: [f32; 3]) -> Rgba {
     [(c[0] * 255.0 + 0.5) as u8, (c[1] * 255.0 + 0.5) as u8, (c[2] * 255.0 + 0.5) as u8, 255]
 }
 
 /// `17.944 GHz` for 1.7944e10 with the unit Hz.
-fn si(v: f64, unit: &str) -> String {
+pub(crate) fn si(v: f64, unit: &str) -> String {
     let a = v.abs();
     let (s, p) = if a == 0.0 {
         (1.0, "")
@@ -174,7 +235,7 @@ fn si(v: f64, unit: &str) -> String {
 }
 
 /// The two lines under a mode's number: what the study wrote for it (its label, the frequency, Q, the shares of its energy).
-fn mode_lines(result: &SolveResult, k: usize) -> (String, String) {
+pub(crate) fn mode_lines(result: &SolveResult, k: usize) -> (String, String) {
     let sol = &result.solutions[k];
     let scalar = |name: &str| {
         result
@@ -237,16 +298,16 @@ fn extent(section: &Section, mode: &AlignedMode, level: f64) -> Option<[f64; 4]>
     (b[0] <= b[1] && b[2] <= b[3]).then_some(b)
 }
 
-struct Frame {
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    win: [f64; 4],
+pub(crate) struct Frame {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) w: f64,
+    pub(crate) h: f64,
+    pub(crate) win: [f64; 4],
 }
 
 impl Frame {
-    fn map(&self, p: [f64; 2]) -> [f64; 2] {
+    pub(crate) fn map(&self, p: [f64; 2]) -> [f64; 2] {
         [
             self.x + (p[0] - self.win[0]) / (self.win[1] - self.win[0]) * self.w,
             self.y + (self.win[3] - p[1]) / (self.win[3] - self.win[2]) * self.h,
@@ -290,6 +351,9 @@ pub fn mode_figure(mesh: &Mesh, result: &SolveResult, o: &FigureOptions) -> Resu
 
 /// The same on the solver mesh.
 pub fn mode_figure_on(disc: &Discretisation, result: &SolveResult, o: &FigureOptions) -> Result<Figure, Error> {
+    if matches!(o.kind, Kind::Slice3d | Kind::Cutaway3d | Kind::Isosurface3d | Kind::Mesh3d) {
+        return crate::view3d::figure_3d_on(disc, result, o);
+    }
     if result.solutions.is_empty() {
         return Err(Error::invalid("the result has no solutions to draw"));
     }
@@ -357,6 +421,7 @@ pub fn mode_figure_on(disc: &Discretisation, result: &SolveResult, o: &FigureOpt
     let columns_per_mode = match o.kind {
         Kind::Gallery => 1,
         Kind::Components => 1 + prep[0].mode.in_plane.len().min(2) + usize::from(prep[0].mode.along.is_some()),
+        _ => unreachable!(),
     };
     // the spectrum of the modes goes in the next free panel of a gallery
     let freqs: Vec<Option<f64>> = prep.iter().map(|p| mode_frequency(result, p.k)).collect();
@@ -365,6 +430,7 @@ pub fn mode_figure_on(disc: &Discretisation, result: &SolveResult, o: &FigureOpt
     let (ncols, nrows) = match o.kind {
         Kind::Gallery => (o.columns.clamp(1, 8).min(n_panels), n_panels.div_ceil(o.columns.clamp(1, 8).min(n_panels))),
         Kind::Components => (columns_per_mode, prep.len()),
+        _ => unreachable!(),
     };
     // layout: the tick labels take `lab` on the left of every panel
     let head_h = if o.kind == Kind::Components { 64.0 } else { 46.0 };
@@ -389,6 +455,7 @@ pub fn mode_figure_on(disc: &Discretisation, result: &SolveResult, o: &FigureOpt
         let (r, c0) = match o.kind {
             Kind::Gallery => (idx / ncols, idx % ncols),
             Kind::Components => (idx, 0),
+            _ => unreachable!(),
         };
         let m = &p.mode;
         let mw = window_of(idx);
@@ -585,7 +652,7 @@ fn mode_frequency(result: &SolveResult, k: usize) -> Option<f64> {
 }
 
 /// A unit of length for a window `w` metres wide: the factor to metres and its name.
-fn length_unit(w: f64) -> (f64, &'static str) {
+pub(crate) fn length_unit(w: f64) -> (f64, &'static str) {
     if w >= 1e-3 {
         (1e-3, "mm")
     } else if w >= 2e-7 {
@@ -622,7 +689,7 @@ fn tick_text(v: f64, step: f64) -> String {
 }
 
 /// Tick marks and numbers on the left and bottom edge of a panel, in `unit` metres.
-fn draw_ticks(cv: &mut Canvas, fr: &Frame, unit: f64) {
+pub(crate) fn draw_ticks(cv: &mut Canvas, fr: &Frame, unit: f64) {
     let (x0, x1, z0, z1) = (fr.win[0] / unit, fr.win[1] / unit, fr.win[2] / unit, fr.win[3] / unit);
     let tick = [71, 85, 105, 255];
     let xs = nice_ticks(x0, x1, 5);
@@ -686,7 +753,7 @@ fn draw_spectrum(cv: &mut Canvas, x: f64, y: f64, w: f64, h: f64, numbers: &[usi
 }
 
 /// `win` grown around its centre to the shape `aspect` (height over width) of a panel, so that the scale is the same in x and z.
-fn fit_aspect(win: [f64; 4], aspect: f64) -> [f64; 4] {
+pub(crate) fn fit_aspect(win: [f64; 4], aspect: f64) -> [f64; 4] {
     let (w, h) = (win[1] - win[0], win[3] - win[2]);
     let (cx, cz) = (0.5 * (win[0] + win[1]), 0.5 * (win[2] + win[3]));
     if h / w < aspect {
@@ -699,7 +766,7 @@ fn fit_aspect(win: [f64; 4], aspect: f64) -> [f64; 4] {
 }
 
 /// The part of the segment `a b` inside `rect` (x0, y0, x1, y1), or `None` when it lies outside (Liang-Barsky).
-fn clip(a: [f64; 2], b: [f64; 2], rect: [f64; 4]) -> Option<[[f64; 2]; 2]> {
+pub(crate) fn clip(a: [f64; 2], b: [f64; 2], rect: [f64; 4]) -> Option<[[f64; 2]; 2]> {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
     for (p, q) in [(-dx, a[0] - rect[0]), (dx, rect[2] - a[0]), (-dy, a[1] - rect[1]), (dy, rect[3] - a[1])] {

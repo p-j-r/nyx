@@ -55,7 +55,8 @@ impl AxiMaterial {
 
     /// `eps_r` and `mu_r` per domain from the problem's materials (default 1), absorbing layers (`Materials::pml`) included.
     pub fn from_materials(mesh: &Discretisation, m: &Materials) -> Result<AxiMaterial, String> {
-        let eps: Vec<[C; 3]> = if m.has_complex_permittivity() {
+        let eps: Vec<[C; 3]> = if m.has_complex_permittivity() || m.has_tensor(femcore::props::TensorKind::Permittivity)
+        {
             m.cell_complex_permittivity(mesh, Some(1.0))?
                 .into_iter()
                 .map(|(re, im)| [c(re[0][0], -im[0][0]), c(re[2][2], -im[2][2]), c(re[1][1], -im[1][1])])
