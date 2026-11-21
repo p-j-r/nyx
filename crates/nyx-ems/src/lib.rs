@@ -16,6 +16,7 @@
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod axisym;
+pub mod bloch;
 pub mod cavity;
 pub mod driven;
 pub mod ibc;
@@ -30,6 +31,7 @@ pub use axisym::{
     assemble_axisym, assemble_axisym_with_bcs, axisym_fields_cells, power_along_theta, solve_axisym_modes,
     solve_axisym_pairs, solve_axisymmetric, AxiAssembly, AxiMaterial, AxiModes,
 };
+pub use bloch::{assemble_bloch, bloch_fields_cells, solve_bloch, solve_bloch_eigen, BlochAssembly, BlochSolve};
 pub use cavity::{assemble_emw_eigen, emw_eigen_fields, solve_cavity, solve_emw_modes, EmwAssembly, EmwSolve};
 pub use driven::{assemble_emw_driven, solve_driven, DrivenAssembly};
 pub use modes::{
@@ -42,7 +44,10 @@ pub use modes_complex::{
 };
 pub use optical::{solve_optical, solve_optical_wafer};
 pub use ports::{assemble_lumped_ports_3d, assemble_waveports_3d, AssembledLumpedPort, AssembledWavePort};
-pub use problem::{decode, LumpedJjBc, LumpedPortBc, Problem, Study, SurfaceImpedanceBc, WavePortBc};
+pub use problem::{
+    decode, symmetry_facet_flags, LumpedJjBc, LumpedPortBc, Problem, Study, SurfaceImpedanceBc, Symmetry, WavePortBc,
+    SYMMETRY_CHOICES,
+};
 pub use rom::rom_eigenfrequencies;
 
 use femcore::progress::{self, Progress};
@@ -62,6 +67,15 @@ impl Physics for Ems {
     }
 
     fn studies(&self) -> Vec<StudyDesc> {
+        let sym_param = || {
+            ParamDesc::choice(
+                "symmetry",
+                "Midplane symmetry",
+                &SYMMETRY_CHOICES,
+                "none",
+                "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+            )
+        };
         vec![
             StudyDesc {
                 kind: "modes".into(),
@@ -73,6 +87,7 @@ impl Physics for Ems {
                     ParamDesc::number("n_target", "Effective index near", "", 1.0, "the modes are searched around this index"),
                     ParamDesc::boolean("evanescent", "Evanescent target", false, "search an imaginary effective index"),
                     ParamDesc::integer("n_modes", "Number of modes", 4, 1, ""),
+                    sym_param(),
                 ],
             },
             StudyDesc {
@@ -97,6 +112,27 @@ impl Physics for Ems {
                 params: vec![
                     ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
                     ParamDesc::number("f_search", "Search around", "Hz", 10e9, "").required().range(Some(f64::MIN_POSITIVE), None),
+                    sym_param(),
+                ],
+            },
+            StudyDesc {
+                kind: "bloch".into(),
+                name: "3D Bloch modes".into(),
+                doc: "Fixed-frequency 3D Floquet-Bloch modes of a periodic waveguide or grating unit cell along +y as exp(-j k_y y), returning complex Bloch index n_B = k_y / k_0, loss alpha, and Poynting group index n_g.".into(),
+                dims: Dims::Three,
+                params: vec![
+                    ParamDesc::number("freq", "Frequency", "Hz", 1.934e14, "").required().range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::number("n_target", "Bloch index near", "", 1.5, "the modes are searched around this Bloch index").required(),
+                    ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
+                    ParamDesc {
+                        name: "brillouin_zone".into(),
+                        label: "Brillouin zone".into(),
+                        unit: "".into(),
+                        kind: ParamKind::Integer { default: 1, min: None, max: None },
+                        required: false,
+                        doc: "Brillouin zone index m shifting the target to n_target + (m - 1) * lambda_0 / Lambda".into(),
+                    },
+                    sym_param(),
                 ],
             },
             StudyDesc {
@@ -142,14 +178,14 @@ impl Physics for Ems {
             BcDesc {
                 kind: "periodic".into(),
                 name: "Floquet-periodic pair".into(),
-                doc: "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity study).".into(),
+                doc: "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity, bloch, and driven studies).".into(),
                 applies: Applies::Boundary,
                 params: vec![ParamDesc::text("dest", "Destination boundary", "", "a boundary selector").required(), ParamDesc::number("phase", "Phase advance", "rad", 0.0, "k . d over the period")],
             },
             BcDesc {
                 kind: "pmc".into(),
                 name: "Magnetic wall (mirror plane)".into(),
-                doc: "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane. Cavity study.".into(),
+                doc: "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane.".into(),
                 applies: Applies::Boundary,
                 params: vec![],
             },
@@ -243,6 +279,14 @@ impl Physics for Ems {
                 FieldDesc::new("Ey", "a.u.", &[], "component along the propagation (real solver; `Re Ey` for a complex mode)"),
                 FieldDesc::new("Ez", "a.u.", &[], "surface-normal component (real solver; `Re Ez` for a complex mode)"),
             ],
+            "bloch" => vec![
+                FieldDesc::new("|E|", "a.u.", &[], "magnitude of the electric field, scaled to a maximum of 1"),
+                FieldDesc::new("|Exz|", "a.u.", &[], "magnitude of the transverse (in-plane) part"),
+                FieldDesc::new("|Ey|", "a.u.", &[], "magnitude of the longitudinal part (along the propagation)"),
+                FieldDesc::new("Re Ex", "a.u.", &[], "real part of the lateral component, phase chosen so that the largest component is real"),
+                FieldDesc::new("Re Ey", "a.u.", &[], "real part of the y component (along the propagation)"),
+                FieldDesc::new("Re Ez", "a.u.", &[], "real part of the surface-normal component"),
+            ],
             "axisymmetric_modes" | "cavity" | "driven" => vec![
                 FieldDesc::new("|E|", "a.u.", &[], "magnitude of the electric field, scaled to a maximum of 1"),
                 FieldDesc::new("Re Ex", "a.u.", &[], "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real"),
@@ -295,7 +339,7 @@ impl Physics for Ems {
         let sp = nyx_physics::decode::Params::new(&spec.study.params, &sd.params);
         // a mode study resolves the wave at its frequency; the eigenfrequency studies find modes above the one they search around
         let (freq, headroom) = match spec.study.kind.as_str() {
-            "modes" => (sp.number("freq"), 1.0),
+            "modes" | "bloch" => (sp.number("freq"), 1.0),
             "cavity" | "axisymmetric_modes" => (sp.number("f_search"), 1.5),
             "driven" => (sp.number("f_max"), 1.0),
             _ => return empty,
@@ -365,6 +409,7 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             Study::Modes { .. } => solve_waveguide(&d, problem),
             Study::AxisymmetricModes { .. } => solve_axisymmetric(&d, problem),
             Study::Cavity { .. } => solve_cavity(&d, problem),
+            Study::Bloch { .. } => solve_bloch(&d, problem),
             Study::Driven { .. } => solve_driven(&d, problem),
         }
         .map_err(Error::from_kernel)?

@@ -412,6 +412,101 @@ pub fn eigs_complex(a: &CCsr, b: &CCsr, sigma: C64, nev: usize, tol: f64, max_di
     eigs_complex_projected(a, b, sigma, nev, tol, max_dim, None)
 }
 
+/// Complex quadratic eigenproblem `(A0 + lambda A1 + lambda^2 A2) u = 0`, returning up to `nev` eigenpairs nearest `sigma`.
+///
+/// Linearises the shifted pencil `P(sigma + mu) u = (P(sigma) + mu P'(sigma) + mu^2 A2) u = 0` (`lambda = sigma + 1/theta`)
+/// through the `2n x 2n` shift-and-invert companion operator `T [u; w] = [w; -P(sigma)^-1 (A2 u + P'(sigma) w)]`, factorising
+/// only the `n x n` matrix `P(sigma) = A0 + sigma A1 + sigma^2 A2` once (`A2` may be singular; zero-`theta` roots at infinity
+/// sit at the origin of `T` and are skipped).
+pub fn eigs_quadratic_complex(a0: &CCsr, a1: &CCsr, a2: &CCsr, sigma: C64, nev: usize, tol: f64) -> Result<CEigPairs, String> {
+    let n = a0.nrows();
+    if n == 0 || a0.ncols() != n || a1.nrows() != n || a1.ncols() != n || a2.nrows() != n || a2.ncols() != n {
+        return Err("quadratic eigenproblem matrices must be square and of the same non-zero dimension".into());
+    }
+    if nev == 0 || nev >= 2 * n {
+        return Err("number of eigenvalues must be between 1 and 2n-1".into());
+    }
+    progress::check()?;
+    let _stage = progress::stage(format!("quadratic shift-and-invert Krylov-Schur eigensolver ({nev} modes, {n} unknowns)"));
+    let p_sigma = a0.add_scaled(a1, sigma).add_scaled(a2, sigma * sigma);
+    let p_prime = a1.add_scaled(a2, C64::new(2.0, 0.0) * sigma);
+    let mut fac = ShiftedFactorization::new(&p_sigma, None, Definiteness::General)
+        .map_err(|e| format!("sparse factorisation failed: {e}"))?;
+    fac.ordering = fill_ordering(n);
+    {
+        let _f = progress::stage(format!(
+            "factorising the complex quadratic shifted matrix ({n} unknowns); this cannot be interrupted"
+        ));
+        crate::par::on_factor_pool(|| fac.set_shift(C64::ZERO))
+            .map_err(|e| format!("sparse factorisation failed (singular quadratic pencil at the search shift?): {e}"))?;
+    }
+    progress::check()?;
+
+    let tol_eff = tol_override().unwrap_or(tol);
+    let mut block = nev.min(8);
+    let ticket = crate::warm::begin("qep_shift_invert", 2 * n, nev);
+    let warm_start: Option<Vec<C64>> = ticket.as_ref().and_then(|t| t.start_columns::<C64>());
+    if warm_start.is_some() {
+        block = block.max(nev);
+    }
+    let eps = EpsOptions {
+        which: Which::LargestMagnitude,
+        tol: tol_eff,
+        block_size: block,
+        ncv: None,
+        nev,
+        ..EpsOptions::general(nev)
+    };
+    let op = Guarded {
+        inner: QepShiftInvert { fac: &fac, a2, p_prime: &p_prime, min_n: par_solve_min_n_complex() },
+        project: None,
+        _t: std::marker::PhantomData,
+    };
+    let res = match catch_unwind(AssertUnwindSafe(|| krylov_schur(&op, None, warm_start.as_deref(), &eps))) {
+        Ok(r) => r.map_err(|e| format!("the quadratic eigensolver failed: {e}"))?,
+        Err(payload) if payload.is::<CancelUnwind>() => return Err(progress::CANCELLED.into()),
+        Err(payload) => resume_unwind(payload),
+    };
+    if let Some(t) = ticket {
+        if res.reason == EpsReason::Converged {
+            t.finish((0..res.values.len()).map(|i| res.vectors.col(i)), res.iterations);
+        }
+    }
+
+    let (mut r0, mut r1, mut r2) = (vec![C64::ZERO; n], vec![C64::ZERO; n], vec![C64::ZERO; n]);
+    let mut pairs: Vec<(C64, Vec<C64>, f64)> = Vec::with_capacity(res.values.len());
+    for (i, &theta) in res.values.iter().enumerate() {
+        if theta.norm() < 1e-15 {
+            continue;
+        }
+        let lam = sigma + C64::ONE / theta;
+        let col = res.vectors.col(i);
+        let u_raw = &col[..n];
+        let unorm = norm2(u_raw);
+        if unorm <= 1e-300 {
+            continue;
+        }
+        let u: Vec<C64> = u_raw.iter().map(|&z| z / unorm).collect();
+        a0.spmv(&u, &mut r0);
+        a1.spmv(&u, &mut r1);
+        a2.spmv(&u, &mut r2);
+        let lam2 = lam * lam;
+        let num = (0..n).map(|k| (r0[k] + lam * r1[k] + lam2 * r2[k]).norm_sqr()).sum::<f64>().sqrt();
+        let den = norm2(&r0) + lam.norm() * norm2(&r1) + lam2.norm() * norm2(&r2) + 1e-300;
+        pairs.push((lam, u, num / den));
+    }
+    pairs.sort_by(|a, b| (a.0 - sigma).norm().total_cmp(&(b.0 - sigma).norm()));
+    let mut values = Vec::with_capacity(pairs.len());
+    let mut vectors = Vec::with_capacity(pairs.len());
+    let mut residuals = Vec::with_capacity(pairs.len());
+    for (v, u, r) in pairs {
+        values.push(v);
+        vectors.push(u);
+        residuals.push(r);
+    }
+    Ok(CEigPairs { values, vectors, residuals, dim: res.ncv, converged: res.reason == EpsReason::Converged })
+}
+
 /// A preconditioner given as a closure over free-dof vectors (one multigrid cycle).
 struct ClosurePc<'a>(&'a dyn Fn(&[f64]) -> Vec<f64>);
 
@@ -484,6 +579,61 @@ impl<T: FaerScalar> LinearOperator<T> for ParShiftInvert<'_, T> {
         let n = self.fac.dim();
         y[..n * nrhs].copy_from_slice(&bx[..n * nrhs]);
         self.solve_block(y, nrhs);
+    }
+}
+
+/// Companion shift-and-invert operator `T [u; w] = [w; -P(sigma)^-1 (A2 u + P'(sigma) w)]` on `C^{2n}` for
+/// [`eigs_quadratic_complex`].
+struct QepShiftInvert<'a> {
+    fac: &'a ShiftedFactorization<C64>,
+    a2: &'a CCsr,
+    p_prime: &'a CCsr,
+    min_n: usize,
+}
+
+impl QepShiftInvert<'_> {
+    fn solve_block(&self, rhs: &mut [C64], nrhs: usize) {
+        let n = self.fac.dim();
+        let nt = if self.min_n > 0 && nrhs > 1 && n >= self.min_n { crate::par::threads().min(nrhs) } else { 1 };
+        if nt <= 1 {
+            self.fac.solve_block_in_place(&mut rhs[..n * nrhs], nrhs);
+            return;
+        }
+        let cols = nrhs.div_ceil(nt);
+        rhs[..n * nrhs].par_chunks_mut(cols * n).for_each(|chunk| {
+            let k = chunk.len() / n;
+            self.fac.solve_block_in_place(chunk, k);
+        });
+    }
+}
+
+impl LinearOperator<C64> for QepShiftInvert<'_> {
+    fn dim(&self) -> usize {
+        2 * self.fac.dim()
+    }
+    fn apply(&self, x: &[C64], y: &mut [C64]) {
+        self.apply_block(x, y, 1)
+    }
+    fn apply_block(&self, x: &[C64], y: &mut [C64], nrhs: usize) {
+        let n = self.fac.dim();
+        let n2 = 2 * n;
+        let mut rhs = vec![C64::ZERO; n * nrhs];
+        let mut tmp = vec![C64::ZERO; n];
+        for c in 0..nrhs {
+            let xc = &x[c * n2..(c + 1) * n2];
+            let (u, w) = (&xc[..n], &xc[n..n2]);
+            y[c * n2..c * n2 + n].copy_from_slice(w);
+            let rc = &mut rhs[c * n..(c + 1) * n];
+            self.a2.spmv(u, rc);
+            self.p_prime.spmv(w, &mut tmp);
+            for i in 0..n {
+                rc[i] = -(rc[i] + tmp[i]);
+            }
+        }
+        self.solve_block(&mut rhs, nrhs);
+        for c in 0..nrhs {
+            y[c * n2 + n..(c + 1) * n2].copy_from_slice(&rhs[c * n..(c + 1) * n]);
+        }
     }
 }
 

@@ -42,18 +42,23 @@ fn quad_form_real_mat_complex_vec(mat: &RCsr, x: &[C]) -> f64 {
 /// the exact modal energy row (`ModeEnergyRow`), and the relative equipartition error
 /// `|U_elec - (U_mag^vol + U_kin^IBC + sum_j U_ind,j^JJ)| / U_elec`.
 pub fn compute_mode_energy_and_scale(f: C, x_red: &[C], rot: C, asm: &EmwAssembly) -> (f64, ModeEnergyRow, f64) {
-    let m_tot_r = asm.mc.real_part();
-    let q_m = quad_form_real_mat_complex_vec(&m_tot_r, x_red).max(1e-300);
+    let mut m_tot_phys = asm.m_phys_red.clone();
+    for port in &asm.jj_ports {
+        if port.m_jj_red.nnz() > 0 {
+            m_tot_phys = m_tot_phys.add_scaled(&port.m_jj_red, 1.0);
+        }
+    }
+    let q_m = quad_form_real_mat_complex_vec(&m_tot_phys, x_red).max(1e-300);
     let s_e = 2.0 / (EPS0 * q_m).sqrt();
     let scale = rot * s_e;
     let x_phys: Vec<C> = x_red.iter().map(|&z| z * scale).collect();
 
-    let u_elec_j = 0.25 * EPS0 * quad_form_real_mat_complex_vec(&m_tot_r, &x_phys);
+    let u_elec_j = 0.25 * EPS0 * quad_form_real_mat_complex_vec(&m_tot_phys, &x_phys);
     let k0_m = (2.0 * PI * f.re / C0).max(1e-300);
     let omega_m = (2.0 * PI * f.re).max(1e-300);
     let mag_factor = EPS0 / (4.0 * k0_m * k0_m);
 
-    let u_mag_vol_j = mag_factor * quad_form_real_mat_complex_vec(&asm.k0_red, &x_phys);
+    let u_mag_vol_j = mag_factor * quad_form_real_mat_complex_vec(&asm.k_phys_red, &x_phys);
     let u_kin_ibc_j = if asm.k_ibc_red.nnz() > 0 {
         mag_factor * quad_form_real_mat_complex_vec(&asm.k_ibc_red, &x_phys)
     } else {

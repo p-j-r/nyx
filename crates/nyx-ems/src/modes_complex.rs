@@ -24,15 +24,16 @@
 //! `(A0 + j b_prev A1) x = -b^2 B x`, and the iteration stops when `b` changes by less than
 //! `COUPLED_BETA_TOL` (relative) between two steps.
 
-use crate::ibc::{add_ibc_2d_waveguide, pec_edges_and_nodes_2d};
+use crate::ibc::{add_ibc_2d_waveguide, pec_edges_and_nodes_2d, EPS0, MU0};
 use crate::modes::C0;
-use crate::problem::{Problem, Study, SurfaceImpedanceBc};
+use crate::problem::{pec_edges_and_nodes_2d_with_symmetry, Problem, Study, SurfaceImpedanceBc, Symmetry};
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::fem::*;
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::eigs_complex;
 use femcore::optical::{cell_materials, EpsC, MuC};
+use femcore::props::{PmlDir, TensorKind};
 use femcore::section::local_component;
 use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use std::time::Instant;
@@ -100,6 +101,30 @@ pub fn assemble_modes_complex_with_bcs(
     pec_labels: &[i32],
     ibc_bcs: &[SurfaceImpedanceBc],
     pmc_labels: &[i32],
+) -> Result<ModeAssemblyC, String> {
+    assemble_modes_complex_with_bcs_and_symmetry(
+        mesh,
+        freq,
+        eps,
+        mu,
+        order,
+        pec_labels,
+        ibc_bcs,
+        pmc_labels,
+        Symmetry::None,
+    )
+}
+
+pub(crate) fn assemble_modes_complex_with_bcs_and_symmetry(
+    mesh: &Discretisation,
+    freq: f64,
+    eps: &[EpsC],
+    mu: &[MuC],
+    order: usize,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    pmc_labels: &[i32],
+    symmetry: Symmetry,
 ) -> Result<ModeAssemblyC, String> {
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
@@ -198,7 +223,8 @@ pub fn assemble_modes_complex_with_bcs(
     let a_full = a_coo.to_csr();
     let mut b_full = b_coo.to_csr();
     // PEC walls
-    let (be, bn) = if pec_labels.is_empty() && ibc_bcs.is_empty() && pmc_labels.is_empty() {
+    let (be, bn) = if pec_labels.is_empty() && ibc_bcs.is_empty() && pmc_labels.is_empty() && symmetry == Symmetry::None
+    {
         // walls are the exterior facets only: facets on interfaces between domains are not conductors
         let exterior = mesh.exterior_facets();
         let mut be: Vec<usize> = (0..mesh.n_facets())
@@ -214,8 +240,10 @@ pub fn assemble_modes_complex_with_bcs(
         bn.sort_unstable();
         bn.dedup();
         (be, bn)
-    } else {
+    } else if symmetry == Symmetry::None {
         pec_edges_and_nodes_2d(mesh, pec_labels, ibc_bcs, pmc_labels)
+    } else {
+        pec_edges_and_nodes_2d_with_symmetry(mesh, pec_labels, ibc_bcs, pmc_labels, symmetry)?
     };
     let mut fixed: Vec<usize> = be.clone();
     if order == 2 {
@@ -445,10 +473,14 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
     }
     let (eps, mu) = cell_materials(mesh, &problem.materials)?;
     let target = if evanescent { c(0.0, n_target) } else { c(n_target, 0.0) };
-    let modes = if problem.pec.is_empty() && problem.surface_impedance.is_empty() && problem.pmc.is_empty() {
+    let modes = if problem.pec.is_empty()
+        && problem.surface_impedance.is_empty()
+        && problem.pmc.is_empty()
+        && problem.symmetry == Symmetry::None
+    {
         solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, problem.order)?
     } else {
-        let asm = assemble_modes_complex_with_bcs(
+        let asm = assemble_modes_complex_with_bcs_and_symmetry(
             mesh,
             freq,
             &eps,
@@ -457,11 +489,13 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
             &problem.pec,
             &problem.surface_impedance,
             &problem.pmc,
+            problem.symmetry,
         )?;
         solve_mode_pairs_complex(&asm, target, n_modes)?
     };
     let mut solutions = vec![];
     let mut scalars = vec![];
+    let mode_metrics = compute_waveguide_2d_metrics(mesh, problem, freq, &modes.neff, &modes.et, &modes.phi)?;
     for j in 0..modes.neff.len() {
         let z = modes.neff[j];
         let txt = format!("{:.6} {:+.3e}i", z.re, z.im);
@@ -478,6 +512,7 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
         if q.is_finite() {
             scalars.push((format!("Q {} = Re/(2|Im|) of neff", j + 1), Scalar::Num(q)));
         }
+        mode_metrics[j].push_scalars(j + 1, &mut scalars);
     }
     let mut log = vec!["complex mode analysis (PML or complex materials)".to_string()];
     if !modes.converged {
@@ -496,4 +531,186 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
         dofs: mesh.n_dofs(problem.order),
     };
     Ok(result)
+}
+
+/// Poynting group velocity / group index and non-PML electric energy shares for a 2D waveguide mode.
+pub(crate) struct WaveguideModeMetrics {
+    pub vg: f64,
+    pub comp_shares: [f64; 3],
+    pub domain_shares: Vec<(i32, f64)>,
+    pub layer_fraction: f64,
+}
+
+impl WaveguideModeMetrics {
+    pub fn push_scalars(&self, mode_num: usize, scalars: &mut Vec<(String, Scalar)>) {
+        scalars.push((format!("v_g {mode_num} (m/s)"), Scalar::Num(self.vg)));
+        if self.vg.abs() > 1e-9 * C0 {
+            scalars.push((format!("n_g {mode_num}"), Scalar::Num(C0 / self.vg)));
+        }
+        scalars.push((format!("Ex share {mode_num}"), Scalar::Num(self.comp_shares[0])));
+        scalars.push((format!("Ey share {mode_num}"), Scalar::Num(self.comp_shares[1])));
+        scalars.push((format!("Ez share {mode_num}"), Scalar::Num(self.comp_shares[2])));
+        for &(label, share) in &self.domain_shares {
+            scalars.push((format!("share in domain {label} {mode_num}"), Scalar::Num(share)));
+        }
+        scalars.push((format!("layer fraction {mode_num}"), Scalar::Num(self.layer_fraction)));
+    }
+}
+
+/// Evaluates `P_y`, dispersive `U_EM`, `v_g`, `n_g`, component shares (`Ex`, `Ey`, `Ez`), domain shares,
+/// and PML `layer fraction` at `quad_rule(2, 4)` using unstretched physical `eps_r`, `d(omega eps_r)/domega`, and `mu_r`.
+pub(crate) fn compute_waveguide_2d_metrics(
+    mesh: &Discretisation,
+    problem: &Problem,
+    freq: f64,
+    neff: &[C],
+    et: &[Vec<C>],
+    phi: &[Vec<C>],
+) -> Result<Vec<WaveguideModeMetrics>, String> {
+    let n_modes = neff.len();
+    if n_modes == 0 {
+        return Ok(Vec::new());
+    }
+    let omega = (2.0 * std::f64::consts::PI * freq).max(1e-300);
+    let k0 = omega / C0;
+    let eps_phys_re = problem.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+    let d_omega_eps = problem.cell_d_omega_eps(mesh)?;
+    let mur_phys = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
+    let pml_cells: Vec<bool> = (0..mesh.n_cells())
+        .map(|ci| {
+            problem
+                .materials
+                .pml
+                .get(&mesh.cell_labels[ci])
+                .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
+        })
+        .collect();
+    let any_pml = pml_cells.iter().any(|&p| p);
+    let mut domains: Vec<i32> =
+        (0..mesh.n_cells()).filter(|&ci| !pml_cells[ci]).map(|ci| mesh.cell_labels[ci]).collect();
+    domains.sort_unstable();
+    domains.dedup();
+    let cell_dom_idx: Vec<usize> = (0..mesh.n_cells())
+        .map(|ci| {
+            if pml_cells[ci] {
+                usize::MAX
+            } else {
+                domains.binary_search(&mesh.cell_labels[ci]).unwrap_or(usize::MAX)
+            }
+        })
+        .collect();
+
+    let geo = geometry(mesh);
+    let cd = cell_data(mesh, problem.order);
+    let quad = quad_rule(2, 4);
+    let tab: Vec<(Vec<f64>, Vec<f64>)> = quad.lam.iter().map(|l| shape(l, problem.order)).collect();
+    let nl = mesh.nloc(problem.order);
+    let nloc_e = if problem.order == 1 { 3 } else { 8 };
+
+    let mut p_y = vec![0.0_f64; n_modes];
+    let mut u_em = vec![0.0_f64; n_modes];
+    let mut comp_e = vec![[0.0_f64; 3]; n_modes];
+    let mut dom_e = vec![vec![0.0_f64; domains.len()]; n_modes];
+    let mut u_e_phys = vec![0.0_f64; n_modes];
+    let mut u_e_pml = vec![0.0_f64; n_modes];
+
+    let mut w = vec![[0.0; 2]; nloc_e];
+    let mut curl = vec![0.0; nloc_e];
+    let mut pd = Vec::new();
+    let mut gn = vec![[0.0; 2]; nl];
+
+    for ci in 0..mesh.n_cells() {
+        let g = tri_g(&geo, ci);
+        let area = geo.vol[ci];
+        let er = &eps_phys_re[ci];
+        let de = &d_omega_eps[ci];
+        let mur = mur_phys[ci];
+        let inv_om_mu = 1.0 / (omega * MU0 * mur);
+        let d_idx = cell_dom_idx[ci];
+        mesh.cell_dofs(ci, problem.order, &mut pd);
+        for (q, l) in quad.lam.iter().enumerate() {
+            edge_basis(l, &g, &cd.sign[ci], problem.order, &mut w, &mut curl);
+            let (nv_, dn) = &tab[q];
+            for a in 0..nl {
+                gn[a][0] = (0..3).map(|b| dn[a * 3 + b] * g[b][0]).sum();
+                gn[a][1] = (0..3).map(|b| dn[a * 3 + b] * g[b][1]).sum();
+            }
+            let wq_area = quad.w[q] * area;
+            for j in 0..n_modes {
+                let beta = neff[j] * k0;
+                let j_beta = c(0.0, 1.0) * beta;
+                let (mut ex, mut ez, mut curl_2d) = (c(0.0, 0.0), c(0.0, 0.0), c(0.0, 0.0));
+                for s in 0..nloc_e {
+                    let cf = et[j][cd.gdofs[ci][s]];
+                    ex += cf * w[s][0];
+                    ez += cf * w[s][1];
+                    curl_2d += cf * curl[s];
+                }
+                let (mut phi_q, mut dphi_dx, mut dphi_dz) = (c(0.0, 0.0), c(0.0, 0.0), c(0.0, 0.0));
+                for a in 0..nl {
+                    let pf = phi[j][pd[a]];
+                    phi_q += pf * nv_[a];
+                    dphi_dx += pf * gn[a][0];
+                    dphi_dz += pf * gn[a][1];
+                }
+                let ey = j_beta * phi_q;
+                let e_w = [ex, ey, ez];
+                let mut e_eps_e = 0.0_f64;
+                for a in 0..3 {
+                    for b in 0..3 {
+                        e_eps_e += er[a][b] * (e_w[a].conj() * e_w[b]).re;
+                    }
+                }
+                if pml_cells[ci] {
+                    u_e_pml[j] += e_eps_e * wq_area;
+                } else {
+                    u_e_phys[j] += e_eps_e * wq_area;
+                    for k in 0..3 {
+                        comp_e[j][k] += er[k][k].abs() * e_w[k].norm_sqr() * wq_area;
+                    }
+                    if d_idx != usize::MAX {
+                        dom_e[j][d_idx] += e_eps_e * wq_area;
+                    }
+                    // Wafer right-handed (x, y, z) magnetic field H = (j / (omega mu0 mu_r)) curl E:
+                    // (curl E)_x = -j beta (e_z + dphi/dz)  => H_x = +(beta / (omega mu)) (e_z + dphi/dz)
+                    // (curl E)_y = -(de_z/dx - de_x/dz)     => H_y = -(j / (omega mu)) curl_2d
+                    // (curl E)_z = +j beta (e_x + dphi/dx)  => H_z = -(beta / (omega mu)) (e_x + dphi/dx)
+                    let hx = beta * (ez + dphi_dz) * inv_om_mu;
+                    let hy = -c(0.0, 1.0) * curl_2d * inv_om_mu;
+                    let hz = -beta * (ex + dphi_dx) * inv_om_mu;
+                    p_y[j] += 0.5 * (ez.conj() * hx - ex.conj() * hz).re * wq_area;
+                    let mut e_de_e = 0.0_f64;
+                    for a in 0..3 {
+                        for b in 0..3 {
+                            e_de_e += de[a][b] * (e_w[a].conj() * e_w[b]).re;
+                        }
+                    }
+                    let h_mu_h = mur * (hx.norm_sqr() + hy.norm_sqr() + hz.norm_sqr());
+                    u_em[j] += 0.25 * (EPS0 * e_de_e + MU0 * h_mu_h) * wq_area;
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::with_capacity(n_modes);
+    for j in 0..n_modes {
+        let vg_raw = if u_em[j] > 0.0 { p_y[j] / u_em[j] } else { 0.0 };
+        let vg = if vg_raw.abs() <= 1e-9 * C0 { 0.0 } else { vg_raw };
+        let comp_tot = comp_e[j][0] + comp_e[j][1] + comp_e[j][2];
+        let comp_shares = if comp_tot > 0.0 {
+            [comp_e[j][0] / comp_tot, comp_e[j][1] / comp_tot, comp_e[j][2] / comp_tot]
+        } else {
+            [0.0; 3]
+        };
+        let dom_tot: f64 = dom_e[j].iter().sum();
+        let domain_shares = domains
+            .iter()
+            .enumerate()
+            .map(|(d, &label)| (label, if dom_tot > 0.0 { dom_e[j][d] / dom_tot } else { 0.0 }))
+            .collect();
+        let u_all = u_e_phys[j] + u_e_pml[j];
+        let layer_fraction = if any_pml && u_all > 0.0 { (u_e_pml[j] / u_all).clamp(0.0, 1.0) } else { 0.0 };
+        out.push(WaveguideModeMetrics { vg, comp_shares, domain_shares, layer_fraction });
+    }
+    Ok(out)
 }

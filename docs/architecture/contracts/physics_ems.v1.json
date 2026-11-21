@@ -97,7 +97,7 @@
     },
     {
       "applies": "boundary",
-      "doc": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity study).",
+      "doc": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity, bloch, and driven studies).",
       "kind": "periodic",
       "name": "Floquet-periodic pair",
       "params": [
@@ -129,7 +129,7 @@
     },
     {
       "applies": "boundary",
-      "doc": "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane. Cavity study.",
+      "doc": "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane.",
       "kind": "pmc",
       "name": "Magnetic wall (mirror plane)",
       "params": []
@@ -483,6 +483,44 @@
         "unit": "a.u."
       }
     ],
+    "bloch": [
+      {
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the transverse (in-plane) part",
+        "name": "|Exz|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the longitudinal part (along the propagation)",
+        "name": "|Ey|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (along the propagation)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
+        "unit": "a.u."
+      }
+    ],
     "cavity": [
       {
         "components": [],
@@ -680,7 +718,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity study).",
+              "description": "The dofs on `on` are the dofs on `dest` shifted by the cell and multiplied by exp(-j phase) (cavity, bloch, and driven studies).",
               "properties": {
                 "kind": {
                   "const": "periodic"
@@ -717,7 +755,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane. Cavity study.",
+              "description": "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane.",
               "properties": {
                 "kind": {
                   "const": "pmc"
@@ -1089,6 +1127,22 @@
                     "default": 1.0,
                     "description": "Effective index near. the modes are searched around this index",
                     "type": "number"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1164,10 +1218,87 @@
                     "description": "Number of modes",
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
                   "f_search"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Fixed-frequency 3D Floquet-Bloch modes of a periodic waveguide or grating unit cell along +y as exp(-j k_y y), returning complex Bloch index n_B = k_y / k_0, loss alpha, and Poynting group index n_g.",
+            "properties": {
+              "kind": {
+                "const": "bloch"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "brillouin_zone": {
+                    "default": 1,
+                    "description": "Brillouin zone. Brillouin zone index m shifting the target to n_target + (m - 1) * lambda_0 / Lambda",
+                    "type": "integer"
+                  },
+                  "freq": {
+                    "default": 193400000000000.0,
+                    "description": "Frequency [Hz]",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "n_modes": {
+                    "default": 6,
+                    "description": "Number of modes",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_target": {
+                    "default": 1.5,
+                    "description": "Bloch index near. the modes are searched around this Bloch index",
+                    "type": "number"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "freq",
+                  "n_target"
                 ],
                 "type": "object"
               }
@@ -1291,6 +1422,28 @@
           "name": "n_modes",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
         }
       ]
     },
@@ -1372,6 +1525,110 @@
           "name": "f_search",
           "required": true,
           "unit": "Hz"
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "three",
+      "doc": "Fixed-frequency 3D Floquet-Bloch modes of a periodic waveguide or grating unit cell along +y as exp(-j k_y y), returning complex Bloch index n_B = k_y / k_0, loss alpha, and Poynting group index n_g.",
+      "kind": "bloch",
+      "name": "3D Bloch modes",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 193400000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Frequency",
+          "name": "freq",
+          "required": true,
+          "unit": "Hz"
+        },
+        {
+          "doc": "the modes are searched around this Bloch index",
+          "kind": {
+            "default": 1.5,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Bloch index near",
+          "name": "n_target",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 6,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Number of modes",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "Brillouin zone index m shifting the target to n_target + (m - 1) * lambda_0 / Lambda",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": null,
+            "type": "integer"
+          },
+          "label": "Brillouin zone",
+          "name": "brillouin_zone",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
         }
       ]
     },

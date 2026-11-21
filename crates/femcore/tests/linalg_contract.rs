@@ -33,7 +33,13 @@ fn eigen_options_have_the_documented_shape_and_defaults() {
 #[test]
 fn the_driver_surface_kernels_call_is_public() {
     let _ = (dense_eigh, dense_gen_eigh, eigs_real_general_near);
-    let _ = (DirectSolver::<f64>::new, DirectSolver::<C64>::new, eigs_near::<f64>, eigs_near::<C64>);
+    let _ = (
+        DirectSolver::<f64>::new,
+        DirectSolver::<C64>::new,
+        eigs_near::<f64>,
+        eigs_near::<C64>,
+        femcore::linalg::driver::eigs_quadratic_complex,
+    );
 }
 
 /// `K u = 1` for the 1D Laplacian (2, -1): `u_i = i (n + 1 - i) / 2`.
@@ -148,4 +154,60 @@ fn a_converged_complex_pair_of_a_real_pencil_is_reported_and_never_dropped() {
     assert!(!r.complex_found);
     assert_eq!(r.values.len(), 2);
     assert!((r.values[0] - 20.0).abs() < 1e-8 && (r.values[1] - 21.0).abs() < 1e-8, "{:?}", r.values);
+}
+
+#[test]
+fn quadratic_complex_shift_invert_handles_complex_repeated_and_singular_a2() {
+    use femcore::linalg::driver::eigs_quadratic_complex;
+    // Size n = 40:
+    // - Coordinates 0 and 1 have repeated complex quadratic roots lambda_+ = 2.4 - 0.15i and lambda_- = -1.8 + 0.05i
+    //   via (lambda - lambda_+)(lambda - lambda_-) = lambda^2 - (lambda_+ + lambda_-) lambda + lambda_+ * lambda_- = 0.
+    // - Coordinates 2..10 have singular A2 = 0 (linear modes A0 + lambda A1 = 0 at lambda_k = 10.0 + k as f64, plus an infinite root).
+    // - Coordinates 10..40 have well-separated quadratic roots +- (4.0 + 0.2 * k).
+    let n = 40;
+    let lp = C64::new(2.4, -0.15);
+    let lm = C64::new(-1.8, 0.05);
+    let (mut t0, mut t1, mut t2) = (vec![], vec![], vec![]);
+    for i in 0..2 {
+        t0.push((i, i, lp * lm));
+        t1.push((i, i, -(lp + lm)));
+        t2.push((i, i, C64::new(1.0, 0.0)));
+    }
+    // Add singular-A2 linear modes on 2..10 at lambda_k = 30.0 + k - 0.1i (plus infinite root theta = 0)
+    for i in 2..10 {
+        let root = C64::new(30.0 + i as f64, -0.1);
+        t0.push((i, i, -root));
+        t1.push((i, i, C64::new(1.0, 0.0)));
+        // A2 has zero row/column on 2..10 -> singular A2!
+    }
+    for i in 10..n {
+        let r = C64::new(4.0 + 0.2 * i as f64, -0.02);
+        t0.push((i, i, -(r * r)));
+        t1.push((i, (i + 1).min(n - 1), C64::new(0.0, if i + 1 < n { 0.01 } else { 0.0 })));
+        t2.push((i, i, C64::new(1.0, 0.0)));
+    }
+    let a0 = Csr::from_triplets(n, n, &t0).unwrap();
+    let a1 = Csr::from_triplets(n, n, &t1).unwrap();
+    let a2 = Csr::from_triplets(n, n, &t2).unwrap();
+
+    // 1. Search near repeated complex root lp = 2.4 - 0.15i: both copies must be found with unit 2-norm and tiny QEP residual
+    let res = eigs_quadratic_complex(&a0, &a1, &a2, C64::new(2.35, -0.1), 4, 1e-11).unwrap();
+    assert!(res.converged);
+    assert!(res.values.len() >= 2);
+    for k in 0..2 {
+        assert!((res.values[k] - lp).norm() < 1e-10, "copy {k}: {:?} vs {lp:?}", res.values[k]);
+        assert!(res.residuals[k] < 1e-11, "residual {}: {:e}", k, res.residuals[k]);
+        let nrm: f64 = res.vectors[k].iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt();
+        assert!((nrm - 1.0).abs() < 1e-12, "unit 2-norm expected, got {nrm}");
+    }
+    // Check linear independence of the two eigenvectors of the repeated eigenvalue
+    let dot: C64 = res.vectors[0].iter().zip(&res.vectors[1]).map(|(a, b)| a.conj() * b).sum();
+    assert!(dot.norm() < 0.99, "repeated eigenvectors must span 2D eigenspace, got |dot| = {}", dot.norm());
+
+    // 2. Search near the finite roots of the singular-A2 block (lambda_2 = 32.0 - 0.1i, lambda_3 = 33.0 - 0.1i)
+    let res_sing = eigs_quadratic_complex(&a0, &a1, &a2, C64::new(32.2, 0.0), 3, 1e-11).unwrap();
+    assert!(res_sing.converged);
+    assert!((res_sing.values[0] - C64::new(32.0, -0.1)).norm() < 1e-10, "got {:?}", res_sing.values);
+    assert!((res_sing.values[1] - C64::new(33.0, -0.1)).norm() < 1e-10, "got {:?}", res_sing.values);
+    assert!(res_sing.residuals.iter().all(|&r| r < 1e-11));
 }

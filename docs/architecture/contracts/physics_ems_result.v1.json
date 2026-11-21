@@ -40,11 +40,152 @@
     ],
     "study": "axisymmetric_modes"
   },
+  "bloch": {
+    "physics": "ems",
+    "scalars": [
+      "n_B re 1",
+      "n_B im 1",
+      "n_B 1",
+      "alpha 1 (dB/cm)",
+      "k_y re 1 (rad/m)",
+      "k_y im 1 (rad/m)",
+      "phase 1 (rad)",
+      "v_g 1 (m/s)",
+      "n_g 1",
+      "Ex share 1",
+      "Ey share 1",
+      "Ez share 1",
+      "share in domain 1 1",
+      "layer fraction 1",
+      "n_B re 2",
+      "n_B im 2",
+      "n_B 2",
+      "alpha 2 (dB/cm)",
+      "k_y re 2 (rad/m)",
+      "k_y im 2 (rad/m)",
+      "phase 2 (rad)",
+      "v_g 2 (m/s)",
+      "n_g 2",
+      "Ex share 2",
+      "Ey share 2",
+      "Ez share 2",
+      "share in domain 1 2",
+      "layer fraction 2",
+      "field frame"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez",
+          "Hx",
+          "Hy",
+          "Hz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Exz|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Ey|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": true,
+        "label_prefix": "mode 1"
+      },
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez",
+          "Hx",
+          "Hy",
+          "Hz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Exz|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Ey|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": true,
+        "label_prefix": "mode 2"
+      }
+    ],
+    "study": "bloch"
+  },
   "cavity": {
     "physics": "ems",
     "scalars": [
       "f1 (Hz)",
+      "f re 1 (Hz)",
+      "f im 1 (Hz)",
+      "layer fraction 1",
+      "Ex share 1",
+      "Ey share 1",
+      "Ez share 1",
+      "share in domain 1 1",
       "f2 (Hz)",
+      "f re 2 (Hz)",
+      "f im 2 (Hz)",
+      "layer fraction 2",
+      "Ex share 2",
+      "Ey share 2",
+      "Ez share 2",
+      "share in domain 1 2",
       "field frame"
     ],
     "solutions": [
@@ -126,8 +267,22 @@
     "scalars": [
       "neff 1",
       "Q 1 = Re/(2|Im|) of neff",
+      "v_g 1 (m/s)",
+      "n_g 1",
+      "Ex share 1",
+      "Ey share 1",
+      "Ez share 1",
+      "share in domain 1 1",
+      "layer fraction 1",
       "neff 2",
       "Q 2 = Re/(2|Im|) of neff",
+      "v_g 2 (m/s)",
+      "n_g 2",
+      "Ex share 2",
+      "Ey share 2",
+      "Ez share 2",
+      "share in domain 1 2",
+      "layer fraction 2",
       "field frame"
     ],
     "solutions": [
@@ -222,7 +377,21 @@
     "physics": "ems",
     "scalars": [
       "neff 1",
+      "v_g 1 (m/s)",
+      "n_g 1",
+      "Ex share 1",
+      "Ey share 1",
+      "Ez share 1",
+      "share in domain 1 1",
+      "layer fraction 1",
       "neff 2",
+      "v_g 2 (m/s)",
+      "n_g 2",
+      "Ex share 2",
+      "Ey share 2",
+      "Ez share 2",
+      "share in domain 1 2",
+      "layer fraction 2",
       "field frame"
     ],
     "solutions": [

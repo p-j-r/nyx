@@ -12,10 +12,172 @@
 use crate::ibc::resolve_jj_l_and_ej;
 use crate::Ems;
 use femcore::material::{bcs_surface_impedance, FilmModel};
-use femcore::props::{Materials, Periodic, Pml, PmlDir};
+use femcore::props::{Materials, Periodic, Pml, PmlDir, TensorKind};
 use nyx_physics::decode::{domain_names_by_label, materials_by_label, resolve_conditions, Params};
-use nyx_physics::{Ctx, Error, Physics, ProblemSpec};
+use nyx_physics::{Ctx, Discretisation, Error, MaterialAssign, Physics, ProblemSpec};
 use std::collections::BTreeMap;
+
+/// Allowed values for the midplane `symmetry` parameter on `modes`, `cavity`, and `bloch`.
+pub const SYMMETRY_CHOICES: [&str; 9] =
+    ["none", "pec_x", "pmc_x", "pec_z", "pmc_z", "pec_x_pmc_z", "pmc_x_pec_z", "pmc_x_pmc_z", "pec_x_pec_z"];
+
+/// Midplane PEC/PMC symmetry condition on exterior facets lying on `x = 0` and/or `z = 0`.
+/// On a quarter mesh `x >= 0, z >= 0`, fundamental `TE0` is `PecXPmcZ` (`pec_x_pmc_z`) and `TM0` is `PmcXPecZ` (`pmc_x_pec_z`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Symmetry {
+    #[default]
+    None,
+    PecX,
+    PmcX,
+    PecZ,
+    PmcZ,
+    PecXPmcZ,
+    PmcXPecZ,
+    PmcXPmcZ,
+    PecXPecZ,
+}
+
+impl Symmetry {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "none" | "" => Ok(Self::None),
+            "pec_x" => Ok(Self::PecX),
+            "pmc_x" => Ok(Self::PmcX),
+            "pec_z" => Ok(Self::PecZ),
+            "pmc_z" => Ok(Self::PmcZ),
+            "pec_x_pmc_z" => Ok(Self::PecXPmcZ),
+            "pmc_x_pec_z" => Ok(Self::PmcXPecZ),
+            "pmc_x_pmc_z" => Ok(Self::PmcXPmcZ),
+            "pec_x_pec_z" => Ok(Self::PecXPecZ),
+            other => Err(format!("unknown symmetry '{other}' (expected one of {SYMMETRY_CHOICES:?})")),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::PecX => "pec_x",
+            Self::PmcX => "pmc_x",
+            Self::PecZ => "pec_z",
+            Self::PmcZ => "pmc_z",
+            Self::PecXPmcZ => "pec_x_pmc_z",
+            Self::PmcXPecZ => "pmc_x_pec_z",
+            Self::PmcXPmcZ => "pmc_x_pmc_z",
+            Self::PecXPecZ => "pec_x_pec_z",
+        }
+    }
+
+    /// `Some(true)` for PEC on `x = 0`, `Some(false)` for PMC on `x = 0`, `None` otherwise.
+    pub fn x_is_pec(self) -> Option<bool> {
+        match self {
+            Self::PecX | Self::PecXPmcZ | Self::PecXPecZ => Some(true),
+            Self::PmcX | Self::PmcXPecZ | Self::PmcXPmcZ => Some(false),
+            Self::None | Self::PecZ | Self::PmcZ => None,
+        }
+    }
+
+    /// `Some(true)` for PEC on `z = 0`, `Some(false)` for PMC on `z = 0`, `None` otherwise.
+    pub fn z_is_pec(self) -> Option<bool> {
+        match self {
+            Self::PecZ | Self::PmcXPecZ | Self::PecXPecZ => Some(true),
+            Self::PmcZ | Self::PecXPmcZ | Self::PmcXPmcZ => Some(false),
+            Self::None | Self::PecX | Self::PmcX => None,
+        }
+    }
+}
+
+/// Auto-detects exterior facets lying on `x = 0` (when `|xmin| <= tol` or `|xmax| <= tol`) and/or
+/// `z = 0` (when `|zmin| <= tol` or `|zmax| <= tol`), returning `(sym_pec_facets, sym_pmc_facets)`.
+pub fn symmetry_facet_flags(mesh: &Discretisation, symmetry: Symmetry) -> Result<(Vec<bool>, Vec<bool>), String> {
+    let nf = mesh.n_facets();
+    let mut sym_pec = vec![false; nf];
+    let mut sym_pmc = vec![false; nf];
+    if symmetry == Symmetry::None {
+        return Ok((sym_pec, sym_pmc));
+    }
+    let (lo, hi) = mesh.bbox();
+    let extent = (0..mesh.dim).map(|k| hi[k] - lo[k]).fold(0.0, f64::max).max(1e-300);
+    let tol = 1e-6 * extent;
+    let x_idx = 0usize;
+    let z_idx = if mesh.dim == 2 { 1usize } else { 2usize };
+    let x_rule = symmetry.x_is_pec();
+    let z_rule = symmetry.z_is_pec();
+    if x_rule.is_some() && !(lo[x_idx].abs() <= tol || hi[x_idx].abs() <= tol) {
+        return Err(format!(
+            "symmetry '{}' requires an exterior boundary on x = 0 (mesh x spans [{:.3e}, {:.3e}])",
+            symmetry.as_str(),
+            lo[x_idx],
+            hi[x_idx]
+        ));
+    }
+    if z_rule.is_some() && !(lo[z_idx].abs() <= tol || hi[z_idx].abs() <= tol) {
+        return Err(format!(
+            "symmetry '{}' requires an exterior boundary on z = 0 (mesh z spans [{:.3e}, {:.3e}])",
+            symmetry.as_str(),
+            lo[z_idx],
+            hi[z_idx]
+        ));
+    }
+    let exterior = mesh.exterior_facets();
+    for f in 0..nf {
+        if !exterior[f] {
+            continue;
+        }
+        let fv = mesh.facet(f);
+        if let Some(is_pec) = x_rule {
+            if fv.iter().all(|&v| mesh.point(v as usize)[x_idx].abs() <= tol) {
+                if is_pec {
+                    sym_pec[f] = true;
+                } else {
+                    sym_pmc[f] = true;
+                }
+            }
+        }
+        if let Some(is_pec) = z_rule {
+            if fv.iter().all(|&v| mesh.point(v as usize)[z_idx].abs() <= tol) {
+                if is_pec {
+                    sym_pec[f] = true;
+                } else {
+                    sym_pmc[f] = true;
+                }
+            }
+        }
+    }
+    Ok((sym_pec, sym_pmc))
+}
+
+/// Collects PEC boundary edge indices `be` and vertex indices `bn` for a 2D mesh, honoring explicit `pec`
+/// facets and midplane `symmetry` (`pec_*` / `pmc_*`), while excluding `surface_impedance` and `pmc` facets.
+pub(crate) fn pec_edges_and_nodes_2d_with_symmetry(
+    mesh: &Discretisation,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    pmc_labels: &[i32],
+    symmetry: Symmetry,
+) -> Result<(Vec<usize>, Vec<usize>), String> {
+    let exterior = mesh.exterior_facets();
+    let (sym_pec, sym_pmc) = symmetry_facet_flags(mesh, symmetry)?;
+    let ibc_labels: Vec<i32> = ibc_bcs.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let is_pec_facet = |f: usize| -> bool {
+        let l = mesh.facet_labels[f];
+        pec_labels.contains(&l)
+            || sym_pec[f]
+            || (exterior[f] && !ibc_labels.contains(&l) && !pmc_labels.contains(&l) && !sym_pmc[f])
+    };
+    let mut be: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| is_pec_facet(f))
+        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
+        .collect();
+    be.sort_unstable();
+    be.dedup();
+    let mut bn: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| is_pec_facet(f))
+        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
+        .collect();
+    bn.sort_unstable();
+    bn.dedup();
+    Ok((be, bn))
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Study {
@@ -28,6 +190,8 @@ pub enum Study {
     /// Eigenfrequencies of a 3D cavity or Floquet cell nearest `f_search` (Hz; a value of zero or less takes the fundamental of a box of
     /// the size of the mesh).
     Cavity { n_modes: usize, f_search: f64 },
+    /// Fixed-frequency 3D Floquet-Bloch modes at `freq` (Hz) near the Bloch index `n_target` in Brillouin zone `brillouin_zone`.
+    Bloch { freq: f64, n_target: f64, n_modes: usize, brillouin_zone: i64 },
     /// Driven frequency-domain multi-port S/Z/Y sweep over `[f_min, f_max]` (`n_points`), solved with Hermite/Galerkin PROM
     /// (`prom_tol = Some(tol)`) or direct point-by-point HDM (`prom_tol = None`).
     Driven { f_min: f64, f_max: f64, n_points: usize, prom_tol: Option<f64> },
@@ -40,14 +204,15 @@ impl Study {
             Study::Modes { .. } => "modes",
             Study::AxisymmetricModes { .. } => "axisymmetric_modes",
             Study::Cavity { .. } => "cavity",
+            Study::Bloch { .. } => "bloch",
             Study::Driven { .. } => "driven",
         }
     }
 
-    /// Reference frequency of the study (Hz): `freq` for `Modes`, `f_search` for `AxisymmetricModes` and `Cavity`, midband for `Driven`.
+    /// Reference frequency of the study (Hz): `freq` for `Modes` and `Bloch`, `f_search` for `AxisymmetricModes` and `Cavity`, midband for `Driven`.
     pub fn reference_freq(&self) -> f64 {
         match *self {
-            Study::Modes { freq, .. } => freq,
+            Study::Modes { freq, .. } | Study::Bloch { freq, .. } => freq,
             Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => f_search,
             Study::Driven { f_min, f_max, .. } => 0.5 * (f_min + f_max),
         }
@@ -124,6 +289,11 @@ pub struct Problem {
     pub waveports: Vec<WavePortBc>,
     /// optional 1-based domain label -> region name mapping from `ProblemSpec::materials`
     pub domain_names: BTreeMap<i32, String>,
+    /// optional midplane PEC/PMC symmetry condition on `x = 0` and/or `z = 0`
+    pub symmetry: Symmetry,
+    /// global-frame real dispersive permittivity derivative `Re(d(omega * eps_r) / d(omega))` per domain label
+    /// when evaluated from a material's `[optical]` dispersion model; domains absent here fall back to static `Re(eps_r)`
+    pub d_omega_eps: BTreeMap<i32, [[f64; 3]; 3]>,
 }
 
 impl Problem {
@@ -140,7 +310,21 @@ impl Problem {
             lumped_ports: vec![],
             waveports: vec![],
             domain_names: BTreeMap::new(),
+            symmetry: Symmetry::None,
+            d_omega_eps: BTreeMap::new(),
         }
+    }
+
+    /// Global-frame unstretched `Re(d(omega * eps_r) / d(omega))` tensor for every cell of `mesh`,
+    /// falling back to static `Re(eps_r)` on domains without an `[optical]` dispersion entry in `d_omega_eps`.
+    pub fn cell_d_omega_eps(&self, mesh: &Discretisation) -> Result<Vec<[[f64; 3]; 3]>, String> {
+        let static_re = self.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+        Ok((0..mesh.n_cells())
+            .map(|ci| {
+                let dom = mesh.cell_labels[ci];
+                self.d_omega_eps.get(&dom).copied().unwrap_or(static_re[ci])
+            })
+            .collect())
     }
 
     /// Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field.
@@ -166,6 +350,9 @@ impl Problem {
             Study::Modes { freq, n_target, .. } => (!freq.is_finite())
                 .then_some("frequency")
                 .or((!n_target.is_finite()).then_some("target effective index")),
+            Study::Bloch { freq, n_target, .. } => {
+                (!freq.is_finite()).then_some("frequency").or((!n_target.is_finite()).then_some("target Bloch index"))
+            }
             Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => {
                 (!f_search.is_finite()).then_some("search frequency")
             }
@@ -223,6 +410,11 @@ impl Problem {
             }
         }
         // tensors of anisotropic domains, layers and Floquet phases: scan the printed form, outside quoted strings, for NaN and inf
+        for (&dom, mat) in &self.d_omega_eps {
+            if mat.iter().flatten().any(|v| !v.is_finite()) {
+                return Err(format!("dispersive permittivity derivative of domain {dom} contains NaN or infinity"));
+            }
+        }
         let text = format!("{:?} {:?} {:?}", m.aniso, m.pml, self.periodic);
         if text.contains("NaN") || text.contains("inf") {
             return Err(
@@ -265,6 +457,18 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             n_modes: sp.integer("n_modes").max(0) as usize,
         },
         "cavity" => Study::Cavity { n_modes: sp.integer("n_modes").max(0) as usize, f_search: sp.number("f_search") },
+        "bloch" => {
+            let freq = sp.number("freq");
+            if freq <= 0.0 || !freq.is_finite() {
+                return Err(Error::invalid(format!("bloch study requires freq > 0 (got {freq})")));
+            }
+            Study::Bloch {
+                freq,
+                n_target: sp.number("n_target"),
+                n_modes: sp.integer("n_modes").max(0) as usize,
+                brillouin_zone: sp.integer("brillouin_zone"),
+            }
+        }
         "driven" => {
             let f_min = sp.number("f_min");
             let f_max = sp.number("f_max");
@@ -279,8 +483,55 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         }
         other => return Err(Error::Unsupported(format!("ems has no study '{other}'"))),
     };
-    let mut materials = materials_by_label(spec, ctx, &ems.properties())?;
-    let domain_names = domain_names_by_label(spec, ctx)?;
+    let symmetry = if matches!(sd.kind.as_str(), "modes" | "cavity" | "bloch") {
+        Symmetry::parse(&sp.text("symmetry")).map_err(Error::invalid)?
+    } else {
+        Symmetry::None
+    };
+
+    let f_ref = study.reference_freq();
+    let derived_lambda = (f_ref > 0.0 && f_ref.is_finite()).then(|| crate::modes::C0 / f_ref);
+    let mut ctx_eff = Ctx::new(ctx.resolver);
+    ctx_eff.library = ctx.library.clone();
+    ctx_eff.wavelength = ctx.wavelength.or(derived_lambda);
+    ctx_eff.frequency = ctx.frequency.or_else(|| (f_ref > 0.0 && f_ref.is_finite()).then_some(f_ref));
+    ctx_eff.temperature = ctx.temperature;
+    ctx_eff.inputs = ctx.inputs.clone();
+    ctx_eff.progress = ctx.progress.clone();
+
+    let mut materials = materials_by_label(spec, &ctx_eff, &ems.properties())?;
+    let domain_names = domain_names_by_label(spec, &ctx_eff)?;
+    let temp_k = ctx_eff.temperature.or_else(|| {
+        spec.params.get("temperature").and_then(serde_json::Value::as_f64).filter(|&t| t > 0.0 && t.is_finite())
+    });
+    let mut d_omega_eps: BTreeMap<i32, [[f64; 3]; 3]> = BTreeMap::new();
+    if let (Some(lib), Some(lambda_m)) = (ctx_eff.library.as_ref(), ctx_eff.wavelength.filter(|&lam| lam <= 3e-4)) {
+        for (region, assign) in &spec.materials {
+            let (name, euler) = match assign {
+                MaterialAssign::Named(n) => (n.as_str(), [0.0; 3]),
+                MaterialAssign::Oriented { material, euler_deg } => (material.as_str(), *euler_deg),
+                _ => continue,
+            };
+            let labels = ctx_eff.resolver.domains(region)?;
+            let mat = lib.require(name).map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
+            let Some(opt) = mat.optical.as_ref() else { continue };
+            let mut diag = [0.0_f64; 3];
+            for (axis, slot) in diag.iter_mut().enumerate() {
+                let (n, k, dn_dlam, dk_dlam) =
+                    opt.nk(axis, lambda_m, temp_k).map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
+                let n_tilde = femcore::linalg::csr::c(n, -k);
+                let dn_tilde = femcore::linalg::csr::c(dn_dlam, -dk_dlam);
+                let d_om = n_tilde * n_tilde - n_tilde * dn_tilde * (2.0 * lambda_m);
+                *slot = d_om.re;
+            }
+            let cryst = [[diag[0], 0.0, 0.0], [0.0, diag[1], 0.0], [0.0, 0.0, diag[2]]];
+            let glob = femcore::material::rotate_tensor(&cryst, &femcore::material::rotation(euler));
+            for &l in &labels {
+                d_omega_eps.insert(l, glob);
+            }
+        }
+    }
+
     let mut periodic = vec![];
     let mut pmc: Vec<i32> = vec![];
     let mut pec: Vec<i32> = vec![];
@@ -289,7 +540,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let mut lumped_ports: Vec<LumpedPortBc> = vec![];
     let mut waveports: Vec<WavePortBc> = vec![];
     let kinds = ems.bc_kinds();
-    for r in resolve_conditions(&spec.bcs, &kinds, ctx)? {
+    for r in resolve_conditions(&spec.bcs, &kinds, &ctx_eff)? {
         let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
         let p = Params::new(&r.params, &d.params);
         match r.kind.as_str() {
@@ -307,13 +558,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
             }
             "periodic" => {
-                if !matches!(study, Study::Cavity { .. } | Study::Driven { .. }) {
+                if !matches!(study, Study::Cavity { .. } | Study::Bloch { .. } | Study::Driven { .. }) {
                     return Err(Error::invalid(format!(
                         "a Floquet-periodic pair belongs to the cavity study, not to '{}'",
                         study.kind()
                     )));
                 }
-                let dest = ctx.resolver.boundaries(&p.text("dest"))?;
+                let dest = ctx_eff.resolver.boundaries(&p.text("dest"))?;
                 if dest.is_empty() {
                     return Err(Error::invalid(format!(
                         "the destination '{}' of a periodic pair selects nothing",
@@ -323,12 +574,6 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase") });
             }
             "pmc" => {
-                if !matches!(study, Study::Cavity { .. } | Study::Driven { .. }) {
-                    return Err(Error::invalid(format!(
-                        "a magnetic wall belongs to the cavity study, not to '{}'",
-                        study.kind()
-                    )));
-                }
                 pmc.extend(r.labels);
             }
             "pec" => {
@@ -505,5 +750,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         lumped_ports,
         waveports,
         domain_names,
+        symmetry,
+        d_omega_eps,
     })
 }
