@@ -1,6 +1,9 @@
 # Titanium nitride (TiN) high-kinetic-inductance / high-Qi superconducting thin film.
-format = 1
+format = 2
 name = "titanium_nitride_sc"
+kind = "superconductor"
+point_group = "isotropic"
+reference_temperature = "0.02 K"
 description = "Superconducting TiN thin film at <1 K (Leduc 2010 / Melville 2020: Tc=2.8-4.8 K, Lk=5-150 pH/sq, E=450 GPa) — ultra-high-Qi kinetic-inductance resonator/MKID nitride vs low-Lk aluminium_sc_emft."
 notes = "Superconducting parameters (reactive sputtered or ALD TiN): t = 8-50 nm, Tc = 2.8-4.8 K (4.5 K nominal), Delta_0 = 0.45-0.75 meV, lambda_L(0) = 250-750 nm, Lk = 5-150 pH/sq, thin TiOxNy surface oxide yields Qi > 5e6."
 source = { cite = "APPROXIMATE superconducting TiN film compilation from H. G. Leduc et al., Appl. Phys. Lett. 97, 102509 (2010) & A. Melville et al., Appl. Phys. Lett. 117, 124004 (2020) + Kim et al. 1992", doi = "10.1063/1.3480420" }
@@ -17,3 +20,19 @@ conductivity = 1.5
 conductivity_unit = "W/(m*K)"
 specific_heat = "0.04 J/(kg*K)"
 source = { cite = "APPROXIMATE dirty-limit TiN thin-film thermal properties at 4 K (depends strongly on stoichiometry N/Ti and film thickness)" }
+
+[superconducting]
+tc = "4.5 K"
+gap_0 = "680 ueV"
+sigma_n = "5.0e5 S/m"
+r_res = "4.0 nOhm/sq"
+nominal_thickness = "25 nm"
+film_model = "thin_limit"
+source = { cite = "APPROXIMATE superconducting TiN thin-film parameters from H. G. Leduc et al., Appl. Phys. Lett. 97, 102509 (2010) & A. Melville et al., Appl. Phys. Lett. 117, 124004 (2020)", doi = "10.1063/1.3480420" }
+
+[interfaces.ma]
+oxide = "TiOxNy"
+thickness = "2.5 nm"
+eps_r = 10.0
+tan_delta_tls_0 = 2.0e-4
+source = { cite = "APPROXIMATE thin titanium oxynitride native surface layer yielding high internal Q" }

@@ -48,6 +48,11 @@ impl<'a> Params<'a> {
         }
     }
 
+    /// Number if explicitly provided in the JSON object, else `None`.
+    pub fn optional_number(&self, name: &str) -> Option<f64> {
+        self.given(name).and_then(Value::as_f64)
+    }
+
     pub fn integer(&self, name: &str) -> i64 {
         match (self.given(name).and_then(Value::as_i64), &self.desc(name).kind) {
             (Some(x), _) => x,
@@ -97,6 +102,18 @@ impl<'a> Params<'a> {
 /// where the material is anisotropic or oriented, and `eps_r` from the optical model at `ctx.wavelength` where the material has one.
 pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> Result<Materials, Error> {
     let mut m = Materials::default();
+    let spec_freq = spec
+        .study
+        .params
+        .get("freq")
+        .and_then(Value::as_f64)
+        .or_else(|| spec.study.params.get("f_search").and_then(Value::as_f64))
+        .filter(|&f| f > 0.0 && f.is_finite());
+    let freq_hz =
+        ctx.frequency.or_else(|| ctx.wavelength.filter(|&l| l > 0.0).map(|l| 299_792_458.0 / l)).or(spec_freq);
+    let temp_k = ctx
+        .temperature
+        .or_else(|| spec.params.get("temperature").and_then(Value::as_f64).filter(|&t| t > 0.0 && t.is_finite()));
     for (region, assign) in &spec.materials {
         let labels = ctx.resolver.domains(region)?;
         match assign {
@@ -110,15 +127,33 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                     }
                 }
             }
-            MaterialAssign::Named(n) => named(&mut m, region, &labels, n, [0.0; 3], ctx, props)?,
+            MaterialAssign::Named(n) => named(&mut m, region, &labels, n, [0.0; 3], ctx, freq_hz, temp_k, props)?,
             MaterialAssign::Oriented { material, euler_deg } => {
-                named(&mut m, region, &labels, material, *euler_deg, ctx, props)?
+                named(&mut m, region, &labels, material, *euler_deg, ctx, freq_hz, temp_k, props)?
             }
         }
     }
     Ok(m)
 }
 
+fn m3_to_sym_tensor(m: &femcore::material::M3) -> femcore::material::Tensor {
+    femcore::material::Tensor::Symmetric {
+        xx: m[0][0],
+        yy: m[1][1],
+        zz: m[2][2],
+        xy: m[0][1],
+        yz: m[1][2],
+        xz: m[0][2],
+    }
+}
+
+fn is_isotropic_m3(m: &femcore::material::M3) -> bool {
+    let scale = m[0][0].abs().max(m[1][1].abs()).max(m[2][2].abs()).max(1.0);
+    (m[0][0] - m[1][1]).abs() + (m[1][1] - m[2][2]).abs() + m[0][1].abs() + m[0][2].abs() + m[1][2].abs()
+        < 1e-12 * scale
+}
+
+#[allow(clippy::too_many_arguments)]
 fn named(
     m: &mut Materials,
     region: &str,
@@ -126,6 +161,8 @@ fn named(
     name: &str,
     euler: [f64; 3],
     ctx: &Ctx,
+    freq_hz: Option<f64>,
+    temp_k: Option<f64>,
     props: &[PropDesc],
 ) -> Result<(), Error> {
     use femcore::material::{Class, Tensor};
@@ -136,14 +173,42 @@ fn named(
     })?;
     let mat = lib.require(name).map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
     let wants = |p: &str| props.iter().any(|d| d.name == p);
-    for (k, v) in mat.legacy_scalars() {
-        if wants(&k) {
+    let mut legacy = mat.legacy_scalars();
+    if temp_k.is_some() {
+        if let Some(cp) = mat.specific_heat_at(temp_k) {
+            legacy.insert("Cp".into(), cp);
+        }
+        if let Some(kt) = mat.thermal_conductivity_at(temp_k) {
+            if let Some(s) = kt.as_scalar() {
+                legacy.insert("k".into(), s);
+            } else {
+                legacy.remove("k");
+            }
+        }
+        if let Some(at) = mat.thermal_expansion_at(temp_k) {
+            if let Some(s) = at.as_scalar() {
+                legacy.insert("alpha".into(), s);
+            } else {
+                legacy.remove("alpha");
+            }
+        }
+    }
+    for (k, v) in &legacy {
+        if wants(k) {
             for &l in labels {
-                m.set(l, &k, v);
+                m.set(l, k, *v);
             }
         }
     }
     let mut an = mat.anisotropy(euler);
+    if temp_k.is_some() {
+        if let Some(kt) = mat.thermal_conductivity_at(temp_k) {
+            an.conductivity = Some(m3_to_sym_tensor(&kt.matrix()));
+        }
+        if let Some(at) = mat.thermal_expansion_at(temp_k) {
+            an.expansion = Some(m3_to_sym_tensor(&at.matrix()));
+        }
+    }
     // what the kernels read as scalars stays scalar: crystal data only where the material has a direction in it or is placed at an angle
     let tilted = euler.iter().any(|a| a.abs() > 1e-12);
     let elastic_aniso = mat.elastic.as_ref().is_some_and(|e| e.detect_class() != Class::Isotropic);
@@ -153,49 +218,105 @@ fn named(
             (t, _) => t.clone(),
         }
     };
-    let legacy = mat.legacy_scalars();
-    an.conductivity = keep(&an.conductivity, legacy.get("k").copied());
-    an.expansion = keep(&an.expansion, legacy.get("alpha").copied());
-    an.permittivity = keep(&an.permittivity, legacy.get("eps_r").copied());
-    if !elastic_aniso && !tilted {
+    an.conductivity = if wants("k") { keep(&an.conductivity, legacy.get("k").copied()) } else { None };
+    an.expansion = if wants("alpha") { keep(&an.expansion, legacy.get("alpha").copied()) } else { None };
+    an.permittivity = if wants("eps_r") { keep(&an.permittivity, legacy.get("eps_r").copied()) } else { None };
+    if !wants("E") {
+        an.stiffness = None;
+        an.viscosity = None;
+    } else if !elastic_aniso && !tilted {
         an.stiffness = None;
     }
-    if wants("eps_r") && mat.optical.is_some() {
-        if let Some(lambda) = ctx.wavelength {
-            let eps = mat
-                .optical_permittivity(lambda, None, euler)
+    if !wants("eps_r") {
+        an.permittivity = None;
+        an.permittivity_im = None;
+    } else {
+        // Optical dispersion applies when an optical/THz wavelength (<= 300 um, f >= 1 THz) is given and the material has [optical].
+        let use_optical = mat.optical.is_some() && ctx.wavelength.is_some_and(|lam| lam <= 3e-4);
+        if use_optical {
+            let lambda = ctx.wavelength.unwrap();
+            an.permittivity_im = None;
+            let eps_cryst = mat
+                .optical_permittivity(lambda, temp_k, [0.0; 3])
                 .map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
-            let lossy = eps.iter().flatten().any(|z| z.im.abs() > 1e-9 * (1.0 + z.re.abs()));
-            if lossy {
-                return Err(Error::Unsupported(format!(
-                    "region '{region}': the material '{name}' is lossy at {:.0} nm (permittivity with an imaginary part); the mode solver takes real permittivities, use an absorbing layer for loss",
-                    lambda * 1e9
-                )));
-            }
-            let g = |i: usize, j: usize| eps[i][j].re;
-            let iso =
-                (g(0, 0) - g(1, 1)).abs() + (g(1, 1) - g(2, 2)).abs() + g(0, 1).abs() + g(0, 2).abs() + g(1, 2).abs()
-                    < 1e-12;
-            if iso {
+            let eps_glob = mat
+                .optical_permittivity(lambda, temp_k, euler)
+                .map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
+            let re_cryst = [
+                [eps_cryst[0][0].re, eps_cryst[0][1].re, eps_cryst[0][2].re],
+                [eps_cryst[1][0].re, eps_cryst[1][1].re, eps_cryst[1][2].re],
+                [eps_cryst[2][0].re, eps_cryst[2][1].re, eps_cryst[2][2].re],
+            ];
+            let re_glob = [
+                [eps_glob[0][0].re, eps_glob[0][1].re, eps_glob[0][2].re],
+                [eps_glob[1][0].re, eps_glob[1][1].re, eps_glob[1][2].re],
+                [eps_glob[2][0].re, eps_glob[2][1].re, eps_glob[2][2].re],
+            ];
+            if is_isotropic_m3(&re_glob) {
                 for &l in labels {
-                    m.set(l, "eps_r", g(0, 0));
+                    m.set(l, "eps_r", re_glob[0][0]);
                 }
                 an.permittivity = None;
             } else {
-                // the optical tensor is already in the wafer frame
-                an.permittivity = Some(Tensor::Symmetric {
-                    xx: g(0, 0),
-                    yy: g(1, 1),
-                    zz: g(2, 2),
-                    xy: g(0, 1),
-                    yz: g(1, 2),
-                    xz: g(0, 2),
-                });
-                an.euler_deg = [0.0; 3];
+                an.permittivity = Some(m3_to_sym_tensor(&re_cryst));
+            }
+            // In exp(+i omega t), passive optical loss (n - i k)^2 has Im(eps) <= 0, so loss magnitude is -Im(eps).
+            let lossy = eps_cryst.iter().flatten().any(|z| z.im.abs() > 1e-12 * (1.0 + z.re.abs()));
+            if lossy {
+                let im_cryst = [
+                    [-eps_cryst[0][0].im, -eps_cryst[0][1].im, -eps_cryst[0][2].im],
+                    [-eps_cryst[1][0].im, -eps_cryst[1][1].im, -eps_cryst[1][2].im],
+                    [-eps_cryst[2][0].im, -eps_cryst[2][1].im, -eps_cryst[2][2].im],
+                ];
+                let im_glob = [
+                    [-eps_glob[0][0].im, -eps_glob[0][1].im, -eps_glob[0][2].im],
+                    [-eps_glob[1][0].im, -eps_glob[1][1].im, -eps_glob[1][2].im],
+                    [-eps_glob[2][0].im, -eps_glob[2][1].im, -eps_glob[2][2].im],
+                ];
+                if is_isotropic_m3(&im_glob) && an.permittivity.is_none() {
+                    for &l in labels {
+                        m.set(l, "eps_r_im", im_glob[0][0]);
+                    }
+                    an.permittivity_im = None;
+                } else {
+                    an.permittivity_im = Some(m3_to_sym_tensor(&im_cryst));
+                }
+            }
+        } else if let Some((re_cryst, im_cryst)) =
+            mat.complex_microwave_permittivity(freq_hz, temp_k, None, false, [0.0; 3])
+        {
+            let re_glob = femcore::material::tensor_global(&m3_to_sym_tensor(&re_cryst), euler);
+            if is_isotropic_m3(&re_glob) {
+                for &l in labels {
+                    m.set(l, "eps_r", re_glob[0][0]);
+                }
+                an.permittivity = None;
+            } else {
+                an.permittivity = Some(m3_to_sym_tensor(&re_cryst));
+            }
+            let has_im = im_cryst.iter().flatten().any(|&v| v.abs() > 1e-15);
+            if has_im {
+                let im_glob = femcore::material::tensor_global(&m3_to_sym_tensor(&im_cryst), euler);
+                if is_isotropic_m3(&im_glob) && an.permittivity.is_none() {
+                    for &l in labels {
+                        m.set(l, "eps_r_im", im_glob[0][0]);
+                    }
+                    an.permittivity_im = None;
+                } else {
+                    an.permittivity_im = Some(m3_to_sym_tensor(&im_cryst));
+                }
+            } else {
+                an.permittivity_im = None;
             }
         }
     }
-    if an.stiffness.is_some() || an.conductivity.is_some() || an.permittivity.is_some() || an.expansion.is_some() {
+    if an.stiffness.is_some()
+        || an.viscosity.is_some()
+        || an.conductivity.is_some()
+        || an.permittivity.is_some()
+        || an.permittivity_im.is_some()
+        || an.expansion.is_some()
+    {
         for &l in labels {
             m.aniso.insert(l, an.clone());
         }

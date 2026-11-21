@@ -21,7 +21,6 @@ use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::EigOpts;
 use femcore::pml::cell_stretches;
-use femcore::props::TensorKind;
 use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -464,7 +463,7 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
         return Err("EM waves on a 3D mesh use the cavity study".into());
     };
     let order = if problem.order == 1 { 1 } else { 2 };
-    let tens = problem.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+    let tens = problem.materials.cell_complex_permittivity(mesh, Some(1.0))?;
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     let has_pml = problem.materials.has_pml();
     let stretch = if has_pml { Some(cell_stretches(mesh, &problem.materials.pml)) } else { None };
@@ -477,14 +476,15 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
         let lam = [sy * sz / sx, sx * sz / sy, sx * sy / sz];
         let pml_here = stretch.is_some()
             && (sx.re != 1.0 || sx.im != 0.0 || sy.re != 1.0 || sy.im != 0.0 || sz.re != 1.0 || sz.im != 0.0);
-        let t = tens[ci];
+        let (tr, ti) = tens[ci];
         // a stretch S = diag(sx, sy, sz) turns eps into det(S) eps_ab / (s_a s_b): the diagonal gets `lam`, off-diagonal terms of an
         // anisotropic crystal are scaled consistently
         let (sv, det) = ([sx, sy, sz], sx * sy * sz);
         let mut e = [[c(0.0, 0.0); 3]; 3];
         for a in 0..3 {
             for b in 0..3 {
-                e[a][b] = if pml_here { det * t[a][b] / (sv[a] * sv[b]) } else { c(t[a][b], 0.0) };
+                let tc = c(tr[a][b], -ti[a][b]);
+                e[a][b] = if pml_here { det * tc / (sv[a] * sv[b]) } else { tc };
             }
         }
         eps.push(e);
@@ -497,6 +497,11 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
         ]);
     }
     let mut tl = Instant::now();
+    // shift: the requested frequency; without one, the frequency of a wave that fits the cavity
+    let (lo, hi) = mesh.bbox();
+    let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
+    let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
+    let sigma = (2.0 * std::f64::consts::PI * f0 / C0).powi(2);
     // periodic pairs
     let mut matches = vec![];
     for p in &problem.periodic {
@@ -505,12 +510,17 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     let vkey = vertex_keys(mesh, &matches);
     let ned = Ned3::new(mesh, order, vkey);
     let n = ned.n_dofs();
-    let (k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
+    let (mut k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
+    if !problem.surface_impedance.is_empty() {
+        let ibc = crate::ibc::assemble_ibc_3d(mesh, &ned, &problem.surface_impedance, f0)?;
+        k = k.add_scaled(&ibc.kc_ibc_full, c(1.0, 0.0));
+    }
     lap(&mut tl, "emw3d: numbering and assembly");
-    // perfect electric conductor on the exterior boundary, except the periodic boundaries and the magnetic walls (`Problem::pmc`, natural)
+    // perfect electric conductor on the exterior boundary, except periodic boundaries, magnetic walls (`Problem::pmc`), and surface_impedance walls
     let exterior = mesh.exterior_facets();
     let periodic_labels: Vec<i32> =
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
+    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
     let mut fixed_set = std::collections::BTreeSet::new();
     let mut pec_vertex = std::collections::BTreeSet::new();
     let mut pec_edge = std::collections::BTreeSet::new();
@@ -518,6 +528,7 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
         if exterior[f]
             && !periodic_labels.contains(&mesh.facet_labels[f])
             && !problem.pmc.contains(&mesh.facet_labels[f])
+            && !ibc_labels.contains(&mesh.facet_labels[f])
         {
             let fv = mesh.facet(f);
             for d in ned.boundary_dofs(mesh, [fv[0], fv[1], fv[2]]) {
@@ -574,11 +585,6 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     };
     let g_h = femcore::periodic::ccsr_adjoint(&g_red);
     lap(&mut tl, "emw3d: reduction and gradient matrix");
-    // shift: the requested frequency; without one, the frequency of a wave that fits the cavity
-    let (lo, hi) = mesh.bbox();
-    let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
-    let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
-    let sigma = (2.0 * std::f64::consts::PI * f0 / C0).powi(2);
     Ok(EmwAssembly { order, n, nred, ned, red, kc, mc, g_red, g_h, f0, sigma, n_modes, f_search })
 }
 

@@ -1,5 +1,5 @@
 # Crystalline silicon UV-visible-NIR tabulated (n, k) compilation from Palik Handbook / Aspnes & Studna (1983).
-format = 1
+format = 2
 name = "silicon_palik"
 extends = "silicon"
 description = "Crystalline Si tabulated complex n,k (Palik 1985 / Aspnes & Studna 1983, 0.25-2.5 um) — captures UV/visible interband absorption k above 1.1 um bandgap unlike lossless IR silicon and silicon_salzberg."

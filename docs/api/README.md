@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:5537898d0511ea423ddc799d7dbc92c7` · 104 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:859281e3d66adbe8e73f63c6bf336339` · 107 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -34,11 +34,13 @@ Catalog hash: `b3:5537898d0511ea423ddc799d7dbc92c7` · 104 commands. `nyx api li
 | [`add_transform`](add_transform.md) | edit | Transform |
 | [`add_union`](add_union.md) | edit | Union |
 | [`analyse`](analyse.md) | read | Analyse a result |
+| [`bcs_surface_impedance`](bcs_surface_impedance.md) | read | Evaluate BCS superconducting complex conductivity and sheet impedance |
 | [`check_project`](check_project.md) | read | Check the project |
 | [`confinement`](confinement.md) | read | Fraction of a field in a region |
 | [`convergence_check`](convergence_check.md) | expensive | Check mesh convergence |
 | [`describe_material`](describe_material.md) | read | Describe a material |
 | [`describe_physics`](describe_physics.md) | read | Describe a physics |
+| [`evaluate_material`](evaluate_material.md) | read | Evaluate a material at temperature, frequency and wavelength |
 | [`export_results`](export_results.md) | expensive | Write the results to an HDF5 file |
 | [`extremum`](extremum.md) | read | Largest or smallest value of an expression |
 | [`fetch_material`](fetch_material.md) | expensive | Download a material from an open database |
@@ -92,6 +94,7 @@ Catalog hash: `b3:5537898d0511ea423ddc799d7dbc92c7` · 104 commands. `nyx api li
 | [`result_field`](result_field.md) | read | Read a field |
 | [`result_info`](result_info.md) | read | Describe the results |
 | [`results_file_info`](results_file_info.md) | read | Describe an HDF5 results file |
+| [`search_remote_materials`](search_remote_materials.md) | read | Search curated and live open material databases |
 | [`set_active`](set_active.md) | edit | Set the active physics |
 | [`set_geometry`](set_geometry.md) | edit | Replace the geometry |
 | [`set_material`](set_material.md) | edit | Assign a material to a region |

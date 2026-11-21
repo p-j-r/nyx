@@ -17,6 +17,7 @@
 
 pub mod axisym;
 pub mod cavity;
+pub mod ibc;
 pub mod modes;
 pub mod modes_complex;
 pub mod optical;
@@ -36,7 +37,7 @@ pub use modes_complex::{
     solve_modes_complex, solve_waveguide_complex, ModeAssemblyC, ModesC,
 };
 pub use optical::{solve_optical, solve_optical_wafer};
-pub use problem::{decode, Problem, Study};
+pub use problem::{decode, Problem, Study, SurfaceImpedanceBc};
 
 use femcore::progress::{self, Progress};
 use nyx_physics::Mesh;
@@ -133,6 +134,21 @@ impl Physics for Ems {
                 doc: "Perfect magnetic conductor on the boundary: the field is free there (tangential H zero). On a mirror plane of the structure it keeps the modes that are even under the reflection (the tangential electric field even, the normal one odd), such as the TE-like modes of a slab with the plane at its mid-plane. Cavity study.".into(),
                 applies: Applies::Boundary,
                 params: vec![],
+            },
+            BcDesc {
+                kind: "surface_impedance".into(),
+                name: "Superconducting / resistive surface impedance".into(),
+                doc: "Thin-film kinetic-inductance and surface-resistance impedance sheet Z_s = R_s + j omega L_k_sq on the boundary (direct L_k_sq / R_s or evaluated from a [superconducting] library material via Zimmermann arbitrary-purity BCS).".into(),
+                applies: Applies::Boundary,
+                params: vec![
+                    ParamDesc::number("L_k_sq", "Sheet kinetic inductance", "H/sq", 0.0, "used when `material` is empty").range(Some(0.0), None),
+                    ParamDesc::number("R_s", "Sheet surface resistance", "Ohm/sq", 0.0, "used when `material` is empty").range(Some(0.0), None),
+                    ParamDesc::text("material", "Superconducting material", "", "optional material name with a [superconducting] section (overrides L_k_sq and R_s via BCS)"),
+                    ParamDesc::number("thickness", "Film thickness", "m", 100e-9, "film thickness for BCS sheet impedance").range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::number("temperature", "Temperature", "K", 0.02, "operating temperature for BCS evaluation").range(Some(0.0), None),
+                    ParamDesc::number("f_ref", "Reference frequency", "Hz", 0.0, "0 uses the study frequency / search frequency").range(Some(0.0), None),
+                    ParamDesc::choice("film_model", "Thin-film model", &["kerr", "two_sided", "thin_limit"], "kerr", "Kerr coth(gamma d), two-sided coth(gamma d / 2), or thin-film limit 1/(sigma d)"),
+                ],
             },
         ]
     }

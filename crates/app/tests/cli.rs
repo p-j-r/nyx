@@ -282,6 +282,32 @@ fn material_cli_lists_shows_and_imports_offline() {
     let saved = std::fs::read_to_string(&out_toml).unwrap();
     assert!(saved.contains("extends = \"silicon\"") && saved.contains("UNVERIFIED"), "{saved}");
 
+    let eval = nyx(&["material", "eval", "niobium_sc", "--temp", "0.02", "--freq", "5e9", "--json"]);
+    assert_eq!(eval.status.code(), Some(0), "{}", text(&eval.stderr));
+    let ev_json: serde_json::Value = serde_json::from_str(&text(&eval.stdout)).unwrap();
+    assert!(ev_json["superconducting"]["l_k_sq_h_sq"].as_f64().unwrap() > 0.0);
+
+    let bcs = nyx(&[
+        "material",
+        "bcs",
+        "niobium_sc",
+        "--freq",
+        "5e9",
+        "--temp",
+        "0.02",
+        "--thickness",
+        "100e-9",
+        "--json",
+    ]);
+    assert_eq!(bcs.status.code(), Some(0), "{}", text(&bcs.stderr));
+    let bcs_json: serde_json::Value = serde_json::from_str(&text(&bcs.stdout)).unwrap();
+    assert!(bcs_json["r_s_ohm_sq"].as_f64().unwrap() >= 8.0e-9);
+
+    let search = nyx(&["material", "search", "silicon", "--json"]);
+    assert_eq!(search.status.code(), Some(0), "{}", text(&search.stderr));
+    let s_json: serde_json::Value = serde_json::from_str(&text(&search.stdout)).unwrap();
+    assert!(!s_json["catalog_matches"].as_array().unwrap().is_empty());
+
     assert_eq!(nyx(&["material"]).status.code(), Some(2));
     assert_eq!(nyx(&["material", "show", "silicon_salzbergg"]).status.code(), Some(2));
     assert_eq!(nyx(&["material", "unknown"]).status.code(), Some(2));

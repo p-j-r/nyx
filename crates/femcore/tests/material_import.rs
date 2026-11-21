@@ -3,7 +3,7 @@
 //! Offline verification of the pure-Rust importers (`femcore::material::import`) for refractiveindex.info, AFLOW, Materials Project and NumBAT.
 
 use femcore::material::import::{catalog_entry, import_to_toml, resolve_url, strip_jsonc_comments, ImportFormat, ImportOptions, REMOTE_CATALOG};
-use femcore::material::{Library, MaterialSpec};
+use femcore::material::{Dispersion, Library, MaterialSpec, PointGroup};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -174,5 +174,47 @@ fn numbat_jsonc_strips_comments_and_ignores_placeholder_dois() {
     assert!(spec.source[0].doi.is_none(), "placeholder xx.xxxx must not become a DOI");
     assert_eq!(spec.density, Some(2331.0));
     assert!(spec.notes.as_deref().unwrap().contains("p_11=-0.094"));
+    assert!(spec.photoelastic.is_some());
+    assert!((spec.viscoelastic.as_ref().unwrap().matrix[0][0] - 5.9e-3).abs() < 1e-12);
     assert!((spec.optical.unwrap().nk(0, 1.55e-6, None).unwrap().0 - 3.4757).abs() < 1e-6);
+}
+
+#[test]
+fn format2_importers_preserve_rii_formula4_kdata_and_mp_piezo() {
+    let rii = r#"
+REFERENCES: "Test Zelmon + k"
+DATA:
+  - type: formula 4
+    wavelength_range: 0.4 4.0
+    coefficients: 4.9048 0.11768 0 0.0475 1 0 0 1 1 -0.027169 2
+  - type: tabulated k
+    data: |
+      0.40 0.002
+      1.00 0.0001
+      2.00 0.0
+"#;
+    let out = import_to_toml(ImportFormat::RefractiveIndexInfo, rii, &ImportOptions { name: "ln_rii", description: None, extends: None, source_url: None }).unwrap();
+    let spec = MaterialSpec::from_toml(&out).unwrap();
+    assert!(out.starts_with("format = 2") || out.contains("\nformat = 2"));
+    let opt = spec.optical.as_ref().unwrap();
+    let (n, k, _, _) = opt.nk(0, 1.0e-6, None).unwrap();
+    assert!(n > 2.2 && (k - 1e-4).abs() < 1e-12);
+    assert!(matches!(opt.axes.model(0).dispersion, Dispersion::RiiFormula4 { .. }));
+
+    let mp = r#"{
+        "data": [{
+            "material_id": "mp-aln",
+            "formula_pretty": "AlN",
+            "symmetry": { "point_group": "6mm" },
+            "density": 3.26,
+            "elasticity": { "elastic_tensor": { "ieee_format": [[410,149,99,0,0,0],[149,410,99,0,0,0],[99,99,389,0,0,0],[0,0,0,125,0,0],[0,0,0,0,125,0],[0,0,0,0,0,130.5]] } },
+            "dielectric": { "e_total": [[8.5,0,0],[0,8.5,0],[0,0,9.5]], "e_electronic": [[4.6,0,0],[0,4.6,0],[0,0,4.8]] },
+            "piezoelectric": { "total": [[0,0,0,0,-0.48,0],[0,0,0,-0.48,0,0],[-0.58,-0.58,1.55,0,0,0]] }
+        }]
+    }"#;
+    let mp_toml = import_to_toml(ImportFormat::MaterialsProject, mp, &ImportOptions { name: "aln_mp", description: None, extends: None, source_url: None }).unwrap();
+    let mp_spec = MaterialSpec::from_toml(&mp_toml).unwrap();
+    assert_eq!(mp_spec.point_group, Some(PointGroup::C6v));
+    assert_eq!(mp_spec.dielectric.as_ref().unwrap().eps_inf.as_ref().unwrap().matrix()[2][2], 4.8);
+    assert!((mp_spec.piezoelectric.as_ref().unwrap().matrix[2][2] - 1.55).abs() < 1e-12);
 }

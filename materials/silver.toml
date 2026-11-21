@@ -1,7 +1,10 @@
 # Silver: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk room-temperature mechanical/thermal/electrical baseline.
-format = 1
+format = 2
 name = "silver"
 description = "Evaporated Ag wide-band Lorentz-Drude fit at 293 K (Rakic 1998, 0.25-12.4 um; E=83 GPa, sigma=6.30e7 S/m) — broadband analytical baseline vs sharper NIR experimental silver_johnson."
+kind = "metal"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
 source = { cite = "APPROXIMATE bulk polycrystalline mechanics/thermal/electrical + verified Rakic et al. 1998 [optical] fit (0.248-12.4 um)", doi = "10.1364/AO.37.005271" }
 density = "10490 kg/m^3"
 

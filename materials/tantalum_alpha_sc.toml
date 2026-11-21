@@ -1,6 +1,9 @@
 # Body-centered cubic alpha-phase tantalum (alpha-Ta) superconducting film for high-coherence transmons.
-format = 1
+format = 2
 name = "tantalum_alpha_sc"
+kind = "superconductor"
+point_group = "isotropic"
+reference_temperature = "4.0 K"
 description = "BCC alpha-Ta superconducting thin film at <4 K (Place 2021 / Crowley 2023 / standard_die.materials.TA_ALPHA: Tc=4.35 K, Lk=0.15 pH/sq, E=191 GPa) — ultra-low-TLS native Ta2O5 wiring vs aluminium_sc_emft and niobium_sc."
 notes = "Superconducting parameters (BCC alpha-Ta, vs high-resistivity tetragonal beta-Ta Tc~0.7 K): t = 150-200 nm, Tc = 4.35 K, Delta_0 = 0.66 meV, lambda_L(0) = 110 nm, Lk = 0.08-0.25 pH/sq (0.15 pH/sq nominal), rho_n(5 K) ~ 1 uOhm*cm. Forms compact self-limiting Ta2O5 native oxide yielding transmon T1 = 300-500 us on c-sapphire."
 source = { cite = "APPROXIMATE alpha-Ta cryogenic compilation from A. P. M. Place et al., Nat. Commun. 12, 1779 (2021) & K. D. Crowley et al., Phys. Rev. X 13, 041005 (2023) + Featherston & Neighbours 1963", doi = "10.1038/s41467-021-22030-5" }
@@ -19,3 +22,22 @@ specific_heat = "0.08 J/(kg*K)"
 expansion = 1.0e-9
 expansion_unit = "1/K"
 source = { cite = "APPROXIMATE normal-state 4 K alpha-Ta thin-film thermal properties (electronic conductivity vanishes exponentially below Tc = 4.35 K)" }
+
+[superconducting]
+tc = "4.35 K"
+gap_0 = "660 ueV"
+lambda_L = "110 nm"
+sigma_n = "1.0e8 S/m"
+r_res = "3.0 nOhm/sq"
+x_qp_floor = 2.0e-7
+nominal_thickness = "150 nm"
+film_model = "kerr"
+source = { cite = "APPROXIMATE alpha-Ta superconducting thin film parameters from A. P. M. Place et al., Nat. Commun. 12, 1779 (2021) & K. D. Crowley et al., Phys. Rev. X 13, 041005 (2023)", doi = "10.1038/s41467-021-22030-5" }
+
+[interfaces.ma]
+oxide = "Ta2O5"
+thickness = "3.0 nm"
+eps_r = 25.0
+tan_delta_tls_0 = 3.0e-4
+e_crit = "15.0 V/m"
+source = { cite = "APPROXIMATE thin self-limiting native Ta2O5 surface oxide layer yielding reduced TLS participation compared with thick Nb2O5" }

@@ -1,8 +1,12 @@
 # Congruent lithium niobate (LiNbO3), trigonal 3m crystal with optic axis = crystal z. Orientation is set in the project.
-format = 1
+format = 2
 name = "lithium_niobate"
 description = "Congruent bulk/TFLN LiNbO3 at 294 K (Weis & Gaylord 1985 trigonal c11=203 GPa + Zelmon 1997 uniaxial Sellmeier 0.4-5 um, ne=2.1376 at 1.55 um) — undoped baseline vs photorefractive-resistant lithium_niobate_mgo and cryogenic lithium_niobate_4k."
-notes = "Permittivity entries use mechanically free (low-frequency) relative values eps^T = (85.2 perp, 28.7 par); for clamped GHz microwave simulations replace [electrical] with eps^S = (44.0 perp, 29.0 par) from Weis & Gaylord 1985 Table 1."
+kind = "crystalline"
+point_group = "3m"
+crystal_setting = "IEEE-1987"
+reference_temperature = "294.15 K"
+notes = "Contains both clamped (eps_clamped) and mechanically free (eps_free) relative permittivities in [dielectric] together with piezoelectric, photoelastic, electro-optic, and viscoelastic tensors."
 source = [
   { cite = "J. Kushibiki, I. Takanaga, M. Arakawa, T. Sannomiya, Accurate measurements of the acoustical physical constants of LiNbO3 and LiTaO3 single crystals, IEEE Trans. Ultrason. Ferroelectr. Freq. Control 46, 1315-1323 (1999): Archimedes density 4642.8 kg/m^3 of SAW-grade congruent LiNbO3", url = "https://lithium-niobate.com/data/", doi = "10.1109/58.796136", verified = "2026-11-21" },
   { cite = "D. E. Zelmon, D. L. Small, D. Jundt, J. Opt. Soc. Am. B 14, 3319-3322 (1997), optical Sellmeier verified 2026-11-04", doi = "10.1364/JOSAB.14.003319", verified = "2026-11-04" },
@@ -28,9 +32,62 @@ expansion = { perp = 1.41e-5, par = 4.1e-6 }
 expansion_unit = "1/K"
 source = { cite = "T. Volk and M. Wohlecke, Lithium Niobate: Defects, Photorefraction and Ferroelectric Switching, Springer Series in Materials Science 115 (2009), Table 1.1 (p. 3) congruent LiNbO3 near 300 K", url = "https://lithium-niobate.com/data/", doi = "10.1007/978-3-540-70766-0", verified = "2026-11-21" }
 
-[electrical]
-permittivity = { perp = 85.2, par = 28.7 }
-source = { cite = "R. S. Weis and T. K. Gaylord, Appl. Phys. A 37, 191-203 (1985), Table 1 (p. 197), mechanically free (low-frequency) relative permittivity eps^T/eps0", url = "https://lithium-niobate.com/data/", doi = "10.1007/BF00614817", verified = "2026-11-21" }
+[dielectric]
+eps_clamped = { perp = 44.3, par = 27.9 }
+eps_free = { perp = 85.2, par = 28.7 }
+loss_tangent = 5.0e-4
+loss_ref_freq = "10 GHz"
+source = [
+  { cite = "R. S. Weis and T. K. Gaylord, Appl. Phys. A 37, 191-203 (1985), Table 1 (p. 197), mechanically free (low-frequency) relative permittivity eps^T/eps0", url = "https://lithium-niobate.com/data/", doi = "10.1007/BF00614817", verified = "2026-11-21" },
+  { cite = "APPROXIMATE Weis & Gaylord 1985 clamped GHz permittivity eps^S (~44.3 perp, ~27.9 par) and room-temperature microwave loss tangent" },
+]
+
+[piezoelectric]
+form = "strain_charge"
+unit = "pC/N"
+d15 = 69.2
+d22 = 20.8
+d31 = -0.85
+d33 = 6.0
+source = { cite = "APPROXIMATE congruent LiNbO3 strain-charge piezoelectric coefficients (Weis & Gaylord 1985 Table 2 / Warner, Onoe & Coquin 1967)", doi = "10.1007/BF00614817" }
+
+[photoelastic]
+wavelength = "633 nm"
+p11 = -0.026
+p12 = 0.090
+p13 = 0.133
+p31 = 0.179
+p33 = 0.071
+p14 = -0.075
+p41 = 0.151
+p44 = 0.146
+source = { cite = "APPROXIMATE congruent LiNbO3 Pockels photoelastic constants at 633 nm (Weis & Gaylord 1985 / Dixon 1967)" }
+
+[electro_optic]
+wavelength = "633 nm"
+unit = "pm/V"
+source = { cite = "APPROXIMATE congruent LiNbO3 linear electro-optic Pockels tensor at 633 nm (Weis & Gaylord 1985 Table 4)" }
+
+[electro_optic.clamped]
+r13 = 8.6
+r22 = 3.4
+r33 = 28.6
+r51 = 28.0
+
+[electro_optic.free]
+r13 = 9.6
+r22 = 6.8
+r33 = 30.9
+r51 = 32.6
+
+[viscoelastic]
+unit = "mPa*s"
+eta11 = 5.0
+eta12 = 1.2
+eta13 = 1.0
+eta33 = 5.5
+eta44 = 2.0
+source = { cite = "APPROXIMATE room-temperature congruent LiNbO3 effective acoustic viscosity (order-of-magnitude GHz BAW attenuation baseline)" }
 
 [optical]
 wavelength_unit = "um"

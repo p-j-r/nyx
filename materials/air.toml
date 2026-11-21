@@ -1,6 +1,9 @@
 # Air treated as vacuum for photonics (the real index at 1 atm is about 1.0003). No elastic stiffness: a fluid.
-format = 1
+format = 2
 name = "air"
+kind = "fluid"
+point_group = "isotropic"
+reference_temperature = "300 K"
 description = "Dry air idealized optically as vacuum (n = 1.0, eps_r = 1.0, rho = 1.2 kg/m^3 at 300 K) — lossless background cladding baseline."
 source = "Compiled from the per-table sources below. Density 1.2 kg/m^3 is the usual room-temperature figure: APPROXIMATE, not checked against a reference in this library"
 density = "1.2 kg/m^3"

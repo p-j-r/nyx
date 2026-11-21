@@ -11,6 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod bcs;
+pub mod coupled;
 pub mod elastic;
 pub mod import;
 pub mod optics;
@@ -18,14 +20,23 @@ pub mod reader;
 pub mod schema;
 pub mod source;
 pub mod spec;
+pub mod state_t;
 pub mod tensor;
 pub mod units;
 
+pub use bcs::{
+    bcs_gap, bcs_surface_impedance, surface_impedance_from_params, BcsEval, FilmModel, Superconducting,
+    BCS_GAP_RATIO, EV_TO_J, HBAR, K_B, MU0,
+};
+pub use coupled::{
+    Dielectric, ElectroOptic, InterfaceLayer, Interfaces, Photoelastic, PiezoForm, Piezoelectric, Viscoelastic, EPSILON_0,
+};
 pub use elastic::{Class, Elastic, Unique};
 pub use optics::{Dispersion, Optical, OpticsError};
 pub use reader::MaterialError;
 pub use source::Source;
 pub use spec::{merge_over, Library, MaterialSpec};
+pub use state_t::{CrystalSetting, MaterialKind, PointGroup, TempCurve, TempTensor};
 pub use tensor::TensorProp;
 
 pub type M3 = [[f64; 3]; 3];
@@ -183,6 +194,18 @@ pub struct Anisotropy {
     pub expansion: Option<Tensor>,
     /// Bunge Z-X-Z angles of the crystal axes in degrees
     pub euler_deg: [f64; 3],
+    /// Imaginary part magnitude of relative permittivity (microwave/optical dielectric loss in crystal frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permittivity_im: Option<Tensor>,
+    /// Phonon/structural viscosity tensor eta in Pa*s (solver Voigt order in crystal frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viscosity: Option<M6>,
+    /// Piezoelectric stress-charge coupling e_iJ in C/m^2 (textbook Voigt in crystal frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub piezo_e: Option<[[f64; 6]; 3]>,
+    /// Photoelastic Pockels tensor p_IJ (dimensionless, textbook Voigt in crystal frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photoelastic: Option<M6>,
 }
 
 pub fn rotation(euler_deg: [f64; 3]) -> M3 {
@@ -279,6 +302,12 @@ fn rotate_stiffness(c: &M6, r: &M3) -> M6 {
 /// Stiffness in the global frame (solver Voigt order).
 pub fn stiffness_global(s: &Stiffness, euler_deg: [f64; 3]) -> M6 {
     rotate_stiffness(&s.voigt(), &rotation(euler_deg))
+}
+
+/// Rotates a symmetric `6x6` fourth-order tensor in solver Voigt order `(xx, yy, zz, xy, yz, xz)`
+/// from crystal frame to global frame by Bunge Z-X-Z Euler angles (degrees).
+pub fn rotate_m6_global(m: &M6, euler_deg: [f64; 3]) -> M6 {
+    rotate_stiffness(m, &rotation(euler_deg))
 }
 
 /// Isotropic stiffness (solver Voigt order).

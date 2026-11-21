@@ -1,6 +1,9 @@
 # Niobium (Nb) BCC crystal & superconducting thin film at 4.2 K (MIT-LL SFQ5ee / Carroll 1965 / Golovashkin 1969).
-format = 1
+format = 2
 name = "niobium_sc"
+kind = "superconductor"
+point_group = "m-3m"
+reference_temperature = "4.2 K"
 description = "Nb superconducting film/crystal at 4.2 K (Carroll 1965 BCC c11=252.7 GPa + Golovashkin 1969 4.2 K n,k 0.4-9.2 um; Tc=9.2 K, lambda_L=90 nm, Lk=0.09 pH/sq) — highest elemental Tc for SFQ and cQED resonators vs tantalum_alpha_sc."
 notes = "Superconducting parameters (MIT-LL SFQ5ee M1-M7 & standard cQED Nb): Tc = 8.8-9.2 K, Delta_0 = 1.45 meV, lambda_L(0) = 85-110 nm (90 nm nominal), Lk = 0.06-0.15 pH/sq. Native Nb2O5 (~5 nm) adds higher MA TLS loss unless BOE-stripped or encapsulated."
 source = [
@@ -62,3 +65,24 @@ data = [
   [9.20, 4.99, 58.8],
 ]
 source = { cite = "A. I. Golovashkin, I. E. Leksina, G. P. Motulevich, A. A. Shubin, Optical properties of niobium, Sov. Phys. JETP 29, 27-34 (1969), 4.2 K table, refractiveindex.info (main/Nb/Golovashkin-4.2K, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Nb&page=Golovashkin-4.2K", verified = "2026-11-21" }
+
+[superconducting]
+tc = "9.2 K"
+gap_0 = "1395 ueV"
+lambda_L = "33.3 nm"
+xi_0 = "39.0 nm"
+sigma_n = "5.5e7 S/m"
+dynes_gamma = "0.5 ueV"
+r_res = "8.0 nOhm/sq"
+x_qp_floor = 1.0e-7
+nominal_thickness = "100 nm"
+film_model = "kerr"
+source = { cite = "APPROXIMATE thin-film mK loss extensions + Park et al., npj Quantum Inf. (2026) Fig. 1d-e Nb BCS parameters (Tc = 9.2 K, Delta_0 = 1.395 meV, lambda_L = 33.3 nm, xi_0 = 39.0 nm, sigma_n = 5.5e7 S/m)" }
+
+[interfaces.ma]
+oxide = "Nb2O5"
+thickness = "4.5 nm"
+eps_r = 33.0
+tan_delta_tls_0 = 8.0e-4
+e_crit = "12.0 V/m"
+source = { cite = "APPROXIMATE native pentoxide Nb2O5 (~4-5 nm) surface TLS dielectric loss layer dominant in planar Nb resonators; BOE strip reduces thickness" }

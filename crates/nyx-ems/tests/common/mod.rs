@@ -74,6 +74,7 @@ impl Spec {
             materials: self.materials.clone(),
             periodic: vec![],
             pmc: vec![],
+            surface_impedance: vec![],
         }
     }
 

@@ -10,6 +10,7 @@
 //! on a mesh of the other dimension is refused by name.
 
 use crate::Ems;
+use femcore::material::{bcs_surface_impedance, FilmModel};
 use femcore::props::{Materials, Periodic, Pml, PmlDir};
 use nyx_physics::decode::{materials_by_label, resolve_conditions, Params};
 use nyx_physics::{Ctx, Error, Physics, ProblemSpec};
@@ -36,6 +37,27 @@ impl Study {
             Study::Cavity { .. } => "cavity",
         }
     }
+
+    /// Reference frequency of the study (Hz): `freq` for `Modes`, `f_search` for `AxisymmetricModes` and `Cavity`.
+    pub fn reference_freq(&self) -> f64 {
+        match *self {
+            Study::Modes { freq, .. } => freq,
+            Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => f_search,
+        }
+    }
+}
+
+/// Kinetic-inductance / surface-impedance sheet boundary condition (`Z_s = R_s + i omega L_k_sq`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceImpedanceBc {
+    pub labels: Vec<i32>,
+    pub l_k_sq: f64,
+    pub r_s: f64,
+    pub material: String,
+    pub thickness: f64,
+    pub temperature: f64,
+    pub f_ref: f64,
+    pub film_model: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -51,11 +73,20 @@ pub struct Problem {
     /// the field is left free on them instead of having its tangential part set to zero. A mirror plane that keeps the modes even
     /// under the reflection (tangential E even, E normal odd) is one of these.
     pub pmc: Vec<i32>,
+    /// superconducting / resistive surface-impedance boundary conditions
+    pub surface_impedance: Vec<SurfaceImpedanceBc>,
 }
 
 impl Problem {
     pub fn new(study: Study, order: usize) -> Problem {
-        Problem { order, study, materials: Materials::default(), periodic: vec![], pmc: vec![] }
+        Problem {
+            order,
+            study,
+            materials: Materials::default(),
+            periodic: vec![],
+            pmc: vec![],
+            surface_impedance: vec![],
+        }
     }
 
     /// Every number the user can type must be finite: NaN or infinity does not stop a factorisation, it flows into every field.
@@ -87,6 +118,19 @@ impl Problem {
         };
         if let Some(what) = study_bad {
             return Err(format!("the study's {what} is NaN or infinite"));
+        }
+        for ibc in &self.surface_impedance {
+            for (k, v) in [
+                ("L_k_sq", ibc.l_k_sq),
+                ("R_s", ibc.r_s),
+                ("thickness", ibc.thickness),
+                ("temperature", ibc.temperature),
+                ("f_ref", ibc.f_ref),
+            ] {
+                if !v.is_finite() {
+                    return Err(format!("surface_impedance parameter '{k}' is {v}: it must be a finite number"));
+                }
+            }
         }
         // tensors of anisotropic domains, layers and Floquet phases: scan the printed form, outside quoted strings, for NaN and inf
         let text = format!("{:?} {:?} {:?}", m.aniso, m.pml, self.periodic);
@@ -136,6 +180,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let mut materials = materials_by_label(spec, ctx, &ems.properties())?;
     let mut periodic = vec![];
     let mut pmc: Vec<i32> = vec![];
+    let mut surface_impedance: Vec<SurfaceImpedanceBc> = vec![];
     let kinds = ems.bc_kinds();
     for r in resolve_conditions(&spec.bcs, &kinds, ctx)? {
         let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
@@ -179,10 +224,62 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
                 pmc.extend(r.labels);
             }
+            "surface_impedance" => {
+                let mut l_k_sq = p.number("L_k_sq");
+                let mut r_s = p.number("R_s");
+                let material = p.text("material");
+                let thickness = p.number("thickness");
+                let temperature = p.number("temperature");
+                let f_ref_given = p.optional_number("f_ref").unwrap_or(0.0);
+                let f_ref = if f_ref_given > 0.0 { f_ref_given } else { study.reference_freq() };
+                let film_model = p.text("film_model");
+                let fm = FilmModel::parse(&film_model).ok_or_else(|| {
+                    Error::invalid(format!(
+                        "surface_impedance: unknown film_model '{film_model}' (expected 'two_sided', 'kerr' or 'thin_limit')"
+                    ))
+                })?;
+                if !material.trim().is_empty() {
+                    let lib = ctx.library.as_ref().ok_or_else(|| {
+                        Error::Unsupported(format!(
+                            "surface_impedance: material '{material}' needs a material library, and this run has none"
+                        ))
+                    })?;
+                    let mat =
+                        lib.require(material.trim()).map_err(|e| Error::invalid(format!("surface_impedance: {e}")))?;
+                    let sc = mat.superconducting.as_ref().ok_or_else(|| {
+                        Error::invalid(format!(
+                            "surface_impedance: material '{}' has no [superconducting] section",
+                            material.trim()
+                        ))
+                    })?;
+                    if f_ref <= 0.0 {
+                        return Err(Error::invalid(
+                            "surface_impedance with a superconducting material requires a positive f_ref or study search frequency",
+                        ));
+                    }
+                    let eval = bcs_surface_impedance(sc, f_ref, temperature, thickness, fm)
+                        .map_err(|e| Error::invalid(format!("surface_impedance ('{}'): {e}", material.trim())))?;
+                    l_k_sq = eval.l_k_sq;
+                    r_s = eval.r_s;
+                }
+                if l_k_sq < 0.0 || r_s < 0.0 {
+                    return Err(Error::invalid("surface_impedance requires non-negative L_k_sq and R_s"));
+                }
+                surface_impedance.push(SurfaceImpedanceBc {
+                    labels: r.labels,
+                    l_k_sq,
+                    r_s,
+                    material,
+                    thickness,
+                    temperature,
+                    f_ref,
+                    film_model: fm.as_str().to_string(),
+                });
+            }
             other => return Err(Error::Unsupported(format!("ems has no condition '{other}'"))),
         }
     }
     pmc.sort_unstable();
     pmc.dedup();
-    Ok(Problem { order: spec.order as usize, study, materials, periodic, pmc })
+    Ok(Problem { order: spec.order as usize, study, materials, periodic, pmc, surface_impedance })
 }

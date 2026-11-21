@@ -69,19 +69,64 @@ pub fn resolve_remote_url(format: &str, target: &str) -> Result<String, Error> {
 
 /// Downloads a UTF-8 text payload over HTTPS using system `curl` (`--max-time 20`, 5 MiB cap).
 pub fn fetch_url_text(url: &str) -> Result<String, Error> {
+    fetch_url_text_with_api_key(url, None)
+}
+
+/// Downloads a UTF-8 text payload over HTTPS using system `curl` (`--max-time 20`, 5 MiB cap),
+/// passing an optional `X-API-KEY` header via `curl --config -` on stdin so the key never appears in `argv` or logs.
+pub fn fetch_url_text_with_api_key(url: &str, api_key: Option<&str>) -> Result<String, Error> {
+    use std::io::Write;
+    use std::process::Stdio;
     let u = url.trim();
     if !u.starts_with("https://") {
         return Err(Error::invalid(format!("only https:// URLs may be downloaded, got '{u}'")));
     }
     let bin = if cfg!(windows) { "curl.exe" } else { "curl" };
-    let out = Command::new(bin)
-        .args(["--fail", "--silent", "--show-error", "--location", "--max-time", "20", "--max-filesize", "5242880", u])
-        .output()
-        .map_err(|e| {
-            Error::invalid(format!(
-                "could not run {bin} to download '{u}': {e} (download the file manually and use `nyx material import`)"
-            ))
-        })?;
+    let key_clean = api_key.map(str::trim).filter(|s| !s.is_empty());
+    let out = if let Some(k) = key_clean {
+        if k.contains(['\r', '\n']) {
+            return Err(Error::invalid("API key must not contain newline characters"));
+        }
+        let mut child = Command::new(bin)
+            .args([
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--max-time",
+                "20",
+                "--max-filesize",
+                "5242880",
+                "--config",
+                "-",
+                u,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                Error::invalid(format!(
+                    "could not run {bin} to download '{u}': {e} (download the file manually and use `nyx material import`)"
+                ))
+            })?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let escaped = k.replace('\\', "\\\\").replace('"', "\\\"");
+            let _ = writeln!(stdin, "header = \"X-API-KEY: {escaped}\"");
+        }
+        child
+            .wait_with_output()
+            .map_err(|e| Error::invalid(format!("could not wait on {bin} while downloading '{u}': {e}")))?
+    } else {
+        Command::new(bin)
+            .args(["--fail", "--silent", "--show-error", "--location", "--max-time", "20", "--max-filesize", "5242880", u])
+            .output()
+            .map_err(|e| {
+                Error::invalid(format!(
+                    "could not run {bin} to download '{u}': {e} (download the file manually and use `nyx material import`)"
+                ))
+            })?
+    };
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let msg = stderr.trim();
@@ -235,6 +280,23 @@ impl Engine {
         add_to_project: bool,
         folder: Option<&Path>,
     ) -> Result<Value, Error> {
+        self.fetch_material_with_key(source, target, name, description, extends, add_to_project, folder, None)
+    }
+
+    /// Downloads a remote database entry or catalog preset over HTTPS (using `api_key` or `MP_API_KEY` via `curl --config -` stdin for Materials Project),
+    /// converts it into validated TOML, and adds/saves as requested.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fetch_material_with_key(
+        &mut self,
+        source: &str,
+        target: Option<&str>,
+        name: Option<&str>,
+        description: Option<&str>,
+        extends: Option<&str>,
+        add_to_project: bool,
+        folder: Option<&Path>,
+        api_key: Option<&str>,
+    ) -> Result<Value, Error> {
         let src = source.trim();
         let tgt_opt = target.map(str::trim).filter(|s| !s.is_empty());
 
@@ -271,8 +333,28 @@ impl Engine {
 
         let final_name =
             validate_material_name(name.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(&default_name))?.to_string();
-        let url = resolve_url(fmt, &resolved_target).map_err(|e| Error::invalid(e.to_string()))?;
-        let raw = fetch_url_text(&url)?;
+        let env_mp_key = std::env::var("MP_API_KEY").ok();
+        let effective_key = api_key
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| (fmt == ImportFormat::MaterialsProject).then_some(env_mp_key.as_deref()).flatten());
+        let url = if fmt == ImportFormat::MaterialsProject && !resolved_target.starts_with("https://") {
+            if effective_key.is_none() {
+                return Err(Error::invalid(
+                    "Materials Project live download requires an API key (`api_key` argument, `--api-key` CLI flag, or `MP_API_KEY` environment variable)",
+                ));
+            }
+            let mp_id = resolved_target.trim();
+            if !mp_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                return Err(Error::invalid(format!("invalid Materials Project id '{mp_id}'")));
+            }
+            format!(
+                "https://api.materialsproject.org/materials/summary/?material_ids={mp_id}&_fields=material_id,formula_pretty,symmetry,density,elasticity,dielectric,piezoelectric"
+            )
+        } else {
+            resolve_url(fmt, &resolved_target).map_err(|e| Error::invalid(e.to_string()))?
+        };
+        let raw = fetch_url_text_with_api_key(&url, effective_key)?;
         let opts = ImportOptions {
             name: &final_name,
             description: resolved_desc,
@@ -285,5 +367,132 @@ impl Engine {
             extra.push(("preset", json!(id)));
         }
         finalize_import(self, &final_name, &toml_text, add_to_project, folder, &extra)
+    }
+
+    /// Searches the curated `REMOTE_CATALOG` and (when `live` is true) live AFLOW and Materials Project HTTPS endpoints.
+    pub fn search_remote_materials(
+        &self,
+        query: &str,
+        domain: Option<&str>,
+        source: Option<&str>,
+        live: bool,
+        api_key: Option<&str>,
+    ) -> Result<Value, Error> {
+        let q = query.trim();
+        let q_low = q.to_ascii_lowercase();
+        let dom_filter = domain.map(str::trim).filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("all"));
+        let src_filter = source.map(str::trim).filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("all"));
+
+        let catalog_matches: Vec<Value> = remote_catalog()
+            .into_iter()
+            .filter(|c| dom_filter.is_none_or(|d| c.domain.eq_ignore_ascii_case(d)))
+            .filter(|c| src_filter.is_none_or(|s| c.format.eq_ignore_ascii_case(s)))
+            .filter(|c| {
+                q_low.is_empty()
+                    || c.id.to_ascii_lowercase().contains(&q_low)
+                    || c.target.to_ascii_lowercase().contains(&q_low)
+                    || c.summary.to_ascii_lowercase().contains(&q_low)
+                    || c.extends.is_some_and(|e| e.to_ascii_lowercase().contains(&q_low))
+                    || c.domain.to_ascii_lowercase().contains(&q_low)
+                    || c.format.to_ascii_lowercase().contains(&q_low)
+            })
+            .map(|c| {
+                json!({
+                    "id": c.id,
+                    "domain": c.domain,
+                    "format": c.format,
+                    "format_label": c.format_label,
+                    "target": c.target,
+                    "extends": c.extends,
+                    "summary": c.summary,
+                    "url": c.url,
+                })
+            })
+            .collect();
+
+        let mut live_matches: Vec<Value> = Vec::new();
+        let mut live_warnings: Vec<String> = Vec::new();
+
+        if live && !q.is_empty() && q.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            let want_aflow = src_filter.is_none_or(|s| s.eq_ignore_ascii_case("aflow"));
+            if want_aflow {
+                let aflow_url =
+                    format!("https://aflowlib.duke.edu/search/API/?species({q}),ael_voigt_bulk_modulus_B,$paging(1,8)");
+                match fetch_url_text(&aflow_url) {
+                    Ok(body) => {
+                        if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&body) {
+                            for item in arr.into_iter().take(8) {
+                                let compound = item.get("compound").and_then(Value::as_str).unwrap_or(q);
+                                let auid = item.get("auid").and_then(Value::as_str).unwrap_or("");
+                                let aurl = item.get("aurl").and_then(Value::as_str).unwrap_or("");
+                                let target_url = if !aurl.is_empty() {
+                                    format!("https://{}/?format=json", aurl.trim_start_matches("aflowlib.duke.edu:"))
+                                } else {
+                                    aflow_url.clone()
+                                };
+                                live_matches.push(json!({
+                                    "format": "aflow",
+                                    "id": if auid.is_empty() { compound.to_string() } else { format!("{compound}_{auid}") },
+                                    "target": target_url,
+                                    "summary": format!("AFLOW live DFT entry for {compound} ({auid})"),
+                                }));
+                            }
+                        }
+                    }
+                    Err(e) => live_warnings.push(format!("AFLOW live search unavailable: {e}")),
+                }
+            }
+
+            let want_mp = src_filter.is_none_or(|s| s.eq_ignore_ascii_case("mp"));
+            let env_mp = std::env::var("MP_API_KEY").ok();
+            let mp_key = api_key.map(str::trim).filter(|s| !s.is_empty()).or(env_mp.as_deref());
+            if want_mp {
+                if let Some(key) = mp_key {
+                    let mp_url = if q.starts_with("mp-") {
+                        format!(
+                            "https://api.materialsproject.org/materials/summary/?material_ids={q}&_fields=material_id,formula_pretty,symmetry,density&_limit=8"
+                        )
+                    } else {
+                        format!(
+                            "https://api.materialsproject.org/materials/summary/?formula={q}&_fields=material_id,formula_pretty,symmetry,density&_limit=8"
+                        )
+                    };
+                    match fetch_url_text_with_api_key(&mp_url, Some(key)) {
+                        Ok(body) => {
+                            if let Ok(v) = serde_json::from_str::<Value>(&body) {
+                                if let Some(arr) = v.get("data").and_then(Value::as_array) {
+                                    for item in arr.iter().take(8) {
+                                        let mid = item.get("material_id").and_then(Value::as_str).unwrap_or(q);
+                                        let formula = item.get("formula_pretty").and_then(Value::as_str).unwrap_or(q);
+                                        let pg = item
+                                            .get("symmetry")
+                                            .and_then(|s| s.get("point_group"))
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("");
+                                        live_matches.push(json!({
+                                            "format": "mp",
+                                            "id": format!("mp_{}_{}", formula.to_ascii_lowercase(), mid.replace('-', "_")),
+                                            "target": mid,
+                                            "summary": format!("Materials Project {formula} ({mid}, point group {pg})"),
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => live_warnings.push(format!("Materials Project live search failed: {e}")),
+                    }
+                } else if src_filter.is_some_and(|s| s.eq_ignore_ascii_case("mp")) {
+                    live_warnings
+                        .push("Materials Project live search skipped: provide `api_key` or set `MP_API_KEY`".into());
+                }
+            }
+        }
+
+        Ok(json!({
+            "query": q,
+            "catalog_matches": catalog_matches,
+            "live_matches": live_matches,
+            "live_warnings": live_warnings,
+        }))
     }
 }

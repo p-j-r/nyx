@@ -1,7 +1,10 @@
 # Copper: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk room-temperature mechanical/thermal/electrical baseline.
-format = 1
+format = 2
 name = "copper"
 description = "Copper at 293 K (Rakic 1998 Lorentz-Drude 0.21-12.4 um; E=130 GPa, k=401 W/(m*K), Cp=385 J/(kg*K)) — room-temperature normal-metal baseline vs RRR=100 cryogenic copper_4k."
+kind = "metal"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
 source = { cite = "APPROXIMATE bulk OFHC polycrystalline mechanics/thermal/electrical at 293 K + verified Rakic et al. 1998 [optical] fit (0.207-12.4 um)", doi = "10.1364/AO.37.005271" }
 density = "8960 kg/m^3"
 

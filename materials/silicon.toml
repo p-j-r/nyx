@@ -1,8 +1,11 @@
 # Single-crystal silicon at room temperature. Crystal axes along the cube edges (orientation is set in the project).
 # Every table carries its own source; a value that is only approximate says so in its source text.
-format = 1
+format = 2
 name = "silicon"
 description = "Single-crystal Si [100] at 293 K (Hopcroft 2010 cubic elastic + Li 1980 IR index 1.2-14 um, n=3.4757 at 1.55 um) — baseline vs silicon_salzberg, silicon_palik, silicon_mcskimin, silicon_4k."
+kind = "semiconductor"
+point_group = "m-3m"
+reference_temperature = "293.15 K"
 source = { cite = "Compiled from the per-table sources below. Density 2329 kg/m^3 (2.329 g/cm^3): El-Cat silicon properties page and Sydor/Ohara data sheet (2.33 g/cm^3), checked 2026-11-04", verified = "2026-11-04" }
 density = "2329 kg/m^3"
 
@@ -25,9 +28,36 @@ source = [
   { cite = "APPROXIMATE thermal conductivity at 300 K: 148 W/(m K) (El-Cat silicon properties); other compilations give 130 (Ioffe NSM), 150 (PVEducation), 156; it depends on doping, isotopes and temperature", url = "https://www.el-cat.com/silicon-properties.htm", verified = "2026-11-04" },
 ]
 
-[electrical]
-permittivity = 11.7
-source = { cite = "APPROXIMATE static relative permittivity: 11.7 (PVEducation, Ioffe NSM); 11.9 is also quoted (El-Cat)", url = "https://www.pveducation.org/pvcdrom/materials/general-properties-of-silicon", verified = "2026-11-04" }
+[dielectric]
+eps_clamped = 11.7
+loss_tangent = 5.0e-6
+loss_ref_freq = "10 GHz"
+source = [
+  { cite = "APPROXIMATE static relative permittivity: 11.7 (PVEducation, Ioffe NSM); 11.9 is also quoted (El-Cat)", url = "https://www.pveducation.org/pvcdrom/materials/general-properties-of-silicon", verified = "2026-11-04" },
+  { cite = "APPROXIMATE room-temperature high-resistivity silicon microwave loss tangent (~5e-6 at 10 GHz)" },
+]
+
+[photoelastic]
+wavelength = "1.55 um"
+p11 = -0.094
+p12 = 0.017
+p44 = -0.051
+source = { cite = "APPROXIMATE crystalline Si photoelastic constants at 1.15-3.39 um (Biegelsen 1974 / Dixon 1967 / NumBAT library)" }
+
+[viscoelastic]
+unit = "mPa*s"
+eta11 = 5.9
+eta12 = 5.16
+eta44 = 0.62
+source = { cite = "APPROXIMATE room-temperature silicon Akhiezer phonon viscosity tensor (Mason & Bateman 1964 / NumBAT Si)" }
+
+[interfaces.sa]
+oxide = "SiO2"
+thickness = "2.0 nm"
+eps_r = 3.9
+tan_delta_tls_0 = 1.5e-3
+e_crit = "15 V/m"
+source = { cite = "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters" }
 
 [optical]
 wavelength_unit = "um"

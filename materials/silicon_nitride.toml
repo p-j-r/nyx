@@ -1,9 +1,14 @@
 # Silicon nitride (stoichiometric LPCVD Si3N4 thin film): Luke 2015 optical Sellmeier + typical LPCVD mechanics/thermal/electrical.
-format = 1
+format = 2
 name = "silicon_nitride"
 description = "Stoichiometric LPCVD Si3N4 film at 293 K (Luke 2015 Sellmeier 0.31-5.5 um, n=1.9963 at 1.55 um; E=270 GPa) — low-loss photonic baseline vs UV-VIS silicon_nitride_philipp and higher-index silicon_nitride_pecvd."
+kind = "amorphous"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
 source = { cite = "APPROXIMATE thin-film compilation: [optical] verified from Luke et al. 2015; density 3100 kg/m^3 and mechanical/thermal/electrical are representative stoichiometric LPCVD Si3N4 film values that depend on furnace stress and stoichiometry", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Luke" }
 density = "3100 kg/m^3"
+residual_stress = [1.0e9, 1.0e9, 0.0, 0.0, 0.0, 0.0]
+residual_stress_unit = "Pa"
 
 [elastic]
 unit = "GPa"
@@ -19,9 +24,19 @@ expansion = 2.3e-6
 expansion_unit = "1/K"
 source = { cite = "APPROXIMATE thin-film LPCVD Si3N4 thermal properties (phonon-boundary scattering lowers k below bulk ~30 W/(m*K) beta-Si3N4)" }
 
-[electrical]
-permittivity = 7.5
-source = { cite = "APPROXIMATE static/RF relative permittivity of stoichiometric LPCVD Si3N4 (~7.0-8.0 across foundry PDKs)" }
+[dielectric]
+eps_clamped = 7.5
+loss_tangent = 2.0e-4
+loss_ref_freq = "10 GHz"
+tls_tan_delta_0 = 3.0e-4
+tls_e_crit = "20 V/m"
+source = { cite = "APPROXIMATE static/RF relative permittivity and TLS dielectric loss of stoichiometric LPCVD Si3N4 (~7.0-8.0 across foundry PDKs)" }
+
+[photoelastic]
+wavelength = "1.55 um"
+p11 = -0.125
+p12 = 0.047
+source = { cite = "APPROXIMATE stoichiometric LPCVD Si3N4 isotropic photoelastic constants at 1550 nm (Gyger et al., Phys. Rev. Lett. 124, 013902, 2020)" }
 
 [optical]
 wavelength_unit = "um"

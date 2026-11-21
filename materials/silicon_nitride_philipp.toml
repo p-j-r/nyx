@@ -1,5 +1,5 @@
 # Silicon nitride visible/NIR Sellmeier fit (Philipp 1973 / Baak 1982).
-format = 1
+format = 2
 name = "silicon_nitride_philipp"
 extends = "silicon_nitride"
 description = "Stoichiometric Si3N4 visible/NIR 1-term Sellmeier (Philipp 1973 / Baak 1982, 0.207-1.24 um, n=2.011 at 0.633 um) — classic visible-band fit vs Luke 2015 telecom/MIR silicon_nitride and Si-rich silicon_nitride_pecvd."

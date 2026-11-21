@@ -541,11 +541,13 @@ fn eval_rii_n(kind: &str, coeffs: &[f64], x: f64) -> Option<f64> {
             let mut i = 1;
             for _ in 0..2 {
                 if i + 3 < coeffs.len() {
-                    let denom = x2 - coeffs[i + 2].powf(coeffs[i + 3]);
-                    if denom.abs() < 1e-18 {
-                        return None;
+                    if coeffs[i] != 0.0 {
+                        let denom = x2 - coeffs[i + 2].powf(coeffs[i + 3]);
+                        if denom.abs() < 1e-18 {
+                            return None;
+                        }
+                        n2 += coeffs[i] * x.powf(coeffs[i + 1]) / denom;
                     }
-                    n2 += coeffs[i] * x.powf(coeffs[i + 1]) / denom;
                     i += 4;
                 }
             }
@@ -674,9 +676,51 @@ fn rii_block_to_dispersion(block: &RiiBlock, range_out: &mut Option<(f64, f64)>)
             }
             Ok(Dispersion::Herzberger { coefficients: out })
         }
-        "formula 4" | "formula 5" | "formula 6" => sample_formula_to_table(k, c, range),
+        "formula 4" => {
+            if c.is_empty() {
+                return Err(err("optical", "missing RII formula 4 coefficients"));
+            }
+            let _ = eval_rii_n(k, c, 0.5 * (range.0 + range.1))
+                .ok_or_else(|| err("optical", "RII formula 4 fails to evaluate cleanly in wavelength_range"))?;
+            Ok(Dispersion::RiiFormula4 { coefficients: c.to_vec() })
+        }
+        "formula 5" => {
+            if c.is_empty() || c.len() % 2 != 1 {
+                return Err(err("optical", "RII formula 5 expects 1 + 2*m coefficients"));
+            }
+            Ok(Dispersion::RiiFormula5 { coefficients: c.to_vec() })
+        }
+        "formula 6" => {
+            if c.is_empty() || c.len() % 2 != 1 {
+                return Err(err("optical", "RII formula 6 expects 1 + 2*m coefficients"));
+            }
+            Ok(Dispersion::RiiFormula6 { coefficients: c.to_vec() })
+        }
         other => Err(err("optical", format!("unsupported refractiveindex.info DATA type `{other}`"))),
     }
+}
+
+fn extract_k_data(k_block: &RiiBlock, n_range: Option<(f64, f64)>) -> Option<(Vec<f64>, Vec<f64>)> {
+    let mut kl = Vec::new();
+    let mut kv = Vec::new();
+    for r in &k_block.rows {
+        let wl = r[0];
+        let k = r[2];
+        if wl <= 0.0 || k < 0.0 || !k.is_finite() {
+            continue;
+        }
+        if let Some((lo, hi)) = n_range {
+            if wl < lo * (1.0 - 1e-12) || wl > hi * (1.0 + 1e-12) {
+                continue;
+            }
+        }
+        if kl.last().is_some_and(|prev: &f64| wl <= *prev) {
+            continue;
+        }
+        kl.push(wl);
+        kv.push(k);
+    }
+    (kl.len() >= 2).then_some((kl, kv))
 }
 
 fn sample_formula_to_table(kind: &str, coeffs: &[f64], range: (f64, f64)) -> Result<Dispersion, MaterialError> {
@@ -696,60 +740,6 @@ fn sample_formula_to_table(kind: &str, coeffs: &[f64], range: (f64, f64)) -> Res
     }
     let k = vec![0.0; n_pts];
     Ok(Dispersion::Tabulated { lambda, n, k, interpolation: Interp::Pchip, extrapolate: Extrapolate::Error })
-}
-
-fn combine_n_and_k_tables(n_block: &RiiBlock, k_block: &RiiBlock) -> Result<(Dispersion, (f64, f64)), MaterialError> {
-    let mut nr = None;
-    let nd = rii_block_to_dispersion(n_block, &mut nr)?;
-    let (lo, hi) = nr.ok_or_else(|| err("optical", "missing wavelength range for refractive index"))?;
-    let mut lambda = Vec::new();
-    let mut nv = Vec::new();
-    let mut kv = Vec::new();
-    for r in &k_block.rows {
-        let wl = r[0];
-        if wl < lo * (1.0 - 1e-12) || wl > hi * (1.0 + 1e-12) || r[2] < 0.0 {
-            continue;
-        }
-        if lambda.last().is_some_and(|prev: &f64| wl <= *prev) {
-            continue;
-        }
-        let n_val = match &nd {
-            Dispersion::Tabulated { lambda: nl, n, .. } => {
-                // linear interpolation in overlapping range
-                let pos = nl.partition_point(|x| *x < wl).min(nl.len() - 1).max(1);
-                let t = ((wl - nl[pos - 1]) / (nl[pos] - nl[pos - 1])).clamp(0.0, 1.0);
-                n[pos - 1] + t * (n[pos] - n[pos - 1])
-            }
-            Dispersion::Sellmeier { a, b, c } => {
-                let x2 = wl * wl;
-                let mut sum = *a;
-                for (bi, ci) in b.iter().zip(c) {
-                    sum += bi * x2 / (x2 - ci);
-                }
-                sum.sqrt()
-            }
-            Dispersion::Schott { coefficients: a } => {
-                (a[0] + a[1] * wl.powi(2) + a[2] * wl.powi(-2) + a[3] * wl.powi(-4) + a[4] * wl.powi(-6) + a[5] * wl.powi(-8)).sqrt()
-            }
-            Dispersion::Herzberger { coefficients: c } => {
-                let l = 1.0 / (wl * wl - 0.028);
-                let x2 = wl * wl;
-                c[0] + c[1] * l + c[2] * l * l + c[3] * x2 + c[4] * x2 * x2 + c[5] * x2 * x2 * x2
-            }
-            _ => continue,
-        };
-        if n_val.is_finite() && n_val > 0.0 {
-            lambda.push(wl);
-            nv.push(n_val);
-            kv.push(r[2]);
-        }
-    }
-    if lambda.len() < 2 {
-        // fallback: drop unmerged k and keep pure n model
-        return Ok((nd, (lo, hi)));
-    }
-    let ext = (lambda[0], *lambda.last().unwrap());
-    Ok((Dispersion::Tabulated { lambda, n: nv, k: kv, interpolation: Interp::Pchip, extrapolate: Extrapolate::Error }, ext))
 }
 
 fn import_rii_yaml(raw: &str, opts: &ImportOptions<'_>) -> Result<String, MaterialError> {
@@ -878,13 +868,8 @@ fn import_rii_yaml(raw: &str, opts: &ImportOptions<'_>) -> Result<String, Materi
     let k_only_block = blocks.iter().find(|b| !b.has_n && b.has_k);
 
     let mut range = None;
-    let dispersion = if let Some(kb) = k_only_block {
-        let (disp, r) = combine_n_and_k_tables(n_block, kb)?;
-        range = Some(r);
-        disp
-    } else {
-        rii_block_to_dispersion(n_block, &mut range)?
-    };
+    let dispersion = rii_block_to_dispersion(n_block, &mut range)?;
+    let k_data = k_only_block.and_then(|kb| extract_k_data(kb, range));
 
     let clean_ref = strip_html(&refs);
     let clean_cmt = strip_html(&comments);
@@ -907,18 +892,22 @@ fn import_rii_yaml(raw: &str, opts: &ImportOptions<'_>) -> Result<String, Materi
         description: Some(opts.description.map(|s| s.to_string()).unwrap_or(desc)),
         source: vec![src.clone()],
         notes: (!clean_cmt.is_empty()).then_some(clean_cmt),
-        density: None,
-        elastic: None,
-        thermal: Default::default(),
-        electrical: Default::default(),
         optical: Some(Optical {
             source: vec![src],
             wavelength_unit: "um".into(),
             unit_m: 1e-6,
             range,
             reference_temperature: temp_k,
-            axes: Axes::Isotropic(AxisModel { dispersion, source: Vec::new(), dn_dt: 0.0 }),
+            axes: Axes::Isotropic(AxisModel {
+                dispersion,
+                source: Vec::new(),
+                dn_dt: 0.0,
+                k_data,
+                dn_dt_einstein_theta: None,
+                dn_dt_range: None,
+            }),
         }),
+        ..Default::default()
     };
     build_spec_toml(&spec, opts.extends, None)
 }
@@ -1052,6 +1041,58 @@ fn import_aflow_json(raw: &str, opts: &ImportOptions<'_>) -> Result<String, Mate
 
 // ------------------------------------------------------------------ 4. Materials Project JSON
 
+fn mp_3x3_toml(arr: &Value) -> Option<toml::Value> {
+    let diel = arr.as_array()?;
+    if diel.len() != 3 || !diel.iter().all(|r| r.as_array().is_some_and(|c| c.len() == 3)) {
+        return None;
+    }
+    let mut m = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            m[i][j] = diel[i][j].as_f64()?;
+        }
+    }
+    for i in 0..3 {
+        for j in (i + 1)..3 {
+            let avg = 0.5 * (m[i][j] + m[j][i]);
+            m[i][j] = avg;
+            m[j][i] = avg;
+        }
+    }
+    let pd = TensorProp::Symmetric([m[0][0], m[1][1], m[2][2], m[1][2], m[0][2], m[0][1]])
+        .principal_values()
+        .into_iter()
+        .all(|v| v > 0.0);
+    if !pd {
+        return None;
+    }
+    let off_zero = m[0][1].abs() <= 1e-8 && m[0][2].abs() <= 1e-8 && m[1][2].abs() <= 1e-8;
+    let iso_xx_yy = (m[0][0] - m[1][1]).abs() <= 1e-6 * m[0][0].abs();
+    let iso_xx_zz = (m[0][0] - m[2][2]).abs() <= 1e-6 * m[0][0].abs();
+    Some(if off_zero && iso_xx_yy && iso_xx_zz {
+        let s = if m[0][0] == m[1][1] && m[0][0] == m[2][2] {
+            m[0][0]
+        } else {
+            (m[0][0] + m[1][1] + m[2][2]) / 3.0
+        };
+        toml::Value::Float(s)
+    } else if off_zero && iso_xx_yy {
+        let mut uni = toml::Table::new();
+        let perp = if m[0][0] == m[1][1] { m[0][0] } else { 0.5 * (m[0][0] + m[1][1]) };
+        uni.insert("perp".into(), toml::Value::Float(perp));
+        uni.insert("par".into(), toml::Value::Float(m[2][2]));
+        toml::Value::Table(uni)
+    } else if off_zero {
+        toml::Value::Array(vec![
+            toml::Value::Float(m[0][0]),
+            toml::Value::Float(m[1][1]),
+            toml::Value::Float(m[2][2]),
+        ])
+    } else {
+        toml::Value::Array(m.iter().map(|r| toml::Value::Array(r.iter().map(|v| toml::Value::Float(*v)).collect())).collect())
+    })
+}
+
 fn import_mp_json(raw: &str, opts: &ImportOptions<'_>) -> Result<String, MaterialError> {
     let root: Value = serde_json::from_str(raw).map_err(|e| err("json", format!("invalid Materials Project JSON: {e}")))?;
     let doc = root
@@ -1074,8 +1115,17 @@ fn import_mp_json(raw: &str, opts: &ImportOptions<'_>) -> Result<String, Materia
 
     let mut t = toml::Table::new();
     let desc = format!("Materials Project 0 K DFT {formula} ({mp_id}) — IEEE Voigt single-crystal tensor; calibrate for film/T.");
-    let notes = "Exported in IEEE Std 176 Voigt order (xx, yy, zz, yz, xz, xy), matching nyx directly.";
+    let notes = "Exported in IEEE Std 176 Voigt order (xx, yy, zz, yz, xz, xy), matching nyx format = 2 directly.";
     push_common_header(&mut t, opts, &desc, Some(notes), src.clone());
+
+    let pg = doc
+        .get("symmetry")
+        .and_then(|s| s.get("point_group"))
+        .and_then(Value::as_str)
+        .and_then(super::state_t::PointGroup::parse);
+    if let Some(p) = pg {
+        t.insert("point_group".into(), p.as_str().into());
+    }
 
     if let Some(rho) = doc.get("density").and_then(Value::as_f64).filter(|d| *d > 0.0) {
         t.insert("density".into(), format!("{:.2} kg/m^3", rho * 1000.0).into());
@@ -1098,68 +1148,63 @@ fn import_mp_json(raw: &str, opts: &ImportOptions<'_>) -> Result<String, Materia
         t.insert("elastic".into(), toml::Value::Table(e_tab));
     }
 
-    if let Some(diel) = doc.get("dielectric").and_then(|d| d.get("e_total")).and_then(Value::as_array) {
-        if diel.len() == 3 && diel.iter().all(|r| r.as_array().is_some_and(|c| c.len() == 3)) {
-            let mut m = [[0.0; 3]; 3];
-            for i in 0..3 {
-                for j in 0..3 {
-                    m[i][j] = diel[i][j].as_f64().unwrap_or(0.0);
-                }
-            }
-            for i in 0..3 {
-                for j in i + 1..3 {
-                    let avg = 0.5 * (m[i][j] + m[j][i]);
-                    m[i][j] = avg;
-                    m[j][i] = avg;
-                }
-            }
-            let pd = TensorProp::Symmetric([m[0][0], m[1][1], m[2][2], m[1][2], m[0][2], m[0][1]])
-                .principal_values()
-                .into_iter()
-                .all(|v| v > 0.0);
-            if pd {
-                let off_zero = m[0][1].abs() <= 1e-8 && m[0][2].abs() <= 1e-8 && m[1][2].abs() <= 1e-8;
-                let iso_xx_yy = (m[0][0] - m[1][1]).abs() <= 1e-6 * m[0][0].abs();
-                let iso_xx_zz = (m[0][0] - m[2][2]).abs() <= 1e-6 * m[0][0].abs();
-                let perm_val = if off_zero && iso_xx_yy && iso_xx_zz {
-                    let s = if m[0][0] == m[1][1] && m[0][0] == m[2][2] {
-                        m[0][0]
-                    } else {
-                        (m[0][0] + m[1][1] + m[2][2]) / 3.0
-                    };
-                    toml::Value::Float(s)
-                } else if off_zero && iso_xx_yy {
-                    let mut uni = toml::Table::new();
-                    let perp = if m[0][0] == m[1][1] { m[0][0] } else { 0.5 * (m[0][0] + m[1][1]) };
-                    uni.insert("perp".into(), toml::Value::Float(perp));
-                    uni.insert("par".into(), toml::Value::Float(m[2][2]));
-                    toml::Value::Table(uni)
-                } else if off_zero {
-                    toml::Value::Array(vec![
-                        toml::Value::Float(m[0][0]),
-                        toml::Value::Float(m[1][1]),
-                        toml::Value::Float(m[2][2]),
-                    ])
-                } else {
-                    toml::Value::Array(m.iter().map(|r| toml::Value::Array(r.iter().map(|v| toml::Value::Float(*v)).collect())).collect())
-                };
-                let mut el_tab = toml::Table::new();
-                el_tab.insert("permittivity".into(), perm_val);
-                el_tab.insert(
-                    "source".into(),
-                    source_to_toml(&Source {
-                        cite: format!("UNVERIFIED DFPT total dielectric tensor from Materials Project ({mp_id})"),
-                        url: src.url.clone(),
-                        doi: Some("10.1038/sdata.2016.134".into()),
-                        verified: None,
-                    }),
-                );
-                t.insert("electrical".into(), toml::Value::Table(el_tab));
+    let diel_node = doc.get("dielectric");
+    let e_total = diel_node.and_then(|d| d.get("e_total")).and_then(mp_3x3_toml);
+    let e_elec = diel_node.and_then(|d| d.get("e_electronic")).and_then(mp_3x3_toml);
+    let dfpt_src = Source {
+        cite: format!("UNVERIFIED DFPT dielectric tensor from Materials Project ({mp_id})"),
+        url: src.url.clone(),
+        doi: Some("10.1038/sdata.2016.134".into()),
+        verified: None,
+    };
+    if let Some(perm_val) = e_total.clone() {
+        let mut el_tab = toml::Table::new();
+        el_tab.insert("permittivity".into(), perm_val);
+        el_tab.insert("source".into(), source_to_toml(&dfpt_src));
+        t.insert("electrical".into(), toml::Value::Table(el_tab));
+    }
+    if e_total.is_some() || e_elec.is_some() {
+        let mut dl_tab = toml::Table::new();
+        if let Some(et) = e_total {
+            dl_tab.insert("eps_clamped".into(), et);
+        }
+        if let Some(ee) = e_elec {
+            dl_tab.insert("eps_inf".into(), ee);
+        }
+        dl_tab.insert("source".into(), source_to_toml(&dfpt_src));
+        t.insert("dielectric".into(), toml::Value::Table(dl_tab));
+    }
+
+    if !pg.is_some_and(|p| p.forbids_piezo_and_pockels()) {
+        if let Some(pz_arr) = doc
+            .get("piezoelectric")
+            .and_then(|p| p.get("total").or_else(|| p.get("e_ij")).or(Some(p)))
+            .and_then(Value::as_array)
+        {
+            if pz_arr.len() == 3 && pz_arr.iter().all(|r| r.as_array().is_some_and(|c| c.len() == 6)) {
+                let rows: Vec<toml::Value> = pz_arr
+                    .iter()
+                    .map(|r| {
+                        toml::Value::Array(
+                            r.as_array()
+                                .unwrap()
+                                .iter()
+                                .map(|v| toml::Value::Float(v.as_f64().unwrap_or(0.0)))
+                                .collect(),
+                        )
+                    })
+                    .collect();
+                let mut pz_tab = toml::Table::new();
+                pz_tab.insert("form".into(), "stress_charge".into());
+                pz_tab.insert("unit".into(), "C/m^2".into());
+                pz_tab.insert("matrix".into(), toml::Value::Array(rows));
+                pz_tab.insert("source".into(), source_to_toml(&src));
+                t.insert("piezoelectric".into(), toml::Value::Table(pz_tab));
             }
         }
     }
 
-    if !t.contains_key("elastic") && !t.contains_key("electrical") {
+    if !t.contains_key("elastic") && !t.contains_key("electrical") && !t.contains_key("dielectric") {
         return Err(err("mp", "Materials Project JSON contained neither `elastic_tensor` nor `dielectric.e_total`"));
     }
     render_toml_table(&t)
@@ -1295,6 +1340,65 @@ fn import_numbat_json(raw: &str, opts: &ImportOptions<'_>) -> Result<String, Mat
         }
         o_tab.insert("source".into(), source_to_toml(&src));
         t.insert("optical".into(), toml::Value::Table(o_tab));
+    }
+
+    if let Some(p11) = get_opt("p_11") {
+        let p12 = get_opt("p_12").unwrap_or(0.0);
+        let p13 = get_opt("p_13").unwrap_or(p12);
+        let p31 = get_opt("p_31").unwrap_or(p12);
+        let p33 = get_opt("p_33").unwrap_or(p11);
+        let p44 = get_opt("p_44").unwrap_or(0.5 * (p11 - p12));
+        let p66 = get_opt("p_66").unwrap_or(0.5 * (p11 - p12));
+        let p14 = get_opt("p_14").unwrap_or(0.0);
+        let p41 = get_opt("p_41").unwrap_or(p14);
+        let mut pm = [
+            [p11, p12, p13, p14, 0.0, 0.0],
+            [p12, p11, p13, -p14, 0.0, 0.0],
+            [p31, p31, p33, 0.0, 0.0, 0.0],
+            [p41, -p41, 0.0, p44, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, p44, p41],
+            [0.0, 0.0, 0.0, 0.0, p14, p66],
+        ];
+        if p14 == 0.0 && p41 == 0.0 && (p31 - p12).abs() < 1e-12 && (p33 - p11).abs() < 1e-12 && p66 == p44 {
+            // Cubic or isotropic exact zeros
+            pm[3][0] = 0.0;
+        }
+        let rows = pm
+            .iter()
+            .map(|r| toml::Value::Array(r.iter().copied().map(toml::Value::Float).collect()))
+            .collect();
+        let mut pe_tab = toml::Table::new();
+        pe_tab.insert("matrix".into(), toml::Value::Array(rows));
+        pe_tab.insert("source".into(), source_to_toml(&src));
+        t.insert("photoelastic".into(), toml::Value::Table(pe_tab));
+    }
+
+    if let Some(eta11) = get_opt("eta_11").filter(|&v| v > 0.0) {
+        let eta12 = get_opt("eta_12").unwrap_or(0.0);
+        let eta13 = get_opt("eta_13").unwrap_or(eta12);
+        let eta33 = get_opt("eta_33").unwrap_or(eta11);
+        let eta44 = get_opt("eta_44").unwrap_or((0.5 * (eta11 - eta12)).max(0.0));
+        let eta66 = get_opt("eta_66").unwrap_or((0.5 * (eta11 - eta12)).max(0.0));
+        let em = [
+            [eta11, eta12, eta13, 0.0, 0.0, 0.0],
+            [eta12, eta11, eta13, 0.0, 0.0, 0.0],
+            [eta13, eta13, eta33, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, eta44, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, eta44, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, eta66],
+        ];
+        let evals = super::elastic::sym_eigenvalues(em);
+        if evals[0] >= -1e-12 * eta11 {
+            let rows = em
+                .iter()
+                .map(|r| toml::Value::Array(r.iter().copied().map(toml::Value::Float).collect()))
+                .collect();
+            let mut ve_tab = toml::Table::new();
+            ve_tab.insert("unit".into(), "Pa*s".into());
+            ve_tab.insert("matrix".into(), toml::Value::Array(rows));
+            ve_tab.insert("source".into(), source_to_toml(&src));
+            t.insert("viscoelastic".into(), toml::Value::Table(ve_tab));
+        }
     }
 
     render_toml_table(&t)

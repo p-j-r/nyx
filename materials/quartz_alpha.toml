@@ -1,7 +1,11 @@
 # Right-handed single-crystal alpha-quartz (crystalline SiO2, point group 32), trigonal symmetry about crystal z (optic axis).
-format = 1
+format = 2
 name = "quartz_alpha"
 description = "Single-crystal alpha-quartz SiO2 (Bechmann 1958 trigonal c11=86.74 GPa + Ghosh 1999 uniaxial Sellmeier 0.198-2.05 um, no=1.5277 at 1.55 um) — anisotropic piezoelectric SAW/BAW crystal vs amorphous fused silica."
+kind = "crystalline"
+point_group = "32"
+crystal_setting = "IEEE-1987"
+reference_temperature = "293.15 K"
 source = [
   { cite = "R. Bechmann, Elastic and piezoelectric constants of alpha-quartz, Phys. Rev. 110, 1060-1061 (1958): density 2648.5 kg/m^3", doi = "10.1103/PhysRev.110.1060", verified = "2026-11-21" },
   { cite = "G. Ghosh, Opt. Commun. 163, 95-102 (1999)", doi = "10.1016/S0030-4018(99)00091-7", verified = "2026-11-21" },
@@ -25,9 +29,33 @@ conductivity_unit = "W/(m*K)"
 specific_heat = "740 J/(kg*K)"
 source = { cite = "APPROXIMATE crystalline alpha-quartz thermal properties near 300 K (anisotropic thermal conductivity 6.2 perp / 10.7 par W/(m*K) from handbook compilations)" }
 
-[electrical]
-permittivity = { perp = 4.52, par = 4.63 }
-source = { cite = "R. Bechmann, Phys. Rev. 110, 1060-1061 (1958): low-frequency free relative permittivity eps^T (perp = 4.52, par = 4.63)", doi = "10.1103/PhysRev.110.1060", verified = "2026-11-21" }
+[dielectric]
+eps_free = { perp = 4.52, par = 4.63 }
+loss_tangent = 1.0e-5
+loss_ref_freq = "10 GHz"
+source = [
+  { cite = "R. Bechmann, Phys. Rev. 110, 1060-1061 (1958): low-frequency free relative permittivity eps^T (perp = 4.52, par = 4.63)", doi = "10.1103/PhysRev.110.1060", verified = "2026-11-21" },
+  { cite = "APPROXIMATE synthetic alpha-quartz microwave loss tangent near 10 GHz" },
+]
+
+[piezoelectric]
+form = "strain_charge"
+unit = "pC/N"
+d11 = 2.31
+d14 = -0.727
+source = { cite = "APPROXIMATE Bechmann 1958 right-handed alpha-quartz piezoelectric constants (d11 = 2.31, d14 = -0.727 pC/N)", doi = "10.1103/PhysRev.110.1060" }
+
+[photoelastic]
+wavelength = "589 nm"
+p11 = 0.16
+p12 = 0.27
+p13 = 0.27
+p31 = 0.29
+p33 = 0.10
+p14 = -0.047
+p41 = -0.041
+p44 = -0.079
+source = { cite = "APPROXIMATE single-crystal alpha-quartz Pockels photoelastic constants (Narasimhamurty / Pockels 1889 / Dixon 1967 compilation)" }
 
 [optical]
 wavelength_unit = "um"

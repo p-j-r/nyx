@@ -1,7 +1,10 @@
 # Single-crystal diamond (cubic carbon, point group m-3m), room temperature.
-format = 1
+format = 2
 name = "diamond"
 description = "Single-crystal IIa/CVD diamond (McSkimin & Andreatch 1972 cubic c11=1076.4 GPa + Phillip & Taft 1964 UV-MIR table n=2.3878 at 1.55 um) — highest acoustic velocity (~17.5 km/s) and thermal conductivity (2200 W/(m*K))."
+kind = "crystalline"
+point_group = "m-3m"
+reference_temperature = "298.15 K"
 source = [
   { cite = "H. J. McSkimin and P. Andreatch Jr., Elastic moduli of diamond as a function of pressure and temperature, J. Appl. Phys. 43, 2944-2948 (1972): density 3515 kg/m^3", doi = "10.1063/1.1661636", verified = "2026-11-21" },
   { cite = "H. R. Phillip and E. A. Taft, Phys. Rev. 136, A1445-A1448 (1964) [optical]", doi = "10.1103/PhysRev.136.A1445", verified = "2026-11-21" },
@@ -24,9 +27,25 @@ expansion = 1.0e-6
 expansion_unit = "1/K"
 source = { cite = "APPROXIMATE pure type-IIa / electronic-grade single-crystal diamond at 300 K (nitrogen impurities and polycrystalline grain boundaries reduce CVD diamond thermal conductivity to 1000-1800 W/(m*K))" }
 
-[electrical]
-permittivity = 5.70
-source = { cite = "J. Fontanella et al., Temperature and pressure variation of the dielectric constant of diamond, Appl. Opt. / J. Chem. Phys. (static/RF relative permittivity eps_r = 5.70 of IIa diamond at 300 K; APPROXIMATE)", doi = "10.1063/1.323980" }
+[dielectric]
+eps_clamped = 5.70
+loss_tangent = 1.0e-6
+loss_ref_freq = "10 GHz"
+source = { cite = "J. Fontanella et al., Temperature and pressure variation of the dielectric constant of diamond, Appl. Opt. / J. Chem. Phys. (static/RF relative permittivity eps_r = 5.70 and ultralow microwave loss of IIa diamond at 300 K; APPROXIMATE)", doi = "10.1063/1.323980" }
+
+[photoelastic]
+wavelength = "633 nm"
+p11 = -0.249
+p12 = 0.043
+p44 = -0.172
+source = { cite = "APPROXIMATE single-crystal diamond cubic Pockels photoelastic constants (M. H. Grimsditch and A. K. Ramdas, Phys. Rev. B 11, 3139, 1975)", doi = "10.1103/PhysRevB.11.3139" }
+
+[viscoelastic]
+unit = "mPa*s"
+eta11 = 0.30
+eta12 = 0.05
+eta44 = 0.15
+source = { cite = "APPROXIMATE single-crystal type-IIa diamond room-temperature Akhiezer acoustic viscosity tensor" }
 
 [optical]
 wavelength_unit = "um"

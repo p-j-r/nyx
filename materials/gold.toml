@@ -1,7 +1,10 @@
 # Gold: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk room-temperature mechanical/thermal/electrical baseline.
-format = 1
+format = 2
 name = "gold"
 description = "Evaporated Au wide-band Lorentz-Drude fit at 293 K (Rakic 1998, 0.25-6.2 um; E=78 GPa, sigma=4.52e7 S/m) — broadband analytical baseline vs lower-loss NIR experimental gold_johnson."
+kind = "metal"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
 source = { cite = "APPROXIMATE bulk polycrystalline mechanics/thermal/electrical + verified Rakic et al. 1998 [optical] fit (0.248-6.2 um)", doi = "10.1364/AO.37.005271" }
 density = "19300 kg/m^3"
 

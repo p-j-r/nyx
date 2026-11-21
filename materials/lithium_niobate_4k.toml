@@ -1,8 +1,11 @@
 # Cryogenic congruent lithium niobate (LiNbO3) at 4 K, trigonal 3m crystal.
-format = 1
+format = 2
 name = "lithium_niobate_4k"
 extends = "lithium_niobate"
 description = "Cryogenic congruent LiNbO3 at 4 K (~2.5% stiffened trigonal C^E c33=248 GPa, clamped cryo eps=[44.3, 44.3, 26.5]) — mK piezo-optomechanical transducer model vs room-temperature lithium_niobate."
+kind = "crystalline"
+point_group = "3m"
+reference_temperature = "4.0 K"
 notes = "Optical dispersion inherited from 21 C Zelmon [optical]. Piezo-optomechanical microwave simulations at 4 K/10 mK freeze out low-frequency clamped-to-free dispersion and use clamped permittivity."
 source = { cite = "APPROXIMATE 4 K extrapolated thermoelastic stiffening and clamped microwave permittivity + inherited lithium_niobate density and Zelmon [optical]" }
 
@@ -23,6 +26,10 @@ conductivity_unit = "W/(m*K)"
 specific_heat = "0.035 J/(kg*K)"
 source = { cite = "APPROXIMATE 4 K congruent LiNbO3 thermal conductivity and specific heat in the phonon boundary-scattering regime" }
 
-[electrical]
-permittivity = { perp = 44.3, par = 26.5 }
-source = { cite = "APPROXIMATE GHz clamped low-temperature relative permittivity of congruent LiNbO3 (~44 perp, ~26.5 par)" }
+[dielectric]
+eps_clamped = { perp = 44.3, par = 26.5 }
+loss_tangent = 5.0e-6
+loss_ref_freq = "6 GHz"
+tls_tan_delta_0 = 2.0e-5
+tls_e_crit = "15 V/m"
+source = { cite = "APPROXIMATE GHz clamped low-temperature relative permittivity (~44.3 perp, ~26.5 par) and cryogenic microwave TLS loss tangent of congruent LiNbO3" }

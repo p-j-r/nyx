@@ -1,5 +1,5 @@
 # Silicon NIR/MIR Sellmeier fit of Salzberg & Villa (1957) / Tatian (1984).
-format = 1
+format = 2
 name = "silicon_salzberg"
 extends = "silicon"
 description = "Float-zone Si NIR/MIR 3-term Sellmeier (Salzberg & Villa 1957, 1.36-11 um, n=3.4777 at 1.55 um) — classic refractiveindex.info fit (+0.0020 above Li 1980 baseline silicon; lossless vs silicon_palik)."

@@ -38,12 +38,45 @@ fn every_library_file_and_table_has_a_source() {
             check_sources(&format!("{name}: [elastic]"), &e.source);
         }
         let t = &m.thermal;
-        if t.conductivity.is_some() || t.specific_heat.is_some() || t.expansion.is_some() {
+        if t.conductivity.is_some()
+            || t.specific_heat.is_some()
+            || t.expansion.is_some()
+            || t.conductivity_t.is_some()
+            || t.specific_heat_t.is_some()
+            || t.expansion_t.is_some()
+        {
             check_sources(&format!("{name}: [thermal]"), &t.source);
         }
         let e = &m.electrical;
         if e.permittivity.is_some() || e.permeability.is_some() || e.conductivity.is_some() {
             check_sources(&format!("{name}: [electrical]"), &e.source);
+        }
+        if let Some(dl) = &m.dielectric {
+            check_sources(&format!("{name}: [dielectric]"), &dl.source);
+        }
+        if let Some(sc) = &m.superconducting {
+            check_sources(&format!("{name}: [superconducting]"), &sc.source);
+        }
+        if let Some(pz) = &m.piezoelectric {
+            check_sources(&format!("{name}: [piezoelectric]"), &pz.source);
+        }
+        if let Some(pe) = &m.photoelastic {
+            check_sources(&format!("{name}: [photoelastic]"), &pe.source);
+        }
+        if let Some(eo) = &m.electro_optic {
+            check_sources(&format!("{name}: [electro_optic]"), &eo.source);
+        }
+        if let Some(ve) = &m.viscoelastic {
+            check_sources(&format!("{name}: [viscoelastic]"), &ve.source);
+        }
+        if let Some(ma) = &m.interfaces.ma {
+            check_sources(&format!("{name}: [interfaces.ma]"), &ma.source);
+        }
+        if let Some(ms) = &m.interfaces.ms {
+            check_sources(&format!("{name}: [interfaces.ms]"), &ms.source);
+        }
+        if let Some(sa) = &m.interfaces.sa {
+            check_sources(&format!("{name}: [interfaces.sa]"), &sa.source);
         }
         if let Some(o) = &m.optical {
             // each axis has its own source or shares the one of [optical]
@@ -239,9 +272,10 @@ fn new_models_need_their_range_and_units_and_say_so() {
 #[test]
 fn every_library_material_has_a_comparative_description() {
     let lib = library();
-    assert_eq!(lib.len(), 38);
+    assert_eq!(lib.len(), 40);
     for name in lib.names() {
         let m = lib.get(&name).unwrap();
+        assert_eq!(m.format, 2, "{name} should be migrated to format = 2");
         let d = m.description.as_deref().unwrap_or("").trim();
         assert!(d.len() >= 40, "{name} description is missing or too short: {d:?}");
     }

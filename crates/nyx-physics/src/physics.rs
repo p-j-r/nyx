@@ -34,13 +34,25 @@ pub struct Ctx<'a> {
     pub library: Option<Arc<femcore::material::Library>>,
     /// the free-space wavelength (m) of the study, for materials given as optical models (the engine derives it from the frequency of the study)
     pub wavelength: Option<f64>,
+    /// the reference frequency (Hz) of the study, for microwave/RF dielectric and superconducting models
+    pub frequency: Option<f64>,
+    /// the reference temperature (K) of the study, for temperature-dependent thermal, dielectric and thermo-optic models
+    pub temperature: Option<f64>,
     /// imported fields by role (`temperature`), values per dof, from physics that ran before this one
     pub inputs: BTreeMap<String, Vec<f64>>,
 }
 
 impl<'a> Ctx<'a> {
     pub fn new(resolver: &'a dyn LabelResolver) -> Ctx<'a> {
-        Ctx { resolver, progress: Progress::new(), library: None, wavelength: None, inputs: BTreeMap::new() }
+        Ctx {
+            resolver,
+            progress: Progress::new(),
+            library: None,
+            wavelength: None,
+            frequency: None,
+            temperature: None,
+            inputs: BTreeMap::new(),
+        }
     }
 
     /// `Err(Cancelled)` when the run was cancelled; kernels call it between stages.

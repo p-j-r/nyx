@@ -2001,7 +2001,7 @@
   },
   {
     "access": "expensive",
-    "description": "Downloads a preset or database entry over HTTPS from `refractiveindex.info`, `AFLOW` or `NumBAT`, converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`.",
+    "description": "Downloads a preset or database entry over HTTPS from `refractiveindex.info`, `AFLOW`, `Materials Project` or `NumBAT`, converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`.",
     "name": "fetch_material",
     "schema": {
       "additionalProperties": false,
@@ -2009,6 +2009,10 @@
         "add_to_project": {
           "description": "add the downloaded material to the active project (default true)",
           "type": "boolean"
+        },
+        "api_key": {
+          "description": "optional Materials Project API key (falls back to MP_API_KEY environment variable; passed via curl stdin, never stored)",
+          "type": "string"
         },
         "description": {
           "description": "optional one-line comparative summary written into the material description field",
@@ -2027,11 +2031,11 @@
           "type": "string"
         },
         "source": {
-          "description": "curated preset id (from `list_remote_materials`), `catalog`, `rii`, `aflow` or `numbat`",
+          "description": "curated preset id (from `list_remote_materials`), `catalog`, `rii`, `aflow`, `mp` or `numbat`",
           "type": "string"
         },
         "target": {
-          "description": "preset id, database entry key, AFLOW query, NumBAT stem or https URL; omit when `source` is a preset id",
+          "description": "preset id, database entry key, Materials Project id (e.g. mp-149), AFLOW query, NumBAT stem or https URL; omit when `source` is a preset id",
           "type": "string"
         }
       },
@@ -2041,6 +2045,188 @@
       "type": "object"
     },
     "title": "Download a material from an open database"
+  },
+  {
+    "access": "read",
+    "description": "Searches the curated remote material presets by keyword, formula, domain or source database, and optionally queries live AFLOW and Materials Project HTTPS endpoints.",
+    "name": "search_remote_materials",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key": {
+          "description": "optional Materials Project API key for live mp queries (falls back to MP_API_KEY environment variable)",
+          "type": "string"
+        },
+        "domain": {
+          "description": "physics domain filter, default all",
+          "enum": [
+            "all",
+            "photonics",
+            "phononics",
+            "superconducting"
+          ],
+          "type": "string"
+        },
+        "live": {
+          "description": "also query live AFLOW and Materials Project HTTPS endpoints, default false",
+          "type": "boolean"
+        },
+        "query": {
+          "description": "search keyword, chemical formula or material identifier (e.g. Si, AlN, LiNbO3, mp-149)",
+          "type": "string"
+        },
+        "source": {
+          "description": "database filter, default all",
+          "enum": [
+            "all",
+            "rii",
+            "aflow",
+            "mp",
+            "numbat"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "title": "Search curated and live open material databases"
+  },
+  {
+    "access": "read",
+    "description": "Evaluates a material's temperature-, frequency-, wavelength- and electric-field-dependent properties: thermal curves at T, optical (n, k) and complex permittivity at (wavelength, T), microwave complex permittivity and TLS loss tangent at (frequency, T, e_field), piezoelectric Legendre duals (eps_clamped, eps_free, C^E, C^D), photoelastic, electro-optic, viscoelastic, and BCS superconducting surface impedance.",
+    "name": "evaluate_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "e_field": {
+          "description": "electric-field amplitude in V/m for saturable TLS dielectric loss",
+          "type": "number"
+        },
+        "euler_deg": {
+          "description": "Bunge Z-X-Z crystal orientation angles in degrees [phi1, Phi, phi2]",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "film_model": {
+          "description": "thin-film boundary formula for BCS sheet impedance, default kerr",
+          "enum": [
+            "kerr",
+            "two_sided",
+            "thin_limit"
+          ],
+          "type": "string"
+        },
+        "frequency": {
+          "description": "evaluation frequency in Hz for microwave dielectric and BCS superconducting models",
+          "type": "number"
+        },
+        "name": {
+          "description": "material name in the library or active project",
+          "type": "string"
+        },
+        "temperature": {
+          "description": "evaluation temperature in K (default: material reference_temperature)",
+          "type": "number"
+        },
+        "thickness": {
+          "description": "film thickness in m for BCS superconducting sheet impedance",
+          "type": "number"
+        },
+        "wavelength": {
+          "description": "evaluation free-space wavelength in m for optical dispersion models",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Evaluate a material at temperature, frequency and wavelength"
+  },
+  {
+    "access": "read",
+    "description": "Evaluates Zimmermann arbitrary-purity BCS complex conductivity sigma = sigma_1 - j sigma_2 and thin-film sheet surface impedance Z_s = R_s + j omega L_k_sq (with Dynes pair-breaking Gamma, residual R_res and non-equilibrium x_qp_floor) for a library/project material or explicit superconducting parameters.",
+    "name": "bcs_surface_impedance",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "dynes_gamma": {
+          "description": "Dynes pair-breaking broadening Gamma in J",
+          "type": "number"
+        },
+        "ell": {
+          "description": "electron mean free length ell in m when material is omitted",
+          "type": "number"
+        },
+        "film_model": {
+          "description": "thin-film sheet impedance model: kerr, two_sided or thin_limit",
+          "enum": [
+            "kerr",
+            "two_sided",
+            "thin_limit"
+          ],
+          "type": "string"
+        },
+        "frequency": {
+          "description": "microwave frequency in Hz",
+          "type": "number"
+        },
+        "gap_0": {
+          "description": "zero-temperature BCS gap Delta(0) in J when material is omitted",
+          "type": "number"
+        },
+        "lambda_L": {
+          "description": "clean-limit London penetration depth in m when material is omitted",
+          "type": "number"
+        },
+        "material": {
+          "description": "optional material name with a [superconducting] section",
+          "type": "string"
+        },
+        "r_res": {
+          "description": "residual sheet resistance floor in Ohm/sq",
+          "type": "number"
+        },
+        "sigma_n": {
+          "description": "normal-state conductivity in S/m when material is omitted",
+          "type": "number"
+        },
+        "tc": {
+          "description": "critical temperature Tc in K when material is omitted",
+          "type": "number"
+        },
+        "temperature": {
+          "description": "operating temperature in K",
+          "type": "number"
+        },
+        "thickness": {
+          "description": "film thickness in m (default: material nominal_thickness or 100e-9)",
+          "type": "number"
+        },
+        "x_qp_floor": {
+          "description": "non-equilibrium normalized quasiparticle density floor",
+          "type": "number"
+        },
+        "xi_0": {
+          "description": "BCS/Pippard coherence length in m when material is omitted",
+          "type": "number"
+        }
+      },
+      "required": [
+        "frequency",
+        "temperature"
+      ],
+      "type": "object"
+    },
+    "title": "Evaluate BCS superconducting complex conductivity and sheet impedance"
   },
   {
     "access": "expensive",

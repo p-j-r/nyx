@@ -1,8 +1,11 @@
 # Cryogenic single-crystal sapphire (alpha-Al2O3) at 4 K, trigonal symmetry about c-axis (crystal z).
-format = 1
+format = 2
 name = "sapphire_4k"
 extends = "sapphire"
 description = "Cryogenic c-cut sapphire Al2O3 at 4 K (Tefft 1966 4 K stiffened trigonal c11=502 GPa + Krupka 1999 cryo eps=[9.27 perp, 11.34 par]) — ultra-low microwave loss-tangent quantum substrate vs 293 K sapphire."
+kind = "crystalline"
+point_group = "-3m"
+reference_temperature = "4.0 K"
 notes = "Optical dispersion inherited from 293 K Dodge/Malitson [optical]. Bulk dielectric loss tangent tan delta < 2e-8 at 20 mK for HEMEX-grade sapphire; integrated thermal contraction 293 K -> 4 K is -6.6e-4 parallel c, -5.3e-4 perp c."
 source = { cite = "APPROXIMATE 4 K extrapolated sapphire mechanical/thermal properties + Krupka 1999 cryogenic permittivity + inherited Malitson/Dodge [optical]", doi = "10.1088/0957-0233/10/5/308" }
 
@@ -25,6 +28,13 @@ expansion = 2.0e-9
 expansion_unit = "1/K"
 source = { cite = "APPROXIMATE 4 K crystalline sapphire boundary-scattering thermal conductivity (100-1000 W/(m*K) depending on crystal size/purity) and Debye T^3 specific heat (Theta_D ~ 1035 K)" }
 
-[electrical]
-permittivity = { perp = 9.27, par = 11.34 }
-source = { cite = "J. Krupka, K. Derzakowski, M. Tobar, J. Hartnett, R. G. Geyer, Complex permittivity of some ultralow loss dielectric crystals at cryogenic temperatures, Meas. Sci. Technol. 10, 387-392 (1999): 4-10 K sapphire", doi = "10.1088/0957-0233/10/5/308", verified = "2026-11-21" }
+[dielectric]
+eps_clamped = { perp = 9.27, par = 11.34 }
+loss_tangent = 1.0e-8
+loss_ref_freq = "10 GHz"
+tls_tan_delta_0 = 3.0e-7
+tls_e_crit = "10 V/m"
+source = [
+  { cite = "J. Krupka, K. Derzakowski, M. Tobar, J. Hartnett, R. G. Geyer, Complex permittivity of some ultralow loss dielectric crystals at cryogenic temperatures, Meas. Sci. Technol. 10, 387-392 (1999): 4-10 K sapphire", doi = "10.1088/0957-0233/10/5/308", verified = "2026-11-21" },
+  { cite = "APPROXIMATE HEMEX-grade cryogenic sapphire microwave loss tangent and TLS saturation floor" },
+]

@@ -1,5 +1,5 @@
 # MBE-grown GaAs complex (n, k) table across the direct bandgap absorption edge (Papatryfonos 2021).
-format = 1
+format = 2
 name = "gallium_arsenide_papatryfonos"
 extends = "gallium_arsenide"
 description = "MBE GaAs UV-SWIR complex n,k table (Papatryfonos 2021 ellipsometry, 0.26-1.88 um) — resolves the 870 nm direct-bandgap absorption edge unlike sub-bandgap lossless Skauli gallium_arsenide."

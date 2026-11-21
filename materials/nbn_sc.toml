@@ -1,0 +1,47 @@
+# Format 2 superconductor material definition: delta-NbN thin film.
+# Note: Representative sputtered thin-film NbN RF parameters (APPROXIMATE).
+
+format = 2
+name = "nbn_sc"
+description = "High-kinetic-inductance B1 rocksalt NbN thin film compared with Nb and TiN for SNSPDs and compact resonators"
+kind = "superconductor"
+point_group = "m-3m"
+reference_temperature = "4.0 K"
+source = { cite = "APPROXIMATE representative sputtered delta-NbN thin-film superconducting RF dataset (Kamlapure 2010; Annunziata 2010)" }
+notes = "Tc = 15.0 K. Strong-coupling dirty-limit B1 NbN thin film (xi_0 ~ 5 nm, large kinetic inductance Lk)."
+density = "8400 kg/m^3"
+
+[elastic]
+source = { cite = "APPROXIMATE polycrystalline B1 NbN thin-film elastic moduli (Chen 2005 / NIST)" }
+class = "isotropic"
+E = "380 GPa"
+nu = 0.25
+
+[thermal]
+source = { cite = "APPROXIMATE cryogenic NbN film thermal properties at 4 K (UNVERIFIED order-of-magnitude)" }
+conductivity = "1.5 W/(m*K)"
+specific_heat = "0.20 J/(kg*K)"
+expansion = 0.0
+expansion_unit = "1/K"
+
+[superconducting]
+source = { cite = "APPROXIMATE representative NbN BCS/kinetic-inductance parameters (Kamlapure 2010, Appl. Phys. Lett. 96)" }
+tc = "15.0 K"
+gap_0 = "2.45 meV"
+lambda_L = "200 nm"
+xi_0 = "5.0 nm"
+mean_free_path = "1.5 nm"
+sigma_n = "6.5e5 S/m"
+dynes_gamma = "5.0 ueV"
+r_res = "15 nOhm/sq"
+x_qp_floor = 1e-7
+nominal_thickness = "10 nm"
+film_model = "kerr"
+
+[interfaces.ma]
+source = { cite = "APPROXIMATE native NbOxNy/Nb2O5 surface oxide TLS parameters" }
+oxide = "Nb2O5"
+thickness = "2.5 nm"
+eps_r = 25.0
+tan_delta_tls_0 = 8.0e-4
+e_crit = "10 V/m"

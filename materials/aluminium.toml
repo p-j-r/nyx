@@ -1,6 +1,9 @@
 # Aluminium: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk/MEMS room-temperature mechanics/thermal/electrical.
-format = 1
+format = 2
 name = "aluminium"
+kind = "metal"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
 description = "Evaporated/MEMS aluminium at 293 K (Rakic 1998 Lorentz-Drude 0.06-248 um; E=70 GPa, k=237 W/(m*K)) — room-temperature normal-metal/electrode baseline vs mK superconducting aluminium_sc_emft."
 source = { cite = "APPROXIMATE bulk/MEMS aluminium mechanics/thermal/electrical at 293 K + verified Rakic et al. 1998 [optical] fit (0.062-248 um)", doi = "10.1364/AO.37.005271" }
 density = "2700 kg/m^3"

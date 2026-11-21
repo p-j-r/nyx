@@ -1,5 +1,5 @@
 # Silver experimental thin-film (n, k) table of Johnson & Christy (1972).
-format = 1
+format = 2
 name = "silver_johnson"
 extends = "silver"
 description = "Evaporated Ag thin-film experimental n,k table (Johnson & Christy 1972, 0.188-1.937 um) — sharper low-loss NIR plasmonics table vs wide-band Rakic 1998 analytical Drude-Lorentz silver."

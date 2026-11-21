@@ -244,7 +244,21 @@ pub fn assemble_lrb(
     }
     let kf = to_complex(&k.submatrix(&free, &free));
     let mf = to_complex(&m.submatrix(&free, &free));
-    let cfull = damping_matrix(mesh, &st.c6, rho_cells, labels, spec.order, d);
+    let mut cfull = if labels.is_empty() {
+        Csr::zeros(n, n)
+    } else {
+        damping_matrix(mesh, &st.c6, rho_cells, labels, spec.order, d)
+    };
+    if spec.materials.has_viscosity() {
+        let eta6: Vec<M6> = spec
+            .materials
+            .cell_viscosity_skipping(mesh, &spec.inactive)?
+            .iter()
+            .map(|c| femcore::section::plane_stiffness(c, d))
+            .collect();
+        let c_visc = crate::solid::assemble_solid(mesh, &eta6, spec.order, spec.plane, spec.thickness);
+        cfull = if cfull.nnz() == 0 { c_visc } else { cfull.add_scaled(&c_visc, 1.0) };
+    }
     let cf = cfull.submatrix(&free, &free);
     Ok(LrbAssembly { order: spec.order, d, n, kf, mf, cf, free, n_modes, f_search })
 }

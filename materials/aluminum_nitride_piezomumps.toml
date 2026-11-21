@@ -1,13 +1,18 @@
 # Reactive-sputtered c-axis polycrystalline AlN film (MEMSCAP PiezoMUMPs mechanics + Beliaev 2021/2022 optical table).
-format = 1
+format = 2
 name = "aluminum_nitride_piezomumps"
 description = "Reactive-sputtered c-axis polycrystalline AlN thin film (MEMSCAP PiezoMUMPs E=330 GPa + Beliaev 2021 n=2.018 at 1.55 um) — softer foundry MEMS/waveguide film vs single-crystal aluminum_nitride and alloyed scaln_30."
+kind = "polycrystalline"
+point_group = "6mm"
+reference_temperature = "293.15 K"
 notes = "MEMSCAP PiezoMUMPs PZFILM 0.50 um sputtered AlN: d33_eff = 3.4-5.1 pC/N, d31 = -1.8 to -2.2 pC/N (e31,f ~ -1.0 C/m^2), residual stress -50 to +150 MPa."
 source = [
   { cite = "APPROXIMATE sputtered AlN film mechanics/thermal/electrical from A. Cowen et al., PiezoMUMPs Design Handbook Rev. 1.3 (MEMSCAP Inc.)", url = "https://www.memscap.com/products/mumps/piezomumps" },
   { cite = "L. Yu. Beliaev, E. Shkondin, A. V. Lavrinenko, O. Takayama, J. Vac. Sci. Technol. A 39, 043408 (2021) / Erratum 40, 027001 (2022) [optical]", doi = "10.1116/6.0000884", verified = "2026-11-21" },
 ]
 density = "3260 kg/m^3"
+residual_stress = [50e6, 50e6, 0.0, 0.0, 0.0, 0.0]
+residual_stress_unit = "Pa"
 
 [elastic]
 unit = "GPa"
@@ -23,9 +28,19 @@ expansion = 4.5e-6
 expansion_unit = "1/K"
 source = { cite = "APPROXIMATE grain-boundary-limited thermal conductivity (~20-80 W/(m*K) in 0.5 um sputtered AlN films vs 285 W/(m*K) single crystal)" }
 
-[electrical]
-permittivity = 9.5
+[dielectric]
+eps_clamped = 9.5
+loss_tangent = 1.5e-3
+loss_ref_freq = "1 GHz"
 source = { cite = "APPROXIMATE low-frequency/RF relative permittivity along c-axis of PiezoMUMPs sputtered AlN (9.5-10.2 across foundry runs; tan delta < 0.003)" }
+
+[piezoelectric]
+form = "strain_charge"
+unit = "pC/N"
+d31 = -2.0
+d33 = 4.5
+d15 = 3.6
+source = { cite = "APPROXIMATE c-axis textured sputtered AlN piezoelectric strain-charge coefficients in MEMSCAP PiezoMUMPs Design Handbook Rev. 1.3 (d31 ~ -2.0 pC/N, d33 ~ 4.5 pC/N)", url = "https://www.memscap.com/products/mumps/piezomumps" }
 
 [optical]
 wavelength_unit = "um"

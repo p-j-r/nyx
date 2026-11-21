@@ -1,5 +1,5 @@
 # 5 mol% MgO-doped congruent lithium niobate (MgO:CLN) uniaxial Sellmeier fit (Zelmon 1997).
-format = 1
+format = 2
 name = "lithium_niobate_mgo"
 extends = "lithium_niobate"
 description = "5 mol% MgO-doped congruent LiNbO3 uniaxial Sellmeier (Zelmon 1997, 0.4-5.0 um, ne=2.1299 at 1.55 um) — optical-damage-resistant nonlinear variant (lower ne than undoped congruent lithium_niobate)."

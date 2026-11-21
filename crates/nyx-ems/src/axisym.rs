@@ -54,10 +54,14 @@ impl AxiMaterial {
 
     /// `eps_r` and `mu_r` per domain from the problem's materials (default 1), absorbing layers (`Materials::pml`) included.
     pub fn from_materials(mesh: &Discretisation, m: &Materials) -> Result<AxiMaterial, String> {
-        let eps = m.cell_values(mesh, "eps_r", Some(1.0))?;
+        let eps = m.cell_complex_permittivity(mesh, Some(1.0))?;
         let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
         let mat = AxiMaterial {
-            eps: eps.iter().map(|&e| [c(e, 0.0); 3]).collect(),
+            // Axisymmetric components are in order (r, z, theta) = wafer (x, z, y)
+            eps: eps
+                .iter()
+                .map(|(re, im)| [c(re[0][0], -im[0][0]), c(re[2][2], -im[2][2]), c(re[1][1], -im[1][1])])
+                .collect(),
             mu: mu.iter().map(|&u| [c(u, 0.0); 3]).collect(),
         };
         Ok(mat.with_pml(mesh, &m.pml))
@@ -218,6 +222,18 @@ pub struct AxiAssembly {
 }
 
 pub fn assemble_axisym(mesh: &Discretisation, mat: &AxiMaterial, m: f64, order: usize) -> Result<AxiAssembly, String> {
+    assemble_axisym_with_ibc(mesh, mat, m, order, 0.0, &[], &[])
+}
+
+pub fn assemble_axisym_with_ibc(
+    mesh: &Discretisation,
+    mat: &AxiMaterial,
+    m: f64,
+    order: usize,
+    f_search: f64,
+    ibc_bcs: &[crate::problem::SurfaceImpedanceBc],
+    pmc_labels: &[i32],
+) -> Result<AxiAssembly, String> {
     if mesh.dim != 2 {
         return Err("an axisymmetric problem needs a 2D mesh in (r, z)".into());
     }
@@ -290,22 +306,11 @@ pub fn assemble_axisym(mesh: &Discretisation, mat: &AxiMaterial, m: f64, order: 
         a_coo.push_block(&dofs, &dofs, &kl);
         b_coo.push_block(&dofs, &dofs, &ml);
     }
+    crate::ibc::add_ibc_2d_axisym(mesh, order, f_search, ibc_bcs, &mut a_coo)?;
     let a_full: CCsr = a_coo.to_csr();
     let b_full: CCsr = b_coo.to_csr();
-    // perfectly conducting walls on the exterior facets
-    let exterior = mesh.exterior_facets();
-    let mut be: Vec<usize> = (0..mesh.n_facets())
-        .filter(|&f| exterior[f])
-        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]))
-        .collect();
-    be.sort_unstable();
-    be.dedup();
-    let mut bn: Vec<usize> = (0..mesh.n_facets())
-        .filter(|&f| exterior[f])
-        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
-        .collect();
-    bn.sort_unstable();
-    bn.dedup();
+    // perfectly conducting walls on the exterior facets excluding surface_impedance and pmc facets
+    let (be, bn) = crate::ibc::pec_edges_and_nodes_2d(mesh, ibc_bcs, pmc_labels);
     let mut fixed: Vec<usize> = be.clone();
     if order == 2 {
         fixed.extend(be.iter().map(|&e| ne + e));
@@ -423,7 +428,15 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
         return Err("at least one mode is needed".into());
     }
     let mat = AxiMaterial::from_materials(mesh, &problem.materials)?;
-    let asm = assemble_axisym(mesh, &mat, azimuthal_order as f64, problem.order)?;
+    let asm = assemble_axisym_with_ibc(
+        mesh,
+        &mat,
+        azimuthal_order as f64,
+        problem.order,
+        f_search,
+        &problem.surface_impedance,
+        &problem.pmc,
+    )?;
     let modes = solve_axisym_pairs(&asm, f_search, n_modes)?;
     let mut solutions = vec![];
     let mut scalars = vec![];

@@ -108,3 +108,44 @@ fn extends_without_a_library_is_explained() {
     let e = MaterialSpec::from_toml("format = 1\nextends = \"silicon\"\n").unwrap_err().to_string();
     assert!(e.contains("together with its base material") && e.contains("Library::load_dir"), "{e}");
 }
+
+#[test]
+fn format_2_deep_merges_subtables_and_resets_conflicting_models() {
+    let d = temp_dir("v2deep");
+    std::fs::write(
+        d.join("base.toml"),
+        "format = 2\nkind = \"crystalline\"\npoint_group = \"m-3m\"\ndensity = \"2329 kg/m^3\"\n[dielectric]\neps_clamped = 11.45\nloss_tangent = 1e-6\ntls_tan_delta_0 = 2e-6\n[optical]\nwavelength_unit = \"um\"\nrange = [1.2, 6.0]\nmodel = \"sellmeier\"\nB = [10.6684293]\nC = [0.09091319]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("child.toml"),
+        "format = 2\nextends = \"base\"\n[dielectric]\nloss_tangent = 5e-8\n[optical]\nmodel = \"constant\"\nn = 3.45\n",
+    )
+    .unwrap();
+    let lib = Library::load_dir(&d).unwrap();
+    std::fs::remove_dir_all(&d).ok();
+
+    let child = lib.get("child").unwrap();
+    let dl = child.dielectric.as_ref().unwrap();
+    assert_eq!(dl.eps_clamped.as_ref().unwrap().as_scalar(), Some(11.45));
+    assert_eq!(dl.loss_tangent.as_ref().unwrap().as_scalar(), Some(5e-8));
+    assert_eq!(dl.tls_tan_delta_0, Some(2e-6));
+    assert!((child.optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap().0 - 3.45).abs() < 1e-12);
+}
+
+#[test]
+fn centrosymmetric_point_group_forbids_piezo_and_pockels() {
+    let e_pz = MaterialSpec::from_toml(
+        "format = 2\npoint_group = \"m-3m\"\n[piezoelectric]\nform = \"stress_charge\"\nunit = \"C/m^2\"\ne14 = 0.5\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(e_pz.contains("forbids linear piezoelectricity"), "{e_pz}");
+
+    let e_eo = MaterialSpec::from_toml(
+        "format = 2\npoint_group = \"-3m\"\n[electro_optic]\nunit = \"pm/V\"\nr33 = 10.0\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(e_eo.contains("forbids the linear electro-optic"), "{e_eo}");
+}

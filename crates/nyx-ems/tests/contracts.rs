@@ -252,3 +252,74 @@ fn result_shape_exemplar_is_stable() {
     });
     contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_ems_result.v1.json", &got);
 }
+
+#[test]
+fn cavity_dielectric_loss_tangent_and_bcs_surface_impedance_give_expected_q_and_shift() {
+    use nyx_ems::Study;
+    let boxm = common::block(0.04, 0.03, 0.02, 2, 2, 2);
+    let exchange = Mesh::from_solver_mesh(&boxm).unwrap();
+
+    // 1. Lossless vs homogeneous dielectric loss tangent tan_delta = 1e-4 (eps_r = 10, eps_r_im = 1e-3 -> Q = 10_000)
+    let mut p_lossless = nyx_ems::Problem::new(Study::Cavity { n_modes: 1, f_search: 2.0e9 }, 1);
+    p_lossless.materials.set(1, "eps_r", 10.0);
+    let r_lossless = nyx_ems::run(&exchange, &p_lossless, &femcore::progress::Progress::new()).unwrap();
+    let f_pec = r_lossless.solutions[0].value.unwrap();
+
+    let mut p_lossy = p_lossless.clone();
+    p_lossy.materials.set(1, "eps_r_im", 1.0e-3);
+    let r_lossy = nyx_ems::run(&exchange, &p_lossy, &femcore::progress::Progress::new()).unwrap();
+    let q_lossy = r_lossy
+        .scalars
+        .iter()
+        .find_map(|(k, v)| match (k.as_str(), v) {
+            ("Q1", Scalar::Num(q)) => Some(*q),
+            _ => None,
+        })
+        .expect("lossy cavity must report Q1");
+    assert!((q_lossy - 1.0e4).abs() / 1.0e4 < 1e-2, "expected Q1 ~ 1e4 from tan_delta = 1e-4, got {q_lossy}");
+
+    // 2. Superconducting surface_impedance BC on wall y0 using library material niobium_sc
+    let lib = std::sync::Arc::new(
+        femcore::material::Library::load_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../materials"))
+            .unwrap(),
+    );
+    let mut spec = ProblemSpec::new("ems", 1, "cavity");
+    spec.study.params = json!({ "n_modes": 1, "f_search": 2.0e9 });
+    spec.materials.insert("guide".into(), MaterialAssign::Props([("eps_r".to_string(), 10.0)].into()));
+    spec.bcs.push(BcSpec {
+        on: "y0".into(),
+        kind: "surface_impedance".into(),
+        params: json!({
+            "material": "niobium_sc",
+            "thickness": 20e-9,
+            "temperature": 1.5,
+            "film_model": "kerr"
+        }),
+    });
+    let table = Table;
+    let mut ctx = Ctx::new(&table);
+    ctx.library = Some(lib);
+    let r_ibc = Ems.solve(&exchange, &spec, &mut ctx).unwrap();
+    let f_ibc = r_ibc.solutions[0].value.unwrap();
+    assert!(f_ibc < f_pec, "kinetic inductance on y0 must lower cavity frequency: {f_ibc} vs {f_pec}");
+    let q_ibc = r_ibc
+        .scalars
+        .iter()
+        .find_map(|(k, v)| match (k.as_str(), v) {
+            ("Q1", Scalar::Num(q)) => Some(*q),
+            _ => None,
+        })
+        .expect("superconducting cavity with finite R_s must report Q1");
+    assert!(q_ibc > 1.0e5 && q_ibc.is_finite(), "expected high superconducting cavity Q1, got {q_ibc}");
+
+    // 3. 2D waveguide mode with complex permittivity auto-routes to solve_waveguide_complex
+    let guide = femcore::testkit::rect(0.03, 0.015, 6, 3);
+    let guide_ex = Mesh::from_solver_mesh(&guide).unwrap();
+    let mut wg = common::emw();
+    wg.study = Study::Modes { freq: 12e9, n_target: 1.5, evanescent: false, n_modes: 1 };
+    wg.materials.set(1, "eps_r", 4.0);
+    wg.materials.set(1, "eps_r_im", 0.04);
+    let r_wg = nyx_ems::run(&guide_ex, &wg, &femcore::progress::Progress::new()).unwrap();
+    let eig = r_wg.solutions[0].eigenvalue.expect("complex waveguide mode must have complex neff");
+    assert!(eig[0] > 1.0 && eig[1] < -1e-4, "expected passive complex neff (Re > 1, Im < 0), got {eig:?}");
+}

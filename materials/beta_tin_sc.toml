@@ -1,0 +1,39 @@
+# Format 2 superconductor material definition: beta-Sn (white tin).
+# Note: Representative clean Type-I BCS parameters (APPROXIMATE).
+
+format = 2
+name = "beta_tin_sc"
+description = "Clean Type-I superconducting beta-Sn (white tin) compared with Nb and Al for low-Tc BCS benchmarks and RF joints"
+kind = "superconductor"
+point_group = "isotropic"
+reference_temperature = "1.5 K"
+source = { cite = "APPROXIMATE representative beta-Sn superconducting and mechanical dataset (Kittel / Poole Handbook of Superconductivity)" }
+notes = "Tc = 3.72 K. Classic weak-coupling clean Type-I BCS superconductor (xi_0 = 230 nm > lambda_L = 34 nm)."
+density = "7287 kg/m^3"
+
+[elastic]
+source = { cite = "APPROXIMATE polycrystalline white tin elastic moduli at cryogenic temperature (CRC / Rayne 1960)" }
+class = "isotropic"
+E = "50.0 GPa"
+nu = 0.36
+
+[thermal]
+source = { cite = "APPROXIMATE cryogenic beta-Sn thermal transport near 1.5-4 K (NIST Cryogenic Properties / UNVERIFIED)" }
+conductivity = "150.0 W/(m*K)"
+specific_heat = "0.10 J/(kg*K)"
+expansion = 1.0e-8
+expansion_unit = "1/K"
+
+[superconducting]
+source = { cite = "APPROXIMATE beta-Sn BCS parameters (Tinkham / Biondi & Garfunkel 1959)" }
+tc = "3.72 K"
+gap_0 = "565 ueV"
+lambda_L = "34 nm"
+xi_0 = "230 nm"
+mean_free_path = "1.0 um"
+sigma_n = "1.0e8 S/m"
+dynes_gamma = "0.2 ueV"
+r_res = "5 nOhm/sq"
+x_qp_floor = 1e-7
+nominal_thickness = "1.0 um"
+film_model = "kerr"

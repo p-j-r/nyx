@@ -382,27 +382,90 @@ impl App {
         self.material_import_panel(ui);
     }
 
-    /// What a library material gives, in one line, and its source file text on request.
-    fn material_summary(&self, ui: &mut Ui, name: &str) {
+    /// What a library material gives, in one line, live (T, f, d) evaluation, and its source file text on request.
+    fn material_summary(&mut self, ui: &mut Ui, name: &str) {
         match self.engine.describe_material(name) {
             Ok(d) => {
                 if let Some(desc) = d["description"].as_str().filter(|s| !s.is_empty()) {
                     ui.weak(desc);
                 }
                 let mut parts: Vec<String> = vec![];
+                if let Some(k) = d["kind"].as_str() {
+                    parts.push(k.to_string());
+                }
+                if let Some(pg) = d["point_group"].as_str() {
+                    parts.push(format!("pg: {pg}"));
+                }
                 if let Some(c) = d["elastic"]["class"].as_str() {
                     parts.push(format!("elastic: {c}"));
                 }
                 if d["optical"] == true {
-                    parts.push("optical model".into());
+                    parts.push("optical".into());
                 }
                 if d["thermal"] == true {
                     parts.push("thermal".into());
                 }
-                if d["electrical"] == true {
+                if d["dielectric"] == true {
+                    parts.push("dielectric".into());
+                } else if d["electrical"] == true {
                     parts.push("electrical".into());
                 }
-                ui.weak(parts.join(", "));
+                if d["superconducting"] == true {
+                    parts.push("superconducting (BCS)".into());
+                }
+                if d["piezoelectric"] == true {
+                    parts.push("piezoelectric".into());
+                }
+                if d["photoelastic"] == true {
+                    parts.push("photoelastic".into());
+                }
+                if d["electro_optic"] == true {
+                    parts.push("electro-optic".into());
+                }
+                if d["viscoelastic"] == true {
+                    parts.push("viscoelastic".into());
+                }
+                if d["interfaces"] == true {
+                    parts.push("TLS interfaces".into());
+                }
+                ui.weak(parts.join("  ·  "));
+                egui::CollapsingHeader::new("Live (T, f, d) evaluator")
+                    .id_salt(format!("eval_{name}"))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("T (K):");
+                            num(ui, &mut self.mat_fetch.eval_temp_k);
+                            ui.label("f (GHz):");
+                            num(ui, &mut self.mat_fetch.eval_freq_ghz);
+                            if d["superconducting"] == true {
+                                ui.label("d (nm):");
+                                num(ui, &mut self.mat_fetch.eval_thickness_nm);
+                            }
+                        });
+                        let t_k = self.mat_fetch.eval_temp_k.max(0.001);
+                        let f_hz = self.mat_fetch.eval_freq_ghz.max(1e-6) * 1.0e9;
+                        let d_m = self.mat_fetch.eval_thickness_nm.max(0.1) * 1.0e-9;
+                        if let Ok(ev) = self.engine.evaluate_material(name, Some(t_k), Some(f_hz), None, None, Some(d_m), None, None) {
+                            if let Some(th) = ev.get("thermal") {
+                                if let Some(cp) = th["specific_heat_j_kgk"].as_f64() {
+                                    ui.weak(format!("Cp({t_k:.2} K) = {cp:.4e} J/(kg*K)"));
+                                }
+                            }
+                            if let Some(dl) = ev.get("dielectric") {
+                                let exx = dl["eps_re"][0][0].as_f64().unwrap_or(1.0);
+                                let ezz = dl["eps_re"][2][2].as_f64().unwrap_or(exx);
+                                let td = dl["tan_delta_xx"].as_f64().unwrap_or(0.0);
+                                ui.weak(format!("eps_r = ({exx:.3}, {ezz:.3}), tan delta = {td:.3e}"));
+                            }
+                            if let Some(sc) = ev.get("superconducting") {
+                                let rs = sc["r_s_ohm_sq"].as_f64().unwrap_or(0.0);
+                                let lk = sc["l_k_sq_h_sq"].as_f64().unwrap_or(0.0) * 1.0e12;
+                                let gap = sc["delta_t_mev"].as_f64().unwrap_or(0.0);
+                                ui.weak(format!("BCS: R_s = {rs:.3e} Ohm/sq, L_k = {lk:.3} pH/sq, Delta(T) = {gap:.3} meV"));
+                            }
+                        }
+                    });
                 if let Some(t) = d["toml"].as_str() {
                     egui::CollapsingHeader::new("material file").id_salt(format!("toml_{name}")).default_open(false).show(ui, |ui| {
                         ui.add(egui::TextEdit::multiline(&mut t.to_string().as_str()).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
@@ -415,8 +478,58 @@ impl App {
         }
     }
 
-    /// Collapsed panel to download curated presets or convert pasted database payloads (`refractiveindex.info`, `AFLOW`, `Materials Project`, `NumBAT`).
+    /// Collapsed panel to download curated presets, search open databases asynchronously, or convert pasted database payloads (`refractiveindex.info`, `AFLOW`, `Materials Project`, `NumBAT`).
     fn material_import_panel(&mut self, ui: &mut Ui) {
+        use crate::state::MaterialBgMsg;
+        if let Some(rx) = &self.mat_fetch.pending {
+            ui.ctx().request_repaint();
+            if let Ok(msg) = rx.try_recv() {
+                self.mat_fetch.pending = None;
+                self.mat_fetch.busy_label = None;
+                match msg {
+                    MaterialBgMsg::Fetched { result } => match result {
+                        Ok((nm, toml_text, save_dir)) => match self.engine.add_material(&nm, &toml_text) {
+                            Ok(_) => {
+                                let mut note = format!("Added '{nm}' to project.");
+                                if let Some(dir) = save_dir {
+                                    let _ = std::fs::create_dir_all(&dir);
+                                    let path = dir.join(format!("{nm}.toml"));
+                                    if std::fs::write(&path, &toml_text).is_ok() {
+                                        note = format!("Added '{nm}' to project and saved {}.", path.display());
+                                    }
+                                }
+                                self.mat_fetch.is_error = false;
+                                self.mat_fetch.message = Some(note);
+                            }
+                            Err(e) => {
+                                self.mat_fetch.is_error = true;
+                                self.mat_fetch.message = Some(e.to_string());
+                            }
+                        },
+                        Err(e) => {
+                            self.mat_fetch.is_error = true;
+                            self.mat_fetch.message = Some(e);
+                        }
+                    },
+                    MaterialBgMsg::Searched { result } => match result {
+                        Ok(v) => {
+                            let mut rows = v["catalog_matches"].as_array().cloned().unwrap_or_default();
+                            if let Some(live) = v["live_matches"].as_array() {
+                                rows.extend(live.iter().cloned());
+                            }
+                            self.mat_fetch.is_error = false;
+                            self.mat_fetch.message = Some(format!("Found {} matching record(s).", rows.len()));
+                            self.mat_fetch.search_results = rows;
+                        }
+                        Err(e) => {
+                            self.mat_fetch.is_error = true;
+                            self.mat_fetch.message = Some(e);
+                        }
+                    },
+                }
+            }
+        }
+        let is_busy = self.mat_fetch.pending.is_some();
         let catalog = nyx_engine::material_fetch::remote_catalog();
         let formats = ["rii", "aflow", "mp", "numbat"];
         let opt_trim = |s: &str| {
@@ -424,7 +537,10 @@ impl App {
             (!t.is_empty()).then(|| t.to_string())
         };
         egui::CollapsingHeader::new("Download or import material").id_salt("mat_import_panel").default_open(false).show(ui, |ui| {
-            ui.weak("Fetch additional entries from open databases on demand (HTTPS) or paste an offline JSON/YAML/JSONC record.");
+            ui.weak("Fetch additional entries from open databases on demand (HTTPS, non-blocking background fetch) or paste an offline JSON/YAML/JSONC record.");
+            if let Some(busy) = &self.mat_fetch.busy_label {
+                ui.weak(format!("Working in background: {busy}..."));
+            }
             if !catalog.is_empty() {
                 if self.mat_fetch.preset >= catalog.len() {
                     self.mat_fetch.preset = 0;
@@ -444,38 +560,72 @@ impl App {
                             }
                         }
                     });
-                    if ui.button("Download preset").clicked() {
-                        let preset = &catalog[self.mat_fetch.preset];
-                        let name_ov = opt_trim(&self.mat_fetch.name);
-                        let ext_ov = opt_trim(&self.mat_fetch.extends);
-                        let desc_ov = opt_trim(&self.mat_fetch.description);
+                    if ui.add_enabled(!is_busy, egui::Button::new("Download preset")).clicked() {
+                        let preset = catalog[self.mat_fetch.preset].clone();
+                        let name_ov = opt_trim(&self.mat_fetch.name).unwrap_or_else(|| preset.id.to_string());
+                        let ext_ov = opt_trim(&self.mat_fetch.extends).or_else(|| preset.extends.map(str::to_string));
+                        let desc_ov = opt_trim(&self.mat_fetch.description).or_else(|| Some(preset.summary.to_string()));
                         let save_dir = self.mat_fetch.save_to_library.then(nyx_engine::material_fetch::default_materials_folder).flatten();
-                        match self.engine.fetch_material(preset.id, None, name_ov.as_deref(), desc_ov.as_deref(), ext_ov.as_deref(), true, save_dir.as_deref()) {
-                            Ok(v) => {
-                                let nm = v["name"].as_str().unwrap_or(preset.id);
-                                self.mat_fetch.is_error = false;
-                                self.mat_fetch.message = Some(match v["saved_path"].as_str() {
-                                    Some(p) => format!("Added '{nm}' to project and saved {p}."),
-                                    None => format!("Added '{nm}' to project."),
-                                });
-                            }
-                            Err(e) => {
-                                self.mat_fetch.is_error = true;
-                                self.mat_fetch.message = Some(e.to_string());
-                            }
-                        }
+                        let api_key = opt_trim(&self.mat_fetch.mp_api_key);
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.mat_fetch.pending = Some(rx);
+                        self.mat_fetch.busy_label = Some(format!("downloading {}", preset.id));
+                        std::thread::spawn(move || {
+                            let res = (|| -> Result<(String, String, Option<std::path::PathBuf>), String> {
+                                let url = nyx_engine::material_fetch::resolve_remote_url(preset.format, preset.target).map_err(|e| e.to_string())?;
+                                let raw = nyx_engine::material_fetch::fetch_url_text_with_api_key(&url, api_key.as_deref()).map_err(|e| e.to_string())?;
+                                let toml = nyx_engine::material_fetch::convert_to_toml(preset.format, &raw, &name_ov, desc_ov.as_deref(), ext_ov.as_deref(), Some(&url)).map_err(|e| e.to_string())?;
+                                Ok((name_ov, toml, save_dir))
+                            })();
+                            let _ = tx.send(MaterialBgMsg::Fetched { result: res });
+                        });
                     }
                 });
                 ui.weak(sel.summary);
             }
 
             ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Search catalog:");
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.search_query).hint_text("keyword or formula (e.g. Si, AlN, NbN)").desired_width(150.0));
+                ui.checkbox(&mut self.mat_fetch.live_search, "live AFLOW/MP");
+                if ui.add_enabled(!is_busy, egui::Button::new("Search")).clicked() {
+                    let q = self.mat_fetch.search_query.trim().to_string();
+                    let live = self.mat_fetch.live_search;
+                    let key = opt_trim(&self.mat_fetch.mp_api_key);
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.mat_fetch.pending = Some(rx);
+                    self.mat_fetch.busy_label = Some(format!("searching '{q}'"));
+                    std::thread::spawn(move || {
+                        let eng = nyx_engine::Engine::new();
+                        let res = eng.search_remote_materials(&q, None, None, live, key.as_deref()).map_err(|e| e.to_string());
+                        let _ = tx.send(MaterialBgMsg::Searched { result: res });
+                    });
+                }
+            });
+            for row in self.mat_fetch.search_results.iter().take(6) {
+                let id = row["id"].as_str().unwrap_or("");
+                let fmt = row["format"].as_str().unwrap_or("");
+                let tgt = row["target"].as_str().unwrap_or("");
+                let sum = row["summary"].as_str().unwrap_or("");
+                ui.horizontal(|ui| {
+                    if ui.small_button("Use").clicked() {
+                        self.mat_fetch.source = fmt.to_string();
+                        self.mat_fetch.target = tgt.to_string();
+                        self.mat_fetch.name = id.to_string();
+                        self.mat_fetch.description = sum.to_string();
+                    }
+                    ui.weak(format!("[{fmt}] {id}: {sum}"));
+                });
+            }
+
+            ui.add_space(4.0);
             egui::Grid::new("mat_fetch_fields").num_columns(2).show(ui, |ui| {
                 ui.label("Source / format:");
-                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.source).hint_text("preset id, rii, aflow, or numbat").desired_width(220.0));
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.source).hint_text("preset id, rii, aflow, mp, or numbat").desired_width(220.0));
                 ui.end_row();
                 ui.label("Entry / query:");
-                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.target).hint_text("e.g. main/Si/nk/Green-2008").desired_width(220.0));
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.target).hint_text("e.g. main/Si/nk/Green-2008 or mp-149").desired_width(220.0));
                 ui.end_row();
                 ui.label("Material name:");
                 ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.name).hint_text("optional slug").desired_width(220.0));
@@ -486,27 +636,35 @@ impl App {
                 ui.label("Description:");
                 ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.description).hint_text("optional one-line comparison").desired_width(220.0));
                 ui.end_row();
+                ui.label("MP API key:");
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.mp_api_key).password(true).hint_text("optional Materials Project key (stdin curl)").desired_width(220.0));
+                ui.end_row();
             });
             ui.horizontal(|ui| {
                 ui.checkbox(&mut self.mat_fetch.save_to_library, "save to materials/ folder");
-                if ui.button("Download custom").clicked() {
+                if ui.add_enabled(!is_busy, egui::Button::new("Download custom")).clicked() {
                     let src = self.mat_fetch.source.trim().to_string();
                     let tgt = opt_trim(&self.mat_fetch.target);
                     let nm = opt_trim(&self.mat_fetch.name);
                     let ext = opt_trim(&self.mat_fetch.extends);
                     let desc = opt_trim(&self.mat_fetch.description);
+                    let key = opt_trim(&self.mat_fetch.mp_api_key);
                     let save_dir = self.mat_fetch.save_to_library.then(nyx_engine::material_fetch::default_materials_folder).flatten();
-                    match self.engine.fetch_material(&src, tgt.as_deref(), nm.as_deref(), desc.as_deref(), ext.as_deref(), true, save_dir.as_deref()) {
-                        Ok(v) => {
-                            let added = v["name"].as_str().unwrap_or("imported");
-                            self.mat_fetch.is_error = false;
-                            self.mat_fetch.message = Some(format!("Added '{added}' to project."));
-                        }
-                        Err(e) => {
-                            self.mat_fetch.is_error = true;
-                            self.mat_fetch.message = Some(e.to_string());
-                        }
-                    }
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.mat_fetch.pending = Some(rx);
+                    self.mat_fetch.busy_label = Some(format!("downloading {src}"));
+                    std::thread::spawn(move || {
+                        let mut eng = nyx_engine::Engine::new();
+                        let res = eng
+                            .fetch_material_with_key(&src, tgt.as_deref(), nm.as_deref(), desc.as_deref(), ext.as_deref(), false, None, key.as_deref())
+                            .map(|v| {
+                                let final_nm = v["name"].as_str().unwrap_or("imported").to_string();
+                                let toml = v["imported_toml"].as_str().or_else(|| v["toml"].as_str()).unwrap_or("").to_string();
+                                (final_nm, toml, save_dir)
+                            })
+                            .map_err(|e| e.to_string());
+                        let _ = tx.send(MaterialBgMsg::Fetched { result: res });
+                    });
                 }
             });
 

@@ -1,34 +1,60 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
-//! A material as a human-written TOML file: `MaterialSpec` (density, elastic stiffness, thermal and electrical tensors, optical
-//! dispersion), reading with plain-language errors, writing back, and `Library`, a folder of such files loaded at run time.
-//! The format is version `FORMAT` (key `format = 1`); the schema is in `schema.rs` and documented in `docs/MATERIALS.md`.
+//! A material as a human-written TOML file: `MaterialSpec` supporting `format = 2` (multi-physics:
+//! temperature-dependent thermal/dielectric/optical curves, BCS superconductors with sub-gap mK loss,
+//! surface oxide TLS interfaces, piezoelectric Legendre duals, photoelastic, electro-optic, and
+//! viscoelastic tensors) with a full read-only compatibility shim for `format = 1` files and
+//! representation-aware deep merge for `extends`.
 
+use super::bcs::{bcs_surface_impedance, BcsEval, FilmModel, Superconducting};
+use super::coupled::{
+    resolve_piezo_legendre_duals, solver_to_voigt_m6, stiffness_to_textbook_voigt, voigt_to_solver_m6,
+    Dielectric, ElectroOptic, Interfaces, Photoelastic, Piezoelectric, Viscoelastic,
+};
 use super::elastic::Elastic;
 use super::optics::{self, Optical, OpticsError};
 use super::reader::{MaterialError, Section};
 use super::source::{read_sources, write_sources, Source};
+use super::state_t::{CrystalSetting, MaterialKind, PointGroup, TempCurve, TempTensor};
 use super::tensor::{Requirement, TensorProp};
 use super::units::Dim;
-use super::{Anisotropy, Stiffness};
+use super::{rotate_tensor, rotation, Anisotropy, Stiffness, Tensor, M3, M6};
 use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// The version of the material file format this code reads and writes.
-pub const FORMAT: i64 = 1;
+/// Current primary version of the material file format (`format = 2`).
+pub const FORMAT: i64 = 2;
+/// Legacy v1 file format version still supported read-only via dual reader.
+pub const FORMAT_V1: i64 = 1;
+
+fn default_format() -> i64 {
+    FORMAT
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Thermal {
     #[serde(default)]
     pub source: Vec<Source>,
-    /// W/(m K)
+    /// W/(m K) at reference temperature (or evaluated from `conductivity_t`)
     pub conductivity: Option<TensorProp>,
-    /// J/(kg K)
+    /// J/(kg K) at reference temperature (or evaluated from `specific_heat_t`)
     pub specific_heat: Option<f64>,
-    /// 1/K
+    /// 1/K at reference temperature (or evaluated from `expansion_t`)
     pub expansion: Option<TensorProp>,
+    /// Temperature-dependent thermal conductivity `k(T)`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conductivity_t: Option<TempTensor>,
+    /// Temperature-dependent specific heat `c_p(T)`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub specific_heat_t: Option<TempCurve>,
+    /// Temperature-dependent instantaneous thermal expansion coefficient `alpha(T)`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expansion_t: Option<TempTensor>,
+    /// Integrated thermal contraction `(L(T) - L_ref) / L_ref`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contraction: Option<TempTensor>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -45,6 +71,8 @@ pub struct Electrical {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MaterialSpec {
+    #[serde(skip, default = "default_format")]
+    pub format: i64,
     pub name: String,
     pub description: Option<String>,
     /// references the numbers come from
@@ -52,21 +80,169 @@ pub struct MaterialSpec {
     pub notes: Option<String>,
     /// kg/m^3
     pub density: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<MaterialKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point_group: Option<PointGroup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crystal_setting: Option<CrystalSetting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual_stress: Option<TensorProp>,
     pub elastic: Option<Elastic>,
     pub thermal: Thermal,
     pub electrical: Electrical,
     pub optical: Option<Optical>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dielectric: Option<Dielectric>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superconducting: Option<Superconducting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub piezoelectric: Option<Piezoelectric>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photoelastic: Option<Photoelastic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electro_optic: Option<ElectroOptic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viscoelastic: Option<Viscoelastic>,
+    #[serde(default, skip_serializing_if = "Interfaces::is_empty")]
+    pub interfaces: Interfaces,
 }
 
-const TOP_KEYS: &[&str] = &["format", "name", "description", "source", "notes", "extends", "density", "density_unit", "elastic", "thermal", "electrical", "optical"];
-const ELASTIC_KEYS: &[&str] = &["source", "unit", "compliance_unit", "class", "unique_axis", "matrix", "compliance", "E", "nu", "lambda", "mu", "K", "G", "c11", "c12", "c44"];
-const THERMAL_KEYS: &[&str] = &["source", "conductivity", "conductivity_unit", "specific_heat", "specific_heat_unit", "expansion", "expansion_unit"];
-const ELECTRICAL_KEYS: &[&str] = &["source", "permittivity", "permeability", "conductivity", "conductivity_unit"];
+impl Default for MaterialSpec {
+    fn default() -> Self {
+        Self {
+            format: FORMAT,
+            name: String::new(),
+            description: None,
+            source: Vec::new(),
+            notes: None,
+            density: None,
+            kind: None,
+            point_group: None,
+            crystal_setting: None,
+            reference_temperature: None,
+            residual_stress: None,
+            elastic: None,
+            thermal: Thermal::default(),
+            electrical: Electrical::default(),
+            optical: None,
+            dielectric: None,
+            superconducting: None,
+            piezoelectric: None,
+            photoelastic: None,
+            electro_optic: None,
+            viscoelastic: None,
+            interfaces: Interfaces::default(),
+        }
+    }
+}
+
+pub const TOP_KEYS: &[&str] = &[
+    "format",
+    "name",
+    "description",
+    "source",
+    "notes",
+    "extends",
+    "kind",
+    "point_group",
+    "crystal_setting",
+    "reference_temperature",
+    "reference_temperature_unit",
+    "density",
+    "density_unit",
+    "residual_stress",
+    "residual_stress_unit",
+    "elastic",
+    "thermal",
+    "electrical",
+    "dielectric",
+    "superconducting",
+    "piezoelectric",
+    "photoelastic",
+    "electro_optic",
+    "viscoelastic",
+    "interfaces",
+    "optical",
+];
+
+pub const TOP_KEYS_V1: &[&str] = &[
+    "format",
+    "name",
+    "description",
+    "source",
+    "notes",
+    "extends",
+    "density",
+    "density_unit",
+    "elastic",
+    "thermal",
+    "electrical",
+    "optical",
+];
+
+pub const ELASTIC_KEYS: &[&str] = &["source", "unit", "compliance_unit", "class", "unique_axis", "matrix", "compliance", "E", "nu", "lambda", "mu", "K", "G", "c11", "c12", "c44"];
+pub const THERMAL_KEYS: &[&str] = &[
+    "source",
+    "conductivity",
+    "conductivity_unit",
+    "conductivity_T",
+    "conductivity_T_unit",
+    "specific_heat",
+    "specific_heat_unit",
+    "specific_heat_T",
+    "specific_heat_T_unit",
+    "expansion",
+    "expansion_unit",
+    "expansion_T",
+    "expansion_T_unit",
+    "contraction",
+    "contraction_unit",
+];
+pub const ELECTRICAL_KEYS: &[&str] = &["source", "permittivity", "permeability", "conductivity", "conductivity_unit"];
 
 fn positive(s: &Section, key: &str, v: Option<f64>, what: &str) -> Result<Option<f64>, MaterialError> {
     match v {
-        Some(x) if x <= 0.0 => Err(s.err(key, format!("{what} must be positive (found {x})"))),
+        Some(x) if !x.is_finite() || x <= 0.0 => Err(s.err(key, format!("{what} must be positive (found {x})"))),
         other => Ok(other),
+    }
+}
+
+fn is_temp_curve_value(v: &toml::Value) -> bool {
+    match v {
+        toml::Value::Table(t) => {
+            if t.contains_key("form") || t.contains_key("T") || t.contains_key("T_range") || t.contains_key("theta_e") {
+                return true;
+            }
+            if t.contains_key("perp") && t.contains_key("par") && t.len() == 2 {
+                return matches!(&t["perp"], toml::Value::Table(pt) if pt.contains_key("form") || pt.contains_key("T") || pt.contains_key("T_range") || pt.contains_key("theta_e"))
+                    || matches!(&t["par"], toml::Value::Table(pt) if pt.contains_key("form") || pt.contains_key("T") || pt.contains_key("T_range") || pt.contains_key("theta_e"));
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn m3_to_tensor(m: &M3) -> Tensor {
+    let diag = m[0][1].abs() < 1e-12 && m[0][2].abs() < 1e-12 && m[1][2].abs() < 1e-12;
+    if diag {
+        if (m[0][0] - m[1][1]).abs() < 1e-12 * m[0][0].abs().max(1.0) {
+            Tensor::Uniaxial { perp: m[0][0], par: m[2][2] }
+        } else {
+            Tensor::Diagonal { x: m[0][0], y: m[1][1], z: m[2][2] }
+        }
+    } else {
+        Tensor::Symmetric {
+            xx: m[0][0],
+            yy: m[1][1],
+            zz: m[2][2],
+            xy: m[0][1],
+            yz: m[1][2],
+            xz: m[0][2],
+        }
     }
 }
 
@@ -93,18 +269,43 @@ impl MaterialSpec {
             ));
         }
 
-        match s.value("format") {
-            Some(toml::Value::Integer(FORMAT)) => {}
-            Some(toml::Value::Integer(n)) => return Err(s.err("format", format!("this file is format {n}, but this version of nyx reads format {FORMAT}"))),
-            Some(_) => return Err(s.err("format", "must be a whole number; write format = 1")),
-            None => return Err(s.err("format", "is missing; the first line of a material file is format = 1 (the version of this file format)")),
-        }
+        let fmt = match s.value("format") {
+            Some(toml::Value::Integer(1)) => FORMAT_V1,
+            Some(toml::Value::Integer(2)) => FORMAT,
+            Some(toml::Value::Integer(n)) => return Err(s.err("format", format!("this file is format {n}, but this version of nyx reads format 1 or 2"))),
+            Some(_) => return Err(s.err("format", "must be a whole number; write format = 2 (or format = 1)")),
+            None => return Err(s.err("format", "is missing; the first line of a material file is format = 2 (or format = 1)")),
+        };
         s.string("name")?;
         let description = s.string("description")?;
         let notes = s.string("notes")?;
         let source = read_sources(&mut s, "source")?;
+
+        let kind = match s.string("kind")? {
+            Some(ref text) => Some(MaterialKind::parse(text).ok_or_else(|| {
+                s.err("kind", format!("unknown material kind '{text}'; expected crystalline, polycrystalline, amorphous, superconductor, semiconductor, dielectric, metal, polymer or fluid"))
+            })?),
+            None => None,
+        };
+        let point_group = match s.string("point_group")? {
+            Some(ref text) => Some(PointGroup::parse(text).ok_or_else(|| {
+                s.err("point_group", format!("unknown Hermann-Mauguin point_group '{text}' (use e.g. \"m-3m\", \"-3m\", \"3m\", \"6mm\", \"isotropic\")"))
+            })?),
+            None => None,
+        };
+        let crystal_setting = match s.string("crystal_setting")? {
+            Some(ref text) => Some(CrystalSetting::parse(text).ok_or_else(|| {
+                s.err("crystal_setting", format!("unknown crystal_setting '{text}'; expected \"IEEE-1987\" or \"IRE-1949\""))
+            })?),
+            None => None,
+        };
+        let raw_rt = s.quantity("reference_temperature", Dim::Temperature, None)?;
+        let reference_temperature = positive(&s, "reference_temperature", raw_rt, "reference_temperature")?;
+        let t_ref = reference_temperature.unwrap_or(293.15);
+
         let density = s.quantity("density", Dim::Density, None)?;
         let density = positive(&s, "density", density, "the density")?;
+        let residual_stress = TensorProp::read(&mut s, "residual_stress", Dim::Pressure, Requirement::SymmetricOnly, "residual_stress")?;
 
         let elastic = match s.sub("elastic")? {
             None => None,
@@ -118,10 +319,66 @@ impl MaterialSpec {
         let mut thermal = Thermal::default();
         if let Some(mut t) = s.sub("thermal")? {
             thermal.source = read_sources(&mut t, "source")?;
-            thermal.conductivity = TensorProp::read(&mut t, "conductivity", Dim::ThermalConductivity, Requirement::PositiveDefinite, "thermal conductivity")?;
-            let cp = t.quantity("specific_heat", Dim::SpecificHeat, None)?;
-            thermal.specific_heat = positive(&t, "specific_heat", cp, "the specific heat")?;
-            thermal.expansion = TensorProp::read(&mut t, "expansion", Dim::PerKelvin, Requirement::SymmetricOnly, "thermal expansion")?;
+            if t.value("conductivity").is_some_and(is_temp_curve_value) {
+                let curve = TempTensor::read(&mut t, "conductivity", Dim::ThermalConductivity, None)?.unwrap();
+                let val = curve.eval_tensor(t_ref);
+                val.check(Requirement::PositiveDefinite, "thermal conductivity").map_err(|m| t.err("conductivity", m))?;
+                thermal.conductivity = Some(val);
+                thermal.conductivity_t = Some(curve);
+            } else {
+                thermal.conductivity = TensorProp::read(&mut t, "conductivity", Dim::ThermalConductivity, Requirement::PositiveDefinite, "thermal conductivity")?;
+            }
+            if let Some(curve) = TempTensor::read(&mut t, "conductivity_T", Dim::ThermalConductivity, None)? {
+                let val = curve.eval_tensor(t_ref);
+                val.check(Requirement::PositiveDefinite, "thermal.conductivity_T").map_err(|m| t.err("conductivity_T", m))?;
+                if thermal.conductivity.is_none() {
+                    thermal.conductivity = Some(val);
+                }
+                thermal.conductivity_t = Some(curve);
+            }
+
+            if t.value("specific_heat").is_some_and(is_temp_curve_value) {
+                let curve = TempCurve::read(&mut t, "specific_heat", Dim::SpecificHeat, None)?.unwrap();
+                let v = curve.eval(t_ref);
+                if !v.is_finite() || v <= 0.0 {
+                    return Err(t.err("specific_heat", format!("specific_heat({t_ref} K) must be positive (found {v})")));
+                }
+                thermal.specific_heat = Some(v);
+                thermal.specific_heat_t = Some(curve);
+            } else {
+                let cp = t.quantity("specific_heat", Dim::SpecificHeat, None)?;
+                thermal.specific_heat = positive(&t, "specific_heat", cp, "the specific heat")?;
+            }
+            if let Some(curve) = TempCurve::read(&mut t, "specific_heat_T", Dim::SpecificHeat, None)? {
+                let v = curve.eval(t_ref);
+                if !v.is_finite() || v <= 0.0 {
+                    return Err(t.err("specific_heat_T", format!("specific_heat_T({t_ref} K) must be positive (found {v})")));
+                }
+                if thermal.specific_heat.is_none() {
+                    thermal.specific_heat = Some(v);
+                }
+                thermal.specific_heat_t = Some(curve);
+            }
+
+            if t.value("expansion").is_some_and(is_temp_curve_value) {
+                let curve = TempTensor::read(&mut t, "expansion", Dim::PerKelvin, None)?.unwrap();
+                let val = curve.eval_tensor(t_ref);
+                val.check(Requirement::SymmetricOnly, "thermal expansion").map_err(|m| t.err("expansion", m))?;
+                thermal.expansion = Some(val);
+                thermal.expansion_t = Some(curve);
+            } else {
+                thermal.expansion = TensorProp::read(&mut t, "expansion", Dim::PerKelvin, Requirement::SymmetricOnly, "thermal expansion")?;
+            }
+            if let Some(curve) = TempTensor::read(&mut t, "expansion_T", Dim::PerKelvin, None)? {
+                let val = curve.eval_tensor(t_ref);
+                val.check(Requirement::SymmetricOnly, "thermal.expansion_T").map_err(|m| t.err("expansion_T", m))?;
+                if thermal.expansion.is_none() {
+                    thermal.expansion = Some(val);
+                }
+                thermal.expansion_t = Some(curve);
+            }
+
+            thermal.contraction = TempTensor::read(&mut t, "contraction", Dim::Dimensionless, None)?;
             t.finish(THERMAL_KEYS)?;
         }
 
@@ -135,6 +392,29 @@ impl MaterialSpec {
             t.finish(ELECTRICAL_KEYS)?;
         }
 
+        let dielectric = s.sub("dielectric")?.map(|mut d| Dielectric::read(&mut d)).transpose()?;
+        let superconducting = s.sub("superconducting")?.map(|mut sc| Superconducting::read(&mut sc)).transpose()?;
+        let piezoelectric = s.sub("piezoelectric")?.map(|mut pz| Piezoelectric::read(&mut pz, point_group)).transpose()?;
+        let photoelastic = s.sub("photoelastic")?.map(|mut pe| Photoelastic::read(&mut pe, point_group)).transpose()?;
+        let electro_optic = s.sub("electro_optic")?.map(|mut eo| ElectroOptic::read(&mut eo, point_group)).transpose()?;
+        let viscoelastic = s.sub("viscoelastic")?.map(|mut ve| Viscoelastic::read(&mut ve, point_group)).transpose()?;
+        let interfaces = s.sub("interfaces")?.map(|mut iface| Interfaces::read(&mut iface)).transpose()?.unwrap_or_default();
+
+        if let Some(pg) = point_group.filter(|pg| pg.forbids_piezo_and_pockels()) {
+            if piezoelectric.is_some() {
+                return Err(s.err(
+                    "piezoelectric",
+                    format!("point_group \"{}\" is centrosymmetric (or chiral cubic 432) and forbids linear piezoelectricity by Neumann's principle", pg.as_str()),
+                ));
+            }
+            if electro_optic.is_some() {
+                return Err(s.err(
+                    "electro_optic",
+                    format!("point_group \"{}\" forbids the linear electro-optic (Pockels) effect by Neumann's principle", pg.as_str()),
+                ));
+            }
+        }
+
         let optical = match s.sub("optical")? {
             None => None,
             Some(mut o) => {
@@ -145,8 +425,39 @@ impl MaterialSpec {
                 Some(opt)
             }
         };
-        s.finish(TOP_KEYS)?;
-        Ok(MaterialSpec { name, description, source, notes, density, elastic, thermal, electrical, optical })
+
+        if fmt == FORMAT_V1 {
+            // Retain v1 surface compatibility while still permitting [superconducting] from sibling branch
+            let v1_plus: Vec<&str> = TOP_KEYS_V1.iter().copied().chain(std::iter::once("superconducting")).collect();
+            s.finish(&v1_plus)?;
+        } else {
+            s.finish(TOP_KEYS)?;
+        }
+
+        Ok(MaterialSpec {
+            format: fmt,
+            name,
+            description,
+            source,
+            notes,
+            density,
+            kind,
+            point_group,
+            crystal_setting,
+            reference_temperature,
+            residual_stress,
+            elastic,
+            thermal,
+            electrical,
+            optical,
+            dielectric,
+            superconducting,
+            piezoelectric,
+            photoelastic,
+            electro_optic,
+            viscoelastic,
+            interfaces,
+        })
     }
 
     pub fn from_toml(text: &str) -> Result<MaterialSpec, MaterialError> {
@@ -165,13 +476,25 @@ impl MaterialSpec {
         })
     }
 
-    /// The material as TOML text, in the same format (comments of an original file are not kept).
+    /// The material as TOML text in `format = 2` (comments of an original file are not kept).
     pub fn to_toml(&self) -> String {
         let mut t = toml::Table::new();
         t.insert("format".into(), toml::Value::Integer(FORMAT));
         t.insert("name".into(), self.name.clone().into());
         if let Some(d) = &self.description {
             t.insert("description".into(), d.clone().into());
+        }
+        if let Some(k) = self.kind {
+            t.insert("kind".into(), k.as_str().into());
+        }
+        if let Some(pg) = self.point_group {
+            t.insert("point_group".into(), pg.as_str().into());
+        }
+        if let Some(cs) = self.crystal_setting {
+            t.insert("crystal_setting".into(), cs.as_str().into());
+        }
+        if let Some(rt) = self.reference_temperature {
+            t.insert("reference_temperature".into(), format!("{rt} K").into());
         }
         if let Some(v) = write_sources(&self.source) {
             t.insert("source".into(), v);
@@ -182,6 +505,7 @@ impl MaterialSpec {
         if let Some(d) = self.density {
             t.insert("density".into(), format!("{d} kg/m^3").into());
         }
+        put_tensor(&mut t, "residual_stress", self.residual_stress.as_ref(), Some("Pa"));
         if let Some(e) = &self.elastic {
             t.insert("elastic".into(), toml::Value::Table(e.write()));
         }
@@ -190,10 +514,22 @@ impl MaterialSpec {
             th.insert("source".into(), v);
         }
         put_tensor(&mut th, "conductivity", self.thermal.conductivity.as_ref(), Some("W/(m*K)"));
+        if let Some(ct) = &self.thermal.conductivity_t {
+            th.insert("conductivity_T".into(), ct.to_toml(Some("W/(m*K)")));
+        }
         if let Some(c) = self.thermal.specific_heat {
             th.insert("specific_heat".into(), format!("{c} J/(kg*K)").into());
         }
+        if let Some(cpt) = &self.thermal.specific_heat_t {
+            th.insert("specific_heat_T".into(), cpt.to_toml(Some("J/(kg*K)")));
+        }
         put_tensor(&mut th, "expansion", self.thermal.expansion.as_ref(), Some("1/K"));
+        if let Some(at) = &self.thermal.expansion_t {
+            th.insert("expansion_T".into(), at.to_toml(Some("1/K")));
+        }
+        if let Some(con) = &self.thermal.contraction {
+            th.insert("contraction".into(), con.to_toml(None));
+        }
         if !th.is_empty() {
             t.insert("thermal".into(), toml::Value::Table(th));
         }
@@ -209,6 +545,43 @@ impl MaterialSpec {
         if !el.is_empty() {
             t.insert("electrical".into(), toml::Value::Table(el));
         }
+        if let Some(dl) = &self.dielectric {
+            let mut tbl = toml::Table::new();
+            dl.write(&mut tbl);
+            if !tbl.is_empty() {
+                t.insert("dielectric".into(), toml::Value::Table(tbl));
+            }
+        }
+        if let Some(sc) = &self.superconducting {
+            let mut tbl = toml::Table::new();
+            sc.write(&mut tbl);
+            t.insert("superconducting".into(), toml::Value::Table(tbl));
+        }
+        if let Some(pz) = &self.piezoelectric {
+            let mut tbl = toml::Table::new();
+            pz.write(&mut tbl);
+            t.insert("piezoelectric".into(), toml::Value::Table(tbl));
+        }
+        if let Some(pe) = &self.photoelastic {
+            let mut tbl = toml::Table::new();
+            pe.write(&mut tbl);
+            t.insert("photoelastic".into(), toml::Value::Table(tbl));
+        }
+        if let Some(eo) = &self.electro_optic {
+            let mut tbl = toml::Table::new();
+            eo.write(&mut tbl);
+            t.insert("electro_optic".into(), toml::Value::Table(tbl));
+        }
+        if let Some(ve) = &self.viscoelastic {
+            let mut tbl = toml::Table::new();
+            ve.write(&mut tbl);
+            t.insert("viscoelastic".into(), toml::Value::Table(tbl));
+        }
+        if !self.interfaces.is_empty() {
+            let mut tbl = toml::Table::new();
+            self.interfaces.write(&mut tbl);
+            t.insert("interfaces".into(), toml::Value::Table(tbl));
+        }
         if let Some(o) = &self.optical {
             t.insert("optical".into(), toml::Value::Table(o.write()));
         }
@@ -217,14 +590,171 @@ impl MaterialSpec {
 
     // ----- use by the solvers -----
 
-    /// The material in the older `Anisotropy` form (stiffness as a general matrix, tensors), placed with Bunge angles in degrees.
+    /// Clamped (constant-strain) static/microwave relative permittivity `eps^S` in the crystal frame.
+    pub fn permittivity_clamped(&self) -> Option<M3> {
+        let dl_c = self
+            .dielectric
+            .as_ref()
+            .and_then(|d| d.eps_clamped.as_ref().or(d.eps_r.as_ref()))
+            .map(TensorProp::matrix);
+        if dl_c.is_some() {
+            return dl_c;
+        }
+        let dl_f = self.dielectric.as_ref().and_then(|d| d.eps_free.as_ref()).map(TensorProp::matrix);
+        if let (Some(ef), Some(el), Some(pz)) = (dl_f, &self.elastic, &self.piezoelectric) {
+            let ce = solver_to_voigt_m6(&el.c);
+            if let Ok((ec, _, _, _)) = resolve_piezo_legendre_duals(&ce, pz, None, Some(&ef)) {
+                return Some(ec);
+            }
+        }
+        dl_f.or_else(|| self.electrical.permittivity.as_ref().map(TensorProp::matrix))
+    }
+
+    /// Free (constant-stress) static/microwave relative permittivity `eps^T` in the crystal frame.
+    pub fn permittivity_free(&self) -> Option<M3> {
+        let dl_f = self.dielectric.as_ref().and_then(|d| d.eps_free.as_ref()).map(TensorProp::matrix);
+        if dl_f.is_some() {
+            return dl_f;
+        }
+        let ec = self
+            .dielectric
+            .as_ref()
+            .and_then(|d| d.eps_clamped.as_ref().or(d.eps_r.as_ref()))
+            .or(self.electrical.permittivity.as_ref())
+            .map(TensorProp::matrix);
+        if let (Some(ec_m), Some(el), Some(pz)) = (ec, &self.elastic, &self.piezoelectric) {
+            let ce = solver_to_voigt_m6(&el.c);
+            if let Ok((_, ef, _, _)) = resolve_piezo_legendre_duals(&ce, pz, Some(&ec_m), None) {
+                return Some(ef);
+            }
+        }
+        ec
+    }
+
+    /// Short-circuit (constant-electric-field) stiffness `C^E` in solver Voigt order (`Pa`).
+    pub fn stiffness_constant_e(&self) -> Option<M6> {
+        self.elastic.as_ref().map(|e| e.c)
+    }
+
+    /// Open-circuit (constant-displacement) stiffness `C^D = C^E + e^T (eps^S)^-1 e` in solver Voigt order (`Pa`).
+    pub fn stiffness_constant_d(&self) -> Option<M6> {
+        let el = self.elastic.as_ref()?;
+        let ce_voigt = solver_to_voigt_m6(&el.c);
+        if let Some(pz) = &self.piezoelectric {
+            let ec = self
+                .dielectric
+                .as_ref()
+                .and_then(|d| d.eps_clamped.as_ref().or(d.eps_r.as_ref()))
+                .or(self.electrical.permittivity.as_ref())
+                .map(TensorProp::matrix);
+            let ef = self.dielectric.as_ref().and_then(|d| d.eps_free.as_ref()).map(TensorProp::matrix);
+            if let Ok((_, _, _, cd_voigt)) = resolve_piezo_legendre_duals(&ce_voigt, pz, ec.as_ref(), ef.as_ref()) {
+                return Some(voigt_to_solver_m6(&cd_voigt));
+            }
+        }
+        Some(el.c)
+    }
+
+    /// Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` where
+    /// `eps_tilde = eps_re - i eps_im_loss` (`exp(+i omega t)`) and `eps_im_loss >= 0`.
+    pub fn complex_microwave_permittivity(
+        &self,
+        freq_hz: Option<f64>,
+        temp_k: Option<f64>,
+        e_field_v_per_m: Option<f64>,
+        prefer_free: bool,
+        euler_deg: [f64; 3],
+    ) -> Option<(M3, M3)> {
+        let (mut re_cryst, im_cryst) = if let Some(dl) = &self.dielectric {
+            if let Some((re, im)) = dl.complex_permittivity(freq_hz, temp_k, e_field_v_per_m, prefer_free) {
+                (re, im)
+            } else {
+                let re = if prefer_free { self.permittivity_free()? } else { self.permittivity_clamped()? };
+                (re, [[0.0; 3]; 3])
+            }
+        } else {
+            let re = if prefer_free { self.permittivity_free()? } else { self.permittivity_clamped()? };
+            (re, [[0.0; 3]; 3])
+        };
+        if prefer_free && self.dielectric.as_ref().and_then(|d| d.eps_free.as_ref()).is_none() {
+            if let Some(free_re) = self.permittivity_free() {
+                re_cryst = free_re;
+            }
+        }
+        let r = rotation(euler_deg);
+        Some((rotate_tensor(&re_cryst, &r), rotate_tensor(&im_cryst, &r)))
+    }
+
+    /// Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k`, defaulting to reference temperature.
+    pub fn thermal_conductivity_at(&self, temp_k: Option<f64>) -> Option<TensorProp> {
+        match (temp_k, &self.thermal.conductivity_t) {
+            (Some(t), Some(curve)) => Some(curve.eval_tensor(t)),
+            _ => self.thermal.conductivity.clone(),
+        }
+    }
+
+    /// Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k`, defaulting to reference temperature.
+    pub fn specific_heat_at(&self, temp_k: Option<f64>) -> Option<f64> {
+        match (temp_k, &self.thermal.specific_heat_t) {
+            (Some(t), Some(curve)) => Some(curve.eval(t)),
+            _ => self.thermal.specific_heat,
+        }
+    }
+
+    /// Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k`, defaulting to reference temperature.
+    pub fn thermal_expansion_at(&self, temp_k: Option<f64>) -> Option<TensorProp> {
+        match (temp_k, &self.thermal.expansion_t) {
+            (Some(t), Some(curve)) => Some(curve.eval_tensor(t)),
+            _ => self.thermal.expansion.clone(),
+        }
+    }
+
+    /// Convenience BCS surface impedance evaluator using `[superconducting]` defaults when omitted.
+    pub fn surface_impedance_at(
+        &self,
+        freq_hz: f64,
+        temp_k: f64,
+        thickness: Option<f64>,
+        film_model: Option<FilmModel>,
+    ) -> Result<BcsEval, MaterialError> {
+        let sc = self.superconducting.as_ref().ok_or_else(|| MaterialError {
+            material: self.name.clone(),
+            path: "superconducting".into(),
+            message: "this material has no [superconducting] section".into(),
+        })?;
+        let d = thickness.or(sc.nominal_thickness).unwrap_or(100e-9);
+        let fm = film_model.or(sc.film_model).unwrap_or_default();
+        bcs_surface_impedance(sc, freq_hz, temp_k, d, fm).map_err(|message| MaterialError {
+            material: self.name.clone(),
+            path: "superconducting".into(),
+            message,
+        })
+    }
+
+    /// The material in the `Anisotropy` form placed with Bunge angles in degrees.
     pub fn anisotropy(&self, euler_deg: [f64; 3]) -> Anisotropy {
+        let perm_cryst = self.permittivity_clamped();
+        let perm_im = self
+            .dielectric
+            .as_ref()
+            .and_then(|d| d.complex_permittivity(None, self.reference_temperature, None, false))
+            .map(|(_, im)| im)
+            .filter(|im| im.iter().flatten().any(|&v| v > 0.0));
+        let ce_voigt = self.elastic.as_ref().map(|e| solver_to_voigt_m6(&e.c));
+        let piezo_e = self
+            .piezoelectric
+            .as_ref()
+            .and_then(|pz| pz.stress_charge(ce_voigt.as_ref()).ok());
         Anisotropy {
             stiffness: self.elastic.as_ref().map(|e| Stiffness::General(e.c)),
             conductivity: self.thermal.conductivity.as_ref().map(TensorProp::to_legacy),
-            permittivity: self.electrical.permittivity.as_ref().map(TensorProp::to_legacy),
+            permittivity: perm_cryst.map(|m| m3_to_tensor(&m)),
             expansion: self.thermal.expansion.as_ref().map(TensorProp::to_legacy),
             euler_deg,
+            permittivity_im: perm_im.map(|m| m3_to_tensor(&m)),
+            viscosity: self.viscoelastic.as_ref().map(Viscoelastic::to_solver_voigt),
+            piezo_e,
+            photoelastic: self.photoelastic.as_ref().map(|pe| pe.matrix),
         }
     }
 
@@ -239,7 +769,15 @@ impl MaterialSpec {
         put("rho", self.density);
         put("Cp", self.thermal.specific_heat);
         put("mu_r", self.electrical.permeability);
-        put("eps_r", self.electrical.permittivity.as_ref().and_then(TensorProp::as_scalar));
+        put(
+            "eps_r",
+            self.electrical.permittivity.as_ref().and_then(TensorProp::as_scalar).or_else(|| {
+                self.dielectric
+                    .as_ref()
+                    .and_then(|d| d.eps_clamped.as_ref().or(d.eps_free.as_ref()).or(d.eps_r.as_ref()))
+                    .and_then(TensorProp::as_scalar)
+            }),
+        );
         put("k", self.thermal.conductivity.as_ref().and_then(TensorProp::as_scalar));
         put("alpha", self.thermal.expansion.as_ref().and_then(TensorProp::as_scalar));
         if let Some(e) = &self.elastic {
@@ -249,6 +787,14 @@ impl MaterialSpec {
                 put("nu", Some(lam / (2.0 * (lam + mu))));
             }
         }
+        if let Some(dl) = &self.dielectric {
+            put("tan_delta", dl.loss_tangent.as_ref().and_then(TensorProp::as_scalar));
+            put("tls_tan_delta_0", dl.tls_tan_delta_0);
+        }
+        if let Some(sc) = &self.superconducting {
+            put("Tc", Some(sc.tc));
+        }
+        let _ = stiffness_to_textbook_voigt;
         m
     }
 
@@ -461,10 +1007,110 @@ fn resolve(key: &str, raw: &BTreeMap<String, (String, toml::Table)>, stack: &mut
     Ok(merged)
 }
 
-/// `over` laid over `base`: every top-level key of `over` replaces the one of `base`, and a table (`elastic`, `thermal`, `electrical`,
-/// `optical`) is replaced as a whole, never mixed key by key, so a half-replaced stiffness cannot occur. `name` is not inherited; a
-/// unit key (`density_unit`) of the base does not follow a value that replaces the base's (units are never assumed).
+fn is_elastic_rep_key(k: &str) -> bool {
+    if matches!(k, "matrix" | "compliance" | "class" | "unique_axis" | "E" | "nu" | "lambda" | "mu" | "K" | "G") {
+        return true;
+    }
+    let b = k.as_bytes();
+    b.len() == 3 && (b[0] == b'c' || b[0] == b's') && (b'1'..=b'6').contains(&b[1]) && (b'1'..=b'6').contains(&b[2])
+}
+
+fn strip_unit_if_unqualified(out: &mut toml::Table, over: &toml::Table, k: &str) {
+    let ukey = format!("{k}_unit");
+    if !over.contains_key(&ukey) {
+        out.remove(&ukey);
+    }
+}
+
+fn merge_subtable(section: &str, base: &toml::Table, over: &toml::Table) -> toml::Table {
+    let mut r = base.clone();
+
+    if section == "elastic" && over.keys().any(|k| is_elastic_rep_key(k)) {
+        r.retain(|k, _| !is_elastic_rep_key(k) && k != "unit" && k != "compliance_unit");
+    }
+
+    if section == "optical" || section.starts_with("optical.") {
+        // Reset conflicting optical model keys when changing model or axis structure
+        let model_changed = over.get("model").is_some_and(|m| r.get("model") != Some(m));
+        if model_changed {
+            for k in ["n", "k", "eps", "A", "B", "C", "lambda0", "coefficients", "data", "interpolation", "extrapolate", "frequency_unit", "eps_inf", "plasma_frequency", "damping", "drude_weight", "oscillators"] {
+                r.remove(k);
+            }
+        }
+        let iso_over = over.contains_key("model");
+        let axes_over = over.contains_key("ordinary") || over.contains_key("extraordinary") || over.contains_key("x") || over.contains_key("y") || over.contains_key("z");
+        if iso_over && section == "optical" {
+            for k in ["ordinary", "extraordinary", "x", "y", "z"] {
+                r.remove(k);
+            }
+        } else if axes_over && section == "optical" {
+            for k in optics::MODEL_KEYS {
+                r.remove(*k);
+            }
+        }
+    }
+
+    if section == "piezoelectric" {
+        let form_changed = over.get("form").is_some_and(|f| r.get("form") != Some(f));
+        let rep_changed = over.contains_key("matrix") || over.keys().any(|k| k.starts_with('e') || k.starts_with('d'));
+        if form_changed || rep_changed {
+            r.remove("matrix");
+            r.retain(|k, _| !((k.starts_with('e') || k.starts_with('d')) && k.len() == 3 && k.as_bytes()[1].is_ascii_digit()));
+        }
+    }
+
+    if matches!(section, "photoelastic" | "viscoelastic" | "electro_optic" | "electro_optic.clamped" | "electro_optic.free") {
+        let rep_changed = over.contains_key("matrix") || over.keys().any(|k| k.len() == 3 && (k.starts_with('p') || k.starts_with('r')) || (k.len() == 5 && k.starts_with("eta")));
+        if rep_changed {
+            r.remove("matrix");
+            r.retain(|k, _| !((k.starts_with('p') || k.starts_with('r')) && k.len() == 3 && k.as_bytes()[1].is_ascii_digit()) && !k.starts_with("eta"));
+        }
+    }
+
+    for (k, v) in over {
+        let sub_path = format!("{section}.{k}");
+        if let (Some(toml::Value::Table(bt)), toml::Value::Table(ot)) = (r.get(k), v) {
+            // Only recurse into structured sub-tables or compatible temp-curve form; if `form` changed, replace whole curve
+            if ot.get("form").is_some() && bt.get("form") != ot.get("form") {
+                r.insert(k.clone(), v.clone());
+            } else {
+                r.insert(k.clone(), toml::Value::Table(merge_subtable(&sub_path, bt, ot)));
+            }
+        } else {
+            r.insert(k.clone(), v.clone());
+        }
+        strip_unit_if_unqualified(&mut r, over, k);
+    }
+    r
+}
+
+/// `over` laid over `base`:
+/// - When `over` (or `base` if `over` omits `format`) is `format = 1`: legacy whole-table replacement (ADR 30).
+/// - When `over` is `format = 2`: representation-aware deep merge across nested tables.
+///
+/// The merged table carries `max(base.format, over.format)` so a legacy `format = 1` child extending a
+/// `format = 2` library material inherits all library sections without schema-key rejection.
 pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table {
+    let base_fmt = base.get("format").and_then(|v| v.as_integer()).unwrap_or(FORMAT_V1);
+    let over_fmt = over.get("format").and_then(|v| v.as_integer()).unwrap_or(base_fmt);
+
+    if over_fmt == FORMAT_V1 {
+        let mut r = base.clone();
+        r.remove("extends");
+        r.remove("name");
+        for (k, v) in over {
+            if k == "extends" {
+                continue;
+            }
+            r.insert(k.clone(), v.clone());
+            if k == "density" && !over.contains_key("density_unit") {
+                r.remove("density_unit");
+            }
+        }
+        r.insert("format".into(), toml::Value::Integer(base_fmt.max(over_fmt)));
+        return r;
+    }
+
     let mut r = base.clone();
     r.remove("extends");
     r.remove("name");
@@ -472,24 +1118,52 @@ pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table {
         if k == "extends" {
             continue;
         }
-        r.insert(k.clone(), v.clone());
-        if k == "density" && !over.contains_key("density_unit") {
-            r.remove("density_unit");
+        if let (Some(toml::Value::Table(bt)), toml::Value::Table(ot)) = (r.get(k), v) {
+            r.insert(k.clone(), toml::Value::Table(merge_subtable(k, bt, ot)));
+        } else {
+            r.insert(k.clone(), v.clone());
         }
+        strip_unit_if_unqualified(&mut r, over, k);
     }
+    r.insert("format".into(), toml::Value::Integer(base_fmt.max(over_fmt)));
     r
 }
 
 /// The keys each table of a material file accepts (the contract test compares them with the JSON Schema).
 pub struct Keys {
     pub top: &'static [&'static str],
+    pub top_v1: &'static [&'static str],
     pub elastic: &'static [&'static str],
     pub thermal: &'static [&'static str],
     pub electrical: &'static [&'static str],
+    pub dielectric: &'static [&'static str],
+    pub superconducting: &'static [&'static str],
+    pub piezoelectric: &'static [&'static str],
+    pub photoelastic: &'static [&'static str],
+    pub electro_optic: &'static [&'static str],
+    pub viscoelastic: &'static [&'static str],
+    pub interfaces: &'static [&'static str],
+    pub interface_layer: &'static [&'static str],
     pub optical: &'static [&'static str],
     pub model: &'static [&'static str],
 }
 
 pub fn keys() -> Keys {
-    Keys { top: TOP_KEYS, elastic: ELASTIC_KEYS, thermal: THERMAL_KEYS, electrical: ELECTRICAL_KEYS, optical: optics::OPTICAL_KEYS, model: optics::MODEL_KEYS }
+    Keys {
+        top: TOP_KEYS,
+        top_v1: TOP_KEYS_V1,
+        elastic: ELASTIC_KEYS,
+        thermal: THERMAL_KEYS,
+        electrical: ELECTRICAL_KEYS,
+        dielectric: super::coupled::DIELECTRIC_KEYS,
+        superconducting: super::bcs::SC_KEYS,
+        piezoelectric: super::coupled::PIEZOELECTRIC_KEYS,
+        photoelastic: super::coupled::PHOTOELASTIC_KEYS,
+        electro_optic: super::coupled::ELECTRO_OPTIC_KEYS,
+        viscoelastic: super::coupled::VISCOELASTIC_KEYS,
+        interfaces: super::coupled::INTERFACES_KEYS,
+        interface_layer: super::coupled::IFACE_KEYS,
+        optical: optics::OPTICAL_KEYS,
+        model: optics::MODEL_KEYS,
+    }
 }

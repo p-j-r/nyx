@@ -395,3 +395,37 @@ fn result_shape_exemplar_is_stable() {
     });
     contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_sms_result.v1.json", &got);
 }
+
+#[test]
+fn viscoelastic_eigenfrequency_yields_akhiezer_quality_factor() {
+    use nyx_sms::{Bc, BcKind, Problem, Study};
+    let mesh = femcore::testkit::rect(1.0, 0.1, 8, 2);
+    let ex = exchange(&mesh);
+    let clamp = Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } };
+
+    // Undamped fundamental mode with E = 100 GPa, nu = 0.0, rho = 2500 kg/m^3
+    let mut p0 = Problem::new(Study::Eigenfrequency { n_modes: 1, f_search: 0.0 }, 1);
+    for (k, v) in [("E", 100e9), ("nu", 0.0), ("rho", 2500.0)] {
+        p0.materials.default.insert(k.into(), v);
+    }
+    p0.bcs = vec![clamp.clone()];
+    let r0 = nyx_sms::run(&ex, &p0, &femcore::progress::Progress::new()).unwrap();
+    let f0 = r0.solutions[0].value.unwrap();
+
+    // Add proportional Kelvin-Voigt / Akhiezer viscosity eta = tau * E with tau = 1e-6 s (eta = 1e5 Pa*s)
+    let tau = 1.0e-6;
+    let mut pv = p0.clone();
+    pv.study = Study::Eigenfrequency { n_modes: 1, f_search: f0 };
+    pv.materials.default.insert("eta".into(), 100e9 * tau);
+    let rv = nyx_sms::run(&ex, &pv, &femcore::progress::Progress::new()).unwrap();
+    let q1 = rv
+        .scalars
+        .iter()
+        .find_map(|(k, v)| match (k.as_str(), v) {
+            ("Q1", Scalar::Num(q)) => Some(*q),
+            _ => None,
+        })
+        .expect("viscoelastic eigenfrequency solve must report Q1");
+    let q_exact = 1.0 / (2.0 * std::f64::consts::PI * f0 * tau);
+    assert!((q1 - q_exact).abs() / q_exact < 1e-2, "expected Q1 ~ {q_exact} from Kelvin-Voigt viscosity, got {q1}");
+}

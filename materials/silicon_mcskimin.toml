@@ -1,5 +1,5 @@
 # Single-crystal silicon ultrasonic stiffness of McSkimin (1953) at 298 K.
-format = 1
+format = 2
 name = "silicon_mcskimin"
 extends = "silicon"
 description = "High-purity single-crystal Si [100] ultrasonic stiffness (McSkimin 1953, c11=165.7, c12=63.9, c44=79.6 GPa at 298 K) — acoustic pulse-echo reference vs Hopcroft 2010 MEMS silicon and cryogenic silicon_4k."

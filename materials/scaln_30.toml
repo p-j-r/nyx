@@ -1,8 +1,11 @@
 # Scandium aluminum nitride (Sc0.30Al0.70N) wurtzite piezoelectric alloy film.
-format = 1
+format = 2
 name = "scaln_30"
 description = "30% Sc-alloyed wurtzite Sc0.30Al0.70N film (Caro 2015 / Akiyama 2009, softened c33=260 GPa, eps_par=15) — high-coupling BAW/FBAR piezoelectric (kt^2 ~ 15-22%) vs stiffer lower-coupling aluminum_nitride."
-notes = "Alloy composition x = 0.30 enhances piezoelectric response dramatically (e33 ~ +2.3 to +2.7 C/m^2, d33 ~ 15-22 pC/N vs 5.1 pC/N for pure AlN) while softening c33 from 389 GPa to ~260 GPa."
+kind = "crystalline"
+point_group = "6mm"
+reference_temperature = "293.15 K"
+notes = "Alloy composition x = 0.30 enhances piezoelectric response dramatically (e33 = +2.45 C/m^2, d33 ~ 15-22 pC/N vs 5.1 pC/N for pure AlN) while softening c33 from 389 GPa to ~260 GPa."
 source = { cite = "APPROXIMATE 30% Sc-alloyed wurtzite Sc0.30Al0.70N compilation from M. A. Caro et al., J. Phys.: Condens. Matter 27, 245901 (2015) and M. Akiyama et al., Adv. Mater. 21, 593 (2009); film stoichiometry and stress strongly affect actual constants", doi = "10.1088/0953-8984/27/24/245901" }
 density = "3380 kg/m^3"
 
@@ -24,6 +27,26 @@ expansion = 5.0e-6
 expansion_unit = "1/K"
 source = { cite = "APPROXIMATE alloy-disordered ScAlN thin-film thermal properties (mass-disorder phonon scattering reduces k sharply below pure AlN)" }
 
-[electrical]
-permittivity = { perp = 14.0, par = 15.0 }
-source = { cite = "APPROXIMATE clamped RF relative permittivity of Sc0.30Al0.70N (~13-16 eps_r, increasing above pure AlN ~9.0 with Sc fraction; Akiyama et al. 2009 / Caro et al. 2015)", doi = "10.1002/adma.200802611" }
+[dielectric]
+eps_clamped = { perp = 14.0, par = 15.0 }
+loss_tangent = 5.0e-4
+loss_ref_freq = "5 GHz"
+source = { cite = "APPROXIMATE clamped RF relative permittivity and loss tangent of Sc0.30Al0.70N (~13-16 eps_r, increasing above pure AlN ~9.0 with Sc fraction; Akiyama et al. 2009 / Caro et al. 2015)", doi = "10.1002/adma.200802611" }
+
+[piezoelectric]
+form = "stress_charge"
+unit = "C/m^2"
+e31 = -0.78
+e33 = 2.45
+e15 = -0.35
+source = { cite = "APPROXIMATE wurtzite Sc0.30Al0.70N piezoelectric stress constants interpolated from Caro et al., J. Phys.: Condens. Matter 27, 245901 (2015)", doi = "10.1088/0953-8984/27/24/245901" }
+
+[electro_optic]
+wavelength = "1.55 um"
+unit = "pm/V"
+source = { cite = "APPROXIMATE Sc0.30Al0.70N linear electro-optic Pockels coefficients at 1550 nm" }
+
+[electro_optic.clamped]
+r13 = 1.4
+r33 = 2.2
+r51 = 0.8

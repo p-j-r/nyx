@@ -106,12 +106,13 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
-| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101 | spec, units, elastic, tensor, optics, schema, database importers (`import.rs`) |
-| `crates/femcore/tests/material_import.rs` | 101 | pure-Rust importer & catalog regression tests |
-| `materials/*` | 29, 30, 34, 35, 101 | the shipped multi-source material library (TOML) |
-| `docs/MATERIALS.md` | 29, 30, 34, 35, 101 | material library guide, variant catalog, and database import commands |
-| `crates/nyx-engine/src/material_fetch.rs` | 101 | engine catalog, offline database conversion, and HTTPS material fetch |
-| `crates/app/src/matcmd.rs` | 101 | `nyx material` CLI subcommands (`list`, `show`, `import`, `fetch`) |
+| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101, 102 | spec, units, elastic, tensor, optics, schema, T-curves (`state_t.rs`), Mattis–Bardeen BCS (`bcs.rs`), coupled tensors (`coupled.rs`), database importers (`import.rs`) |
+| `crates/femcore/tests/material_import.rs` | 101, 102 | pure-Rust importer & catalog regression tests |
+| `crates/femcore/tests/material_bcs.rs` | 102 | Mattis–Bardeen BCS surface impedance and sub-gap mK loss floor tests |
+| `materials/*` | 29, 30, 34, 35, 101, 102 | the shipped multi-source material library (TOML, `format = 2`) |
+| `docs/MATERIALS.md` | 29, 30, 34, 35, 101, 102 | material library guide, `format = 2` sections, variant catalog, and database import commands |
+| `crates/nyx-engine/src/material_fetch.rs` | 101, 102 | engine catalog, remote search, offline database conversion, and HTTPS material fetch |
+| `crates/app/src/matcmd.rs` | 101, 102 | `nyx material` CLI subcommands (`list`, `show`, `eval`, `bcs`, `search`, `import`, `fetch`) |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
 | `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |
@@ -135,7 +136,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
-| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19 | behaviour and contract tests of the material format |
+| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19, 102 | behaviour and contract tests of the material format |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
 | `crates/femcore/tests/ring_frame.rs` | 1 | |
@@ -168,7 +169,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27 | shared target directory |
-| `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |
+| `crates/nyx-physics/src/decode.rs` | 41, 25, 102 | typed parameters and name resolution shared by every physics |
 | `crates/nyx-physics/src/testkit.rs` | 41, 10 | the golden-file harness |
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
 | `crates/nyx-physics/*` | 25, 19 | the Physics trait, envelope, descriptors, registry |
@@ -179,11 +180,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-sms/tests/axisym_mode_scalars.rs` | 80 | the numeric frequency parts and the energy shares against closed forms whose family is known |
 | `crates/nyx-engine/src/convergence.rs` | 61, 80 | mesh convergence on a scratch engine; solutions compared by index, paired by nearest eigenvalue, or one mode followed |
 | `crates/nyx-engine/src/solve.rs` | 61, 80 | the solve chain in coupling order; puts the region names into the scalars a kernel names by domain number |
-| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
+| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68, 102 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, absorbing-layer, viscoelastic damping and Floquet kernels (moved from femcore::sms*), descriptors |
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
-| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
+| `crates/nyx-ems/src/ibc.rs` | 102, 45 | Mattis–Bardeen / kinetic-inductance surface impedance boundary condition (`Z_s = R_s + j w L_k`) |
+| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 102 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric and cavity kernels (moved from femcore::ems*), descriptors |
 | `crates/nyx-analysis/*` | 56, 25, 21, 99 | the polarization analysis (Stokes, Poincare, classes, groups) as a function of a result; moved from `femcore::{analysis, polarization}` in phase 5 |
 | `crates/nyx-engine/tests/layering.rs` | 26 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
