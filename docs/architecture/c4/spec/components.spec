@@ -52,7 +52,7 @@ apiref    | API reference | apiref.rs | 89, 57 | One Markdown page per engine co
 meshing   | Meshing seam | meshing.rs pml.rs preview.rs | 54, 50, 92 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92).
 materials | Materials | materials.rs | 58 | The material library plus the materials a project carries, resolved at the study wavelength.
 analyse   | Analyses | analyse.rs figure.rs | 56, 99 | Runs the analyses of nyx-analysis on the latest result of a physics, and draws its modes as a figure (SVG or PNG).
-resultsIO | Results files | h5io.rs xdmf.rs results_file.rs | 62, 63 | HDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results.
+resultsIO | Results files | h5io.rs xdmf.rs results_file.rs | 62, 63, 99, 102 | HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description, and opening a results file as a project with its results.
 storeLink | Store link | store_link.rs | 39, 59 | Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here).
 registry  | Registry and facade | lib.rs | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with.
 edge engine.project -> @projectFile | Saves and loads
@@ -111,6 +111,16 @@ archive   | Archives | archive.rs | 14 | .nyx files: a workflow as one determini
 util      | Utilities | util.rs | 14 | UTC time without a time crate, time-ordered ids, atomic file writes, hashes and slugs.
 edge store.flow -> @workspaceStore | Reads and writes workflow folders
 edge store.runs -> @workspaceStore | Appends runs.jsonl
+
+[storage | nyx-storage | nyx_storage]
+types     | Storage types and read budget | lib.rs | 102, 62, 99 | FieldStorageLayout (L1 Deflate-3, L2 Shuffle+LZF packed 5D, L3 Contiguous packed 5D), ReadBudgetConfig (512 MiB default ceiling), MeshData, ModeHeader, PackedComponentMeta and bitwise f64 verification helpers.
+reader    | Streaming HDF5 reader | reader.rs | 102, 62, 99 | Bounded-memory streaming reader over hdf5_pure::File::open_streaming: checked_mul read-budget guards, O(1) mode-header scan, mesh reader (with optional curved edges), and transparent single-mode cell-field slicing across L2/L3 packed 5D and legacy L1/v3 files.
+writer    | Packed and streaming HDF5 writer | writer.rs | 102, 62, 99 | Whole-file atomic writer (write_nyx_packed) and bounded-RSS incremental mode-by-mode streaming appender (init_nyx_packed_streaming, append_solved_mode_in_place via File::open_rw and append_staged).
+xdmf      | Direct-path XDMF generator | xdmf.rs | 102, 62, 99 | Direct-path XDMF 3.0 XML companion generator (generate_direct_xdmf, write_direct_xdmf) referencing internal HDF5 dataset paths without /viz hard links.
+sweep     | Sweep checkpoint and atomic IO | sweep.rs | 102, 87 | Incremental in-place parameter-sweep checkpointing (SweepCheckpoint over unlimited chunked datasets via File::open_rw) and Windows NTFS atomic file replacement helpers.
+edge storage.reader -> @resultsFile | Streams and slices
+edge storage.writer -> @resultsFile | Writes and appends atomically
+edge storage.xdmf -> @resultsFile | Writes .xdmf index
 
 [geom | geom | geom]
 featurelist  | Feature list | model.rs expr.rs print.rs error.rs lib.rs | 2, 3, 63 | The serialisable feature list (single source of truth for code and GUI), its operations and validation, parameter expressions, printing as Rust builder calls, and the error type.
