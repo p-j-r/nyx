@@ -23,16 +23,14 @@ use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
 use crate::mesh::SimplexMesh;
 use crate::meshing::adapt3d::adapt_to_metrics3;
 use crate::meshing::geomdrive::MeshedGeom;
-use crate::meshing::mesher::{mesh_chains, Chain, Fill, MeshParams};
-use crate::meshing::sheet3d::subdivide_z_interval;
-use crate::meshing::{Adaptive, MeshPlan, PmlMode};
-use geom::complex::{Complex, EdgeGeom, FaceGeom};
+use crate::meshing::physics_size::PhysicsSizing;
+pub use crate::meshing::sheet3d::{build_sized_overlay_mesh_2d, extrude_overlay_2d, extrude_overlay_2d_with_plan};
+use crate::meshing::{Adaptive, MeshPlan, Sizing};
+use geom::complex::{Complex, EdgeGeom};
 use geom::curve::Curve;
 use geom::eval::Evaluated;
-use geom::math::{cross3, dist2, dot3, sub3, Aabb, V2, V3};
-use geom::model::RegionKind;
-use geom::query::DiscretizeOpts;
-use std::collections::{BTreeMap, HashMap};
+use geom::math::{dist2, V2};
+use std::collections::BTreeMap;
 
 /// Exact 2D geometry oracle over `LayerStack::overlay` in the `(x, y)` sweep plane.
 ///
@@ -307,341 +305,9 @@ fn adapt_overlay_2d_with_adapt_mesh(
 }
 
 /// Builds the initial 2D conformal triangulation `m2` over `ev.complex().stack.overlay` (`cell_labels`
-/// = `ov_cell + 1`, boundary `facet_labels` = `ov_edge + 1`).
+/// = `ov_cell + 1`, boundary `facet_labels` = `ov_edge + 1`) using [`build_sized_overlay_mesh_2d`].
 pub fn build_overlay_mesh_2d(ev: &Evaluated, plan: &MeshPlan) -> Result<SimplexMesh, String> {
-    if ev.list.dim != 3 {
-        return Err("build_overlay_mesh_2d requires a 3D stack model".into());
-    }
-    if !(plan.opts.h > 0.0 && plan.opts.h.is_finite()) {
-        return Err("the element size must be positive".into());
-    }
-    let scale = match plan.mesher {
-        crate::meshing::Mesher::Simple => 1.0,
-        crate::meshing::Mesher::Adaptive(a) => a.scale,
-    };
-    let h_global = plan.opts.h * scale;
-    let max_dev = plan.opts.max_dev.unwrap_or(h_global / 50.0);
-    let labels = ev.label_map().map_err(|e| e.to_string())?;
-    let cx = ev.complex();
-    let st = cx.stack.as_ref().ok_or("model has no prismatic layer stack")?;
-    let ov = &st.overlay;
-
-    let nr = ev.regions().len();
-    let mut skip_region = vec![false; nr];
-    if matches!(plan.pml, PmlMode::Structured) {
-        for p in ev.pml_regions() {
-            skip_region[p.region as usize] = true;
-        }
-    }
-    let meshable: Vec<bool> = (0..nr)
-        .map(|r| !skip_region[r] && !matches!(labels.domains[r].kind, RegionKind::Hole | RegionKind::Void))
-        .collect();
-
-    let ncell = ov.regions.len();
-    let nedge = ov.edges.len();
-    let mut chains = Vec::with_capacity(nedge);
-    for (e, ed) in ov.edges.iter().enumerate() {
-        let t_pts = ov.discretize_edge(e as u32, DiscretizeOpts { max_dev, max_len: h_global });
-        let mut pts: Vec<V2> = t_pts.into_iter().map(|(_, p)| [p[0], p[1]]).collect();
-        let last = pts.len() - 1;
-        let v0p = ov.vertices[ed.v0 as usize].p;
-        let v1p = ov.vertices[ed.v1 as usize].p;
-        pts[0] = [v0p[0], v0p[1]];
-        pts[last] = [v1p[0], v1p[1]];
-        chains.push(Chain { pts, label: (e + 1) as i32, part: e });
-    }
-
-    let mut ov_bb = Aabb::EMPTY;
-    for r in &ov.regions {
-        ov_bb = ov_bb.union(&r.bbox);
-    }
-    let cell_active: Vec<bool> =
-        (0..ncell).map(|c| st.layers.iter().any(|l| l.region_of[c].is_some_and(|r| meshable[r as usize]))).collect();
-    let domain_at = |cen: V2| -> Option<i32> {
-        let c = ov.locate(cen)?;
-        cell_active[c as usize].then_some(c as i32 + 1)
-    };
-    let fills: Vec<Fill> = Vec::new();
-    mesh_chains(
-        &chains,
-        &fills,
-        &MeshParams {
-            h: h_global,
-            h_fine_min: h_global * 1e-6,
-            h_reach: h_global,
-            min_angle_deg: plan.opts.min_angle_deg,
-            lo: [ov_bb.lo[0], ov_bb.lo[1]],
-            hi: [ov_bb.hi[0], ov_bb.hi[1]],
-        },
-        &domain_at,
-    )
-}
-
-/// Extrudes a conformal 2D overlay mesh `m2` across the 3D layers of `ev` into a conformal 3D
-/// tetrahedral [`MeshedGeom`] with graded vertical steps matched to the local sheet resolution in `m2`.
-pub fn extrude_overlay_2d(
-    ev: Evaluated,
-    m2: &SimplexMesh,
-    h_global: f64,
-    sheet_dz_override: Option<f64>,
-) -> Result<MeshedGeom, String> {
-    if ev.list.dim != 3 || m2.dim != 2 {
-        return Err("extrude_overlay_2d requires a 3D Evaluated model and a 2D overlay mesh".into());
-    }
-    let labels = ev.label_map().map_err(|e| e.to_string())?;
-    let cx = ev.complex();
-    let st = cx.stack.as_ref().ok_or("extrude_overlay_2d requires a prismatic layer stack")?;
-    let ov = &st.overlay;
-    let tol = cx.tol;
-
-    let nr = ev.regions().len();
-    let meshable: Vec<bool> =
-        (0..nr).map(|r| !matches!(labels.domains[r].kind, RegionKind::Hole | RegionKind::Void)).collect();
-
-    let ntri2 = m2.n_cells();
-    let n2 = m2.n_points();
-    let tri_ov_cell: Vec<usize> = m2.cell_labels.iter().map(|&l| (l - 1) as usize).collect();
-    let pt2 = |v: u32| -> V2 { [m2.points[2 * v as usize], m2.points[2 * v as usize + 1]] };
-
-    // Map 2D mesh edges separating distinct overlay cells (or outer boundary) to overlay edge ids
-    let mut edge2_sides: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
-    for (ti, &c) in tri_ov_cell.iter().enumerate() {
-        let v = m2.cell(ti);
-        for (a, b) in [(v[0], v[1]), (v[1], v[2]), (v[2], v[0])] {
-            edge2_sides.entry((a.min(b), a.max(b))).or_default().push(c);
-        }
-    }
-    let mut bnd_edges2: Vec<(u32, u32, u32)> = Vec::new();
-    let mut edge_list: Vec<((u32, u32), Vec<usize>)> = edge2_sides.into_iter().collect();
-    edge_list.sort_by_key(|x| x.0);
-    for &((a, b), ref sides) in &edge_list {
-        let (c0, c1) = match sides.as_slice() {
-            [c0] => (Some(*c0 as u32), None),
-            [c0, c1] if c0 != c1 => (Some(*c0 as u32), Some(*c1 as u32)),
-            _ => continue,
-        };
-        let (pa, pb) = (pt2(a), pt2(b));
-        let mid = [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1])];
-        let mut best: Option<(f64, u32)> = None;
-        for pass in 0..2 {
-            for (ei, ed) in ov.edges.iter().enumerate() {
-                if pass == 0 && !((ed.left == c0 && ed.right == c1) || (ed.left == c1 && ed.right == c0)) {
-                    continue;
-                }
-                let d = dist2(ov.project_edge(ei as u32, mid), mid);
-                if best.is_none_or(|(bd, _)| d < bd) {
-                    best = Some((d, ei as u32));
-                }
-            }
-            if best.is_some() {
-                break;
-            }
-        }
-        if let Some((_, oe)) = best {
-            bnd_edges2.push((a, b, oe));
-        }
-    }
-
-    // Infer characteristic sheet vertical step `dz` at each sheet plane `z` from `m2` triangle edges on the sheet
-    let sheet_dz_at = |z: f64, default_h: f64| -> Option<f64> {
-        let mut sheet_cells = vec![false; ov.regions.len()];
-        let mut any = false;
-        for f in &cx.faces {
-            if f.is_sheet() {
-                if let FaceGeom::Cap { cell, z: fz } = f.geom {
-                    if (fz - z).abs() <= tol {
-                        sheet_cells[cell as usize] = true;
-                        any = true;
-                    }
-                }
-            }
-        }
-        if !any {
-            return None;
-        }
-        if let Some(ovr) = sheet_dz_override {
-            return Some(ovr.min(default_h));
-        }
-        let mut min_edge = default_h;
-        for (ti, &ov_c) in tri_ov_cell.iter().enumerate() {
-            if ov_c < sheet_cells.len() && sheet_cells[ov_c] {
-                let v = m2.cell(ti);
-                for (a, b) in [(v[0], v[1]), (v[1], v[2]), (v[2], v[0])] {
-                    min_edge = min_edge.min(dist2(pt2(a), pt2(b)));
-                }
-            }
-        }
-        // Prevent extreme pancake slab ratios while resolving fine rim scales
-        Some(min_edge.max(default_h * 1e-3).min(default_h))
-    };
-
-    let mut z_planes: Vec<f64> = Vec::new();
-    let mut slab_layer: Vec<Option<usize>> = Vec::new();
-    for (k, l) in st.layers.iter().enumerate() {
-        let active_in_layer = l.region_of.iter().flatten().any(|&r| meshable[r as usize]);
-        if !active_in_layer {
-            continue;
-        }
-        let dz0 = sheet_dz_at(l.z0, h_global).unwrap_or(h_global);
-        let dz1 = sheet_dz_at(l.z1, h_global).unwrap_or(h_global);
-        let zs = subdivide_z_interval(l.z0, l.z1, dz0, dz1, h_global, 1.35);
-        if let Some(&last_z) = z_planes.last() {
-            if (l.z0 - last_z).abs() > tol {
-                z_planes.push(l.z0);
-                slab_layer.push(None);
-            }
-        } else {
-            z_planes.push(zs[0]);
-        }
-        for &zk in &zs[1..] {
-            z_planes.push(zk);
-            slab_layer.push(Some(k));
-        }
-    }
-    if z_planes.len() < 2 {
-        return Err("the 3D model has no active layers to mesh".into());
-    }
-    let nz = z_planes.len();
-    let nslab = nz - 1;
-
-    let nf = cx.faces.len();
-    let face_label: Vec<i32> = (0..nf as u32)
-        .map(|fi| labels.label_of_edge(fi).ok_or_else(|| format!("face '{}' has no boundary label", cx.facet_name(fi))))
-        .collect::<Result<Vec<i32>, String>>()?;
-    let face_normal: Vec<V3> = (0..nf as u32)
-        .map(|fi| cx.facet_normals(fi).into_iter().next().unwrap_or([0.0, 0.0, 1.0]))
-        .collect();
-
-    let mut cap_at: HashMap<(u32, usize), usize> = HashMap::new();
-    let mut lat_at: HashMap<(u32, usize), usize> = HashMap::new();
-    for (fi, f) in cx.faces.iter().enumerate() {
-        let eff = |r: Option<u32>| r.filter(|&r| meshable[r as usize]);
-        if eff(f.first).is_none() && eff(f.second).is_none() {
-            continue;
-        }
-        match f.geom {
-            FaceGeom::Cap { cell, z } => {
-                if let Some(zp) = z_planes.iter().position(|&zp| (zp - z).abs() <= tol) {
-                    cap_at.insert((cell, zp), fi);
-                }
-            }
-            FaceGeom::Lateral { edge, z0, z1 } => {
-                for (k, l) in st.layers.iter().enumerate() {
-                    if l.z0 >= z0 - tol && l.z1 <= z1 + tol {
-                        lat_at.insert((edge, k), fi);
-                    }
-                }
-            }
-            FaceGeom::Quadric(_) | FaceGeom::Planar { .. } => {}
-        }
-    }
-
-    let mut used_v = vec![u32::MAX; nz * n2];
-    for (s, &layer_opt) in slab_layer.iter().enumerate() {
-        let Some(k) = layer_opt else { continue };
-        let l = &st.layers[k];
-        for (ti, &ov_c) in tri_ov_cell.iter().enumerate().take(ntri2) {
-            let Some(r) = l.region_of[ov_c] else { continue };
-            if !meshable[r as usize] {
-                continue;
-            }
-            for &v in m2.cell(ti) {
-                used_v[s * n2 + v as usize] = 0;
-                used_v[(s + 1) * n2 + v as usize] = 0;
-            }
-        }
-    }
-
-    let mut points: Vec<f64> = Vec::new();
-    let mut n_pts3 = 0u32;
-    for zp in 0..nz {
-        let z = z_planes[zp];
-        for v2 in 0..n2 {
-            let slot = &mut used_v[zp * n2 + v2];
-            if *slot == 0 {
-                *slot = n_pts3;
-                n_pts3 += 1;
-                let p2 = pt2(v2 as u32);
-                let pw = cx.wv([p2[0], p2[1], z]);
-                points.extend_from_slice(&pw);
-            }
-        }
-    }
-    let vid = |v2: u32, zp: usize| -> u32 { used_v[zp * n2 + v2 as usize] };
-    let pt3 = |v3: u32| -> V3 {
-        let i = 3 * v3 as usize;
-        [points[i], points[i + 1], points[i + 2]]
-    };
-    let det3 = |a: V3, b: V3, c: V3| -> f64 {
-        a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])
-    };
-
-    let mut cells: Vec<u32> = Vec::new();
-    let mut cell_labels: Vec<i32> = Vec::new();
-    for (s, &layer_opt) in slab_layer.iter().enumerate() {
-        let Some(k) = layer_opt else { continue };
-        let l = &st.layers[k];
-        for (ti, &ov_c) in tri_ov_cell.iter().enumerate().take(ntri2) {
-            let Some(r) = l.region_of[ov_c] else { continue };
-            if !meshable[r as usize] {
-                continue;
-            }
-            let dom_id = labels.domains[r as usize].id;
-            let mut v = [m2.cell(ti)[0], m2.cell(ti)[1], m2.cell(ti)[2]];
-            v.sort_unstable();
-            let (b0, b1, b2) = (vid(v[0], s), vid(v[1], s), vid(v[2], s));
-            let (t0, t1, t2) = (vid(v[0], s + 1), vid(v[1], s + 1), vid(v[2], s + 1));
-            for mut tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
-                let (p0, p1, p2, p3) = (pt3(tet[0]), pt3(tet[1]), pt3(tet[2]), pt3(tet[3]));
-                if det3(sub3(p1, p0), sub3(p2, p0), sub3(p3, p0)) < 0.0 {
-                    tet.swap(1, 2);
-                }
-                cells.extend_from_slice(&tet);
-                cell_labels.push(dom_id);
-            }
-        }
-    }
-
-    let mut facets: Vec<u32> = Vec::new();
-    let mut facet_labels: Vec<i32> = Vec::new();
-    let mut push_oriented_tri = |mut tri: [u32; 3], fi: usize| {
-        let (p0, p1, p2) = (pt3(tri[0]), pt3(tri[1]), pt3(tri[2]));
-        let n = cross3(sub3(p1, p0), sub3(p2, p0));
-        if dot3(n, face_normal[fi]) < 0.0 {
-            tri.swap(1, 2);
-        }
-        facets.extend_from_slice(&tri);
-        facet_labels.push(face_label[fi]);
-    };
-
-    for zp in 0..nz {
-        for (ti, &ov_c) in tri_ov_cell.iter().enumerate().take(ntri2) {
-            if let Some(&fi) = cap_at.get(&(ov_c as u32, zp)) {
-                let v = m2.cell(ti);
-                let tri = [vid(v[0], zp), vid(v[1], zp), vid(v[2], zp)];
-                if tri.iter().all(|&w| w != u32::MAX) {
-                    push_oriented_tri(tri, fi);
-                }
-            }
-        }
-    }
-
-    for &(a, b, oe) in &bnd_edges2 {
-        let (a, b) = (a.min(b), a.max(b));
-        for (s, &layer_opt) in slab_layer.iter().enumerate().take(nslab) {
-            let Some(k) = layer_opt else { continue };
-            if let Some(&fi) = lat_at.get(&(oe, k)) {
-                let (ba, bb, ta, tb) = (vid(a, s), vid(b, s), vid(a, s + 1), vid(b, s + 1));
-                if [ba, bb, ta, tb].iter().all(|&w| w != u32::MAX) {
-                    push_oriented_tri([ba, bb, tb], fi);
-                    push_oriented_tri([ba, tb, ta], fi);
-                }
-            }
-        }
-    }
-
-    let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
-    Ok(MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) })
+    build_sized_overlay_mesh_2d(ev, plan, None)
 }
 
 /// Identifies vertices of a 3D `SimplexMesh` lying on open 1D perimeter rims of `sheet_labels`
@@ -677,4 +343,18 @@ pub fn sheet_rim_vertices_3d(mesh: &SimplexMesh, sheet_labels: &[i32]) -> Vec<bo
 /// onto exact `Complex::edges3`, and emitting each sheet facet once without duplicating interface facets.
 pub fn adapt_sheet_full_3d(g: MeshedGeom, metrics: &[Sym<3>], a: &Adaptive) -> Result<(MeshedGeom, AdaptReport), String> {
     adapt_to_metrics3(g, metrics, a)
+}
+
+/// Same as [`adapt_sheet_full_3d`], and re-applies `AF-5` (`curved`) + `AF-2` (`quarter_point`)
+/// `EdgeNodes` enrichment according to `plan`.
+pub fn adapt_sheet_full_3d_with_plan(
+    g: MeshedGeom,
+    metrics: &[Sym<3>],
+    a: &Adaptive,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<(MeshedGeom, AdaptReport), String> {
+    let (mut g_out, report) = adapt_to_metrics3(g, metrics, a)?;
+    crate::meshing::sheet3d::apply_sheet_post_enrichment(&mut g_out, plan, waves);
+    Ok((g_out, report))
 }

@@ -28,9 +28,11 @@
 pub mod optical;
 pub mod edge;
 pub mod expr;
+pub mod farfield;
 pub mod fieldexpr;
 pub mod formula;
 pub mod fem;
+pub mod rt;
 pub mod fields;
 pub mod material;
 pub mod adapt;

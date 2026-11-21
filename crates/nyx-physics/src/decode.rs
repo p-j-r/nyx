@@ -112,15 +112,32 @@ impl<'a> Params<'a> {
 /// where the material is anisotropic or oriented, and `eps_r` from the optical model at `ctx.wavelength` where the material has one.
 pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> Result<Materials, Error> {
     let mut m = Materials::default();
+    let is_quasi_static_electro = spec.physics == "dfs" && spec.study.kind == "electrostatic";
+    let has_eps_r = props.iter().any(|d| d.name == "eps_r");
+    let find_prop_kind =
+        |name: &str| -> Option<PropKind> {
+            props.iter().find(|d| d.name == name).map(|d| d.kind).or_else(|| {
+                (has_eps_r && matches!(name, "tan_delta" | "sigma" | "eps_r_im")).then_some(PropKind::Tensor)
+            })
+        };
     let spec_freq = spec
         .study
         .params
         .get("freq")
+        .or_else(|| spec.study.params.get("frequency"))
         .and_then(Value::as_f64)
         .or_else(|| spec.study.params.get("f_search").and_then(Value::as_f64))
         .filter(|&f| f > 0.0 && f.is_finite());
-    let freq_hz =
-        ctx.frequency.or_else(|| ctx.wavelength.filter(|&l| l > 0.0).map(|l| 299_792_458.0 / l)).or(spec_freq);
+    let freq_hz = ctx
+        .frequency
+        .or_else(|| {
+            (!is_quasi_static_electro)
+                .then_some(ctx.wavelength)
+                .flatten()
+                .filter(|&l| l > 0.0)
+                .map(|l| 299_792_458.0 / l)
+        })
+        .or(spec_freq);
     let temp_k = ctx
         .temperature
         .or_else(|| spec.params.get("temperature").and_then(Value::as_f64).filter(|&t| t > 0.0 && t.is_finite()));
@@ -129,7 +146,7 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
         match assign {
             MaterialAssign::Props(map) => {
                 for (name, v) in map {
-                    if !props.iter().any(|d| &d.name == name) {
+                    if find_prop_kind(name).is_none() {
                         return Err(Error::invalid(format!("region '{region}': unknown property '{name}'")));
                     }
                     for &l in &labels {
@@ -138,8 +155,9 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                 }
             }
             MaterialAssign::PropsTensor(map) => {
+                let mut inline_td_tensor: Option<femcore::material::Tensor> = None;
                 for (name, v) in map {
-                    let Some(desc) = props.iter().find(|d| &d.name == name) else {
+                    let Some(prop_kind) = find_prop_kind(name) else {
                         return Err(Error::invalid(format!("region '{region}': unknown property '{name}'")));
                     };
                     match v {
@@ -154,7 +172,7 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                             }
                         }
                         PropValue::Diag([x, y, z]) => {
-                            if desc.kind != PropKind::Tensor {
+                            if prop_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -171,11 +189,15 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                 }
                             } else {
                                 let tensor = femcore::material::Tensor::Diagonal { x: *x, y: *y, z: *z };
-                                set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                                if name == "tan_delta" {
+                                    inline_td_tensor = Some(tensor);
+                                } else {
+                                    set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                                }
                             }
                         }
                         PropValue::Sym6([xx, yy, zz, xy, xz, yz]) => {
-                            if desc.kind != PropKind::Tensor {
+                            if prop_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -199,11 +221,15 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                     yz: *yz,
                                     xz: *xz,
                                 };
-                                set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                                if name == "tan_delta" {
+                                    inline_td_tensor = Some(tensor);
+                                } else {
+                                    set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                                }
                             }
                         }
                         PropValue::Matrix(mat) => {
-                            if desc.kind != PropKind::Tensor {
+                            if prop_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -236,16 +262,32 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                     yz: 0.5 * (mat[1][2] + mat[2][1]),
                                     xz: 0.5 * (mat[0][2] + mat[2][0]),
                                 };
-                                set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                                if name == "tan_delta" {
+                                    inline_td_tensor = Some(tensor);
+                                } else {
+                                    set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                                }
                             }
                         }
                     }
                 }
+                apply_inline_tan_delta_tensors(&mut m, &labels, inline_td_tensor.as_ref());
             }
-            MaterialAssign::Named(n) => named(&mut m, region, &labels, n, [0.0; 3], ctx, freq_hz, temp_k, props)?,
-            MaterialAssign::Oriented { material, euler_deg } => {
-                named(&mut m, region, &labels, material, *euler_deg, ctx, freq_hz, temp_k, props)?
+            MaterialAssign::Named(n) => {
+                named(&mut m, region, &labels, n, [0.0; 3], ctx, freq_hz, temp_k, props, is_quasi_static_electro)?
             }
+            MaterialAssign::Oriented { material, euler_deg } => named(
+                &mut m,
+                region,
+                &labels,
+                material,
+                *euler_deg,
+                ctx,
+                freq_hz,
+                temp_k,
+                props,
+                is_quasi_static_electro,
+            )?,
         }
     }
     Ok(m)
@@ -274,7 +316,7 @@ fn set_inline_tensor(
         match name {
             "eps_r" => an.permittivity = Some(tensor.clone()),
             "eps_r_im" => an.permittivity_im = Some(tensor.clone()),
-            "k" => an.conductivity = Some(tensor.clone()),
+            "k" | "sigma" => an.conductivity = Some(tensor.clone()),
             "alpha" => an.expansion = Some(tensor.clone()),
             _ => {
                 return Err(Error::invalid(format!(
@@ -284,6 +326,40 @@ fn set_inline_tensor(
         }
     }
     Ok(())
+}
+
+fn apply_inline_tan_delta_tensors(
+    m: &mut Materials,
+    labels: &[i32],
+    inline_td_tensor: Option<&femcore::material::Tensor>,
+) {
+    let Some(td_t) = inline_td_tensor else { return };
+    let td_m = femcore::material::tensor_global(td_t, [0.0; 3]);
+    for &l in labels {
+        let eps_m = m
+            .aniso
+            .get(&l)
+            .and_then(|an| an.permittivity.as_ref())
+            .map(|t| femcore::material::tensor_global(t, [0.0; 3]))
+            .unwrap_or_else(|| {
+                let s = m.get(l, "eps_r").unwrap_or(1.0);
+                [[s, 0.0, 0.0], [0.0, s, 0.0], [0.0, 0.0, s]]
+            });
+        let mut im = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                let mut s1 = 0.0;
+                let mut s2 = 0.0;
+                for k in 0..3 {
+                    s1 += eps_m[i][k] * td_m[k][j];
+                    s2 += td_m[i][k] * eps_m[k][j];
+                }
+                im[i][j] = 0.5 * (s1 + s2);
+            }
+        }
+        let an = m.aniso.entry(l).or_default();
+        an.permittivity_im = Some(m3_to_sym_tensor(&im));
+    }
 }
 
 fn m3_to_sym_tensor(m: &femcore::material::M3) -> femcore::material::Tensor {
@@ -314,6 +390,7 @@ fn named(
     freq_hz: Option<f64>,
     temp_k: Option<f64>,
     props: &[PropDesc],
+    is_quasi_static_electro: bool,
 ) -> Result<(), Error> {
     use femcore::material::{Class, Tensor};
     let lib = ctx.library.as_ref().ok_or_else(|| {
@@ -344,7 +421,7 @@ fn named(
         }
     }
     for (k, v) in &legacy {
-        if wants(k) {
+        if wants(k) || (wants("eps_r") && matches!(k.as_str(), "tan_delta" | "sigma" | "eps_r_im")) {
             for &l in labels {
                 m.set(l, k, *v);
             }
@@ -368,7 +445,14 @@ fn named(
             (t, _) => t.clone(),
         }
     };
-    an.conductivity = if wants("k") { keep(&an.conductivity, legacy.get("k").copied()) } else { None };
+    an.conductivity = if wants("k") {
+        keep(&an.conductivity, legacy.get("k").copied())
+    } else if wants("sigma") || (wants("eps_r") && !wants("k")) {
+        let sig_t = mat.electrical.conductivity.as_ref().map(|tp| m3_to_sym_tensor(&tp.matrix()));
+        keep(&sig_t, legacy.get("sigma").copied())
+    } else {
+        None
+    };
     an.expansion = if wants("alpha") { keep(&an.expansion, legacy.get("alpha").copied()) } else { None };
     an.permittivity = if wants("eps_r") { keep(&an.permittivity, legacy.get("eps_r").copied()) } else { None };
     if !wants("E") {
@@ -381,8 +465,10 @@ fn named(
         an.permittivity = None;
         an.permittivity_im = None;
     } else {
-        // Optical dispersion applies when an optical/THz wavelength (<= 300 um, f >= 1 THz) is given and the material has [optical].
-        let use_optical = mat.optical.is_some() && ctx.wavelength.is_some_and(|lam| lam <= 3e-4);
+        // Optical dispersion applies when an optical/THz wavelength (<= 300 um, f >= 1 THz) is given and the material has [optical],
+        // never for quasi-static dfs electrostatic studies.
+        let use_optical =
+            !is_quasi_static_electro && mat.optical.is_some() && ctx.wavelength.is_some_and(|lam| lam <= 3e-4);
         if use_optical {
             let lambda = ctx.wavelength.unwrap();
             an.permittivity_im = None;
@@ -450,6 +536,9 @@ fn named(
                 if is_isotropic_m3(&im_glob) && an.permittivity.is_none() {
                     for &l in labels {
                         m.set(l, "eps_r_im", im_glob[0][0]);
+                        if re_glob[0][0].abs() > 0.0 {
+                            m.set(l, "tan_delta", im_glob[0][0] / re_glob[0][0]);
+                        }
                     }
                     an.permittivity_im = None;
                 } else {

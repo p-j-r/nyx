@@ -63,17 +63,35 @@ pub fn load_library(dirs: &[PathBuf]) -> (Library, Vec<String>) {
     (Library::default(), notes)
 }
 
-/// The frequency (Hz) of a study, from the first parameter of the study descriptor with the unit Hz (given, else its default); the free-space
-/// wavelength follows. `None` for a study without a frequency.
-pub fn study_wavelength(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
+/// The frequency (Hz) of a study, from the first parameter of the study descriptor with the unit Hz (given, else its default),
+/// or an explicit `"freq"` / `"frequency"` study parameter.
+pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
     use nyx_physics::ParamKind;
     let studies = p.studies();
     let sd = studies.iter().find(|s| s.kind == spec.study.kind)?;
-    let d = sd.params.iter().find(|d| d.unit == "Hz")?;
-    let f = spec.study.params.get(&d.name).and_then(Value::as_f64).or(match d.kind {
-        ParamKind::Number { default, .. } => Some(default),
-        _ => None,
-    })?;
+    if let Some(d) = sd.params.iter().find(|d| d.unit == "Hz") {
+        let f = spec.study.params.get(&d.name).and_then(Value::as_f64).or(match d.kind {
+            ParamKind::Number { default, .. } => Some(default),
+            _ => None,
+        })?;
+        return (f >= 0.0 && f.is_finite()).then_some(f);
+    }
+    spec.study
+        .params
+        .get("freq")
+        .or_else(|| spec.study.params.get("frequency"))
+        .and_then(Value::as_f64)
+        .filter(|&f| f >= 0.0 && f.is_finite())
+}
+
+/// The frequency (Hz) of a study, from the first parameter of the study descriptor with the unit Hz (given, else its default); the free-space
+/// wavelength follows. `None` for a study without a frequency, or for quasi-static `dfs` `electrostatic` studies where `freq` evaluates
+/// `[dielectric]` / `[electrical]` AC loss rather than `[optical]` dispersion.
+pub fn study_wavelength(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
+    if p.id() == "dfs" && spec.study.kind == "electrostatic" {
+        return None;
+    }
+    let f = study_frequency(p, spec)?;
     (f > 0.0 && f.is_finite()).then(|| 299_792_458.0 / f)
 }
 

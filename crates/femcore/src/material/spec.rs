@@ -67,6 +67,9 @@ pub struct Electrical {
     pub permeability: Option<f64>,
     /// S/m
     pub conductivity: Option<TensorProp>,
+    /// dimensionless dielectric loss tangent `tan(delta)`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loss_tangent: Option<TensorProp>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -390,7 +393,25 @@ impl MaterialSpec {
             let mu = t.number("permeability")?;
             electrical.permeability = positive(&t, "permeability", mu, "the relative permeability")?;
             electrical.conductivity = TensorProp::read(&mut t, "conductivity", Dim::ElectricalConductivity, Requirement::NonNegative, "electrical conductivity")?;
-            t.finish(ELECTRICAL_KEYS)?;
+            if electrical.conductivity.is_none() {
+                electrical.conductivity = TensorProp::read(&mut t, "sigma", Dim::ElectricalConductivity, Requirement::NonNegative, "electrical conductivity")?;
+            }
+            electrical.loss_tangent = TensorProp::read(&mut t, "loss_tangent", Dim::Dimensionless, Requirement::NonNegative, "dielectric loss tangent")?;
+            if electrical.loss_tangent.is_none() {
+                electrical.loss_tangent = TensorProp::read(&mut t, "tan_delta", Dim::Dimensionless, Requirement::NonNegative, "dielectric loss tangent")?;
+            }
+            const ELECTRICAL_PARSE_KEYS: &[&str] = &[
+                "source",
+                "permittivity",
+                "permeability",
+                "conductivity",
+                "conductivity_unit",
+                "sigma",
+                "sigma_unit",
+                "loss_tangent",
+                "tan_delta",
+            ];
+            t.finish(ELECTRICAL_PARSE_KEYS)?;
         }
 
         let dielectric = s.sub("dielectric")?.map(|mut d| Dielectric::read(&mut d)).transpose()?;
@@ -543,6 +564,7 @@ impl MaterialSpec {
             el.insert("permeability".into(), toml::Value::Float(m));
         }
         put_tensor(&mut el, "conductivity", self.electrical.conductivity.as_ref(), Some("S/m"));
+        put_tensor(&mut el, "loss_tangent", self.electrical.loss_tangent.as_ref(), None);
         if !el.is_empty() {
             t.insert("electrical".into(), toml::Value::Table(el));
         }
@@ -666,7 +688,7 @@ impl MaterialSpec {
         prefer_free: bool,
         euler_deg: [f64; 3],
     ) -> Option<(M3, M3)> {
-        let (mut re_cryst, im_cryst) = if let Some(dl) = &self.dielectric {
+        let (mut re_cryst, mut im_cryst) = if let Some(dl) = &self.dielectric {
             if let Some((re, im)) = dl.complex_permittivity(freq_hz, temp_k, e_field_v_per_m, prefer_free) {
                 (re, im)
             } else {
@@ -680,6 +702,22 @@ impl MaterialSpec {
         if prefer_free && self.dielectric.as_ref().and_then(|d| d.eps_free.as_ref()).is_none() {
             if let Some(free_re) = self.permittivity_free() {
                 re_cryst = free_re;
+            }
+        }
+        if !im_cryst.iter().flatten().any(|&v| v > 0.0) {
+            if let Some(td) = &self.electrical.loss_tangent {
+                let td_m = td.matrix();
+                for i in 0..3 {
+                    for j in 0..3 {
+                        let mut s1 = 0.0;
+                        let mut s2 = 0.0;
+                        for k in 0..3 {
+                            s1 += re_cryst[i][k] * td_m[k][j];
+                            s2 += td_m[i][k] * re_cryst[k][j];
+                        }
+                        im_cryst[i][j] = 0.5 * (s1 + s2);
+                    }
+                }
             }
         }
         let r = rotation(euler_deg);
@@ -740,7 +778,24 @@ impl MaterialSpec {
             .as_ref()
             .and_then(|d| d.complex_permittivity(None, self.reference_temperature, None, false))
             .map(|(_, im)| im)
-            .filter(|im| im.iter().flatten().any(|&v| v > 0.0));
+            .filter(|im| im.iter().flatten().any(|&v| v > 0.0))
+            .or_else(|| {
+                let re_cryst = perm_cryst?;
+                let td_m = self.electrical.loss_tangent.as_ref()?.matrix();
+                let mut im = [[0.0; 3]; 3];
+                for i in 0..3 {
+                    for j in 0..3 {
+                        let mut s1 = 0.0;
+                        let mut s2 = 0.0;
+                        for k in 0..3 {
+                            s1 += re_cryst[i][k] * td_m[k][j];
+                            s2 += td_m[i][k] * re_cryst[k][j];
+                        }
+                        im[i][j] = 0.5 * (s1 + s2);
+                    }
+                }
+                im.iter().flatten().any(|&v| v > 0.0).then_some(im)
+            });
         let ce_voigt = self.elastic.as_ref().map(|e| solver_to_voigt_m6(&e.c));
         let piezo_e = self
             .piezoelectric
@@ -748,7 +803,12 @@ impl MaterialSpec {
             .and_then(|pz| pz.stress_charge(ce_voigt.as_ref()).ok());
         Anisotropy {
             stiffness: self.elastic.as_ref().map(|e| Stiffness::General(e.c)),
-            conductivity: self.thermal.conductivity.as_ref().map(TensorProp::to_legacy),
+            conductivity: self
+                .thermal
+                .conductivity
+                .as_ref()
+                .or(self.electrical.conductivity.as_ref())
+                .map(TensorProp::to_legacy),
             permittivity: perm_cryst.map(|m| m3_to_tensor(&m)),
             expansion: self.thermal.expansion.as_ref().map(TensorProp::to_legacy),
             euler_deg,
@@ -779,6 +839,7 @@ impl MaterialSpec {
                     .and_then(TensorProp::as_scalar)
             }),
         );
+        put("sigma", self.electrical.conductivity.as_ref().and_then(TensorProp::as_scalar));
         put("k", self.thermal.conductivity.as_ref().and_then(TensorProp::as_scalar));
         put("alpha", self.thermal.expansion.as_ref().and_then(TensorProp::as_scalar));
         if let Some(e) = &self.elastic {
@@ -788,8 +849,15 @@ impl MaterialSpec {
                 put("nu", Some(lam / (2.0 * (lam + mu))));
             }
         }
+        put(
+            "tan_delta",
+            self.dielectric
+                .as_ref()
+                .and_then(|dl| dl.loss_tangent.as_ref())
+                .or(self.electrical.loss_tangent.as_ref())
+                .and_then(TensorProp::as_scalar),
+        );
         if let Some(dl) = &self.dielectric {
-            put("tan_delta", dl.loss_tangent.as_ref().and_then(TensorProp::as_scalar));
             put("tls_tan_delta_0", dl.tls_tan_delta_0);
         }
         if let Some(sc) = &self.superconducting {

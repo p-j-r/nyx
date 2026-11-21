@@ -76,7 +76,7 @@ fn adapted_interface_vertices_lie_on_the_circle_and_the_core_area_converges() {
     // a coarse chord polygon on purpose: max_dev h/4
     let mut plan = MeshPlan::adaptive(0.25, 0.4);
     plan.opts.max_dev = Some(0.25 / 4.0);
-    let simple_plan = MeshPlan { mesher: Mesher::Simple, ..plan };
+    let simple_plan = MeshPlan { mesher: Mesher::Simple, ..plan.clone() };
     let simple = mesh_model(&m.list, &simple_plan).unwrap();
     let adapted = mesh_model(&m.list, &plan).unwrap();
     let core = adapted.domain("core").unwrap();

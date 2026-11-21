@@ -70,6 +70,56 @@
     },
     {
       "applies": "boundary",
+      "doc": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+      "kind": "far_field",
+      "name": "Far-field open boundary",
+      "params": [
+        {
+          "doc": "1: first-order multipole Robin condition; 2: 3D second-order symmetric Laplace-Beltrami correction",
+          "kind": {
+            "default": 1,
+            "max": 2,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Asymptotic order",
+          "name": "order",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "asymptotic potential decay power gamma > 0 (V ~ r^-gamma; 1.0 for monopole, 2.0 for dipole)",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Decay power",
+          "name": "decay_power",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional multipole expansion center [cx, cy, cz]; omit to use conductor area-weighted centroid",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Multipole center",
+          "name": "center",
+          "required": false,
+          "unit": "m"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
       "doc": "Fixed temperature (heat transfer).",
       "kind": "temperature",
       "name": "Temperature",
@@ -449,6 +499,26 @@
     },
     {
       "default": 0.0,
+      "kind": "tensor",
+      "label": "Dielectric loss tangent",
+      "name": "tan_delta",
+      "needed_by": [
+        "electrostatic"
+      ],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "tensor",
+      "label": "Electrical conductivity",
+      "name": "sigma",
+      "needed_by": [
+        "electrostatic"
+      ],
+      "unit": "S/m"
+    },
+    {
+      "default": 0.0,
       "kind": "scalar",
       "label": "Charge density",
       "name": "rho_v",
@@ -624,6 +694,58 @@
                   "required": [
                     "name"
                   ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+              "properties": {
+                "kind": {
+                  "const": "far_field"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "center": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Multipole center [m]. optional multipole expansion center [cx, cy, cz]; omit to use conductor area-weighted centroid",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "decay_power": {
+                      "default": 1.0,
+                      "description": "Decay power. asymptotic potential decay power gamma > 0 (V ~ r^-gamma; 1.0 for monopole, 2.0 for dipole)",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "order": {
+                      "default": 1,
+                      "description": "Asymptotic order. 1: first-order multipole Robin condition; 2: 3D second-order symmetric Laplace-Beltrami correction",
+                      "maximum": 2,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [],
                   "type": "object"
                 }
               },
@@ -981,6 +1103,80 @@
                 "rho_v": {
                   "description": "Charge density [C/m^3]",
                   "type": "number"
+                },
+                "sigma": {
+                  "description": "Electrical conductivity [S/m]",
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "tan_delta": {
+                  "description": "Dielectric loss tangent []",
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  ]
                 }
               },
               "type": "object"
@@ -1039,6 +1235,60 @@
               "params": {
                 "additionalProperties": false,
                 "properties": {
+                  "adapt_estimator": {
+                    "default": "flux_jump_goal",
+                    "description": "Adaptive error estimator. a posteriori cell error indicator driving h-adaptation",
+                    "enum": [
+                      "flux_jump_goal",
+                      "prager_synge",
+                      "hessian"
+                    ],
+                    "type": "string"
+                  },
+                  "adapt_growth": {
+                    "default": 1.35,
+                    "description": "Adaptive cell growth factor. target mesh complexity / cell growth factor per adaptive pass (> 1)",
+                    "minimum": 1.000000001,
+                    "type": "number"
+                  },
+                  "adapt_min_converged_passes": {
+                    "default": 1,
+                    "description": "Minimum converged passes. consecutive passes below adapt_rel_tol required to stop",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "adapt_mode": {
+                    "default": "auto",
+                    "description": "Adaptive meshing mode. auto: sheet_2d_z on 3D sheet stacks, full_3d on general 3D, 2D metric adaptation in 2D",
+                    "enum": [
+                      "auto",
+                      "sheet_2d_z",
+                      "full_3d"
+                    ],
+                    "type": "string"
+                  },
+                  "adapt_passes": {
+                    "default": 1,
+                    "description": "Adaptive passes. number of goal-oriented h-adaptive mesh refinement passes (1 disables AMR)",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "adapt_rel_tol": {
+                    "default": 0.001,
+                    "description": "Adaptive relative tolerance. pass-to-pass relative capacitance convergence threshold",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "flux_bounds": {
+                    "default": "none",
+                    "description": "Complementary flux bounds. Prager-Synge H(div) equilibrated-flux lower/upper capacitance bounds; midpoint sets C = 0.5 * (C^up + C^low)",
+                    "enum": [
+                      "none",
+                      "report",
+                      "midpoint"
+                    ],
+                    "type": "string"
+                  },
                   "formulation": {
                     "default": "volumetric_fem",
                     "description": "Formulation. volumetric_fem: 2D/3D finite elements; planar_bem: 2D layered-dielectric boundary elements on planar conductor sheets; auto: planar_bem when applicable, otherwise volumetric_fem",
@@ -1048,6 +1298,12 @@
                       "auto"
                     ],
                     "type": "string"
+                  },
+                  "freq": {
+                    "default": 0.0,
+                    "description": "Operating frequency [Hz]. operating frequency for AC quasi-static dielectric loss (G and Q_diel; 0 for DC)",
+                    "minimum": 0.0,
+                    "type": "number"
                   },
                   "richardson": {
                     "default": false,
@@ -1221,6 +1477,119 @@
           "name": "richardson",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "number of goal-oriented h-adaptive mesh refinement passes (1 disables AMR)",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Adaptive passes",
+          "name": "adapt_passes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "pass-to-pass relative capacitance convergence threshold",
+          "kind": {
+            "default": 0.001,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Adaptive relative tolerance",
+          "name": "adapt_rel_tol",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "consecutive passes below adapt_rel_tol required to stop",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Minimum converged passes",
+          "name": "adapt_min_converged_passes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "target mesh complexity / cell growth factor per adaptive pass (> 1)",
+          "kind": {
+            "default": 1.35,
+            "max": null,
+            "min": 1.000000001,
+            "type": "number"
+          },
+          "label": "Adaptive cell growth factor",
+          "name": "adapt_growth",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto: sheet_2d_z on 3D sheet stacks, full_3d on general 3D, 2D metric adaptation in 2D",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "sheet_2d_z",
+              "full_3d"
+            ],
+            "type": "choice"
+          },
+          "label": "Adaptive meshing mode",
+          "name": "adapt_mode",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "a posteriori cell error indicator driving h-adaptation",
+          "kind": {
+            "default": "flux_jump_goal",
+            "options": [
+              "flux_jump_goal",
+              "prager_synge",
+              "hessian"
+            ],
+            "type": "choice"
+          },
+          "label": "Adaptive error estimator",
+          "name": "adapt_estimator",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "Prager-Synge H(div) equilibrated-flux lower/upper capacitance bounds; midpoint sets C = 0.5 * (C^up + C^low)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "report",
+              "midpoint"
+            ],
+            "type": "choice"
+          },
+          "label": "Complementary flux bounds",
+          "name": "flux_bounds",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "operating frequency for AC quasi-static dielectric loss (G and Q_diel; 0 for DC)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Operating frequency",
+          "name": "freq",
+          "required": false,
+          "unit": "Hz"
         }
       ]
     },

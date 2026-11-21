@@ -30,6 +30,26 @@ fn check_factor(factor: f64) -> Result<(), Error> {
     Ok(())
 }
 
+fn project_has_multi_pass_amr(p: &Project) -> bool {
+    p.physics.iter().any(|s| {
+        s.physics == "dfs"
+            && s.study.kind == "electrostatic"
+            && s.study.params.get("adapt_passes").and_then(Value::as_i64).unwrap_or(1) > 1
+    })
+}
+
+fn force_single_adapt_pass(p: &mut Project) {
+    for s in &mut p.physics {
+        if s.physics == "dfs" && s.study.kind == "electrostatic" {
+            if let Some(obj) = s.study.params.as_object_mut() {
+                if obj.get("adapt_passes").and_then(Value::as_i64).unwrap_or(1) > 1 {
+                    obj.insert("adapt_passes".into(), json!(1));
+                }
+            }
+        }
+    }
+}
+
 /// The project with its element size multiplied by `factor` (`< 1` refines, `> 1` coarsens), along with the adaptive size factor, chord limit,
 /// wavelength rules, and sweep layer counts. When `scale_sizes` is true (the default), non-suppressed `add_size` (`Op::Size`) features on the
 /// scratch copy also scale `h` and `max_deviation` by `factor` and `min_layers` by `1 / factor`.
@@ -38,6 +58,7 @@ fn refined(p: &Project, factor: f64, scale_sizes: bool) -> Project {
     use geom::model::Op;
 
     let mut q = p.clone();
+    force_single_adapt_pass(&mut q);
     q.mesh.h *= factor;
     if let Some(s) = q.mesh.adapt_scale.as_mut() {
         *s *= factor;
@@ -828,6 +849,7 @@ pub fn extrapolate_capacitance(
         maxwell_matrix_f: c_r,
         mutual_matrix_f,
         ec_matrix_hz,
+        ..Default::default()
     };
     Ok((data, per_entry_rel_error, max_entry_rel_error))
 }
@@ -1010,8 +1032,10 @@ impl ConvergenceJob {
             .spec(physics)
             .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
         let targets = vec![physics.to_string()];
-        let present = self.mesh_inline(&self.project)?;
-        let other = self.mesh_inline(&refined(&self.project, factor, scale_sizes))?;
+        let mut base = self.project.clone();
+        force_single_adapt_pass(&mut base);
+        let present = self.mesh_inline(&base)?;
+        let other = self.mesh_inline(&refined(&base, factor, scale_sizes))?;
         let (coarse_m, fine_m) = if factor < 1.0 { (&present, &other) } else { (&other, &present) };
         let (c, f) = (coarse_m.mesh().n_cells() as u64, fine_m.mesh().n_cells() as u64);
         let (dc, df) = (coarse_m.mesh().dim() as u8, fine_m.mesh().dim() as u8);
@@ -1090,8 +1114,11 @@ fn check(
         // L3: the comparison mesh is built first (milliseconds against a solve), so a check larger than the caller accepts is refused before
         // any solve, and the answer to a refusal says what the check would have cost
         let scale_sizes = this.limits.scale_sizes;
+        let had_amr = project_has_multi_pass_amr(&this.project);
+        let mut base_project = this.project.clone();
+        force_single_adapt_pass(&mut base_project);
         let other_label = if factor < 1.0 { "finer" } else { "coarser" };
-        let other_project = refined(&this.project, factor, scale_sizes);
+        let other_project = refined(&base_project, factor, scale_sizes);
         let other_model = {
             let _stage = femcore::progress::stage(format!(
                 "convergence check: the {other_label} mesh (element size times {factor})"
@@ -1114,8 +1141,8 @@ fn check(
         }
         // the two solves are stages of the one job, run here under its progress, so the check can be watched and cancelled; the first is skipped
         // when an earlier request solved this physics alone on this mesh (found by content, so the numbers are the ones this solve would give).
-        // Mode pairing and Richardson extrapolation need full `SolveResult` payloads (solutions, `CapacitanceMatrixData`), which the summary cache omits.
-        let need_full_present = !matches!(matching, Matching::Index) || this.limits.extrapolate.is_some();
+        // Mode pairing, Richardson extrapolation, and multi-pass AMR projects need fresh single-pass `SolveResult` payloads.
+        let need_full_present = had_amr || !matches!(matching, Matching::Index) || this.limits.extrapolate.is_some();
         let reusable =
             if !need_full_present { this.reuse.as_ref().and_then(|(stages, key)| stages.solve(key)) } else { None };
         let (present_summary, self_reused, present_solved) = match reusable {
@@ -1127,7 +1154,7 @@ fn check(
             }
             None => {
                 let _stage = femcore::progress::stage("convergence check: the solve on the present mesh");
-                let (model, r) = this.solve_inline(this.project.clone(), &targets, physics, progress)?;
+                let (model, r) = this.solve_inline(base_project, &targets, physics, progress)?;
                 (Arc::new(SolveSummary::of(&r, model.mesh().n_cells())), false, Some((model, r)))
             }
         };

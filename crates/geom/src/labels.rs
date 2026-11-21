@@ -39,6 +39,12 @@ pub struct LabelMap {
     pub domains: Vec<DomainLabel>,
     pub boundaries: Vec<BoundaryLabel>,
     pub groups: Vec<Group>,
+    /// 1-based boundary label -> physical metal film thickness `t_m` (m) for finite-thickness `Op::Sheet` facets.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sheet_thickness_m: std::collections::BTreeMap<i32, f64>,
+    /// 1-based boundary label -> substrate over-etch trench depth `t_e` (m) for etched `Op::Sheet` facets.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sheet_etch_depth_m: std::collections::BTreeMap<i32, f64>,
 }
 
 impl LabelMap {
@@ -203,7 +209,25 @@ pub fn compile(ev: &Evaluated) -> GeomResult<LabelMap> {
             }
         }
     }
-    Ok(LabelMap { domains, boundaries, groups })
+    let mut sheet_thickness_m = std::collections::BTreeMap::new();
+    let mut sheet_etch_depth_m = std::collections::BTreeMap::new();
+    if cx.dim == 3 {
+        for b in &boundaries {
+            for &e in &b.entities {
+                if let Some(f) = cx.faces.get(e as usize) {
+                    if f.is_sheet() {
+                        if let Some(tm) = cx.sheet_thickness(&f.name).filter(|&t| t > 0.0) {
+                            sheet_thickness_m.insert(b.id, tm);
+                        }
+                        if let Some(te) = cx.sheet_etch_depth(&f.name).filter(|&t| t > 0.0) {
+                            sheet_etch_depth_m.insert(b.id, te);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(LabelMap { domains, boundaries, groups, sheet_thickness_m, sheet_etch_depth_m })
 }
 
 impl Evaluated {

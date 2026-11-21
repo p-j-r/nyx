@@ -70,8 +70,11 @@ pub fn run_chain_partial(
     let mut done: Vec<(String, SolveResult)> = vec![];
     let mut failed = None;
     for id in order {
-        match solve_one(registry, project, model, &id, library, &progress, &done) {
-            Ok(result) => done.push((id, result)),
+        match solve_one_single(registry, project, model, &id, library, &progress, &done) {
+            Ok(mut result) => {
+                nyx_physics::ElectroAmrData::strip_from(&mut result);
+                done.push((id, result));
+            }
             Err(e) => {
                 failed = Some(e);
                 break;
@@ -81,8 +84,49 @@ pub fn run_chain_partial(
     (done.into_iter().map(|(_, r)| r).collect(), failed)
 }
 
+/// Like [`run_chain_partial`], and runs multi-pass electrostatic AMR (`AF-1`) when `project` and `targets` request `adapt_passes > 1`,
+/// returning the final adapted [`MeshedModel`] alongside the solved results.
+pub fn run_chain_partial_amr(
+    registry: &Registry,
+    project: &Project,
+    mut model: Arc<MeshedModel>,
+    targets: &[String],
+    library: &Arc<femcore::material::Library>,
+    progress: Arc<Progress>,
+) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>) {
+    let ids: Vec<&str> = targets.iter().map(String::as_str).collect();
+    let order = match registry.solve_order(&ids) {
+        Ok(o) => o,
+        Err(e) => return (model, vec![], Some(e)),
+    };
+    let use_amr = crate::amr::project_uses_electro_amr(project, targets);
+    let mut done: Vec<(String, SolveResult)> = vec![];
+    let mut failed = None;
+    for id in order {
+        let step = if id == "dfs" && use_amr {
+            crate::amr::solve_dfs_with_amr(registry, project, model.clone(), library, &progress, &done)
+        } else {
+            solve_one_single(registry, project, &model, &id, library, &progress, &done).map(|mut r| {
+                nyx_physics::ElectroAmrData::strip_from(&mut r);
+                (model.clone(), r)
+            })
+        };
+        match step {
+            Ok((next_model, result)) => {
+                model = next_model;
+                done.push((id, result));
+            }
+            Err(e) => {
+                failed = Some(e);
+                break;
+            }
+        }
+    }
+    (model, done.into_iter().map(|(_, r)| r).collect(), failed)
+}
+
 /// One physics of a chain, with the fields of the physics solved before it.
-fn solve_one(
+pub(crate) fn solve_one_single(
     registry: &Registry,
     project: &Project,
     model: &MeshedModel,
@@ -98,12 +142,26 @@ fn solve_one(
     let spec = project
         .spec(id)
         .ok_or_else(|| Error::invalid(format!("the project has no problem for '{id}'; add the physics first")))?;
+    if id == "dfs"
+        && spec.study.kind == "electrostatic"
+        && project.mesh.singular_edges.as_deref() == Some("quarter_point")
+    {
+        let fb = spec.study.params.get("flux_bounds").and_then(|v| v.as_str()).unwrap_or("none");
+        let ps_amr = spec.study.params.get("adapt_passes").and_then(|v| v.as_i64()).unwrap_or(1) > 1
+            && spec.study.params.get("adapt_estimator").and_then(|v| v.as_str()) == Some("prager_synge");
+        if fb != "none" || ps_amr {
+            return Err(Error::invalid(
+                "flux_bounds / prager_synge cannot be combined with singular_edges='quarter_point': contravariant Piola-mapped Raviart-Thomas fluxes have divergent L^2 energy on singular quarter-point (det J -> 0) CurvedTets",
+            ));
+        }
+    }
     validate_spec(p, spec)?;
     p.validate(spec, model.mesh())?;
     let mut ctx = Ctx::new(model);
     ctx.progress = progress.clone();
     ctx.library = Some(library.clone());
     ctx.wavelength = crate::materials::study_wavelength(p, spec);
+    ctx.frequency = crate::materials::study_frequency(p, spec);
     for imp in p.imports() {
         if let Some(values) = done.iter().find_map(|(o, r)| exported(registry, o, r, &imp.role)) {
             ctx.inputs.insert(imp.role.clone(), values);

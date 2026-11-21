@@ -174,12 +174,15 @@ pub struct RegionX {
     pub pml: Option<PmlInfo>,
 }
 
-/// An evaluated 2D zero-thickness sheet embedded at plane `z` in a 3D layer-stack model.
+/// An evaluated 2D sheet embedded at plane `z` in a 3D layer-stack model, with optional finite metal
+/// `thickness` (`[z, z + thickness]`) and substrate `etch_depth` trench (`[z - etch_depth, z]`).
 #[derive(Clone, Debug)]
 pub struct SheetX {
     pub name: String,
     pub feature: FeatureId,
     pub z: f64,
+    pub thickness: f64,
+    pub etch_depth: f64,
     pub expr: Node,
 }
 
@@ -593,12 +596,19 @@ impl Builder<'_> {
                 let (pts, names) = ccw_polygon(&p, &nm);
                 self.profile(f, LShape::Poly { pts, names }, xf, suffix)
             }
-            Op::Polygons { polygons, holes, simplify_tol, min_hole_area } => {
+            Op::Polygons { polygons, holes, simplify_tol, min_hole_area, arc_tol } => {
                 if polygons.is_empty() {
                     return Err(GeomError(format!("Polygons '{}' needs at least one outer polygon", f.name)));
                 }
                 let tol = self.ev(simplify_tol, f, "simplify_tol")?;
                 let min_hole = self.ev(min_hole_area, f, "min_hole_area")?;
+                let atol = self.ev(arc_tol, f, "arc_tol")?;
+                if atol < 0.0 || !atol.is_finite() {
+                    return Err(GeomError(format!(
+                        "Polygons '{}' has arc_tol ({atol}); it must be non-negative and finite",
+                        f.name
+                    )));
+                }
                 let mut raw_polys = Vec::with_capacity(polygons.len());
                 for ring in polygons {
                     let pts: Vec<V2> = ring.iter().map(|q| self.ev2(q, f, "point")).collect::<GeomResult<_>>()?;
@@ -615,31 +625,66 @@ impl Builder<'_> {
                     .filter(|(id, _)| *id != f.id)
                     .flat_map(|(_, pts)| pts.iter().copied())
                     .collect();
-                let (outers, surviving_holes) =
-                    crate::poly_batch::simplify_rings_with_pins(&raw_polys, &raw_holes, &external_pins, tol, min_hole)?;
-                let mut outer_nodes = Vec::with_capacity(outers.len());
-                for (pi, p) in outers.iter().enumerate() {
-                    let nm: Vec<String> = (0..p.len()).map(|i| format!("e{i}")).collect();
-                    let (pts, names) = ccw_polygon(p, &nm);
-                    let sfx = if outers.len() == 1 && surviving_holes.is_empty() {
-                        suffix.to_string()
+                if atol > 0.0 {
+                    let (outers, surviving_holes) = crate::poly_batch::fit_rings_with_pins(
+                        &raw_polys,
+                        &raw_holes,
+                        &external_pins,
+                        tol,
+                        min_hole,
+                        atol,
+                    )?;
+                    let n_out = outers.len();
+                    let n_holes = surviving_holes.len();
+                    let mut outer_nodes = Vec::with_capacity(n_out);
+                    for (pi, segs) in outers.into_iter().enumerate() {
+                        let sfx =
+                            if n_out == 1 && n_holes == 0 { suffix.to_string() } else { format!("{suffix}[{pi}]") };
+                        outer_nodes.push(self.profile(f, LShape::Contour { segs }, xf, &sfx)?);
+                    }
+                    let mut hole_nodes = Vec::with_capacity(n_holes);
+                    for (hi, segs) in surviving_holes.into_iter().enumerate() {
+                        let sfx = format!("{suffix}[h{hi}]");
+                        hole_nodes.push(self.profile(f, LShape::Contour { segs }, xf, &sfx)?);
+                    }
+                    let outer = if outer_nodes.len() == 1 { outer_nodes.remove(0) } else { Node::Union(outer_nodes) };
+                    if hole_nodes.is_empty() {
+                        Ok(outer)
                     } else {
-                        format!("{suffix}[{pi}]")
-                    };
-                    outer_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
-                }
-                let mut hole_nodes = Vec::with_capacity(surviving_holes.len());
-                for (hi, h) in surviving_holes.iter().enumerate() {
-                    let nm: Vec<String> = (0..h.len()).map(|i| format!("e{i}")).collect();
-                    let (pts, names) = ccw_polygon(h, &nm);
-                    let sfx = format!("{suffix}[h{hi}]");
-                    hole_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
-                }
-                let outer = if outer_nodes.len() == 1 { outer_nodes.remove(0) } else { Node::Union(outer_nodes) };
-                if hole_nodes.is_empty() {
-                    Ok(outer)
+                        Ok(Node::Diff(Box::new(outer), hole_nodes))
+                    }
                 } else {
-                    Ok(Node::Diff(Box::new(outer), hole_nodes))
+                    let (outers, surviving_holes) = crate::poly_batch::simplify_rings_with_pins(
+                        &raw_polys,
+                        &raw_holes,
+                        &external_pins,
+                        tol,
+                        min_hole,
+                    )?;
+                    let mut outer_nodes = Vec::with_capacity(outers.len());
+                    for (pi, p) in outers.iter().enumerate() {
+                        let nm: Vec<String> = (0..p.len()).map(|i| format!("e{i}")).collect();
+                        let (pts, names) = ccw_polygon(p, &nm);
+                        let sfx = if outers.len() == 1 && surviving_holes.is_empty() {
+                            suffix.to_string()
+                        } else {
+                            format!("{suffix}[{pi}]")
+                        };
+                        outer_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
+                    }
+                    let mut hole_nodes = Vec::with_capacity(surviving_holes.len());
+                    for (hi, h) in surviving_holes.iter().enumerate() {
+                        let nm: Vec<String> = (0..h.len()).map(|i| format!("e{i}")).collect();
+                        let (pts, names) = ccw_polygon(h, &nm);
+                        let sfx = format!("{suffix}[h{hi}]");
+                        hole_nodes.push(self.profile(f, LShape::Poly { pts, names }, xf, &sfx)?);
+                    }
+                    let outer = if outer_nodes.len() == 1 { outer_nodes.remove(0) } else { Node::Union(outer_nodes) };
+                    if hole_nodes.is_empty() {
+                        Ok(outer)
+                    } else {
+                        Ok(Node::Diff(Box::new(outer), hole_nodes))
+                    }
                 }
             }
             Op::Box { min, max } => {
@@ -925,11 +970,31 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         });
     }
     for f in list.features.iter().filter(|f| !f.suppressed) {
-        let Op::Sheet { input, z } = &f.op else { continue };
+        let Op::Sheet { input, z, thickness, etch_depth } = &f.op else { continue };
         if dim != 3 {
             return Err(GeomError(format!("Sheet '{}' is a 3D operation; this is a 2D model", f.name)));
         }
         let z0 = b.ev(z, f, "z")?;
+        let t_m = b.ev(thickness, f, "thickness")?;
+        let t_e = b.ev(etch_depth, f, "etch_depth")?;
+        if !t_m.is_finite() || t_m < 0.0 {
+            return Err(GeomError(format!("Sheet '{}' has thickness {t_m}; it must be non-negative", f.name)));
+        }
+        if !t_e.is_finite() || t_e < 0.0 {
+            return Err(GeomError(format!("Sheet '{}' has etch_depth {t_e}; it must be non-negative", f.name)));
+        }
+        if t_m > 0.0 && t_m < 1e-9 {
+            return Err(GeomError(format!(
+                "Sheet '{}' thickness {t_m:.3e} m is below the minimum 1.0e-9 m nanometer film tolerance",
+                f.name
+            )));
+        }
+        if t_e > 0.0 && t_e < 1e-9 {
+            return Err(GeomError(format!(
+                "Sheet '{}' etch_depth {t_e:.3e} m is below the minimum 1.0e-9 m nanometer trench tolerance",
+                f.name
+            )));
+        }
         b.sheet_z = Some(z0);
         let expr = b.inst(*input, Xf3::ID, "");
         b.sheet_z = None;
@@ -937,7 +1002,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         if expr == Node::Empty {
             warnings.push(format!("sheet '{}' is built from a suppressed or empty feature", f.name));
         } else {
-            sheets.push(SheetX { name: f.name.clone(), feature: f.id, z: z0, expr });
+            sheets.push(SheetX { name: f.name.clone(), feature: f.id, z: z0, thickness: t_m, etch_depth: t_e, expr });
         }
     }
     let model_box = |prims: &[Arc<Prim>]| prims.iter().filter(|p| !p.aux).fold(Aabb::EMPTY, |a, p| a.union(&p.bbox3()));

@@ -15,6 +15,7 @@
 
 /// The analyses of results (restructure phase 5); the window draws the polarization from here until it calls engine commands.
 pub use nyx_analysis as analysis;
+pub mod amr;
 pub mod analyse;
 pub mod commands;
 pub mod convergence;

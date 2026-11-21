@@ -157,7 +157,7 @@ impl Engine {
             cmd("remove_physics", "Remove a physics from the project", "", Edit, schema(vec![("physics", phys())], &["physics"])),
             cmd("set_active", "Set the active physics", "The one solved by default.", Edit, schema(vec![("physics", phys())], &["physics"])),
             cmd("check_project", "Check the project", "Checks the geometry, the element size and every problem against the descriptors of its physics, without meshing.", Read, schema(vec![], &[])),
-            cmd("import_gds", "Import GDSII conductive sheets", "Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, pins }`.", Edit,
+            cmd("import_gds", "Import GDSII conductive sheets", "Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, fits circular arcs within `arc_tol`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, unpadded_bbox, padded_bbox, lateral_pad, pins }`.", Edit,
                 schema(vec![
                     ("path", text("file path to the binary GDSII (.gds) stream")),
                     ("layers", object("map from base sheet name to [layer, datatype] GDSII integer pair, e.g. {\"gnd\": [1, 0], \"sig\": [1, 10]}")),
@@ -165,13 +165,39 @@ impl Engine {
                     ("split_islands", boolean("split disconnected polygons on each layer into separate sheets (<name>_0, <name>_1, ... or matched TEXT pin names), default true")),
                     ("pin_layer", json!({ "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2, "description": "[layer, texttype] GDSII pair whose TEXT labels rename matching conductive islands" })),
                     ("simplify_tol", number("collinear/chord vertex simplification tolerance in metres (shared cross-layer contact vertices stay pinned), default 0")),
+                    ("arc_tol", number("1-DOF endpoint-anchored circular arc fitting tolerance in metres (0 disables arc fitting), default 0")),
                     ("cell", text("top structure cell name to flatten; omit to auto-select the unreferenced root cell")),
                     ("layer_bbox", boolean("when true (default), return bbox over imported layers only; when false, return full top-cell bbox")),
+                    ("lateral_pad", number("non-negative lateral buffer margin in metres added around the returned bbox, default 0")),
                 ], &["path", "layers"])),
-            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `gap_cells` or `sweep` set to null return to the simple mesher / explicit-only sheet sizing / an unswept mesh. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.", Edit,
-                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"], "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher" })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"], "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2" })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity and bloch studies, default false")),
+            cmd("add_chip_stack", "Add a 3D chip dielectric stack", "Constructs a 3D chip dielectric stack (`VacBot`, `Si`, `VacTop` boxes and `Overlay`) over a 2D `[xmin, ymin, xmax, ymax]` bounding box (explicitly given or inferred from existing 2D/sheet features in the project), expanded laterally by `lateral_pad >= 0`.", Edit,
+                schema(vec![
+                    ("bbox", json!({ "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "optional unpadded 2D bounding box [xmin, ymin, xmax, ymax] in metres; omit to infer from existing 2D/sheet features" })),
+                    ("lateral_pad", number("non-negative lateral buffer margin in metres added on all 4 horizontal sides, default 0")),
+                    ("z", number("wafer-normal z coordinate of the top substrate interface in metres, default 0")),
+                    ("t_sub", number("substrate thickness in metres (alias: substrate_thickness), default 350e-6")),
+                    ("substrate_thickness", number("alias for t_sub: substrate thickness in metres")),
+                    ("h_vac_top", number("top vacuum thickness above z in metres (aliases: t_vac_top, vac_top_thickness), default 3 * t_sub")),
+                    ("t_vac_top", number("alias for h_vac_top: top vacuum thickness in metres")),
+                    ("vac_top_thickness", number("alias for h_vac_top: top vacuum thickness in metres")),
+                    ("h_vac_bot", number("bottom vacuum thickness below the substrate in metres (0 omits bottom vacuum; aliases: t_vac_bot, vac_bot_thickness), default h_vac_top")),
+                    ("t_vac_bot", number("alias for h_vac_bot: bottom vacuum thickness in metres")),
+                    ("vac_bot_thickness", number("alias for h_vac_bot: bottom vacuum thickness in metres")),
+                    ("vac_bot_box", text("feature name of the bottom vacuum Box, default \"vac_bot\"")),
+                    ("substrate_box", text("feature name of the substrate Box, default \"si_sub\"")),
+                    ("vac_top_box", text("feature name of the top vacuum Box, default \"vac_top\"")),
+                    ("vac_bot_region", text("region name of the bottom vacuum in Overlay, default \"VacBot\"")),
+                    ("substrate_region", text("region name of the substrate in Overlay, default \"Si\"")),
+                    ("vac_top_region", text("region name of the top vacuum in Overlay, default \"VacTop\"")),
+                    ("overlay", boolean("create or update the project's Overlay feature with the stack regions, default true")),
+                ], &[])),
+            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `singular_edges`, `quarter_point_xi` or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.", Edit,
+                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"], "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher" })), ("adapt_grade", json!({ "type": ["number", "null"], "description": "adaptive / AMR metric gradation slope (> 0); null uses 0.4" })), ("adapt_max_cells", json!({ "type": ["integer", "null"], "minimum": 1, "description": "adaptive / AMR maximum cell count (>= 1); null uses 2000000" })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"], "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2" })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) isoparametric geometry for cells on curved surfaces and fitted sheet arc rims (ems, dfs, and sheet3d), default false")),
                     ("gap_cells", json!({ "type": ["number", "null"], "description": "3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping" })),
                     ("z_coarsen", boolean("3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false")),
+                    ("singular_edges", json!({ "type": ["string", "null"], "enum": ["none", "quarter_point", null], "description": "3D sheet stack: edge singularity enrichment on zero-thickness conductor rims (\"none\" or \"quarter_point\"); null uses study defaults" })),
+                    ("quarter_point_xi", json!({ "type": ["number", "null"], "minimum": 0.25, "maximum": 0.5, "description": "3D sheet stack: Barsoum quarter-point mid-edge parameter xi_QP in [0.25, 0.50]; null uses 0.25" })),
+                    ("corner_grading", boolean("3D sheet stack: radical Morrison-Lewis corner grading toward sharp 2D sheet corners, default false")),
                     ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number", "description": "thickness of the layer along y, metres" }, "n": { "type": "integer", "description": "cells across the thickness" }, "domain_offset": { "type": "integer", "description": "added to the domain numbers of the layer's cells" }, "fill": { "type": "string", "description": "region name: every cell of the layer belongs to it" }, "regions": { "type": "object", "description": "optional per-layer region remap { source_region: target_region } in this layer" } }, "required": ["thickness", "n"] }, "description": "layers to sweep a 2D cross-section or 3D geometry model along y" }))], &[])),
             cmd("mesh_build", "Mesh the geometry", "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.", Expensive, schema(vec![("wait", boolean("wait for the mesh, default true"))], &[])),
             cmd("solve_run", "Solve", "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.", Expensive,
@@ -552,6 +578,7 @@ impl Engine {
                 ok()
             }
             "import_gds" => self.import_gds(args),
+            "add_chip_stack" => self.add_chip_stack(args),
             "set_mesh" => self.set_mesh(args),
             "mesh_build" => {
                 if opt_bool(args, "wait", true) {
@@ -862,6 +889,59 @@ impl Engine {
                 "z_coarsen" => {
                     s.z_coarsen = v.as_bool().ok_or_else(|| Error::invalid("`z_coarsen` is true or false"))?
                 }
+                "adapt_grade" => {
+                    s.adapt_grade = if v.is_null() {
+                        None
+                    } else {
+                        let gr = v
+                            .as_f64()
+                            .ok_or_else(|| Error::invalid("`adapt_grade` is a positive number or null"))?;
+                        if !(gr > 0.0 && gr.is_finite()) {
+                            return Err(Error::invalid("`adapt_grade` must be a positive finite number"));
+                        }
+                        Some(gr)
+                    }
+                }
+                "adapt_max_cells" => {
+                    s.adapt_max_cells = if v.is_null() {
+                        None
+                    } else {
+                        let mc = v
+                            .as_u64()
+                            .filter(|&n| n >= 1)
+                            .ok_or_else(|| Error::invalid("`adapt_max_cells` is a positive integer (>= 1) or null"))?;
+                        Some(mc as usize)
+                    }
+                }
+                "singular_edges" => {
+                    s.singular_edges = if v.is_null() {
+                        None
+                    } else {
+                        let se = v
+                            .as_str()
+                            .ok_or_else(|| Error::invalid("`singular_edges` is \"none\", \"quarter_point\", or null"))?;
+                        if !matches!(se, "none" | "quarter_point") {
+                            return Err(Error::invalid(format!(
+                                "`singular_edges` must be \"none\" or \"quarter_point\", got \"{se}\""
+                            )));
+                        }
+                        Some(se.to_string())
+                    }
+                }
+                "quarter_point_xi" => {
+                    s.quarter_point_xi = if v.is_null() {
+                        None
+                    } else {
+                        let xi = v
+                            .as_f64()
+                            .filter(|&x| x.is_finite() && (0.25..=0.50).contains(&x))
+                            .ok_or_else(|| Error::invalid("`quarter_point_xi` is a number in [0.25, 0.50] or null"))?;
+                        Some(xi)
+                    }
+                }
+                "corner_grading" => {
+                    s.corner_grading = v.as_bool().ok_or_else(|| Error::invalid("`corner_grading` is true or false"))?
+                }
                 "sweep" => {
                     s.sweep = if v.is_null() {
                         None
@@ -871,7 +951,7 @@ impl Engine {
                 }
                 other => {
                     return Err(Error::invalid(format!(
-                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, points_per_wavelength, structured_pml, max_dev, curved, gap_cells, z_coarsen, sweep)"
+                        "set_mesh has no field '{other}' (h, adapt_scale, adapt_grade, adapt_max_cells, physics_sizing, points_per_wavelength, structured_pml, max_dev, curved, gap_cells, z_coarsen, singular_edges, quarter_point_xi, corner_grading, sweep)"
                     )))
                 }
             }

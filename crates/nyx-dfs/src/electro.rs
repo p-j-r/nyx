@@ -12,7 +12,8 @@ use femcore::linalg::driver::{dense_eigh, DirectSolver};
 use femcore::material::{self, M3};
 use femcore::props::{LinearSolver, TensorKind};
 use nyx_physics::{
-    cell_fields_of, CapacitanceMatrixData, Discretisation, Field, Scalar, Solution, SolveResult, TlsMeta,
+    cell_fields_of, CapacitanceMatrixData, Discretisation, ElectroAmrData, Field, Scalar, Solution, SolveResult,
+    TlsMeta,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -33,14 +34,45 @@ pub struct ElectroAssembly {
     pub volt: BTreeMap<i32, f64>,
 }
 
-fn assemble_laplace_curved_3d(mesh: &Discretisation, order: usize, coeff: &[f64]) -> Csr {
+fn validate_curved_tets_q8(mesh: &Discretisation, cquad: &Quad) -> Result<(), String> {
+    for c in 0..mesh.n_cells() {
+        if mesh.cell_is_curved(c) {
+            let cv = mesh.cell(c);
+            let mut v4 = [[0.0; 3]; 4];
+            for i in 0..4 {
+                let p = mesh.point(cv[i] as usize);
+                v4[i] = [p[0], p[1], p[2]];
+            }
+            let det_straight = CurvedTet::straight(v4).jacobian(&[0.25, 0.25, 0.25, 0.25]).1;
+            if !(det_straight.is_finite() && det_straight.abs() > 1e-300) {
+                return Err(format!(
+                    "curved tetrahedron {c} has degenerate straight base determinant ({det_straight:.3e})"
+                ));
+            }
+            let ct = CurvedTet::new(mesh.cell_geometry_nodes(c));
+            for q in 0..cquad.w.len() {
+                let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
+                let (_, det) = ct.jacobian(&lam);
+                if !(det.is_finite() && det * det_straight > 0.0) {
+                    return Err(format!(
+                        "curved tetrahedron {c} has non-positive or inverted Jacobian determinant at Gauss point {q} (det = {det:.3e}, det_straight = {det_straight:.3e})"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn assemble_laplace_curved_3d(mesh: &Discretisation, order: usize, coeff: &[f64]) -> Result<Csr, String> {
     let re = RefElement::new(3, order, if order > 1 { 2 * (order - 1) } else { 1 });
-    let cquad = quad_rule_collapsed(6);
+    let cquad = quad_rule_collapsed(8);
+    validate_curved_tets_q8(mesh, &cquad)?;
     let cshapes: Vec<Vec<f64>> = cquad.lam.iter().map(|lam| shape(lam, order).1).collect();
     let geo = geometry(mesh);
     let nloc = re.nloc;
     let n = mesh.n_dofs(order);
-    assemble_parallel(mesh.n_cells(), n, n, |range, coo| {
+    Ok(assemble_parallel(mesh.n_cells(), n, n, |range, coo| {
         let mut dofs = Vec::new();
         let mut grad = vec![0.0; nloc * 3];
         let mut ke = vec![0.0; nloc * nloc];
@@ -91,17 +123,18 @@ fn assemble_laplace_curved_3d(mesh: &Discretisation, order: usize, coeff: &[f64]
             mesh.cell_dofs(c, order, &mut dofs);
             coo.push_block(&dofs, &dofs, &ke);
         }
-    })
+    }))
 }
 
-fn assemble_laplace_tensor_curved_3d(mesh: &Discretisation, order: usize, kt: &[M3]) -> Csr {
+pub(crate) fn assemble_laplace_tensor_curved_3d(mesh: &Discretisation, order: usize, kt: &[M3]) -> Result<Csr, String> {
     let re = RefElement::new(3, order, if order > 1 { 2 * (order - 1) } else { 1 });
-    let cquad = quad_rule_collapsed(6);
+    let cquad = quad_rule_collapsed(8);
+    validate_curved_tets_q8(mesh, &cquad)?;
     let cshapes: Vec<Vec<f64>> = cquad.lam.iter().map(|lam| shape(lam, order).1).collect();
     let geo = geometry(mesh);
     let nloc = re.nloc;
     let n = mesh.n_dofs(order);
-    assemble_parallel(mesh.n_cells(), n, n, |range, coo| {
+    Ok(assemble_parallel(mesh.n_cells(), n, n, |range, coo| {
         let mut dofs = Vec::new();
         let mut grad = vec![0.0; nloc * 3];
         let mut ke = vec![0.0; nloc * nloc];
@@ -158,147 +191,97 @@ fn assemble_laplace_tensor_curved_3d(mesh: &Discretisation, order: usize, kt: &[
             mesh.cell_dofs(c, order, &mut dofs);
             coo.push_block(&dofs, &dofs, &ke);
         }
-    })
+    }))
 }
 
-/// Enriches a 3D mesh for P2 Barsoum quarter-point singularity capture (`singular_edges = "quarter_point"`):
-/// finds all open perimeter vertices of interior conductor sheet facets (edges shared by exactly 1
-/// interior conductor facet carrying `Terminal`, `Ground`, or `Potential`), shifts mid-edge geometry
-/// nodes on tet edges `(a, b)` with `is_rim[a] ^ is_rim[b]` to `0.75 * p_rim + 0.25 * p_other`, and
-/// validates positive `CurvedTet` Jacobians across all collapsed-quadrature points on every affected cell.
+/// Enriches a 3D mesh for P2 Barsoum quarter-point singularity capture (`singular_edges = "quarter_point"`)
+/// when `mesh` has not already been enriched by `sheet3d`:
+/// finds all open perimeter vertices of interior zero-thickness conductor sheet facets (`Terminal`, `Ground`,
+/// or `Potential`), shifts mid-edge geometry nodes via [`femcore::meshing::singularity::apply_quarter_point_nodes`],
+/// clamps `xi_QP` upward on curved rims, and validates positive `CurvedTet` Jacobians across all 216 Gauss points
+/// of `quad_rule_collapsed(8)`.
 pub fn enrich_quarter_point_mesh(mesh: &Discretisation, spec: &Problem) -> Option<(Discretisation, usize, usize)> {
-    if spec.order != 2 || mesh.dim != 3 || spec.singular_edges != "quarter_point" {
+    if spec.order != 2 || mesh.dim != 3 || spec.singular_edges != "quarter_point" || mesh.has_qp() {
         return None;
     }
-    let mut cond_labels = BTreeSet::new();
+    let mut cond_labels = Vec::new();
     for bc in &spec.bcs {
         if matches!(bc.kind, BcKind::Potential(_) | BcKind::Ground | BcKind::Terminal(_)) {
-            cond_labels.extend(bc.labels.iter().copied());
+            for &l in &bc.labels {
+                if spec.sheet_thickness_m.get(&l).copied().unwrap_or(0.0) <= 0.0 && !cond_labels.contains(&l) {
+                    cond_labels.push(l);
+                }
+            }
         }
     }
     if cond_labels.is_empty() {
         return None;
     }
-    let exterior = mesh.exterior_facets();
-    let mut edge_count: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    for f in 0..mesh.n_facets() {
-        if !exterior[f] && cond_labels.contains(&mesh.facet_labels[f]) {
-            let fv = mesh.facet(f);
-            for &(i, j) in &[(0, 1), (1, 2), (2, 0)] {
-                let (a, b) = (fv[i].min(fv[j]), fv[i].max(fv[j]));
-                *edge_count.entry((a, b)).or_insert(0) += 1;
-            }
-        }
-    }
-    if edge_count.is_empty() {
+    let rim_verts = femcore::meshing::singularity::sheet_rim_vertices(mesh, &cond_labels);
+    if !rim_verts.iter().any(|&r| r) {
         return None;
     }
-    let nv = mesh.n_points();
-    let mut is_rim = vec![false; nv];
-    for (&(a, b), &cnt) in &edge_count {
-        if cnt == 1 {
-            is_rim[a as usize] = true;
-            is_rim[b as usize] = true;
+    let mut curved_rim_edges = BTreeSet::new();
+    for ([a, b], _) in mesh.edge_node_list() {
+        if rim_verts.get(a as usize).copied().unwrap_or(false) && rim_verts.get(b as usize).copied().unwrap_or(false) {
+            curved_rim_edges.insert([a.min(b), a.max(b)]);
         }
     }
-    let n_rim_verts = is_rim.iter().filter(|&&r| r).count();
-    if n_rim_verts == 0 {
-        return None;
-    }
-
-    let mut edge_map: BTreeMap<[u32; 2], [f64; 3]> = mesh.edge_node_list().into_iter().collect();
-    let mut qp_edges: BTreeSet<[u32; 2]> = BTreeSet::new();
-    for &(a, b) in mesh.edges() {
-        let (ua, ub) = (a as usize, b as usize);
-        if (is_rim[ua] ^ is_rim[ub]) && !edge_map.contains_key(&[a, b]) {
-            let (p_rim, p_other) =
-                if is_rim[ua] { (mesh.point(ua), mesh.point(ub)) } else { (mesh.point(ub), mesh.point(ua)) };
-            let qpt = [
-                0.75 * p_rim[0] + 0.25 * p_other[0],
-                0.75 * p_rim[1] + 0.25 * p_other[1],
-                0.75 * p_rim[2] + 0.25 * p_other[2],
-            ];
-            edge_map.insert([a, b], qpt);
-            qp_edges.insert([a, b]);
-        }
-    }
-    if qp_edges.is_empty() {
-        return None;
-    }
-
     let mut enriched = mesh.clone();
-    let nodes_vec: Vec<([u32; 2], [f64; 3])> = edge_map.iter().map(|(&k, &v)| (k, v)).collect();
-    enriched.set_edge_nodes(&nodes_vec);
-
-    // Validate positive CurvedTet Jacobian across all quadrature points on every affected cell
-    let cquad = quad_rule_collapsed(6);
-    let mut bad_edges: BTreeSet<[u32; 2]> = BTreeSet::new();
-    for c in 0..enriched.n_cells() {
-        if !enriched.cell_is_curved(c) {
-            continue;
-        }
-        let cv = enriched.cell(c);
-        let mut v4 = [[0.0; 3]; 4];
-        for i in 0..4 {
-            let p = enriched.point(cv[i] as usize);
-            v4[i] = [p[0], p[1], p[2]];
-        }
-        let det0 = CurvedTet::straight(v4).jacobian(&[0.25, 0.25, 0.25, 0.25]).1;
-        let ct = CurvedTet::new(enriched.cell_geometry_nodes(c));
-        let mut valid = det0.abs() > 1e-30;
-        if valid {
-            for lam in &cquad.lam {
-                let (_, det) = ct.jacobian(&[lam[0], lam[1], lam[2], lam[3]]);
-                if det * det0 <= 1e-12 * det0 * det0 {
-                    valid = false;
-                    break;
-                }
-            }
-        }
-        if !valid {
-            for i in 0..4 {
-                for j in (i + 1)..4 {
-                    let key = [cv[i].min(cv[j]), cv[i].max(cv[j])];
-                    if qp_edges.contains(&key) {
-                        bad_edges.insert(key);
-                    }
-                }
-            }
-        }
+    let rep = femcore::meshing::singularity::apply_quarter_point_nodes(
+        &mut enriched,
+        &rim_verts,
+        femcore::meshing::singularity::DEFAULT_QUARTER_POINT_XI,
+        &curved_rim_edges,
+    );
+    if rep.shifted_edges == 0 {
+        return None;
     }
-    if !bad_edges.is_empty() {
-        for k in &bad_edges {
-            edge_map.remove(k);
-            qp_edges.remove(k);
-        }
-        if qp_edges.is_empty() {
-            return None;
-        }
-        let nodes_vec: Vec<([u32; 2], [f64; 3])> = edge_map.iter().map(|(&k, &v)| (k, v)).collect();
-        enriched.set_edge_nodes(&nodes_vec);
-    }
-    Some((enriched, n_rim_verts, qp_edges.len()))
+    Some((enriched, rep.rim_vertices, rep.shifted_edges))
 }
 
-pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
+/// Prepares the working discretisation for electrostatics:
+/// - Strips quarter-point edges if `spec.order < 2` (retaining smooth `AF-5` `curved` edges);
+/// - Deduplicates quarter-point enrichment if `sheet3d` (`set_mesh`) already enriched `mesh`;
+/// - Otherwise enriches `mesh` when `spec.singular_edges == "quarter_point"` and `spec.order == 2`.
+pub fn prepare_electro_mesh(mesh: &Discretisation, spec: &Problem) -> (Option<(Discretisation, usize, usize)>, bool) {
+    if mesh.dim == 3 && mesh.has_qp() {
+        if spec.order < 2 {
+            let qp_set: BTreeSet<[u32; 2]> = mesh.qp_edge_list().into_iter().collect();
+            let smooth_nodes: Vec<([u32; 2], [f64; 3])> =
+                mesh.edge_node_list().into_iter().filter(|(k, _)| !qp_set.contains(k)).collect();
+            let mut stripped = mesh.clone();
+            stripped.set_edge_nodes(&smooth_nodes);
+            stripped.set_qp_edges(&[]);
+            return (Some((stripped, 0, 0)), false);
+        }
+        return (None, true);
+    }
+    (enrich_quarter_point_mesh(mesh, spec), false)
+}
+
+fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
     let order = spec.order;
-    check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
-    let qp_mesh = enrich_quarter_point_mesh(mesh, spec);
-    let m_work = qp_mesh.as_ref().map_or(mesh, |(m, _, _)| m);
+    check_boundary_labels(m_work, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
     let eps = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
     let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
-    let k = if spec.materials.has_tensor(TensorKind::Permittivity) {
-        let mut t = plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?);
+    let eps_tensors_rel: Option<Vec<M3>> = if spec.materials.has_tensor(TensorKind::Permittivity) {
+        Some(plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?))
+    } else {
+        None
+    };
+    let mut k = if let Some(ref tr) = eps_tensors_rel {
+        let mut t = tr.clone();
         t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
         if m_work.dim == 3 && m_work.has_curved() {
-            assemble_laplace_tensor_curved_3d(m_work, order, &t)
+            assemble_laplace_tensor_curved_3d(m_work, order, &t)?
         } else {
             assemble_laplace_tensor(m_work, order, &t)
         }
     } else {
         let coeff: Vec<f64> = eps.iter().map(|e| EPS0 * e).collect();
         if m_work.dim == 3 && m_work.has_curved() {
-            assemble_laplace_curved_3d(m_work, order, &coeff)
+            assemble_laplace_curved_3d(m_work, order, &coeff)?
         } else {
             assemble_laplace(m_work, order, &coeff)
         }
@@ -307,6 +290,19 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
     let mut f = if rho.iter().any(|&r| r != 0.0) { assemble_source(m_work, order, &rho) } else { vec![0.0; n] };
     let mut volt: BTreeMap<i32, f64> = BTreeMap::new();
     for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            if !(1..=2).contains(ff_order) {
+                return Err(format!("far_field condition 'order' must be 1 or 2, got {ff_order}"));
+            }
+            if !decay_power.is_finite() || *decay_power <= 0.0 {
+                return Err(format!("far_field condition 'decay_power' must be positive, got {decay_power}"));
+            }
+            if let Some(c) = center {
+                if c.iter().any(|x| !x.is_finite()) {
+                    return Err("far_field condition 'center' has a NaN or infinite coordinate".into());
+                }
+            }
+        }
         for &lab in &bc.labels {
             match &bc.kind {
                 BcKind::Potential(v) => {
@@ -327,6 +323,7 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
                         f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
                     }
                 }
+                BcKind::FarField { .. } => {}
                 other => return Err(format!("'{}' is not an electrostatics boundary condition", other.name())),
             }
         }
@@ -334,8 +331,32 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
     if volt.is_empty() {
         return Err("electrostatics needs at least one potential, ground or terminal boundary".into());
     }
+    let ref_labels: Vec<i32> = volt.keys().copied().collect();
+    let eps_ff = match &eps_tensors_rel {
+        Some(tr) => FarFieldPermittivity::Tensor(tr),
+        None => FarFieldPermittivity::Scalar(&eps),
+    };
+    let need_rt = spec.flux_bounds != "none" || (spec.adapt_passes > 1 && spec.adapt_estimator == "prager_synge");
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !volt.contains_key(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid(m_work, &ref_labels));
+                let eff_ff_order = if need_rt { 1 } else { *ff_order };
+                let k_far =
+                    assemble_farfield_robin(m_work, &ff_labs, order, eff_ff_order, *decay_power, c, EPS0, eps_ff);
+                k = k.add_scaled(&k_far, 1.0);
+            }
+        }
+    }
     let (fixed, vals) = dirichlet_constraints(m_work, &volt, order);
     Ok(ElectroAssembly { k, f, fixed, vals, volt })
+}
+
+pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
+    let (qp_mesh, _) = prepare_electro_mesh(mesh, spec);
+    let m_work = qp_mesh.as_ref().map_or(mesh, |(m, _, _)| m);
+    assemble_electrostatics_on_work_mesh(m_work, spec)
 }
 
 /// Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one
@@ -395,12 +416,14 @@ fn build_tls_meta(mesh: &Discretisation, spec: &Problem) -> TlsMeta {
             }
         }
     }
+    let sheet_thickness_m: BTreeMap<i32, f64> =
+        spec.sheet_thickness_m.iter().filter(|&(_, &t)| t > 0.0 && t.is_finite()).map(|(&k, &v)| (k, v)).collect();
     TlsMeta {
         domain_eps_r,
         domain_names: spec.domain_names.clone(),
         conductor_labels,
         sheet_labels: sheet_set.into_iter().collect(),
-        sheet_thickness_m: BTreeMap::new(),
+        sheet_thickness_m,
         pec_labels: pec_set.into_iter().collect(),
     }
 }
@@ -441,6 +464,343 @@ fn invert_spd_ec_matrix(maxwell: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, String> {
     Ok(ec)
 }
 
+#[derive(Clone, Copy)]
+struct FacetFarFieldSpec {
+    cell: usize,
+    gamma: f64,
+    center: [f64; 3],
+}
+
+fn build_facet_farfield_specs(
+    mesh: &Discretisation,
+    spec: &Problem,
+    volt: &BTreeMap<i32, f64>,
+) -> Vec<Option<FacetFarFieldSpec>> {
+    let nf = mesh.n_facets();
+    let has_ff = spec.bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. }));
+    if !has_ff || nf == 0 {
+        return Vec::new();
+    }
+    let ref_labels: Vec<i32> = volt.keys().copied().collect();
+    let mut label_ff: BTreeMap<i32, (f64, [f64; 3])> = BTreeMap::new();
+    for bc in &spec.bcs {
+        if let BcKind::FarField { decay_power, center, .. } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !volt.contains_key(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid(mesh, &ref_labels));
+                let gamma = if decay_power.is_finite() && *decay_power > 0.0 { *decay_power } else { 1.0 };
+                for l in ff_labs {
+                    label_ff.insert(l, (gamma, c));
+                }
+            }
+        }
+    }
+    if label_ff.is_empty() {
+        return Vec::new();
+    }
+
+    let sorted_key = |vs: &[u32]| -> [u32; 3] {
+        let mut k = [u32::MAX; 3];
+        for (i, &v) in vs.iter().take(3).enumerate() {
+            k[i] = v;
+        }
+        k[..vs.len().min(3)].sort_unstable();
+        k
+    };
+    let mut face_to_cell: BTreeMap<[u32; 3], usize> = BTreeMap::new();
+    for c in 0..mesh.n_cells() {
+        let cv = mesh.cell(c);
+        if mesh.dim == 2 {
+            for &(a, b) in &[(0, 1), (0, 2), (1, 2)] {
+                face_to_cell.entry(sorted_key(&[cv[a], cv[b]])).or_insert(c);
+            }
+        } else {
+            for &(a, b, d) in &[(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)] {
+                face_to_cell.entry(sorted_key(&[cv[a], cv[b], cv[d]])).or_insert(c);
+            }
+        }
+    }
+
+    let mut out = vec![None; nf];
+    for f in 0..nf {
+        if let Some(&(gamma, center)) = label_ff.get(&mesh.facet_labels[f]) {
+            if let Some(&cell) = face_to_cell.get(&sorted_key(mesh.facet(f))) {
+                out[f] = Some(FacetFarFieldSpec { cell, gamma, center });
+            }
+        }
+    }
+    out
+}
+
+fn eval_farfield_alpha_pointwise(
+    dim: usize,
+    r_inf_2d: f64,
+    ff: FacetFarFieldSpec,
+    eps_rel: &[f64],
+    eps_tensors_rel: Option<&[M3]>,
+    x_q: [f64; 3],
+    n_hat: [f64; 3],
+) -> f64 {
+    let eps_nf = if let Some(tr) = eps_tensors_rel {
+        let m = &tr[ff.cell];
+        let mut s = 0.0;
+        for i in 0..dim.min(3) {
+            for j in 0..dim.min(3) {
+                s += n_hat[i] * m[i][j] * n_hat[j];
+            }
+        }
+        if s.is_finite() {
+            s.max(0.0)
+        } else {
+            0.0
+        }
+    } else {
+        let e = eps_rel.get(ff.cell).copied().unwrap_or(1.0);
+        if e.is_finite() {
+            e.max(0.0)
+        } else {
+            0.0
+        }
+    };
+    if eps_nf <= 0.0 {
+        return 0.0;
+    }
+    if dim == 2 {
+        let rx = x_q[0] - ff.center[0];
+        let ry = x_q[1] - ff.center[1];
+        let r2 = rx * rx + ry * ry;
+        let rn = rx * n_hat[0] + ry * n_hat[1];
+        if r2 <= 1e-30 || rn <= 0.0 {
+            return 0.0;
+        }
+        let r = r2.sqrt();
+        let r_scale = r_inf_2d.max(r);
+        let denom_ln = (2.0 * r_scale / r).ln().max(1.0);
+        EPS0 * eps_nf * (ff.gamma * (rn / r2)) / (2.0 * denom_ln)
+    } else {
+        let rx = x_q[0] - ff.center[0];
+        let ry = x_q[1] - ff.center[1];
+        let rz = x_q[2] - ff.center[2];
+        let r2 = rx * rx + ry * ry + rz * rz;
+        let rn = rx * n_hat[0] + ry * n_hat[1] + rz * n_hat[2];
+        if r2 <= 1e-30 || rn <= 0.0 {
+            return 0.0;
+        }
+        EPS0 * eps_nf * (ff.gamma * rn / r2)
+    }
+}
+
+fn build_facet_midpoint_robin_alpha(
+    mesh: &Discretisation,
+    ff_specs: &[Option<FacetFarFieldSpec>],
+    eps_rel: &[f64],
+    eps_tensors_rel: Option<&[M3]>,
+) -> Option<Vec<f64>> {
+    if ff_specs.is_empty() {
+        return None;
+    }
+    let nf = mesh.n_facets();
+    let d = mesh.dim;
+    let (lo, hi) = mesh.bbox();
+    let r_inf_2d = if d == 2 { (hi[0] - lo[0]).hypot(hi[1] - lo[1]).max(1e-12) } else { 1.0 };
+    let mut alphas = vec![0.0; nf];
+    for (f, spec_opt) in ff_specs.iter().copied().enumerate() {
+        let Some(ff) = spec_opt else { continue };
+        let fv = mesh.facet(f);
+        let cv = mesh.cell(ff.cell);
+        let opp_v = cv.iter().copied().find(|v| !fv.contains(v)).unwrap_or(cv[0]);
+        let p_opp_s = mesh.point(opp_v as usize);
+        let mut p_opp = [0.0; 3];
+        p_opp[..d].copy_from_slice(&p_opp_s[..d]);
+
+        if d == 2 {
+            let p0 = mesh.point(fv[0] as usize);
+            let p1 = mesh.point(fv[1] as usize);
+            let xm = [0.5 * (p0[0] + p1[0]), 0.5 * (p0[1] + p1[1]), 0.0];
+            let dx = p1[0] - p0[0];
+            let dy = p1[1] - p0[1];
+            let len = dx.hypot(dy);
+            if len <= 1e-30 {
+                continue;
+            }
+            let mut n_hat = [dy / len, -dx / len, 0.0];
+            if (xm[0] - p_opp[0]) * n_hat[0] + (xm[1] - p_opp[1]) * n_hat[1] < 0.0 {
+                n_hat[0] = -n_hat[0];
+                n_hat[1] = -n_hat[1];
+            }
+            alphas[f] = eval_farfield_alpha_pointwise(2, r_inf_2d, ff, eps_rel, eps_tensors_rel, xm, n_hat);
+        } else {
+            let p0 = mesh.point(fv[0] as usize);
+            let p1 = mesh.point(fv[1] as usize);
+            let p2 = mesh.point(fv[2] as usize);
+            let xm = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0, (p0[2] + p1[2] + p2[2]) / 3.0];
+            let u = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+            let v = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+            let cr = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+            let len = (cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]).sqrt();
+            if len <= 1e-30 {
+                continue;
+            }
+            let mut n_hat = [cr[0] / len, cr[1] / len, cr[2] / len];
+            if (xm[0] - p_opp[0]) * n_hat[0] + (xm[1] - p_opp[1]) * n_hat[1] + (xm[2] - p_opp[2]) * n_hat[2] < 0.0 {
+                n_hat = [-n_hat[0], -n_hat[1], -n_hat[2]];
+            }
+            alphas[f] = eval_farfield_alpha_pointwise(3, 1.0, ff, eps_rel, eps_tensors_rel, xm, n_hat);
+        }
+    }
+    Some(alphas)
+}
+
+fn compute_hessian_cell_eta2(mesh: &Discretisation, potentials: &[Vec<f64>]) -> Result<(Vec<f64>, f64), String> {
+    let nc = mesh.n_cells();
+    if nc == 0 || potentials.is_empty() {
+        return Ok((vec![0.0; nc], 0.0));
+    }
+    let geo = geometry(mesh);
+    let mut eta2 = vec![0.0; nc];
+    if mesh.dim == 2 {
+        let hs_all: Vec<Vec<[[f64; 2]; 2]>> = potentials
+            .iter()
+            .map(|v| femcore::adapt::estimate::recovered_hessians(mesh, v))
+            .collect::<Result<Vec<_>, _>>()?;
+        for c in 0..nc {
+            let area = geo.vol[c].max(0.0);
+            let h_c = (4.0 * area / 3.0_f64.sqrt()).sqrt();
+            let cv = mesh.cell(c);
+            let mut frob_sq = 0.0;
+            for hs in &hs_all {
+                let mut m_avg = [[0.0; 2]; 2];
+                for &vi in cv {
+                    let mv = &hs[vi as usize];
+                    for r in 0..2 {
+                        for col in 0..2 {
+                            m_avg[r][col] += mv[r][col] / 3.0;
+                        }
+                    }
+                }
+                frob_sq += m_avg[0][0] * m_avg[0][0] + 2.0 * m_avg[0][1] * m_avg[0][1] + m_avg[1][1] * m_avg[1][1];
+            }
+            eta2[c] = area * h_c.powi(4) * frob_sq;
+        }
+    } else {
+        let hs_all: Vec<Vec<[[f64; 3]; 3]>> = potentials
+            .iter()
+            .map(|v| femcore::adapt::estimate3::recovered_hessians(mesh, v))
+            .collect::<Result<Vec<_>, _>>()?;
+        for c in 0..nc {
+            let vol = geo.vol[c].max(0.0);
+            let h_c = (6.0 * 2.0_f64.sqrt() * vol).cbrt();
+            let cv = mesh.cell(c);
+            let mut frob_sq = 0.0;
+            for hs in &hs_all {
+                let mut m_avg = [[0.0; 3]; 3];
+                for &vi in cv {
+                    let mv = &hs[vi as usize];
+                    for r in 0..3 {
+                        for col in 0..3 {
+                            m_avg[r][col] += 0.25 * mv[r][col];
+                        }
+                    }
+                }
+                for r in 0..3 {
+                    for col in 0..3 {
+                        frob_sq += m_avg[r][col] * m_avg[r][col];
+                    }
+                }
+            }
+            eta2[c] = vol * h_c.powi(4) * frob_sq;
+        }
+    }
+    let total = eta2.iter().sum::<f64>().sqrt();
+    Ok((eta2, total))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_amr_indicators_on_work_mesh(
+    m_work: &Discretisation,
+    spec: &Problem,
+    volt: &BTreeMap<i32, f64>,
+    eps_rel: &[f64],
+    eps_tensors_rel: Option<&[M3]>,
+    ff_specs: &[Option<FacetFarFieldSpec>],
+    potentials: &[Vec<f64>],
+    cap_matrix_opt: Option<&[Vec<f64>]>,
+    eq_opt: Option<&femcore::rt::EquilibratedFluxResult>,
+) -> Result<ElectroAmrData, String> {
+    match spec.adapt_estimator.as_str() {
+        "hessian" => {
+            let (eta2, total_eta) = compute_hessian_cell_eta2(m_work, potentials)?;
+            Ok(ElectroAmrData { eta2, total_eta })
+        }
+        "prager_synge" => {
+            if let Some(eq) = eq_opt {
+                let total_eta = eq.cell_eta2.iter().sum::<f64>().sqrt();
+                return Ok(ElectroAmrData { eta2: eq.cell_eta2.clone(), total_eta });
+            }
+            let dir_labels: Vec<i32> = volt.keys().copied().collect();
+            let eps_phys: Vec<f64> = eps_rel.iter().map(|e| EPS0 * e).collect();
+            let eps_t_phys: Option<Vec<M3>> = eps_tensors_rel.map(|tr| {
+                let mut t = tr.to_vec();
+                t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
+                t
+            });
+            let cell_perm = match &eps_t_phys {
+                Some(t) => femcore::rt::CellPermittivity::Tensor(t),
+                None => femcore::rt::CellPermittivity::Scalar(&eps_phys),
+            };
+            let (lo, hi) = m_work.bbox();
+            let r_inf_2d = if m_work.dim == 2 { (hi[0] - lo[0]).hypot(hi[1] - lo[1]).max(1e-12) } else { 1.0 };
+            let pw_fn = |f: usize, xp: [f64; 3], n_out: [f64; 3]| -> f64 {
+                ff_specs.get(f).and_then(|x| *x).map_or(0.0, |ff| {
+                    eval_farfield_alpha_pointwise(m_work.dim, r_inf_2d, ff, eps_rel, eps_tensors_rel, xp, n_out)
+                })
+            };
+            let robin = if ff_specs.is_empty() {
+                femcore::rt::RobinBoundary::None
+            } else {
+                femcore::rt::RobinBoundary::Pointwise(&pw_fn)
+            };
+            let eq = femcore::rt::equilibrate_electro_flux_bounds(
+                m_work,
+                spec.order,
+                potentials,
+                cell_perm,
+                &dir_labels,
+                robin,
+                cap_matrix_opt,
+            )?;
+            let total_eta = eq.cell_eta2.iter().sum::<f64>().sqrt();
+            Ok(ElectroAmrData { eta2: eq.cell_eta2, total_eta })
+        }
+        _ => {
+            let nf = m_work.n_facets();
+            let dirichlet_facets: Vec<bool> = (0..nf).map(|f| volt.contains_key(&m_work.facet_labels[f])).collect();
+            let perm = match eps_tensors_rel {
+                Some(t) => femcore::adapt::electro::Permittivity::Tensor(t),
+                None => femcore::adapt::electro::Permittivity::Scalar(eps_rel),
+            };
+            let robin_alpha = build_facet_midpoint_robin_alpha(m_work, ff_specs, eps_rel, eps_tensors_rel);
+            let mut opt = femcore::adapt::electro::ElectroEstimatorOptions::new(spec.order, perm, &dirichlet_facets);
+            opt.robin_alpha = robin_alpha.as_deref();
+            if let Some(cap) = cap_matrix_opt {
+                let goal = femcore::adapt::electro::electro_goal_indicators(
+                    m_work,
+                    potentials,
+                    cap,
+                    femcore::adapt::electro::DEFAULT_EPS_FLOOR,
+                    &opt,
+                )?;
+                Ok(ElectroAmrData { eta2: goal.eta2, total_eta: goal.total })
+            } else {
+                let terms = femcore::adapt::electro::electro_term_indicators(m_work, potentials, &opt)?;
+                let eta2 = terms.eta2_by_term.into_iter().next().unwrap_or_else(|| vec![0.0; m_work.n_cells()]);
+                let total_eta = eta2.iter().sum::<f64>().sqrt();
+                Ok(ElectroAmrData { eta2, total_eta })
+            }
+        }
+    }
+}
+
 pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
     match spec.formulation.as_str() {
         "" | "volumetric_fem" => {}
@@ -454,8 +814,34 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
     }
     let t0 = Instant::now();
     let order = spec.order;
-    let qp_info = enrich_quarter_point_mesh(mesh, spec);
-    let asm = assemble_electrostatics(mesh, spec)?;
+    let (qp_info, already_qp) = prepare_electro_mesh(mesh, spec);
+    let m_work = qp_info.as_ref().map_or(mesh, |(m, _, _)| m);
+
+    let need_rt = spec.flux_bounds != "none" || (spec.adapt_passes > 1 && spec.adapt_estimator == "prager_synge");
+    if need_rt {
+        if spec.singular_edges == "quarter_point" || (order >= 2 && m_work.has_qp()) {
+            return Err(
+                "flux_bounds / prager_synge cannot be combined with singular_edges='quarter_point': contravariant Piola-mapped Raviart-Thomas fluxes have divergent L^2 energy on singular quarter-point (det J -> 0) CurvedTets".into(),
+            );
+        }
+        let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
+        let has_sigma_s = spec.bcs.iter().any(|bc| matches!(bc.kind, BcKind::SurfaceCharge(s) if s.abs() > 0.0));
+        if rho.iter().any(|&x| x.abs() > 0.0) || has_sigma_s {
+            return Err(
+                "flux_bounds / prager_synge requires source-free electrostatics (rho_v == 0 and surface_charge == 0)"
+                    .into(),
+            );
+        }
+    }
+
+    let asm = assemble_electrostatics_on_work_mesh(m_work, spec)?;
+    let eps_rel = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
+    let eps_tensors_rel: Option<Vec<M3>> = if spec.materials.has_tensor(TensorKind::Permittivity) {
+        Some(plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?))
+    } else {
+        None
+    };
+    let ff_specs = build_facet_farfield_specs(m_work, spec, &asm.volt);
 
     // Group terminal facets by unique terminal name in first-seen order
     let mut terminals: Vec<(String, Vec<i32>)> = Vec::new();
@@ -477,12 +863,25 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         }
     }
 
-    let tls = build_tls_meta(mesh, spec);
+    let tls = build_tls_meta(m_work, spec);
+    let ref_labels: Vec<i32> = asm.volt.keys().copied().collect();
+    let has_positive_farfield = spec.bcs.iter().any(|bc| {
+        if let BcKind::FarField { center, .. } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !asm.volt.contains_key(l)).collect();
+            if ff_labs.is_empty() {
+                return false;
+            }
+            let c = center.unwrap_or_else(|| farfield_centroid(m_work, &ref_labels));
+            farfield_positive_measure(m_work, &ff_labs, c) > 0.0
+        } else {
+            false
+        }
+    });
 
     if terminals.is_empty() {
-        let (v, solver_note) = solve_potential(mesh, spec, &asm)?;
-        let (fields, cell_fields) = electrostatics_fields(mesh, order, &v);
-        let en = norm_of(&components(&fields[1].values, mesh.dim));
+        let (v, solver_note) = solve_potential(m_work, spec, &asm)?;
+        let (fields, cell_fields) = electrostatics_fields(m_work, order, &v);
+        let en = norm_of(&components(&fields[1].values, m_work.dim));
         let kv = asm.k.matvec(&v);
         let w = 0.5 * v.iter().zip(&kv).map(|(a, b)| a * b).sum::<f64>();
         let (vmin, vmax) = minmax(&v);
@@ -500,13 +899,33 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
                 "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
                 Scalar::Num(2.0 * w / (dv[1] - dv[0]).powi(2)),
             ));
+        } else if dv.len() == 1 && has_positive_farfield && dv[0].abs() > 1e-12 {
+            scalars.push((
+                "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
+                Scalar::Num(2.0 * w / dv[0].powi(2)),
+            ));
+        }
+        if spec.adapt_passes > 1 {
+            let c_single = vec![vec![(2.0 * w).max(1e-30)]];
+            let amr = compute_amr_indicators_on_work_mesh(
+                m_work,
+                spec,
+                &asm.volt,
+                &eps_rel,
+                eps_tensors_rel.as_deref(),
+                &ff_specs,
+                std::slice::from_ref(&v),
+                Some(&c_single),
+                None,
+            )?;
+            scalars.push(amr.scalar());
         }
         scalars.push(tls.scalar());
         return Ok(SolveResult {
             physics: "dfs".into(),
             study: spec.study.kind().into(),
             order: order as u8,
-            dim: mesh.dim as u8,
+            dim: m_work.dim as u8,
             solutions: vec![Solution {
                 label: "stationary".into(),
                 fields,
@@ -524,7 +943,7 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
     let n_term = terminals.len();
     let n = asm.k.nrows();
     let term_dofs: Vec<BTreeSet<usize>> =
-        terminals.iter().map(|(_, labs)| boundary_dofs(mesh, labs, order).into_iter().collect()).collect();
+        terminals.iter().map(|(_, labs)| boundary_dofs(m_work, labs, order).into_iter().collect()).collect();
     let mut bg_labels = Vec::new();
     for bc in &spec.bcs {
         if matches!(bc.kind, BcKind::Ground | BcKind::Potential(_)) {
@@ -535,10 +954,10 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
             }
         }
     }
-    let bg_dofs: BTreeSet<usize> = boundary_dofs(mesh, &bg_labels, order).into_iter().collect();
-    if n_term == 1 && bg_dofs.is_empty() {
+    let bg_dofs: BTreeSet<usize> = boundary_dofs(m_work, &bg_labels, order).into_iter().collect();
+    if n_term == 1 && bg_dofs.is_empty() && !has_positive_farfield {
         return Err(
-            "electrostatics with a single terminal needs at least one ground or potential reference boundary".into()
+            "electrostatics with a single terminal needs at least one ground, potential, or far_field reference boundary".into()
         );
     }
 
@@ -559,14 +978,21 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
     let use_amg = match spec.solver {
         LinearSolver::Direct => false,
         LinearSolver::Iterative => true,
-        LinearSolver::Auto => amg_wanted(mesh.dim, n_free),
+        LinearSolver::Auto => amg_wanted(m_work.dim, n_free),
     } && !fixed.is_empty()
         && n_free > 0;
 
     let mut log = Vec::new();
     if let Some((_, n_rim, n_edges)) = &qp_info {
+        if *n_edges > 0 {
+            log.push(format!(
+                "singular_edges=quarter_point: shifted {n_edges} tet edges meeting {n_rim} conductor sheet perimeter vertices to Barsoum 1/4-points (all affected cells verified det(J) > 0)"
+            ));
+        }
+    } else if already_qp {
         log.push(format!(
-            "singular_edges=quarter_point: shifted {n_edges} tet edges meeting {n_rim} conductor sheet perimeter vertices to Barsoum 1/4-points (all affected cells verified det(J) > 0)"
+            "singular_edges=quarter_point: using {} pre-enriched quarter-point tet edges from mesher",
+            m_work.qp_edge_list().len()
         ));
     }
     let mut v_all = vec![vec![0.0; n]; n_term];
@@ -598,8 +1024,9 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         if use_amg {
             let opts =
                 femcore::linalg::amg_elastic::AmgOptions { line_smooth: spec.amg_line_smooth, ..Default::default() };
-            let sys = AmgSystem::new_with(mesh, order, 1, &asm.k, &fixed, opts)?;
-            let tol = if spec.tol > 0.0 { spec.tol } else { 1e-10 };
+            let sys = AmgSystem::new_with(m_work, order, 1, &asm.k, &fixed, opts)?;
+            let base_tol = if spec.tol > 0.0 { spec.tol } else { 1e-10 };
+            let tol = if need_rt { base_tol.min(1e-11) } else { base_tol };
             let mut rhs_list = Vec::with_capacity(n_term);
             let mut fv_list = Vec::with_capacity(n_term);
             for j in 0..n_term {
@@ -664,6 +1091,82 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         }
     }
 
+    // AF-4: Prager-Synge H(div) Raviart-Thomas complementary flux equilibration & Loewner bounds
+    let mut maxwell_lower_matrix_f = None;
+    let mut maxwell_upper_matrix_f = None;
+    let mut maxwell_mid_matrix_f = None;
+    let mut maxwell_error_bound_f = None;
+    let eq_opt = if need_rt {
+        let dir_labels: Vec<i32> = asm.volt.keys().copied().collect();
+        let eps_phys: Vec<f64> = eps_rel.iter().map(|e| EPS0 * e).collect();
+        let eps_t_phys: Option<Vec<M3>> = eps_tensors_rel.as_ref().map(|tr| {
+            let mut t = tr.clone();
+            t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
+            t
+        });
+        let cell_perm = match &eps_t_phys {
+            Some(t) => femcore::rt::CellPermittivity::Tensor(t),
+            None => femcore::rt::CellPermittivity::Scalar(&eps_phys),
+        };
+        let (lo, hi) = m_work.bbox();
+        let r_inf_2d = if m_work.dim == 2 { (hi[0] - lo[0]).hypot(hi[1] - lo[1]).max(1e-12) } else { 1.0 };
+        let pw_fn = |f: usize, xp: [f64; 3], n_out: [f64; 3]| -> f64 {
+            ff_specs.get(f).and_then(|x| *x).map_or(0.0, |ff| {
+                eval_farfield_alpha_pointwise(m_work.dim, r_inf_2d, ff, &eps_rel, eps_tensors_rel.as_deref(), xp, n_out)
+            })
+        };
+        let robin = if ff_specs.is_empty() {
+            femcore::rt::RobinBoundary::None
+        } else {
+            femcore::rt::RobinBoundary::Pointwise(&pw_fn)
+        };
+        let eq = femcore::rt::equilibrate_electro_flux_bounds(
+            m_work,
+            order,
+            &v_all,
+            cell_perm,
+            &dir_labels,
+            robin,
+            Some(&maxwell_matrix_f),
+        )?;
+        if spec.flux_bounds != "none" {
+            log.push(format!(
+                "flux_bounds={}: RT_{} equilibration solved {} vertex half-star patches ({} sheet splits, max ||div D_tilde||_L2 = {:.2e})",
+                spec.flux_bounds, eq.rt_order, eq.n_patches, eq.n_sheet_splits, eq.max_div_l2
+            ));
+            if spec.flux_bounds == "midpoint" {
+                maxwell_matrix_f = eq.c_mid_matrix.clone();
+            }
+            maxwell_lower_matrix_f = Some(eq.c_lower_matrix.clone());
+            maxwell_upper_matrix_f = Some(eq.c_upper_matrix.clone());
+            maxwell_mid_matrix_f = Some(eq.c_mid_matrix.clone());
+            maxwell_error_bound_f = Some(eq.c_error_bound_matrix.clone());
+        }
+        Some(eq)
+    } else {
+        None
+    };
+
+    // AF-6: Quasi-electrostatic AC dielectric conductance, Q matrix, and strong-loss Delta C^(2) >= 0
+    let ac = crate::ac_loss::compute_ac_loss(
+        m_work,
+        spec,
+        (spec.freq > 0.0).then_some(spec.freq),
+        &asm.k,
+        &free,
+        &v_all,
+        &maxwell_matrix_f,
+    )?;
+    maxwell_matrix_f = ac.corrected_maxwell_matrix_f;
+    if ac.conductance_matrix_s.is_some() || ac.q_dielectric_matrix.is_some() {
+        log.push(format!(
+            "ac_loss: evaluated dielectric conductance/Q matrices (freq = {:.3e} Hz, max tan_delta_eff = {:.3e}{})",
+            spec.freq,
+            ac.max_tan_delta_eff,
+            if ac.delta_c_second_order_f.is_some() { ", applied complex Schur Delta C" } else { "" }
+        ));
+    }
+
     let mut mutual_matrix_f = vec![vec![0.0; n_term]; n_term];
     for i in 0..n_term {
         let mut sum_row = 0.0;
@@ -681,9 +1184,9 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
     let mut solutions = Vec::with_capacity(n_term);
     let mut scalars = Vec::new();
     for j in 0..n_term {
-        let (fields, cell_fields) = electrostatics_fields(mesh, order, &v_all[j]);
+        let (fields, cell_fields) = electrostatics_fields(m_work, order, &v_all[j]);
         if j == 0 {
-            let en = norm_of(&components(&fields[1].values, mesh.dim));
+            let en = norm_of(&components(&fields[1].values, m_work.dim));
             let w = 0.5 * maxwell_matrix_f[0][0];
             let (vmin, vmax) = minmax(&v_all[0]);
             scalars.push(("stored energy W_e (J; per metre in 2D)".to_string(), Scalar::Num(w)));
@@ -727,11 +1230,33 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         }
     }
 
+    if spec.adapt_passes > 1 {
+        let amr = compute_amr_indicators_on_work_mesh(
+            m_work,
+            spec,
+            &asm.volt,
+            &eps_rel,
+            eps_tensors_rel.as_deref(),
+            &ff_specs,
+            &v_all,
+            Some(&maxwell_matrix_f),
+            eq_opt.as_ref(),
+        )?;
+        scalars.push(amr.scalar());
+    }
+
     let cap_data = CapacitanceMatrixData {
         terminals: terminals.into_iter().map(|(n, _)| n).collect(),
         maxwell_matrix_f,
         mutual_matrix_f,
         ec_matrix_hz,
+        maxwell_lower_matrix_f,
+        maxwell_upper_matrix_f,
+        maxwell_mid_matrix_f,
+        maxwell_error_bound_f,
+        conductance_matrix_s: ac.conductance_matrix_s,
+        q_dielectric_matrix: ac.q_dielectric_matrix,
+        ..Default::default()
     };
     scalars.push(cap_data.scalar());
     scalars.push(tls.scalar());
@@ -740,7 +1265,7 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         physics: "dfs".into(),
         study: spec.study.kind().into(),
         order: order as u8,
-        dim: mesh.dim as u8,
+        dim: m_work.dim as u8,
         solutions,
         scalars,
         log,

@@ -2,11 +2,12 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:e2c9e35ff4a117f9efdeb845f5577b2f` · 110 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:eecd578f2371b10bdfd055e5c68fd23c` · 111 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
 | [`add_box`](add_box.md) | edit | Box |
+| [`add_chip_stack`](add_chip_stack.md) | edit | Add a 3D chip dielectric stack |
 | [`add_circle`](add_circle.md) | edit | Circle |
 | [`add_condition`](add_condition.md) | edit | Add a boundary or domain condition |
 | [`add_cone`](add_cone.md) | edit | Cone frustum |
@@ -28,7 +29,7 @@ Catalog hash: `b3:e2c9e35ff4a117f9efdeb845f5577b2f` · 110 commands. `nyx api li
 | [`add_rect`](add_rect.md) | edit | Rectangle |
 | [`add_revolve`](add_revolve.md) | edit | Revolve |
 | [`add_rounded_rect`](add_rounded_rect.md) | edit | Rounded rectangle |
-| [`add_sheet`](add_sheet.md) | edit | 2D sheet in 3D |
+| [`add_sheet`](add_sheet.md) | edit | 2D sheet or conformal slab in 3D |
 | [`add_size`](add_size.md) | edit | Mesh size |
 | [`add_sphere`](add_sphere.md) | edit | Sphere |
 | [`add_tag`](add_tag.md) | edit | Tag |
