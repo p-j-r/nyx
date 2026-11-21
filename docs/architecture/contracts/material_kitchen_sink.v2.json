@@ -1,0 +1,504 @@
+{
+  "crystal_setting": "IEEE-1987",
+  "density": 4640.0,
+  "description": "Format 2 multi-physics contract exemplar covering T-curves, BCS/TLS losses, and coupled tensors",
+  "dielectric": {
+    "eps_clamped": {
+      "Uniaxial": {
+        "par": 27.9,
+        "perp": 44.3
+      }
+    },
+    "eps_inf": {
+      "Uniaxial": {
+        "par": 4.5,
+        "perp": 4.9
+      }
+    },
+    "loss_ref_freq": 10000000000.0,
+    "loss_tangent": {
+      "Diagonal": [
+        0.00001,
+        0.00001,
+        0.000015
+      ]
+    },
+    "source": [
+      {
+        "cite": "Invented v2 dielectric exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ],
+    "tls_e_crit": 15.0,
+    "tls_tan_delta_0": 2e-6
+  },
+  "elastic": {
+    "c": [
+      [
+        203000000000.0,
+        57300000000.0,
+        75200000000.0,
+        8500000000.0,
+        0.0,
+        0.0
+      ],
+      [
+        57300000000.0,
+        203000000000.0,
+        75200000000.0,
+        -8500000000.0,
+        0.0,
+        0.0
+      ],
+      [
+        75200000000.0,
+        75200000000.0,
+        242400000000.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        8500000000.0,
+        -8500000000.0,
+        0.0,
+        59500000000.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        59500000000.0,
+        8500000000.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        8500000000.0,
+        72850000000.0
+      ]
+    ],
+    "class": "Trigonal",
+    "exact_constants": true,
+    "source": [
+      {
+        "cite": "Invented v2 contract exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ]
+  },
+  "electrical": {
+    "conductivity": {
+      "Scalar": 1e-14
+    },
+    "permeability": 1.0,
+    "permittivity": null,
+    "source": [
+      {
+        "cite": "Invented v2 electrical exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ]
+  },
+  "electro_optic": {
+    "clamped": [
+      [
+        0.0,
+        -3.3999999999999996e-12,
+        8.6e-12
+      ],
+      [
+        0.0,
+        3.3999999999999996e-12,
+        8.6e-12
+      ],
+      [
+        0.0,
+        0.0,
+        2.86e-11
+      ],
+      [
+        0.0,
+        2.8e-11,
+        0.0
+      ],
+      [
+        2.8e-11,
+        0.0,
+        0.0
+      ],
+      [
+        -3.3999999999999996e-12,
+        0.0,
+        0.0
+      ]
+    ],
+    "source": [
+      {
+        "cite": "Invented v2 electro-optic exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ],
+    "wavelength": 6.33e-7
+  },
+  "interfaces": {
+    "ma": {
+      "e_crit": 10.0,
+      "eps_r": 33.0,
+      "oxide": "Nb2O5",
+      "source": [
+        {
+          "cite": "Invented surface oxide exemplar",
+          "doi": null,
+          "url": null,
+          "verified": "2026-11-21"
+        }
+      ],
+      "tan_delta_tls_0": 0.0008,
+      "thickness": 3.0000000000000004e-9
+    }
+  },
+  "kind": "crystalline",
+  "name": "kitchen_sink_v2",
+  "notes": "Non-centrosymmetric trigonal 3m test case exercising every v2 section.",
+  "optical": {
+    "axes": {
+      "Uniaxial": {
+        "extraordinary": {
+          "dispersion": {
+            "RiiFormula4": {
+              "coefficients": [
+                4.582,
+                0.099169,
+                0.0,
+                0.044432,
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                -0.02195,
+                2.0
+              ]
+            }
+          },
+          "dn_dt": 0.000038,
+          "dn_dt_einstein_theta": 350.0,
+          "source": []
+        },
+        "ordinary": {
+          "dispersion": {
+            "RiiFormula4": {
+              "coefficients": [
+                4.9048,
+                0.11768,
+                0.0,
+                0.0475,
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                -0.027169,
+                2.0
+              ]
+            }
+          },
+          "dn_dt": 4e-6,
+          "dn_dt_einstein_theta": 350.0,
+          "dn_dt_range": [
+            4.0,
+            400.0
+          ],
+          "k_data": [
+            [
+              0.4,
+              1.0,
+              4.0
+            ],
+            [
+              0.00001,
+              1e-7,
+              0.0
+            ]
+          ],
+          "source": []
+        }
+      }
+    },
+    "range": [
+      0.4,
+      4.0
+    ],
+    "reference_temperature": 293.15,
+    "source": [
+      {
+        "cite": "Invented v2 optical exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ],
+    "unit_m": 1e-6,
+    "wavelength_unit": "um"
+  },
+  "photoelastic": {
+    "matrix": [
+      [
+        -0.026,
+        0.09,
+        0.133,
+        -0.075,
+        0.0,
+        0.0
+      ],
+      [
+        0.09,
+        -0.026,
+        0.133,
+        0.075,
+        0.0,
+        0.0
+      ],
+      [
+        0.179,
+        0.179,
+        0.071,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.151,
+        -0.151,
+        0.0,
+        0.146,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.146,
+        0.151
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -0.075,
+        -0.057999999999999996
+      ]
+    ],
+    "source": [
+      {
+        "cite": "Invented v2 photoelastic exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ],
+    "wavelength": 6.33e-7
+  },
+  "piezoelectric": {
+    "form": "strain_charge",
+    "matrix": [
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        6.92e-11,
+        -4.1600000000000004e-11
+      ],
+      [
+        -2.0800000000000002e-11,
+        2.0800000000000002e-11,
+        0.0,
+        6.92e-11,
+        0.0,
+        0.0
+      ],
+      [
+        -8.499999999999999e-13,
+        -8.499999999999999e-13,
+        6e-12,
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "source": [
+      {
+        "cite": "Invented v2 piezo exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ]
+  },
+  "point_group": "3m",
+  "reference_temperature": 293.15,
+  "residual_stress": {
+    "Symmetric": [
+      -50000000.0,
+      -50000000.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "source": [
+    {
+      "cite": "Invented v2 contract exemplar",
+      "doi": null,
+      "url": null,
+      "verified": "2026-11-21"
+    }
+  ],
+  "superconducting": {
+    "dynes_gamma": 8.01088317e-26,
+    "film_model": "Kerr",
+    "gap_0": 2.2350364044299997e-22,
+    "lambda_l": 3.33e-8,
+    "nominal_thickness": 1.0000000000000001e-7,
+    "r_res": 8e-9,
+    "sigma_n": 55000000.0,
+    "source": [
+      {
+        "cite": "Invented v2 superconducting exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ],
+    "tc": 9.2,
+    "x_qp_floor": 1e-7,
+    "xi_0": 3.9000000000000005e-8
+  },
+  "thermal": {
+    "conductivity": {
+      "Scalar": 4.6
+    },
+    "conductivity_t": {
+      "T": [
+        4.0,
+        77.0,
+        293.15
+      ],
+      "form": "tabulated_T",
+      "kind": "scalar",
+      "values": [
+        12.0,
+        8.0,
+        4.6
+      ]
+    },
+    "expansion": {
+      "Diagonal": [
+        0.0000154,
+        0.0000154,
+        7.5e-6
+      ]
+    },
+    "source": [
+      {
+        "cite": "Invented v2 thermal exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ],
+    "specific_heat": 117.26303623292007,
+    "specific_heat_t": {
+      "T_range": [
+        4.0,
+        300.0
+      ],
+      "coeffs": [
+        -1.5,
+        1.2,
+        0.1
+      ],
+      "form": "log10_poly"
+    }
+  },
+  "viscoelastic": {
+    "cryo_qm_floor": 1000000000.0,
+    "matrix": [
+      [
+        0.005,
+        0.0012,
+        0.001,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0012,
+        0.005,
+        0.001,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.001,
+        0.001,
+        0.0055,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.002,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.002,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0019000000000000002
+      ]
+    ],
+    "source": [
+      {
+        "cite": "Invented v2 viscoelastic exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ]
+  }
+}

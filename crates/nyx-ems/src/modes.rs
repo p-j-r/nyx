@@ -394,7 +394,10 @@ pub fn mode_fields_cells(
 /// when the problem has absorbing layers, a tilted crystal, or a complex pair among the wanted eigenvalues. The result carries the
 /// polarization of the modes (scalars and log, as before the move; the analysis itself is in `Solved::analysis`).
 pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
-    if problem.materials.has_pml() || problem.surface_impedance.iter().any(|b| b.r_s > 0.0) {
+    if problem.materials.has_pml()
+        || problem.materials.has_complex_permittivity()
+        || problem.surface_impedance.iter().any(|b| b.r_s > 0.0)
+    {
         return crate::modes_complex::solve_waveguide_complex(mesh, problem);
     }
     let t0 = Instant::now();

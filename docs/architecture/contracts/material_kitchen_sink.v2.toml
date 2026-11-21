@@ -1,0 +1,133 @@
+# Contract exemplar of material file format 2 (all multi-physics sections, invented numbers).
+format = 2
+name = "kitchen_sink_v2"
+description = "Format 2 multi-physics contract exemplar covering T-curves, BCS/TLS losses, and coupled tensors"
+kind = "crystalline"
+point_group = "3m"
+crystal_setting = "IEEE-1987"
+reference_temperature = "293.15 K"
+source = { cite = "Invented v2 contract exemplar", verified = "2026-11-21" }
+notes = "Non-centrosymmetric trigonal 3m test case exercising every v2 section."
+density = "4640 kg/m^3"
+residual_stress = [-50.0e6, -50.0e6, 0.0, 0.0, 0.0, 0.0]
+residual_stress_unit = "Pa"
+
+[elastic]
+source = { cite = "Invented v2 contract exemplar", verified = "2026-11-21" }
+class = "trigonal"
+unit = "GPa"
+c11 = 203.0
+c12 = 57.3
+c13 = 75.2
+c14 = 8.5
+c33 = 242.4
+c44 = 59.5
+
+[thermal]
+source = { cite = "Invented v2 thermal exemplar", verified = "2026-11-21" }
+specific_heat_T = { form = "log10_poly", T_range = [4.0, 300.0], coeffs = [-1.5, 1.2, 0.1], unit = "J/(kg*K)" }
+expansion = [15.4e-6, 15.4e-6, 7.5e-6]
+expansion_unit = "1/K"
+
+[thermal.conductivity]
+form = "tabulated_T"
+T = [4.0, 77.0, 293.15]
+values = [12.0, 8.0, 4.6]
+unit = "W/(m*K)"
+
+[electrical]
+source = { cite = "Invented v2 electrical exemplar", verified = "2026-11-21" }
+permeability = 1.0
+conductivity = "1e-14 S/m"
+
+[dielectric]
+source = { cite = "Invented v2 dielectric exemplar", verified = "2026-11-21" }
+eps_clamped = { perp = 44.3, par = 27.9 }
+eps_inf = { perp = 4.9, par = 4.5 }
+loss_tangent = [1.0e-5, 1.0e-5, 1.5e-5]
+loss_ref_freq = "10 GHz"
+tls_tan_delta_0 = 2.0e-6
+tls_e_crit = "15 V/m"
+
+[superconducting]
+source = { cite = "Invented v2 superconducting exemplar", verified = "2026-11-21" }
+tc = "9.2 K"
+gap_0 = "1395 ueV"
+lambda_L = "33.3 nm"
+xi_0 = "39 nm"
+sigma_n = "5.5e7 S/m"
+dynes_gamma = "0.5 ueV"
+r_res = "8 nOhm/sq"
+x_qp_floor = 1e-7
+nominal_thickness = "100 nm"
+film_model = "kerr"
+
+[interfaces.ma]
+source = { cite = "Invented surface oxide exemplar", verified = "2026-11-21" }
+oxide = "Nb2O5"
+thickness = "3.0 nm"
+eps_r = 33.0
+tan_delta_tls_0 = 8.0e-4
+e_crit = "10 V/m"
+
+[piezoelectric]
+source = { cite = "Invented v2 piezo exemplar", verified = "2026-11-21" }
+form = "strain_charge"
+unit = "pC/N"
+d15 = 69.2
+d22 = 20.8
+d31 = -0.85
+d33 = 6.0
+
+[photoelastic]
+source = { cite = "Invented v2 photoelastic exemplar", verified = "2026-11-21" }
+wavelength = "633 nm"
+p11 = -0.026
+p12 = 0.090
+p13 = 0.133
+p31 = 0.179
+p33 = 0.071
+p14 = -0.075
+p41 = 0.151
+p44 = 0.146
+
+[electro_optic]
+source = { cite = "Invented v2 electro-optic exemplar", verified = "2026-11-21" }
+wavelength = "633 nm"
+unit = "pm/V"
+
+[electro_optic.clamped]
+r13 = 8.6
+r22 = 3.4
+r33 = 28.6
+r51 = 28.0
+
+[viscoelastic]
+source = { cite = "Invented v2 viscoelastic exemplar", verified = "2026-11-21" }
+unit = "mPa*s"
+eta11 = 5.0
+eta12 = 1.2
+eta13 = 1.0
+eta33 = 5.5
+eta44 = 2.0
+cryo_qm_floor = 1e9
+
+[optical]
+wavelength_unit = "um"
+range = [0.4, 4.0]
+reference_temperature = "20 degC"
+source = { cite = "Invented v2 optical exemplar", verified = "2026-11-21" }
+
+[optical.ordinary]
+model = "rii_formula_4"
+coefficients = [4.9048, 0.11768, 0.0, 0.0475, 1.0, 0.0, 0.0, 1.0, 1.0, -0.027169, 2.0]
+k_data = [[0.4, 1e-5], [1.0, 1e-7], [4.0, 0.0]]
+dn_dT = "4e-6 1/K"
+dn_dT_einstein_theta = "350 K"
+dn_dT_range = [4.0, 400.0]
+
+[optical.extraordinary]
+model = "rii_formula_4"
+coefficients = [4.5820, 0.099169, 0.0, 0.044432, 1.0, 0.0, 0.0, 1.0, 1.0, -0.021950, 2.0]
+dn_dT = "3.8e-5 1/K"
+dn_dT_einstein_theta = "350 K"

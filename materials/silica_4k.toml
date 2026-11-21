@@ -1,0 +1,35 @@
+# Cryogenic fused silica (amorphous SiO2) at 4 K showing anomalous glass softening and TLS thermal plateau.
+format = 2
+name = "silica_4k"
+extends = "silica"
+description = "Cryogenic fused silica SiO2 at 4 K (Fine 1954 / Hunklinger anomalous -4.5% glass softening E=70.0 GPa + TLS k=0.09 W/(m*K)) — softer glass mechanics and TLS thermal bottleneck vs 293 K silica."
+kind = "amorphous"
+point_group = "isotropic"
+reference_temperature = "4.0 K"
+notes = "Optical dispersion is inherited from room-temperature Malitson 1965 [optical]; cryogenic index near 1.55 um shifts by approximately -0.0014 to ~1.4426 from 293 K to 20 K (Leviton & Frey 2006, Proc. SPIE 6273). Total thermal contraction 293 K -> 4 K is slightly positive (+0.5e-4)."
+source = [
+  { cite = "APPROXIMATE 4 K fused silica mechanics/thermal/permittivity + inherited room-temperature Malitson [optical]; see M. E. Fine, H. Van Duyne, N. T. Kenney, J. Appl. Phys. 25, 402 (1954)", doi = "10.1063/1.1721651" },
+]
+density = "2203 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 70.0
+nu = 0.165
+source = { cite = "APPROXIMATE 4 K fused silica modulus (~4.5% anomalous softening vs 293 K E = 72.7 GPa via tunneling states; M. E. Fine et al., J. Appl. Phys. 25, 402-405 (1954) & S. Hunklinger)", doi = "10.1063/1.1721651" }
+
+[thermal]
+conductivity = 0.09
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.30 J/(kg*K)"
+expansion = -6.0e-7
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE 4 K amorphous SiO2 glassy thermal conductivity plateau (~0.08-0.10 W/(m*K)) and TLS linear specific heat excess (~0.25-0.35 J/(kg*K)) from Zeller & Pohl, Phys. Rev. B 4, 2029 (1971)", doi = "10.1103/PhysRevB.4.2029" }
+
+[dielectric]
+eps_clamped = 3.80
+loss_tangent = 5.0e-5
+loss_ref_freq = "6 GHz"
+tls_tan_delta_0 = 5.0e-4
+tls_e_crit = "15 V/m"
+source = { cite = "APPROXIMATE 4 K / mK amorphous SiO2 microwave relative permittivity, loss tangent, and Two-Level System TLS parameters (Martinis et al., Phys. Rev. Lett. 95, 210503, 2005)" }

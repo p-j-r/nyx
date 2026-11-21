@@ -65,6 +65,7 @@ impl Default for Pml {
 pub enum TensorKind {
     Conductivity,
     Permittivity,
+    PermittivityIm,
     Expansion,
 }
 
@@ -73,6 +74,7 @@ impl TensorKind {
         match self {
             TensorKind::Conductivity => "k",
             TensorKind::Permittivity => "eps_r",
+            TensorKind::PermittivityIm => "eps_r_im",
             TensorKind::Expansion => "alpha",
         }
     }
@@ -80,6 +82,7 @@ impl TensorKind {
         match self {
             TensorKind::Conductivity => a.conductivity.as_ref(),
             TensorKind::Permittivity => a.permittivity.as_ref(),
+            TensorKind::PermittivityIm => a.permittivity_im.as_ref(),
             TensorKind::Expansion => a.expansion.as_ref(),
         }
     }
@@ -89,6 +92,20 @@ impl Materials {
     /// True if any domain has an active perfectly matched layer.
     pub fn has_pml(&self) -> bool {
         self.pml.values().any(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
+    }
+
+    /// True if any domain carries a non-zero imaginary permittivity (dielectric/optical loss).
+    pub fn has_complex_permittivity(&self) -> bool {
+        self.default.get("eps_r_im").is_some_and(|v| v.abs() > 0.0)
+            || self.domains.values().any(|m| m.get("eps_r_im").is_some_and(|v| v.abs() > 0.0))
+            || self.aniso.values().any(|a| a.permittivity_im.is_some())
+    }
+
+    /// True if any domain carries a non-zero phonon/structural viscosity tensor or scalar `eta`.
+    pub fn has_viscosity(&self) -> bool {
+        self.default.get("eta").is_some_and(|v| *v > 0.0)
+            || self.domains.values().any(|m| m.get("eta").is_some_and(|v| *v > 0.0))
+            || self.aniso.values().any(|a| a.viscosity.is_some())
     }
 
     pub fn get(&self, domain: i32, name: &str) -> Option<f64> {
@@ -155,6 +172,47 @@ impl Materials {
                 }
             };
             by_domain.insert(d, t);
+        }
+        Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
+    }
+
+    /// Global-frame `(eps_re, eps_im_loss)` permittivity pair of every cell.
+    /// Under the `exp(+i omega t)` convention, passive dielectric loss corresponds to `eps = eps_re - i eps_im_loss`.
+    pub fn cell_complex_permittivity(&self, mesh: &SimplexMesh, fallback_re: Option<f64>) -> Result<Vec<(M3, M3)>, String> {
+        let re = self.cell_tensor(mesh, TensorKind::Permittivity, fallback_re)?;
+        let im = self.cell_tensor(mesh, TensorKind::PermittivityIm, Some(0.0))?;
+        Ok(re.into_iter().zip(im).collect())
+    }
+
+    /// Global-frame `6x6` dynamic viscosity tensor `eta` (solver Voigt order, `Pa*s`) of every cell.
+    pub fn cell_viscosity(&self, mesh: &SimplexMesh) -> Result<Vec<M6>, String> {
+        self.cell_viscosity_skipping(mesh, &[])
+    }
+
+    /// Global-frame `6x6` dynamic viscosity tensor `eta` (solver Voigt order, `Pa*s`) of every cell;
+    /// domains in `skip` or without viscosity get a zero matrix.
+    pub fn cell_viscosity_skipping(&self, mesh: &SimplexMesh, skip: &[i32]) -> Result<Vec<M6>, String> {
+        let mut by_domain: BTreeMap<i32, M6> = BTreeMap::new();
+        for d in mesh.domain_labels() {
+            if skip.contains(&d) {
+                by_domain.insert(d, [[0.0; 6]; 6]);
+                continue;
+            }
+            let eta = if let Some(v) = self.aniso.get(&d).and_then(|a| a.viscosity.as_ref()) {
+                material::rotate_m6_global(v, self.aniso[&d].euler_deg)
+            } else if let Some(eta_s) = self.get(d, "eta") {
+                if eta_s < 0.0 {
+                    return Err(format!("viscosity 'eta' of domain {d} must be non-negative (found {eta_s})"));
+                }
+                if eta_s > 0.0 {
+                    material::isotropic_stiffness(eta_s, 0.0)
+                } else {
+                    [[0.0; 6]; 6]
+                }
+            } else {
+                [[0.0; 6]; 6]
+            };
+            by_domain.insert(d, eta);
         }
         Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
     }

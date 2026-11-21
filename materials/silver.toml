@@ -1,8 +1,31 @@
-# Silver: optical data only (Lorentz-Drude fit of Rakic et al. 1998).
-format = 1
+# Silver: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk room-temperature mechanical/thermal/electrical baseline.
+format = 2
 name = "silver"
-description = "Silver, evaporated film, room temperature (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Evaporated Ag wide-band Lorentz-Drude fit at 293 K (Rakic 1998, 0.25-12.4 um; E=83 GPa, sigma=6.30e7 S/m) — broadband analytical baseline vs sharper NIR experimental silver_johnson."
+kind = "metal"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
+source = { cite = "APPROXIMATE bulk polycrystalline mechanics/thermal/electrical + verified Rakic et al. 1998 [optical] fit (0.248-12.4 um)", doi = "10.1364/AO.37.005271" }
+density = "10490 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 83.0
+nu = 0.37
+source = { cite = "APPROXIMATE polycrystalline bulk silver handbook values at 293 K (thin-film modulus depends on grain size and deposition conditions)" }
+
+[thermal]
+conductivity = 429.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "235 J/(kg*K)"
+expansion = 18.9e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE standard bulk silver thermophysical handbook values at 300 K" }
+
+[electrical]
+conductivity = 6.30e7
+conductivity_unit = "S/m"
+source = { cite = "APPROXIMATE bulk pure silver DC conductivity at 293 K" }
 
 [optical]
 wavelength_unit = "um"

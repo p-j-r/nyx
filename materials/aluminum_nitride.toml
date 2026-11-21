@@ -1,0 +1,95 @@
+# Single-crystal wurtzite aluminum nitride (AlN), hexagonal 6mm symmetry, c-axis = crystal z.
+format = 2
+name = "aluminum_nitride"
+description = "Single-crystal wurtzite AlN (Tsubouchi 1985 hexagonal c33=389 GPa + Pastrnak 1966 uniaxial Sellmeier 0.22-5.0 um, no=2.119 at 1.55 um) — bulk/epitaxial piezo-optomechanics benchmark vs sputtered aluminum_nitride_piezomumps and scaln_30."
+kind = "crystalline"
+point_group = "6mm"
+reference_temperature = "293.15 K"
+notes = "Includes Tsubouchi 1985 piezoelectric stress tensor (e33 = 1.55, e31 = -0.58, e15 = -0.48 C/m^2) alongside clamped RF dielectric, photoelastic, electro-optic, and viscoelastic tensors."
+source = [
+  { cite = "K. Tsubouchi and N. Mikoshiba, Zero-temperature-coefficient SAW delay line on AlN epitaxial films, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985): density 3260 kg/m^3", doi = "10.1109/T-SU.1985.31647", verified = "2026-11-21" },
+  { cite = "J. Pastrnak and L. Roskovcova, Phys. Stat. Sol. 14, K5-K8 (1966)", doi = "10.1002/pssb.19660140127", verified = "2026-11-21" },
+]
+density = "3260 kg/m^3"
+
+[elastic]
+class = "hexagonal"
+unit = "GPa"
+c11 = 410.0
+c12 = 149.0
+c13 = 99.0
+c33 = 389.0
+c44 = 125.0
+source = { cite = "K. Tsubouchi and N. Mikoshiba, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985), Table I, hexagonal wurtzite stiffness C^E of epitaxial AlN", doi = "10.1109/T-SU.1985.31647", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 285.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "740 J/(kg*K)"
+expansion = 4.5e-6
+expansion_unit = "1/K"
+source = { cite = "G. A. Slack et al., The intrinsic thermal conductivity of AlN, J. Phys. Chem. Solids 48, 641-647 (1987); specific heat and expansion (APPROXIMATE thin-film/orientation average)", doi = "10.1016/0022-3697(87)90153-3" }
+
+[dielectric]
+eps_clamped = { perp = 8.5, par = 9.5 }
+loss_tangent = 3.0e-4
+loss_ref_freq = "10 GHz"
+source = [
+  { cite = "K. Tsubouchi and N. Mikoshiba, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985), clamped/RF relative permittivity of wurtzite AlN", doi = "10.1109/T-SU.1985.31647", verified = "2026-11-21" },
+  { cite = "APPROXIMATE epitaxial wurtzite AlN microwave dielectric loss tangent near 10 GHz" },
+]
+
+[piezoelectric]
+form = "stress_charge"
+unit = "C/m^2"
+e31 = -0.58
+e33 = 1.55
+e15 = -0.48
+source = { cite = "K. Tsubouchi and N. Mikoshiba, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985), Table I, piezoelectric stress constants e_iJ of epitaxial wurtzite AlN", doi = "10.1109/T-SU.1985.31647", verified = "2026-11-21" }
+
+[photoelastic]
+wavelength = "633 nm"
+p11 = -0.10
+p12 = -0.027
+p13 = -0.019
+p31 = -0.019
+p33 = -0.107
+p44 = -0.032
+source = { cite = "APPROXIMATE wurtzite AlN photoelastic tensor (Davydov 2002 / NumBAT AlN)" }
+
+[electro_optic]
+wavelength = "633 nm"
+unit = "pm/V"
+source = { cite = "APPROXIMATE wurtzite AlN clamped linear electro-optic Pockels coefficients (Graupner et al. 1992)" }
+
+[electro_optic.clamped]
+r13 = 0.67
+r33 = -0.59
+r51 = 0.50
+
+[viscoelastic]
+unit = "mPa*s"
+eta11 = 0.80
+eta12 = 0.25
+eta13 = 0.20
+eta33 = 0.85
+eta44 = 0.25
+source = { cite = "APPROXIMATE room-temperature wurtzite AlN Akhiezer phonon viscosity tensor" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.22, 5.0]
+reference_temperature = "293.15 K"
+source = { cite = "J. Pastrnak and L. Roskovcova, Refraction index measurements on AlN single crystals, Phys. Stat. Sol. 14, K5-K8 (1966), refractiveindex.info (main/AlN/Pastrnak-o and Pastrnak-e, CC0)", url = "https://refractiveindex.info/?shelf=main&book=AlN&page=Pastrnak-o", doi = "10.1002/pssb.19660140127", verified = "2026-11-21" }
+
+[optical.ordinary]
+model = "sellmeier"
+A = 3.1399
+B = [1.3786, 3.861]
+lambda0 = [0.1715, 15.03]
+
+[optical.extraordinary]
+model = "sellmeier"
+A = 3.0729
+B = [1.6173, 4.139]
+lambda0 = [0.1746, 15.03]

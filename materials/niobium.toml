@@ -1,7 +1,8 @@
 # Niobium: superconducting thin-film BCS and London parameters (Park et al. 2026, Maxfield & McLean 1965).
-format = 1
+format = 2
 name = "niobium"
-description = "Niobium sputtered superconducting film"
+kind = "superconductor"
+description = "Niobium sputtered superconducting film (Park 2026 / Maxfield & McLean 1965: Tc=9.2 K, Delta_0=1.395 meV, lambda_L=33.3 nm, xi_0=39.0 nm, sigma_n=5.5e7 S/m) — compact BCS alias of niobium_sc."
 source = { cite = "Compiled from the per-table sources below. Density 8570 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)", verified = "2026-11-21" }
 density = "8570 kg/m^3"
 

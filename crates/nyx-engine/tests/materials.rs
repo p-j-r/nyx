@@ -77,3 +77,62 @@ fn a_physics_sized_mesh_is_finer_where_the_waves_are_short() {
     let sized: Value = e.call("mesh_build", &json!({})).unwrap();
     assert!(sized["mesh"]["cells"].as_u64().unwrap() > coarse, "sizing from the waves refines the mesh: {sized}");
 }
+
+#[test]
+fn library_list_and_describe_expose_comparative_descriptions() {
+    let mut e = Engine::new();
+    let list = e.call("list_materials", &json!({})).unwrap();
+    let rows = list.as_array().unwrap();
+    let si = rows.iter().find(|r| r["name"] == "silicon").expect("silicon in list");
+    assert!(si["description"].as_str().is_some_and(|s| !s.is_empty()), "{si}");
+    let salz = e.call("describe_material", &json!({ "name": "silicon_salzberg" })).unwrap();
+    assert!(salz["description"].as_str().is_some_and(|s| s.contains("Salzberg")), "{salz}");
+}
+
+#[test]
+fn remote_catalog_and_offline_import_material_work_and_respect_path_guard() {
+    let mut e = Engine::new();
+    let all = e.call("list_remote_materials", &json!({})).unwrap();
+    let items = all.as_array().unwrap();
+    assert!(items.len() >= 20, "expected curated catalog entries: {items:?}");
+    let photonics = e.call("list_remote_materials", &json!({ "domain": "photonics" })).unwrap();
+    assert!(photonics.as_array().unwrap().iter().all(|r| r["domain"] == "photonics"));
+    assert!(e.call("list_remote_materials", &json!({ "domain": "nonsense" })).is_err());
+
+    let root = std::env::temp_dir().join(format!("nyx-engine-import-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let save_dir = root.join("saved");
+    std::fs::create_dir_all(&save_dir).unwrap();
+    e.set_path_root(Some(&root)).unwrap();
+
+    // Escaping folder must be refused by path_guard before any file is written.
+    let rii = "REFERENCES: \"Synthetic test\"\nDATA:\n  - type: formula 1\n    wavelength_range: 1.0 2.0\n    coefficients: 0 10.6684293 0.301516485 0.0030434748 1.13475115\n";
+    assert!(
+        e.call(
+            "import_material",
+            &json!({ "name": "si_synth", "format": "rii", "content": rii, "extends": "silicon", "folder": "../escaped" }),
+        )
+        .is_err()
+    );
+
+    // Valid import extending `silicon`, added to project and written inside `root`.
+    let out = e
+        .call(
+            "import_material",
+            &json!({
+                "name": "si_synth",
+                "format": "rii",
+                "content": rii,
+                "description": "Synthetic Sellmeier Si variant extending silicon",
+                "extends": "silicon",
+                "add_to_project": true,
+                "folder": "saved"
+            }),
+        )
+        .unwrap();
+    assert_eq!(out["name"], "si_synth");
+    assert_eq!(out["added_to_project"], true);
+    assert!(save_dir.join("si_synth.toml").is_file(), "TOML should be written into root/saved");
+    assert!(e.library().unwrap().names().contains(&"si_synth".to_string()));
+    let _ = std::fs::remove_dir_all(&root);
+}

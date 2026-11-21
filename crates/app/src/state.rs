@@ -233,3 +233,64 @@ pub struct ReduceForm {
     pub formula: String,
     pub lines: Vec<String>,
 }
+
+/// Result sent back from a background material download or live search thread.
+pub enum MaterialBgMsg {
+    Fetched {
+        result: Result<(String, String, Option<std::path::PathBuf>), String>,
+    },
+    Searched {
+        result: Result<serde_json::Value, String>,
+    },
+}
+
+/// What the collapsed "Download or import material" panel and live (T, f, d) evaluator of the Materials tab remember.
+pub struct MaterialFetchForm {
+    pub preset: usize,
+    pub source: String,
+    pub target: String,
+    pub format: usize,
+    pub raw: String,
+    pub name: String,
+    pub extends: String,
+    pub description: String,
+    pub mp_api_key: String,
+    pub search_query: String,
+    pub live_search: bool,
+    pub search_results: Vec<serde_json::Value>,
+    pub save_to_library: bool,
+    pub message: Option<String>,
+    pub is_error: bool,
+    pub eval_temp_k: f64,
+    pub eval_freq_ghz: f64,
+    pub eval_thickness_nm: f64,
+    pub pending: Option<std::sync::mpsc::Receiver<MaterialBgMsg>>,
+    pub busy_label: Option<String>,
+}
+
+impl Default for MaterialFetchForm {
+    fn default() -> Self {
+        Self {
+            preset: 0,
+            source: String::new(),
+            target: String::new(),
+            format: 0,
+            raw: String::new(),
+            name: String::new(),
+            extends: String::new(),
+            description: String::new(),
+            mp_api_key: String::new(),
+            search_query: String::new(),
+            live_search: false,
+            search_results: Vec::new(),
+            save_to_library: false,
+            message: None,
+            is_error: false,
+            eval_temp_k: 4.0,
+            eval_freq_ghz: 5.0,
+            eval_thickness_nm: 100.0,
+            pending: None,
+            busy_label: None,
+        }
+    }
+}

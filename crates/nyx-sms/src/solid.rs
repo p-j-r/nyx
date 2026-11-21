@@ -669,7 +669,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
                 .filter(|b| matches!(b.kind, BcKind::LowReflecting))
                 .flat_map(|b| b.labels.iter().copied())
                 .collect();
-            if !lrb_labels.is_empty() {
+            if !lrb_labels.is_empty() || (spec.materials.has_viscosity() && *f_search > 0.0) {
                 return crate::lrb::solve_lrb(mesh, spec, &st, &k, &m, &rho, &lrb_labels, *n_modes, *f_search, t0);
             }
             let free = free_dofs(n, &st.fixed);

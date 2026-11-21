@@ -55,12 +55,16 @@ impl AxiMaterial {
 
     /// `eps_r` and `mu_r` per domain from the problem's materials (default 1), absorbing layers (`Materials::pml`) included.
     pub fn from_materials(mesh: &Discretisation, m: &Materials) -> Result<AxiMaterial, String> {
-        let eps = m.cell_values(mesh, "eps_r", Some(1.0))?;
-        let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
-        let mat = AxiMaterial {
-            eps: eps.iter().map(|&e| [c(e, 0.0); 3]).collect(),
-            mu: mu.iter().map(|&u| [c(u, 0.0); 3]).collect(),
+        let eps: Vec<[C; 3]> = if m.has_complex_permittivity() {
+            m.cell_complex_permittivity(mesh, Some(1.0))?
+                .into_iter()
+                .map(|(re, im)| [c(re[0][0], -im[0][0]), c(re[2][2], -im[2][2]), c(re[1][1], -im[1][1])])
+                .collect()
+        } else {
+            m.cell_values(mesh, "eps_r", Some(1.0))?.into_iter().map(|e| [c(e, 0.0); 3]).collect()
         };
+        let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
+        let mat = AxiMaterial { eps, mu: mu.iter().map(|&u| [c(u, 0.0); 3]).collect() };
         Ok(mat.with_pml(mesh, &m.pml))
     }
 

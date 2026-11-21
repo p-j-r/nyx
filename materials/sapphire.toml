@@ -1,7 +1,11 @@
-# Sapphire (alpha-Al2O3), trigonal 3m class, optic axis = crystal z. Orientation is set in the project.
-format = 1
+# Sapphire (alpha-Al2O3), trigonal -3m class, optic axis = crystal z. Orientation is set in the project.
+format = 2
 name = "sapphire"
-description = "Synthetic sapphire, room temperature"
+description = "Single-crystal alpha-Al2O3 at 293 K (Wachtman 1960 trigonal c11=496.8 GPa + Malitson/Dodge uniaxial 0.2-5 um) — room-temperature cQAD/SOS substrate vs cryogenic sapphire_4k."
+kind = "crystalline"
+point_group = "-3m"
+crystal_setting = "IEEE-1987"
+reference_temperature = "293.15 K"
 source = { cite = "Compiled from the per-table sources below. Density 3980 kg/m^3 (3.98 g/cm^3): Valley Design sapphire properties page, checked 2026-11-04", verified = "2026-11-04" }
 density = "3980 kg/m^3"
 
@@ -24,9 +28,33 @@ expansion = { perp = 5.0e-6, par = 5.6e-6 }
 expansion_unit = "1/K"
 source = { cite = "APPROXIMATE supplier data at about 20 to 25 degC: conductivity 23.0 (perpendicular to c) and 25.8 (parallel) W/(m K), specific heat 756 J/(kg K) at 18 degC, expansion about 5.0e-6 and 5.6e-6 1/K (Valley Design sapphire properties). Suppliers disagree (for example CrysTec gives 4.5e-6 and 5.3e-6 1/K for expansion), and conductivity falls steeply with temperature", url = "https://valleydesign.com/sappprop/", verified = "2026-11-04" }
 
-[electrical]
-permittivity = { perp = 9.4, par = 11.5 }
-source = { cite = "APPROXIMATE low-frequency relative permittivity, 9.4 perpendicular and 11.5 parallel to c (Valley Design sapphire properties; supplier tables quote 11.5 to 11.6)", url = "https://valleydesign.com/sappprop/", verified = "2026-11-04" }
+[dielectric]
+eps_clamped = { perp = 9.4, par = 11.5 }
+loss_tangent = 1.0e-5
+loss_ref_freq = "10 GHz"
+source = [
+  { cite = "APPROXIMATE low-frequency relative permittivity, 9.4 perpendicular and 11.5 parallel to c (Valley Design sapphire properties; supplier tables quote 11.5 to 11.6)", url = "https://valleydesign.com/sappprop/", verified = "2026-11-04" },
+  { cite = "APPROXIMATE room-temperature single-crystal sapphire microwave loss tangent (~1e-5 at 10 GHz)" },
+]
+
+[photoelastic]
+wavelength = "633 nm"
+p11 = -0.23
+p12 = -0.03
+p13 = 0.02
+p31 = -0.04
+p33 = -0.20
+p44 = -0.10
+source = { cite = "APPROXIMATE alpha-Al2O3 trigonal photoelastic constants at 633 nm (Dixon 1967, J. Appl. Phys. 38)" }
+
+[viscoelastic]
+unit = "mPa*s"
+eta11 = 0.35
+eta12 = 0.12
+eta13 = 0.10
+eta33 = 0.38
+eta44 = 0.11
+source = { cite = "APPROXIMATE room-temperature sapphire Akhiezer acoustic viscosity tensor (de Klerk / Lamb & Richter 1966)" }
 
 [optical]
 wavelength_unit = "um"

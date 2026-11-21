@@ -1,0 +1,30 @@
+# Niobium titanium nitride (NbTiN) magnetic-field-resilient high-Tc superconducting thin film.
+format = 2
+name = "niobium_titanium_nitride_sc"
+kind = "superconductor"
+point_group = "isotropic"
+reference_temperature = "4.0 K"
+description = "Disordered NbTiN superconducting thin film at 4 K (Samkharadze 2016: Tc=12.5-14.8 K, Bc2>10 T, Lk=3-40 pH/sq) — magnetic-field-resilient spin/hybrid cQED and TWPA film vs titanium_nitride_sc and niobium_sc."
+notes = "Superconducting parameters (reactive sputtered NbTiN): t = 8-30 nm, Tc = 12.5-14.8 K (14.5 K nominal), Delta_0 = 2.0-2.3 meV, lambda_L(0) = 220-380 nm, Lk = 3-40 pH/sq, withstands B_parallel > 1-6 T without quasiparticle Q collapse."
+source = { cite = "APPROXIMATE disordered NbTiN film compilation from N. Samkharadze et al., Phys. Rev. Appl. 5, 044004 (2016)", doi = "10.1103/PhysRevApplied.5.044004" }
+density = "7800 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 380.0
+nu = 0.27
+source = { cite = "APPROXIMATE rocksalt NbTiN sputtered thin-film elastic modulus (interpolated from refractory transition-metal nitrides)" }
+
+[thermal]
+conductivity = 1.2
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.06 J/(kg*K)"
+source = { cite = "APPROXIMATE disordered NbTiN thin-film thermal properties at 4 K" }
+
+[superconducting]
+tc = "14.5 K"
+gap_0 = "2200 ueV"
+sigma_n = "8.0e5 S/m"
+nominal_thickness = "15 nm"
+film_model = "thin_limit"
+source = { cite = "APPROXIMATE disordered NbTiN kinetic-inductance film parameters from N. Samkharadze et al., Phys. Rev. Appl. 5, 044004 (2016)", doi = "10.1103/PhysRevApplied.5.044004" }

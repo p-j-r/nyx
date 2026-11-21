@@ -1927,11 +1927,241 @@
   },
   {
     "access": "read",
+    "description": "Curated presets from open material databases (`refractiveindex.info`, `AFLOW`, `NumBAT`) that `fetch_material` can download and convert on demand.",
+    "name": "list_remote_materials",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "description": "physics domain filter, default all",
+          "enum": [
+            "all",
+            "photonics",
+            "phononics",
+            "superconducting"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "List downloadable remote materials"
+  },
+  {
+    "access": "edit",
+    "description": "Converts raw payload text from an open database (`rii` YAML, `aflow` JSON, `mp` JSON or `numbat` JSONC) into validated TOML, optionally extending a library material and adding it to the project or writing `<name>.toml` into `folder`.",
+    "name": "import_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "add_to_project": {
+          "description": "add the converted material to the active project (default true)",
+          "type": "boolean"
+        },
+        "content": {
+          "description": "raw YAML, JSON or JSONC payload text from the external database",
+          "type": "string"
+        },
+        "description": {
+          "description": "optional one-line comparative summary written into the material description field",
+          "type": "string"
+        },
+        "extends": {
+          "description": "optional base material name in the library to inherit unprovided properties from",
+          "type": "string"
+        },
+        "folder": {
+          "description": "optional destination folder to write <name>.toml into",
+          "type": "string"
+        },
+        "format": {
+          "description": "source database format: rii, aflow, mp or numbat",
+          "enum": [
+            "rii",
+            "aflow",
+            "mp",
+            "numbat"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "description": "material name without slashes or commas",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "format",
+        "content"
+      ],
+      "type": "object"
+    },
+    "title": "Import an external material record"
+  },
+  {
+    "access": "expensive",
+    "description": "Downloads a preset or database entry over HTTPS from `refractiveindex.info`, `AFLOW`, `Materials Project` or `NumBAT`, converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`.",
+    "name": "fetch_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "add_to_project": {
+          "description": "add the downloaded material to the active project (default true)",
+          "type": "boolean"
+        },
+        "api_key": {
+          "description": "optional Materials Project API key (falls back to MP_API_KEY environment variable; passed via curl stdin, never stored)",
+          "type": "string"
+        },
+        "description": {
+          "description": "optional one-line comparative summary written into the material description field",
+          "type": "string"
+        },
+        "extends": {
+          "description": "optional base material name in the library to inherit unprovided properties from",
+          "type": "string"
+        },
+        "folder": {
+          "description": "optional destination folder to write <name>.toml into",
+          "type": "string"
+        },
+        "name": {
+          "description": "material name in TOML; defaults to the preset id or derived entry stem",
+          "type": "string"
+        },
+        "source": {
+          "description": "curated preset id (from `list_remote_materials`), `catalog`, `rii`, `aflow`, `mp` or `numbat`",
+          "type": "string"
+        },
+        "target": {
+          "description": "preset id, database entry key, Materials Project id (e.g. mp-149), AFLOW query, NumBAT stem or https URL; omit when `source` is a preset id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "title": "Download a material from an open database"
+  },
+  {
+    "access": "read",
+    "description": "Searches the curated remote material presets by keyword, formula, domain or source database, and optionally queries live AFLOW and Materials Project HTTPS endpoints.",
+    "name": "search_remote_materials",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key": {
+          "description": "optional Materials Project API key for live mp queries (falls back to MP_API_KEY environment variable)",
+          "type": "string"
+        },
+        "domain": {
+          "description": "physics domain filter, default all",
+          "enum": [
+            "all",
+            "photonics",
+            "phononics",
+            "superconducting"
+          ],
+          "type": "string"
+        },
+        "live": {
+          "description": "also query live AFLOW and Materials Project HTTPS endpoints, default false",
+          "type": "boolean"
+        },
+        "query": {
+          "description": "search keyword, chemical formula or material identifier (e.g. Si, AlN, LiNbO3, mp-149)",
+          "type": "string"
+        },
+        "source": {
+          "description": "database filter, default all",
+          "enum": [
+            "all",
+            "rii",
+            "aflow",
+            "mp",
+            "numbat"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "title": "Search curated and live open material databases"
+  },
+  {
+    "access": "read",
+    "description": "Evaluates a material's temperature-, frequency-, wavelength- and electric-field-dependent properties: thermal curves at T, optical (n, k) and complex permittivity at (wavelength, T), microwave complex permittivity and TLS loss tangent at (frequency, T, e_field), piezoelectric Legendre duals (eps_clamped, eps_free, C^E, C^D), photoelastic, electro-optic, viscoelastic, and BCS superconducting surface impedance.",
+    "name": "evaluate_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "e_field": {
+          "description": "electric-field amplitude in V/m for saturable TLS dielectric loss",
+          "type": "number"
+        },
+        "euler_deg": {
+          "description": "Bunge Z-X-Z crystal orientation angles in degrees [phi1, Phi, phi2]",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "film_model": {
+          "description": "thin-film boundary formula for BCS sheet impedance, default kerr",
+          "enum": [
+            "kerr",
+            "two_sided",
+            "thin_limit"
+          ],
+          "type": "string"
+        },
+        "frequency": {
+          "description": "evaluation frequency in Hz for microwave dielectric and BCS superconducting models",
+          "type": "number"
+        },
+        "name": {
+          "description": "material name in the library or active project",
+          "type": "string"
+        },
+        "temperature": {
+          "description": "evaluation temperature in K (default: material reference_temperature)",
+          "type": "number"
+        },
+        "thickness": {
+          "description": "film thickness in m for BCS superconducting sheet impedance",
+          "type": "number"
+        },
+        "wavelength": {
+          "description": "evaluation free-space wavelength in m for optical dispersion models",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "title": "Evaluate a material at temperature, frequency and wavelength"
+  },
+  {
+    "access": "read",
     "description": "Evaluates Zimmermann arbitrary-purity BCS complex conductivity and thin-film surface impedance (Z_s = R_s + i omega L_k_sq) for a superconducting material or parameter set.",
     "name": "bcs_surface_impedance",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "dynes_gamma": {
+          "description": "Dynes pair-breaking broadening Gamma in J",
+          "type": "number"
+        },
         "film_model": {
           "default": "kerr",
           "description": "thin-film boundary convention: two_sided (interior sheet jump), kerr (one-sided backed wall) or thin_limit (Pearl d << lambda_eff)",
@@ -1967,6 +2197,10 @@
           "description": "electron mean free path in metres",
           "type": "number"
         },
+        "r_res": {
+          "description": "residual sheet resistance floor in Ohm/sq",
+          "type": "number"
+        },
         "sigma_n": {
           "description": "normal-state conductivity in S/m",
           "type": "number"
@@ -1982,6 +2216,10 @@
         "thickness": {
           "description": "film thickness in metres",
           "minimum": 1e-12,
+          "type": "number"
+        },
+        "x_qp_floor": {
+          "description": "non-equilibrium normalized quasiparticle density floor",
           "type": "number"
         },
         "xi_0": {

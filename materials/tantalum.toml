@@ -1,7 +1,8 @@
 # Alpha-phase tantalum (alpha-Ta) superconducting film for high-coherence quantum circuits.
-format = 1
+format = 2
 name = "tantalum"
-description = "Alpha-phase tantalum (alpha-Ta) superconducting film"
+kind = "superconductor"
+description = "Alpha-phase tantalum (alpha-Ta) superconducting film (Place 2021: Tc=4.38 K, Delta_0=0.70 meV, lambda_L=35 nm, xi_0=92 nm, sigma_n=2.5e7 S/m) — compact BCS alias of tantalum_alpha_sc."
 source = { cite = "Compiled from the per-table sources below. Density 16650 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)", verified = "2026-11-21" }
 density = "16650 kg/m^3"
 

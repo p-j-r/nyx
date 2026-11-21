@@ -40,24 +40,54 @@ fn the_library_has_its_materials() {
         vec![
             "air",
             "aluminium",
+            "aluminium_sc_emft",
+            "aluminum_nitride",
+            "aluminum_nitride_piezomumps",
+            "beta_tin_sc",
             "copper",
+            "copper_4k",
+            "diamond",
+            "gallium_arsenide",
+            "gallium_arsenide_papatryfonos",
             "gold",
+            "gold_johnson",
             "granular_aluminium",
+            "granular_aluminium_sc",
             "lithium_niobate",
+            "lithium_niobate_4k",
+            "lithium_niobate_mgo",
             "nbn",
+            "nbn_sc",
             "niobium",
+            "niobium_sc",
+            "niobium_titanium_nitride_sc",
+            "polysilicon_polymumps",
+            "quartz_alpha",
             "sapphire",
+            "sapphire_4k",
+            "scaln_30",
             "silica",
+            "silica_4k",
+            "silica_thermal_box",
             "silicon",
+            "silicon_4k",
+            "silicon_mcskimin",
             "silicon_nitride",
+            "silicon_nitride_pecvd",
+            "silicon_nitride_philipp",
+            "silicon_palik",
+            "silicon_salzberg",
             "silver",
+            "silver_johnson",
             "tantalum",
+            "tantalum_alpha_sc",
             "tin",
+            "titanium_nitride_sc",
         ]
     );
     assert!(lib.get("Silicon").is_some(), "lookup ignores case");
     let e = lib.require("platinum").unwrap_err().to_string();
-    assert!(e.contains("available: air, aluminium, copper, gold"), "{e}");
+    assert!(e.contains("available: air, aluminium,"), "{e}");
 }
 
 #[test]

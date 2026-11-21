@@ -56,12 +56,13 @@ fn disordered_nb_35nm_spec() -> Superconducting {
         xi_0: Some(38.0e-9),
         mean_free_path: Some(2.0e-9),
         sigma_n: Some(7.5e6),
+        ..Default::default()
     }
 }
 
 fn disordered_nb_library() -> Arc<Library> {
     let toml_text = r#"
-format = 1
+format = 2
 name = "Nb_Disordered_35nm_Park2026"
 description = "35 nm disordered Nb film on sapphire (Park et al. 2026)"
 

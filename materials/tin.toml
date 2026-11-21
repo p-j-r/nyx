@@ -1,7 +1,8 @@
 # White tin (beta-Sn) superconducting film.
-format = 1
+format = 2
 name = "tin"
-description = "White tin (beta-Sn) superconducting film"
+kind = "superconductor"
+description = "White tin (beta-Sn) superconducting film (Tinkham 1996 / Kittel 2005: Tc=3.72 K, Delta_0=0.575 meV, lambda_L=34 nm, xi_0=230 nm, sigma_n=4.0e7 S/m) — compact BCS alias of beta_tin_sc."
 source = { cite = "Compiled from the per-table sources below. Density 7265 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)", verified = "2026-11-21" }
 density = "7265 kg/m^3"
 

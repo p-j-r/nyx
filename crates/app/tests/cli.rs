@@ -240,3 +240,75 @@ fn api_stubs_prints_the_type_stub_of_the_nyx_object() {
     let out = text(&o.stdout);
     assert!(out.contains("class _Nyx:") && out.contains("def solve_run(self") && out.contains("nyx: _Nyx"), "{}", &out[..out.len().min(400)]);
 }
+
+#[test]
+fn material_cli_lists_shows_and_imports_offline() {
+    let list = nyx(&["material", "list"]);
+    assert_eq!(list.status.code(), Some(0), "{}", text(&list.stderr));
+    let out = text(&list.stdout);
+    assert!(out.contains("silicon_salzberg") && out.contains("aluminium_sc_emft"), "{out}");
+
+    let remote = nyx(&["material", "list", "--remote", "--domain", "photonics", "--json"]);
+    assert_eq!(remote.status.code(), Some(0), "{}", text(&remote.stderr));
+    let r_json: serde_json::Value = serde_json::from_str(&text(&remote.stdout)).unwrap();
+    let arr = r_json.as_array().unwrap();
+    assert!(!arr.is_empty() && arr.iter().all(|r| r["domain"] == "photonics"));
+
+    let show = nyx(&["material", "show", "silicon_salzberg"]);
+    assert_eq!(show.status.code(), Some(0), "{}", text(&show.stderr));
+    assert!(text(&show.stdout).contains("Salzberg"));
+
+    let dir = tmp("material-import");
+    let raw = dir.join("si_test.yml");
+    let out_toml = dir.join("si_test.toml");
+    std::fs::write(
+        &raw,
+        "REFERENCES: \"Synthetic test\"\nDATA:\n  - type: formula 1\n    wavelength_range: 1.0 2.0\n    coefficients: 0 10.6684293 0.301516485 0.0030434748 1.13475115\n",
+    )
+    .unwrap();
+    let imp = nyx(&[
+        "material",
+        "import",
+        "rii",
+        raw.to_str().unwrap(),
+        "--name",
+        "si_test",
+        "--extends",
+        "silicon",
+        "--out",
+        out_toml.to_str().unwrap(),
+    ]);
+    assert_eq!(imp.status.code(), Some(0), "{}", text(&imp.stderr));
+    let saved = std::fs::read_to_string(&out_toml).unwrap();
+    assert!(saved.contains("extends = \"silicon\"") && saved.contains("UNVERIFIED"), "{saved}");
+
+    let eval = nyx(&["material", "eval", "niobium_sc", "--temp", "0.02", "--freq", "5e9", "--json"]);
+    assert_eq!(eval.status.code(), Some(0), "{}", text(&eval.stderr));
+    let ev_json: serde_json::Value = serde_json::from_str(&text(&eval.stdout)).unwrap();
+    assert!(ev_json["superconducting"]["l_k_sq_h_sq"].as_f64().unwrap() > 0.0);
+
+    let bcs = nyx(&[
+        "material",
+        "bcs",
+        "niobium_sc",
+        "--freq",
+        "5e9",
+        "--temp",
+        "0.02",
+        "--thickness",
+        "100e-9",
+        "--json",
+    ]);
+    assert_eq!(bcs.status.code(), Some(0), "{}", text(&bcs.stderr));
+    let bcs_json: serde_json::Value = serde_json::from_str(&text(&bcs.stdout)).unwrap();
+    assert!(bcs_json["r_s_ohm_sq"].as_f64().unwrap() >= 8.0e-9);
+
+    let search = nyx(&["material", "search", "silicon", "--json"]);
+    assert_eq!(search.status.code(), Some(0), "{}", text(&search.stderr));
+    let s_json: serde_json::Value = serde_json::from_str(&text(&search.stdout)).unwrap();
+    assert!(!s_json["catalog_matches"].as_array().unwrap().is_empty());
+
+    assert_eq!(nyx(&["material"]).status.code(), Some(2));
+    assert_eq!(nyx(&["material", "show", "silicon_salzbergg"]).status.code(), Some(2));
+    assert_eq!(nyx(&["material", "unknown"]).status.code(), Some(2));
+}

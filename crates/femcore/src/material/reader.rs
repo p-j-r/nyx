@@ -263,6 +263,14 @@ fn example_unit(dim: Dim) -> &'static str {
         Dim::ElectricalConductivity => "S/m",
         Dim::Dimensionless => "",
         Dim::Frequency => "eV",
-        Dim::Energy => "meV",
+        Dim::FrequencyHz => "GHz",
+        Dim::Energy => "ueV",
+        Dim::SheetResistance => "nOhm",
+        Dim::SheetInductance => "pH/sq",
+        Dim::PiezoelectricStress => "C/m^2",
+        Dim::PiezoelectricStrain => "pC/N",
+        Dim::ElectroOptic => "pm/V",
+        Dim::DynamicViscosity => "mPa*s",
+        Dim::ElectricField => "V/m",
     }
 }

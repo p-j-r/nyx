@@ -163,6 +163,8 @@ pub struct App {
     pub feedback: crate::feedback::Feedback,
     /// work that follows a solve, one piece per frame (`shell::Deferred`)
     pub deferred: VecDeque<crate::shell::Deferred>,
+    /// form state of the Materials tab's on-demand download / import panel
+    pub mat_fetch: crate::state::MaterialFetchForm,
 }
 
 impl App {
@@ -235,6 +237,7 @@ impl App {
             mcp_server: nyx_connect::find_server(),
             connect_status: vec![],
             connect_note: None,
+            mat_fetch: Default::default(),
             ctx,
         };
         app.engine.set_owner("gui"); // a person's requests run before an agent's (ADR 87)

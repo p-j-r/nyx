@@ -28,7 +28,6 @@ use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::EigOpts;
 use femcore::pml::cell_stretches;
-use femcore::props::TensorKind;
 use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -482,7 +481,7 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
         return Err("EM waves on a 3D mesh use the cavity study".into());
     };
     let order = if problem.order == 1 { 1 } else { 2 };
-    let tens = problem.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+    let tens = problem.materials.cell_complex_permittivity(mesh, Some(1.0))?;
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     let has_pml = problem.materials.has_pml();
     let stretch = if has_pml { Some(cell_stretches(mesh, &problem.materials.pml)) } else { None };
@@ -495,14 +494,15 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
         let lam = [sy * sz / sx, sx * sz / sy, sx * sy / sz];
         let pml_here = stretch.is_some()
             && (sx.re != 1.0 || sx.im != 0.0 || sy.re != 1.0 || sy.im != 0.0 || sz.re != 1.0 || sz.im != 0.0);
-        let t = tens[ci];
+        let (t_re, t_im) = tens[ci];
         // a stretch S = diag(sx, sy, sz) turns eps into det(S) eps_ab / (s_a s_b): the diagonal gets `lam`, off-diagonal terms of an
         // anisotropic crystal are scaled consistently
         let (sv, det) = ([sx, sy, sz], sx * sy * sz);
         let mut e = [[c(0.0, 0.0); 3]; 3];
         for a in 0..3 {
             for b in 0..3 {
-                e[a][b] = if pml_here { det * t[a][b] / (sv[a] * sv[b]) } else { c(t[a][b], 0.0) };
+                let ec = c(t_re[a][b], -t_im[a][b]);
+                e[a][b] = if pml_here { det * ec / (sv[a] * sv[b]) } else { ec };
             }
         }
         eps.push(e);

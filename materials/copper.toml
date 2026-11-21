@@ -1,8 +1,31 @@
-# Copper: optical data only (Lorentz-Drude fit of Rakic et al. 1998).
-format = 1
+# Copper: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk room-temperature mechanical/thermal/electrical baseline.
+format = 2
 name = "copper"
-description = "Copper, evaporated film, room temperature (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Copper at 293 K (Rakic 1998 Lorentz-Drude 0.21-12.4 um; E=130 GPa, k=401 W/(m*K), Cp=385 J/(kg*K)) — room-temperature normal-metal baseline vs RRR=100 cryogenic copper_4k."
+kind = "metal"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
+source = { cite = "APPROXIMATE bulk OFHC polycrystalline mechanics/thermal/electrical at 293 K + verified Rakic et al. 1998 [optical] fit (0.207-12.4 um)", doi = "10.1364/AO.37.005271" }
+density = "8960 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 130.0
+nu = 0.34
+source = { cite = "APPROXIMATE polycrystalline bulk OFHC copper elastic constants at 293 K (Ledbetter & Naimon 1974 VRH baseline ~129.8 GPa)" }
+
+[thermal]
+conductivity = 401.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "385 J/(kg*K)"
+expansion = 16.5e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE pure bulk copper thermophysical values at 300 K" }
+
+[electrical]
+conductivity = 5.96e7
+conductivity_unit = "S/m"
+source = { cite = "APPROXIMATE annealed pure copper DC conductivity at 293 K" }
 
 [optical]
 wavelength_unit = "um"

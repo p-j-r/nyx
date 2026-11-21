@@ -40,6 +40,12 @@ pub enum Dispersion {
     Schott { coefficients: Vec<f64> },
     /// Herzberger: `n = A + B L + C L^2 + D x^2 + E x^4 + F x^6`, `L = 1/(x^2 - 0.028 um^2)`
     Herzberger { coefficients: Vec<f64> },
+    /// RefractiveIndex.info formula 4 (generalised Sellmeier with power terms, wavelengths in um)
+    RiiFormula4 { coefficients: Vec<f64> },
+    /// RefractiveIndex.info formula 5 (Cauchy-like general power series `n = c0 + sum c_{1+2i} lam^{c_{2+2i}}`, wavelengths in um)
+    RiiFormula5 { coefficients: Vec<f64> },
+    /// RefractiveIndex.info formula 6 (gas dispersion `n = 1 + c0 + sum c_{1+2i} / (c_{2+2i} - lam^-2)`, wavelengths in um)
+    RiiFormula6 { coefficients: Vec<f64> },
     /// Drude and Lorentz oscillators in the permittivity, `e^{j omega t}` convention:
     /// `eps = eps_inf - f0 Wp^2/(w^2 - j g0 w) + sum_k f_k Wp^2/(w0_k^2 - w^2 + j g_k w)`. Frequencies in rad/s.
     Oscillators { eps_inf: f64, plasma: f64, drude: Option<[f64; 2]>, lorentz: Vec<[f64; 3]>, frequency_unit: String },
@@ -54,6 +60,9 @@ impl Dispersion {
             Dispersion::Tabulated { .. } => "tabulated",
             Dispersion::Schott { .. } => "schott",
             Dispersion::Herzberger { .. } => "herzberger",
+            Dispersion::RiiFormula4 { .. } => "rii_formula_4",
+            Dispersion::RiiFormula5 { .. } => "rii_formula_5",
+            Dispersion::RiiFormula6 { .. } => "rii_formula_6",
             Dispersion::Oscillators { drude, lorentz, .. } => match (drude.is_some(), lorentz.is_empty()) {
                 (true, true) => "drude",
                 (false, _) => "lorentz",
@@ -71,8 +80,18 @@ pub struct AxisModel {
     pub source: Vec<Source>,
     /// thermo-optic coefficient dn/dT in 1/K (0 if none)
     pub dn_dt: f64,
+    /// Optional separate extinction table `[wavelengths_in_file_units, k_values]` paired with any dispersion model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub k_data: Option<(Vec<f64>, Vec<f64>)>,
+    /// Optional Einstein oscillator temperature Theta_E [K] saturating dn/dT -> 0 as T -> 0 K.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dn_dt_einstein_theta: Option<f64>,
+    /// Optional valid temperature range `[T_min, T_max]` [K] for thermo-optic evaluation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dn_dt_range: Option<[f64; 2]>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Axes {
     Isotropic(AxisModel),
@@ -255,6 +274,91 @@ impl Dispersion {
                 }
                 Some((n, 0.0, dn, 0.0))
             }
+            Dispersion::RiiFormula4 { coefficients: c } => {
+                if c.is_empty() {
+                    return None;
+                }
+                let s_um = unit_m / 1e-6;
+                let xu = x * s_um;
+                let x2 = xu * xu;
+                let mut n2 = c[0];
+                let mut dn2 = 0.0;
+                let mut i = 1;
+                for _ in 0..2 {
+                    if i + 3 < c.len() {
+                        if c[i] != 0.0 {
+                            let pole = c[i + 2].powf(c[i + 3]);
+                            let den = x2 - pole;
+                            if den.abs() < 1e-18 || !den.is_finite() {
+                                return None;
+                            }
+                            let p = c[i + 1];
+                            let xp = xu.powf(p);
+                            let num = c[i] * xp;
+                            let dnum = if p == 0.0 { 0.0 } else { c[i] * p * xu.powf(p - 1.0) };
+                            n2 += num / den;
+                            dn2 += (dnum * den - num * (2.0 * xu)) / (den * den);
+                        }
+                        i += 4;
+                    }
+                }
+                while i + 1 < c.len() {
+                    let a = c[i];
+                    let p = c[i + 1];
+                    n2 += a * xu.powf(p);
+                    if p != 0.0 {
+                        dn2 += a * p * xu.powf(p - 1.0);
+                    }
+                    i += 2;
+                }
+                if n2 <= 0.0 || !n2.is_finite() {
+                    return None;
+                }
+                let n = n2.sqrt();
+                Some((n, 0.0, (dn2 / (2.0 * n)) * s_um, 0.0))
+            }
+            Dispersion::RiiFormula5 { coefficients: c } => {
+                if c.is_empty() {
+                    return None;
+                }
+                let s_um = unit_m / 1e-6;
+                let xu = x * s_um;
+                let mut n = c[0];
+                let mut dn = 0.0;
+                for p in c[1..].as_chunks::<2>().0 {
+                    n += p[0] * xu.powf(p[1]);
+                    if p[1] != 0.0 {
+                        dn += p[0] * p[1] * xu.powf(p[1] - 1.0);
+                    }
+                }
+                if n <= 0.0 || !n.is_finite() {
+                    return None;
+                }
+                Some((n, 0.0, dn * s_um, 0.0))
+            }
+            Dispersion::RiiFormula6 { coefficients: c } => {
+                if c.is_empty() {
+                    return None;
+                }
+                let s_um = unit_m / 1e-6;
+                let xu = x * s_um;
+                let inv = 1.0 / (xu * xu);
+                let inv3 = 1.0 / (xu * xu * xu);
+                let mut n = 1.0 + c[0];
+                let mut dn = 0.0;
+                for p in c[1..].as_chunks::<2>().0 {
+                    let den = p[1] - inv;
+                    if den.abs() < 1e-18 || !den.is_finite() {
+                        return None;
+                    }
+                    n += p[0] / den;
+                    dn += -2.0 * p[0] * inv3 / (den * den);
+                }
+                if n <= 0.0 || !n.is_finite() {
+                    return None;
+                }
+                Some((n, 0.0, dn * s_um, 0.0))
+            }
             Dispersion::Oscillators { eps_inf, plasma, drude, lorentz, .. } => {
                 use num_complex::Complex64 as C;
                 let lam = x * unit_m;
@@ -345,9 +449,31 @@ impl Optical {
                 return Err(out_of(lo, hi));
             }
         }
-        let (mut n, k, dn, dk) = m.dispersion.eval(x, self.unit_m).ok_or(OpticsError::NotFinite { lambda_m })?;
-        if let Some(t) = temp_k {
-            n += m.dn_dt * (t - self.reference_temperature);
+        let (mut n, mut k, dn, mut dk) = m.dispersion.eval(x, self.unit_m).ok_or(OpticsError::NotFinite { lambda_m })?;
+        if let Some((kl, kv)) = &m.k_data {
+            if let Some((k_val, dk_val)) = interpolate(kl, kv, Interp::Pchip, x, false) {
+                k = k_val.max(0.0);
+                dk = dk_val;
+            } else if x > kl[kl.len() - 1] && kv[kv.len() - 1] <= 1e-4 {
+                // Transparent long-wavelength tail past interband k(lambda) table
+                k = 0.0;
+                dk = 0.0;
+            } else {
+                return Err(out_of(kl[0], kl[kl.len() - 1]));
+            }
+        }
+        if let Some(t_raw) = temp_k {
+            let t = match m.dn_dt_range {
+                Some([lo, hi]) => t_raw.clamp(lo, hi),
+                None => t_raw,
+            };
+            if let Some(theta) = m.dn_dt_einstein_theta {
+                let g_t = super::state_t::einstein_thermal_coordinate(t, theta);
+                let g_ref = super::state_t::einstein_thermal_coordinate(self.reference_temperature, theta);
+                n += m.dn_dt * (g_t - g_ref);
+            } else {
+                n += m.dn_dt * (t - self.reference_temperature);
+            }
         }
         if !(n.is_finite() && k.is_finite()) {
             return Err(OpticsError::NotFinite { lambda_m });
@@ -506,7 +632,13 @@ impl Optical {
                     }
                     let _ = b;
                 }
-                Dispersion::Cauchy { .. } | Dispersion::Schott { .. } | Dispersion::Herzberger { .. } | Dispersion::Oscillators { .. } => {}
+                Dispersion::Cauchy { .. }
+                | Dispersion::Schott { .. }
+                | Dispersion::Herzberger { .. }
+                | Dispersion::RiiFormula4 { .. }
+                | Dispersion::RiiFormula5 { .. }
+                | Dispersion::RiiFormula6 { .. }
+                | Dispersion::Oscillators { .. } => {}
                 Dispersion::Tabulated { lambda, n, k, .. } => {
                     if let Some((tlo, thi)) = self.range {
                         if m.dispersion.table_extent().is_some() && (tlo < lambda[0] * (1.0 - 1e-12) || thi > lambda[lambda.len() - 1] * (1.0 + 1e-12)) {
@@ -587,15 +719,109 @@ fn read_model_finish(s: &mut Section, ctx: &Ctx) -> Result<AxisModel, MaterialEr
     Ok(m)
 }
 
-pub const MODEL_KEYS: &[&str] = &["model", "n", "k", "eps", "A", "B", "C", "lambda0", "coefficients", "data", "interpolation", "extrapolate", "dn_dT", "dn_dT_unit", "source", "frequency_unit", "eps_inf", "plasma_frequency", "damping", "drude_weight", "oscillators"];
+pub const MODEL_KEYS: &[&str] = &[
+    "model",
+    "n",
+    "k",
+    "eps",
+    "A",
+    "B",
+    "C",
+    "lambda0",
+    "coefficients",
+    "data",
+    "k_data",
+    "interpolation",
+    "extrapolate",
+    "dn_dT",
+    "dn_dT_unit",
+    "dn_dT_einstein_theta",
+    "dn_dT_einstein_theta_unit",
+    "dn_dT_range",
+    "dn_dT_range_unit",
+    "source",
+    "frequency_unit",
+    "eps_inf",
+    "plasma_frequency",
+    "damping",
+    "drude_weight",
+    "oscillators",
+];
 
 fn floats(s: &mut Section, key: &str) -> Result<Option<Vec<f64>>, MaterialError> {
     s.numbers(key)
 }
 
+type KDataTable = (Vec<f64>, Vec<f64>);
+
+fn read_k_data(s: &mut Section, need_unit: bool) -> Result<Option<KDataTable>, MaterialError> {
+    let Some(v) = s.value("k_data") else {
+        return Ok(None);
+    };
+    if !need_unit {
+        return Err(s.err("wavelength_unit", "is required in [optical] when using k_data"));
+    }
+    let toml::Value::Array(rows) = v else {
+        return Err(s.err("k_data", "must be [[wavelength, k], ...]"));
+    };
+    let mut kl = Vec::with_capacity(rows.len());
+    let mut kv = Vec::with_capacity(rows.len());
+    for (i, row) in rows.iter().enumerate() {
+        let toml::Value::Array(r) = row else {
+            return Err(s.err("k_data", format!("row {} must be [wavelength, k]", i + 1)));
+        };
+        if r.len() != 2 {
+            return Err(s.err("k_data", format!("row {} has {} entries; expected [wavelength, k]", i + 1, r.len())));
+        }
+        let wl = s.number_of("k_data", &r[0])?;
+        let k = s.number_of("k_data", &r[1])?;
+        if wl <= 0.0 || k < 0.0 {
+            return Err(s.err("k_data", format!("row {}: wavelength must be > 0 and k must be >= 0", i + 1)));
+        }
+        if kl.last().is_some_and(|&prev: &f64| wl <= prev) {
+            return Err(s.err("k_data", format!("row {}: wavelengths must strictly increase", i + 1)));
+        }
+        kl.push(wl);
+        kv.push(k);
+    }
+    if kl.len() < 2 {
+        return Err(s.err("k_data", "k_data requires at least two [wavelength, k] rows"));
+    }
+    Ok(Some((kl, kv)))
+}
+
+fn read_dn_dt_range(s: &mut Section) -> Result<Option<[f64; 2]>, MaterialError> {
+    let Some(v) = s.value("dn_dT_range") else {
+        return Ok(None);
+    };
+    let u = s.string("dn_dT_range_unit")?.unwrap_or_else(|| "K".to_string());
+    let toml::Value::Array(a) = v else {
+        return Err(s.err("dn_dT_range", "must be [T_min, T_max]"));
+    };
+    if a.len() != 2 {
+        return Err(s.err("dn_dT_range", "dn_dT_range must have 2 elements [T_min, T_max]"));
+    }
+    let lo_raw = s.number_of("dn_dT_range", &a[0])?;
+    let hi_raw = s.number_of("dn_dT_range", &a[1])?;
+    let lo = units::to_si(lo_raw, &u, Dim::Temperature).map_err(|m| s.err("dn_dT_range", m))?;
+    let hi = units::to_si(hi_raw, &u, Dim::Temperature).map_err(|m| s.err("dn_dT_range", m))?;
+    if lo < 0.0 || hi <= lo {
+        return Err(s.err("dn_dT_range", "dn_dT_range must satisfy 0 <= T_min < T_max"));
+    }
+    Ok(Some([lo, hi]))
+}
+
 fn read_model(s: &mut Section, ctx: &Ctx) -> Result<AxisModel, MaterialError> {
     let kind = s.string("model")?.ok_or_else(|| s.err("model", "is missing; write model = \"constant\", \"sellmeier\", \"cauchy\" or \"tabulated\""))?;
     let dn_dt = s.quantity("dn_dT", Dim::PerKelvin, None)?.unwrap_or(0.0);
+    let dn_dt_einstein_theta = s.quantity("dn_dT_einstein_theta", Dim::Temperature, Some("K"))?;
+    if let Some(th) = dn_dt_einstein_theta {
+        if th <= 0.0 {
+            return Err(s.err("dn_dT_einstein_theta", "Einstein temperature Theta_E must be positive"));
+        }
+    }
+    let dn_dt_range = read_dn_dt_range(s)?;
+    let k_data = read_k_data(s, ctx.unit_given)?;
     let need_unit = |s: &Section| -> Result<(), MaterialError> {
         if ctx.unit_given {
             Ok(())
@@ -698,23 +924,47 @@ fn read_model(s: &mut Section, ctx: &Ctx) -> Result<AxisModel, MaterialError> {
             let _ = ctx.unit_m;
             Dispersion::Tabulated { lambda, n, k, interpolation, extrapolate }
         }
-        "schott" | "herzberger" => {
+        "schott" | "herzberger" | "rii_formula_4" | "rii_formula_5" | "rii_formula_6" => {
             need_unit(s)?;
             let name = kind.to_ascii_lowercase();
             let coefficients = floats(s, "coefficients")?.ok_or_else(|| {
-                if name == "schott" {
-                    s.err("coefficients", "the Schott model needs coefficients = [a0, a1, a2, a3, a4, a5] for n^2 = a0 + a1 x^2 + a2 x^-2 + a3 x^-4 + a4 x^-6 + a5 x^-8")
-                } else {
-                    s.err("coefficients", "the Herzberger model needs coefficients = [A, B, C, D, E, F] for n = A + B L + C L^2 + D x^2 + E x^4 + F x^6, L = 1/(x^2 - 0.028 um^2)")
+                match name.as_str() {
+                    "schott" => s.err("coefficients", "the Schott model needs coefficients = [a0, a1, a2, a3, a4, a5] for n^2 = a0 + a1 x^2 + a2 x^-2 + a3 x^-4 + a4 x^-6 + a5 x^-8"),
+                    "herzberger" => s.err("coefficients", "the Herzberger model needs coefficients = [A, B, C, D, E, F] for n = A + B L + C L^2 + D x^2 + E x^4 + F x^6, L = 1/(x^2 - 0.028 um^2)"),
+                    _ => s.err("coefficients", format!("the {name} model requires a coefficients = [...] list")),
                 }
             })?;
-            if coefficients.len() != 6 {
-                return Err(s.err("coefficients", format!("the {name} model needs exactly 6 coefficients (found {}); write 0 for the ones you do not have", coefficients.len())));
-            }
-            if name == "schott" {
-                Dispersion::Schott { coefficients }
-            } else {
-                Dispersion::Herzberger { coefficients }
+            match name.as_str() {
+                "schott" => {
+                    if coefficients.len() != 6 {
+                        return Err(s.err("coefficients", format!("the schott model needs exactly 6 coefficients (found {}); write 0 for the ones you do not have", coefficients.len())));
+                    }
+                    Dispersion::Schott { coefficients }
+                }
+                "herzberger" => {
+                    if coefficients.len() != 6 {
+                        return Err(s.err("coefficients", format!("the herzberger model needs exactly 6 coefficients (found {}); write 0 for the ones you do not have", coefficients.len())));
+                    }
+                    Dispersion::Herzberger { coefficients }
+                }
+                "rii_formula_4" => {
+                    if coefficients.is_empty() {
+                        return Err(s.err("coefficients", "rii_formula_4 needs at least 1 coefficient"));
+                    }
+                    Dispersion::RiiFormula4 { coefficients }
+                }
+                "rii_formula_5" => {
+                    if coefficients.is_empty() || coefficients.len() % 2 != 1 {
+                        return Err(s.err("coefficients", "rii_formula_5 needs 1 + 2*m coefficients [c0, c1, c2, ...]"));
+                    }
+                    Dispersion::RiiFormula5 { coefficients }
+                }
+                _ => {
+                    if coefficients.is_empty() || coefficients.len() % 2 != 1 {
+                        return Err(s.err("coefficients", "rii_formula_6 needs 1 + 2*m coefficients [c0, c1, c2, ...]"));
+                    }
+                    Dispersion::RiiFormula6 { coefficients }
+                }
             }
         }
         "drude" | "lorentz" | "drude_lorentz" => {
@@ -770,9 +1020,16 @@ fn read_model(s: &mut Section, ctx: &Ctx) -> Result<AxisModel, MaterialError> {
             };
             Dispersion::Oscillators { eps_inf, plasma, drude, lorentz, frequency_unit: fu }
         }
-        other => return Err(s.err("model", format!("unknown model '{other}'; use constant, sellmeier, cauchy, schott, herzberger, drude, lorentz, drude_lorentz or tabulated"))),
+        other => return Err(s.err("model", format!("unknown model '{other}'; use constant, sellmeier, cauchy, schott, herzberger, rii_formula_4, rii_formula_5, rii_formula_6, drude, lorentz, drude_lorentz or tabulated"))),
     };
-    Ok(AxisModel { dispersion, source: Vec::new(), dn_dt })
+    Ok(AxisModel {
+        dispersion,
+        source: Vec::new(),
+        dn_dt,
+        k_data,
+        dn_dt_einstein_theta,
+        dn_dt_range,
+    })
 }
 
 fn fl(v: &[f64]) -> toml::Value {
@@ -813,7 +1070,11 @@ fn write_model(t: &mut toml::Table, m: &AxisModel) {
                 t.insert("extrapolate".into(), "linear".into());
             }
         }
-        Dispersion::Schott { coefficients } | Dispersion::Herzberger { coefficients } => {
+        Dispersion::Schott { coefficients }
+        | Dispersion::Herzberger { coefficients }
+        | Dispersion::RiiFormula4 { coefficients }
+        | Dispersion::RiiFormula5 { coefficients }
+        | Dispersion::RiiFormula6 { coefficients } => {
             t.insert("coefficients".into(), fl(coefficients));
         }
         Dispersion::Oscillators { eps_inf, plasma, drude, lorentz, frequency_unit } => {
@@ -841,6 +1102,16 @@ fn write_model(t: &mut toml::Table, m: &AxisModel) {
     if m.dn_dt != 0.0 {
         t.insert("dn_dT".into(), format!("{} 1/K", m.dn_dt).into());
     }
+    if let Some(theta) = m.dn_dt_einstein_theta {
+        t.insert("dn_dT_einstein_theta".into(), format!("{theta} K").into());
+    }
+    if let Some([lo, hi]) = m.dn_dt_range {
+        t.insert("dn_dT_range".into(), fl(&[lo, hi]));
+    }
+    if let Some((kl, kv)) = &m.k_data {
+        let rows = kl.iter().enumerate().map(|(i, l)| fl(&[*l, kv[i]])).collect();
+        t.insert("k_data".into(), toml::Value::Array(rows));
+    }
 }
 
 /// Keys of the `[optical]` table itself (the model keys of an isotropic material live there too).
@@ -865,6 +1136,9 @@ mod tests {
                 source: Vec::new(),
                 dispersion: Dispersion::Sellmeier { a: 1.0, b: vec![0.6961663, 0.4079426, 0.8974794], c: vec![0.0684043_f64.powi(2), 0.1162414_f64.powi(2), 9.896161_f64.powi(2)] },
                 dn_dt: 0.0,
+                k_data: None,
+                dn_dt_einstein_theta: None,
+                dn_dt_range: None,
             }),
         }
     }
@@ -911,5 +1185,79 @@ mod tests {
             prev = v;
         }
         assert!(interpolate(&x, &y, Interp::Pchip, 5.1, false).is_none());
+    }
+
+    #[test]
+    fn rii_formulas_4_5_6_match_finite_difference_derivatives() {
+        // Formula 4 (SiO2/LiNbO3 form with negative IR pole power term):
+        let f4 = Optical {
+            source: Vec::new(),
+            wavelength_unit: "um".into(),
+            unit_m: 1e-6,
+            range: Some((0.4, 5.0)),
+            reference_temperature: 293.15,
+            axes: Axes::Isotropic(AxisModel {
+                dispersion: Dispersion::RiiFormula4 {
+                    coefficients: vec![4.9048, 0.11768, 0.0, 0.0475, 1.0, 0.0, 0.0, 1.0, 1.0, -0.027169, 2.0],
+                },
+                source: Vec::new(),
+                dn_dt: 0.0,
+                k_data: None,
+                dn_dt_einstein_theta: None,
+                dn_dt_range: None,
+            }),
+        };
+        let f5 = Optical {
+            axes: Axes::Isotropic(AxisModel {
+                dispersion: Dispersion::RiiFormula5 { coefficients: vec![2.391, 0.012, -2.0, 0.0005, -4.0] },
+                source: Vec::new(),
+                dn_dt: 0.0,
+                k_data: None,
+                dn_dt_einstein_theta: None,
+                dn_dt_range: None,
+            }),
+            ..f4.clone()
+        };
+        let f6 = Optical {
+            axes: Axes::Isotropic(AxisModel {
+                dispersion: Dispersion::RiiFormula6 { coefficients: vec![0.0, 0.05792105, 238.0185, 0.00167917, 57.362] },
+                source: Vec::new(),
+                dn_dt: 0.0,
+                k_data: None,
+                dn_dt_einstein_theta: None,
+                dn_dt_range: None,
+            }),
+            ..f4.clone()
+        };
+        for o in [f4, f5, f6] {
+            let l = 1.55e-6;
+            let h = 1e-11;
+            let (_, _, dn, _) = o.nk(0, l, None).unwrap();
+            let fd = (o.nk(0, l + h, None).unwrap().0 - o.nk(0, l - h, None).unwrap().0) / (2.0 * h);
+            assert!((dn - fd).abs() < 1e-3 * fd.abs().max(1.0), "derivative mismatch: {dn} vs {fd}");
+        }
+    }
+
+    #[test]
+    fn k_data_and_einstein_dn_dt_work_with_sellmeier() {
+        let mut o = silica();
+        if let Axes::Isotropic(ref mut m) = o.axes {
+            m.dn_dt = 1.0e-5;
+            m.dn_dt_einstein_theta = Some(400.0);
+            m.k_data = Some((vec![0.3, 0.5, 1.0, 1.5], vec![1e-3, 1e-4, 1e-6, 0.0]));
+        }
+        // Analytical n preserved alongside tabulated k
+        let (n_500, k_500, _, _) = o.nk(0, 0.5e-6, None).unwrap();
+        assert!((k_500 - 1e-4).abs() < 1e-12);
+        assert!(n_500 > 1.45 && n_500 < 1.47);
+        // Transparent tail past k_data returns k = 0 when within optical range
+        let (_, k_1800, _, _) = o.nk(0, 1.8e-6, None).unwrap();
+        assert_eq!(k_1800, 0.0);
+        // Cryo Einstein saturation: slope -> 0 near 0 K
+        let n_1k = o.nk(0, 1.55e-6, Some(1.0)).unwrap().0;
+        let n_10k = o.nk(0, 1.55e-6, Some(10.0)).unwrap().0;
+        let n_293 = o.nk(0, 1.55e-6, Some(293.15)).unwrap().0;
+        assert!((n_10k - n_1k).abs() < 1e-18);
+        assert!(n_10k < n_293);
     }
 }

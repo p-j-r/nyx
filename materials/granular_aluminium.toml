@@ -1,7 +1,8 @@
 # Granular aluminium (grAl) dirty-limit high-kinetic-inductance superconducting film.
-format = 1
+format = 2
 name = "granular_aluminium"
-description = "Granular aluminium (grAl) dirty-limit superinductor film"
+kind = "superconductor"
+description = "Granular aluminium (grAl) dirty-limit superinductor film (Maleeva 2018 / Gruenhaupt 2019: Tc=1.90 K, Delta_0=0.30 meV, sigma_n=2.5e4 S/m) — compact alias of granular_aluminium_sc."
 source = { cite = "Compiled from the per-table sources below (dirty-limit grAl film parameters from Maleeva et al. 2018 and Gruenhaupt et al. 2019)", verified = "2026-11-21" }
 density = "2700 kg/m^3"
 

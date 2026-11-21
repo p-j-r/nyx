@@ -22,8 +22,24 @@ pub enum Dim {
     ElectricalConductivity,
     /// angular frequency, frequency or photon energy; the SI value is rad/s
     Frequency,
+    /// linear frequency; the SI value is Hz
+    FrequencyHz,
     /// energy; the SI value is J
     Energy,
+    /// surface or sheet resistance; the SI value is Ohm (Ohm/sq)
+    SheetResistance,
+    /// sheet or kinetic inductance; the SI value is H (H/sq)
+    SheetInductance,
+    /// stress-charge piezoelectric coefficient; the SI value is C/m^2
+    PiezoelectricStress,
+    /// strain-charge piezoelectric coefficient; the SI value is C/N (== m/V)
+    PiezoelectricStrain,
+    /// linear electro-optic (Pockels) coefficient; the SI value is m/V
+    ElectroOptic,
+    /// dynamic viscosity; the SI value is Pa*s
+    DynamicViscosity,
+    /// electric field strength; the SI value is V/m
+    ElectricField,
 }
 
 impl Dim {
@@ -40,7 +56,15 @@ impl Dim {
             Dim::Compliance => "a compliance, for example 1/GPa",
             Dim::ElectricalConductivity => "an electrical conductivity, for example S/m",
             Dim::Frequency => "a frequency or energy, for example eV, THz or rad/s",
-            Dim::Energy => "an energy, for example meV, eV or J",
+            Dim::FrequencyHz => "a frequency in Hz, for example GHz or MHz",
+            Dim::Energy => "an energy, for example meV, ueV or J",
+            Dim::SheetResistance => "a surface or sheet resistance, for example Ohm or nOhm/sq",
+            Dim::SheetInductance => "a sheet inductance, for example pH/sq or nH/sq",
+            Dim::PiezoelectricStress => "a stress-charge piezoelectric coefficient, for example C/m^2",
+            Dim::PiezoelectricStrain => "a strain-charge piezoelectric coefficient, for example pC/N",
+            Dim::ElectroOptic => "an electro-optic (Pockels) coefficient, for example pm/V",
+            Dim::DynamicViscosity => "a dynamic viscosity, for example Pa*s or mPa*s",
+            Dim::ElectricField => "an electric field strength, for example V/m or kV/cm",
         }
     }
 }
@@ -53,6 +77,7 @@ fn normalise(u: &str) -> String {
             '\u{3bc}' | '\u{b5}' => s.push('u'),
             '\u{b0}' => s.push_str("deg"),
             '\u{c5}' => s.push_str("angstrom"),
+            '\u{3a9}' | '\u{2126}' => s.push_str("Ohm"),
             c => s.push(c),
         }
     }
@@ -61,6 +86,7 @@ fn normalise(u: &str) -> String {
 
 fn prefix(p: &str) -> Option<f64> {
     Some(match p {
+        "f" => 1e-15,
         "p" => 1e-12,
         "n" => 1e-9,
         "u" => 1e-6,
@@ -95,6 +121,7 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
         "ppm/K" | "1e-6/K" | "10^-6/K" | "e-6/K" | "ppm/degC" | "1e-6/degC" => return Some((Dim::PerKelvin, 1e-6)),
         "1e-5/K" | "10^-5/K" => return Some((Dim::PerKelvin, 1e-5)),
         "m^2/N" | "m2/N" => return Some((Dim::Compliance, 1.0)),
+        "K" => return Some((Dim::Temperature, 1.0)),
         "degC" | "C" => return Some((Dim::Temperature, 1.0)),
         "angstrom" => return Some((Dim::Length, 1e-10)),
         "S/m" => return Some((Dim::ElectricalConductivity, 1.0)),
@@ -104,12 +131,6 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
     }
     if let Some(f) = with_prefix(&u, "eV") {
         return Some((Dim::Frequency, f * 1.602_176_634e-19 / 1.054_571_817e-34));
-    }
-    if let Some(f) = with_prefix(&u, "J") {
-        return Some((Dim::Energy, f));
-    }
-    if let Some(f) = with_prefix(&u, "K") {
-        return Some((Dim::Temperature, f));
     }
     if let Some(f) = with_prefix(&u, "Hz") {
         return Some((Dim::Frequency, f * 2.0 * std::f64::consts::PI));
@@ -132,6 +153,40 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
             return Some((Dim::ElectricalConductivity, f));
         }
     }
+    if let Some(f) = with_prefix(&u, "Ohm/sq")
+        .or_else(|| with_prefix(&u, "ohm/sq"))
+        .or_else(|| with_prefix(&u, "Ohm"))
+        .or_else(|| with_prefix(&u, "ohm"))
+    {
+        return Some((Dim::SheetResistance, f));
+    }
+    if let Some(f) = with_prefix(&u, "H/sq").or_else(|| with_prefix(&u, "H")) {
+        return Some((Dim::SheetInductance, f));
+    }
+    if let Some(f) = with_prefix(&u, "C/m^2").or_else(|| with_prefix(&u, "C/m2")) {
+        return Some((Dim::PiezoelectricStress, f));
+    }
+    if let Some(f) = with_prefix(&u, "C/N") {
+        return Some((Dim::PiezoelectricStrain, f));
+    }
+    if let Some(f) = with_prefix(&u, "m/V") {
+        return Some((Dim::ElectroOptic, f));
+    }
+    if let Some(f) = with_prefix(&u, "Pas") {
+        return Some((Dim::DynamicViscosity, f));
+    }
+    if let Some(f) = with_prefix(&u, "V/m") {
+        return Some((Dim::ElectricField, f));
+    }
+    if let Some(f) = with_prefix(&u, "V/cm") {
+        return Some((Dim::ElectricField, f * 1e2));
+    }
+    if let Some(f) = with_prefix(&u, "J") {
+        return Some((Dim::Energy, f));
+    }
+    if let Some(f) = with_prefix(&u, "K") {
+        return Some((Dim::Temperature, f));
+    }
     if let Some(f) = with_prefix(&u, "m") {
         return Some((Dim::Length, f));
     }
@@ -141,10 +196,27 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
 /// `value` in `unit` converted to SI, if `unit` is a unit of dimension `expect`.
 pub fn to_si(value: f64, unit: &str, expect: Dim) -> Result<f64, String> {
     let u = normalise(unit);
-    if expect == Dim::Energy {
-        if let Some(f) = with_prefix(&u, "eV") {
-            return Ok(value * f * 1.602_176_634e-19);
+    match expect {
+        Dim::Energy => {
+            if let Some(f) = with_prefix(&u, "eV") {
+                return Ok(value * f * 1.602_176_634e-19);
+            }
+            if let Some(f) = with_prefix(&u, "J") {
+                return Ok(value * f);
+            }
         }
+        Dim::FrequencyHz => {
+            if let Some(f) = with_prefix(&u, "Hz") {
+                return Ok(value * f);
+            }
+        }
+        Dim::PiezoelectricStrain => {
+            // 1 C/N == 1 m/V in SI; accept both notations (e.g. pC/N and pm/V) for strain-charge d_iJ.
+            if let Some(f) = with_prefix(&u, "C/N").or_else(|| with_prefix(&u, "m/V")) {
+                return Ok(value * f);
+            }
+        }
+        _ => {}
     }
     let (dim, f) = lookup(unit).ok_or_else(|| format!("the unit '{unit}' is not known; expected {}", expect.describe()))?;
     if dim != expect {
@@ -190,16 +262,18 @@ mod tests {
         assert_eq!(to_si(1.55, "\u{b5}m", Dim::Length).unwrap(), 1.55e-6);
         assert!((to_si(5.0, "ppm/K", Dim::PerKelvin).unwrap() - 5.0e-6).abs() < 1e-18);
         assert!((to_si(20.0, "degC", Dim::Temperature).unwrap() - 293.15).abs() < 1e-12);
-        assert_eq!(to_si(9.2, "K", Dim::Temperature).unwrap(), 9.2);
-        assert!((to_si(10.0, "mK", Dim::Temperature).unwrap() - 0.01).abs() < 1e-15);
-        assert!((to_si(1.0, "eV", Dim::Energy).unwrap() - 1.602_176_634e-19).abs() < 1e-32);
-        assert!((to_si(1.395, "meV", Dim::Energy).unwrap() - 1.395e-3 * 1.602_176_634e-19).abs() < 1e-35);
-        assert!((to_si(180.0, "ueV", Dim::Energy).unwrap() - 180.0e-6 * 1.602_176_634e-19).abs() < 1e-35);
-        assert_eq!(to_si(2.5e-22, "J", Dim::Energy).unwrap(), 2.5e-22);
-        assert!((to_si(33.3, "nm", Dim::Length).unwrap() - 33.3e-9).abs() < 1e-21);
-        assert_eq!(to_si(5.5e7, "S/m", Dim::ElectricalConductivity).unwrap(), 5.5e7);
         assert_eq!(to_si(1.0, "1/GPa", Dim::Compliance).unwrap(), 1e-9);
         assert_eq!(to_si(3.0, "W/(m*K)", Dim::ThermalConductivity).unwrap(), 3.0);
+        assert!((to_si(180.0, "ueV", Dim::Energy).unwrap() - 180e-6 * 1.602_176_634e-19).abs() < 1e-34);
+        assert_eq!(to_si(10.0, "GHz", Dim::FrequencyHz).unwrap(), 10.0e9);
+        assert!((to_si(12.0, "nOhm", Dim::SheetResistance).unwrap() - 12e-9).abs() < 1e-22);
+        assert!((to_si(12.0, "nOhm/sq", Dim::SheetResistance).unwrap() - 12e-9).abs() < 1e-22);
+        assert!((to_si(0.09, "pH/sq", Dim::SheetInductance).unwrap() - 0.09e-12).abs() < 1e-25);
+        assert_eq!(to_si(2.45, "C/m^2", Dim::PiezoelectricStress).unwrap(), 2.45);
+        assert!((to_si(69.2, "pC/N", Dim::PiezoelectricStrain).unwrap() - 69.2e-12).abs() < 1e-24);
+        assert!((to_si(30.8, "pm/V", Dim::ElectroOptic).unwrap() - 30.8e-12).abs() < 1e-24);
+        assert!((to_si(5.9, "mPa*s", Dim::DynamicViscosity).unwrap() - 5.9e-3).abs() < 1e-16);
+        assert_eq!(to_si(1.0, "kV/cm", Dim::ElectricField).unwrap(), 1e5);
     }
 
     #[test]

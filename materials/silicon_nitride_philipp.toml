@@ -1,0 +1,17 @@
+# Silicon nitride visible/NIR Sellmeier fit (Philipp 1973 / Baak 1982).
+format = 2
+name = "silicon_nitride_philipp"
+extends = "silicon_nitride"
+description = "Stoichiometric Si3N4 visible/NIR 1-term Sellmeier (Philipp 1973 / Baak 1982, 0.207-1.24 um, n=2.011 at 0.633 um) — classic visible-band fit vs Luke 2015 telecom/MIR silicon_nitride and Si-rich silicon_nitride_pecvd."
+source = { cite = "Mechanical, thermal and electrical properties inherited from silicon_nitride; [optical] from Philipp 1973 / Baak 1982 (refractiveindex.info main/Si3N4/Philipp, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Philipp", doi = "10.1149/1.2403440", verified = "2026-11-21" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.207, 1.24]
+model = "sellmeier"
+B = [2.8939]
+lambda0 = [0.13967]
+source = [
+  { cite = "H. R. Philipp, Optical properties of silicon nitride, J. Electrochem. Soc. 120, 295-300 (1973); Sellmeier fit by T. Baak, Appl. Opt. 21, 1069-1072 (1982), refractiveindex.info (Si3N4, Philipp, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Philipp", doi = "10.1149/1.2403440", verified = "2026-11-21" },
+  { cite = "T. Baak Sellmeier formula DOI", doi = "10.1364/AO.21.001069", verified = "2026-11-21" },
+]

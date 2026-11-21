@@ -1,0 +1,46 @@
+# Evaporated/sputtered 150 nm Al superconducting thin film (standard_die EMFT baseline).
+format = 2
+name = "aluminium_sc_emft"
+extends = "aluminium"
+kind = "superconductor"
+point_group = "isotropic"
+reference_temperature = "0.01 K"
+description = "Evaporated 150 nm Al superconducting film on FZ-Si at <1 K (standard_die.materials.AL: Tc=1.20 K, lambda_L=70 nm, Lk=0.20 pH/sq, E=77.5 GPa) — Josephson junction and mK CPW film vs 293 K aluminium."
+notes = "Superconducting film parameters (T -> 10 mK): thickness t = 150 nm, Tc = 1.20 K, BCS gap Delta_0 = 0.180 meV, effective London penetration depth lambda_L(0) = 70 nm (thin film vs 16 nm clean bulk), sheet kinetic inductance Lk = 0.20 pH/sq; Al/AlOx/Al junction Rn*A = 1278 Ohm*um^2. [optical] inherited from Rakic 1998 293 K Al."
+source = { cite = "APPROXIMATE thin-film cryogenic Al compilation from standard_die.materials.AL & McRae et al., Rev. Sci. Instrum. 91, 091101 (2020) + Kamm & Alers 1964 4.2 K Al mechanics", doi = "10.1063/5.0017378" }
+density = "2700 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 77.5
+nu = 0.34
+source = { cite = "APPROXIMATE 4.2 K polycrystalline Al thin-film isotropic stiffness inferred from G. N. Kamm and G. A. Alers, J. Appl. Phys. 35, 327 (1964)", doi = "10.1063/1.1713309" }
+
+[thermal]
+conductivity = 10.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.26 J/(kg*K)"
+expansion = 2.0e-9
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE thin-film 4 K normal-state aluminium thermal properties (quasiparticle electronic thermal conductivity drops exponentially below Tc = 1.20 K)" }
+
+[superconducting]
+tc = "1.20 K"
+gap_0 = "180 ueV"
+lambda_L = "16.0 nm"
+mean_free_path = "15.0 nm"
+sigma_n = "2.0e7 S/m"
+dynes_gamma = "0.2 ueV"
+r_res = "5.0 nOhm/sq"
+x_qp_floor = 1.0e-6
+nominal_thickness = "150 nm"
+film_model = "kerr"
+source = { cite = "APPROXIMATE evaporated 150 nm Al superconducting film parameters from standard_die.materials.AL & McRae et al., Rev. Sci. Instrum. 91, 091101 (2020)", doi = "10.1063/5.0017378" }
+
+[interfaces.ma]
+oxide = "AlOx"
+thickness = "3.0 nm"
+eps_r = 9.8
+tan_delta_tls_0 = 1.5e-3
+e_crit = "10.0 V/m"
+source = { cite = "APPROXIMATE native AlOx amorphous surface oxide TLS loss layer (~2-4 nm); see Martinis et al., Phys. Rev. Lett. 95, 210503 (2005)", doi = "10.1103/PhysRevLett.95.210503" }

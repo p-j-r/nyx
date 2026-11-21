@@ -109,9 +109,13 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
-| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101, 104 | spec, units, elastic, tensor, optics, schema (phase 6), Zimmermann BCS conductivity (`bcs.rs`) |
-| `materials/*` | 29, 30, 34, 35, 101, 104 | the shipped material library (TOML, including superconductors) |
-| `docs/MATERIALS.md` | 29, 30, 34, 35, 101 | |
+| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101, 104, 108, 109 | spec, units, elastic, tensor, optics, schema, T-curves (`state_t.rs`), Zimmermann BCS (`bcs.rs`), coupled tensors (`coupled.rs`), database importers (`import.rs`) |
+| `crates/femcore/tests/material_import.rs` | 108, 109 | pure-Rust importer & catalog regression tests |
+| `crates/femcore/tests/material_bcs.rs` | 104, 109 | Mattis–Bardeen BCS surface impedance and sub-gap mK loss floor tests |
+| `materials/*` | 29, 30, 34, 35, 101, 104, 108, 109 | the shipped multi-source material library (TOML, `format = 2`) |
+| `docs/MATERIALS.md` | 29, 30, 34, 35, 101, 108, 109 | material library guide, `format = 2` sections, variant catalog, and database import commands |
+| `crates/nyx-engine/src/material_fetch.rs` | 108, 109 | engine catalog, remote search, offline database conversion, and HTTPS material fetch |
+| `crates/app/src/matcmd.rs` | 108, 109 | `nyx material` CLI subcommands (`list`, `show`, `eval`, `bcs`, `search`, `import`, `fetch`) |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
 | `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |
@@ -135,7 +139,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/lib.rs` | 12 | module map |
 | `crates/femcore/tests/linalg_contract.rs` | 33, 19 | driver contract and closed-form checks |
 | `crates/femcore/tests/contracts.rs` | 19, 1, 4, 5, 9, 16, 51, 52, 53, 54 | |
-| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19, 101, 104 | behaviour, BCS, and contract tests of the material format |
+| `crates/femcore/tests/material*.rs` | 29, 30, 34, 35, 19, 101, 104, 108, 109 | behaviour, BCS, and contract tests of the material format |
 | `crates/femcore/tests/sheet_mesh3d.rs` | 102 | tests of conformal 3D sheet-stack meshing and `<sheet>:edge` tags |
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
@@ -170,7 +174,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27, 107 | shared target directory (no `HDF5_DIR` C dependency) |
-| `crates/nyx-physics/src/decode.rs` | 41, 25 | typed parameters and name resolution shared by every physics |
+| `crates/nyx-physics/src/decode.rs` | 41, 25, 109 | typed parameters and name resolution shared by every physics |
 | `crates/nyx-physics/src/testkit.rs` | 41, 10 | the golden-file harness |
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
 | `crates/nyx-physics/src/cqed.rs` | 103, 104, 105, 106 | typed cQED payloads (`CapacitanceMatrixData`, `InductanceMatrixData`, `TlsMeta`, `CircuitRom`, `DrivenPortData`) |
@@ -185,15 +189,15 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-sms/tests/{pml_floquet,waveguide_modes}.rs` | 101 | Floquet-periodic absorbing layers (`P^H K P` congruence, inactive mass skip) and native 2.5D elastic waveguide modes (`study = "modes"`, closed-form SH cutoff, 3D swept Floquet agreement, PML complex frequencies and shares) |
 | `crates/nyx-engine/src/convergence.rs` | 61, 80, 97, 101 | mesh convergence on a scratch engine; solutions compared by index, paired by nearest eigenvalue, or one mode followed; lossless imaginary floor and quality-factor noise rows |
 | `crates/nyx-engine/src/solve.rs` | 61, 80 | the solve chain in coupling order; puts the region names into the scalars a kernel names by domain number |
-| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68, 101 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, absorbing-layer and Floquet kernels (moved from femcore::sms*), descriptors |
+| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68, 101, 109 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, absorbing-layer, viscoelastic damping and Floquet kernels (moved from femcore::sms*), descriptors |
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
-| `crates/nyx-ems/src/{ibc,rom}.rs` | 104 | superconducting thin-film IBC, rank-1 `lumped_jj`, physical $H$/$K$ normalization, passive `CircuitRom`, and `TlsMeta` |
+| `crates/nyx-ems/src/{ibc,rom}.rs` | 104, 109 | superconducting thin-film IBC, rank-1 `lumped_jj`, physical $H$/$K$ normalization, passive `CircuitRom`, and `TlsMeta` |
 | `crates/nyx-ems/tests/kicq_cpw_bcs.rs` | 104 | 3D CPW BCS kinetic inductance shift and lumped JJ equipartition tests (Test 3) |
 | `crates/nyx-ems/src/{driven,ports}.rs` | 106 | driven frequency-domain solver, `lumped_port`, 2D boundary-mode `waveport`, and Hermite Tangential Galerkin PROM |
 | `crates/nyx-ems/tests/driven_prom.rs` | 106 | 3D driven PROM, waveport, and BBQ admittance verification (Test 6) |
-| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, and driven kernels |
+| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106, 109 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, and driven kernels |
 | `crates/nyx-analysis/src/capacitance.rs` | 103 | `capacitance_matrix` and `inductance_matrix` analyses of `dfs` results |
 | `crates/nyx-analysis/src/{epr,hamiltonian,tls}.rs` | 105 | `epr` KICQ analysis, `hamiltonian` (`normal_fock` / `craig_bampton`), and `tls_participation` |
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |

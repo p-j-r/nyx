@@ -1,0 +1,38 @@
+# Granular aluminum (grAl, Al/AlOx nano-composite) superconducting superinductor film.
+format = 2
+name = "granular_aluminium_sc"
+kind = "superconductor"
+point_group = "isotropic"
+reference_temperature = "0.02 K"
+description = "Nano-granular Al/AlOx superconducting superinductor film grAl (Grunhaupt 2019 / Maleeva 2018: Tc=1.8-2.1 K, Lk=200-2500 pH/sq) — high-impedance fluxonium superinductor vs clean low-Lk aluminium_sc_emft."
+notes = "Superconducting parameters (O2-reactive evaporated grAl, rho_n = 300-4000 uOhm*cm): t = 15-30 nm, Tc = 1.8-2.1 K (superconducting dome enhancement above Al), Delta_0 = 0.28-0.33 meV, lambda_L(0) = 800-3500 nm, Lk = 0.2-2.5 nH/sq yielding Z0 > R_Q = 6.45 kOhm without JJ arrays."
+source = { cite = "APPROXIMATE granular aluminum compilation from L. Grunhaupt et al., Nat. Mater. 18, 816-819 (2019) & N. Maleeva et al., Nat. Commun. 9, 3889 (2018)", doi = "10.1038/s41563-019-0350-3" }
+density = "3000 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 110.0
+nu = 0.30
+source = { cite = "APPROXIMATE Al nanocrystal / amorphous AlOx matrix composite film elastic modulus (oxygen content tunes modulus between Al ~77 GPa and am-AlOx ~150 GPa)" }
+
+[thermal]
+conductivity = 0.3
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.20 J/(kg*K)"
+source = { cite = "APPROXIMATE high-resistivity granular Al/AlOx thin-film thermal properties at 4 K (Wiedemann-Franz thermal conductivity strongly suppressed below Tc = 1.9 K)" }
+
+[superconducting]
+tc = "1.9 K"
+gap_0 = "290 ueV"
+sigma_n = "1.0e5 S/m"
+dynes_gamma = "2.0 ueV"
+nominal_thickness = "20 nm"
+film_model = "thin_limit"
+source = { cite = "APPROXIMATE dirty-limit granular Al/AlOx superinductor parameters (rho_n ~ 1000 uOhm*cm) from L. Grunhaupt et al., Nat. Mater. 18, 816-819 (2019)", doi = "10.1038/s41563-019-0350-3" }
+
+[interfaces.ma]
+oxide = "AlOx"
+thickness = "2.5 nm"
+eps_r = 9.8
+tan_delta_tls_0 = 1.2e-3
+source = { cite = "APPROXIMATE AlOx native oxide capping on reactive-evaporated granular aluminum" }

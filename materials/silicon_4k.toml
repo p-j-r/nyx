@@ -1,0 +1,78 @@
+# Cryogenic single-crystal float-zone silicon [100] at 4-10 K.
+format = 2
+name = "silicon_4k"
+description = "Cryogenic high-resistivity FZ Si [100] at 4-10 K (McSkimin 1953 elastic c11=167.72 GPa + Franta/Frey 10 K index n=3.4488 at 1.55 um + Krupka eps_r=11.45) — ~1.3% stiffer and -0.027 lower n than 293 K silicon."
+kind = "semiconductor"
+point_group = "m-3m"
+reference_temperature = "4.0 K"
+notes = "Integrated linear thermal contraction from 293 K to 4 K is -2.16e-4 (negative thermal expansion between 18 K and 124 K); high-resistivity (>3 kOhm*cm) FZ Si microwave loss tangent tan delta < 1e-6 at mK."
+source = [
+  { cite = "H. J. McSkimin, J. Appl. Phys. 24, 988-997 (1953) low-T elastic limit", doi = "10.1063/1.1721449", verified = "2026-11-21" },
+  { cite = "D. Franta et al., Appl. Surf. Sci. 421, 405-419 (2017) & J. Appl. Phys. 123, 185707 (2018) incorporating B. J. Frey, D. B. Leviton, T. J. Madison (2006) 10 K optical data", doi = "10.1063/1.5026195", verified = "2026-11-21" },
+]
+density = "2330.5 kg/m^3"
+
+[elastic]
+class = "cubic"
+unit = "GPa"
+c11 = 167.72
+c12 = 64.98
+c44 = 80.36
+source = { cite = "H. J. McSkimin, Measurement of elastic constants at low temperatures by means of ultrasonic waves — data for silicon and germanium single crystals, J. Appl. Phys. 24, 988-997 (1953), low-temperature saturation limit (~4.2-77 K)", doi = "10.1063/1.1721449", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 200.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.0185 J/(kg*K)"
+specific_heat_T = { form = "tabulated_T", T = [4.0, 10.0, 77.0, 293.15], values = [0.0185, 0.27, 180.0, 700.0], unit = "J/(kg*K)" }
+expansion = -1.0e-8
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE 4 K cryogenic crystalline Si thermal values (k ~ 100-400 W/(m*K) limited by sample thickness in Casimir boundary-scattering regime; Cp ~ 0.0185 J/(kg*K) T^3 Debye limit + representative specific_heat_T table)" }
+
+[dielectric]
+eps_clamped = 11.45
+loss_tangent = 2.0e-7
+loss_ref_freq = "6 GHz"
+tls_tan_delta_0 = 8.0e-7
+tls_e_crit = "10.0 V/m"
+source = [
+  { cite = "J. Krupka, J. Breeze, A. Centeno, N. Alford, T. Claussen, L. Jensen, Measurements of permittivity, dielectric loss tangent, and resistivity of float-zone silicon at microwave frequencies, IEEE Trans. Microw. Theory Tech. 54, 3995-4001 (2006): cryogenic high-resistivity FZ-Si eps_r = 11.45", doi = "10.1109/TMTT.2006.883655", verified = "2026-11-21" },
+  { cite = "APPROXIMATE mK high-resistivity FZ-Si microwave bulk loss tangent and TLS parameters" },
+]
+
+[interfaces.sa]
+oxide = "SiO2"
+thickness = "2.0 nm"
+eps_r = 3.9
+tan_delta_tls_0 = 1.5e-3
+e_crit = "15 V/m"
+source = { cite = "APPROXIMATE native SiO2 substrate-air surface oxide thickness and cryogenic TLS loss parameters" }
+
+[optical]
+wavelength_unit = "um"
+range = [1.00071, 10.0071]
+reference_temperature = "10 K"
+model = "tabulated"
+data = [
+  [1.00071, 3.539156, 5.6465e-5],
+  [1.09979, 3.511267, 2.3407e-7],
+  [1.20036, 3.490503, 2.6586e-8],
+  [1.31012, 3.473505, 3.6769e-9],
+  [1.40059, 3.462591, 9.1813e-10],
+  [1.50076, 3.452862, 2.4222e-10],
+  [1.54992, 3.448797, 1.3447e-10],
+  [1.60070, 3.445004, 7.6128e-11],
+  [1.80015, 3.433199, 1.0940e-11],
+  [2.00129, 3.424792, 1.8719e-12],
+  [2.50213, 3.412121, 7.2153e-15],
+  [3.00130, 3.405340, 1.7741e-15],
+  [4.00230, 3.398629, 2.9452e-16],
+  [5.00391, 3.395538, 8.9418e-9],
+  [5.49933, 3.394593, 2.4494e-7],
+  [7.00342, 3.392848, 1.5921e-5],
+  [10.0071, 3.391357, 5.7185e-5],
+]
+source = [
+  { cite = "D. Franta et al., Temperature-dependent dispersion model of float zone crystalline silicon, Appl. Surf. Sci. 421, 405-419 (2017) & J. Appl. Phys. 123, 185707 (2018), 10 K IR rows from refractiveindex.info (main/Si/Franta-10K, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si&page=Franta-10K", doi = "10.1063/1.5026195", verified = "2026-11-21" },
+  { cite = "Incorporates B. J. Frey, D. B. Leviton, T. J. Madison, Temperature-dependent refractive index of silicon and germanium, Proc. SPIE 6273, 62732J (2006)", doi = "10.1117/12.672850", verified = "2026-11-21" },
+]

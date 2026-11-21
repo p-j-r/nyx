@@ -1,7 +1,8 @@
 # Niobium nitride (NbN) high-kinetic-inductance superconducting film.
-format = 1
+format = 2
 name = "nbn"
-description = "Niobium nitride (NbN) disordered superconducting thin film"
+kind = "superconductor"
+description = "Niobium nitride (NbN) disordered superconducting thin film (Semenov 2009 / Wang 1996: Tc=14.5 K, Delta_0=2.40 meV, lambda_L=50 nm, xi_0=5 nm, sigma_n=5.0e5 S/m) — compact alias vs 16 K nbn_sc."
 source = { cite = "Compiled from the per-table sources below. Density 8470 kg/m^3 (APPROXIMATE stoichiometric delta-NbN density)", verified = "2026-11-21" }
 density = "8470 kg/m^3"
 

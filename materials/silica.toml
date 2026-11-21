@@ -1,7 +1,10 @@
 # Fused silica (amorphous SiO2): isotropic. Mechanical and thermal values are those of Corning HPFS 7980.
-format = 1
+format = 2
 name = "silica"
-description = "Fused silica (Corning HPFS 7980 data), 293 K"
+description = "Fused silica glass (Corning HPFS 7980, E=72.7 GPa, Malitson 1965 Sellmeier 0.21-6.7 um, n=1.4440 at 1.55 um) — bulk baseline vs silica_thermal_box, silica_4k, and crystalline quartz_alpha."
+kind = "amorphous"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
 source = { cite = "Compiled from the per-table sources below. Density 2201 kg/m^3: Corning 7980 data sheet as reproduced by Abrisa Technologies (2.201 g/cm^3); Corning HPFS brochure gives 2.20 g/cm^3", verified = "2026-11-04" }
 density = "2201 kg/m^3"
 
@@ -19,9 +22,26 @@ expansion = 0.52e-6
 expansion_unit = "1/K"
 source = { cite = "Corning HPFS 7979/7980/8655 brochure (2015): specific heat 0.770 J/(g K), thermal conductivity 1.38 W/(m K), thermal expansion 0.52e-6 1/K (5 to 35 degC)", url = "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf", verified = "2026-11-04" }
 
-[electrical]
-permittivity = 3.75
-source = { cite = "APPROXIMATE low-frequency relative permittivity: the AZoM fused silica data page gives the range 3.6 to 3.9; 3.75 is its midpoint, not a measurement of a particular grade", url = "https://www.azom.com/properties.aspx?ArticleID=1387", verified = "2026-11-04" }
+[dielectric]
+eps_clamped = 3.75
+loss_tangent = 1.0e-4
+loss_ref_freq = "10 GHz"
+source = [
+  { cite = "APPROXIMATE low-frequency relative permittivity: the AZoM fused silica data page gives the range 3.6 to 3.9; 3.75 is its midpoint, not a measurement of a particular grade", url = "https://www.azom.com/properties.aspx?ArticleID=1387", verified = "2026-11-04" },
+  { cite = "APPROXIMATE room-temperature fused silica microwave loss tangent at 10 GHz" },
+]
+
+[photoelastic]
+wavelength = "633 nm"
+p11 = 0.121
+p12 = 0.270
+source = { cite = "APPROXIMATE fused silica isotropic Pockels photoelastic constants (Dixon 1967 / NumBAT SiO2)" }
+
+[viscoelastic]
+unit = "mPa*s"
+eta11 = 1.6
+eta12 = 1.29
+source = { cite = "APPROXIMATE room-temperature fused silica acoustic viscosity tensor (NumBAT SiO2 / Pine 1969)" }
 
 [optical]
 wavelength_unit = "um"

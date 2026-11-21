@@ -1,8 +1,31 @@
-# Aluminium: optical (Lorentz-Drude fit of Rakic et al. 1998) and superconducting BCS parameters.
-format = 1
+# Aluminium: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk/MEMS room-temperature mechanics/thermal/electrical + superconducting BCS parameters.
+format = 2
 name = "aluminium"
-description = "Aluminium, evaporated film (room-temperature optical and cryogenic superconducting data)"
-source = { cite = "Compiled from the per-table sources below (optical data from Rakic et al. 1998; superconducting BCS parameters from Tinkham 1996 and Kittel 2005)", verified = "2026-11-21" }
+kind = "metal"
+point_group = "isotropic"
+reference_temperature = "293.15 K"
+description = "Evaporated/MEMS aluminium at 293 K (Rakic 1998 Lorentz-Drude 0.06-248 um; E=70 GPa, k=237 W/(m*K)) — room-temperature normal-metal/electrode baseline vs mK superconducting aluminium_sc_emft."
+source = { cite = "APPROXIMATE bulk/MEMS aluminium mechanics/thermal/electrical at 293 K + verified Rakic et al. 1998 [optical] fit (0.062-248 um)", doi = "10.1364/AO.37.005271" }
+density = "2700 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 70.0
+nu = 0.35
+source = { cite = "APPROXIMATE polycrystalline aluminium / MEMSCAP PiezoMUMPs PADMETAL film values at 293 K (E ~ 68-70 GPa, nu = 0.35)" }
+
+[thermal]
+conductivity = 237.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "900 J/(kg*K)"
+expansion = 23.1e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE pure bulk aluminium thermophysical values at 300 K" }
+
+[electrical]
+conductivity = 3.77e7
+conductivity_unit = "S/m"
+source = { cite = "APPROXIMATE pure bulk aluminium DC conductivity at 293 K (sheet resistance drops >10x for evaporated thin films below 4 K)" }
 
 [optical]
 wavelength_unit = "um"

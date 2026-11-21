@@ -221,6 +221,48 @@ impl Engine {
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
                 schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
             cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
+            cmd("list_remote_materials", "List downloadable remote materials", "Curated presets from open material databases (`refractiveindex.info`, `AFLOW`, `NumBAT`) that `fetch_material` can download and convert on demand.", Read,
+                schema(vec![("domain", json!({ "type": "string", "enum": ["all", "photonics", "phononics", "superconducting"], "description": "physics domain filter, default all" }))], &[])),
+            cmd("import_material", "Import an external material record", "Converts raw payload text from an open database (`rii` YAML, `aflow` JSON, `mp` JSON or `numbat` JSONC) into validated TOML, optionally extending a library material and adding it to the project or writing `<name>.toml` into `folder`.", Edit,
+                schema(vec![
+                    ("name", text("material name without slashes or commas")),
+                    ("format", json!({ "type": "string", "enum": ["rii", "aflow", "mp", "numbat"], "description": "source database format: rii, aflow, mp or numbat" })),
+                    ("content", text("raw YAML, JSON or JSONC payload text from the external database")),
+                    ("description", text("optional one-line comparative summary written into the material description field")),
+                    ("extends", text("optional base material name in the library to inherit unprovided properties from")),
+                    ("add_to_project", boolean("add the converted material to the active project (default true)")),
+                    ("folder", text("optional destination folder to write <name>.toml into")),
+                ], &["name", "format", "content"])),
+            cmd("fetch_material", "Download a material from an open database", "Downloads a preset or database entry over HTTPS from `refractiveindex.info`, `AFLOW`, `Materials Project` or `NumBAT`, converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`.", Expensive,
+                schema(vec![
+                    ("source", text("curated preset id (from `list_remote_materials`), `catalog`, `rii`, `aflow`, `mp` or `numbat`")),
+                    ("target", text("preset id, database entry key, Materials Project id (e.g. mp-149), AFLOW query, NumBAT stem or https URL; omit when `source` is a preset id")),
+                    ("name", text("material name in TOML; defaults to the preset id or derived entry stem")),
+                    ("description", text("optional one-line comparative summary written into the material description field")),
+                    ("extends", text("optional base material name in the library to inherit unprovided properties from")),
+                    ("add_to_project", boolean("add the downloaded material to the active project (default true)")),
+                    ("folder", text("optional destination folder to write <name>.toml into")),
+                    ("api_key", text("optional Materials Project API key (falls back to MP_API_KEY environment variable; passed via curl stdin, never stored)")),
+                ], &["source"])),
+            cmd("search_remote_materials", "Search curated and live open material databases", "Searches the curated remote material presets by keyword, formula, domain or source database, and optionally queries live AFLOW and Materials Project HTTPS endpoints.", Read,
+                schema(vec![
+                    ("query", text("search keyword, chemical formula or material identifier (e.g. Si, AlN, LiNbO3, mp-149)")),
+                    ("domain", json!({ "type": "string", "enum": ["all", "photonics", "phononics", "superconducting"], "description": "physics domain filter, default all" })),
+                    ("source", json!({ "type": "string", "enum": ["all", "rii", "aflow", "mp", "numbat"], "description": "database filter, default all" })),
+                    ("live", boolean("also query live AFLOW and Materials Project HTTPS endpoints, default false")),
+                    ("api_key", text("optional Materials Project API key for live mp queries (falls back to MP_API_KEY environment variable)")),
+                ], &["query"])),
+            cmd("evaluate_material", "Evaluate a material at temperature, frequency and wavelength", "Evaluates a material's temperature-, frequency-, wavelength- and electric-field-dependent properties: thermal curves at T, optical (n, k) and complex permittivity at (wavelength, T), microwave complex permittivity and TLS loss tangent at (frequency, T, e_field), piezoelectric Legendre duals (eps_clamped, eps_free, C^E, C^D), photoelastic, electro-optic, viscoelastic, and BCS superconducting surface impedance.", Read,
+                schema(vec![
+                    ("name", text("material name in the library or active project")),
+                    ("temperature", number("evaluation temperature in K (default: material reference_temperature)")),
+                    ("frequency", number("evaluation frequency in Hz for microwave dielectric and BCS superconducting models")),
+                    ("wavelength", number("evaluation free-space wavelength in m for optical dispersion models")),
+                    ("e_field", number("electric-field amplitude in V/m for saturable TLS dielectric loss")),
+                    ("thickness", number("film thickness in m for BCS superconducting sheet impedance")),
+                    ("film_model", json!({ "type": "string", "enum": ["kerr", "two_sided", "thin_limit"], "description": "thin-film boundary formula for BCS sheet impedance, default kerr" })),
+                    ("euler_deg", json!({ "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Bunge Z-X-Z crystal orientation angles in degrees [phi1, Phi, phi2]" })),
+                ], &["name"])),
             cmd("bcs_surface_impedance", "BCS thin-film surface impedance", "Evaluates Zimmermann arbitrary-purity BCS complex conductivity and thin-film surface impedance (Z_s = R_s + i omega L_k_sq) for a superconducting material or parameter set.", Read,
                 schema(vec![
                     ("material", text("name of a library or project material with a [superconducting] block")),
@@ -235,6 +277,9 @@ impl Engine {
                     ("xi_0", number("BCS coherence length in metres")),
                     ("mean_free_path", number("electron mean free path in metres")),
                     ("sigma_n", number("normal-state conductivity in S/m")),
+                    ("dynes_gamma", number("Dynes pair-breaking broadening Gamma in J")),
+                    ("r_res", number("residual sheet resistance floor in Ohm/sq")),
+                    ("x_qp_floor", number("non-equilibrium normalized quasiparticle density floor")),
                 ], &["freq", "thickness"])),
             cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.", Expensive,
                 schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report")),
@@ -542,7 +587,54 @@ impl Engine {
                 self.remove_material(get_str(args, "name")?)?;
                 ok()
             }
-            "bcs_surface_impedance" => self.bcs_surface_impedance(args),
+            "list_remote_materials" => self.list_remote_materials(opt_str(args, "domain")),
+            "import_material" => self.import_material(
+                get_str(args, "name")?,
+                get_str(args, "format")?,
+                get_str(args, "content")?,
+                opt_str(args, "description"),
+                opt_str(args, "extends"),
+                opt_bool(args, "add_to_project", true),
+                opt_str(args, "folder").map(std::path::Path::new),
+            ),
+            "fetch_material" => self.fetch_material_with_key(
+                get_str(args, "source")?,
+                opt_str(args, "target"),
+                opt_str(args, "name"),
+                opt_str(args, "description"),
+                opt_str(args, "extends"),
+                opt_bool(args, "add_to_project", true),
+                opt_str(args, "folder").map(std::path::Path::new),
+                opt_str(args, "api_key"),
+            ),
+            "search_remote_materials" => self.search_remote_materials(
+                get_str(args, "query")?,
+                opt_str(args, "domain"),
+                opt_str(args, "source"),
+                opt_bool(args, "live", false),
+                opt_str(args, "api_key"),
+            ),
+            "evaluate_material" => {
+                let euler = match args.get("euler_deg").and_then(Value::as_array) {
+                    Some(a) if a.len() == 3 => Some([
+                        a[0].as_f64().unwrap_or(0.0),
+                        a[1].as_f64().unwrap_or(0.0),
+                        a[2].as_f64().unwrap_or(0.0),
+                    ]),
+                    _ => None,
+                };
+                self.evaluate_material(
+                    get_str(args, "name")?,
+                    args.get("temperature").and_then(Value::as_f64),
+                    args.get("frequency").and_then(Value::as_f64),
+                    args.get("wavelength").and_then(Value::as_f64),
+                    args.get("e_field").and_then(Value::as_f64),
+                    args.get("thickness").and_then(Value::as_f64),
+                    opt_str(args, "film_model"),
+                    euler,
+                )
+            }
+            "bcs_surface_impedance" => self.bcs_surface_impedance_cmd(args),
             "convergence_check" => {
                 let (physics, factor, tolerance) = (
                     get_str(args, "physics")?,

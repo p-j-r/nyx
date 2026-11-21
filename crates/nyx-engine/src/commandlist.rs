@@ -449,18 +449,30 @@ impl Engine {
                         }
                     }
                     match access.get(name) {
-                        Some(Access::Edit) => match e.call(name, &l.args) {
-                            Ok(_) => {
-                                // a command that replaces the project drops the mesh, the results and the stage caches, as it does for real
-                                if matches!(name, "project_new" | "project_load" | "project_open" | "store_open") {
-                                    solved.clear();
-                                    alone.clear();
-                                    cache.meshes.clear();
+                        Some(Access::Edit) => {
+                            let call_args = if name == "import_material" {
+                                // Planning runs in memory and never writes `<name>.toml` into `folder`.
+                                let mut trimmed = l.args.clone();
+                                if let Some(m) = trimmed.as_object_mut() {
+                                    m.remove("folder");
                                 }
-                                report.steps.push(step("edit", "applied to the copy".into()))
+                                trimmed
+                            } else {
+                                l.args.clone()
+                            };
+                            match e.call(name, &call_args) {
+                                Ok(_) => {
+                                    // a command that replaces the project drops the mesh, the results and the stage caches, as it does for real
+                                    if matches!(name, "project_new" | "project_load" | "project_open" | "store_open") {
+                                        solved.clear();
+                                        alone.clear();
+                                        cache.meshes.clear();
+                                    }
+                                    report.steps.push(step("edit", "applied to the copy".into()))
+                                }
+                                Err(err) => report.problems.push(problem(err.to_string())),
                             }
-                            Err(err) => report.problems.push(problem(err.to_string())),
-                        },
+                        }
                         Some(Access::Read) => report.steps.push(step("read", "not run in the plan".into())),
                         _ => {
                             let kind =

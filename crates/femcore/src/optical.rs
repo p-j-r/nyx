@@ -47,7 +47,16 @@ pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, V
 
 /// As `cell_materials` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
 pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
-    let tens: Vec<_> = m.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(|t| crate::section::local_tensor_signed(t, prop_sign)).collect();
+    let tens_re: Vec<_> = m
+        .cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?
+        .iter()
+        .map(|t| crate::section::local_tensor_signed(t, prop_sign))
+        .collect();
+    let tens_im: Vec<_> = m
+        .cell_tensor(mesh, TensorKind::PermittivityIm, Some(0.0))?
+        .iter()
+        .map(|t| crate::section::local_tensor_signed(t, prop_sign))
+        .collect();
     let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
     // bounding boxes of the PML domains
     let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
@@ -67,7 +76,9 @@ pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) 
     let mut eps = Vec::with_capacity(mesh.n_cells());
     let mut mus = Vec::with_capacity(mesh.n_cells());
     for ci in 0..mesh.n_cells() {
-        let t = tens[ci];
+        let tr = tens_re[ci];
+        let ti = tens_im[ci];
+        let tc = |a: usize, b: usize| c(tr[a][b], -ti[a][b]);
         let l = mesh.cell_labels[ci];
         let (mut sx, mut sy) = (c(1.0, 0.0), c(1.0, 0.0));
         if let (Some(p), Some((lo, hi))) = (m.pml.get(&l), boxes.get(&l)) {
@@ -85,7 +96,7 @@ pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) 
         let (lx, ly, lz) = (sy / sx, sx / sy, sx * sy);
         // eps_ij -> det(S) eps_ij / (s_i s_j) with S = diag(sx, sy, 1): the diagonal gets lx, ly, lz, xy is unchanged,
         // xz and yz are multiplied by sy and sx
-        eps.push(EpsC { xx: lx * t[0][0], xy: c(t[0][1], 0.0), yy: ly * t[1][1], zz: lz * t[2][2], xz: sy * t[0][2], yz: sx * t[1][2] });
+        eps.push(EpsC { xx: lx * tc(0, 0), xy: tc(0, 1), yy: ly * tc(1, 1), zz: lz * tc(2, 2), xz: sy * tc(0, 2), yz: sx * tc(1, 2) });
         mus.push(MuC { x: lx * mu[ci], y: ly * mu[ci], z: lz * mu[ci] });
     }
     Ok((eps, mus))

@@ -1,0 +1,86 @@
+# Single-crystal diamond (cubic carbon, point group m-3m), room temperature.
+format = 2
+name = "diamond"
+description = "Single-crystal IIa/CVD diamond (McSkimin & Andreatch 1972 cubic c11=1076.4 GPa + Phillip & Taft 1964 UV-MIR table n=2.3878 at 1.55 um) — highest acoustic velocity (~17.5 km/s) and thermal conductivity (2200 W/(m*K))."
+kind = "crystalline"
+point_group = "m-3m"
+reference_temperature = "298.15 K"
+source = [
+  { cite = "H. J. McSkimin and P. Andreatch Jr., Elastic moduli of diamond as a function of pressure and temperature, J. Appl. Phys. 43, 2944-2948 (1972): density 3515 kg/m^3", doi = "10.1063/1.1661636", verified = "2026-11-21" },
+  { cite = "H. R. Phillip and E. A. Taft, Phys. Rev. 136, A1445-A1448 (1964) [optical]", doi = "10.1103/PhysRev.136.A1445", verified = "2026-11-21" },
+]
+density = "3515 kg/m^3"
+
+[elastic]
+class = "cubic"
+unit = "GPa"
+c11 = 1076.4
+c12 = 125.2
+c44 = 577.4
+source = { cite = "H. J. McSkimin and P. Andreatch Jr., J. Appl. Phys. 43, 2944-2948 (1972), ultrasonic pulse-superposition elastic moduli of type IIa diamond at 298 K", doi = "10.1063/1.1661636", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 2200.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "509 J/(kg*K)"
+expansion = 1.0e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE pure type-IIa / electronic-grade single-crystal diamond at 300 K (nitrogen impurities and polycrystalline grain boundaries reduce CVD diamond thermal conductivity to 1000-1800 W/(m*K))" }
+
+[dielectric]
+eps_clamped = 5.70
+loss_tangent = 1.0e-6
+loss_ref_freq = "10 GHz"
+source = { cite = "J. Fontanella et al., Temperature and pressure variation of the dielectric constant of diamond, Appl. Opt. / J. Chem. Phys. (static/RF relative permittivity eps_r = 5.70 and ultralow microwave loss of IIa diamond at 300 K; APPROXIMATE)", doi = "10.1063/1.323980" }
+
+[photoelastic]
+wavelength = "633 nm"
+p11 = -0.249
+p12 = 0.043
+p44 = -0.172
+source = { cite = "APPROXIMATE single-crystal diamond cubic Pockels photoelastic constants (M. H. Grimsditch and A. K. Ramdas, Phys. Rev. B 11, 3139, 1975)", doi = "10.1103/PhysRevB.11.3139" }
+
+[viscoelastic]
+unit = "mPa*s"
+eta11 = 0.30
+eta12 = 0.05
+eta44 = 0.15
+source = { cite = "APPROXIMATE single-crystal type-IIa diamond room-temperature Akhiezer acoustic viscosity tensor" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.221400335, 10.0]
+reference_temperature = "298.15 K"
+model = "tabulated"
+data = [
+  [0.221400335, 2.727706, 0.0],
+  [0.229600347, 2.690742, 0.0],
+  [0.238431130, 2.666955, 0.0],
+  [0.247968375, 2.638736, 0.0],
+  [0.258300390, 2.605957, 0.0],
+  [0.269530842, 2.581765, 0.0],
+  [0.281782244, 2.560885, 0.0],
+  [0.295200446, 2.541324, 0.0],
+  [0.309960469, 2.523632, 0.0],
+  [0.326274177, 2.505813, 0.0],
+  [0.344400521, 2.487867, 0.0],
+  [0.364659375, 2.473324, 0.0],
+  [0.387450586, 2.464987, 0.0],
+  [0.413280625, 2.455052, 0.0],
+  [0.442800669, 2.441252, 0.0],
+  [0.476862259, 2.431479, 0.0],
+  [0.516600781, 2.427076, 0.0],
+  [0.563564488, 2.420857, 0.0],
+  [0.619920937, 2.411429, 0.0],
+  [0.688801041, 2.406543, 0.0],
+  [0.774901171, 2.406202, 0.0],
+  [0.885601339, 2.400035, 0.0],
+  [1.033201562, 2.390523, 0.0],
+  [1.239841874, 2.388125, 0.0],
+  [1.549802343, 2.387783, 0.0],
+  [2.066403124, 2.383241, 0.0],
+  [3.099604686, 2.378521, 0.0],
+  [6.199209372, 2.378176, 0.0],
+  [10.00000000, 2.377833, 0.0],
+]
+source = { cite = "H. R. Phillip and E. A. Taft, Kramers-Kronig analysis of reflectance data for diamond, Phys. Rev. 136, A1445-A1448 (1964), transparent UV-MIR rows (0.221-10 um), refractiveindex.info (main/C/Phillip, CC0)", url = "https://refractiveindex.info/?shelf=main&book=C&page=Phillip", doi = "10.1103/PhysRev.136.A1445", verified = "2026-11-21" }

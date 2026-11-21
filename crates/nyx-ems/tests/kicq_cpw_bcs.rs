@@ -45,12 +45,13 @@ fn park_nb_spec() -> Superconducting {
         xi_0: Some(39.0e-9),
         mean_free_path: None,
         sigma_n: Some(5.5e7),
+        ..Default::default()
     }
 }
 
 fn park_nb_library() -> Arc<Library> {
     let toml_text = r#"
-format = 1
+format = 2
 name = "Nb_Park2026"
 description = "100 nm Nb thin film (Park et al. 2026)"
 

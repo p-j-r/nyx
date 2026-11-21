@@ -27,6 +27,7 @@ pub mod guide;
 #[cfg(feature = "hdf5")]
 pub mod h5io;
 pub mod jobs;
+pub mod material_fetch;
 pub mod materials;
 #[cfg(feature = "hdf5")]
 pub mod xdmf;

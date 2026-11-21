@@ -2,14 +2,17 @@
 // Copyright (C) 2026 p-j-r
 //! Arbitrary-purity BCS complex conductivity and thin-film surface impedance evaluator
 //! (Zimmermann et al., Physica C 183, 99-104, 1991; Mattis & Bardeen, Phys. Rev. 111, 412, 1958;
-//! Park et al., npj Quantum Inf. 2026).
+//! Park et al., npj Quantum Inf. 2026) extended with sub-gap mK loss mechanisms (`dynes_gamma`,
+//! `r_res`, `x_qp_floor`, `nominal_thickness`, `film_model`).
 //!
 //! Time-harmonic convention: `exp(+i omega t)`, so the superconducting complex conductivity is
 //! `sigma(omega, T) = sigma_1(omega, T) - i sigma_2(omega, T)` with `sigma_1 >= 0` and `sigma_2 > 0`
 //! for `T < T_c`, and the sheet surface impedance is `Z_s = R_s + i omega L_k_sq` with `R_s >= 0`
 //! and `L_k_sq > 0`.
 
-use super::spec::Superconducting;
+use super::reader::{MaterialError, Section};
+use super::source::{read_sources, write_sources, Source};
+use super::units::Dim;
 use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
@@ -97,6 +100,179 @@ impl FilmModel {
             FilmModel::TwoSided => "two_sided",
             FilmModel::Kerr => "kerr",
             FilmModel::ThinLimit => "thin_limit",
+        }
+    }
+}
+
+/// Superconducting normal-state, gap, mean-free-path, and sub-gap mK loss parameters (`[superconducting]`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Superconducting {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source: Vec<Source>,
+    /// Critical temperature `T_c` in K.
+    pub tc: f64,
+    /// Zero-temperature superconducting gap `Delta(0)` in J (defaults to `1.7638 k_B T_c`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap_0: Option<f64>,
+    /// Clean-limit London penetration depth `lambda_L` in m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lambda_l: Option<f64>,
+    /// Pippard/BCS coherence length `xi_0` in m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xi_0: Option<f64>,
+    /// Electron mean free path `ell` in m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_free_path: Option<f64>,
+    /// Normal-state electrical conductivity `sigma_n` just above `T_c` in S/m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sigma_n: Option<f64>,
+    /// Dynes pair-breaking broadening `Gamma` in J (produces finite sub-gap density of states at mK).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynes_gamma: Option<f64>,
+    /// Non-BCS residual sheet surface resistance floor `R_res` in Ohm/sq.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r_res: Option<f64>,
+    /// Non-equilibrium normalized quasiparticle density floor `x_qp = n_qp / (2 N_0 Delta)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_qp_floor: Option<f64>,
+    /// Default nominal film thickness in m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nominal_thickness: Option<f64>,
+    /// Default thin-film geometry model when evaluated at default thickness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub film_model: Option<FilmModel>,
+}
+
+pub const SC_KEYS: &[&str] = &[
+    "source",
+    "tc",
+    "tc_unit",
+    "gap_0",
+    "gap_0_unit",
+    "lambda_L",
+    "lambda_L_unit",
+    "xi_0",
+    "xi_0_unit",
+    "mean_free_path",
+    "mean_free_path_unit",
+    "sigma_n",
+    "sigma_n_unit",
+    "dynes_gamma",
+    "dynes_gamma_unit",
+    "r_res",
+    "r_res_unit",
+    "x_qp_floor",
+    "nominal_thickness",
+    "nominal_thickness_unit",
+    "film_model",
+];
+
+fn positive_opt(s: &Section, key: &str, v: Option<f64>, what: &str) -> Result<Option<f64>, MaterialError> {
+    match v {
+        Some(x) if !x.is_finite() || x <= 0.0 => Err(s.err(key, format!("{what} must be positive (found {x})"))),
+        other => Ok(other),
+    }
+}
+
+fn nonneg_opt(s: &Section, key: &str, v: Option<f64>, what: &str) -> Result<Option<f64>, MaterialError> {
+    match v {
+        Some(x) if !x.is_finite() || x < 0.0 => Err(s.err(key, format!("{what} must be non-negative (found {x})"))),
+        other => Ok(other),
+    }
+}
+
+impl Superconducting {
+    /// Zero-temperature gap `Delta(0)` in Joules, defaulting to weak-coupling `1.7638 k_B T_c`.
+    pub fn effective_gap_0(&self) -> f64 {
+        self.gap_0.unwrap_or(BCS_GAP_RATIO * K_B * self.tc)
+    }
+
+    pub fn read(s: &mut Section) -> Result<Self, MaterialError> {
+        let source = read_sources(s, "source")?;
+        let tc = s
+            .quantity("tc", Dim::Temperature, None)?
+            .ok_or_else(|| s.err("tc", "is missing; write tc = \"9.2 K\""))?;
+        if !tc.is_finite() || tc <= 0.0 {
+            return Err(s.err("tc", format!("critical temperature tc must be positive (found {tc} K)")));
+        }
+        let raw_gap = s.quantity("gap_0", Dim::Energy, None)?;
+        let gap_0 = positive_opt(s, "gap_0", raw_gap, "gap_0")?;
+        let raw_ll = s.quantity("lambda_L", Dim::Length, None)?;
+        let lambda_l = positive_opt(s, "lambda_L", raw_ll, "lambda_L")?;
+        let raw_xi = s.quantity("xi_0", Dim::Length, None)?;
+        let xi_0 = positive_opt(s, "xi_0", raw_xi, "xi_0")?;
+        let raw_mfp = s.quantity("mean_free_path", Dim::Length, None)?;
+        let mean_free_path = positive_opt(s, "mean_free_path", raw_mfp, "mean_free_path")?;
+        let raw_sn = s.quantity("sigma_n", Dim::ElectricalConductivity, None)?;
+        let sigma_n = positive_opt(s, "sigma_n", raw_sn, "sigma_n")?;
+        let raw_dg = s.quantity("dynes_gamma", Dim::Energy, None)?;
+        let dynes_gamma = nonneg_opt(s, "dynes_gamma", raw_dg, "dynes_gamma")?;
+        let raw_rr = s.quantity("r_res", Dim::SheetResistance, None)?;
+        let r_res = nonneg_opt(s, "r_res", raw_rr, "r_res")?;
+        let raw_xqp = s.quantity("x_qp_floor", Dim::Dimensionless, None)?;
+        let x_qp_floor = nonneg_opt(s, "x_qp_floor", raw_xqp, "x_qp_floor")?;
+        let raw_nt = s.quantity("nominal_thickness", Dim::Length, None)?;
+        let nominal_thickness = positive_opt(s, "nominal_thickness", raw_nt, "nominal_thickness")?;
+        let film_model = match s.string("film_model")? {
+            Some(ref text) => Some(FilmModel::parse(text).ok_or_else(|| {
+                s.err(
+                    "film_model",
+                    format!("unknown film_model '{text}'; expected \"kerr\", \"two_sided\" or \"thin_limit\""),
+                )
+            })?),
+            None => None,
+        };
+        s.finish(SC_KEYS)?;
+        Ok(Self {
+            source,
+            tc,
+            gap_0,
+            lambda_l,
+            xi_0,
+            mean_free_path,
+            sigma_n,
+            dynes_gamma,
+            r_res,
+            x_qp_floor,
+            nominal_thickness,
+            film_model,
+        })
+    }
+
+    pub fn write(&self, tbl: &mut toml::Table) {
+        if let Some(v) = write_sources(&self.source) {
+            tbl.insert("source".into(), v);
+        }
+        tbl.insert("tc".into(), format!("{} K", self.tc).into());
+        if let Some(g) = self.gap_0 {
+            tbl.insert("gap_0".into(), format!("{g} J").into());
+        }
+        if let Some(ll) = self.lambda_l {
+            tbl.insert("lambda_L".into(), format!("{ll} m").into());
+        }
+        if let Some(xi) = self.xi_0 {
+            tbl.insert("xi_0".into(), format!("{xi} m").into());
+        }
+        if let Some(ell) = self.mean_free_path {
+            tbl.insert("mean_free_path".into(), format!("{ell} m").into());
+        }
+        if let Some(sn) = self.sigma_n {
+            tbl.insert("sigma_n".into(), format!("{sn} S/m").into());
+        }
+        if let Some(dg) = self.dynes_gamma {
+            tbl.insert("dynes_gamma".into(), format!("{dg} J").into());
+        }
+        if let Some(rr) = self.r_res {
+            tbl.insert("r_res".into(), format!("{rr} Ohm").into());
+        }
+        if let Some(xqp) = self.x_qp_floor {
+            tbl.insert("x_qp_floor".into(), toml::Value::Float(xqp));
+        }
+        if let Some(d) = self.nominal_thickness {
+            tbl.insert("nominal_thickness".into(), format!("{d} m").into());
+        }
+        if let Some(fm) = self.film_model {
+            tbl.insert("film_model".into(), fm.as_str().into());
         }
     }
 }
@@ -239,15 +415,21 @@ fn fermi(e_j: f64, kt_j: f64) -> f64 {
     }
 }
 
-/// Stable difference `f(e1) - f(e2)` for `e2 = e1 + hw > e1 > 0` avoiding cancellation at large `e1 / kT`.
+/// Stable difference `f(e1) - f(e2)` for `e2 = e1 + hw > e1` avoiding cancellation at large `e1 / kT`.
 #[inline]
 fn fermi_diff(e1: f64, e2: f64, kt_j: f64) -> f64 {
     if kt_j <= 0.0 {
-        return 0.0;
+        return if e1 < 0.0 && e2 > 0.0 {
+            1.0
+        } else if (e1 == 0.0 && e2 > 0.0) || (e1 < 0.0 && e2 == 0.0) {
+            0.5
+        } else {
+            0.0
+        };
     }
     let x1 = e1 / kt_j;
     let x2 = e2 / kt_j;
-    if x1 > 500.0 {
+    if x1 > 500.0 || x2 < -500.0 {
         return 0.0;
     }
     let dx = (e2 - e1) / kt_j;
@@ -255,7 +437,7 @@ fn fermi_diff(e1: f64, e2: f64, kt_j: f64) -> f64 {
         let e_x1 = (-x1).exp();
         let e_x2 = (-x2).exp();
         (e_x1 - e_x2) / ((1.0 + e_x1) * (1.0 + e_x2))
-    } else if dx < 1e-4 {
+    } else if x1 >= 0.0 && dx < 1e-4 {
         let ex1 = x1.exp();
         let edx = dx.exp_m1();
         (ex1 * edx) / ((1.0 + ex1) * (1.0 + ex1 * (1.0 + edx)))
@@ -285,7 +467,6 @@ fn evaluate_bcs_conductivity(
     }
 
     // ----- Interval 1: E_1 in [Delta, inf) via hyperbolic substitution E_1 = Delta * cosh(u) -----
-    // dE_1 / R_1 = du, canceling the 1 / sqrt(E_1^2 - Delta^2) singularity at E_1 = Delta.
     let (i1_re, i1_im) = {
         let u_max = match gamma_s {
             Some(gs) => (1.0 + 1e9 * (delta_j + gs + hw_j) / delta_j).acosh(),
@@ -339,29 +520,21 @@ fn evaluate_bcs_conductivity(
                     let df = fermi_diff(e1, e2, kt_j);
                     let e1e2_d2 = e1 * e2 + delta_j * delta_j;
                     let r1r2 = r1 * r2;
-                    // (g_1 + 1) * R_1 * dE_1 / (R_1 * R_2) = (E_1 E_2 + Delta^2 + R_1 R_2) / R_2 * du
                     let gp_r1 = (e1e2_d2 + r1r2) / r2;
-                    // (g_1 - 1) * R_1 = (E_1 E_2 + Delta^2 - R_1 R_2) / R_2 = Delta^2 (E_1 + E_2)^2 / (R_2 (E_1 E_2 + Delta^2 + R_1 R_2))
                     let gm_r1 = (delta_j * delta_j * (e1 + e2) * (e1 + e2)) / (r2 * (e1e2_d2 + r1r2));
 
                     match gamma_s {
                         None => {
-                            // Dirty limit: K_1,re = 4 [f(E_1) - f(E_2)] (E_1 E_2 + Delta^2) / R_2 * du
                             let re = 4.0 * df * (e1e2_d2 / r2);
                             (re, 0.0)
                         }
                         Some(gs) => {
                             let gs2 = gs * gs;
                             let r_plus = r1 + r2;
-                            // R_2 - R_1 = hw * (E_1 + E_2) / (R_1 + R_2) without subtractive cancellation
                             let r_minus = hw_j * (e1 + e2) / r_plus;
                             let d_minus = r_minus * r_minus + gs2;
                             let d_plus = r_plus * r_plus + gs2;
-
                             let re = 2.0 * df * gs2 * (gp_r1 / d_minus + gm_r1 / d_plus);
-                            // Total thermal weight on the (1 - g_1)(R_2 + R_1) / d_plus term is
-                            // 2 [1 - f(E_1) - f(E_2)] = 2 [1 - 2 f(E_2)] - 2 [f(E_1) - f(E_2)],
-                            // and 1 - g_1 = -(g_1 - 1).
                             let tanh_sum = 2.0 * (1.0 - fermi(e1, kt_j) - fermi(e2, kt_j));
                             let im = gs * (2.0 * df * gp_r1 * r_minus / d_minus - tanh_sum * gm_r1 * r_plus / d_plus);
                             (re, im)
@@ -376,8 +549,6 @@ fn evaluate_bcs_conductivity(
     };
 
     // ----- Sub-interval 2a: E_1 in [max(-Delta, Delta - hw), Delta] -----
-    // Trigonometric substitution E_1(theta) = mid + half * cos(theta), theta in [0, pi],
-    // analytically cancels both endpoint square-root singularities S_1 and R_2.
     let e_min_2a = (-delta_j).max(delta_j - hw_j);
     let i2a_im = if delta_j > e_min_2a {
         let mid = 0.5 * (e_min_2a + delta_j);
@@ -390,18 +561,14 @@ fn evaluate_bcs_conductivity(
                 let sin_t = theta.sin();
                 let e1 = mid + half * cos_t;
                 let e2 = e1 + hw_j;
-                // dE_1 = half * sin(theta) * dtheta = sqrt((Delta - E_1)(E_1 - e_min_2a)) * dtheta
                 let d_minus_e1 = (half * (1.0 - cos_t)).max(0.0);
                 let e1_minus_emin = (half * (1.0 + cos_t)).max(0.0);
                 let s1 = (d_minus_e1 * (delta_j + e1)).max(0.0).sqrt();
                 let r2 = ((e2 - delta_j).max(0.0) * (e2 + delta_j)).sqrt();
 
-                // Quotient J = (dE_1 / dtheta) / (S_1 * R_2) with exact singularity cancellation:
                 let jac_over_s1r2 = if hw_j <= 2.0 * delta_j {
-                    // e_min_2a == Delta - hw, so e2 - Delta == E_1 - e_min_2a
                     1.0 / ((delta_j + e1) * (e2 + delta_j)).sqrt()
                 } else {
-                    // e_min_2a == -Delta, so S_1 == half * sin(theta) == dE_1 / dtheta
                     1.0 / r2
                 };
                 let _ = (sin_t, e1_minus_emin);
@@ -443,7 +610,6 @@ fn evaluate_bcs_conductivity(
                 let e1_minus_emin = (half * (1.0 + cos_t)).max(0.0);
                 let r1 = (emax_minus_e1 * (-e1 + delta_j)).sqrt();
                 let r2 = (e1_minus_emin * (e2 + delta_j)).sqrt();
-                // (dE_1 / dtheta) / (R_1 * R_2) = 1 / sqrt((-E_1 + Delta)(E_2 + Delta))
                 let jac_over_r1r2 = 1.0 / ((-e1 + delta_j) * (e2 + delta_j)).sqrt();
                 let tanh2 = 1.0 - 2.0 * fermi(e2, kt_j);
                 let e1e2_d2 = e1 * e2 + delta_j * delta_j;
@@ -459,9 +625,7 @@ fn evaluate_bcs_conductivity(
                         let r_minus = r2 - r1;
                         let d_plus = r_plus * r_plus + gs2;
                         let d_minus = r_minus * r_minus + gs2;
-                        // (1 - g_1) * R_1 * R_2 = R_1 R_2 - (E_1 E_2 + Delta^2) > 0 since E_1 E_2 + Delta^2 < 0
                         let one_minus_g = r1r2 - e1e2_d2;
-                        // (-1 - g_1) * R_1 * R_2 = -(R_1 R_2 + E_1 E_2 + Delta^2) > 0
                         let minus_one_minus_g = -(r1r2 + e1e2_d2);
                         let re = tanh2 * gs2 * (one_minus_g / d_plus + minus_one_minus_g / d_minus) * jac_over_r1r2;
                         let im = tanh2 * gs * (one_minus_g * r_plus / d_plus + minus_one_minus_g * r_minus / d_minus) * jac_over_r1r2;
@@ -483,6 +647,74 @@ fn evaluate_bcs_conductivity(
     (sigma_1, sigma_2)
 }
 
+/// Dynes sub-gap pair-breaking real conductivity `sigma_1,Dynes >= 0` integrated strictly over the
+/// sub-gap channel (`|E_1| < Delta` or `|E_2| < Delta`) to avoid any double counting with the
+/// Zimmermann/Mattis-Bardeen coherence integral.
+fn dynes_subgap_sigma_1(sigma_n: f64, delta_j: f64, hw_j: f64, kt_j: f64, gamma_d: f64) -> f64 {
+    if delta_j <= 0.0 || gamma_d <= 0.0 {
+        return 0.0;
+    }
+    let coeffs = |e: f64| -> (f64, f64) {
+        let z = Complex64::new(e, -gamma_d);
+        let mut s = (z * z - delta_j * delta_j).sqrt();
+        if (z / s).re < 0.0 {
+            s = -s;
+        }
+        let gr = (z / s).re.max(0.0);
+        let ga = (Complex64::new(delta_j, 0.0) / s).re;
+        (gr, ga)
+    };
+    let e_lo = -delta_j - hw_j;
+    let e_hi = delta_j;
+    let mut pts = vec![e_lo, -delta_j, (-hw_j).clamp(e_lo, e_hi), 0.0, (delta_j - hw_j).clamp(e_lo, e_hi), e_hi];
+    pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    pts.dedup_by(|a, b| (*a - *b).abs() < 1e-35);
+    let mut integral = 0.0;
+    for w in pts.windows(2) {
+        let (re, _) = gl32_integrate(w[0], w[1], &|e1| {
+            let e2 = e1 + hw_j;
+            if e1.abs() >= delta_j && e2.abs() >= delta_j {
+                return (0.0, 0.0);
+            }
+            let df = fermi_diff(e1, e2, kt_j);
+            let (gr1, ga1) = coeffs(e1);
+            let (gr2, ga2) = coeffs(e2);
+            ((df * (gr1 * gr2 + ga1 * ga2)).max(0.0), 0.0)
+        });
+        integral += re;
+    }
+    (sigma_n / hw_j) * integral.max(0.0)
+}
+
+/// Effective quasiparticle temperature `T_eff` corresponding to thermal normalized quasiparticle
+/// density `sqrt(2 pi k_B T / Delta) * exp(-Delta / (k_B T)) = x_qp`.
+fn effective_temp_for_xqp(delta_j: f64, x_qp: f64) -> f64 {
+    if delta_j <= 0.0 || x_qp <= 0.0 {
+        return 0.0;
+    }
+    let target = x_qp.min(0.4);
+    let u = (target / (2.0 * PI).sqrt()).ln();
+    // Solve ln(sqrt(t)) - 1/t = ln(target / sqrt(2 pi)), with t = k_B T / Delta in (0, 0.5]
+    let mut lo = 1e-4_f64;
+    let mut hi = 0.6_f64;
+    let mut t = (1.0 / (-u).max(2.0)).clamp(lo, hi);
+    for _ in 0..40 {
+        let g = 0.5 * t.ln() - 1.0 / t - u;
+        if g < 0.0 {
+            lo = lo.max(t);
+        } else {
+            hi = hi.min(t);
+        }
+        let dg = 0.5 / t + 1.0 / (t * t);
+        let next = t - g / dg;
+        t = if next > lo && next < hi { next } else { 0.5 * (lo + hi) };
+        if (hi - lo) < 1e-12 * t {
+            break;
+        }
+    }
+    t * delta_j / K_B
+}
+
 /// Evaluates arbitrary-purity BCS complex conductivity and thin-film surface impedance from explicit parameters.
 #[allow(clippy::too_many_arguments)]
 pub fn surface_impedance_from_params(
@@ -492,6 +724,39 @@ pub fn surface_impedance_from_params(
     xi_0: Option<f64>,
     mean_free_path: Option<f64>,
     sigma_n: Option<f64>,
+    freq_hz: f64,
+    temperature: f64,
+    thickness: f64,
+    film_model: FilmModel,
+) -> Result<BcsEval, String> {
+    surface_impedance_full(
+        tc,
+        gap_0_j,
+        lambda_l,
+        xi_0,
+        mean_free_path,
+        sigma_n,
+        None,
+        None,
+        None,
+        freq_hz,
+        temperature,
+        thickness,
+        film_model,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn surface_impedance_full(
+    tc: f64,
+    gap_0_j: Option<f64>,
+    lambda_l: Option<f64>,
+    xi_0: Option<f64>,
+    mean_free_path: Option<f64>,
+    sigma_n: Option<f64>,
+    dynes_gamma: Option<f64>,
+    r_res: Option<f64>,
+    x_qp_floor: Option<f64>,
     freq_hz: f64,
     temperature: f64,
     thickness: f64,
@@ -514,16 +779,6 @@ pub fn surface_impedance_from_params(
         }
     }
 
-    // Resolve normal-state conductivity sigma_n and impurity scattering rate gamma_s = hbar / tau:
-    // - When (lambda_L, xi_0) are given with sigma_n and/or mean_free_path:
-    //   v_F = pi * Delta_0 * xi_0 / hbar,
-    //   ell = mean_free_path.unwrap_or(sigma_n * mu_0 * lambda_L^2 * v_F),
-    //   sigma_n = sigma_n.unwrap_or(ell / (mu_0 * lambda_L^2 * v_F)),
-    //   gamma_s = pi * Delta_0 * xi_0 / ell.
-    // - When (xi_0, mean_free_path, sigma_n) are given without lambda_L:
-    //   gamma_s = pi * Delta_0 * xi_0 / mean_free_path.
-    // - When only sigma_n (and tc / gap_0) are given:
-    //   evaluate Mattis-Bardeen dirty limit (ell / xi_0 -> 0, gamma_s = None).
     let (sigma_n_val, gamma_s) = match (sigma_n, lambda_l, xi_0, mean_free_path) {
         (Some(sn), Some(ll), Some(xi), mfp) => {
             let v_f = PI * delta_0 * xi / HBAR;
@@ -555,7 +810,22 @@ pub fn surface_impedance_from_params(
     let hw_j = HBAR * omega;
     let kt_j = K_B * temperature;
 
-    let (sigma_1, sigma_2) = evaluate_bcs_conductivity(sigma_n_val, delta_j, hw_j, kt_j, gamma_s);
+    let (mut sigma_1, sigma_2) = evaluate_bcs_conductivity(sigma_n_val, delta_j, hw_j, kt_j, gamma_s);
+
+    // Non-equilibrium quasiparticle density floor adds dissipative sigma_1 evaluated at T_qp(x_qp_floor).
+    if let Some(xqp) = x_qp_floor.filter(|&x| x > 0.0 && delta_j > 0.0) {
+        let t_eff = effective_temp_for_xqp(delta_j, xqp);
+        if t_eff > temperature {
+            let (s1_floor, _) = evaluate_bcs_conductivity(sigma_n_val, delta_j, hw_j, K_B * t_eff, gamma_s);
+            sigma_1 = sigma_1.max(s1_floor);
+        }
+    }
+
+    // Dynes sub-gap pair-breaking density of states adds finite sub-gap absorption.
+    if let Some(gd) = dynes_gamma.filter(|&g| g > 0.0 && delta_j > 0.0) {
+        sigma_1 += dynes_subgap_sigma_1(sigma_n_val, delta_j, hw_j, kt_j, gd);
+    }
+
     let sigma = Complex64::new(sigma_1, -sigma_2);
 
     let lambda_eff = if sigma_2 > 0.0 {
@@ -564,12 +834,10 @@ pub fn surface_impedance_from_params(
         f64::INFINITY
     };
 
-    // Propagation constant gamma = sqrt(i * omega * mu_0 * sigma) with Re(gamma) > 0.
     let i_omega_mu0 = Complex64::new(0.0, omega * MU0);
     let gamma = (i_omega_mu0 * sigma).sqrt();
 
     let coth_scaled = |z: Complex64| -> Complex64 {
-        // Returns z * coth(z), overflow-safe for large Re(z) >= 0 and cancellation-safe for tiny |z|.
         let z = if z.re < 0.0 { -z } else { z };
         if z.norm() < 1e-4 {
             let z2 = z * z;
@@ -583,13 +851,14 @@ pub fn surface_impedance_from_params(
     };
 
     let inv_sigma_d = Complex64::new(1.0, 0.0) / (sigma * thickness);
-    let z_s = match film_model {
+    let mut z_s = match film_model {
         FilmModel::ThinLimit => inv_sigma_d,
         FilmModel::Kerr => inv_sigma_d * coth_scaled(gamma * thickness),
         FilmModel::TwoSided => inv_sigma_d * coth_scaled(0.5 * gamma * thickness),
     };
 
-    let r_s = z_s.re.max(0.0);
+    let r_s = z_s.re.max(0.0) + r_res.unwrap_or(0.0).max(0.0);
+    z_s = Complex64::new(r_s, z_s.im);
     let l_k_sq = z_s.im / omega;
     let l_eff = if l_k_sq.abs() > 0.0 {
         l_k_sq + (r_s * r_s) / (omega * omega * l_k_sq)
@@ -612,7 +881,8 @@ pub fn surface_impedance_from_params(
     })
 }
 
-/// Evaluates arbitrary-purity BCS complex conductivity and thin-film surface impedance for a `[superconducting]` block.
+/// Evaluates arbitrary-purity BCS complex conductivity and thin-film surface impedance for a `[superconducting]` block,
+/// including sub-gap `dynes_gamma`, `r_res`, and `x_qp_floor` loss channels when present.
 pub fn bcs_surface_impedance(
     sc: &Superconducting,
     freq_hz: f64,
@@ -620,13 +890,16 @@ pub fn bcs_surface_impedance(
     thickness: f64,
     film_model: FilmModel,
 ) -> Result<BcsEval, String> {
-    surface_impedance_from_params(
+    surface_impedance_full(
         sc.tc,
         sc.gap_0,
         sc.lambda_l,
         sc.xi_0,
         sc.mean_free_path,
         sc.sigma_n,
+        sc.dynes_gamma,
+        sc.r_res,
+        sc.x_qp_floor,
         freq_hz,
         temperature,
         thickness,
@@ -703,18 +976,51 @@ mod tests {
 
         // Park et al. 2026 Nb (d = 100 nm, f = 7 GHz, T = 10 mK)
         let nb = Superconducting {
-            source: Vec::new(),
             tc,
             gap_0: Some(gap_0),
             lambda_l: Some(lambda_l),
             xi_0: Some(39.0e-9),
-            mean_free_path: None,
             sigma_n: Some(5.5e7),
+            ..Default::default()
         };
         let kerr = bcs_surface_impedance(&nb, freq, 0.01, 100e-9, FilmModel::Kerr).unwrap();
         let two = bcs_surface_impedance(&nb, freq, 0.01, 100e-9, FilmModel::TwoSided).unwrap();
         let thin = bcs_surface_impedance(&nb, freq, 0.01, 100e-9, FilmModel::ThinLimit).unwrap();
         assert!(kerr.l_k_sq > two.l_k_sq && two.l_k_sq > thin.l_k_sq && thin.l_k_sq > 0.0);
         assert!((kerr.z_s.im / omega - kerr.l_k_sq).abs() < 1e-25);
+    }
+
+    #[test]
+    fn subgap_mk_loss_channels_give_finite_positive_resistance() {
+        let base = Superconducting {
+            tc: 9.2,
+            gap_0: Some(1.395e-3 * EV_TO_J),
+            lambda_l: Some(33.3e-9),
+            xi_0: Some(39.0e-9),
+            sigma_n: Some(5.5e7),
+            ..Default::default()
+        };
+        let ev0 = bcs_surface_impedance(&base, 5.0e9, 0.01, 100e-9, FilmModel::Kerr).unwrap();
+
+        let with_rres = Superconducting {
+            r_res: Some(12e-9),
+            ..base.clone()
+        };
+        let ev_r = bcs_surface_impedance(&with_rres, 5.0e9, 0.01, 100e-9, FilmModel::Kerr).unwrap();
+        assert!(ev_r.r_s >= ev0.r_s + 11.9e-9 && ev_r.r_s.is_finite());
+
+        let with_dynes = Superconducting {
+            dynes_gamma: Some(5e-6 * EV_TO_J),
+            ..base.clone()
+        };
+        let ev_d = bcs_surface_impedance(&with_dynes, 5.0e9, 0.01, 100e-9, FilmModel::Kerr).unwrap();
+        assert!(ev_d.sigma.re > ev0.sigma.re && ev_d.r_s > ev0.r_s);
+
+        let with_xqp = Superconducting {
+            x_qp_floor: Some(1e-5),
+            ..base
+        };
+        let ev_x = bcs_surface_impedance(&with_xqp, 5.0e9, 0.01, 100e-9, FilmModel::Kerr).unwrap();
+        assert!(ev_x.sigma.re > ev0.sigma.re && ev_x.r_s > ev0.r_s);
     }
 }
