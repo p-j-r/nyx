@@ -6,6 +6,7 @@ pub mod diff;
 pub mod error;
 pub mod eval;
 pub mod expr;
+pub mod gds;
 pub mod labels;
 pub mod math;
 pub mod model;
