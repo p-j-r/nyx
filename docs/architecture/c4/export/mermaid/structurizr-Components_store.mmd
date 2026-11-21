@@ -28,8 +28,8 @@ graph TB
         style 85 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
-      121[("<div style='font-weight: bold'>Workspace data</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files and folders]</div><div style='font-size: 80%; margin-top:10px'>workspace.json,<br />workflow.json, history.jsonl,<br />runs.jsonl, specs/<br />(experiment.nyx.json,<br />specs/<hash>.nyx.json), run<br />folders with results.h5, .nyx<br />archives.</div>")]
-      style 121 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      127[("<div style='font-weight: bold'>Workspace data</div><div style='font-size: 70%; margin-top: 0px'>[Container: Files and folders]</div><div style='font-size: 80%; margin-top:10px'>workspace.json,<br />workflow.json, history.jsonl,<br />runs.jsonl, specs/<br />(experiment.nyx.json,<br />specs/<hash>.nyx.json), run<br />folders with results.h5, .nyx<br />archives.</div>")]
+      style 127 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
     84-. "<div>uses flow</div><div style='font-size: 70%'>[Rust paths]</div>" .->80
@@ -50,7 +50,7 @@ graph TB
     79-. "<div>uses model</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     79-. "<div>uses runs</div><div style='font-size: 70%'>[Rust paths]</div>" .->82
     79-. "<div>uses util</div><div style='font-size: 70%'>[Rust paths]</div>" .->85
-    80-. "<div>Reads and writes workflow<br />folders</div><div style='font-size: 70%'>[declared in spec]</div>" .->121
-    82-. "<div>Appends runs.jsonl</div><div style='font-size: 70%'>[declared in spec]</div>" .->121
+    80-. "<div>Reads and writes workflow<br />folders</div><div style='font-size: 70%'>[declared in spec]</div>" .->127
+    82-. "<div>Appends runs.jsonl</div><div style='font-size: 70%'>[declared in spec]</div>" .->127
 
   end

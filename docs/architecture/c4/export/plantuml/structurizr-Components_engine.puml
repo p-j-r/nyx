@@ -103,14 +103,14 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
     rectangle "==Meshing seam\n<size:16>[Component: Rust modules]</size>\n\nMeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Meshingseam
     rectangle "==Materials\n<size:16>[Component: Rust modules]</size>\n\nThe material library plus the materials a project carries, resolved at the study wavelength." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Materials
     rectangle "==Analyses\n<size:16>[Component: Rust modules]</size>\n\nRuns the analyses of nyx-analysis on the latest result of a physics, and draws its modes as a figure (SVG or PNG)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Analyses
-    rectangle "==Results files\n<size:16>[Component: Rust modules]</size>\n\nHDF5 results (serial or MPI-IO), the XDMF description, and opening a results file as a project with its results." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Resultsfiles
+    rectangle "==Results files\n<size:16>[Component: Rust modules]</size>\n\nHDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description, and opening a results file as a project with its results." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Resultsfiles
     rectangle "==Store link\n<size:16>[Component: Rust modules]</size>\n\nBinds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Storelink
     rectangle "==Registry and facade\n<size:16>[Component: Rust modules]</size>\n\nThe physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxengine.Registryandfacade
   }
 
   component "==geom\n<size:16>[Container: Rust library]</size>\n\nLean CSG-over-B-rep geometry kernel: feature lists, named regions and boundaries, selectors, exact projection oracles. Depends on serde and optional rayon only." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.geom
   database "==Project file\n<size:16>[Container: File .nyx.json]</size>\n\nEverything saved for one model: geometry, materials, boundary conditions, studies. JSON with a format key." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Projectfile
-  database "==Results file\n<size:16>[Container: File .h5 and .xdmf]</size>\n\nProject, mesh and every solution of every solved physics, compressed, exact; with an XDMF description next to it." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Resultsfile
+  database "==Results file\n<size:16>[Container: File .h5 and .xdmf]</size>\n\nProject, mesh and every solution of every solved physics, compressed (packed 5D Shuffle+LZF or Deflate), exact; with an XDMF description next to it." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Resultsfile
   database "==Material library\n<size:16>[Container: Files]</size>\n\nmaterials/*.toml next to the program: silicon, silica, sapphire, metals, nitrides, niobate and more, with sources." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Materiallibrary
   component "==nyx-physics\n<size:16>[Container: Rust library]</size>\n\nThe Physics trait, the problem envelope (ProblemSpec), descriptors, SolveResult, the registry type, validation, JSON Schemas." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxphysics
   component "==nyx-dfs\n<size:16>[Container: Rust library]</size>\n\nDiffusion physics: heat and electrostatics. Typed problem, three-stage kernels, descriptors, goldens." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeSxLZXJuZWw=>> as nyx.nyxdfs
@@ -118,6 +118,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   component "==nyx-ems\n<size:16>[Container: Rust library]</size>\n\nEM waves: waveguide modes (real and complex), axisymmetric, cavity in 3D." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeSxLZXJuZWw=>> as nyx.nyxems
   component "==nyx-analysis\n<size:16>[Container: Rust library]</size>\n\nAnalyses of results: the polarization (Stokes parameters, Poincare sphere, classes, degenerate groups) as a function of a SolveResult and its mesh." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxanalysis
   component "==nyx-store\n<size:16>[Container: Rust library]</size>\n\nWorkspace, workflow, experiment and run storage: manifests, append-only run log, versions, search, .nyx archives. Knows nothing of a project." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxstore
+  component "==nyx-storage\n<size:16>[Container: Rust library]</size>\n\nPure-Rust HDF5 storage engine (hdf5-pure + zlib-rs): packed 5D Shuffle+LZF and contiguous layouts, bounded-memory streaming reader/writer, direct-path XDMF, and in-place parameter-sweep appender." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxstorage
   component "==femcore\n<size:16>[Container: Rust library]</size>\n\nThe FEM core: meshes, meshing and adaptation, linear algebra behind one driver, finite-element basics, the material specification and library, expressions." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.femcore
 }
 
@@ -194,6 +195,7 @@ nyx.nyxengine.Registryandfacade --> nyx.nyxengine.Meshingseam <<Relationship-UmV
 nyx.nyxengine.Registryandfacade --> nyx.nyxengine.Project <<Relationship-UmVsYXRpb25zaGlw>> : "uses project\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Resultsfiles --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material::spec, mesh +1\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Resultsfiles --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: error, registry +1\n<size:16>[Rust paths]</size>"
+nyx.nyxengine.Resultsfiles --> nyx.nyxstorage <<Relationship-UmVsYXRpb25zaGlw>> : "uses storage: crate root\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Resultsfiles --> nyx.nyxengine.Commands <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Resultsfiles --> nyx.nyxengine.Jobrunnerandqueue <<Relationship-UmVsYXRpb25zaGlw>> : "uses jobs\n<size:16>[Rust paths]</size>"
 nyx.nyxengine.Resultsfiles --> nyx.nyxengine.Meshingseam <<Relationship-UmVsYXRpb25zaGlw>> : "uses meshing\n<size:16>[Rust paths]</size>"
@@ -208,5 +210,6 @@ nyx.nyxengine.Storelink --> nyx.nyxengine.Resultsfiles <<Relationship-UmVsYXRpb2
 nyx.nyxengine.Materials --> nyx.Materiallibrary <<Relationship-UmVsYXRpb25zaGlw>> : "Loads\n<size:16>[declared in spec]</size>"
 nyx.nyxengine.Project --> nyx.Projectfile <<Relationship-UmVsYXRpb25zaGlw>> : "Saves and loads\n<size:16>[declared in spec]</size>"
 nyx.nyxengine.Resultsfiles --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Writes and opens\n<size:16>[declared in spec]</size>"
+nyx.nyxstorage --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Streams and slices\n<size:16>[declared in spec]</size>"
 
 @enduml

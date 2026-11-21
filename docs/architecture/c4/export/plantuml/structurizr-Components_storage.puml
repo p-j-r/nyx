@@ -1,0 +1,100 @@
+@startuml
+title <size:24>Component View: nyx - nyx-storage</size>\n<size:24>The components of nyx-storage and what they use.</size>
+
+set separator none
+top to bottom direction
+skinparam ranksep 60
+skinparam nodesep 30
+hide stereotype
+
+<style>
+  root {
+    BackgroundColor: #ffffff;
+    FontColor: #444444;
+  }
+  // Element,Component
+  .Element-RWxlbWVudCxDb21wb25lbnQ= {
+    BackgroundColor: #85bbf0;
+    LineColor: #5d82a8;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #000000;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+    MaximumWidth: 450;
+  }
+  // Element,Container,Store
+  .Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU= {
+    BackgroundColor: #438dd5;
+    LineColor: #2e6295;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #ffffff;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+    MaximumWidth: 450;
+  }
+  // Relationship
+  .Relationship-UmVsYXRpb25zaGlw {
+    LineThickness: 2;
+    LineStyle: 10-10;
+    LineColor: #444444;
+    FontColor: #444444;
+    FontSize: 24;
+  }
+  // nyx
+  .Boundary-bnl4 {
+    BackgroundColor: #ffffff;
+    LineColor: #0b4884;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #ffffff;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+  }
+  // nyx-storage
+  .Boundary-bnl4LXN0b3JhZ2U= {
+    BackgroundColor: #ffffff;
+    LineColor: #2e6295;
+    LineStyle: 0;
+    LineThickness: 2;
+    FontColor: #ffffff;
+    FontSize: 24;
+    HorizontalAlignment: center;
+    Shadowing: 0;
+  }
+</style>
+
+rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
+  rectangle "nyx-storage\n<size:16>[Container: Rust library]</size>" <<Boundary-bnl4LXN0b3JhZ2U=>> {
+    rectangle "==Storage types and read budget\n<size:16>[Component: Rust modules]</size>\n\nFieldStorageLayout (L1 Deflate-3, L2 Shuffle+LZF packed 5D, L3 Contiguous packed 5D), ReadBudgetConfig (512 MiB default ceiling), MeshData, ModeHeader, PackedComponentMeta and bitwise f64 verification helpers." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxstorage.Storagetypesandreadbudget
+    rectangle "==Streaming HDF5 reader\n<size:16>[Component: Rust modules]</size>\n\nBounded-memory streaming reader over hdf5_pure::File::open_streaming: checked_mul read-budget guards, O(1) mode-header scan, mesh reader (with optional curved edges), and transparent single-mode cell-field slicing across L2/L3 packed 5D and legacy L1/v3 files." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxstorage.StreamingHDF5reader
+    rectangle "==Packed and streaming HDF5 writer\n<size:16>[Component: Rust modules]</size>\n\nWhole-file atomic writer (write_nyx_packed) and bounded-RSS incremental mode-by-mode streaming appender (init_nyx_packed_streaming, append_solved_mode_in_place via File::open_rw and append_staged)." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxstorage.PackedandstreamingHDF5writer
+    rectangle "==Direct-path XDMF generator\n<size:16>[Component: Rust modules]</size>\n\nDirect-path XDMF 3.0 XML companion generator (generate_direct_xdmf, write_direct_xdmf) referencing internal HDF5 dataset paths without /viz hard links." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxstorage.DirectpathXDMFgenerator
+    rectangle "==Sweep checkpoint and atomic IO\n<size:16>[Component: Rust modules]</size>\n\nIncremental in-place parameter-sweep checkpointing (SweepCheckpoint over unlimited chunked datasets via File::open_rw) and Windows NTFS atomic file replacement helpers." <<Element-RWxlbWVudCxDb21wb25lbnQ=>> as nyx.nyxstorage.SweepcheckpointandatomicIO
+  }
+
+  database "==Results file\n<size:16>[Container: File .h5 and .xdmf]</size>\n\nProject, mesh and every solution of every solved physics, compressed (packed 5D Shuffle+LZF or Deflate), exact; with an XDMF description next to it." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Resultsfile
+}
+
+nyx.nyxstorage.StreamingHDF5reader --> nyx.nyxstorage.Storagetypesandreadbudget <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.SweepcheckpointandatomicIO --> nyx.nyxstorage.StreamingHDF5reader <<Relationship-UmVsYXRpb25zaGlw>> : "uses reader\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.SweepcheckpointandatomicIO --> nyx.nyxstorage.Storagetypesandreadbudget <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.Storagetypesandreadbudget --> nyx.nyxstorage.StreamingHDF5reader <<Relationship-UmVsYXRpb25zaGlw>> : "uses reader\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.Storagetypesandreadbudget --> nyx.nyxstorage.SweepcheckpointandatomicIO <<Relationship-UmVsYXRpb25zaGlw>> : "uses sweep\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.Storagetypesandreadbudget --> nyx.nyxstorage.PackedandstreamingHDF5writer <<Relationship-UmVsYXRpb25zaGlw>> : "uses writer\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.Storagetypesandreadbudget --> nyx.nyxstorage.DirectpathXDMFgenerator <<Relationship-UmVsYXRpb25zaGlw>> : "uses xdmf\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.PackedandstreamingHDF5writer --> nyx.nyxstorage.StreamingHDF5reader <<Relationship-UmVsYXRpb25zaGlw>> : "uses reader\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.PackedandstreamingHDF5writer --> nyx.nyxstorage.SweepcheckpointandatomicIO <<Relationship-UmVsYXRpb25zaGlw>> : "uses sweep\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.PackedandstreamingHDF5writer --> nyx.nyxstorage.Storagetypesandreadbudget <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.PackedandstreamingHDF5writer --> nyx.nyxstorage.DirectpathXDMFgenerator <<Relationship-UmVsYXRpb25zaGlw>> : "uses xdmf\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.DirectpathXDMFgenerator --> nyx.nyxstorage.SweepcheckpointandatomicIO <<Relationship-UmVsYXRpb25zaGlw>> : "uses sweep\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.DirectpathXDMFgenerator --> nyx.nyxstorage.Storagetypesandreadbudget <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root\n<size:16>[Rust paths]</size>"
+nyx.nyxstorage.StreamingHDF5reader --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Streams and slices\n<size:16>[declared in spec]</size>"
+nyx.nyxstorage.PackedandstreamingHDF5writer --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Writes and appends atomically\n<size:16>[declared in spec]</size>"
+nyx.nyxstorage.DirectpathXDMFgenerator --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Writes .xdmf index\n<size:16>[declared in spec]</size>"
+
+@enduml

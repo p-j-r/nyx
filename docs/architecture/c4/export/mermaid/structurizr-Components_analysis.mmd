@@ -24,18 +24,18 @@ graph TB
 
       41["<div style='font-weight: bold'>nyx-physics</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The Physics trait, the<br />problem envelope<br />(ProblemSpec), descriptors,<br />SolveResult, the registry<br />type, validation, JSON<br />Schemas.</div>"]
       style 41 fill:#438dd5,stroke:#2e6295,color:#ffffff
-      86["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
-      style 86 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      92["<div style='font-weight: bold'>femcore</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust library]</div><div style='font-size: 80%; margin-top:10px'>The FEM core: meshes, meshing<br />and adaptation, linear<br />algebra behind one driver,<br />finite-element basics, the<br />material specification and<br />library, expressions.</div>"]
+      style 92 fill:#438dd5,stroke:#2e6295,color:#ffffff
     end
 
-    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->86
+    41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->92
     72-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     72-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->75
     72-. "<div>uses samples</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
-    76-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
+    76-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
     76-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     75-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
-    73-. "<div>uses femcore: fem, fields +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->86
+    73-. "<div>uses femcore: fem, fields +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->92
     73-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     73-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->75
     73-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->74

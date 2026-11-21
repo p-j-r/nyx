@@ -14,50 +14,50 @@ graph TB
     subgraph 5 ["nyx"]
       style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
 
-      subgraph 111 ["geom"]
-        style 111 fill:#ffffff,stroke:#2e6295,color:#2e6295
+      subgraph 117 ["geom"]
+        style 117 fill:#ffffff,stroke:#2e6295,color:#2e6295
 
-        112["<div style='font-weight: bold'>Feature list</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The serialisable feature list<br />(single source of truth for<br />code and GUI), its operations<br />and validation, parameter<br />expressions, printing as Rust<br />builder calls, and the error<br />type.</div>"]
-        style 112 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        113["<div style='font-weight: bold'>Evaluation</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Evaluator turns a feature<br />list into an evaluated model<br />at a chosen tier with a<br />cache; scenes instantiate<br />profiles with transforms and<br />patterns; change detection<br />between evaluations for<br />sweeps.</div>"]
-        style 113 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        114["<div style='font-weight: bold'>2D kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Primitives, planar curves,<br />the planar arrangement of all<br />boundary pieces and the<br />evaluated region complex.</div>"]
-        style 114 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        115["<div style='font-weight: bold'>3D kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Prismatic models as a layer<br />stack, general planar-faced<br />solids, and the edges and<br />vertices of a 3D model.</div>"]
-        style 115 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        116["<div style='font-weight: bold'>Queries and selectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Exact queries on an evaluated<br />model, serialisable<br />selectors, the LabelMap<br />between names and the integer<br />labels solvers consume, and<br />simulation operations as<br />data.</div>"]
-        style 116 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        117["<div style='font-weight: bold'>Display tessellation</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Tessellation for the viewport<br />and picking only, never for<br />meshing.</div>"]
-        style 117 fill:#85bbf0,stroke:#5d82a8,color:#000000
-        118["<div style='font-weight: bold'>Math helpers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Small vector, box and<br />similarity-transform helpers.</div>"]
+        118["<div style='font-weight: bold'>Feature list</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The serialisable feature list<br />(single source of truth for<br />code and GUI), its operations<br />and validation, parameter<br />expressions, printing as Rust<br />builder calls, and the error<br />type.</div>"]
         style 118 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        119["<div style='font-weight: bold'>Evaluation</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>The Evaluator turns a feature<br />list into an evaluated model<br />at a chosen tier with a<br />cache; scenes instantiate<br />profiles with transforms and<br />patterns; change detection<br />between evaluations for<br />sweeps.</div>"]
+        style 119 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        120["<div style='font-weight: bold'>2D kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Primitives, planar curves,<br />the planar arrangement of all<br />boundary pieces and the<br />evaluated region complex.</div>"]
+        style 120 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        121["<div style='font-weight: bold'>3D kernel</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Prismatic models as a layer<br />stack, general planar-faced<br />solids, and the edges and<br />vertices of a 3D model.</div>"]
+        style 121 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        122["<div style='font-weight: bold'>Queries and selectors</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Exact queries on an evaluated<br />model, serialisable<br />selectors, the LabelMap<br />between names and the integer<br />labels solvers consume, and<br />simulation operations as<br />data.</div>"]
+        style 122 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        123["<div style='font-weight: bold'>Display tessellation</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Tessellation for the viewport<br />and picking only, never for<br />meshing.</div>"]
+        style 123 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        124["<div style='font-weight: bold'>Math helpers</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust modules]</div><div style='font-size: 80%; margin-top:10px'>Small vector, box and<br />similarity-transform helpers.</div>"]
+        style 124 fill:#85bbf0,stroke:#5d82a8,color:#000000
       end
 
     end
 
-    113-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
-    113-. "<div>uses arrange, complex +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
-    113-. "<div>uses planar, stack</div><div style='font-size: 70%'>[Rust paths]</div>" .->115
-    113-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
-    113-. "<div>uses sim</div><div style='font-size: 70%'>[Rust paths]</div>" .->116
-    112-. "<div>uses select</div><div style='font-size: 70%'>[Rust paths]</div>" .->116
-    114-. "<div>uses scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
-    114-. "<div>uses error, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
-    114-. "<div>uses stack</div><div style='font-size: 70%'>[Rust paths]</div>" .->115
-    114-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
-    115-. "<div>uses eval, scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
-    115-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
-    115-. "<div>uses arrange, complex +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
-    115-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
-    115-. "<div>uses tess</div><div style='font-size: 70%'>[Rust paths]</div>" .->117
-    116-. "<div>uses eval, scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
-    116-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
-    116-. "<div>uses complex, curve</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
-    116-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
-    117-. "<div>uses eval</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
-    117-. "<div>uses complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
-    117-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
-    117-. "<div>uses query</div><div style='font-size: 70%'>[Rust paths]</div>" .->116
+    119-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
+    119-. "<div>uses arrange, complex +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->120
+    119-. "<div>uses planar, stack</div><div style='font-size: 70%'>[Rust paths]</div>" .->121
+    119-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
+    119-. "<div>uses sim</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
+    118-. "<div>uses select</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
+    120-. "<div>uses scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->119
+    120-. "<div>uses error, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
+    120-. "<div>uses stack</div><div style='font-size: 70%'>[Rust paths]</div>" .->121
+    120-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
+    121-. "<div>uses eval, scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->119
+    121-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
+    121-. "<div>uses arrange, complex +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->120
+    121-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
+    121-. "<div>uses tess</div><div style='font-size: 70%'>[Rust paths]</div>" .->123
+    122-. "<div>uses eval, scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->119
+    122-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
+    122-. "<div>uses complex, curve</div><div style='font-size: 70%'>[Rust paths]</div>" .->120
+    122-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
+    123-. "<div>uses eval</div><div style='font-size: 70%'>[Rust paths]</div>" .->119
+    123-. "<div>uses complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->120
+    123-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
+    123-. "<div>uses query</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
 
   end```
 

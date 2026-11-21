@@ -126,7 +126,7 @@ database "==Workspace folder\n<size:16>[Software System]</size>\n\nDocuments/nyx
 rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   component "==geom\n<size:16>[Container: Rust library]</size>\n\nLean CSG-over-B-rep geometry kernel: feature lists, named regions and boundaries, selectors, exact projection oracles. Depends on serde and optional rayon only." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.geom
   database "==Project file\n<size:16>[Container: File .nyx.json]</size>\n\nEverything saved for one model: geometry, materials, boundary conditions, studies. JSON with a format key." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Projectfile
-  database "==Results file\n<size:16>[Container: File .h5 and .xdmf]</size>\n\nProject, mesh and every solution of every solved physics, compressed, exact; with an XDMF description next to it." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Resultsfile
+  database "==Results file\n<size:16>[Container: File .h5 and .xdmf]</size>\n\nProject, mesh and every solution of every solved physics, compressed (packed 5D Shuffle+LZF or Deflate), exact; with an XDMF description next to it." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Resultsfile
   database "==Workspace data\n<size:16>[Container: Files and folders]</size>\n\nworkspace.json, workflow.json, history.jsonl, runs.jsonl, specs/ (experiment.nyx.json, specs/<hash>.nyx.json), run folders with results.h5, .nyx archives." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Workspacedata
   database "==Material library\n<size:16>[Container: Files]</size>\n\nmaterials/*.toml next to the program: silicon, silica, sapphire, metals, nitrides, niobate and more, with sources." <<Element-RWxlbWVudCxDb250YWluZXIsU3RvcmU=>> as nyx.Materiallibrary
   rectangle "==nyx-mcp\n<size:16>[Container: Rust binary]</size>\n\nThe MCP server (stdio, JSON-RPC 2.0): four script tools (script_run, script_wait, script_check, api) over one script kernel; the agent writes Python that calls the engine commands and only what it prints comes back." <<Element-RWxlbWVudCxDb250YWluZXIsRXhlY3V0YWJsZQ==>> as nyx.nyxmcp
@@ -140,6 +140,7 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
   component "==nyx-ems\n<size:16>[Container: Rust library]</size>\n\nEM waves: waveguide modes (real and complex), axisymmetric, cavity in 3D." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeSxLZXJuZWw=>> as nyx.nyxems
   component "==nyx-analysis\n<size:16>[Container: Rust library]</size>\n\nAnalyses of results: the polarization (Stokes parameters, Poincare sphere, classes, degenerate groups) as a function of a SolveResult and its mesh." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxanalysis
   component "==nyx-store\n<size:16>[Container: Rust library]</size>\n\nWorkspace, workflow, experiment and run storage: manifests, append-only run log, versions, search, .nyx archives. Knows nothing of a project." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxstore
+  component "==nyx-storage\n<size:16>[Container: Rust library]</size>\n\nPure-Rust HDF5 storage engine (hdf5-pure + zlib-rs): packed 5D Shuffle+LZF and contiguous layouts, bounded-memory streaming reader/writer, direct-path XDMF, and in-place parameter-sweep appender." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.nyxstorage
   component "==femcore\n<size:16>[Container: Rust library]</size>\n\nThe FEM core: meshes, meshing and adaptation, linear algebra behind one driver, finite-element basics, the material specification and library, expressions." <<Element-RWxlbWVudCxDb250YWluZXIsTGlicmFyeQ==>> as nyx.femcore
 }
 
@@ -160,6 +161,7 @@ nyx.nyxengine --> nyx.nyxsms <<Relationship-UmVsYXRpb25zaGlw>> : "Compiled-in ph
 nyx.nyxengine --> nyx.nyxems <<Relationship-UmVsYXRpb25zaGlw>> : "Compiled-in physics (feature ems)\n<size:16>[Rust API]</size>"
 nyx.nyxengine --> nyx.nyxanalysis <<Relationship-UmVsYXRpb25zaGlw>> : "Analyses of results\n<size:16>[Rust API]</size>"
 nyx.nyxengine --> nyx.nyxstore <<Relationship-UmVsYXRpb25zaGlw>> : "Workflows and runs; passes spec text and a card\n<size:16>[Rust API]</size>"
+nyx.nyxengine --> nyx.nyxstorage <<Relationship-UmVsYXRpb25zaGlw>> : "Reads and writes HDF5 results and sweep checkpoints\n<size:16>[Rust API]</size>"
 nyx.nyxengine --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "Meshing, materials, plots\n<size:16>[Rust API]</size>"
 nyx.nyxengine --> nyx.geom <<Relationship-UmVsYXRpb25zaGlw>> : "Feature lists, labels, selectors\n<size:16>[Rust API]</size>"
 nyx.nyxdfs --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "Implements Physics\n<size:16>[Rust API]</size>"
@@ -173,8 +175,9 @@ nyx.nyxanalysis --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "Mesh geomet
 nyx.nyxphysics --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "Mesh, materials\n<size:16>[Rust API]</size>"
 nyx.femcore --> nyx.geom <<Relationship-UmVsYXRpb25zaGlw>> : "Evaluates models, reads selectors and labels\n<size:16>[Rust API]</size>"
 nyx.nyxengine --> nyx.Projectfile <<Relationship-UmVsYXRpb25zaGlw>> : "Saves and loads\n<size:16>[serde JSON]</size>"
-nyx.nyxengine --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Writes and opens\n<size:16>[HDF5 (serial or MPI-IO), XDMF]</size>"
+nyx.nyxengine --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Writes and opens\n<size:16>[HDF5 (hdf5-pure), XDMF]</size>"
 nyx.nyxengine --> nyx.Materiallibrary <<Relationship-UmVsYXRpb25zaGlw>> : "Loads\n<size:16>[TOML]</size>"
 nyx.nyxstore --> nyx.Workspacedata <<Relationship-UmVsYXRpb25zaGlw>> : "Reads and writes"
+nyx.nyxstorage --> nyx.Resultsfile <<Relationship-UmVsYXRpb25zaGlw>> : "Streams and slices\n<size:16>[declared in spec]</size>"
 
 @enduml

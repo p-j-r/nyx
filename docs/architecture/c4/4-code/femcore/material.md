@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Material specification** (`femcore.material
 > TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, provenance and the library loader.
 
 **Decisions:** [ADR 29](../../../adr/0029-material-files-are-toml-with-explicit-units.md), [ADR 30](../../../adr/0030-optical-dispersion-models-evaluated-at-the-study-wavelength.md), [ADR 34](../../../adr/0034-a-material-may-extend-another-and-replaces-whole-tables.md), [ADR 35](../../../adr/0035-material-provenance-oscillator-models-and-the-checked-library.md)  
-**Size:** 9 files, 3537 lines.
+**Size:** 9 files, 3538 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/material/elastic.rs` | 783 |  |
+| `crates/femcore/src/material/elastic.rs` | 784 |  |
 | `crates/femcore/src/material/mod.rs` | 397 |  |
 | `crates/femcore/src/material/optics.rs` | 916 |  |
 | `crates/femcore/src/material/reader.rs` | 268 |  |
@@ -416,7 +416,7 @@ classDiagram
 | fn | `Elastic::global` | `material/elastic.rs:392` | `pub fn global(&self, euler_deg: [f64; 3]) -> M6` —  Stiffness in the solver's Voigt order (xx, yy, zz, xy, yz, xz) after rotating the crystal with Bunge angles (degrees). |
 | fn | `Elastic::eigenvalue_range` | `material/elastic.rs:397` | `pub fn eigenvalue_range(&self) -> (f64, f64)` —  Smallest and largest eigenvalue of the stiffness in the normalised (Mandel) form, Pa. |
 | fn | `Elastic::read` | `material/elastic.rs:403` | `pub fn read(s: &mut Section) -> Result<Elastic, MaterialError>` —  Reads the `[elastic]` table. |
-| fn | `Elastic::write` | `material/elastic.rs:565` | `pub fn write(&self) -> toml::Table` —  The `[elastic]` table written from this value: constants if the file gave them, otherwise the matrix (upper triangle), in GPa. |
+| fn | `Elastic::write` | `material/elastic.rs:566` | `pub fn write(&self) -> toml::Table` —  The `[elastic]` table written from this value: constants if the file gave them, otherwise the matrix (upper triangle), in GPa. |
 | type | `M3` | `material/mod.rs:30` |  |
 | type | `M6` | `material/mod.rs:31` |  |
 | enum | `Stiffness` | `material/mod.rs:35` | variants: `Cubic`, `Hexagonal`, `Trigonal`, `Orthotropic`, `General` |
