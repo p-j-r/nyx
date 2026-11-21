@@ -79,6 +79,7 @@ pub(crate) struct Spec {
 }
 
 /// Where the arguments say a bare name comes from.
+#[derive(Clone)]
 pub(crate) struct Defaults {
     physics: Option<String>,
     solution: usize,
@@ -86,6 +87,8 @@ pub(crate) struct Defaults {
     wavelength: Option<f64>,
     /// the request integrates over a `boundary`, so `nx ny nz` mean something
     boundary: bool,
+    /// the request evaluates over a batch of `solutions`, so bare field handles follow `solution`
+    batch_solutions: bool,
 }
 
 enum Kind {
@@ -152,6 +155,30 @@ fn same_mesh(a: &SimplexMesh, b: &SimplexMesh) -> bool {
     a.dim == b.dim && a.points == b.points && a.cells == b.cells && a.cell_labels == b.cell_labels
 }
 
+#[inline]
+fn cell_vol(mesh: &SimplexMesh, c: usize) -> f64 {
+    let v = mesh.cell(c);
+    let x0 = mesh.point(v[0] as usize);
+    if mesh.dim == 2 {
+        let x1 = mesh.point(v[1] as usize);
+        let x2 = mesh.point(v[2] as usize);
+        let det = (x1[0] - x0[0]) * (x2[1] - x0[1]) - (x1[1] - x0[1]) * (x2[0] - x0[0]);
+        det.abs() / 2.0
+    } else {
+        let x1 = mesh.point(v[1] as usize);
+        let x2 = mesh.point(v[2] as usize);
+        let x3 = mesh.point(v[3] as usize);
+        let m0 = [x1[0] - x0[0], x1[1] - x0[1], x1[2] - x0[2]];
+        let m1 = [x2[0] - x0[0], x2[1] - x0[1], x2[2] - x0[2]];
+        let m2 = [x3[0] - x0[0], x3[1] - x0[1], x3[2] - x0[2]];
+        let c00 = m1[1] * m2[2] - m1[2] * m2[1];
+        let c01 = m1[2] * m2[0] - m1[0] * m2[2];
+        let c02 = m1[0] * m2[1] - m1[1] * m2[0];
+        let det = m0[0] * c00 + m0[1] * c01 + m0[2] * c02;
+        det.abs() / 6.0
+    }
+}
+
 fn interp(n: &[f64], loc: &[C]) -> C {
     let (mut re, mut im) = (0.0, 0.0);
     for a in 0..n.len() {
@@ -197,7 +224,8 @@ fn prop_name(name: &str) -> &str {
 
 impl Namer<'_> {
     fn slot(&mut self, physics: &str, solution: usize, name: &str, what: What) -> Tree {
-        Tree::Leaf(slot(self.specs, Spec { physics: physics.to_string(), solution, name: name.to_string(), what }))
+        let sol = if matches!(what, What::Field) { solution } else { 0 };
+        Tree::Leaf(slot(self.specs, Spec { physics: physics.to_string(), solution: sol, name: name.to_string(), what }))
     }
 
     /// The physics and solution of a name, with the result they live in checked.
@@ -353,6 +381,102 @@ impl Names for Namer<'_> {
 
 // ------------------------------------------------------------------------------------------------------------- the engine side
 
+/// Whether a JSON object is a single expression AST node (`op`, `field`, `num`, `const`, `coord`, `material`, `region`, `normal`)
+/// rather than a batch map of named expressions (`{"energy": "...", "ex2": "..."}`).
+fn is_ast_object(m: &serde_json::Map<String, Value>) -> bool {
+    if m.is_empty() {
+        return false;
+    }
+    if m.contains_key("op") && m.keys().all(|k| matches!(k.as_str(), "op" | "args" | "n")) {
+        return true;
+    }
+    if m.contains_key("field") && m.keys().all(|k| matches!(k.as_str(), "field" | "physics" | "solution")) {
+        return true;
+    }
+    for key in ["num", "const"] {
+        if let Some(v) = m.get(key) {
+            if m.len() == 1
+                && (v.is_number() || v.as_array().is_some_and(|a| a.len() == 2 && a[0].is_number() && a[1].is_number()))
+            {
+                return true;
+            }
+        }
+    }
+    let plain_name = |v: &Value| {
+        v.as_str().is_some_and(|s| {
+            !s.trim().is_empty()
+                && !s.chars().any(|c| "+-*/^()<>=!,[]\"'`.:".contains(c))
+                && !s.contains(" and ")
+                && !s.contains(" or ")
+        })
+    };
+    if let Some(v) = m.get("coord") {
+        if m.keys().all(|k| matches!(k.as_str(), "coord" | "physics" | "solution"))
+            && (v.as_str().is_some_and(|s| matches!(s, "x" | "y" | "z")) || v.as_u64().is_some_and(|a| a < 3))
+        {
+            return true;
+        }
+    }
+    if let Some(v) = m.get("normal") {
+        if m.keys().all(|k| matches!(k.as_str(), "normal" | "physics" | "solution"))
+            && (v.as_str().is_some_and(|s| matches!(s, "nx" | "ny" | "nz" | "x" | "y" | "z"))
+                || v.as_u64().is_some_and(|a| a < 3))
+        {
+            return true;
+        }
+    }
+    if let Some(v) = m.get("material") {
+        if m.keys().all(|k| matches!(k.as_str(), "material" | "physics" | "solution" | "wavelength")) && plain_name(v) {
+            return true;
+        }
+    }
+    if let Some(v) = m.get("region") {
+        if m.keys().all(|k| matches!(k.as_str(), "region" | "physics" | "solution")) && plain_name(v) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The shape of `expr` in `integrate`: a single expression, a batch list, or a batch map of named expressions.
+enum BatchExpr<'a> {
+    Single(&'a Value),
+    List(Vec<&'a Value>),
+    Map(Vec<(String, &'a Value)>),
+}
+
+impl<'a> BatchExpr<'a> {
+    fn from_value(v: &'a Value) -> Result<Self, Error> {
+        match v {
+            Value::Array(arr) => {
+                if arr.is_empty() {
+                    return invalid("`expr` list cannot be empty");
+                }
+                Ok(BatchExpr::List(arr.iter().collect()))
+            }
+            Value::Object(m) if !is_ast_object(m) => {
+                if m.is_empty() {
+                    return invalid("`expr` map cannot be empty");
+                }
+                Ok(BatchExpr::Map(m.iter().map(|(k, val)| (k.clone(), val)).collect()))
+            }
+            other => Ok(BatchExpr::Single(other)),
+        }
+    }
+
+    fn is_multi(&self) -> bool {
+        !matches!(self, BatchExpr::Single(_))
+    }
+
+    fn values(&self) -> Vec<&'a Value> {
+        match self {
+            BatchExpr::Single(v) => vec![*v],
+            BatchExpr::List(vs) => vs.clone(),
+            BatchExpr::Map(entries) => entries.iter().map(|(_, v)| *v).collect(),
+        }
+    }
+}
+
 impl Engine {
     fn defaults(&self, args: &Value) -> Result<Defaults, Error> {
         let physics = match args.get("physics") {
@@ -374,7 +498,60 @@ impl Engine {
             },
         };
         let boundary = args.get("boundary").is_some_and(|v| !v.is_null());
-        Ok(Defaults { physics, solution, wavelength, boundary })
+        Ok(Defaults { physics, solution, wavelength, boundary, batch_solutions: false })
+    }
+
+    /// Resolves `solutions` (`"all"` or `[0, 1, ...]`) or falls back to `vec![d.solution]`.
+    /// Refuses if both `solution` and `solutions` are explicitly passed, or if `solutions` is empty / out-of-range.
+    fn parse_solutions(&self, args: &Value, d: &Defaults) -> Result<(Vec<usize>, bool), Error> {
+        let Some(sols_val) = args.get("solutions").filter(|v| !v.is_null()) else {
+            return Ok((vec![d.solution], false));
+        };
+        if args.get("solution").is_some_and(|v| !v.is_null()) {
+            return invalid("give `solution` or `solutions`, not both");
+        }
+        let physics = d.physics.as_deref().ok_or_else(|| {
+            Error::invalid(format!(
+                "give `physics` with `solutions` (the results are: {})",
+                self.results.keys().cloned().collect::<Vec<_>>().join(", ")
+            ))
+        })?;
+        let stored = self.results.get(physics).ok_or_else(|| {
+            Error::invalid(format!(
+                "there is no result for '{physics}' yet; solve first{}",
+                if self.results.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (the results are: {})", self.results.keys().cloned().collect::<Vec<_>>().join(", "))
+                }
+            ))
+        })?;
+        let n_sol = stored.result.solutions.len();
+        match sols_val {
+            Value::String(s) if s == "all" => {
+                if n_sol == 0 {
+                    return invalid(format!("the result of '{physics}' has no solutions"));
+                }
+                Ok(((0..n_sol).collect(), true))
+            }
+            Value::Array(arr) => {
+                if arr.is_empty() {
+                    return invalid("`solutions` cannot be empty");
+                }
+                let mut out = Vec::with_capacity(arr.len());
+                for v in arr {
+                    let idx = v.as_u64().ok_or_else(|| {
+                        Error::invalid("`solutions` must be \"all\" or a list of whole solution numbers")
+                    })? as usize;
+                    if idx >= n_sol {
+                        return invalid(format!("the result of '{physics}' has {n_sol} solutions; there is no {idx}"));
+                    }
+                    out.push(idx);
+                }
+                Ok((out, true))
+            }
+            _ => invalid("`solutions` must be \"all\" or a list of whole solution numbers"),
+        }
     }
 
     fn parse_expr(&self, v: &Value, d: &Defaults, specs: &mut Vec<Spec>, depth: usize) -> Result<Tree, Error> {
@@ -403,15 +580,19 @@ impl Engine {
                         Some(Value::String(p)) => Some(p.as_str()),
                         _ => d.physics.as_deref(),
                     };
-                    let solution = match m.get("solution") {
-                        Some(s) => {
-                            s.as_u64().ok_or_else(|| Error::invalid("`solution` must be a whole number"))? as usize
+                    let solution = if d.batch_solutions {
+                        d.solution
+                    } else {
+                        match m.get("solution") {
+                            Some(s) => {
+                                s.as_u64().ok_or_else(|| Error::invalid("`solution` must be a whole number"))? as usize
+                            }
+                            None => d.solution,
                         }
-                        None => d.solution,
                     };
                     return leaf(name, physics, solution, specs);
                 }
-                if let Some(n) = m.get("num") {
+                if let Some(n) = m.get("num").or_else(|| m.get("const")) {
                     return match n {
                         Value::Number(x) => Ok(Tree::num(x.as_f64().unwrap_or(f64::NAN))),
                         Value::Array(a) if a.len() == 2 => match (a[0].as_f64(), a[1].as_f64()) {
@@ -420,6 +601,74 @@ impl Engine {
                         },
                         _ => invalid("`num` is a number or a pair [re, im]"),
                     };
+                }
+                if let Some(c) = m.get("coord") {
+                    let axis = match c {
+                        Value::String(s) => ["x", "y", "z"]
+                            .iter()
+                            .position(|a| a == s)
+                            .ok_or_else(|| Error::invalid("`coord` must be \"x\", \"y\" or \"z\""))?,
+                        Value::Number(n) => n
+                            .as_u64()
+                            .filter(|&a| a < 3)
+                            .ok_or_else(|| Error::invalid("`coord` axis must be 0, 1 or 2"))?
+                            as usize,
+                        _ => return invalid("`coord` must be \"x\", \"y\" or \"z\""),
+                    };
+                    let physics = match m.get("physics").and_then(Value::as_str) {
+                        Some(p) => p,
+                        None => d.physics.as_deref().ok_or_else(|| Error::invalid("give `physics`"))?,
+                    };
+                    return Ok(Tree::Leaf(slot(
+                        specs,
+                        Spec {
+                            physics: physics.to_string(),
+                            solution: 0,
+                            name: AXES[axis].to_string(),
+                            what: What::Coord(axis),
+                        },
+                    )));
+                }
+                if let Some(n) = m.get("normal") {
+                    if !d.boundary {
+                        return invalid(
+                            "`nx`, `ny` and `nz` are the normal of a boundary: they exist in `integrate` with `boundary`",
+                        );
+                    }
+                    let axis = match n {
+                        Value::String(s) => ["nx", "ny", "nz"]
+                            .iter()
+                            .position(|a| a == s)
+                            .or_else(|| ["x", "y", "z"].iter().position(|a| a == s))
+                            .ok_or_else(|| Error::invalid("`normal` must be \"nx\", \"ny\" or \"nz\""))?,
+                        Value::Number(n) => n
+                            .as_u64()
+                            .filter(|&a| a < 3)
+                            .ok_or_else(|| Error::invalid("`normal` axis must be 0, 1 or 2"))?
+                            as usize,
+                        _ => return invalid("`normal` must be \"nx\", \"ny\" or \"nz\""),
+                    };
+                    let physics = match m.get("physics").and_then(Value::as_str) {
+                        Some(p) => p,
+                        None => d.physics.as_deref().ok_or_else(|| Error::invalid("give `physics`"))?,
+                    };
+                    return Ok(Tree::Leaf(slot(
+                        specs,
+                        Spec {
+                            physics: physics.to_string(),
+                            solution: 0,
+                            name: format!("n{}", AXES[axis]),
+                            what: What::Normal(axis),
+                        },
+                    )));
+                }
+                if let Some(mat) = m.get("material").and_then(Value::as_str) {
+                    let mut namer = Namer { engine: self, d, specs, missing: None, unknown: false };
+                    return namer.material(mat).map_err(|e| namer.missing.take().unwrap_or_else(|| Error::invalid(e)));
+                }
+                if let Some(reg) = m.get("region").and_then(Value::as_str) {
+                    let mut namer = Namer { engine: self, d, specs, missing: None, unknown: false };
+                    return namer.region(reg).map_err(|e| namer.missing.take().unwrap_or_else(|| Error::invalid(e)));
                 }
                 let op = m
                     .get("op")
@@ -721,20 +970,104 @@ impl Engine {
     /// Parses expressions that share one leaf table (each a handle, a name or a number), resolved against the stored results.
     pub(crate) fn expressions(&self, args: &Value, exprs: &[&Value]) -> Result<(Vec<Tree>, Prep), Error> {
         let d = self.defaults(args)?;
+        self.expressions_for_solutions(&d, &[d.solution], false, exprs)
+    }
+
+    /// Parses `exprs` across `solutions` (`sol_idx` outer, `expr_idx` inner) against one deduplicated `Prep`.
+    pub(crate) fn expressions_for_solutions(
+        &self,
+        d: &Defaults,
+        solutions: &[usize],
+        batch_solutions: bool,
+        exprs: &[&Value],
+    ) -> Result<(Vec<Tree>, Prep), Error> {
+        fn can_remap(v: &Value, batch_solutions: bool) -> bool {
+            match v {
+                Value::Number(_) => true,
+                Value::String(s) => !s.contains(':'),
+                Value::Object(m) => {
+                    if m.contains_key("field") {
+                        return batch_solutions || !m.contains_key("solution");
+                    }
+                    if let Some(args) = m.get("args").and_then(Value::as_array) {
+                        return args.iter().all(|a| can_remap(a, batch_solutions));
+                    }
+                    true
+                }
+                _ => false,
+            }
+        }
+        fn remap_tree(t: &Tree, sol: usize, specs: &mut Vec<Spec>) -> Tree {
+            match t {
+                Tree::Num(z) => Tree::Num(*z),
+                Tree::Leaf(i) => {
+                    let mut s = specs[*i].clone();
+                    if matches!(s.what, What::Field) {
+                        s.solution = sol;
+                    }
+                    Tree::Leaf(slot(specs, s))
+                }
+                Tree::Neg(a) => Tree::Neg(Box::new(remap_tree(a, sol, specs))),
+                Tree::Bin(op, a, b) => {
+                    Tree::Bin(*op, Box::new(remap_tree(a, sol, specs)), Box::new(remap_tree(b, sol, specs)))
+                }
+                Tree::Call(f, a) => Tree::Call(*f, Box::new(remap_tree(a, sol, specs))),
+                Tree::Call2(f, a, b) => {
+                    Tree::Call2(*f, Box::new(remap_tree(a, sol, specs)), Box::new(remap_tree(b, sol, specs)))
+                }
+                Tree::Pow(a, n) => Tree::Pow(Box::new(remap_tree(a, sol, specs)), *n),
+                Tree::Cmp(c, a, b) => {
+                    Tree::Cmp(*c, Box::new(remap_tree(a, sol, specs)), Box::new(remap_tree(b, sol, specs)))
+                }
+                Tree::Where(c, a, b) => Tree::Where(
+                    Box::new(remap_tree(c, sol, specs)),
+                    Box::new(remap_tree(a, sol, specs)),
+                    Box::new(remap_tree(b, sol, specs)),
+                ),
+            }
+        }
+
         let mut specs = vec![];
-        let mut trees = vec![];
-        for e in exprs {
-            trees.push(self.parse_expr(e, &d, &mut specs, 0)?);
+        let mut trees = Vec::with_capacity(solutions.len() * exprs.len());
+        let remappable = solutions.len() > 1 && exprs.iter().all(|e| can_remap(e, batch_solutions));
+        if remappable {
+            let sol0 = solutions[0];
+            let mut d_sol = d.clone();
+            d_sol.solution = sol0;
+            d_sol.batch_solutions = batch_solutions;
+            for e in exprs {
+                trees.push(self.parse_expr(e, &d_sol, &mut specs, 0)?);
+            }
+            let n_exprs = exprs.len();
+            for &sol in &solutions[1..] {
+                for e_idx in 0..n_exprs {
+                    let remapped = remap_tree(&trees[e_idx], sol, &mut specs);
+                    trees.push(remapped);
+                }
+            }
+        } else {
+            for &sol in solutions {
+                let mut d_sol = d.clone();
+                d_sol.solution = sol;
+                d_sol.batch_solutions = batch_solutions;
+                for e in exprs {
+                    trees.push(self.parse_expr(e, &d_sol, &mut specs, 0)?);
+                }
+            }
         }
         // an expression of numbers only (`1` for an area) still needs a mesh to integrate over: the one of the default result
         if specs.is_empty() {
             if let Some(p) = &d.physics {
-                specs.push(Spec { physics: p.clone(), solution: d.solution, name: "x".into(), what: What::Coord(0) });
+                let sol = solutions.first().copied().unwrap_or(d.solution);
+                specs.push(Spec { physics: p.clone(), solution: sol, name: "x".into(), what: What::Coord(0) });
             }
         }
         let prep = self.prepare(&specs)?;
         let flags = prep.complex_flags();
-        for (t, e) in trees.iter().zip(exprs) {
+        let check_count = if remappable { exprs.len() } else { trees.len() };
+        let n_exprs = exprs.len();
+        for (idx, t) in trees.iter().take(check_count).enumerate() {
+            let e = exprs[idx % n_exprs];
             t.check(&flags).map_err(|m| match e {
                 Value::String(s) => Error::invalid(format!("the formula '{s}': {m}")),
                 _ => Error::invalid(m),
@@ -864,6 +1197,212 @@ struct Sum {
     measure: f64,
 }
 
+/// Per-cell domain index map for `by_region: true` single-pass reductions.
+struct DomainMap {
+    names: Vec<String>,
+    cells: Vec<usize>,
+    cell_dom: Vec<usize>,
+}
+
+/// Output of a single-pass batch integral over `trees`.
+struct BatchSum {
+    total: Vec<(f64, f64)>,
+    measure: f64,
+    region_totals: Vec<Vec<(f64, f64)>>,
+    region_measures: Vec<f64>,
+}
+
+/// Output of a single-pass batch confinement integral over `power_trees` and `regions`.
+struct ConfinementBatch {
+    total: Vec<f64>,
+    inside: Vec<Vec<f64>>,
+}
+
+/// Pre-borrowed leaf view avoiding per-cell `loc` buffer copies for `Cell` and `Const` leaves.
+enum FastLeaf<'a> {
+    CellReal(&'a [f64]),
+    CellComplex(&'a [f64], &'a [f64]),
+    Const(&'a [f64]),
+    Slow,
+}
+
+#[inline(always)]
+fn dot_n(n: &[f64], s: &[f64]) -> f64 {
+    if n.len() == 6 && s.len() == 6 {
+        let mut r = 0.0;
+        r += n[0] * s[0];
+        r += n[1] * s[1];
+        r += n[2] * s[2];
+        r += n[3] * s[3];
+        r += n[4] * s[4];
+        r += n[5] * s[5];
+        r
+    } else if n.len() == 10 && s.len() == 10 {
+        let mut r = 0.0;
+        for a in 0..10 {
+            r += n[a] * s[a];
+        }
+        r
+    } else {
+        let mut r = 0.0;
+        for a in 0..n.len() {
+            r += n[a] * s[a];
+        }
+        r
+    }
+}
+
+#[inline(always)]
+fn dot_n_complex(n: &[f64], sr: &[f64], si: &[f64]) -> C {
+    if n.len() == 6 && sr.len() == 6 && si.len() == 6 {
+        let (mut r, mut im_v) = (0.0, 0.0);
+        r += n[0] * sr[0];
+        im_v += n[0] * si[0];
+        r += n[1] * sr[1];
+        im_v += n[1] * si[1];
+        r += n[2] * sr[2];
+        im_v += n[2] * si[2];
+        r += n[3] * sr[3];
+        im_v += n[3] * si[3];
+        r += n[4] * sr[4];
+        im_v += n[4] * si[4];
+        r += n[5] * sr[5];
+        im_v += n[5] * si[5];
+        C::new(r, im_v)
+    } else if n.len() == 10 && sr.len() == 10 && si.len() == 10 {
+        let (mut r, mut im_v) = (0.0, 0.0);
+        for a in 0..10 {
+            r += n[a] * sr[a];
+            im_v += n[a] * si[a];
+        }
+        C::new(r, im_v)
+    } else {
+        let (mut r, mut im_v) = (0.0, 0.0);
+        for a in 0..n.len() {
+            r += n[a] * sr[a];
+            im_v += n[a] * si[a];
+        }
+        C::new(r, im_v)
+    }
+}
+
+/// Flattened, common-subexpression-deduplicated instruction step for batch tree evaluation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FlatStep {
+    Num(C),
+    Add(usize, usize),
+    Sub(usize, usize),
+    Mul(usize, usize),
+    Div(usize, usize),
+    Neg(usize),
+    Abs(usize),
+    Abs2(usize),
+    Re(usize),
+    Im(usize),
+    Conj(usize),
+    Pow(usize, u32),
+}
+
+struct FlatDag {
+    n_leaves: usize,
+    steps: Vec<FlatStep>,
+    roots: Vec<usize>,
+}
+
+impl FlatDag {
+    fn compile(trees: &[Tree], n_leaves: usize) -> Option<Self> {
+        fn add_node(t: &Tree, n_leaves: usize, steps: &mut Vec<FlatStep>) -> Option<usize> {
+            let step = match t {
+                Tree::Leaf(i) => return Some(*i),
+                Tree::Num(z) => FlatStep::Num(*z),
+                Tree::Neg(a) => FlatStep::Neg(add_node(a, n_leaves, steps)?),
+                Tree::Bin(Op::Add, a, b) => FlatStep::Add(add_node(a, n_leaves, steps)?, add_node(b, n_leaves, steps)?),
+                Tree::Bin(Op::Sub, a, b) => FlatStep::Sub(add_node(a, n_leaves, steps)?, add_node(b, n_leaves, steps)?),
+                Tree::Bin(Op::Mul, a, b) => FlatStep::Mul(add_node(a, n_leaves, steps)?, add_node(b, n_leaves, steps)?),
+                Tree::Bin(Op::Div, a, b) => FlatStep::Div(add_node(a, n_leaves, steps)?, add_node(b, n_leaves, steps)?),
+                Tree::Call(Fun::Abs, a) => FlatStep::Abs(add_node(a, n_leaves, steps)?),
+                Tree::Call(Fun::Abs2, a) => FlatStep::Abs2(add_node(a, n_leaves, steps)?),
+                Tree::Call(Fun::Re, a) => FlatStep::Re(add_node(a, n_leaves, steps)?),
+                Tree::Call(Fun::Im, a) => FlatStep::Im(add_node(a, n_leaves, steps)?),
+                Tree::Call(Fun::Conj, a) => FlatStep::Conj(add_node(a, n_leaves, steps)?),
+                Tree::Pow(a, n) => FlatStep::Pow(add_node(a, n_leaves, steps)?, *n),
+                _ => return None,
+            };
+            if let Some(pos) = steps.iter().position(|s| *s == step) {
+                Some(n_leaves + pos)
+            } else {
+                steps.push(step);
+                Some(n_leaves + steps.len() - 1)
+            }
+        }
+
+        let mut steps = Vec::new();
+        let mut roots = Vec::with_capacity(trees.len());
+        for t in trees {
+            roots.push(add_node(t, n_leaves, &mut steps)?);
+        }
+        Some(FlatDag { n_leaves, steps, roots })
+    }
+
+    #[inline]
+    fn reg_len(&self) -> usize {
+        self.n_leaves + self.steps.len()
+    }
+
+    #[inline(always)]
+    fn eval_all(&self, reg: &mut [C]) {
+        for (k, &step) in self.steps.iter().enumerate() {
+            let v = match step {
+                FlatStep::Num(z) => z,
+                FlatStep::Neg(a) => {
+                    let z = reg[a];
+                    C::new(-z.re, -z.im)
+                }
+                FlatStep::Add(a, b) => {
+                    let (x, y) = (reg[a], reg[b]);
+                    C::new(x.re + y.re, x.im + y.im)
+                }
+                FlatStep::Sub(a, b) => {
+                    let (x, y) = (reg[a], reg[b]);
+                    C::new(x.re - y.re, x.im - y.im)
+                }
+                FlatStep::Mul(a, b) => {
+                    let (x, y) = (reg[a], reg[b]);
+                    C::new(x.re * y.re - x.im * y.im, x.re * y.im + x.im * y.re)
+                }
+                FlatStep::Div(a, b) => {
+                    let (x, y) = (reg[a], reg[b]);
+                    let d = y.re * y.re + y.im * y.im;
+                    C::new((x.re * y.re + x.im * y.im) / d, (x.im * y.re - x.re * y.im) / d)
+                }
+                FlatStep::Abs(a) => {
+                    let z = reg[a];
+                    C::new((z.re * z.re + z.im * z.im).sqrt(), 0.0)
+                }
+                FlatStep::Abs2(a) => {
+                    let z = reg[a];
+                    C::new(z.re * z.re + z.im * z.im, 0.0)
+                }
+                FlatStep::Re(a) => C::new(reg[a].re, 0.0),
+                FlatStep::Im(a) => C::new(reg[a].im, 0.0),
+                FlatStep::Conj(a) => {
+                    let z = reg[a];
+                    C::new(z.re, -z.im)
+                }
+                FlatStep::Pow(a, n) => {
+                    let z = reg[a];
+                    let mut r = z;
+                    for _ in 1..n {
+                        r = C::new(r.re * z.re - r.im * z.im, r.re * z.im + r.im * z.re);
+                    }
+                    r
+                }
+            };
+            reg[self.n_leaves + k] = v;
+        }
+    }
+}
+
 impl Prep {
     fn region(&self, region: Option<&str>) -> Result<Region, Error> {
         let n = self.mesh.n_cells();
@@ -877,6 +1416,53 @@ impl Prep {
             return invalid(format!("the region '{text}' has no cells"));
         }
         Ok(Region { mask, cells })
+    }
+
+    /// Maps each cell in `region` to its domain index in `self.model.regions()`, optionally filtered by `region_filter`.
+    fn build_domain_map(&self, region: &Region, region_filter: Option<&str>) -> Result<DomainMap, Error> {
+        use std::collections::HashMap;
+        let allowed = match region_filter.filter(|r| !r.trim().is_empty()) {
+            Some(text) => Some(self.model.domains(text)?),
+            None => None,
+        };
+        let mut names: Vec<String> = Vec::new();
+        let mut cells: Vec<usize> = Vec::new();
+        let mut id_to_dom: HashMap<i32, usize> = HashMap::new();
+        for (id, name) in self.model.regions() {
+            if allowed.as_ref().is_some_and(|a| !a.contains(&id)) {
+                continue;
+            }
+            let d_idx = match names.iter().position(|n| *n == name) {
+                Some(i) => i,
+                None => {
+                    names.push(name);
+                    cells.push(0);
+                    names.len() - 1
+                }
+            };
+            id_to_dom.insert(id, d_idx);
+        }
+        let n_cells = self.mesh.n_cells();
+        let mut cell_dom = vec![usize::MAX; n_cells];
+        for (c, dom_out) in cell_dom.iter_mut().enumerate().take(n_cells) {
+            if !region.mask[c] {
+                continue;
+            }
+            let lbl = self.mesh.cell_labels[c];
+            let d_idx = match id_to_dom.get(&lbl) {
+                Some(&d) => d,
+                None => {
+                    let d = names.len();
+                    names.push(format!("domain {lbl}"));
+                    cells.push(0);
+                    id_to_dom.insert(lbl, d);
+                    d
+                }
+            };
+            *dom_out = d_idx;
+            cells[d_idx] += 1;
+        }
+        Ok(DomainMap { names, cells, cell_dom })
     }
 
     /// The values of every leaf at the nodes of cell `c`: `loc[i * nloc + a]`.
@@ -1027,6 +1613,331 @@ impl Prep {
             ));
         }
         Ok(t)
+    }
+
+    fn fast_leaves(&self) -> (Vec<FastLeaf<'_>>, bool) {
+        let mut has_slow = false;
+        let v = self
+            .leaves
+            .iter()
+            .map(|l| match &l.kind {
+                Kind::Cell(k) => {
+                    let f = &l.res.solutions[l.sol].cell_fields[*k];
+                    if f.im.is_empty() {
+                        FastLeaf::CellReal(&f.re)
+                    } else {
+                        FastLeaf::CellComplex(&f.re, &f.im)
+                    }
+                }
+                Kind::Const(vals) => FastLeaf::Const(vals),
+                _ => {
+                    has_slow = true;
+                    FastLeaf::Slow
+                }
+            })
+            .collect();
+        (v, has_slow)
+    }
+
+    #[inline]
+    fn set_const_leaves(fast: &[FastLeaf<'_>], c: usize, work: &mut [C]) {
+        for (i, fl) in fast.iter().enumerate() {
+            if let FastLeaf::Const(vals) = fl {
+                work[i] = C::new(vals[c], 0.0);
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn interp_fast_leaves(
+        &self,
+        fast: &[FastLeaf<'_>],
+        c: usize,
+        n: &[f64],
+        loc: &[C],
+        normal: Option<&[f64; 3]>,
+        work: &mut [C],
+    ) {
+        let nloc = self.nloc;
+        let base = c * nloc;
+        for (i, fl) in fast.iter().enumerate() {
+            match fl {
+                FastLeaf::CellReal(re) => {
+                    work[i] = C::new(dot_n(n, &re[base..base + nloc]), 0.0);
+                }
+                FastLeaf::CellComplex(re, im) => {
+                    work[i] = dot_n_complex(n, &re[base..base + nloc], &im[base..base + nloc]);
+                }
+                FastLeaf::Const(_) => {}
+                FastLeaf::Slow => {
+                    work[i] = match &self.leaves[i].kind {
+                        Kind::Normal(a) => C::new(normal.map_or(f64::NAN, |v| v[*a]), 0.0),
+                        _ => interp(n, &loc[i * nloc..(i + 1) * nloc]),
+                    };
+                }
+            }
+        }
+    }
+
+    /// Single-pass bit-exact batch volume integral over all `trees` and optional `dom_map` (`by_region`).
+    /// Preserves the exact `BLOCK = 2048` summation order and `geo.vol[c] * cre` grouping so every result matches standalone
+    /// `integrate` bit-for-bit (`to_bits()`) across any thread count.
+    fn integrate_batch(
+        &self,
+        trees: &[Tree],
+        region: &Region,
+        dom_map: Option<&DomainMap>,
+        revolution: bool,
+    ) -> Result<BatchSum, Error> {
+        self.reject_normal()?;
+        let dim = self.mesh.dim;
+        if revolution && dim != 2 {
+            return invalid("`revolution` applies to a 2D (r, z) mesh");
+        }
+        let nthreads = femcore::par::threads();
+        let el = RefElement::new(dim, self.order, 4);
+        let quad = quad_rule(dim, 4);
+        let nq = el.w.len();
+        let nloc = self.nloc;
+        let n_trees = trees.len();
+        let n_doms = dom_map.map_or(0, |m| m.names.len());
+        let nb = self.mesh.n_cells().div_ceil(BLOCK);
+        let (fast_leaves, has_slow) = self.fast_leaves();
+        let dag = FlatDag::compile(trees, self.leaves.len());
+        let work_len = dag.as_ref().map_or(self.leaves.len(), FlatDag::reg_len);
+        let block = |b: usize| -> BatchSum {
+            let mut total = vec![(0.0, 0.0); n_trees];
+            let mut measure = 0.0;
+            let mut region_totals = vec![vec![(0.0, 0.0); n_trees]; n_doms];
+            let mut region_measures = vec![0.0; n_doms];
+            let mut loc = if has_slow { vec![C::new(0.0, 0.0); self.leaves.len() * nloc] } else { vec![] };
+            let mut dofs = vec![];
+            let mut work = vec![C::new(0.0, 0.0); work_len];
+            let mut cell_acc = vec![(0.0, 0.0); n_trees];
+            for c in b * BLOCK..((b + 1) * BLOCK).min(self.mesh.n_cells()) {
+                if !region.mask[c] {
+                    continue;
+                }
+                if has_slow {
+                    self.gather(c, &mut dofs, &mut loc);
+                }
+                Self::set_const_leaves(&fast_leaves, c, &mut work);
+                cell_acc.fill((0.0, 0.0));
+                let mut cm = 0.0;
+                let v = self.mesh.cell(c);
+                for q in 0..nq {
+                    let n = &el.n[q];
+                    self.interp_fast_leaves(&fast_leaves, c, n, &loc, None, &mut work);
+                    let mut w = el.w[q];
+                    let rho = if revolution {
+                        let mut r = 0.0;
+                        for (k, &vk) in v.iter().enumerate() {
+                            r += quad.lam[q][k] * self.mesh.point(vk as usize)[0];
+                        }
+                        let rho = 2.0 * std::f64::consts::PI * r;
+                        w *= rho;
+                        rho
+                    } else {
+                        1.0
+                    };
+                    let wq = el.w[q];
+                    cm += w;
+                    if let Some(d) = &dag {
+                        d.eval_all(&mut work);
+                        if revolution {
+                            for (t, &root) in d.roots.iter().enumerate() {
+                                let f = work[root];
+                                cell_acc[t].0 += wq * (f.re * rho);
+                                cell_acc[t].1 += wq * (f.im * rho);
+                            }
+                        } else {
+                            for (t, &root) in d.roots.iter().enumerate() {
+                                let f = work[root];
+                                cell_acc[t].0 += wq * f.re;
+                                cell_acc[t].1 += wq * f.im;
+                            }
+                        }
+                    } else {
+                        for (t, tree) in trees.iter().enumerate() {
+                            let mut f = tree.eval(&work);
+                            if revolution {
+                                f = C::new(f.re * rho, f.im * rho);
+                            }
+                            cell_acc[t].0 += wq * f.re;
+                            cell_acc[t].1 += wq * f.im;
+                        }
+                    }
+                }
+                let vol = cell_vol(&self.mesh, c);
+                let dm = vol * cm;
+                measure += dm;
+                if let Some(dm_map) = dom_map {
+                    let d = dm_map.cell_dom[c];
+                    region_measures[d] += dm;
+                    let rt = &mut region_totals[d];
+                    for t in 0..n_trees {
+                        let dv0 = vol * cell_acc[t].0;
+                        let dv1 = vol * cell_acc[t].1;
+                        total[t].0 += dv0;
+                        total[t].1 += dv1;
+                        rt[t].0 += dv0;
+                        rt[t].1 += dv1;
+                    }
+                } else {
+                    for t in 0..n_trees {
+                        total[t].0 += vol * cell_acc[t].0;
+                        total[t].1 += vol * cell_acc[t].1;
+                    }
+                }
+            }
+            BatchSum { total, measure, region_totals, region_measures }
+        };
+        let parts: Vec<BatchSum> = if nthreads <= 1 || nb <= 1 {
+            (0..nb).map(block).collect()
+        } else {
+            (0..nb).into_par_iter().map(block).collect()
+        };
+        let mut out = BatchSum {
+            total: vec![(0.0, 0.0); n_trees],
+            measure: 0.0,
+            region_totals: vec![vec![(0.0, 0.0); n_trees]; n_doms],
+            region_measures: vec![0.0; n_doms],
+        };
+        for p in parts {
+            out.measure += p.measure;
+            for t in 0..n_trees {
+                out.total[t].0 += p.total[t].0;
+                out.total[t].1 += p.total[t].1;
+            }
+            for d in 0..n_doms {
+                out.region_measures[d] += p.region_measures[d];
+                for t in 0..n_trees {
+                    out.region_totals[d][t].0 += p.region_totals[d][t].0;
+                    out.region_totals[d][t].1 += p.region_totals[d][t].1;
+                }
+            }
+        }
+        if out.total.iter().any(|(re, im)| !(re.is_finite() && im.is_finite()))
+            || out.region_totals.iter().flatten().any(|(re, im)| !(re.is_finite() && im.is_finite()))
+        {
+            return Err(Error::NonFinite(
+                "the integral is not finite (a division by zero, or a field with NaN)".into(),
+            ));
+        }
+        Ok(out)
+    }
+
+    /// Single-pass bit-exact confinement integral: accumulates `total` over all cells and `inside[r]` over each target region `r`
+    /// in ONE `BLOCK = 2048` pass with exact `to_bits()` parity to standalone `integrate`.
+    fn confinement_batch(
+        &self,
+        power_trees: &[Tree],
+        regions: &[Region],
+        revolution: bool,
+    ) -> Result<ConfinementBatch, Error> {
+        self.reject_normal()?;
+        let dim = self.mesh.dim;
+        if revolution && dim != 2 {
+            return invalid("`revolution` applies to a 2D (r, z) mesh");
+        }
+        let nthreads = femcore::par::threads();
+        let el = RefElement::new(dim, self.order, 4);
+        let quad = quad_rule(dim, 4);
+        let nq = el.w.len();
+        let nloc = self.nloc;
+        let n_sols = power_trees.len();
+        let n_regs = regions.len();
+        let nb = self.mesh.n_cells().div_ceil(BLOCK);
+        let (fast_leaves, has_slow) = self.fast_leaves();
+        let dag = FlatDag::compile(power_trees, self.leaves.len());
+        let work_len = dag.as_ref().map_or(self.leaves.len(), FlatDag::reg_len);
+        let block = |b: usize| -> ConfinementBatch {
+            let mut total = vec![0.0; n_sols];
+            let mut inside = vec![vec![0.0; n_sols]; n_regs];
+            let mut loc = if has_slow { vec![C::new(0.0, 0.0); self.leaves.len() * nloc] } else { vec![] };
+            let mut dofs = vec![];
+            let mut work = vec![C::new(0.0, 0.0); work_len];
+            let mut cell_acc = vec![0.0; n_sols];
+            for c in b * BLOCK..((b + 1) * BLOCK).min(self.mesh.n_cells()) {
+                if has_slow {
+                    self.gather(c, &mut dofs, &mut loc);
+                }
+                Self::set_const_leaves(&fast_leaves, c, &mut work);
+                cell_acc.fill(0.0);
+                let v = self.mesh.cell(c);
+                for q in 0..nq {
+                    let n = &el.n[q];
+                    self.interp_fast_leaves(&fast_leaves, c, n, &loc, None, &mut work);
+                    let rho = if revolution {
+                        let mut r = 0.0;
+                        for (k, &vk) in v.iter().enumerate() {
+                            r += quad.lam[q][k] * self.mesh.point(vk as usize)[0];
+                        }
+                        2.0 * std::f64::consts::PI * r
+                    } else {
+                        1.0
+                    };
+                    let wq = el.w[q];
+                    if let Some(d) = &dag {
+                        d.eval_all(&mut work);
+                        if revolution {
+                            for (s, &root) in d.roots.iter().enumerate() {
+                                let f = work[root];
+                                cell_acc[s] += wq * (f.re * rho);
+                            }
+                        } else {
+                            for (s, &root) in d.roots.iter().enumerate() {
+                                let f = work[root];
+                                cell_acc[s] += wq * f.re;
+                            }
+                        }
+                    } else {
+                        for (s, tree) in power_trees.iter().enumerate() {
+                            let mut f = tree.eval(&work);
+                            if revolution {
+                                f = C::new(f.re * rho, f.im * rho);
+                            }
+                            cell_acc[s] += wq * f.re;
+                        }
+                    }
+                }
+                let vol = cell_vol(&self.mesh, c);
+                for s in 0..n_sols {
+                    total[s] += vol * cell_acc[s];
+                }
+                for (r, reg) in regions.iter().enumerate() {
+                    if reg.mask[c] {
+                        let br = &mut inside[r];
+                        for s in 0..n_sols {
+                            br[s] += vol * cell_acc[s];
+                        }
+                    }
+                }
+            }
+            ConfinementBatch { total, inside }
+        };
+        let parts: Vec<ConfinementBatch> = if nthreads <= 1 || nb <= 1 {
+            (0..nb).map(block).collect()
+        } else {
+            (0..nb).into_par_iter().map(block).collect()
+        };
+        let mut out = ConfinementBatch { total: vec![0.0; n_sols], inside: vec![vec![0.0; n_sols]; n_regs] };
+        for p in parts {
+            for s in 0..n_sols {
+                out.total[s] += p.total[s];
+            }
+            for r in 0..n_regs {
+                for s in 0..n_sols {
+                    out.inside[r][s] += p.inside[r][s];
+                }
+            }
+        }
+        if out.total.iter().any(|x| !x.is_finite()) || out.inside.iter().flatten().any(|x| !x.is_finite()) {
+            return Err(Error::NonFinite(
+                "the integral is not finite (a division by zero, or a field with NaN)".into(),
+            ));
+        }
+        Ok(out)
     }
 
     /// A leaf that is the normal of a boundary has no meaning in a volume integral, an extremum or a probe.
@@ -1274,6 +2185,95 @@ impl Prep {
             ));
         }
         Ok(t)
+    }
+
+    /// Single-pass bit-exact batch boundary integral over all `trees` across `faces` in `BLOCK = 2048` face chunks.
+    fn integrate_boundary_batch(&self, trees: &[Tree], faces: &[Face], revolution: bool) -> Result<BatchSum, Error> {
+        let dim = self.mesh.dim;
+        if revolution && dim != 2 {
+            return invalid("`revolution` applies to a 2D (r, z) mesh");
+        }
+        femcore::par::threads();
+        let rule = facet_rule(dim - 1);
+        let nloc = self.nloc;
+        let n_trees = trees.len();
+        let nb = faces.len().div_ceil(BLOCK);
+        let block = |b: usize| -> BatchSum {
+            let mut total = vec![(0.0, 0.0); n_trees];
+            let mut measure = 0.0;
+            let mut loc = vec![C::new(0.0, 0.0); self.leaves.len() * nloc];
+            let mut dofs = vec![];
+            let mut work = vec![C::new(0.0, 0.0); self.leaves.len()];
+            let mut lam = vec![0.0; dim + 1];
+            let mut face_acc = vec![(0.0, 0.0); n_trees];
+            for face in &faces[b * BLOCK..((b + 1) * BLOCK).min(faces.len())] {
+                let (c, opposite) = face.cells[0];
+                self.gather(c, &mut dofs, &mut loc);
+                let (f_measure, normal) = self.face_geometry(&face.v, c, opposite);
+                let fv = &face.v[..dim];
+                let v = self.mesh.cell(c);
+                face_acc.fill((0.0, 0.0));
+                let mut cm = 0.0;
+                for (q, lf) in rule.lam.iter().enumerate() {
+                    lam.fill(0.0);
+                    for (j, &vj) in fv.iter().enumerate() {
+                        let at = v.iter().position(|&x| x == vj).expect("a face vertex is a vertex of its cell");
+                        lam[at] = lf[j];
+                    }
+                    let (n, _) = shape(&lam, self.order);
+                    for (i, l) in self.leaves.iter().enumerate() {
+                        let nodes = &loc[i * nloc..(i + 1) * nloc];
+                        work[i] = match &l.kind {
+                            Kind::Const(_) => nodes[0],
+                            Kind::Normal(a) => C::new(normal[*a], 0.0),
+                            _ => interp(&n, nodes),
+                        };
+                    }
+                    let mut w = rule.w[q];
+                    let rho = if revolution {
+                        let r: f64 =
+                            fv.iter().enumerate().map(|(j, &vj)| lf[j] * self.mesh.point(vj as usize)[0]).sum();
+                        let rho = 2.0 * std::f64::consts::PI * r;
+                        w *= rho;
+                        rho
+                    } else {
+                        1.0
+                    };
+                    let wq = rule.w[q];
+                    cm += w;
+                    for (t, tree) in trees.iter().enumerate() {
+                        let mut g = tree.eval(&work);
+                        if revolution {
+                            g = C::new(g.re * rho, g.im * rho);
+                        }
+                        face_acc[t].0 += wq * g.re;
+                        face_acc[t].1 += wq * g.im;
+                    }
+                }
+                measure += f_measure * cm;
+                for t in 0..n_trees {
+                    total[t].0 += f_measure * face_acc[t].0;
+                    total[t].1 += f_measure * face_acc[t].1;
+                }
+            }
+            BatchSum { total, measure, region_totals: vec![], region_measures: vec![] }
+        };
+        let parts: Vec<BatchSum> = (0..nb).into_par_iter().map(block).collect();
+        let mut out =
+            BatchSum { total: vec![(0.0, 0.0); n_trees], measure: 0.0, region_totals: vec![], region_measures: vec![] };
+        for p in parts {
+            out.measure += p.measure;
+            for t in 0..n_trees {
+                out.total[t].0 += p.total[t].0;
+                out.total[t].1 += p.total[t].1;
+            }
+        }
+        if out.total.iter().any(|(re, im)| !(re.is_finite() && im.is_finite())) {
+            return Err(Error::NonFinite(
+                "the integral is not finite (a division by zero, or a field with NaN)".into(),
+            ));
+        }
+        Ok(out)
     }
 
     /// The coordinates of local node `a` of cell `c`.
@@ -1537,21 +2537,133 @@ impl Engine {
     }
 
     pub(crate) fn cmd_integrate(&self, args: &Value) -> R {
-        let (tree, p) = self.one_expr(args, "expr")?;
+        let raw_expr = args
+            .get("expr")
+            .ok_or_else(|| Error::invalid("`expr` is required: a field name, a number or an expression"))?;
+        let batch_expr = BatchExpr::from_value(raw_expr)?;
+        let by_region = match args.get("by_region") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => return invalid("`by_region` must be true or false"),
+        };
+        let d = self.defaults(args)?;
+        let (sol_indices, has_solutions_arg) = self.parse_solutions(args, &d)?;
+        let is_batch = has_solutions_arg || by_region || batch_expr.is_multi();
         let rev = Self::revolution(args);
+        if !is_batch {
+            let (tree, p) = self.one_expr(args, "expr")?;
+            if let Some(b) = args.get("boundary").filter(|v| !v.is_null()) {
+                return self.integrate_over_boundary(args, &tree, &p, b, rev);
+            }
+            if args.get("side").is_some_and(|v| !v.is_null()) {
+                return invalid("`side` goes with `boundary`: the region an interface is read in");
+            }
+            let region = p.region(Self::region_arg(args))?;
+            let s = p.integrate(&tree, &region, rev)?;
+            let real = tree.is_real_valued(&p.complex_flags());
+            let mut out = json!({
+                "value": if real { json!(s.re) } else { pair(s.re, s.im) }, "complex": !real,
+                "measure": s.measure, "cells": region.cells, "revolution": rev, "region": Self::region_arg(args),
+            });
+            self.axisym_note(&p, rev, &mut out);
+            self.decorate(&mut out, &p);
+            return Ok(out);
+        }
+
+        let expr_vals = batch_expr.values();
+        let (trees, p) = self.expressions_for_solutions(&d, &sol_indices, has_solutions_arg, &expr_vals)?;
         if let Some(b) = args.get("boundary").filter(|v| !v.is_null()) {
-            return self.integrate_over_boundary(args, &tree, &p, b, rev);
+            if by_region {
+                return invalid(
+                    "give `boundary` or `by_region`, not both: a boundary integral sums over facets, not regions",
+                );
+            }
+            return self.integrate_over_boundary_batch(args, &batch_expr, &sol_indices, &trees, &p, b);
         }
         if args.get("side").is_some_and(|v| !v.is_null()) {
             return invalid("`side` goes with `boundary`: the region an interface is read in");
         }
-        let region = p.region(Self::region_arg(args))?;
-        let s = p.integrate(&tree, &region, rev)?;
-        let real = tree.is_real_valued(&p.complex_flags());
+        let reg_arg = Self::region_arg(args);
+        let region = p.region(reg_arg)?;
+        let dom_map = if by_region { Some(p.build_domain_map(&region, reg_arg)?) } else { None };
+        let batch = p.integrate_batch(&trees, &region, dom_map.as_ref(), rev)?;
+        let flags = p.complex_flags();
+        let real_flags: Vec<bool> = trees.iter().map(|t| t.is_real_valued(&flags)).collect();
+        let n_exprs = expr_vals.len();
+        let val_of = |t_idx: usize, (re, im): (f64, f64)| -> Value {
+            if real_flags[t_idx] {
+                json!(re)
+            } else {
+                pair(re, im)
+            }
+        };
+        let pack_values = |base: usize, slice: &[(f64, f64)]| -> Value {
+            match &batch_expr {
+                BatchExpr::Single(_) => val_of(base, slice[0]),
+                BatchExpr::List(_) => Value::Array((0..n_exprs).map(|e| val_of(base + e, slice[e])).collect()),
+                BatchExpr::Map(entries) => {
+                    let mut m = serde_json::Map::with_capacity(n_exprs);
+                    for (e, (k, _)) in entries.iter().enumerate() {
+                        m.insert(k.clone(), val_of(base + e, slice[e]));
+                    }
+                    Value::Object(m)
+                }
+            }
+        };
+
+        let mut sol_entries = Vec::with_capacity(sol_indices.len());
+        for (s_idx, &sol_id) in sol_indices.iter().enumerate() {
+            let base = s_idx * n_exprs;
+            let vals = pack_values(base, &batch.total[base..base + n_exprs]);
+            let mut sol_obj = serde_json::Map::new();
+            sol_obj.insert("solution".into(), json!(sol_id));
+            if matches!(batch_expr, BatchExpr::Single(_)) {
+                sol_obj.insert("value".into(), vals.clone());
+            }
+            sol_obj.insert("values".into(), vals);
+            if let Some(dm) = &dom_map {
+                let mut reg_map = serde_json::Map::with_capacity(dm.names.len());
+                for (d_idx, dom_name) in dm.names.iter().enumerate() {
+                    let r_vals = pack_values(base, &batch.region_totals[d_idx][base..base + n_exprs]);
+                    reg_map.insert(dom_name.clone(), r_vals);
+                }
+                sol_obj.insert("regions".into(), Value::Object(reg_map));
+            }
+            sol_obj.insert("measure".into(), json!(batch.measure));
+            sol_obj.insert("cells".into(), json!(region.cells));
+            sol_entries.push(Value::Object(sol_obj));
+        }
+
         let mut out = json!({
-            "value": if real { json!(s.re) } else { pair(s.re, s.im) }, "complex": !real,
-            "measure": s.measure, "cells": region.cells, "revolution": rev, "region": Self::region_arg(args),
+            "batch": true,
+            "by_region": by_region,
+            "solutions": sol_entries,
+            "measure": batch.measure,
+            "cells": region.cells,
+            "revolution": rev,
+            "region": reg_arg,
         });
+        if let Some(dm) = &dom_map {
+            let mut rm = serde_json::Map::with_capacity(dm.names.len());
+            let mut rc = serde_json::Map::with_capacity(dm.names.len());
+            for (d_idx, dom_name) in dm.names.iter().enumerate() {
+                rm.insert(dom_name.clone(), json!(batch.region_measures[d_idx]));
+                rc.insert(dom_name.clone(), json!(dm.cells[d_idx]));
+            }
+            out["region_measures"] = Value::Object(rm);
+            out["region_cells"] = Value::Object(rc);
+        }
+        if out["solutions"].as_array().is_some_and(|a| a.len() == 1) {
+            let first = out["solutions"][0].clone();
+            out["values"] = first["values"].clone();
+            if matches!(batch_expr, BatchExpr::Single(_)) {
+                out["value"] = first["value"].clone();
+                out["complex"] = json!(!real_flags[0]);
+            }
+            if by_region {
+                out["regions"] = first["regions"].clone();
+            }
+        }
         self.axisym_note(&p, rev, &mut out);
         self.decorate(&mut out, &p);
         Ok(out)
@@ -1559,6 +2671,99 @@ impl Engine {
 
     /// `integrate` over the facets of a named boundary (ADR 90, N2b): a line integral on a 2D mesh, a surface integral on a 3D one.
     fn integrate_over_boundary(&self, args: &Value, tree: &Tree, p: &Prep, boundary: &Value, rev: bool) -> R {
+        let (name, side_arg, facets) = Self::resolve_boundary_facets(args, p, boundary)?;
+        let s = p.integrate_boundary(tree, &facets, rev)?;
+        let real = tree.is_real_valued(&p.complex_flags());
+        let mut out = json!({
+            "value": if real { json!(s.re) } else { pair(s.re, s.im) }, "complex": !real,
+            "measure": s.measure, "facets": facets.len(), "revolution": rev, "boundary": name, "side": side_arg,
+            "on": if p.mesh.dim == 2 { "a line (the edges of the boundary)" } else { "a surface (the faces of the boundary)" },
+            "normal": "nx, ny, nz: the unit normal in wafer axes, out of the cell each facet is read in",
+        });
+        self.axisym_note(p, rev, &mut out);
+        self.decorate(&mut out, p);
+        Ok(out)
+    }
+
+    fn integrate_over_boundary_batch(
+        &self,
+        args: &Value,
+        batch_expr: &BatchExpr,
+        sol_indices: &[usize],
+        trees: &[Tree],
+        p: &Prep,
+        boundary: &Value,
+    ) -> R {
+        let rev = Self::revolution(args);
+        let (name, side_arg, facets) = Self::resolve_boundary_facets(args, p, boundary)?;
+        let batch = p.integrate_boundary_batch(trees, &facets, rev)?;
+        let flags = p.complex_flags();
+        let real_flags: Vec<bool> = trees.iter().map(|t| t.is_real_valued(&flags)).collect();
+        let n_exprs = batch_expr.values().len();
+        let val_of = |t_idx: usize, (re, im): (f64, f64)| -> Value {
+            if real_flags[t_idx] {
+                json!(re)
+            } else {
+                pair(re, im)
+            }
+        };
+        let pack_values = |base: usize, slice: &[(f64, f64)]| -> Value {
+            match batch_expr {
+                BatchExpr::Single(_) => val_of(base, slice[0]),
+                BatchExpr::List(_) => Value::Array((0..n_exprs).map(|e| val_of(base + e, slice[e])).collect()),
+                BatchExpr::Map(entries) => {
+                    let mut m = serde_json::Map::with_capacity(n_exprs);
+                    for (e, (k, _)) in entries.iter().enumerate() {
+                        m.insert(k.clone(), val_of(base + e, slice[e]));
+                    }
+                    Value::Object(m)
+                }
+            }
+        };
+        let mut sol_entries = Vec::with_capacity(sol_indices.len());
+        for (s_idx, &sol_id) in sol_indices.iter().enumerate() {
+            let base = s_idx * n_exprs;
+            let vals = pack_values(base, &batch.total[base..base + n_exprs]);
+            let mut sol_obj = serde_json::Map::new();
+            sol_obj.insert("solution".into(), json!(sol_id));
+            if matches!(batch_expr, BatchExpr::Single(_)) {
+                sol_obj.insert("value".into(), vals.clone());
+            }
+            sol_obj.insert("values".into(), vals);
+            sol_obj.insert("measure".into(), json!(batch.measure));
+            sol_obj.insert("facets".into(), json!(facets.len()));
+            sol_entries.push(Value::Object(sol_obj));
+        }
+        let mut out = json!({
+            "batch": true,
+            "by_region": false,
+            "solutions": sol_entries,
+            "measure": batch.measure,
+            "facets": facets.len(),
+            "revolution": rev,
+            "boundary": name,
+            "side": side_arg,
+            "on": if p.mesh.dim == 2 { "a line (the edges of the boundary)" } else { "a surface (the faces of the boundary)" },
+            "normal": "nx, ny, nz: the unit normal in wafer axes, out of the cell each facet is read in",
+        });
+        if out["solutions"].as_array().is_some_and(|a| a.len() == 1) {
+            let first = out["solutions"][0].clone();
+            out["values"] = first["values"].clone();
+            if matches!(batch_expr, BatchExpr::Single(_)) {
+                out["value"] = first["value"].clone();
+                out["complex"] = json!(!real_flags[0]);
+            }
+        }
+        self.axisym_note(p, rev, &mut out);
+        self.decorate(&mut out, p);
+        Ok(out)
+    }
+
+    fn resolve_boundary_facets<'a>(
+        args: &'a Value,
+        p: &Prep,
+        boundary: &'a Value,
+    ) -> Result<(&'a str, Option<&'a str>, Vec<Face>), Error> {
         let name = boundary.as_str().filter(|s| !s.trim().is_empty()).ok_or_else(|| {
             Error::invalid("`boundary` is the name of a boundary, or a selector that picks boundaries (e.g. \"outer & plane(z = 0)\")")
         })?;
@@ -1586,17 +2791,7 @@ impl Engine {
             Some(s) => Some(SideSpec::Domains(p.model.domains(s)?)),
         };
         let facets = p.boundary_faces(&labels, side.as_ref(), name)?;
-        let s = p.integrate_boundary(tree, &facets, rev)?;
-        let real = tree.is_real_valued(&p.complex_flags());
-        let mut out = json!({
-            "value": if real { json!(s.re) } else { pair(s.re, s.im) }, "complex": !real,
-            "measure": s.measure, "facets": facets.len(), "revolution": rev, "boundary": name, "side": side_arg,
-            "on": if p.mesh.dim == 2 { "a line (the edges of the boundary)" } else { "a surface (the faces of the boundary)" },
-            "normal": "nx, ny, nz: the unit normal in wafer axes, out of the cell each facet is read in",
-        });
-        self.axisym_note(p, rev, &mut out);
-        self.decorate(&mut out, p);
-        Ok(out)
+        Ok((name, side_arg, facets))
     }
 
     pub(crate) fn cmd_extremum(&self, args: &Value) -> R {
@@ -1750,34 +2945,179 @@ impl Engine {
         if let Some(w) = weight_arg {
             comps.push(w);
         }
-        let (mut trees, p) = self.expressions(args, &comps)?;
-        let weight = weight_arg.map(|_| trees.pop().expect("the weight"));
-        if weight.as_ref().is_some_and(|w| !w.is_real_valued(&p.complex_flags())) {
-            return invalid("`weight` must be real: wrap a complex formula in abs, abs2, re or im");
+        let by_region = match args.get("by_region") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => return invalid("`by_region` must be true or false"),
+        };
+        if args.get("region").is_some_and(|v| !v.is_null()) && args.get("regions").is_some_and(|v| !v.is_null()) {
+            return invalid("give `region` or `regions`, not both");
         }
-        let mut it = trees.into_iter().map(|t| Tree::Call(Fun::Abs2, Box::new(t)));
-        let first = it.next().expect("a component");
-        let mut power = it.fold(first, |acc, t| Tree::Bin(Op::Add, Box::new(acc), Box::new(t)));
-        if let Some(w) = weight {
-            power = Tree::Bin(Op::Mul, Box::new(w), Box::new(power));
+        let explicit_regions: Option<Vec<String>> = match args.get("regions").filter(|v| !v.is_null()) {
+            Some(Value::Array(arr)) => {
+                if arr.is_empty() {
+                    return invalid("`regions` cannot be empty");
+                }
+                let mut v = Vec::with_capacity(arr.len());
+                for item in arr {
+                    let s = item
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty())
+                        .ok_or_else(|| Error::invalid("`regions` must be a list of region names"))?;
+                    v.push(s.to_string());
+                }
+                Some(v)
+            }
+            Some(_) => return invalid("`regions` must be a list of region names"),
+            None => match args.get("region") {
+                Some(Value::Array(arr)) => {
+                    if arr.is_empty() {
+                        return invalid("`region` list cannot be empty");
+                    }
+                    let mut v = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        let s = item
+                            .as_str()
+                            .filter(|s| !s.trim().is_empty())
+                            .ok_or_else(|| Error::invalid("`region` list must contain region names"))?;
+                        v.push(s.to_string());
+                    }
+                    Some(v)
+                }
+                _ => None,
+            },
+        };
+        let d = self.defaults(args)?;
+        let (sol_indices, has_solutions_arg) = self.parse_solutions(args, &d)?;
+        let is_batch = has_solutions_arg || by_region || explicit_regions.is_some();
+        let (all_trees, p) = self.expressions_for_solutions(&d, &sol_indices, has_solutions_arg, &comps)?;
+        let flags = p.complex_flags();
+        let n_comps = comps.len();
+        let mut power_trees = Vec::with_capacity(sol_indices.len());
+        for s_idx in 0..sol_indices.len() {
+            let mut trees: Vec<Tree> = all_trees[s_idx * n_comps..(s_idx + 1) * n_comps].to_vec();
+            let weight = weight_arg.map(|_| trees.pop().expect("the weight"));
+            if weight.as_ref().is_some_and(|w| !w.is_real_valued(&flags)) {
+                return invalid("`weight` must be real: wrap a complex formula in abs, abs2, re or im");
+            }
+            let mut it = trees.into_iter().map(|t| Tree::Call(Fun::Abs2, Box::new(t)));
+            let first = it.next().expect("a component");
+            let mut power = it.fold(first, |acc, t| Tree::Bin(Op::Add, Box::new(acc), Box::new(t)));
+            if let Some(w) = weight {
+                power = Tree::Bin(Op::Mul, Box::new(w), Box::new(power));
+            }
+            power_trees.push(power);
         }
         let rev = Self::revolution(args);
-        let all = p.region(None)?;
-        let part = p.region(Some(
-            Self::region_arg(args)
-                .ok_or_else(|| Error::invalid("`region` is required: the region the fraction is of"))?,
-        ))?;
-        let (inside, total) = (p.integrate(&power, &part, rev)?, p.integrate(&power, &all, rev)?);
-        let mut out = json!({
-            "fraction": inside.re / total.re, "inside": inside.re, "total": total.re, "cells": part.cells,
-            "revolution": rev, "region": Self::region_arg(args),
-            "weighted": weight_arg.is_some(),
-            "meaning": if weight_arg.is_some() {
-                "the integral of weight * sum_k |c_k|^2 over the region divided by the same over the whole mesh"
+        let meaning = if weight_arg.is_some() {
+            "the integral of weight * sum_k |c_k|^2 over the region divided by the same over the whole mesh"
+        } else {
+            "the integral of sum_k |c_k|^2 over the region divided by the same over the whole mesh (no material weight)"
+        };
+        if !is_batch {
+            let part = p.region(Some(
+                Self::region_arg(args)
+                    .ok_or_else(|| Error::invalid("`region` is required: the region the fraction is of"))?,
+            ))?;
+            let batch = p.confinement_batch(&power_trees, std::slice::from_ref(&part), rev)?;
+            let inside = batch.inside[0][0];
+            let total = batch.total[0];
+            let mut out = json!({
+                "fraction": inside / total, "inside": inside, "total": total, "cells": part.cells,
+                "revolution": rev, "region": Self::region_arg(args),
+                "weighted": weight_arg.is_some(),
+                "meaning": meaning,
+            });
+            self.axisym_note(&p, rev, &mut out);
+            self.decorate(&mut out, &p);
+            return Ok(out);
+        }
+
+        let target_regions: Vec<(String, Region)> = if let Some(names) = &explicit_regions {
+            let mut v = Vec::with_capacity(names.len());
+            for name in names {
+                v.push((name.clone(), p.region(Some(name))?));
+            }
+            v
+        } else if by_region {
+            let reg_arg = Self::region_arg(args);
+            let filter_reg = p.region(reg_arg)?;
+            let dm = p.build_domain_map(&filter_reg, reg_arg)?;
+            let n_cells = p.mesh.n_cells();
+            dm.names
+                .into_iter()
+                .enumerate()
+                .map(|(d_idx, name)| {
+                    let mask: Vec<bool> = (0..n_cells).map(|c| dm.cell_dom[c] == d_idx).collect();
+                    let cells = dm.cells[d_idx];
+                    (name, Region { mask, cells })
+                })
+                .collect()
+        } else {
+            let r_name = Self::region_arg(args)
+                .ok_or_else(|| Error::invalid("`region` is required: the region the fraction is of"))?;
+            vec![(r_name.to_string(), p.region(Some(r_name))?)]
+        };
+
+        let regs_only: Vec<Region> =
+            target_regions.iter().map(|(_, r)| Region { mask: r.mask.clone(), cells: r.cells }).collect();
+        let batch = p.confinement_batch(&power_trees, &regs_only, rev)?;
+        let multi_region = by_region || explicit_regions.is_some();
+        let mut sol_entries = Vec::with_capacity(sol_indices.len());
+        for (s_idx, &sol_id) in sol_indices.iter().enumerate() {
+            let tot = batch.total[s_idx];
+            let mut sol_obj = serde_json::Map::new();
+            sol_obj.insert("solution".into(), json!(sol_id));
+            let mut reg_fracs = serde_json::Map::with_capacity(target_regions.len());
+            let mut reg_insides = serde_json::Map::with_capacity(target_regions.len());
+            for (r_idx, (r_name, _)) in target_regions.iter().enumerate() {
+                let ins = batch.inside[r_idx][s_idx];
+                reg_fracs.insert(r_name.clone(), json!(ins / tot));
+                reg_insides.insert(r_name.clone(), json!(ins));
+            }
+            if !multi_region {
+                let ins = batch.inside[0][s_idx];
+                sol_obj.insert("fraction".into(), json!(ins / tot));
+                sol_obj.insert("inside".into(), json!(ins));
+                sol_obj.insert("total".into(), json!(tot));
+                sol_obj.insert("cells".into(), json!(target_regions[0].1.cells));
+                sol_obj.insert("region".into(), json!(target_regions[0].0));
+                sol_obj.insert("regions".into(), Value::Object(reg_fracs.clone()));
+                sol_obj.insert("fractions".into(), Value::Object(reg_fracs));
             } else {
-                "the integral of sum_k |c_k|^2 over the region divided by the same over the whole mesh (no material weight)"
-            },
+                sol_obj.insert("regions".into(), Value::Object(reg_fracs.clone()));
+                sol_obj.insert("fractions".into(), Value::Object(reg_fracs));
+                sol_obj.insert("inside".into(), Value::Object(reg_insides));
+                sol_obj.insert("total".into(), json!(tot));
+            }
+            sol_entries.push(Value::Object(sol_obj));
+        }
+
+        let mut region_cells = serde_json::Map::with_capacity(target_regions.len());
+        for (r_name, reg) in &target_regions {
+            region_cells.insert(r_name.clone(), json!(reg.cells));
+        }
+        let mut out = json!({
+            "batch": true,
+            "by_region": multi_region,
+            "solutions": sol_entries,
+            "region_cells": Value::Object(region_cells),
+            "revolution": rev,
+            "region": Self::region_arg(args),
+            "weighted": weight_arg.is_some(),
+            "meaning": meaning,
         });
+        if out["solutions"].as_array().is_some_and(|a| a.len() == 1) {
+            let first = out["solutions"][0].clone();
+            out["regions"] = first["regions"].clone();
+            out["fractions"] = first["fractions"].clone();
+            out["inside"] = first["inside"].clone();
+            out["total"] = first["total"].clone();
+            if !multi_region {
+                out["fraction"] = first["fraction"].clone();
+                out["cells"] = first["cells"].clone();
+            }
+        }
         self.axisym_note(&p, rev, &mut out);
         self.decorate(&mut out, &p);
         Ok(out)

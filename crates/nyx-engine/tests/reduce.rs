@@ -1228,3 +1228,473 @@ fn an_interface_in_3d_needs_a_side_and_has_the_area_of_the_contact() {
         1e-9,
     );
 }
+
+// ------------------------------------------------------------------------------------------------------ FR-5: single-pass bit-exact batch reductions
+
+struct MultiFld {
+    scale: f64,
+    n_solutions: usize,
+}
+
+impl Physics for MultiFld {
+    fn id(&self) -> &'static str {
+        "fld"
+    }
+    fn name(&self) -> &'static str {
+        "Multi-mode field stand-in"
+    }
+    fn studies(&self) -> Vec<StudyDesc> {
+        vec![StudyDesc {
+            kind: "poly".into(),
+            name: "Polynomial".into(),
+            doc: "".into(),
+            dims: Dims::Both,
+            params: vec![],
+        }]
+    }
+    fn bc_kinds(&self) -> Vec<BcDesc> {
+        vec![]
+    }
+    fn properties(&self) -> Vec<PropDesc> {
+        vec![
+            PropDesc::new("rho", "Density", "kg/m3", PropKind::Scalar, &[], Some(1.0)),
+            PropDesc::new("eps_r", "Relative permittivity", "", PropKind::Scalar, &[], Some(1.0)),
+        ]
+    }
+    fn params(&self) -> Vec<ParamDesc> {
+        vec![]
+    }
+    fn fields(&self, _study: &str) -> Vec<FieldDesc> {
+        vec![FieldDesc::new("T", "K", &[], "")]
+    }
+    fn exports(&self) -> Vec<FieldLink> {
+        vec![]
+    }
+    fn imports(&self) -> Vec<FieldLink> {
+        vec![]
+    }
+    fn validate(&self, _s: &ProblemSpec, _m: &Mesh) -> Result<(), Error> {
+        Ok(())
+    }
+    fn sizing(&self, _s: &ProblemSpec, _library: Option<&Arc<femcore::material::Library>>) -> Sizing {
+        Sizing::default()
+    }
+    fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, _ctx: &mut Ctx) -> Result<SolveResult, Error> {
+        let sm = mesh.discretise().map_err(Error::Invalid)?;
+        let (dim, order) = (sm.dim, spec.order as usize);
+        let nloc = sm.nloc(order);
+        let scaled = |p: &[f64]| -> Vec<f64> { p.iter().map(|x| x * self.scale).collect() };
+        let node = |c: usize, a: usize| -> Vec<f64> {
+            let v = sm.cell(c);
+            if a <= dim {
+                return sm.point(v[a] as usize).to_vec();
+            }
+            let mut k = dim + 1;
+            for i in 0..=dim {
+                for j in i + 1..=dim {
+                    if k == a {
+                        return (0..dim)
+                            .map(|d| 0.5 * (sm.point(v[i] as usize)[d] + sm.point(v[j] as usize)[d]))
+                            .collect();
+                    }
+                    k += 1;
+                }
+            }
+            unreachable!()
+        };
+        let mut solutions = Vec::with_capacity(self.n_solutions);
+        for m in 0..self.n_solutions {
+            let alpha = 1.0 + 0.37 * (m as f64);
+            let beta = 0.5 + 0.19 * (m as f64);
+            let (mut p, mut exr, mut exi, mut eyr, mut eyi, mut ezr, mut ezi) =
+                (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+            for c in 0..sm.n_cells() {
+                for a in 0..nloc {
+                    let (pv, ex, ez) = polys(&scaled(&node(c, a)));
+                    p.push(alpha * pv + (m as f64) * 0.125);
+                    exr.push(alpha * ex.0 - beta * ex.1);
+                    exi.push(alpha * ex.1 + beta * ex.0);
+                    eyr.push(beta * pv);
+                    eyi.push(-0.25 * alpha * ex.0);
+                    ezr.push(alpha * ez.0);
+                    ezi.push(beta * ez.1);
+                }
+            }
+            let cf = |name: &str, re: Vec<f64>, im: Vec<f64>| CellField {
+                name: name.into(),
+                unit: "a.u.".into(),
+                nloc,
+                re,
+                im,
+            };
+            solutions.push(Solution {
+                label: format!("mode {}", m + 1),
+                fields: vec![],
+                value: Some(alpha),
+                cell_fields: vec![cf("p", p, vec![]), cf("Ex", exr, exi), cf("Ey", eyr, eyi), cf("Ez", ezr, ezi)],
+                ..Default::default()
+            });
+        }
+        Ok(SolveResult {
+            physics: "fld".into(),
+            study: "poly".into(),
+            order: spec.order,
+            dim: dim as u8,
+            dofs: sm.n_dofs(order),
+            seconds: 0.0,
+            solutions,
+            scalars: vec![],
+            log: vec![],
+        })
+    }
+}
+
+/// 4-region SOI model with 12 modes and > 4096 cells (multiple `BLOCK = 2048` chunks).
+fn strip_12_modes_4_regions() -> Engine {
+    strip_12_modes_4_regions_h(8.0e-8)
+}
+
+fn strip_12_modes_4_regions_h(h: f64) -> Engine {
+    let mut r = Registry::new();
+    r.register(Arc::new(MultiFld { scale: 1e6, n_solutions: 12 })).unwrap();
+    let mut e = Engine::with(r, Arc::new(FemcoreMesher));
+    call(&mut e, "project_new", json!({ "title": "Strip12", "h": h }));
+    call(&mut e, "add_rect", json!({ "name": "window", "min": [-2e-6, -1.5e-6], "max": [2e-6, 1.5e-6] }));
+    call(&mut e, "add_rect", json!({ "name": "box", "min": [-2e-6, -1.5e-6], "max": [2e-6, 0.0] }));
+    call(&mut e, "add_rect", json!({ "name": "clad", "min": [-1e-6, 0.0], "max": [1e-6, 0.8e-6] }));
+    call(&mut e, "add_rect", json!({ "name": "core", "min": [-2.5e-7, 0.0], "max": [2.5e-7, 2.2e-7] }));
+    call(
+        &mut e,
+        "add_overlay",
+        json!({
+            "regions": [
+                { "name": "air", "input": "window" },
+                { "name": "oxide", "input": "box" },
+                { "name": "cladding", "input": "clad" },
+                { "name": "silicon", "input": "core" }
+            ]
+        }),
+    );
+    call(&mut e, "add_physics", json!({ "physics": "fld", "study": "poly", "order": 2 }));
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "air", "material": { "eps_r": 1.0 } }));
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "oxide", "material": { "eps_r": 2.088 } }));
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "cladding", "material": { "eps_r": 3.9 } }));
+    call(&mut e, "set_material", json!({ "physics": "fld", "region": "silicon", "material": { "eps_r": 12.11 } }));
+    call(&mut e, "solve_run", json!({}));
+    e
+}
+
+#[test]
+fn batch_integrate_matches_standalone_to_the_bit_across_solutions_regions_and_threads() {
+    let mut e = strip_12_modes_4_regions();
+    let n_cells = e.model().unwrap().mesh().n_cells();
+    assert!(n_cells > 2 * 2048, "mesh must span multiple 2048-cell blocks: {n_cells}");
+
+    let expr_map = json!({
+        "energy": "eps_r * (abs2(Ex) + abs2(Ey) + abs2(Ez))",
+        "ex2": "abs2(Ex)",
+        "cross": "Ex * conj(Ez)",
+        "p_val": "p"
+    });
+    let batch_args = json!({
+        "physics": "fld",
+        "solutions": "all",
+        "by_region": true,
+        "expr": expr_map
+    });
+    let batch_t1 = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap()
+        .install(|| call(&mut e, "integrate", batch_args.clone()));
+    let batch_t4 = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap()
+        .install(|| call(&mut e, "integrate", batch_args));
+
+    assert_eq!(batch_t1["batch"], json!(true));
+    assert_eq!(batch_t1["by_region"], json!(true));
+    let sols_t1 = batch_t1["solutions"].as_array().unwrap();
+    let sols_t4 = batch_t4["solutions"].as_array().unwrap();
+    assert_eq!(sols_t1.len(), 12);
+    assert_eq!(sols_t4.len(), 12);
+
+    let regions = ["air", "oxide", "cladding", "silicon"];
+    let exprs = [
+        ("energy", "eps_r * (abs2(Ex) + abs2(Ey) + abs2(Ez))"),
+        ("ex2", "abs2(Ex)"),
+        ("cross", "Ex * conj(Ez)"),
+        ("p_val", "p"),
+    ];
+
+    // Check region_measures bit-for-bit against standalone integrate
+    for r in regions {
+        let single_r = call(&mut e, "integrate", json!({ "physics": "fld", "solution": 0, "region": r, "expr": "p" }));
+        assert_eq!(
+            num(&batch_t1["region_measures"][r]).to_bits(),
+            num(&single_r["measure"]).to_bits(),
+            "region_measures[{r}]"
+        );
+        assert_eq!(
+            num(&batch_t4["region_measures"][r]).to_bits(),
+            num(&single_r["measure"]).to_bits(),
+            "t4 region_measures[{r}]"
+        );
+    }
+
+    // Check every (solution, expr, total & per-region) bit-for-bit across threads and against standalone calls
+    for m in 0..12 {
+        assert_eq!(sols_t1[m]["solution"], json!(m));
+        for (key, formula) in exprs {
+            let standalone_tot = call(&mut e, "integrate", json!({ "physics": "fld", "solution": m, "expr": formula }));
+            assert_eq!(bits(&sols_t1[m]["values"][key]), bits(&standalone_tot["value"]), "sol {m} expr {key} total");
+            assert_eq!(bits(&sols_t4[m]["values"][key]), bits(&standalone_tot["value"]), "t4 sol {m} expr {key} total");
+            assert_eq!(
+                num(&sols_t1[m]["measure"]).to_bits(),
+                num(&standalone_tot["measure"]).to_bits(),
+                "sol {m} measure"
+            );
+            for r in regions {
+                let standalone_reg =
+                    call(&mut e, "integrate", json!({ "physics": "fld", "solution": m, "region": r, "expr": formula }));
+                assert_eq!(
+                    bits(&sols_t1[m]["regions"][r][key]),
+                    bits(&standalone_reg["value"]),
+                    "sol {m} region {r} expr {key}"
+                );
+                assert_eq!(
+                    bits(&sols_t4[m]["regions"][r][key]),
+                    bits(&standalone_reg["value"]),
+                    "t4 sol {m} region {r} expr {key}"
+                );
+            }
+        }
+    }
+
+    // Batch list `expr` with subset `solutions` and `region` filter + `by_region: true`
+    let list_batch = call(
+        &mut e,
+        "integrate",
+        json!({
+            "physics": "fld",
+            "solutions": [0, 5, 11],
+            "region": "oxide, silicon",
+            "by_region": true,
+            "expr": ["abs2(Ex)", { "op": "abs2", "args": ["Ez"] }]
+        }),
+    );
+    let l_sols = list_batch["solutions"].as_array().unwrap();
+    assert_eq!(l_sols.len(), 3);
+    for (idx, &m) in [0usize, 5, 11].iter().enumerate() {
+        assert_eq!(l_sols[idx]["solution"], json!(m));
+        for (e_idx, f_str) in ["abs2(Ex)", "abs2(Ez)"].iter().enumerate() {
+            let want_tot = call(
+                &mut e,
+                "integrate",
+                json!({ "physics": "fld", "solution": m, "region": "oxide, silicon", "expr": f_str }),
+            );
+            assert_eq!(bits(&l_sols[idx]["values"][e_idx]), bits(&want_tot["value"]));
+            for r in ["oxide", "silicon"] {
+                let want_r =
+                    call(&mut e, "integrate", json!({ "physics": "fld", "solution": m, "region": r, "expr": f_str }));
+                assert_eq!(bits(&l_sols[idx]["regions"][r][e_idx]), bits(&want_r["value"]));
+            }
+            assert!(l_sols[idx]["regions"].get("air").is_none());
+        }
+    }
+
+    // Single-solution batch (`by_region: true` with single `expr`) exposes top-level `values`, `value`, and `regions`
+    let single_sol_batch = call(&mut e, "integrate", json!({ "physics": "fld", "by_region": true, "expr": "p" }));
+    let want_all = call(&mut e, "integrate", json!({ "physics": "fld", "expr": "p" }));
+    assert_eq!(bits(&single_sol_batch["value"]), bits(&want_all["value"]));
+    assert_eq!(bits(&single_sol_batch["values"]), bits(&want_all["value"]));
+    for r in regions {
+        let want_r = call(&mut e, "integrate", json!({ "physics": "fld", "region": r, "expr": "p" }));
+        assert_eq!(bits(&single_sol_batch["regions"][r]), bits(&want_r["value"]));
+    }
+
+    // AST node object forms (`const`, `coord`, `material`, `region`) still parse as single AST expressions
+    let ast_coord = call(&mut e, "integrate", json!({ "physics": "fld", "expr": { "coord": "x" } }));
+    let str_coord = call(&mut e, "integrate", json!({ "physics": "fld", "expr": "x" }));
+    assert_eq!(ast_coord.get("batch"), None);
+    assert_eq!(bits(&ast_coord["value"]), bits(&str_coord["value"]));
+
+    let ast_mat = call(&mut e, "integrate", json!({ "physics": "fld", "expr": { "material": "eps_r" } }));
+    let str_mat = call(&mut e, "integrate", json!({ "physics": "fld", "expr": "eps_r" }));
+    assert_eq!(ast_mat.get("batch"), None);
+    assert_eq!(bits(&ast_mat["value"]), bits(&str_mat["value"]));
+
+    let ast_reg = call(&mut e, "integrate", json!({ "physics": "fld", "expr": { "region": "silicon" } }));
+    let str_reg = call(&mut e, "integrate", json!({ "physics": "fld", "expr": "region(\"silicon\")" }));
+    assert_eq!(ast_reg.get("batch"), None);
+    assert_eq!(bits(&ast_reg["value"]), bits(&str_reg["value"]));
+
+    // Validation errors
+    assert!(err(&mut e, "integrate", json!({ "physics": "fld", "solution": 0, "solutions": "all", "expr": "p" }))
+        .contains("not both"));
+    assert!(err(&mut e, "integrate", json!({ "physics": "fld", "solutions": [], "expr": "p" })).contains("empty"));
+    assert!(err(&mut e, "integrate", json!({ "physics": "fld", "solutions": [12], "expr": "p" }))
+        .contains("there is no 12"));
+    assert!(err(&mut e, "integrate", json!({ "physics": "fld", "expr": [] })).contains("empty"));
+    assert!(err(&mut e, "integrate", json!({ "physics": "fld", "expr": {} })).contains("empty"));
+}
+
+#[test]
+fn single_pass_and_batch_confinement_match_standalone_to_the_bit() {
+    let mut e = strip_12_modes_4_regions();
+    let regions = ["air", "oxide", "cladding", "silicon"];
+    let power_expr = "eps_r * (abs2(Ex) + abs2(Ey) + abs2(Ez))";
+
+    // Single-pass single-call confinement vs standalone integrate
+    let single_conf = call(
+        &mut e,
+        "confinement",
+        json!({ "physics": "fld", "solution": 3, "fields": ["Ex", "Ey", "Ez"], "weight": "eps_r", "region": "silicon" }),
+    );
+    assert_eq!(single_conf.get("batch"), None);
+    let want_in =
+        call(&mut e, "integrate", json!({ "physics": "fld", "solution": 3, "region": "silicon", "expr": power_expr }));
+    let want_tot = call(&mut e, "integrate", json!({ "physics": "fld", "solution": 3, "expr": power_expr }));
+    assert_eq!(num(&single_conf["inside"]).to_bits(), num(&want_in["value"]).to_bits());
+    assert_eq!(num(&single_conf["total"]).to_bits(), num(&want_tot["value"]).to_bits());
+    assert_eq!(num(&single_conf["fraction"]).to_bits(), (num(&want_in["value"]) / num(&want_tot["value"])).to_bits());
+
+    // Batch confinement over all solutions and all regions in one pass, tested across NYX_THREADS=1 and 4
+    let conf_args = json!({
+        "physics": "fld",
+        "solutions": "all",
+        "by_region": true,
+        "fields": ["Ex", "Ey", "Ez"],
+        "weight": "eps_r"
+    });
+    let batch_t1 = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap()
+        .install(|| call(&mut e, "confinement", conf_args.clone()));
+    let batch_t4 = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap()
+        .install(|| call(&mut e, "confinement", conf_args));
+
+    assert_eq!(batch_t1["batch"], json!(true));
+    assert_eq!(batch_t1["by_region"], json!(true));
+    let c_sols_1 = batch_t1["solutions"].as_array().unwrap();
+    let c_sols_4 = batch_t4["solutions"].as_array().unwrap();
+    assert_eq!(c_sols_1.len(), 12);
+
+    for m in 0..12 {
+        let tot =
+            num(&call(&mut e, "integrate", json!({ "physics": "fld", "solution": m, "expr": power_expr }))["value"]);
+        assert_eq!(num(&c_sols_1[m]["total"]).to_bits(), tot.to_bits(), "mode {m} total");
+        assert_eq!(num(&c_sols_4[m]["total"]).to_bits(), tot.to_bits(), "t4 mode {m} total");
+        let mut sum_frac = 0.0;
+        for r in regions {
+            let standalone = call(
+                &mut e,
+                "confinement",
+                json!({ "physics": "fld", "solution": m, "fields": ["Ex", "Ey", "Ez"], "weight": "eps_r", "region": r }),
+            );
+            let want_frac = num(&standalone["fraction"]);
+            let want_ins = num(&standalone["inside"]);
+            assert_eq!(num(&c_sols_1[m]["regions"][r]).to_bits(), want_frac.to_bits(), "mode {m} reg {r} frac");
+            assert_eq!(num(&c_sols_4[m]["regions"][r]).to_bits(), want_frac.to_bits(), "t4 mode {m} reg {r} frac");
+            assert_eq!(num(&c_sols_1[m]["inside"][r]).to_bits(), want_ins.to_bits(), "mode {m} reg {r} inside");
+            sum_frac += want_frac;
+        }
+        close(sum_frac, 1.0, 1e-12);
+    }
+
+    // Batch confinement with explicit `regions` list
+    let sub_conf = call(
+        &mut e,
+        "confinement",
+        json!({
+            "physics": "fld",
+            "solutions": [2, 8],
+            "regions": ["silicon", "oxide"],
+            "fields": ["Ex", "Ez"]
+        }),
+    );
+    let sub_sols = sub_conf["solutions"].as_array().unwrap();
+    assert_eq!(sub_sols.len(), 2);
+    for (i, &m) in [2usize, 8].iter().enumerate() {
+        for r in ["silicon", "oxide"] {
+            let want = call(
+                &mut e,
+                "confinement",
+                json!({ "physics": "fld", "solution": m, "region": r, "fields": ["Ex", "Ez"] }),
+            );
+            assert_eq!(num(&sub_sols[i]["regions"][r]).to_bits(), num(&want["fraction"]).to_bits());
+        }
+    }
+}
+
+#[test]
+fn batch_boundary_integrate_matches_standalone_to_the_bit() {
+    let mut e = strip_12_modes_4_regions();
+    let got = call(
+        &mut e,
+        "integrate",
+        json!({
+            "physics": "fld",
+            "boundary": "oxide|silicon",
+            "side": "silicon",
+            "solutions": [0, 4, 11],
+            "expr": {
+                "flux": "im(Ex) * nx + p * nz",
+                "eps_line": "eps_r"
+            }
+        }),
+    );
+    assert_eq!(got["batch"], json!(true));
+    let sols = got["solutions"].as_array().unwrap();
+    assert_eq!(sols.len(), 3);
+    for (idx, &m) in [0usize, 4, 11].iter().enumerate() {
+        for (k, f_str) in [("flux", "im(Ex) * nx + p * nz"), ("eps_line", "eps_r")] {
+            let want = call(
+                &mut e,
+                "integrate",
+                json!({
+                    "physics": "fld",
+                    "solution": m,
+                    "boundary": "oxide|silicon",
+                    "side": "silicon",
+                    "expr": f_str
+                }),
+            );
+            assert_eq!(bits(&sols[idx]["values"][k]), bits(&want["value"]), "sol {m} {k}");
+            assert_eq!(num(&sols[idx]["measure"]).to_bits(), num(&want["measure"]).to_bits());
+        }
+    }
+}
+
+#[test]
+fn batch_integrate_12_modes_4_regions_4_expressions_under_15_ms() {
+    let mut e = strip_12_modes_4_regions_h(1.5e-7);
+    let args = json!({
+        "physics": "fld",
+        "solutions": "all",
+        "by_region": true,
+        "expr": {
+            "energy": "eps_r * (abs2(Ex) + abs2(Ey) + abs2(Ez))",
+            "ex2": "abs2(Ex)",
+            "ey2": "abs2(Ey)",
+            "ez2": "abs2(Ez)"
+        }
+    });
+    // Warm up thread pool and measure best of 5 runs to avoid transient spikes under parallel test load
+    let _ = call(&mut e, "integrate", args.clone());
+    let mut best_ms = f64::INFINITY;
+    let mut got = Value::Null;
+    for _ in 0..5 {
+        let t0 = std::time::Instant::now();
+        got = call(&mut e, "integrate", args.clone());
+        best_ms = best_ms.min(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    eprintln!("FR-5 benchmark (12 modes x 4 regions x 4 expressions): {best_ms:.3} ms");
+    assert_eq!(got["solutions"].as_array().unwrap().len(), 12);
+    assert!(best_ms < 15.0, "expected < 15 ms for 12x4x4 batch integrate, took {best_ms:.3} ms");
+}
