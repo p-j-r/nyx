@@ -20,7 +20,7 @@
 use super::field::MetricField;
 use super::metric::Sym;
 use super::topo::{ekey, Edge, FxMap, Sig};
-use crate::adapt::work::{facet_key, SimplexMesh};
+use crate::adapt::work::SimplexMesh;
 use std::collections::{BTreeSet, HashMap};
 
 /// Sorted vertex triple.
@@ -39,6 +39,8 @@ pub enum VClass3 {
 pub struct PatchInfo {
     pub sig: Sig,
     pub frozen: bool,
+    /// Reference normal for two-sided `Sig::Sheet` patches so orientation is preserved in `to_mesh`.
+    pub normal: Option<[f64; 3]>,
 }
 
 /// A connected run of crease edges.
@@ -60,11 +62,19 @@ pub struct TopoOptions3 {
     pub frozen_labels: Vec<i32>,
     /// Vertices that are corners whatever their neighbours look like.
     pub fixed_vertices: Vec<u32>,
+    /// Facet labels of two-sided interior conductive sheets (`Sig::Sheet`) preserved across adaptation.
+    pub interior_sheet_labels: Vec<i32>,
 }
 
 impl Default for TopoOptions3 {
     fn default() -> Self {
-        TopoOptions3 { crease_angle_deg: 40.0, corner_angle_deg: 40.0, frozen_labels: Vec::new(), fixed_vertices: Vec::new() }
+        TopoOptions3 {
+            crease_angle_deg: 40.0,
+            corner_angle_deg: 40.0,
+            frozen_labels: Vec::new(),
+            fixed_vertices: Vec::new(),
+            interior_sheet_labels: Vec::new(),
+        }
     }
 }
 
@@ -126,7 +136,8 @@ struct SFace {
 impl Work3 {
     /// Build from a mesh; the vertex metrics are `field` evaluated at the vertices.
     pub fn from_mesh(mesh: &SimplexMesh<3>, field: &dyn MetricField<3>, opt: &TopoOptions3) -> Result<Work3, String> {
-        mesh.check().map_err(|e| format!("input mesh invalid: {e}"))?;
+        mesh.check_with_sheets(&opt.interior_sheet_labels)
+            .map_err(|e| format!("input mesh invalid: {e}"))?;
         let tets: Vec<[u32; 4]> = (0..mesh.n_cells()).map(|c| [mesh.cell(c)[0], mesh.cell(c)[1], mesh.cell(c)[2], mesh.cell(c)[3]]).collect();
         let mut w = Work3 {
             pts: mesh.points.clone(),
@@ -147,34 +158,54 @@ impl Work3 {
                 on_face.entry(f).or_default().push((t, opp));
             }
         }
-        let mut facet_label: HashMap<Face, i32> = HashMap::new();
+        let mut facet_info: HashMap<Face, (i32, [f64; 3])> = HashMap::new();
         for f in 0..mesh.n_facets() {
             let v = mesh.facet(f);
-            facet_label.insert(facet_key(&[v[0], v[1], v[2]]).iter().take(3).copied().collect::<Vec<_>>().try_into().unwrap(), mesh.facet_label[f]);
+            let k = fkey(v[0], v[1], v[2]);
+            let (pa, pb, pc) = (w.pts[v[0] as usize], w.pts[v[1] as usize], w.pts[v[2] as usize]);
+            let raw = cross(sub(pb, pa), sub(pc, pa));
+            let nr = dot(raw, raw).sqrt();
+            let n_oriented = if nr > 1e-300 { [raw[0] / nr, raw[1] / nr, raw[2] / nr] } else { [0.0, 0.0, 1.0] };
+            facet_info.insert(k, (mesh.facet_label[f], n_oriented));
         }
-        // surface faces: signature and outward normal
+        // surface faces: signature and outward/sheet normal
         let mut sfaces: Vec<SFace> = vec![];
         let mut keys: Vec<&Face> = on_face.keys().collect();
         keys.sort_unstable();
         for k in keys {
             let ts = &on_face[k];
-            let (sig, owner_opp) = match ts.len() {
-                1 => (Sig::Bnd(*facet_label.get(k).unwrap_or(&i32::MIN)), ts[0].1),
-                2 => {
-                    let (l0, l1) = (w.tlabel[ts[0].0], w.tlabel[ts[1].0]);
-                    if l0 == l1 {
-                        continue;
+            let (sig, n) = match ts.len() {
+                1 => {
+                    let lab = facet_info.get(k).map_or(i32::MIN, |x| x.0);
+                    let (a, b, c) = (w.pts[k[0] as usize], w.pts[k[1] as usize], w.pts[k[2] as usize]);
+                    let mut n = unit(cross(sub(b, a), sub(c, a)));
+                    if dot(n, sub(w.pts[ts[0].1 as usize], a)) > 0.0 {
+                        n = [-n[0], -n[1], -n[2]];
                     }
-                    // the normal points out of the lower-labelled side
-                    (Sig::Iface(l0.min(l1), l0.max(l1)), if l0 < l1 { ts[0].1 } else { ts[1].1 })
+                    (Sig::Bnd(lab), n)
+                }
+                2 => {
+                    if let Some(&(lab, n_sheet)) =
+                        facet_info.get(k).filter(|&&(l, _)| opt.interior_sheet_labels.contains(&l))
+                    {
+                        (Sig::Sheet(lab), n_sheet)
+                    } else {
+                        let (l0, l1) = (w.tlabel[ts[0].0], w.tlabel[ts[1].0]);
+                        if l0 == l1 {
+                            continue;
+                        }
+                        // the normal points out of the lower-labelled side
+                        let owner_opp = if l0 < l1 { ts[0].1 } else { ts[1].1 };
+                        let (a, b, c) = (w.pts[k[0] as usize], w.pts[k[1] as usize], w.pts[k[2] as usize]);
+                        let mut n = unit(cross(sub(b, a), sub(c, a)));
+                        if dot(n, sub(w.pts[owner_opp as usize], a)) > 0.0 {
+                            n = [-n[0], -n[1], -n[2]];
+                        }
+                        (Sig::Iface(l0.min(l1), l0.max(l1)), n)
+                    }
                 }
                 _ => return Err(format!("face {k:?} shared by {} tetrahedra", ts.len())),
             };
-            let (a, b, c) = (w.pts[k[0] as usize], w.pts[k[1] as usize], w.pts[k[2] as usize]);
-            let mut n = unit(cross(sub(b, a), sub(c, a)));
-            if dot(n, sub(w.pts[owner_opp as usize], a)) > 0.0 {
-                n = [-n[0], -n[1], -n[2]];
-            }
             sfaces.push(SFace { key: *k, sig, n });
         }
         // surface edges and the faces on them
@@ -220,7 +251,9 @@ impl Work3 {
             let r = find(&mut parent, i);
             let id = *patch_id.entry(r).or_insert_with(|| {
                 let sig = sfaces[r].sig;
-                w.patches.push(PatchInfo { sig, frozen: matches!(sig, Sig::Bnd(l) if opt.frozen_labels.contains(&l)) });
+                let frozen = matches!(sig, Sig::Bnd(l) | Sig::Sheet(l) if opt.frozen_labels.contains(&l));
+                let normal = matches!(sig, Sig::Sheet(_)).then_some(sfaces[r].n);
+                w.patches.push(PatchInfo { sig, frozen, normal });
                 (w.patches.len() - 1) as u32
             });
             w.patch_of.insert(sfaces[i].key, id);
@@ -272,7 +305,7 @@ impl Work3 {
             }
             let id = w.curves.len() as u32;
             let sigs = crease_sigs[&e].clone();
-            let frozen = sigs.iter().any(|s| matches!(s, Sig::Bnd(l) if opt.frozen_labels.contains(l)));
+            let frozen = sigs.iter().any(|s| matches!(s, Sig::Bnd(l) | Sig::Sheet(l) if opt.frozen_labels.contains(l)));
             w.curves.push(CurveInfo { sigs, frozen });
             let mut stack = vec![e];
             w.curve_of.insert(e, id);
@@ -343,9 +376,23 @@ impl Work3 {
                     return Err(format!("tetrahedra {} and {} overlap across face {f:?}", ts[0], ts[1]));
                 }
             }
-            let surface = ts.len() == 1 || self.tlabel[ts[0]] != self.tlabel[ts[1]];
-            if surface != self.patch_of.contains_key(f) {
-                return Err(format!("face {f:?}: surface={surface} but patch entry {}", self.patch_of.contains_key(f)));
+            let must_be_surface = ts.len() == 1 || self.tlabel[ts[0]] != self.tlabel[ts[1]];
+            match self.patch_of.get(f) {
+                Some(&p) => {
+                    let sig = self.patches[p as usize].sig;
+                    let ok = match sig {
+                        Sig::Bnd(_) => ts.len() == 1,
+                        Sig::Iface(_, _) => ts.len() == 2 && self.tlabel[ts[0]] != self.tlabel[ts[1]],
+                        Sig::Sheet(_) => ts.len() == 2,
+                    };
+                    if !ok {
+                        return Err(format!("face {f:?}: patch sig {sig:?} inconsistent with {} tets", ts.len()));
+                    }
+                }
+                None if must_be_surface => {
+                    return Err(format!("face {f:?}: surface=true but patch entry false"));
+                }
+                None => {}
             }
         }
         for f in self.patch_of.keys() {
@@ -378,14 +425,18 @@ impl Work3 {
         Ok(())
     }
 
-    /// Compact into a simplex mesh (alive tetrahedra, used vertices in index order). Boundary facets carry the patch's facet label;
-    /// unlabelled boundary faces produce no facet. Returns the vertex metrics in the new numbering as well.
+    /// Compact into a simplex mesh (alive tetrahedra, used vertices in index order). Boundary and `Sig::Sheet` facets carry the patch's
+    /// facet label (each emitted once); unlabelled boundary faces produce no facet. Returns the vertex metrics in the new numbering as well.
     pub fn to_mesh(&self) -> (SimplexMesh<3>, Vec<Sym<3>>) {
         let mut used = vec![false; self.pts.len()];
+        let mut face_owner: FxMap<Face, u32> = FxMap::default();
         for (t, tt) in self.tets.iter().enumerate() {
             if self.talive[t] {
                 for &v in tt {
                     used[v as usize] = true;
+                }
+                for (k, opp) in tet_faces(tt) {
+                    face_owner.entry(k).or_insert(opp);
                 }
             }
         }
@@ -408,12 +459,10 @@ impl Work3 {
         faces.sort_unstable();
         let mut seen = BTreeSet::new();
         for (f, &p) in faces {
-            if let Sig::Bnd(l) = self.patches[p as usize].sig {
-                if l != i32::MIN && seen.insert(*f) {
+            match self.patches[p as usize].sig {
+                Sig::Bnd(l) if l != i32::MIN && seen.insert(*f) => {
                     // orient like a face of its owner so that outward normals are consistent
-                    let owner = self.tets.iter().enumerate().find(|(t, tt)| self.talive[*t] && tet_faces(tt).iter().any(|(k, _)| k == f));
-                    if let Some((_, tt)) = owner {
-                        let (_, opp) = *tet_faces(tt).iter().find(|(k, _)| k == f).unwrap();
+                    if let Some(&opp) = face_owner.get(f) {
                         let mut v = [new_id[f[0] as usize], new_id[f[1] as usize], new_id[f[2] as usize]];
                         let (a, b, c) = (self.pts[f[0] as usize], self.pts[f[1] as usize], self.pts[f[2] as usize]);
                         if dot(cross(sub(b, a), sub(c, a)), sub(self.pts[opp as usize], a)) > 0.0 {
@@ -422,6 +471,22 @@ impl Work3 {
                         m.push_facet(&v, l);
                     }
                 }
+                Sig::Sheet(l) if l != i32::MIN && seen.insert(*f) => {
+                    if let Some(&opp) = face_owner.get(f) {
+                        let mut v = [new_id[f[0] as usize], new_id[f[1] as usize], new_id[f[2] as usize]];
+                        let (a, b, c) = (self.pts[f[0] as usize], self.pts[f[1] as usize], self.pts[f[2] as usize]);
+                        let cr = cross(sub(b, a), sub(c, a));
+                        if let Some(n_ref) = self.patches[p as usize].normal {
+                            if dot(cr, n_ref) < 0.0 {
+                                v.swap(1, 2);
+                            }
+                        } else if dot(cr, sub(self.pts[opp as usize], a)) > 0.0 {
+                            v.swap(1, 2);
+                        }
+                        m.push_facet(&v, l);
+                    }
+                }
+                _ => {}
             }
         }
         (m, mets)

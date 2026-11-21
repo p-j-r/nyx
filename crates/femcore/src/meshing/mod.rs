@@ -26,6 +26,7 @@ pub mod pml_box;
 pub mod refine3d;
 pub mod request;
 pub mod sheet3d;
+pub mod sheet3d_amr;
 pub mod validate;
 
 use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
@@ -463,7 +464,7 @@ impl<'a> GeomOracle2<'a> {
             .chains
             .iter()
             .map(|c| match c.sig {
-                Sig::Bnd(l) => labels.edges_of_label(l),
+                Sig::Bnd(l) | Sig::Sheet(l) => labels.edges_of_label(l),
                 Sig::Iface(a, b) => ev
                     .edges()
                     .iter()

@@ -187,6 +187,12 @@ impl<const D: usize> SimplexMesh<D> {
     /// positive measure, every facet shared by one or two cells, every labelled boundary facet is a
     /// true boundary facet, no vertex ids out of range, and no duplicated vertices in a cell.
     pub fn check(&self) -> Result<(), String> {
+        self.check_with_sheets(&[])
+    }
+
+    /// Like [`SimplexMesh::check`], additionally allowing interior facets (`cs.len() == 2`) whose
+    /// label appears in `interior_sheet_labels`.
+    pub fn check_with_sheets(&self, interior_sheet_labels: &[i32]) -> Result<(), String> {
         let np = self.n_points() as u32;
         if self.cells.len() != self.n_cells() * (D + 1) {
             return Err("cell array length does not match labels".into());
@@ -217,8 +223,10 @@ impl<const D: usize> SimplexMesh<D> {
         }
         for f in 0..self.n_facets() {
             let key = facet_key(self.facet(f));
+            let lab = self.facet_label[f];
             match fc.get(&key) {
                 Some(cs) if cs.len() == 1 => {}
+                Some(cs) if cs.len() == 2 && interior_sheet_labels.contains(&lab) => {}
                 Some(_) => return Err(format!("labelled facet {f} is interior")),
                 None => return Err(format!("labelled facet {f} not in any cell")),
             }

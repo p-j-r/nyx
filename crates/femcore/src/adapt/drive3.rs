@@ -154,6 +154,7 @@ pub fn adapt3_with<G: Geometry3>(
     report.unresolved_frozen = unresolved_frozen(&w, opt.lmax);
     w.check().map_err(|e| format!("internal error after adaptation: {e}"))?;
     let (out, metrics) = w.to_mesh();
-    out.check().map_err(|e| format!("adapted mesh invalid: {e}"))?;
+    out.check_with_sheets(&topo.interior_sheet_labels)
+        .map_err(|e| format!("adapted mesh invalid: {e}"))?;
     Ok(Adapted3 { mesh: out, metrics, report })
 }

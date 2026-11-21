@@ -159,19 +159,7 @@ pub struct IbcJjAssembly3D {
     pub cell_sheet: Vec<Option<SheetCellKind>>,
 }
 
-/// Builds a map from each sorted triangle face `[v0, v1, v2]` in a 3D tetrahedral mesh to one adjacent
-/// cell index `ci` and its 3 local vertex indices `[la, lb, lc]` in `0..4`.
-pub fn build_face_to_cell_3d(mesh: &Discretisation) -> HashMap<[u32; 3], (usize, [usize; 3])> {
-    let mut map = HashMap::with_capacity(mesh.n_cells() * 2);
-    for ci in 0..mesh.n_cells() {
-        let v = mesh.cell(ci);
-        for f in FACES {
-            let key = sorted3(v[f[0]], v[f[1]], v[f[2]]);
-            map.entry(key).or_insert((ci, f));
-        }
-    }
-    map
-}
+pub use femcore::fem::build_face_to_cell_3d;
 
 /// Evaluates the tangential Nedelec basis vectors `psi_{s,||} = w_s - (w_s . n) n` at the 6-point Dunavant
 /// quadrature points on a single triangle `tri_sorted = [v0, v1, v2]`.

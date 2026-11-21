@@ -18,7 +18,7 @@
 use super::field::MetricField;
 use super::geom3::Geometry3;
 use super::metric::{edge_length, Sym};
-use super::topo::{ekey, Edge, FxMap};
+use super::topo::{ekey, Edge, FxMap, Sig};
 use super::topo3::{fkey, tet_faces, tet_volume, VClass3, Work3};
 use crate::mesh::quality::simplex_quality;
 
@@ -308,9 +308,13 @@ fn outward_normal(pts: &[[f64; 3]], t: &[u32; 4], f: &[u32; 3]) -> [f64; 3] {
     [n[0] / l, n[1] / l, n[2] / l]
 }
 
+fn has_sheet_patches(w: &Work3) -> bool {
+    w.patches.iter().any(|p| matches!(p.sig, Sig::Sheet(_)))
+}
+
 /// Can vertex `a` be merged into `b`? An interior vertex moves onto anything; a surface vertex only along an edge of its own patch;
 /// a crease vertex only along its own curve; a corner never. Returns the worst new quality if so.
-fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -> Option<f64> {
+fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3, has_sheets: bool) -> Option<f64> {
     let e = ekey(a, b);
     match w.vclass[a as usize] {
         VClass3::Corner => return None,
@@ -337,8 +341,23 @@ fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -
         let common: Vec<u32> = sa.iter().copied().filter(|x| sb.binary_search(x).is_ok()).collect();
         let mut opp: Vec<u32> = surface_faces_on(w, snap, &e).iter().map(|(f, _)| *f.iter().find(|&&x| x != a && x != b).unwrap()).collect();
         opp.sort_unstable();
+        if has_sheets {
+            opp.dedup();
+        }
         if common != opp {
             return None;
+        }
+        if has_sheets {
+            if let VClass3::Crease(_) = w.vclass[a as usize] {
+                for k in w.curve_of.keys() {
+                    if k.contains(&a) && !k.contains(&b) {
+                        let o = if k[0] == a { k[1] } else { k[0] };
+                        if w.curve_of.contains_key(&ekey(b, o)) {
+                            return None;
+                        }
+                    }
+                }
+            }
         }
     }
     // link condition: the common neighbours of a and b are exactly the vertices opposite the edge in its tetrahedra
@@ -353,15 +372,141 @@ fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -
     if common != link {
         return None;
     }
-    // The vertex test above is not enough in 3D (the links must also agree on edges and triangles): no face at b may end up with more
-    // than two tetrahedra, counting the ones that stay and the ones that move from a to b.
-    let mut faces_at_b: FxMap<[u32; 3], u8> = FxMap::default();
+
+    if !has_sheets {
+        // The vertex test above is not enough in 3D (the links must also agree on edges and triangles): no face at b may end up with more
+        // than two tetrahedra, counting the ones that stay and the ones that move from a to b.
+        let mut faces_at_b: FxMap<[u32; 3], u8> = FxMap::default();
+        for &t in &snap.vert_tets[b as usize] {
+            let tt = w.tets[t as usize];
+            if !tt.contains(&a) {
+                for (f, _) in tet_faces(&tt) {
+                    if f.contains(&b) {
+                        *faces_at_b.entry(f).or_default() += 1;
+                    }
+                }
+            }
+        }
+        let mut worst = f64::INFINITY;
+        for &t in &snap.vert_tets[a as usize] {
+            let tt = w.tets[t as usize];
+            if tt.contains(&b) {
+                continue;
+            }
+            let nt = replace(&tt, a, b);
+            for (f, _) in tet_faces(&nt) {
+                if f.contains(&b) {
+                    let c = faces_at_b.entry(f).or_default();
+                    *c += 1;
+                    if *c > 2 {
+                        return None;
+                    }
+                }
+            }
+            if !(tet_volume(&w.pts, &nt) > 0.0) {
+                return None;
+            }
+            if w.vclass[a as usize] != VClass3::Interior {
+                // a surface face that moves with a must not turn by more than about 25 degrees (flat patches do not turn at all)
+                for (f, _) in tet_faces(&tt) {
+                    if f.contains(&a) && !f.contains(&b) && w.patch_of.contains_key(&f) {
+                        let g: Vec<u32> = f.iter().map(|&x| if x == a { b } else { x }).collect();
+                        let (n0, n1) = (outward_normal(&w.pts, &tt, &f), outward_normal(&w.pts, &nt, &fkey(g[0], g[1], g[2])));
+                        if n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] < 0.9 {
+                            return None;
+                        }
+                    }
+                }
+            }
+            let q = tet_q(w, &nt);
+            if q < opt.collapse_qmin.min(tet_q(w, &tt)) {
+                return None;
+            }
+            for &x in &nt {
+                if x != b && elen(w, b, x) > opt.lmax {
+                    return None;
+                }
+            }
+            worst = worst.min(q);
+        }
+        return Some(worst);
+    }
+
+    // Track post-collapse surface patches on faces containing `b` so sheet/interface/boundary topology is strictly preserved.
+    let mut post_patch_at_b: FxMap<[u32; 3], u32> = FxMap::default();
     for &t in &snap.vert_tets[b as usize] {
         let tt = w.tets[t as usize];
         if !tt.contains(&a) {
             for (f, _) in tet_faces(&tt) {
                 if f.contains(&b) {
-                    *faces_at_b.entry(f).or_default() += 1;
+                    if let Some(&p) = w.patch_of.get(&f) {
+                        post_patch_at_b.insert(f, p);
+                    }
+                }
+            }
+        }
+    }
+    if w.vclass[a as usize] != VClass3::Interior {
+        let mut moved_sf: Vec<([u32; 3], u32)> = Vec::new();
+        for &t in &snap.vert_tets[a as usize] {
+            let tt = w.tets[t as usize];
+            if !tt.contains(&b) {
+                for (f, _) in tet_faces(&tt) {
+                    if f.contains(&a) {
+                        if let Some(&p) = w.patch_of.get(&f) {
+                            if !moved_sf.iter().any(|x| x.0 == f) {
+                                moved_sf.push((f, p));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (f, p) in moved_sf {
+            let g: Vec<u32> = f.iter().map(|&x| if x == a { b } else { x }).collect();
+            let f_new = fkey(g[0], g[1], g[2]);
+            if w.patch_of.contains_key(&f_new) || post_patch_at_b.insert(f_new, p).is_some() {
+                return None;
+            }
+        }
+    }
+
+    // The vertex test above is not enough in 3D (the links must also agree on edges and triangles): no face at b may end up with more
+    // than two tetrahedra, two tetrahedra sharing a face must lie on strictly opposite sides of it, and boundary/sheet/interface counts must hold.
+    let mut faces_at_b: FxMap<[u32; 3], (u8, f64, i32)> = FxMap::default();
+    let mut reg_face = |f: [u32; 3], opp: u32, lab: i32| -> bool {
+        let side = tet_volume(&w.pts, &[f[0], f[1], f[2], opp]);
+        if side == 0.0 {
+            return false;
+        }
+        match faces_at_b.get_mut(&f) {
+            None => {
+                faces_at_b.insert(f, (1, side, lab));
+                true
+            }
+            Some(entry) if entry.0 == 1 => {
+                if entry.1 * side >= 0.0 {
+                    return false;
+                }
+                entry.0 = 2;
+                if entry.2 != lab {
+                    post_patch_at_b
+                        .get(&f)
+                        .is_some_and(|&p| matches!(w.patches[p as usize].sig, Sig::Iface(_, _) | Sig::Sheet(_)))
+                } else {
+                    post_patch_at_b.get(&f).is_none_or(|&p| matches!(w.patches[p as usize].sig, Sig::Sheet(_)))
+                }
+            }
+            Some(_) => false,
+        }
+    };
+    for &t in &snap.vert_tets[b as usize] {
+        let tt = w.tets[t as usize];
+        if !tt.contains(&a) {
+            let lab = w.tlabel[t as usize];
+            for (f, opp) in tet_faces(&tt) {
+                if f.contains(&b) && !reg_face(f, opp, lab) {
+                    return None;
                 }
             }
         }
@@ -373,17 +518,14 @@ fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -
             continue;
         }
         let nt = replace(&tt, a, b);
-        for (f, _) in tet_faces(&nt) {
-            if f.contains(&b) {
-                let c = faces_at_b.entry(f).or_default();
-                *c += 1;
-                if *c > 2 {
-                    return None;
-                }
-            }
-        }
         if !(tet_volume(&w.pts, &nt) > 0.0) {
             return None;
+        }
+        let lab = w.tlabel[t as usize];
+        for (f, opp) in tet_faces(&nt) {
+            if f.contains(&b) && !reg_face(f, opp, lab) {
+                return None;
+            }
         }
         if w.vclass[a as usize] != VClass3::Interior {
             // a surface face that moves with a must not turn by more than about 25 degrees (flat patches do not turn at all)
@@ -408,11 +550,24 @@ fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3) -
         }
         worst = worst.min(q);
     }
+    for (f, &(cnt, _, _)) in &faces_at_b {
+        let ok = match post_patch_at_b.get(f) {
+            Some(&p) => match w.patches[p as usize].sig {
+                Sig::Bnd(_) => cnt == 1,
+                Sig::Iface(_, _) | Sig::Sheet(_) => cnt == 2,
+            },
+            None => cnt == 2,
+        };
+        if !ok {
+            return None;
+        }
+    }
     Some(worst)
 }
 
 /// Collapse every edge shorter than `opt.lmin` that can be collapsed (one end moves onto the other, along its patch or curve when it is on one). Returns the number.
 pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize {
+    let has_sheets = has_sheet_patches(w);
     let snap = snapshot(w);
     let mut cand: Vec<(f64, Edge)> = vec![];
     for e in all_edges(&snap) {
@@ -430,7 +585,7 @@ pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize {
             if locked(&lock, &snap.vert_tets[a as usize]) || locked(&lock, &snap.vert_tets[b as usize]) {
                 continue;
             }
-            if let Some(q) = collapse_eval(w, &snap, a, b, opt) {
+            if let Some(q) = collapse_eval(w, &snap, a, b, opt, has_sheets) {
                 if best.is_none_or(|x| q > x.0) {
                     best = Some((q, a, b));
                 }
@@ -615,6 +770,7 @@ fn orient(w: &Work3, t: [u32; 4]) -> [u32; 4] {
 /// One sweep of length-equalising smoothing: every free vertex moves towards the position where its edges would have unit metric length
 /// (projected onto its patch or curve when it lies on one), if that does not worsen the worst tetrahedron of its star.
 pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry3, opt: &AdaptOptions3) -> usize {
+    let has_sheets = has_sheet_patches(w);
     let snap = snapshot(w);
     let mut moved = 0;
     for v in 0..w.pts.len() as u32 {
@@ -640,11 +796,19 @@ pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometr
                         nb.push(e[0]);
                     }
                 }
+                if has_sheets {
+                    nb.sort_unstable();
+                }
             }
-            VClass3::Surface(_) => {
+            VClass3::Surface(p) => {
                 for &t in star {
                     for (f, _) in tet_faces(&w.tets[t as usize]) {
-                        if f.contains(&v) && w.patch_of.contains_key(&f) {
+                        let on_patch = if has_sheets {
+                            w.patch_of.get(&f) == Some(&p)
+                        } else {
+                            w.patch_of.contains_key(&f)
+                        };
+                        if f.contains(&v) && on_patch {
                             nb.extend(f.iter().copied().filter(|&x| x != v));
                         }
                     }
@@ -836,9 +1000,10 @@ pub fn edge_removal_pass(w: &mut Work3) -> usize {
 /// Flip of a boundary edge between two coplanar faces of a boundary patch with exactly two tetrahedra on it: the diagonal of the
 /// quadrilateral changes, the surface (flat there) does not. Returns the number of flips.
 pub fn surface_flip_pass(w: &mut Work3) -> usize {
-    use super::topo::Sig;
+    let has_sheets = has_sheet_patches(w);
     let snap = snapshot(w);
     let mut lock = vec![false; w.tets.len()];
+    let mut new_faces: std::collections::HashSet<[u32; 3]> = Default::default();
     let mut n_done = 0;
     for e in all_edges(&snap) {
         let ts = &snap.edge_tets[&e];
@@ -857,6 +1022,9 @@ pub fn surface_flip_pass(w: &mut Work3) -> usize {
             continue;
         }
         let (c, d) = (*sf[0].0.iter().find(|&&x| x != e[0] && x != e[1]).unwrap(), *sf[1].0.iter().find(|&&x| x != e[0] && x != e[1]).unwrap());
+        if has_sheets && c == d {
+            continue;
+        }
         // the two faces must be coplanar: the four points of the quadrilateral a, c, b, d lie in one plane
         let (pa, pb, pc, pd) = (w.pts[e[0] as usize], w.pts[e[1] as usize], w.pts[c as usize], w.pts[d as usize]);
         let (u, v, x) = (sub3(pb, pa), sub3(pc, pa), sub3(pd, pa));
@@ -869,6 +1037,21 @@ pub fn surface_flip_pass(w: &mut Work3) -> usize {
         let others = |t: u32| -> Vec<u32> { w.tets[t as usize].iter().copied().filter(|&y| y != e[0] && y != e[1]).collect() };
         let (o0, o1) = (others(ts[0]), others(ts[1]));
         let Some(&xv) = o0.iter().find(|y| o1.contains(y)) else { continue };
+        if has_sheets {
+            let cand_faces = [fkey(c, d, xv), fkey(c, d, e[0]), fkey(c, d, e[1])];
+            if cand_faces.iter().any(|f| {
+                w.patch_of.contains_key(f)
+                    || new_faces.contains(f)
+                    || snap.vert_tets[c as usize].iter().any(|&t| {
+                        t != ts[0]
+                            && t != ts[1]
+                            && w.talive[t as usize]
+                            && f.iter().all(|r| w.tets[t as usize].contains(r))
+                    })
+            }) {
+                continue;
+            }
+        }
         // old tets: (a,b,c,x) and (a,b,x,d) in some order; new: (c,d,x,a) and (c,d,x,b)
         let new = [orient(w, [c, d, xv, e[0]]), orient(w, [c, d, xv, e[1]])];
         let (va, vb) = (tet_volume(&w.pts, &[c, d, xv, e[0]]), tet_volume(&w.pts, &[c, d, xv, e[1]]));
@@ -890,6 +1073,11 @@ pub fn surface_flip_pass(w: &mut Work3) -> usize {
             w.tlabel.push(label);
             w.talive.push(true);
             lock.push(true);
+        }
+        if has_sheets {
+            new_faces.insert(fkey(c, d, xv));
+            new_faces.insert(fkey(c, d, e[0]));
+            new_faces.insert(fkey(c, d, e[1]));
         }
         for (f, _) in &sf {
             w.patch_of.remove(f);
