@@ -1,7 +1,7 @@
 # Fused silica (amorphous SiO2): isotropic. Mechanical and thermal values are those of Corning HPFS 7980.
 format = 1
 name = "silica"
-description = "Fused silica (Corning HPFS 7980 data), 293 K"
+description = "Fused silica glass (Corning HPFS 7980, E=72.7 GPa, Malitson 1965 Sellmeier 0.21-6.7 um, n=1.4440 at 1.55 um) — bulk baseline vs silica_thermal_box, silica_4k, and crystalline quartz_alpha."
 source = { cite = "Compiled from the per-table sources below. Density 2201 kg/m^3: Corning 7980 data sheet as reproduced by Abrisa Technologies (2.201 g/cm^3); Corning HPFS brochure gives 2.20 g/cm^3", verified = "2026-11-04" }
 density = "2201 kg/m^3"
 

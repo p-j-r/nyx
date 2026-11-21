@@ -1,0 +1,39 @@
+# Crystalline silicon UV-visible-NIR tabulated (n, k) compilation from Palik Handbook / Aspnes & Studna (1983).
+format = 1
+name = "silicon_palik"
+extends = "silicon"
+description = "Crystalline Si tabulated complex n,k (Palik 1985 / Aspnes & Studna 1983, 0.25-2.5 um) — captures UV/visible interband absorption k above 1.1 um bandgap unlike lossless IR silicon and silicon_salzberg."
+source = [
+  { cite = "Mechanical, thermal and electrical properties inherited from silicon; [optical] tabulated complex n,k from Palik Handbook of Optical Constants of Solids (Aspnes & Studna 1983 UV-NIR + Edwards NIR)", url = "https://refractiveindex.info/?shelf=main&book=Si&page=Aspnes", doi = "10.1103/PhysRevB.27.985", verified = "2026-11-21" },
+]
+
+[optical]
+wavelength_unit = "um"
+range = [0.25, 2.5]
+reference_temperature = "298.15 K"
+model = "tabulated"
+data = [
+  [0.2500, 1.580, 3.632],
+  [0.2805, 2.974, 5.304],
+  [0.2995, 4.999, 4.204],
+  [0.3502, 5.442, 2.989],
+  [0.4000, 5.570, 0.387],
+  [0.4492, 4.682, 0.149],
+  [0.4999, 4.298, 0.073],
+  [0.5486, 4.089, 0.044],
+  [0.6019, 3.943, 0.025],
+  [0.6326, 3.882, 0.019],
+  [0.6965, 3.787, 0.013],
+  [0.8051, 3.688, 0.006],
+  [0.8266, 3.673, 0.005],
+  [1.1200, 3.5361, 0.0],
+  [1.2000, 3.5193, 0.0],
+  [1.3720, 3.5007, 0.0],
+  [1.4000, 3.4876, 0.0],
+  [1.5320, 3.4784, 0.0],
+  [1.6000, 3.4710, 0.0],
+  [1.8000, 3.4578, 0.0],
+  [2.0000, 3.4490, 0.0],
+  [2.5000, 3.4424, 0.0],
+]
+source = { cite = "E. D. Palik (Ed.), Handbook of Optical Constants of Solids (Academic Press, 1985), Si.nk compilation; UV-VIS (0.25-0.83 um) from D. E. Aspnes and A. A. Studna, Phys. Rev. B 27, 985-1009 (1983); transparent IR rows set k=0", doi = "10.1103/PhysRevB.27.985", verified = "2026-11-21" }

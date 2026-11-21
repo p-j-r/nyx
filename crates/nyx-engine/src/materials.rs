@@ -77,9 +77,11 @@ pub fn study_wavelength(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
     (f > 0.0 && f.is_finite()).then(|| 299_792_458.0 / f)
 }
 
-fn describe(m: &MaterialSpec) -> Value {
+pub(crate) fn describe(m: &MaterialSpec) -> Value {
     json!({
         "name": m.name,
+        "description": m.description,
+        "notes": m.notes,
         "density": m.density,
         "elastic": m.elastic.as_ref().map(|e| json!({ "class": format!("{:?}", e.detect_class()) })),
         "optical": m.optical.is_some(),
@@ -117,6 +119,7 @@ impl Engine {
             .filter_map(|n| lib.get(n))
             .map(|m| json!({
                 "name": m.name,
+                "description": m.description,
                 "in_project": self.project.materials.keys().any(|k| k.eq_ignore_ascii_case(&m.name)),
                 "optical": m.optical.is_some(),
                 "elastic": m.elastic.is_some(),

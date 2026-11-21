@@ -162,3 +162,38 @@ let sapphire = lib.require("sapphire")?;
 let aniso = sapphire.anisotropy([0.0, 90.0, 0.0]);                 // for the existing kernels
 let eps = sapphire.optical_permittivity(1.55e-6, Some(300.0), [0.0, 90.0, 0.0])?;   // 3x3 complex, wafer frame
 ```
+
+
+## Bundled multi-source library
+
+Because optical, mechanical, thermal and thin-film parameters depend strongly on author dataset, deposition process and temperature, conflicting sources are shipped as separate named TOML files rather than overwritten silently. Every shipped material carries a one-line `description` stating what distinguishes it from sibling variants.
+
+| Domain | Material names | Key differences |
+|---|---|---|
+| Base optical / RF / thermal (10) | `air`, `aluminium`, `copper`, `gold`, `lithium_niobate`, `sapphire`, `silica`, `silicon`, `silicon_nitride`, `silver` | Standard room-temperature baselines (`silicon`: Li 1980 293 K + Hopcroft/Hall; `silicon_nitride`: Luke 2015 LPCVD; `lithium_niobate`: Zelmon 1997 congruent + Weis-Gaylord trigonal; `sapphire`: Malitson-Dodge + Gladden; `gold`/`silver`: Brendel-Bormann / Palik) |
+| Photonics author / process variants (9) | `silicon_salzberg`, `silicon_palik`, `silicon_nitride_philipp`, `silicon_nitride_pecvd`, `lithium_niobate_mgo`, `gallium_arsenide`, `gallium_arsenide_papatryfonos`, `gold_johnson`, `silver_johnson` | `silicon_salzberg` (Salzberg-Villa 1957 IR) & `silicon_palik` (Palik tabular 0.25-20 um) extend `silicon`; `silicon_nitride_philipp` (stoichiometric UV-NIR) & `silicon_nitride_pecvd` (low-T high-H); `lithium_niobate_mgo` (5 mol% MgO Gayer 2008); `gallium_arsenide` (Skauli 2003 + Blakemore) vs. `gallium_arsenide_papatryfonos` (2021 table); `gold_johnson` / `silver_johnson` (Johnson & Christy 1972 evap. films) |
+| Phononics, crystals & MEMS (8) | `silicon_mcskimin`, `silica_thermal_box`, `quartz_alpha`, `polysilicon_polymumps`, `aluminum_nitride`, `aluminum_nitride_piezomumps`, `scaln_30`, `diamond` | `silicon_mcskimin` (McSkimin 1953 ultrasonics 298 K); `silica_thermal_box` (wet thermal oxide); `quartz_alpha` (trigonal crystal quartz); `polysilicon_polymumps` (foundry Sharpe); `aluminum_nitride` vs. `aluminum_nitride_piezomumps` (sputtered c-AlN) vs. `scaln_30` (30% ScAlN, ~2x piezoelectric, softer c33); `diamond` (single-crystal McSkimin & Bond) |
+| Cryogenic 4 K (5) | `silicon_4k`, `silica_4k`, `sapphire_4k`, `lithium_niobate_4k`, `copper_4k` | Cryogenic 4 K baselines: Frey 2006 / McSkimin 1953 / Glassbrenner-Slack Si, Malitson/White/Pohl vitreous SiO2, Goryachev c-sapphire, Zelmon/Weis-Gaylord LiNbO3, NIST OFHC Cu RRR=100 |
+| Superconducting thin films, normal-state baselines (6) | `aluminium_sc_emft`, `tantalum_alpha_sc`, `niobium_sc`, `titanium_nitride_sc`, `niobium_titanium_nitride_sc`, `granular_aluminium_sc` | Normal-state mechanical, thermal, electrical and optical baselines (`Tc` & kinetic inductance notes inside `[notes]`; suffix `_sc`) |
+
+## Downloading and importing more materials on demand
+
+Bulk 0 K DFT and raw dispersion catalogs (`refractiveindex.info`, `AFLOW`, `Materials Project`, `NumBAT`) are too large and heterogeneous to bundle wholesale without masking uncalibrated bulk values. Instead, `nyx` converts records from these databases on demand into validated `format = 1` TOML files marked `"UNVERIFIED"` in `[source].cite`:
+
+```sh
+# List curated remote presets by domain
+nyx material list --remote
+nyx material list --remote --domain photonics
+
+# Inspect any bundled material
+nyx material show silicon_salzberg
+
+# Download a preset or arbitrary refractiveindex.info / AFLOW / NumBAT entry over HTTPS
+nyx material fetch si_green_2008 --out si_green.toml
+nyx material fetch rii main/Si/nk/Green-2008 --extends silicon --name silicon_green --save
+
+# Convert a local download offline (supports rii YAML, aflow JSON, mp JSON, numbat JSONC)
+nyx material import mp mp_149_si.json --name silicon_mp --extends silicon --out silicon_mp.toml
+```
+
+Within engine command scripts, MCP sessions and the GUI (**Materials > Download or import material**), the equivalent engine commands are `list_remote_materials`, `import_material` and `fetch_material`.

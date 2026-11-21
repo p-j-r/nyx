@@ -1,8 +1,28 @@
-# Gold: optical data only (Lorentz-Drude fit of Rakic et al. 1998). Other properties are not part of this file.
+# Gold: optical data (Lorentz-Drude fit of Rakic et al. 1998) + bulk room-temperature mechanical/thermal/electrical baseline.
 format = 1
 name = "gold"
-description = "Gold, evaporated film, room temperature (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Evaporated Au wide-band Lorentz-Drude fit at 293 K (Rakic 1998, 0.25-6.2 um; E=78 GPa, sigma=4.52e7 S/m) — broadband analytical baseline vs lower-loss NIR experimental gold_johnson."
+source = { cite = "APPROXIMATE bulk polycrystalline mechanics/thermal/electrical + verified Rakic et al. 1998 [optical] fit (0.248-6.2 um)", doi = "10.1364/AO.37.005271" }
+density = "19300 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 78.0
+nu = 0.42
+source = { cite = "APPROXIMATE polycrystalline bulk gold handbook values at 293 K (electroplated/evaporated thin films show grain-texture variation E ~ 70-82 GPa)" }
+
+[thermal]
+conductivity = 317.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "129 J/(kg*K)"
+expansion = 14.2e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE standard bulk gold thermophysical handbook values at 300 K (thin films exhibit lower electron thermal conductivity)" }
+
+[electrical]
+conductivity = 4.52e7
+conductivity_unit = "S/m"
+source = { cite = "APPROXIMATE bulk pure gold DC conductivity at 293 K; thin films have lower conductivity from surface and grain-boundary scattering" }
 
 [optical]
 wavelength_unit = "um"

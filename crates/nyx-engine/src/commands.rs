@@ -221,6 +221,28 @@ impl Engine {
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
                 schema(vec![("name", text("material name")), ("toml", text("the material file text"))], &["name", "toml"])),
             cmd("remove_material", "Remove a project material", "", Edit, schema(vec![("name", text("material name"))], &["name"])),
+            cmd("list_remote_materials", "List downloadable remote materials", "Curated presets from open material databases (`refractiveindex.info`, `AFLOW`, `NumBAT`) that `fetch_material` can download and convert on demand.", Read,
+                schema(vec![("domain", json!({ "type": "string", "enum": ["all", "photonics", "phononics", "superconducting"], "description": "physics domain filter, default all" }))], &[])),
+            cmd("import_material", "Import an external material record", "Converts raw payload text from an open database (`rii` YAML, `aflow` JSON, `mp` JSON or `numbat` JSONC) into validated TOML, optionally extending a library material and adding it to the project or writing `<name>.toml` into `folder`.", Edit,
+                schema(vec![
+                    ("name", text("material name without slashes or commas")),
+                    ("format", json!({ "type": "string", "enum": ["rii", "aflow", "mp", "numbat"], "description": "source database format: rii, aflow, mp or numbat" })),
+                    ("content", text("raw YAML, JSON or JSONC payload text from the external database")),
+                    ("description", text("optional one-line comparative summary written into the material description field")),
+                    ("extends", text("optional base material name in the library to inherit unprovided properties from")),
+                    ("add_to_project", boolean("add the converted material to the active project (default true)")),
+                    ("folder", text("optional destination folder to write <name>.toml into")),
+                ], &["name", "format", "content"])),
+            cmd("fetch_material", "Download a material from an open database", "Downloads a preset or database entry over HTTPS from `refractiveindex.info`, `AFLOW` or `NumBAT`, converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`.", Expensive,
+                schema(vec![
+                    ("source", text("curated preset id (from `list_remote_materials`), `catalog`, `rii`, `aflow` or `numbat`")),
+                    ("target", text("preset id, database entry key, AFLOW query, NumBAT stem or https URL; omit when `source` is a preset id")),
+                    ("name", text("material name in TOML; defaults to the preset id or derived entry stem")),
+                    ("description", text("optional one-line comparative summary written into the material description field")),
+                    ("extends", text("optional base material name in the library to inherit unprovided properties from")),
+                    ("add_to_project", boolean("add the downloaded material to the active project (default true)")),
+                    ("folder", text("optional destination folder to write <name>.toml into")),
+                ], &["source"])),
             cmd("convergence_check", "Check mesh convergence", "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.", Expensive,
                 schema(vec![("physics", phys()), ("factor", number("finer/present element size, between 0 and 1, default 0.6")), ("tolerance", number("largest accepted relative difference, e.g. 1e-3; omit to only report")),
                     ("match", json!({ "type": "string", "enum": ["index", "nearest"], "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the finer mesh in the complex plane and lists the modes without a partner" })),
@@ -527,6 +549,25 @@ impl Engine {
                 self.remove_material(get_str(args, "name")?)?;
                 ok()
             }
+            "list_remote_materials" => self.list_remote_materials(opt_str(args, "domain")),
+            "import_material" => self.import_material(
+                get_str(args, "name")?,
+                get_str(args, "format")?,
+                get_str(args, "content")?,
+                opt_str(args, "description"),
+                opt_str(args, "extends"),
+                opt_bool(args, "add_to_project", true),
+                opt_str(args, "folder").map(std::path::Path::new),
+            ),
+            "fetch_material" => self.fetch_material(
+                get_str(args, "source")?,
+                opt_str(args, "target"),
+                opt_str(args, "name"),
+                opt_str(args, "description"),
+                opt_str(args, "extends"),
+                opt_bool(args, "add_to_project", true),
+                opt_str(args, "folder").map(std::path::Path::new),
+            ),
             "convergence_check" => {
                 let (physics, factor, tolerance) = (
                     get_str(args, "physics")?,

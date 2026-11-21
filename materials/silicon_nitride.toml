@@ -1,8 +1,27 @@
-# Silicon nitride (LPCVD Si3N4 film for integrated photonics): optical data only.
+# Silicon nitride (stoichiometric LPCVD Si3N4 thin film): Luke 2015 optical Sellmeier + typical LPCVD mechanics/thermal/electrical.
 format = 1
 name = "silicon_nitride"
-description = "Silicon nitride film, 340 nm Si3N4 on thermal SiO2 (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Stoichiometric LPCVD Si3N4 film at 293 K (Luke 2015 Sellmeier 0.31-5.5 um, n=1.9963 at 1.55 um; E=270 GPa) — low-loss photonic baseline vs UV-VIS silicon_nitride_philipp and higher-index silicon_nitride_pecvd."
+source = { cite = "APPROXIMATE thin-film compilation: [optical] verified from Luke et al. 2015; density 3100 kg/m^3 and mechanical/thermal/electrical are representative stoichiometric LPCVD Si3N4 film values that depend on furnace stress and stoichiometry", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Luke" }
+density = "3100 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 270.0
+nu = 0.26
+source = { cite = "APPROXIMATE typical LPCVD stoichiometric Si3N4 thin-film modulus (250-290 GPa reported across MEMS handbooks depending on residual tensile stress ~0.9-1.2 GPa and Si:N ratio)" }
+
+[thermal]
+conductivity = 20.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "700 J/(kg*K)"
+expansion = 2.3e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE thin-film LPCVD Si3N4 thermal properties (phonon-boundary scattering lowers k below bulk ~30 W/(m*K) beta-Si3N4)" }
+
+[electrical]
+permittivity = 7.5
+source = { cite = "APPROXIMATE static/RF relative permittivity of stoichiometric LPCVD Si3N4 (~7.0-8.0 across foundry PDKs)" }
 
 [optical]
 wavelength_unit = "um"

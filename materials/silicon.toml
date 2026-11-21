@@ -2,7 +2,7 @@
 # Every table carries its own source; a value that is only approximate says so in its source text.
 format = 1
 name = "silicon"
-description = "Single-crystal silicon, 293 K"
+description = "Single-crystal Si [100] at 293 K (Hopcroft 2010 cubic elastic + Li 1980 IR index 1.2-14 um, n=3.4757 at 1.55 um) — baseline vs silicon_salzberg, silicon_palik, silicon_mcskimin, silicon_4k."
 source = { cite = "Compiled from the per-table sources below. Density 2329 kg/m^3 (2.329 g/cm^3): El-Cat silicon properties page and Sydor/Ohara data sheet (2.33 g/cm^3), checked 2026-11-04", verified = "2026-11-04" }
 density = "2329 kg/m^3"
 

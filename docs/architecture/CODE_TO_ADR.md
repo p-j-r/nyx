@@ -106,9 +106,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
-| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35 | spec, units, elastic, tensor, optics, schema (phase 6) |
-| `materials/*` | 29, 30, 34, 35 | the shipped material library (TOML) |
-| `docs/MATERIALS.md` | 29, 30, 34, 35 | |
+| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101 | spec, units, elastic, tensor, optics, schema, database importers (`import.rs`) |
+| `crates/femcore/tests/material_import.rs` | 101 | pure-Rust importer & catalog regression tests |
+| `materials/*` | 29, 30, 34, 35, 101 | the shipped multi-source material library (TOML) |
+| `docs/MATERIALS.md` | 29, 30, 34, 35, 101 | material library guide, variant catalog, and database import commands |
+| `crates/nyx-engine/src/material_fetch.rs` | 101 | engine catalog, offline database conversion, and HTTPS material fetch |
+| `crates/app/src/matcmd.rs` | 101 | `nyx material` CLI subcommands (`list`, `show`, `import`, `fetch`) |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
 | `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |

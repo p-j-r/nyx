@@ -1,0 +1,28 @@
+# Cryogenic congruent lithium niobate (LiNbO3) at 4 K, trigonal 3m crystal.
+format = 1
+name = "lithium_niobate_4k"
+extends = "lithium_niobate"
+description = "Cryogenic congruent LiNbO3 at 4 K (~2.5% stiffened trigonal C^E c33=248 GPa, clamped cryo eps=[44.3, 44.3, 26.5]) — mK piezo-optomechanical transducer model vs room-temperature lithium_niobate."
+notes = "Optical dispersion inherited from 21 C Zelmon [optical]. Piezo-optomechanical microwave simulations at 4 K/10 mK freeze out low-frequency clamped-to-free dispersion and use clamped permittivity."
+source = { cite = "APPROXIMATE 4 K extrapolated thermoelastic stiffening and clamped microwave permittivity + inherited lithium_niobate density and Zelmon [optical]" }
+
+[elastic]
+class = "trigonal"
+unit = "GPa"
+c11 = 208.0
+c12 = 58.5
+c13 = 76.5
+c14 = 9.0
+c33 = 248.0
+c44 = 61.2
+source = { cite = "APPROXIMATE 4 K trigonal stiffness C^E (~2.5% thermoelastic stiffening over Weis & Gaylord 1985 298 K values using R. T. Smith & F. S. Welsh temperature coefficients, J. Appl. Phys. 42, 2219 (1971))", doi = "10.1063/1.1660528" }
+
+[thermal]
+conductivity = 15.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.035 J/(kg*K)"
+source = { cite = "APPROXIMATE 4 K congruent LiNbO3 thermal conductivity and specific heat in the phonon boundary-scattering regime" }
+
+[electrical]
+permittivity = { perp = 44.3, par = 26.5 }
+source = { cite = "APPROXIMATE GHz clamped low-temperature relative permittivity of congruent LiNbO3 (~44 perp, ~26.5 par)" }

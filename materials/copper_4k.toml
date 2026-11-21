@@ -1,0 +1,25 @@
+# Cryogenic OFHC copper (RRR = 100) at 4 K (NIST Cryogenic Material Properties Database + Ledbetter & Naimon 1974).
+format = 1
+name = "copper_4k"
+extends = "copper"
+description = "Cryogenic OFHC copper (RRR=100) at 4 K (NIST Cryo DB k=642.3 W/(m*K), Cp=0.0994 J/(kg*K), Ledbetter 1974 E=138 GPa) — dilution-refrigerator thermalisation metal vs 293 K copper."
+source = { cite = "Cryogenic 4 K properties for OFHC copper (RRR = 100); [optical] inherited from Rakic 1998 copper", url = "https://trc.nist.gov/cryogenics/materials/OFHC%20Copper/OFHC_Copper_rev1.htm", verified = "2026-11-21" }
+
+[elastic]
+unit = "GPa"
+E = 138.0
+nu = 0.34
+source = { cite = "H. M. Ledbetter and E. R. Naimon, Elastic properties of metals and alloys II. Copper, J. Phys. Chem. Ref. Data 3, 897-935 (1974): 4 K polycrystalline Young's modulus ~138 GPa", doi = "10.1063/1.3253150", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 642.3
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.0994 J/(kg*K)"
+expansion = 2.28e-9
+expansion_unit = "1/K"
+source = { cite = "NIST Cryogenic Material Properties Database, OFHC Copper UNS C10100/C10200 (RRR = 100) official logarithmic rational/polynomial curve fits evaluated at T = 4.0 K", url = "https://trc.nist.gov/cryogenics/materials/OFHC%20Copper/OFHC_Copper_rev1.htm", verified = "2026-11-21" }
+
+[electrical]
+conductivity = 5.9e9
+conductivity_unit = "S/m"
+source = { cite = "APPROXIMATE 4 K DC electrical conductivity of RRR = 100 OFHC copper (~100x residual resistivity ratio over 293 K annealed copper 5.96e7 S/m; scales proportionally with RRR)" }

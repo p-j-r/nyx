@@ -90,3 +90,4 @@ Nygard format (`Date`, `Status`, `Context`, `Decision`, `Consequences`), plus `C
 | 98 | [Connect knows Antigravity and gives an AI the instructions](adr/0098-connect-knows-antigravity-and-gives-an-ai-the-instructions.md) | `nyx-connect::{hosts,server}`, `nyx-connect` command, the app's Connect menu |
 | 99 | [Figures of modes, and one node order in the results file](adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md) | `nyx-analysis::{section,modeview,canvas,raster,figure}`, `nyx-engine::{figure,h5io,xdmf}` |
 | 100 | [nyx is dual licensed: AGPL-3.0 or a commercial licence](adr/0100-nyx-is-dual-licensed-agpl-3-or-commercial.md) | `LICENSE`, `NOTICE`, the `license` of the crates, the About sheet |
+| 101 | [Multi-source material library and on-demand database importers](adr/0101-multi-source-material-library-and-database-importers.md) | `materials/*`, `femcore::material::import`, `nyx-engine::material_fetch`, `nyx material` CLI |

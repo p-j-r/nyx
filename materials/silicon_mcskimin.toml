@@ -1,0 +1,14 @@
+# Single-crystal silicon ultrasonic stiffness of McSkimin (1953) at 298 K.
+format = 1
+name = "silicon_mcskimin"
+extends = "silicon"
+description = "High-purity single-crystal Si [100] ultrasonic stiffness (McSkimin 1953, c11=165.7, c12=63.9, c44=79.6 GPa at 298 K) — acoustic pulse-echo reference vs Hopcroft 2010 MEMS silicon and cryogenic silicon_4k."
+source = { cite = "Density, thermal, electrical and optical properties inherited from silicon; [elastic] from H. J. McSkimin, J. Appl. Phys. 24, 988-997 (1953) at 298 K", doi = "10.1063/1.1721449", verified = "2026-11-21" }
+
+[elastic]
+class = "cubic"
+unit = "GPa"
+c11 = 165.7
+c12 = 63.9
+c44 = 79.6
+source = { cite = "H. J. McSkimin, Measurement of elastic constants at low temperatures by means of ultrasonic waves — data for silicon and germanium single crystals, J. Appl. Phys. 24, 988-997 (1953), 25 degC", doi = "10.1063/1.1721449", verified = "2026-11-21" }

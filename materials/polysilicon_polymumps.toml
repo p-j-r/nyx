@@ -1,0 +1,24 @@
+# LPCVD structural polycrystalline silicon (MEMSCAP PolyMUMPs foundry baseline).
+format = 1
+name = "polysilicon_polymumps"
+description = "LPCVD polycrystalline silicon structural film (MEMSCAP PolyMUMPs Rev. 13.0, E=158 GPa, nu=0.22, rho=2330 kg/m^3) — isotropic grain-averaged MEMS resonator film vs anisotropic single-crystal [100] silicon."
+source = { cite = "D. Koester, A. Cowen, R. Mahadevan, M. Stonefield, B. Hardy, PolyMUMPs Design Handbook Rev. 13.0 (MEMSCAP Inc.); Sharpe et al., JMEMS 1997 (APPROXIMATE grain-size-dependent polysilicon film properties)", url = "https://www.memscap.com/products/mumps/polymumps", doi = "10.1109/84.623107" }
+density = "2330 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 158.0
+nu = 0.22
+source = { cite = "MEMSCAP PolyMUMPs Design Handbook Rev. 13.0 (POLY1/POLY2 annealed at 1050 C: E = 158 +/- 10 GPa, nu = 0.22) & W. N. Sharpe et al., J. Microelectromech. Syst. 6, 193-199 (1997), verified 2026-11-21", url = "https://www.memscap.com/products/mumps/polymumps", doi = "10.1109/84.623107", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 34.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "700 J/(kg*K)"
+expansion = 2.8e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE doped LPCVD polysilicon thin-film thermal properties (grain-boundary and phosphorus-doping scattering reduce thermal conductivity well below single-crystal Si)" }
+
+[electrical]
+permittivity = 11.7
+source = { cite = "APPROXIMATE static relative permittivity of doped polycrystalline silicon (handbook Si value; conductive layers in PolyMUMPs have Rs ~ 10-30 Ohm/sq)" }

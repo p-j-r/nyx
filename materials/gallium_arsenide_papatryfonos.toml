@@ -1,0 +1,44 @@
+# MBE-grown GaAs complex (n, k) table across the direct bandgap absorption edge (Papatryfonos 2021).
+format = 1
+name = "gallium_arsenide_papatryfonos"
+extends = "gallium_arsenide"
+description = "MBE GaAs UV-SWIR complex n,k table (Papatryfonos 2021 ellipsometry, 0.26-1.88 um) — resolves the 870 nm direct-bandgap absorption edge unlike sub-bandgap lossless Skauli gallium_arsenide."
+source = { cite = "Mechanical, thermal and electrical properties inherited from gallium_arsenide; [optical] complex n,k ellipsometry from Papatryfonos et al. 2021 (refractiveindex.info main/GaAs/Papatryfonos, CC0)", url = "https://refractiveindex.info/?shelf=main&book=GaAs&page=Papatryfonos", doi = "10.1063/5.0039631", verified = "2026-11-21" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.26049, 1.87868]
+reference_temperature = "293.15 K"
+model = "tabulated"
+data = [
+  [0.26049, 3.43205, 3.70410],
+  [0.27926, 4.02559, 2.66281],
+  [0.30095, 3.71427, 1.99379],
+  [0.32977, 3.52125, 1.92716],
+  [0.35426, 3.58246, 2.02527],
+  [0.39998, 4.44075, 2.24214],
+  [0.42463, 5.03903, 1.94662],
+  [0.44925, 4.68558, 0.96139],
+  [0.49997, 4.22320, 0.45338],
+  [0.54864, 4.00542, 0.30875],
+  [0.60191, 3.86815, 0.22718],
+  [0.63262, 3.81546, 0.19582],
+  [0.69659, 3.72659, 0.13312],
+  [0.74694, 3.67856, 0.10023],
+  [0.79482, 3.65601, 0.07803],
+  [0.83779, 3.58756, 0.05009],
+  [0.86106, 3.56115, 0.01144],
+  [0.88566, 3.54215, 0.00405],
+  [0.91171, 3.52476, 9.71111e-5],
+  [0.93934, 3.50642, 0.0],
+  [0.99994, 3.47343, 0.0],
+  [1.10708, 3.43736, 0.0],
+  [1.21561, 3.41446, 0.0],
+  [1.31907, 3.40247, 0.0],
+  [1.40901, 3.38961, 0.0],
+  [1.54991, 3.37793, 0.0],
+  [1.67558, 3.37666, 0.0],
+  [1.77132, 3.37140, 0.0],
+  [1.87868, 3.36654, 0.0],
+]
+source = { cite = "K. Papatryfonos et al., Refractive indices of MBE-grown AlGaAs ternary alloys in the transparent wavelength region, AIP Adv. 11, 025327 (2021), sampled across 0.26-1.88 um from refractiveindex.info (GaAs, Papatryfonos, CC0)", url = "https://refractiveindex.info/?shelf=main&book=GaAs&page=Papatryfonos", doi = "10.1063/5.0039631", verified = "2026-11-21" }

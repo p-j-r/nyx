@@ -35,10 +35,52 @@ fn close6(a: &[[f64; 6]; 6], b: &[[f64; 6]; 6], tol: f64) {
 #[test]
 fn the_library_has_its_materials() {
     let lib = library();
-    assert_eq!(lib.names(), vec!["air", "aluminium", "copper", "gold", "lithium_niobate", "sapphire", "silica", "silicon", "silicon_nitride", "silver"]);
+    assert_eq!(
+        lib.names(),
+        vec![
+            "air",
+            "aluminium",
+            "aluminium_sc_emft",
+            "aluminum_nitride",
+            "aluminum_nitride_piezomumps",
+            "copper",
+            "copper_4k",
+            "diamond",
+            "gallium_arsenide",
+            "gallium_arsenide_papatryfonos",
+            "gold",
+            "gold_johnson",
+            "granular_aluminium_sc",
+            "lithium_niobate",
+            "lithium_niobate_4k",
+            "lithium_niobate_mgo",
+            "niobium_sc",
+            "niobium_titanium_nitride_sc",
+            "polysilicon_polymumps",
+            "quartz_alpha",
+            "sapphire",
+            "sapphire_4k",
+            "scaln_30",
+            "silica",
+            "silica_4k",
+            "silica_thermal_box",
+            "silicon",
+            "silicon_4k",
+            "silicon_mcskimin",
+            "silicon_nitride",
+            "silicon_nitride_pecvd",
+            "silicon_nitride_philipp",
+            "silicon_palik",
+            "silicon_salzberg",
+            "silver",
+            "silver_johnson",
+            "tantalum_alpha_sc",
+            "titanium_nitride_sc",
+        ]
+    );
     assert!(lib.get("Silicon").is_some(), "lookup ignores case");
     let e = lib.require("platinum").unwrap_err().to_string();
-    assert!(e.contains("available: air, aluminium, copper, gold"), "{e}");
+    assert!(e.contains("available: air, aluminium,"), "{e}");
 }
 
 #[test]

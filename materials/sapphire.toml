@@ -1,7 +1,7 @@
 # Sapphire (alpha-Al2O3), trigonal 3m class, optic axis = crystal z. Orientation is set in the project.
 format = 1
 name = "sapphire"
-description = "Synthetic sapphire, room temperature"
+description = "Single-crystal alpha-Al2O3 at 293 K (Wachtman 1960 trigonal c11=496.8 GPa + Malitson/Dodge uniaxial 0.2-5 um) — room-temperature cQAD/SOS substrate vs cryogenic sapphire_4k."
 source = { cite = "Compiled from the per-table sources below. Density 3980 kg/m^3 (3.98 g/cm^3): Valley Design sapphire properties page, checked 2026-11-04", verified = "2026-11-04" }
 density = "3980 kg/m^3"
 

@@ -1,0 +1,48 @@
+# Right-handed single-crystal alpha-quartz (crystalline SiO2, point group 32), trigonal symmetry about crystal z (optic axis).
+format = 1
+name = "quartz_alpha"
+description = "Single-crystal alpha-quartz SiO2 (Bechmann 1958 trigonal c11=86.74 GPa + Ghosh 1999 uniaxial Sellmeier 0.198-2.05 um, no=1.5277 at 1.55 um) — anisotropic piezoelectric SAW/BAW crystal vs amorphous fused silica."
+source = [
+  { cite = "R. Bechmann, Elastic and piezoelectric constants of alpha-quartz, Phys. Rev. 110, 1060-1061 (1958): density 2648.5 kg/m^3", doi = "10.1103/PhysRev.110.1060", verified = "2026-11-21" },
+  { cite = "G. Ghosh, Opt. Commun. 163, 95-102 (1999)", doi = "10.1016/S0030-4018(99)00091-7", verified = "2026-11-21" },
+]
+density = "2648.5 kg/m^3"
+
+[elastic]
+class = "trigonal"
+unit = "GPa"
+c11 = 86.74
+c12 = 6.99
+c13 = 11.91
+c14 = -17.91
+c33 = 107.2
+c44 = 57.94
+source = { cite = "R. Bechmann, Elastic and piezoelectric constants of alpha-quartz, Phys. Rev. 110, 1060-1061 (1958), right-handed trigonal class 32 constant-E stiffness C^E", doi = "10.1103/PhysRev.110.1060", verified = "2026-11-21" }
+
+[thermal]
+conductivity = { perp = 6.2, par = 10.7 }
+conductivity_unit = "W/(m*K)"
+specific_heat = "740 J/(kg*K)"
+source = { cite = "APPROXIMATE crystalline alpha-quartz thermal properties near 300 K (anisotropic thermal conductivity 6.2 perp / 10.7 par W/(m*K) from handbook compilations)" }
+
+[electrical]
+permittivity = { perp = 4.52, par = 4.63 }
+source = { cite = "R. Bechmann, Phys. Rev. 110, 1060-1061 (1958): low-frequency free relative permittivity eps^T (perp = 4.52, par = 4.63)", doi = "10.1103/PhysRev.110.1060", verified = "2026-11-21" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.198, 2.0531]
+reference_temperature = "293.15 K"
+source = { cite = "G. Ghosh, Dispersion-equation coefficients for the refractive index and birefringence of calcite and quartz crystals, Opt. Commun. 163, 95-102 (1999), refractiveindex.info (main/SiO2/Ghosh-o and Ghosh-e, CC0)", url = "https://refractiveindex.info/?shelf=main&book=SiO2&page=Ghosh-o", doi = "10.1016/S0030-4018(99)00091-7", verified = "2026-11-21" }
+
+[optical.ordinary]
+model = "sellmeier"
+A = 1.28604141
+B = [1.07044083, 1.10202242]
+C = [0.0100585997, 100.0]
+
+[optical.extraordinary]
+model = "sellmeier"
+A = 1.28851804
+B = [1.09509924, 1.15662475]
+C = [0.0102101864, 100.0]

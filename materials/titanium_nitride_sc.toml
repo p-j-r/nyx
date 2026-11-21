@@ -1,0 +1,19 @@
+# Titanium nitride (TiN) high-kinetic-inductance / high-Qi superconducting thin film.
+format = 1
+name = "titanium_nitride_sc"
+description = "Superconducting TiN thin film at <1 K (Leduc 2010 / Melville 2020: Tc=2.8-4.8 K, Lk=5-150 pH/sq, E=450 GPa) — ultra-high-Qi kinetic-inductance resonator/MKID nitride vs low-Lk aluminium_sc_emft."
+notes = "Superconducting parameters (reactive sputtered or ALD TiN): t = 8-50 nm, Tc = 2.8-4.8 K (4.5 K nominal), Delta_0 = 0.45-0.75 meV, lambda_L(0) = 250-750 nm, Lk = 5-150 pH/sq, thin TiOxNy surface oxide yields Qi > 5e6."
+source = { cite = "APPROXIMATE superconducting TiN film compilation from H. G. Leduc et al., Appl. Phys. Lett. 97, 102509 (2010) & A. Melville et al., Appl. Phys. Lett. 117, 124004 (2020) + Kim et al. 1992", doi = "10.1063/1.3480420" }
+density = "5220 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 450.0
+nu = 0.25
+source = { cite = "APPROXIMATE rocksalt TiN thin-film modulus (~400-500 GPa; J. O. Kim et al., J. Appl. Phys. 72, 1805 (1992), stoichiometric single-crystal/film range)", doi = "10.1063/1.351651" }
+
+[thermal]
+conductivity = 1.5
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.04 J/(kg*K)"
+source = { cite = "APPROXIMATE dirty-limit TiN thin-film thermal properties at 4 K (depends strongly on stoichiometry N/Ti and film thickness)" }

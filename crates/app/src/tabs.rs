@@ -272,6 +272,8 @@ impl App {
         let regions = self.material_regions();
         if regions.is_empty() {
             ui.weak("Build the mesh to list the regions.");
+            ui.add_space(6.0);
+            self.material_import_panel(ui);
             return;
         }
         let lib_names: Vec<String> = self.engine.library().map(|l| l.names()).unwrap_or_default();
@@ -376,12 +378,17 @@ impl App {
         }
         ui.add_space(6.0);
         ui.weak("Library values are typical room-temperature numbers with their sources written in the files; check them for your application. Anisotropic crystal data replaces the scalar value it covers in that region.");
+        ui.add_space(6.0);
+        self.material_import_panel(ui);
     }
 
     /// What a library material gives, in one line, and its source file text on request.
     fn material_summary(&self, ui: &mut Ui, name: &str) {
         match self.engine.describe_material(name) {
             Ok(d) => {
+                if let Some(desc) = d["description"].as_str().filter(|s| !s.is_empty()) {
+                    ui.weak(desc);
+                }
                 let mut parts: Vec<String> = vec![];
                 if let Some(c) = d["elastic"]["class"].as_str() {
                     parts.push(format!("elastic: {c}"));
@@ -406,6 +413,142 @@ impl App {
                 ui.colored_label(crate::theme::danger(ui.ctx()), e.to_string());
             }
         }
+    }
+
+    /// Collapsed panel to download curated presets or convert pasted database payloads (`refractiveindex.info`, `AFLOW`, `Materials Project`, `NumBAT`).
+    fn material_import_panel(&mut self, ui: &mut Ui) {
+        let catalog = nyx_engine::material_fetch::remote_catalog();
+        let formats = ["rii", "aflow", "mp", "numbat"];
+        let opt_trim = |s: &str| {
+            let t = s.trim();
+            (!t.is_empty()).then(|| t.to_string())
+        };
+        egui::CollapsingHeader::new("Download or import material").id_salt("mat_import_panel").default_open(false).show(ui, |ui| {
+            ui.weak("Fetch additional entries from open databases on demand (HTTPS) or paste an offline JSON/YAML/JSONC record.");
+            if !catalog.is_empty() {
+                if self.mat_fetch.preset >= catalog.len() {
+                    self.mat_fetch.preset = 0;
+                }
+                let sel = &catalog[self.mat_fetch.preset];
+                ui.horizontal(|ui| {
+                    ui.label("Preset:");
+                    egui::ComboBox::from_id_salt("mat_fetch_preset").selected_text(format!("[{}] {}", sel.domain, sel.id)).show_ui(ui, |ui| {
+                        for (idx, entry) in catalog.iter().enumerate() {
+                            if ui.selectable_label(self.mat_fetch.preset == idx, format!("[{}] {} ({})", entry.domain, entry.id, entry.format)).clicked() {
+                                self.mat_fetch.preset = idx;
+                                self.mat_fetch.source = entry.id.to_string();
+                                self.mat_fetch.target.clear();
+                                self.mat_fetch.name = entry.id.to_string();
+                                self.mat_fetch.extends = entry.extends.unwrap_or("").to_string();
+                                self.mat_fetch.description = entry.summary.to_string();
+                            }
+                        }
+                    });
+                    if ui.button("Download preset").clicked() {
+                        let preset = &catalog[self.mat_fetch.preset];
+                        let name_ov = opt_trim(&self.mat_fetch.name);
+                        let ext_ov = opt_trim(&self.mat_fetch.extends);
+                        let desc_ov = opt_trim(&self.mat_fetch.description);
+                        let save_dir = self.mat_fetch.save_to_library.then(nyx_engine::material_fetch::default_materials_folder).flatten();
+                        match self.engine.fetch_material(preset.id, None, name_ov.as_deref(), desc_ov.as_deref(), ext_ov.as_deref(), true, save_dir.as_deref()) {
+                            Ok(v) => {
+                                let nm = v["name"].as_str().unwrap_or(preset.id);
+                                self.mat_fetch.is_error = false;
+                                self.mat_fetch.message = Some(match v["saved_path"].as_str() {
+                                    Some(p) => format!("Added '{nm}' to project and saved {p}."),
+                                    None => format!("Added '{nm}' to project."),
+                                });
+                            }
+                            Err(e) => {
+                                self.mat_fetch.is_error = true;
+                                self.mat_fetch.message = Some(e.to_string());
+                            }
+                        }
+                    }
+                });
+                ui.weak(sel.summary);
+            }
+
+            ui.add_space(4.0);
+            egui::Grid::new("mat_fetch_fields").num_columns(2).show(ui, |ui| {
+                ui.label("Source / format:");
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.source).hint_text("preset id, rii, aflow, or numbat").desired_width(220.0));
+                ui.end_row();
+                ui.label("Entry / query:");
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.target).hint_text("e.g. main/Si/nk/Green-2008").desired_width(220.0));
+                ui.end_row();
+                ui.label("Material name:");
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.name).hint_text("optional slug").desired_width(220.0));
+                ui.end_row();
+                ui.label("Extends:");
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.extends).hint_text("optional base material (e.g. silicon)").desired_width(220.0));
+                ui.end_row();
+                ui.label("Description:");
+                ui.add(egui::TextEdit::singleline(&mut self.mat_fetch.description).hint_text("optional one-line comparison").desired_width(220.0));
+                ui.end_row();
+            });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.mat_fetch.save_to_library, "save to materials/ folder");
+                if ui.button("Download custom").clicked() {
+                    let src = self.mat_fetch.source.trim().to_string();
+                    let tgt = opt_trim(&self.mat_fetch.target);
+                    let nm = opt_trim(&self.mat_fetch.name);
+                    let ext = opt_trim(&self.mat_fetch.extends);
+                    let desc = opt_trim(&self.mat_fetch.description);
+                    let save_dir = self.mat_fetch.save_to_library.then(nyx_engine::material_fetch::default_materials_folder).flatten();
+                    match self.engine.fetch_material(&src, tgt.as_deref(), nm.as_deref(), desc.as_deref(), ext.as_deref(), true, save_dir.as_deref()) {
+                        Ok(v) => {
+                            let added = v["name"].as_str().unwrap_or("imported");
+                            self.mat_fetch.is_error = false;
+                            self.mat_fetch.message = Some(format!("Added '{added}' to project."));
+                        }
+                        Err(e) => {
+                            self.mat_fetch.is_error = true;
+                            self.mat_fetch.message = Some(e.to_string());
+                        }
+                    }
+                }
+            });
+
+            ui.add_space(4.0);
+            if self.mat_fetch.format >= formats.len() {
+                self.mat_fetch.format = 0;
+            }
+            ui.horizontal(|ui| {
+                ui.label("Offline import:");
+                egui::ComboBox::from_id_salt("mat_import_fmt").selected_text(formats[self.mat_fetch.format]).show_ui(ui, |ui| {
+                    for (idx, f) in formats.iter().enumerate() {
+                        ui.selectable_value(&mut self.mat_fetch.format, idx, *f);
+                    }
+                });
+                if ui.button("Import text").clicked() {
+                    let nm = opt_trim(&self.mat_fetch.name).unwrap_or_else(|| "imported_material".into());
+                    let ext = opt_trim(&self.mat_fetch.extends);
+                    let desc = opt_trim(&self.mat_fetch.description);
+                    let raw = self.mat_fetch.raw.clone();
+                    let save_dir = self.mat_fetch.save_to_library.then(nyx_engine::material_fetch::default_materials_folder).flatten();
+                    match self.engine.import_material(&nm, formats[self.mat_fetch.format], &raw, desc.as_deref(), ext.as_deref(), true, save_dir.as_deref()) {
+                        Ok(v) => {
+                            let added = v["name"].as_str().unwrap_or(&nm);
+                            self.mat_fetch.is_error = false;
+                            self.mat_fetch.message = Some(format!("Imported '{added}' into project."));
+                        }
+                        Err(e) => {
+                            self.mat_fetch.is_error = true;
+                            self.mat_fetch.message = Some(e.to_string());
+                        }
+                    }
+                }
+            });
+            ui.add(egui::TextEdit::multiline(&mut self.mat_fetch.raw).desired_rows(4).hint_text("Paste YAML (rii), JSON (aflow/mp), or JSONC (numbat)...").font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
+            if let Some(msg) = &self.mat_fetch.message {
+                if self.mat_fetch.is_error {
+                    ui.colored_label(crate::theme::danger(ui.ctx()), msg);
+                } else {
+                    ui.weak(msg);
+                }
+            }
+        });
     }
 
     // ------------------------------------------------------------------ physics

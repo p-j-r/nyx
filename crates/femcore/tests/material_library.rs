@@ -235,3 +235,66 @@ fn new_models_need_their_range_and_units_and_say_so() {
     let e = err("[optical]\nwavelength_unit = \"um\"\nrange = [0.5, 2]\nmodel = \"lorentz\"\nfrequency_unit = \"eV\"\nplasma_frequency = 9\noscillators = [[1, -2, 0.1]]\n");
     assert!(e.contains("resonance must be positive"), "{e}");
 }
+
+#[test]
+fn every_library_material_has_a_comparative_description() {
+    let lib = library();
+    assert_eq!(lib.len(), 38);
+    for name in lib.names() {
+        let m = lib.get(&name).unwrap();
+        let d = m.description.as_deref().unwrap_or("").trim();
+        assert!(d.len() >= 40, "{name} description is missing or too short: {d:?}");
+    }
+}
+
+#[test]
+fn author_process_and_cryogenic_variants_reflect_published_differences() {
+    let lib = library();
+
+    // Photonics author variants
+    let si_li = lib.get("silicon").unwrap().optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap();
+    let si_salz = lib.get("silicon_salzberg").unwrap().optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap();
+    let si_palik_vis = lib.get("silicon_palik").unwrap().optical.as_ref().unwrap().nk(0, 0.40e-6, None).unwrap();
+    let si_palik_ir = lib.get("silicon_palik").unwrap().optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap();
+    assert!((si_li.0 - 3.4757).abs() < 1e-4 && (si_salz.0 - 3.4777).abs() < 5e-4, "{si_li:?} vs {si_salz:?}");
+    assert!(si_palik_vis.1 > 0.3 && si_palik_ir.1 == 0.0, "{si_palik_vis:?} {si_palik_ir:?}");
+
+    // Gold Rakić vs Johnson & Christy
+    let au_rakic = lib.get("gold").unwrap().optical.as_ref().unwrap().nk(0, 0.80e-6, None).unwrap();
+    let au_jc = lib.get("gold_johnson").unwrap().optical.as_ref().unwrap().nk(0, 0.80e-6, None).unwrap();
+    assert!(au_jc.0 < au_rakic.0 && au_jc.1 > 4.5 && au_rakic.1 > 4.5, "{au_rakic:?} vs {au_jc:?}");
+
+    // LPCVD vs PECVD SiNx
+    let sin_lpcvd = lib.get("silicon_nitride").unwrap().optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap().0;
+    let sin_pecvd = lib.get("silicon_nitride_pecvd").unwrap().optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap().0;
+    let sin_philipp = lib.get("silicon_nitride_philipp").unwrap().optical.as_ref().unwrap().nk(0, 0.633e-6, None).unwrap().0;
+    assert!(sin_pecvd > sin_lpcvd && (sin_philipp - 2.011).abs() < 5e-3, "{sin_lpcvd} {sin_pecvd} {sin_philipp}");
+
+    // Congruent LiNbO3 vs MgO:CLN + trigonal mechanics
+    let ln = lib.get("lithium_niobate").unwrap();
+    let ln_mgo = lib.get("lithium_niobate_mgo").unwrap();
+    assert_eq!(ln.elastic.as_ref().unwrap().detect_class(), Class::Trigonal);
+    assert!(ln_mgo.optical.as_ref().unwrap().nk(2, 1.55e-6, None).unwrap().0 < ln.optical.as_ref().unwrap().nk(2, 1.55e-6, None).unwrap().0);
+
+    // GaAs Skauli vs Papatryfonos bandgap absorption
+    let gaas_ir = lib.get("gallium_arsenide").unwrap().optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap().0;
+    let gaas_vis = lib.get("gallium_arsenide_papatryfonos").unwrap().optical.as_ref().unwrap().nk(0, 0.55e-6, None).unwrap();
+    assert!((gaas_ir - 3.3702).abs() < 1e-3 && gaas_vis.1 > 0.25, "{gaas_ir} {gaas_vis:?}");
+
+    // Single-crystal AlN vs sputtered PiezoMUMPs vs Sc0.30Al0.70N
+    let aln = lib.get("aluminum_nitride").unwrap();
+    let aln_p = lib.get("aluminum_nitride_piezomumps").unwrap();
+    let scaln = lib.get("scaln_30").unwrap();
+    assert!(aln.elastic.as_ref().unwrap().c[2][2] > scaln.elastic.as_ref().unwrap().c[2][2]);
+    assert_eq!(aln_p.elastic.as_ref().unwrap().detect_class(), Class::Isotropic);
+    assert!((aln_p.legacy_scalars()["E"] - 330e9).abs() < 1e3);
+
+    // Cryogenic shifts: Si stiffens + lowers index, Sapphire stiffens, Silica anomalously softens, OFHC Cu jumps to >600 W/(m*K)
+    let si_4k = lib.get("silicon_4k").unwrap();
+    assert!(si_4k.elastic.as_ref().unwrap().c[0][0] > lib.get("silicon").unwrap().elastic.as_ref().unwrap().c[0][0]);
+    assert!(si_4k.optical.as_ref().unwrap().nk(0, 1.55e-6, None).unwrap().0 < 3.455);
+    assert!(lib.get("silica_4k").unwrap().elastic.as_ref().unwrap().c[0][0] < lib.get("silica").unwrap().elastic.as_ref().unwrap().c[0][0]);
+    assert!(lib.get("sapphire_4k").unwrap().elastic.as_ref().unwrap().c[0][0] > lib.get("sapphire").unwrap().elastic.as_ref().unwrap().c[0][0]);
+    assert!(lib.get("copper_4k").unwrap().legacy_scalars()["k"] > 600.0);
+    assert!(lib.get("niobium_sc").unwrap().notes.as_deref().unwrap_or("").contains("Tc ="));
+}

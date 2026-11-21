@@ -1,8 +1,36 @@
-# Lithium niobate, congruently grown, uniaxial about the crystal z (optic) axis: optical data only.
+# Congruent lithium niobate (LiNbO3), trigonal 3m crystal with optic axis = crystal z. Orientation is set in the project.
 format = 1
 name = "lithium_niobate"
-description = "Congruent lithium niobate, 21 degC (optical data only)"
-source = { cite = "Optical data only; the data and their literature source are given in the [optical] table", verified = "2026-11-04" }
+description = "Congruent bulk/TFLN LiNbO3 at 294 K (Weis & Gaylord 1985 trigonal c11=203 GPa + Zelmon 1997 uniaxial Sellmeier 0.4-5 um, ne=2.1376 at 1.55 um) — undoped baseline vs photorefractive-resistant lithium_niobate_mgo and cryogenic lithium_niobate_4k."
+notes = "Permittivity entries use mechanically free (low-frequency) relative values eps^T = (85.2 perp, 28.7 par); for clamped GHz microwave simulations replace [electrical] with eps^S = (44.0 perp, 29.0 par) from Weis & Gaylord 1985 Table 1."
+source = [
+  { cite = "J. Kushibiki, I. Takanaga, M. Arakawa, T. Sannomiya, Accurate measurements of the acoustical physical constants of LiNbO3 and LiTaO3 single crystals, IEEE Trans. Ultrason. Ferroelectr. Freq. Control 46, 1315-1323 (1999): Archimedes density 4642.8 kg/m^3 of SAW-grade congruent LiNbO3", url = "https://lithium-niobate.com/data/", doi = "10.1109/58.796136", verified = "2026-11-21" },
+  { cite = "D. E. Zelmon, D. L. Small, D. Jundt, J. Opt. Soc. Am. B 14, 3319-3322 (1997), optical Sellmeier verified 2026-11-04", doi = "10.1364/JOSAB.14.003319", verified = "2026-11-04" },
+]
+density = "4642.8 kg/m^3"
+
+[elastic]
+class = "trigonal"
+unit = "GPa"
+c11 = 203.0
+c12 = 57.3
+c13 = 75.2
+c14 = 8.5
+c33 = 242.4
+c44 = 59.5
+source = { cite = "R. S. Weis and T. K. Gaylord, Lithium niobate: Summary of physical properties and crystal structure, Appl. Phys. A 37, 191-203 (1985), Table 6 (p. 200), constant-electric-field stiffness C^E in IRE-1949 crystal frame", url = "https://lithium-niobate.com/data/", doi = "10.1007/BF00614817", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 3.92
+conductivity_unit = "W/(m*K)"
+specific_heat = "628 J/(kg*K)"
+expansion = { perp = 1.41e-5, par = 4.1e-6 }
+expansion_unit = "1/K"
+source = { cite = "T. Volk and M. Wohlecke, Lithium Niobate: Defects, Photorefraction and Ferroelectric Switching, Springer Series in Materials Science 115 (2009), Table 1.1 (p. 3) congruent LiNbO3 near 300 K", url = "https://lithium-niobate.com/data/", doi = "10.1007/978-3-540-70766-0", verified = "2026-11-21" }
+
+[electrical]
+permittivity = { perp = 85.2, par = 28.7 }
+source = { cite = "R. S. Weis and T. K. Gaylord, Appl. Phys. A 37, 191-203 (1985), Table 1 (p. 197), mechanically free (low-frequency) relative permittivity eps^T/eps0", url = "https://lithium-niobate.com/data/", doi = "10.1007/BF00614817", verified = "2026-11-21" }
 
 [optical]
 wavelength_unit = "um"

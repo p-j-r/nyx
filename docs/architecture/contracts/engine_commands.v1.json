@@ -1926,6 +1926,123 @@
     "title": "Remove a project material"
   },
   {
+    "access": "read",
+    "description": "Curated presets from open material databases (`refractiveindex.info`, `AFLOW`, `NumBAT`) that `fetch_material` can download and convert on demand.",
+    "name": "list_remote_materials",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "description": "physics domain filter, default all",
+          "enum": [
+            "all",
+            "photonics",
+            "phononics",
+            "superconducting"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "List downloadable remote materials"
+  },
+  {
+    "access": "edit",
+    "description": "Converts raw payload text from an open database (`rii` YAML, `aflow` JSON, `mp` JSON or `numbat` JSONC) into validated TOML, optionally extending a library material and adding it to the project or writing `<name>.toml` into `folder`.",
+    "name": "import_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "add_to_project": {
+          "description": "add the converted material to the active project (default true)",
+          "type": "boolean"
+        },
+        "content": {
+          "description": "raw YAML, JSON or JSONC payload text from the external database",
+          "type": "string"
+        },
+        "description": {
+          "description": "optional one-line comparative summary written into the material description field",
+          "type": "string"
+        },
+        "extends": {
+          "description": "optional base material name in the library to inherit unprovided properties from",
+          "type": "string"
+        },
+        "folder": {
+          "description": "optional destination folder to write <name>.toml into",
+          "type": "string"
+        },
+        "format": {
+          "description": "source database format: rii, aflow, mp or numbat",
+          "enum": [
+            "rii",
+            "aflow",
+            "mp",
+            "numbat"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "description": "material name without slashes or commas",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "format",
+        "content"
+      ],
+      "type": "object"
+    },
+    "title": "Import an external material record"
+  },
+  {
+    "access": "expensive",
+    "description": "Downloads a preset or database entry over HTTPS from `refractiveindex.info`, `AFLOW` or `NumBAT`, converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`.",
+    "name": "fetch_material",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "add_to_project": {
+          "description": "add the downloaded material to the active project (default true)",
+          "type": "boolean"
+        },
+        "description": {
+          "description": "optional one-line comparative summary written into the material description field",
+          "type": "string"
+        },
+        "extends": {
+          "description": "optional base material name in the library to inherit unprovided properties from",
+          "type": "string"
+        },
+        "folder": {
+          "description": "optional destination folder to write <name>.toml into",
+          "type": "string"
+        },
+        "name": {
+          "description": "material name in TOML; defaults to the preset id or derived entry stem",
+          "type": "string"
+        },
+        "source": {
+          "description": "curated preset id (from `list_remote_materials`), `catalog`, `rii`, `aflow` or `numbat`",
+          "type": "string"
+        },
+        "target": {
+          "description": "preset id, database entry key, AFLOW query, NumBAT stem or https URL; omit when `source` is a preset id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "title": "Download a material from an open database"
+  },
+  {
     "access": "expensive",
     "description": "Solves the physics again on a finer mesh (element size times `factor`; the project is not changed) and compares every eigenvalue, value and scalar with the present result. With `tolerance` each row says pass or fail and `converged` summarises. With a `tolerance` the verdict is kept for this problem: the answer has `validated` (the result is then `checked` or stays `exploratory`) and the run record that solved it gets the verdict. Without a tolerance nothing is recorded. Use it before quoting a number: a mode index that moves by more than your tolerance is not converged. When the order of the modes changes between the meshes (complex modes of an open resonator), `match` \"nearest\" pairs each mode with the nearest eigenvalue of the finer mesh and `track` follows one mode; the answer then lists the pairs and the modes without a partner (the present mesh is then always solved again, never taken from an earlier request). Only the global element size and its rules are made finer: a size set with add_size stays as it is, so refine those by hand and solve again to test them.",
     "name": "convergence_check",

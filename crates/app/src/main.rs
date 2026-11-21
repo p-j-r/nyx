@@ -20,6 +20,7 @@ mod fmt;
 mod forms;
 mod geomui;
 mod kit;
+mod matcmd;
 mod menu;
 mod pyscript;
 mod regions;
@@ -56,6 +57,13 @@ fn main() -> eframe::Result {
     }
     if args.first().map(String::as_str) == Some("api") {
         if let Err((code, msg)) = apicmd::run(&args[1..]) {
+            eprintln!("nyx: {msg}");
+            std::process::exit(code);
+        }
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("material") {
+        if let Err((code, msg)) = matcmd::run(&args[1..]) {
             eprintln!("nyx: {msg}");
             std::process::exit(code);
         }

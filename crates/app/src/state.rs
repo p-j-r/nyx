@@ -233,3 +233,19 @@ pub struct ReduceForm {
     pub formula: String,
     pub lines: Vec<String>,
 }
+
+/// What the collapsed "Download or import material" panel of the Materials tab remembers.
+#[derive(Default)]
+pub struct MaterialFetchForm {
+    pub preset: usize,
+    pub source: String,
+    pub target: String,
+    pub format: usize,
+    pub raw: String,
+    pub name: String,
+    pub extends: String,
+    pub description: String,
+    pub save_to_library: bool,
+    pub message: Option<String>,
+    pub is_error: bool,
+}

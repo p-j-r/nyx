@@ -1,0 +1,39 @@
+# Gallium arsenide (GaAs), zincblende cubic crystal, 295-300 K.
+format = 1
+name = "gallium_arsenide"
+description = "Undoped bulk GaAs cubic crystal (Blakemore 1982 elastic c11=118.8 GPa + Skauli 2003 IR Sellmeier 0.97-17 um, n=3.3702 at 1.55 um) — sub-bandgap III-V photonics/SAW baseline vs absorbing gallium_arsenide_papatryfonos."
+source = [
+  { cite = "J. S. Blakemore, Semiconducting and other major properties of gallium arsenide, J. Appl. Phys. 53, R123-R181 (1982): density 5317 kg/m^3 at 300 K", doi = "10.1063/1.331665", verified = "2026-11-21" },
+  { cite = "T. Skauli et al., Improved dispersion relations for GaAs and applications to nonlinear optics, J. Appl. Phys. 94, 6447-6455 (2003)", doi = "10.1063/1.1621740", verified = "2026-11-21" },
+]
+density = "5317 kg/m^3"
+
+[elastic]
+class = "cubic"
+unit = "GPa"
+c11 = 118.8
+c12 = 53.8
+c44 = 59.4
+source = { cite = "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982), Table of cubic elastic stiffness constants C^E of GaAs along [100] at 300 K (piezoelectric e14 = -0.16 C/m^2 omitted in purely mechanical model)", doi = "10.1063/1.331665", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 55.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "327 J/(kg*K)"
+expansion = 5.7e-6
+expansion_unit = "1/K"
+source = { cite = "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): undoped GaAs thermal conductivity, specific heat and linear thermal expansion at 300 K (APPROXIMATE — doping lowers thermal conductivity)", doi = "10.1063/1.331665" }
+
+[electrical]
+permittivity = 12.9
+source = { cite = "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): low-frequency relative permittivity of GaAs at 300 K", doi = "10.1063/1.331665", verified = "2026-11-21" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.97, 17.0]
+reference_temperature = "295.15 K"
+model = "sellmeier"
+A = 5.372514
+B = [5.466742, 0.02429960, 1.957522]
+lambda0 = [0.4431307, 0.8746453, 36.9166]
+source = { cite = "T. Skauli, P. S. Kuo, K. L. Vodopyanov, T. J. Pinguet, O. Levi, L. A. Eyres, J. S. Harris, M. M. Fejer, B. Gerard, L. Becouarn, E. Lallier, J. Appl. Phys. 94, 6447-6455 (2003), 22 degC, refractiveindex.info (main/GaAs/Skauli, CC0)", url = "https://refractiveindex.info/?shelf=main&book=GaAs&page=Skauli", doi = "10.1063/1.1621740", verified = "2026-11-21" }

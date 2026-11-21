@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:61d7e227fa5ee34f4d454b86ecd384df` · 101 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:5537898d0511ea423ddc799d7dbc92c7` · 104 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -41,11 +41,13 @@ Catalog hash: `b3:61d7e227fa5ee34f4d454b86ecd384df` · 101 commands. `nyx api li
 | [`describe_physics`](describe_physics.md) | read | Describe a physics |
 | [`export_results`](export_results.md) | expensive | Write the results to an HDF5 file |
 | [`extremum`](extremum.md) | read | Largest or smallest value of an expression |
+| [`fetch_material`](fetch_material.md) | expensive | Download a material from an open database |
 | [`field`](field.md) | read | A handle to a field |
 | [`field_op`](field_op.md) | read | Arithmetic on handles |
 | [`figure`](figure.md) | read | Draw the modes of a result |
 | [`geometry_names`](geometry_names.md) | read | Evaluate the geometry and list its names |
 | [`get_guide`](get_guide.md) | read | Read a nyx guide |
+| [`import_material`](import_material.md) | edit | Import an external material record |
 | [`integrate`](integrate.md) | read | Integrate an expression over a region |
 | [`job_cancel`](job_cancel.md) | expensive | Cancel a job |
 | [`job_list`](job_list.md) | read | List the jobs |
@@ -58,6 +60,7 @@ Catalog hash: `b3:61d7e227fa5ee34f4d454b86ecd384df` · 101 commands. `nyx api li
 | [`list_materials`](list_materials.md) | read | List the materials |
 | [`list_operations`](list_operations.md) | read | List the geometry operations |
 | [`list_physics`](list_physics.md) | read | List the physics of this build |
+| [`list_remote_materials`](list_remote_materials.md) | read | List downloadable remote materials |
 | [`mesh_build`](mesh_build.md) | expensive | Mesh the geometry |
 | [`open_results`](open_results.md) | edit | Open an HDF5 results file |
 | [`overlap`](overlap.md) | read | Overlap of two fields |

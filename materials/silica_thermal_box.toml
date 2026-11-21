@@ -1,0 +1,17 @@
+# Thermally grown SOI buried oxide / MEMSCAP PiezoMUMPs PADOXIDE thin film SiO2.
+format = 1
+name = "silica_thermal_box"
+extends = "silica"
+description = "Thermally grown SOI buried/pad oxide SiO2 (Hopcroft 2010 / MEMSCAP PADOXIDE, rho=2200 kg/m^3, E=70.0 GPa, nu=0.17, eps_r=3.9) — slightly softer wet/dry thin-film oxide vs bulk fused-quartz silica (E=72.7 GPa) and softened silica_4k."
+source = { cite = "Thermal and optical properties inherited from silica; density, [elastic] and [electrical] set to MEMSCAP PiezoMUMPs / SOI buried-oxide thin-film values", url = "https://www.memscap.com/products/mumps/piezomumps", verified = "2026-11-21" }
+density = "2200 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 70.0
+nu = 0.17
+source = { cite = "A. Cowen et al., PiezoMUMPs Design Handbook Rev. 1.3 (MEMSCAP Inc.), PADOXIDE/BOX thermal SiO2: E = 70 GPa, nu = 0.17; residual stress ~ -250 to -300 MPa (APPROXIMATE thin-film oxide modulus)", url = "https://www.memscap.com/products/mumps/piezomumps" }
+
+[electrical]
+permittivity = 3.9
+source = { cite = "Static/low-frequency relative permittivity eps_r = 3.9 of thermally grown SiO2 (MEMSCAP PiezoMUMPs Design Handbook Rev. 1.3; APPROXIMATE typical value)", url = "https://www.memscap.com/products/mumps/piezomumps" }

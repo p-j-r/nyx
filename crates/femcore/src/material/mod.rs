@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod elastic;
+pub mod import;
 pub mod optics;
 pub mod reader;
 pub mod schema;

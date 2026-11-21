@@ -1,0 +1,64 @@
+# Niobium (Nb) BCC crystal & superconducting thin film at 4.2 K (MIT-LL SFQ5ee / Carroll 1965 / Golovashkin 1969).
+format = 1
+name = "niobium_sc"
+description = "Nb superconducting film/crystal at 4.2 K (Carroll 1965 BCC c11=252.7 GPa + Golovashkin 1969 4.2 K n,k 0.4-9.2 um; Tc=9.2 K, lambda_L=90 nm, Lk=0.09 pH/sq) — highest elemental Tc for SFQ and cQED resonators vs tantalum_alpha_sc."
+notes = "Superconducting parameters (MIT-LL SFQ5ee M1-M7 & standard cQED Nb): Tc = 8.8-9.2 K, Delta_0 = 1.45 meV, lambda_L(0) = 85-110 nm (90 nm nominal), Lk = 0.06-0.15 pH/sq. Native Nb2O5 (~5 nm) adds higher MA TLS loss unless BOE-stripped or encapsulated."
+source = [
+  { cite = "K. J. Carroll, Elastic constants of niobium from 4.2 to 300 K, J. Appl. Phys. 36, 3689-3690 (1965): density 8570 kg/m^3", doi = "10.1063/1.1703072", verified = "2026-11-21" },
+  { cite = "A. I. Golovashkin et al., Sov. Phys. JETP 29, 27-34 (1969) [optical at 4.2 K] & S. K. Tolpygo et al., IEEE Trans. Appl. Supercond. 25, 1100905 (2015) [SFQ5ee notes]", doi = "10.1109/TASC.2014.2374836", verified = "2026-11-21" },
+]
+density = "8570 kg/m^3"
+
+[elastic]
+class = "cubic"
+unit = "GPa"
+c11 = 252.7
+c12 = 133.2
+c44 = 30.97
+source = { cite = "K. J. Carroll, Elastic constants of niobium from 4.2 to 300 K, J. Appl. Phys. 36, 3689-3690 (1965), BCC single crystal at 4.2 K", doi = "10.1063/1.1703072", verified = "2026-11-21" }
+
+[thermal]
+conductivity = 30.0
+conductivity_unit = "W/(m*K)"
+specific_heat = "0.12 J/(kg*K)"
+source = { cite = "APPROXIMATE 4-10 K thin-film/moderate-RRR Nb thermal properties (depends strongly on RRR and superconducting gap suppression below Tc = 9.2 K)" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.40, 9.20]
+reference_temperature = "4.2 K"
+model = "tabulated"
+data = [
+  [0.40, 1.10, 3.11],
+  [0.45, 1.87, 3.08],
+  [0.50, 2.24, 3.12],
+  [0.55, 2.35, 3.12],
+  [0.60, 2.30, 3.07],
+  [0.66, 2.28, 3.13],
+  [0.70, 2.17, 3.19],
+  [0.76, 2.02, 3.40],
+  [0.80, 1.69, 3.69],
+  [0.85, 1.63, 4.06],
+  [0.90, 1.47, 4.19],
+  [0.95, 1.33, 4.47],
+  [1.00, 1.23, 4.82],
+  [1.10, 1.01, 5.60],
+  [1.20, 0.82, 6.28],
+  [1.30, 0.78, 7.03],
+  [1.40, 0.75, 7.51],
+  [1.50, 0.56, 8.24],
+  [1.55, 0.45, 8.52],
+  [1.60, 0.41, 8.90],
+  [1.80, 0.28, 10.4],
+  [2.00, 0.18, 11.8],
+  [2.20, 0.63, 13.2],
+  [2.50, 0.30, 15.3],
+  [3.00, 1.10, 17.3],
+  [3.50, 1.53, 18.5],
+  [4.22, 1.82, 24.7],
+  [5.90, 2.10, 35.9],
+  [6.70, 3.40, 38.4],
+  [8.20, 4.04, 51.0],
+  [9.20, 4.99, 58.8],
+]
+source = { cite = "A. I. Golovashkin, I. E. Leksina, G. P. Motulevich, A. A. Shubin, Optical properties of niobium, Sov. Phys. JETP 29, 27-34 (1969), 4.2 K table, refractiveindex.info (main/Nb/Golovashkin-4.2K, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Nb&page=Golovashkin-4.2K", verified = "2026-11-21" }

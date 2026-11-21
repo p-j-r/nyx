@@ -1,0 +1,22 @@
+# 5 mol% MgO-doped congruent lithium niobate (MgO:CLN) uniaxial Sellmeier fit (Zelmon 1997).
+format = 1
+name = "lithium_niobate_mgo"
+extends = "lithium_niobate"
+description = "5 mol% MgO-doped congruent LiNbO3 uniaxial Sellmeier (Zelmon 1997, 0.4-5.0 um, ne=2.1299 at 1.55 um) — optical-damage-resistant nonlinear variant (lower ne than undoped congruent lithium_niobate)."
+source = { cite = "Mechanical, thermal and electrical properties inherited from congruent lithium_niobate; [optical] from Zelmon et al. 1997 5 mol% MgO:LiNbO3 (refractiveindex.info MgO-LiNbO3, CC0)", url = "https://refractiveindex.info/?shelf=other&book=MgO-LiNbO3&page=Zelmon-o", doi = "10.1364/JOSAB.14.003319", verified = "2026-11-21" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.4, 5.0]
+reference_temperature = "294.15 K"
+source = { cite = "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, refractiveindex.info (MgO-LiNbO3, Zelmon-o and Zelmon-e, CC0)", url = "https://refractiveindex.info/?shelf=other&book=MgO-LiNbO3&page=Zelmon-o", doi = "10.1364/JOSAB.14.003319", verified = "2026-11-21" }
+
+[optical.ordinary]
+model = "sellmeier"
+B = [2.4272, 1.4617, 9.6536]
+C = [0.01478, 0.05612, 371.216]
+
+[optical.extraordinary]
+model = "sellmeier"
+B = [2.2454, 1.3005, 6.8972]
+C = [0.01242, 0.05313, 331.33]

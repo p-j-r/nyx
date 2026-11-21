@@ -1,0 +1,57 @@
+# Si-rich PECVD silicon nitride film (Vogt 2015 SiN_x, n = 2.089 at 633 nm and 2.051 at 1550 nm).
+format = 1
+name = "silicon_nitride_pecvd"
+description = "Low-stress Si-rich PECVD SiNx film (Vogt 2015 ellipsometry 0.25-1.70 um, n=2.051 at 1.55 um, E=210 GPa) — higher-index 300 C CMOS-compatible film vs stoichiometric LPCVD silicon_nitride (n=1.9963, E=270 GPa)."
+source = { cite = "APPROXIMATE PECVD SiNx density/mechanics/thermal/electrical + verified Vogt 2015 [optical] ellipsometry table (refractiveindex.info main/Si3N4/Vogt-2, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Vogt-2" }
+density = "2850 kg/m^3"
+
+[elastic]
+unit = "GPa"
+E = 210.0
+nu = 0.25
+source = { cite = "APPROXIMATE typical low-temperature PECVD SiNx film modulus (lower than stoichiometric 800 C LPCVD Si3N4 due to Si-H/N-H incorporation and non-stoichiometric Si excess)" }
+
+[thermal]
+conductivity = 4.5
+conductivity_unit = "W/(m*K)"
+specific_heat = "700 J/(kg*K)"
+expansion = 2.8e-6
+expansion_unit = "1/K"
+source = { cite = "APPROXIMATE amorphous PECVD SiNx thin-film thermal properties (much lower thermal conductivity than crystalline/LPCVD silicon nitride)" }
+
+[electrical]
+permittivity = 7.2
+source = { cite = "APPROXIMATE static/RF relative permittivity of low-stress PECVD SiNx (varies with SiH4/NH3 precursor ratio)" }
+
+[optical]
+wavelength_unit = "um"
+range = [0.25, 1.70]
+reference_temperature = "293.15 K"
+model = "tabulated"
+data = [
+  [0.25, 2.459, 0.247],
+  [0.30, 2.323, 0.100],
+  [0.35, 2.241, 0.0432],
+  [0.40, 2.187, 0.0170],
+  [0.45, 2.150, 0.00481],
+  [0.50, 2.124, 0.000341],
+  [0.55, 2.106, 0.0],
+  [0.60, 2.094, 0.0],
+  [0.63, 2.089, 0.0],
+  [0.70, 2.079, 0.0],
+  [0.75, 2.074, 0.0],
+  [0.80, 2.070, 0.0],
+  [0.85, 2.067, 0.0],
+  [0.90, 2.065, 0.0],
+  [0.95, 2.062, 0.0],
+  [1.00, 2.060, 0.0],
+  [1.10, 2.057, 0.0],
+  [1.20, 2.055, 0.0],
+  [1.31, 2.053, 0.0],
+  [1.40, 2.052, 0.0],
+  [1.50, 2.051, 0.0],
+  [1.55, 2.051, 0.0],
+  [1.60, 2.050, 0.0],
+  [1.70, 2.049, 0.0],
+]
+source = { cite = "M. R. Vogt, Development of physical models for the simulation of optical properties of solar cell modules, PhD Thesis (2015), 67 nm Si-rich PECVD SiN film on Si (n = 2.089 at 630 nm), refractiveindex.info (Si3N4, Vogt-2, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Vogt-2", verified = "2026-11-21" }

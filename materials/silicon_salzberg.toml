@@ -1,0 +1,21 @@
+# Silicon NIR/MIR Sellmeier fit of Salzberg & Villa (1957) / Tatian (1984).
+format = 1
+name = "silicon_salzberg"
+extends = "silicon"
+description = "Float-zone Si NIR/MIR 3-term Sellmeier (Salzberg & Villa 1957, 1.36-11 um, n=3.4777 at 1.55 um) — classic refractiveindex.info fit (+0.0020 above Li 1980 baseline silicon; lossless vs silicon_palik)."
+source = [
+  { cite = "Mechanical, thermal and electrical properties inherited from silicon; [optical] updated to Salzberg & Villa 1957 / Tatian 1984 Sellmeier fit (refractiveindex.info main/Si/Salzberg, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si&page=Salzberg", doi = "10.1364/JOSA.47.000244", verified = "2026-11-21" },
+]
+
+[optical]
+wavelength_unit = "um"
+range = [1.357, 11.04]
+reference_temperature = "299.15 K"
+model = "sellmeier"
+B = [10.6684293, 0.0030434748, 1.54133408]
+lambda0 = [0.301516485, 1.13475115, 1104.0]
+dn_dT = "1.87e-4 1/K"
+source = [
+  { cite = "C. D. Salzberg and J. J. Villa, J. Opt. Soc. Am. 47, 244-246 (1957); Sellmeier parameterization by B. Tatian, Appl. Opt. 23, 4477-4485 (1984), 26 degC, refractiveindex.info (Si, Salzberg, CC0)", url = "https://refractiveindex.info/?shelf=main&book=Si&page=Salzberg", doi = "10.1364/JOSA.47.000244", verified = "2026-11-21" },
+  { cite = "Tatian formula DOI", doi = "10.1364/AO.23.004477", verified = "2026-11-21" },
+]
