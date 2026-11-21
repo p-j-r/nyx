@@ -21,6 +21,7 @@ use crate::{Limits, Options, Outcome};
 /// Runs a script. Its value is its last expression. The engine's path guard is on for the run and restored after it. A person runs their own
 /// file, so the commands that discard the project are allowed.
 pub fn run(engine: &mut Engine, name: &str, src: &str, limits: &Limits, opts: &Options) -> Result<Outcome, String> {
+    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
     let mut kernel = Kernel::new(engine, limits.clone(), opts.clone())?;
     kernel.set_script_name(name);
     match kernel.run(engine, name, src, None, None, true)? {
@@ -32,6 +33,7 @@ pub fn run(engine: &mut Engine, name: &str, src: &str, limits: &Limits, opts: &O
 /// Parses and type-checks a script against the commands of `engine` and runs nothing: a misspelled command or argument, a missing argument, a
 /// syntax error. `Ok` when the script is fine.
 pub fn check(engine: &mut Engine, name: &str, src: &str, limits: &Limits, opts: &Options) -> Result<(), String> {
+    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
     let mut kernel = Kernel::new(engine, limits.clone(), opts.clone())?;
     kernel.set_script_name(name);
     kernel.check(engine, name, src)

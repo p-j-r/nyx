@@ -4,10 +4,10 @@
 //! declared type and range, unknown keys are reported, material property names are ones the physics reads (ROUGH_SPOTS R12). What
 //! needs the mesh or the physics itself stays in `Physics::validate`.
 
-use crate::desc::{ParamDesc, ParamKind};
+use crate::desc::{ParamDesc, ParamKind, PropKind};
 use crate::error::Error;
 use crate::physics::Physics;
-use crate::spec::{MaterialAssign, ProblemSpec};
+use crate::spec::{MaterialAssign, ProblemSpec, PropValue};
 use serde_json::Value;
 
 pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
@@ -57,19 +57,74 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
     }
     let props = p.properties();
     for (region, m) in &spec.materials {
-        if let MaterialAssign::Props(map) = m {
-            for (name, v) in map {
-                if !props.iter().any(|d| &d.name == name) {
-                    return Err(Error::invalid(format!(
-                        "region '{region}': {} does not read a property '{name}' (it reads: {})",
-                        p.name(),
-                        props.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")
-                    )));
-                }
-                if !v.is_finite() {
-                    return Err(Error::invalid(format!("region '{region}': property '{name}' is not a finite number")));
+        match m {
+            MaterialAssign::Props(map) => {
+                for (name, v) in map {
+                    if !props.iter().any(|d| &d.name == name) {
+                        return Err(Error::invalid(format!(
+                            "region '{region}': {} does not read a property '{name}' (it reads: {})",
+                            p.name(),
+                            props.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")
+                        )));
+                    }
+                    if !v.is_finite() {
+                        return Err(Error::invalid(format!("region '{region}': property '{name}' is not a finite number")));
+                    }
                 }
             }
+            MaterialAssign::PropsTensor(map) => {
+                for (name, v) in map {
+                    let Some(desc) = props.iter().find(|d| &d.name == name) else {
+                        return Err(Error::invalid(format!(
+                            "region '{region}': {} does not read a property '{name}' (it reads: {})",
+                            p.name(),
+                            props.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")
+                        )));
+                    };
+                    match v {
+                        PropValue::Scalar(x) => {
+                            if !x.is_finite() {
+                                return Err(Error::invalid(format!("region '{region}': property '{name}' is not a finite number")));
+                            }
+                        }
+                        PropValue::Diag(d) => {
+                            if desc.kind != PropKind::Tensor {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' must be a scalar number, not a tensor"
+                                )));
+                            }
+                            if d.iter().any(|x| !x.is_finite()) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' has a non-finite tensor component"
+                                )));
+                            }
+                        }
+                        PropValue::Matrix(mat) => {
+                            if desc.kind != PropKind::Tensor {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' must be a scalar number, not a tensor"
+                                )));
+                            }
+                            if mat.iter().flatten().any(|x| !x.is_finite()) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' has a non-finite tensor component"
+                                )));
+                            }
+                            let max_abs = mat.iter().flatten().fold(0.0_f64, |acc, x| acc.max(x.abs()));
+                            let tol = 1e-12 * max_abs.max(1.0);
+                            if (mat[0][1] - mat[1][0]).abs() > tol
+                                || (mat[0][2] - mat[2][0]).abs() > tol
+                                || (mat[1][2] - mat[2][1]).abs() > tol
+                            {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': tensor property '{name}' must be symmetric"
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+            MaterialAssign::Named(_) | MaterialAssign::Oriented { .. } => {}
         }
     }
     Ok(())

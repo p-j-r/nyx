@@ -61,5 +61,5 @@ pub fn check_mesh(mesh: &Mesh) -> Result<(), Error> {
 pub use physics::{Ctx, LabelResolver, Physics};
 pub use registry::Registry;
 pub use result::{cell_fields_back, cell_fields_of, CellField, Field, Scalar, Solution, SolveResult};
-pub use spec::{canonical_json, BcSpec, MaterialAssign, ProblemSpec, StudySpec, FORMAT as PROBLEM_FORMAT};
+pub use spec::{canonical_json, BcSpec, MaterialAssign, ProblemSpec, PropValue, StudySpec, FORMAT as PROBLEM_FORMAT};
 pub use validate::{check_params, check_result_finite, validate_spec};

@@ -91,6 +91,7 @@ impl Report {
 
 /// Reads a list. Problems come back with the lines that parsed, so a front-end can show them all at once.
 pub fn parse(text: &str) -> (Vec<Line>, Vec<Problem>) {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let (mut lines, mut problems) = (vec![], vec![]);
     for (i, raw) in text.lines().enumerate() {
         let n = i + 1;

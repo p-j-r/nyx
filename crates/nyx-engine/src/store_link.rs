@@ -44,7 +44,9 @@ pub fn card_of(v: &serde_json::Value) -> Card {
                 nyx_physics::MaterialAssign::Oriented { material, euler_deg } => {
                     format!("{region}: {material} at {euler_deg:?} deg")
                 }
-                nyx_physics::MaterialAssign::Props(_) => format!("{region}: inline properties"),
+                nyx_physics::MaterialAssign::Props(_) | nyx_physics::MaterialAssign::PropsTensor(_) => {
+                    format!("{region}: inline properties")
+                }
             });
         }
     }

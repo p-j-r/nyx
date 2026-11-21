@@ -1429,7 +1429,7 @@ impl App {
                         let material = match m {
                             MaterialAssign::Named(n) => Some(n.clone()),
                             MaterialAssign::Oriented { material, .. } => Some(material.clone()),
-                            MaterialAssign::Props(_) => None,
+                            MaterialAssign::Props(_) | MaterialAssign::PropsTensor(_) => None,
                         };
                         (region.clone(), material)
                     })

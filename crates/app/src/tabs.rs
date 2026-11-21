@@ -442,7 +442,7 @@ impl App {
                     let shown = match &cur {
                         Some(MaterialAssign::Named(n)) => n.clone(),
                         Some(MaterialAssign::Oriented { material, .. }) => format!("{material} (rotated)"),
-                        Some(MaterialAssign::Props(_)) => "numbers".into(),
+                        Some(MaterialAssign::Props(_)) | Some(MaterialAssign::PropsTensor(_)) => "numbers".into(),
                         None => "none".into(),
                     };
                     egui::ComboBox::from_id_salt(format!("mat_{key}")).height(320.0).selected_text(shown).show_ui(ui, |ui| {
@@ -503,6 +503,17 @@ impl App {
                         });
                         if edited {
                             spec.materials.insert(key.clone(), MaterialAssign::Props(map));
+                        }
+                    }
+                    Some(MaterialAssign::PropsTensor(map)) => {
+                        for p in &props {
+                            if let Some(v) = map.get(&p.name) {
+                                ui.horizontal(|ui| {
+                                    ui.label(&p.label);
+                                    ui.monospace(format!("{v:?}"));
+                                    ui.weak(&p.unit);
+                                });
+                            }
                         }
                     }
                     None => {

@@ -68,7 +68,9 @@ fn options(args: &[String]) -> Result<Opts, Exit> {
 }
 
 fn read(file: &str) -> Result<String, Exit> {
-    std::fs::read_to_string(file).map_err(|e| (2, format!("{file}: {e}")))
+    std::fs::read_to_string(file)
+        .map(|s| s.strip_prefix('\u{feff}').map(str::to_string).unwrap_or(s))
+        .map_err(|e| (2, format!("{file}: {e}")))
 }
 
 fn print_problems(problems: &[Problem]) {

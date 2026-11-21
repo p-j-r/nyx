@@ -308,7 +308,7 @@ impl<'a> Visitor<'a> for Scan<'a, '_> {
 }
 
 /// Finds the functions a script hands over as formulas: the arguments of `nyx.<anything>(...)` and of `trace(...)` that are the name of a `def`,
-/// a `lambda`, or a list of them.
+/// a `lambda`, or a list, tuple or dict of them.
 fn roots<'a>(body: &'a [Stmt], defs: &HashMap<String, Vec<&'a StmtFunctionDef>>) -> Vec<Func<'a>> {
     struct Find<'a, 'd> {
         defs: &'d HashMap<String, Vec<&'a StmtFunctionDef>>,
@@ -328,6 +328,7 @@ fn roots<'a>(body: &'a [Stmt], defs: &HashMap<String, Vec<&'a StmtFunctionDef>>)
                 }
                 Expr::List(l) => l.elts.iter().for_each(|x| self.arg(x)),
                 Expr::Tuple(l) => l.elts.iter().for_each(|x| self.arg(x)),
+                Expr::Dict(d) => d.items.iter().for_each(|item| self.arg(&item.value)),
                 _ => {}
             }
         }
