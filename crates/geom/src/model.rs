@@ -251,11 +251,16 @@ pub enum Op {
         #[serde(default)]
         taper_deg: Option<Expr>,
     },
-    /// 3D: a 2D profile or boolean feature embedded as a zero-thickness conductive sheet at plane `z` (default 0.0)
+    /// 3D: a 2D profile or boolean feature embedded as a conductive sheet at plane `z` (default 0.0),
+    /// with optional finite metal `thickness` (`[z, z + thickness]`) and substrate `etch_depth` trench (`[z - etch_depth, z]`)
     Sheet {
         input: FeatureId,
         #[serde(default = "default_zero_expr")]
         z: Expr,
+        #[serde(default = "default_zero_expr")]
+        thickness: Expr,
+        #[serde(default = "default_zero_expr")]
+        etch_depth: Expr,
     },
     Transform {
         input: FeatureId,
@@ -371,7 +376,7 @@ impl Op {
                 .flatten()
                 .chain([simplify_tol, min_hole_area])
                 .collect(),
-            Op::Sheet { z, .. } => vec![z],
+            Op::Sheet { z, thickness, etch_depth, .. } => vec![z, thickness, etch_depth],
             Op::Transform { steps, .. } => steps
                 .iter()
                 .flat_map(|s| match s {
@@ -796,7 +801,20 @@ impl Model {
         )
     }
     pub fn sheet(&mut self, name: &str, input: FeatureId, z: impl Into<Expr>) -> FeatureId {
-        self.push(name, Op::Sheet { input, z: z.into() })
+        self.push(
+            name,
+            Op::Sheet { input, z: z.into(), thickness: default_zero_expr(), etch_depth: default_zero_expr() },
+        )
+    }
+    pub fn sheet_thick(
+        &mut self,
+        name: &str,
+        input: FeatureId,
+        z: impl Into<Expr>,
+        thickness: impl Into<Expr>,
+        etch_depth: impl Into<Expr>,
+    ) -> FeatureId {
+        self.push(name, Op::Sheet { input, z: z.into(), thickness: thickness.into(), etch_depth: etch_depth.into() })
     }
     pub fn transform(&mut self, name: &str, input: FeatureId, steps: Vec<TStep>) -> FeatureId {
         self.push(name, Op::Transform { input, steps })

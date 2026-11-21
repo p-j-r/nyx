@@ -174,12 +174,15 @@ pub struct RegionX {
     pub pml: Option<PmlInfo>,
 }
 
-/// An evaluated 2D zero-thickness sheet embedded at plane `z` in a 3D layer-stack model.
+/// An evaluated 2D sheet embedded at plane `z` in a 3D layer-stack model, with optional finite metal
+/// `thickness` (`[z, z + thickness]`) and substrate `etch_depth` trench (`[z - etch_depth, z]`).
 #[derive(Clone, Debug)]
 pub struct SheetX {
     pub name: String,
     pub feature: FeatureId,
     pub z: f64,
+    pub thickness: f64,
+    pub etch_depth: f64,
     pub expr: Node,
 }
 
@@ -925,11 +928,31 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         });
     }
     for f in list.features.iter().filter(|f| !f.suppressed) {
-        let Op::Sheet { input, z } = &f.op else { continue };
+        let Op::Sheet { input, z, thickness, etch_depth } = &f.op else { continue };
         if dim != 3 {
             return Err(GeomError(format!("Sheet '{}' is a 3D operation; this is a 2D model", f.name)));
         }
         let z0 = b.ev(z, f, "z")?;
+        let t_m = b.ev(thickness, f, "thickness")?;
+        let t_e = b.ev(etch_depth, f, "etch_depth")?;
+        if !t_m.is_finite() || t_m < 0.0 {
+            return Err(GeomError(format!("Sheet '{}' has thickness {t_m}; it must be non-negative", f.name)));
+        }
+        if !t_e.is_finite() || t_e < 0.0 {
+            return Err(GeomError(format!("Sheet '{}' has etch_depth {t_e}; it must be non-negative", f.name)));
+        }
+        if t_m > 0.0 && t_m < 1e-9 {
+            return Err(GeomError(format!(
+                "Sheet '{}' thickness {t_m:.3e} m is below the minimum 1.0e-9 m nanometer film tolerance",
+                f.name
+            )));
+        }
+        if t_e > 0.0 && t_e < 1e-9 {
+            return Err(GeomError(format!(
+                "Sheet '{}' etch_depth {t_e:.3e} m is below the minimum 1.0e-9 m nanometer trench tolerance",
+                f.name
+            )));
+        }
         b.sheet_z = Some(z0);
         let expr = b.inst(*input, Xf3::ID, "");
         b.sheet_z = None;
@@ -937,7 +960,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         if expr == Node::Empty {
             warnings.push(format!("sheet '{}' is built from a suppressed or empty feature", f.name));
         } else {
-            sheets.push(SheetX { name: f.name.clone(), feature: f.id, z: z0, expr });
+            sheets.push(SheetX { name: f.name.clone(), feature: f.id, z: z0, thickness: t_m, etch_depth: t_e, expr });
         }
     }
     let model_box = |prims: &[Arc<Prim>]| prims.iter().filter(|p| !p.aux).fold(Aabb::EMPTY, |a, p| a.union(&p.bbox3()));

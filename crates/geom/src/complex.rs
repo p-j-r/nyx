@@ -136,9 +136,14 @@ impl Face {
         u.clamp(0.0, 1.0)
     }
 
-    /// True when this face fragment comes from a 2D zero-thickness `Op::Sheet` feature.
+    /// True when this face fragment comes from a 2D `Op::Sheet` feature (zero-thickness sheet or thick-sheet cap/sidewall).
     pub fn is_sheet(&self) -> bool {
         self.prov.iter().any(|p| p.role == "sheet")
+    }
+
+    /// True when this face fragment bounds the interior cavity of a finite-thickness `Op::Sheet` conductor (`[z_s, z_s + t_m]`).
+    pub fn is_conductor_cavity(&self) -> bool {
+        self.is_sheet() && (self.first.is_none() != self.second.is_none())
     }
 }
 
@@ -267,7 +272,7 @@ impl Complex {
         v
     }
     /// 3D edge indices (`edges3`) forming the exterior 1D perimeter of `<sheet>`'s union of cap cells
-    /// at its plane `z0` (excluding internal fragment seams shared by two cap cells of the same sheet).
+    /// at its horizontal cap plane(s) (excluding internal fragment seams shared by two cap cells of the same sheet).
     pub fn sheet_perimeter_edges(&self, sheet: &str) -> Vec<u32> {
         if self.dim != 3 {
             return vec![];
@@ -280,12 +285,32 @@ impl Complex {
                         .iter()
                         .filter(|&&fi| {
                             let f = &self.faces[fi as usize];
-                            f.is_sheet() && f.name == sheet
+                            f.is_sheet() && matches!(f.geom, FaceGeom::Cap { .. }) && f.name == sheet
                         })
                         .count()
                         == 1
             })
             .collect()
+    }
+    /// Physical metal film thickness `t_m` (m) of a 3D `Op::Sheet` feature by name, if present.
+    pub fn sheet_thickness(&self, sheet: &str) -> Option<f64> {
+        self.stack.as_ref()?.sheet_thickness_m.get(sheet).copied()
+    }
+    /// Substrate over-etch trench depth `t_e` (m) of a 3D `Op::Sheet` feature by name, if present.
+    pub fn sheet_etch_depth(&self, sheet: &str) -> Option<f64> {
+        self.stack.as_ref()?.sheet_etch_depth_m.get(sheet).copied()
+    }
+    /// Map of sheet name -> metal film thickness `t_m` (m) on a 3D stack complex.
+    pub fn sheet_thickness_m(&self) -> std::collections::BTreeMap<String, f64> {
+        self.stack.as_ref().map_or_else(Default::default, |s| s.sheet_thickness_m.clone())
+    }
+    /// Map of sheet name -> substrate over-etch trench depth `t_e` (m) on a 3D stack complex.
+    pub fn sheet_etch_depth_m(&self) -> std::collections::BTreeMap<String, f64> {
+        self.stack.as_ref().map_or_else(Default::default, |s| s.sheet_etch_depth_m.clone())
+    }
+    /// True when 3D facet `i` bounds an interior finite-thickness `Op::Sheet` conductor cavity (`[z_s, z_s + t_m]`).
+    pub fn facet_is_conductor_cavity(&self, i: u32) -> bool {
+        self.dim == 3 && self.faces.get(i as usize).is_some_and(Face::is_conductor_cavity)
     }
     /// Converts the stored boxes and points of a freshly built stack complex to world coordinates and records the axis.
     pub(crate) fn set_world_frame(&mut self, axis: usize) {

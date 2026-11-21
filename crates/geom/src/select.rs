@@ -662,7 +662,7 @@ impl Ctx<'_> {
             Selector::Outer => {
                 let ids = self.filter(universe, |i| {
                     let (a, b) = cx.facet_sides(i);
-                    a.is_none() != b.is_none()
+                    (a.is_none() != b.is_none()) && !cx.facet_is_conductor_cavity(i)
                 });
                 EntitySet::new(facets, ids)
             }

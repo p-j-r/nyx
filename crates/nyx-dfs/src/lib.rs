@@ -9,6 +9,7 @@
 // The kernels index several arrays with one loop variable, the form that matches the formulas (as in femcore).
 #![allow(clippy::needless_range_loop)]
 
+pub mod ac_loss;
 mod common;
 pub mod electro;
 pub mod heat;
