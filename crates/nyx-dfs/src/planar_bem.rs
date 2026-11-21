@@ -535,6 +535,9 @@ pub fn can_use_planar_bem(mesh: &Discretisation, spec: &Problem) -> bool {
     if mesh.dim != 3 {
         return false;
     }
+    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. })) {
+        return false;
+    }
     let has_terminal = spec.bcs.iter().any(|b| matches!(b.kind, BcKind::Terminal(_)));
     if !has_terminal {
         return false;
@@ -983,6 +986,11 @@ pub fn solve_planar_bem_with_stack(
     let t0 = Instant::now();
     let order = spec.order;
     check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
+    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. })) {
+        return Err(
+            "unsupported: planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+        );
+    }
 
     let (terminals, panels, detected_stack) = if mesh.dim == 3 {
         let (t, p, s, _z) = extract_3d_panels_and_stack(mesh, spec)?;

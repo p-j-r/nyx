@@ -12,6 +12,10 @@
 //! preconditioned with smoothed-aggregation multigrid (`AmgSystem`, `amg`), falling back to the factorisation if
 //! multigrid does not converge. The thresholds that decide are `AMG_THRESHOLD*` and `LOBPCG_MIN_FREE`.
 
+pub use crate::farfield::{
+    assemble_boundary_mass_weighted, assemble_farfield_robin, farfield_centroid, farfield_positive_measure,
+    FarFieldPermittivity,
+};
 use crate::linalg::driver::DirectSolver;
 use crate::mesh::SimplexMesh;
 use crate::linalg::csr::{Coo, RCsr as Csr};

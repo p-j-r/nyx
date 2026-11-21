@@ -20,6 +20,12 @@ pub enum BcKind {
     SurfaceCharge(f64),
     /// named conductor terminal for multi-RHS capacitance matrix extraction
     Terminal(String),
+    /// asymptotic open/infinite far-field Robin / Bayliss-Turkel boundary condition
+    FarField {
+        order: usize,
+        decay_power: f64,
+        center: Option<[f64; 3]>,
+    },
     Temperature(f64),
     /// inward heat flux, W/m^2
     Flux(f64),
@@ -51,6 +57,7 @@ impl BcKind {
             BcKind::Ground => "Ground",
             BcKind::SurfaceCharge(_) => "Surface charge",
             BcKind::Terminal(_) => "Terminal",
+            BcKind::FarField { .. } => "Far-field open boundary",
             BcKind::Temperature(_) => "Temperature",
             BcKind::Flux(_) => "Heat flux",
             BcKind::Convection { .. } => "Convective cooling",
@@ -61,7 +68,14 @@ impl BcKind {
     }
 
     pub fn is_electrostatic(&self) -> bool {
-        matches!(self, BcKind::Potential(_) | BcKind::Ground | BcKind::SurfaceCharge(_) | BcKind::Terminal(_))
+        matches!(
+            self,
+            BcKind::Potential(_)
+                | BcKind::Ground
+                | BcKind::SurfaceCharge(_)
+                | BcKind::Terminal(_)
+                | BcKind::FarField { .. }
+        )
     }
 
     pub fn is_heat(&self) -> bool {
@@ -202,6 +216,13 @@ impl Problem {
                     vec![*current, direction[0], direction[1], direction[2]]
                 }
                 BcKind::FluxLoop { flux_wb, .. } => vec![*flux_wb],
+                BcKind::FarField { decay_power, center, .. } => {
+                    let mut v = vec![*decay_power];
+                    if let Some(c) = center {
+                        v.extend_from_slice(c);
+                    }
+                    v
+                }
                 BcKind::Ground | BcKind::Terminal(_) => vec![],
             };
             if vals.iter().any(|v| !v.is_finite()) {
@@ -211,6 +232,24 @@ impl Problem {
                     bc.kind.name(),
                     bc.labels
                 ));
+            }
+            if let BcKind::FarField { order, decay_power, .. } = &bc.kind {
+                if !(1..=2).contains(order) {
+                    return Err(format!(
+                        "boundary condition {} ({} on boundaries {:?}) has order {order}: it must be 1 or 2",
+                        i + 1,
+                        bc.kind.name(),
+                        bc.labels
+                    ));
+                }
+                if *decay_power <= 0.0 {
+                    return Err(format!(
+                        "boundary condition {} ({} on boundaries {:?}) has decay_power {decay_power}: it must be positive",
+                        i + 1,
+                        bc.kind.name(),
+                        bc.labels
+                    ));
+                }
             }
         }
         if let Study::HeatTransient { t_end, .. } = &self.study {
@@ -271,6 +310,30 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     return Err(Error::invalid("terminal condition requires a non-empty 'name'"));
                 }
                 BcKind::Terminal(name)
+            }
+            "far_field" => {
+                let order_i = p.integer("order");
+                if !(1..=2).contains(&order_i) {
+                    return Err(Error::invalid(format!("far_field condition 'order' must be 1 or 2, got {order_i}")));
+                }
+                let decay_power = p.number("decay_power");
+                if !decay_power.is_finite() || decay_power <= 0.0 {
+                    return Err(Error::invalid(format!(
+                        "far_field condition 'decay_power' must be positive, got {decay_power}"
+                    )));
+                }
+                let center = if p.has("center") {
+                    let cv = p.vector("center");
+                    if cv.len() != 3 || cv.iter().any(|x| !x.is_finite()) {
+                        return Err(Error::invalid(
+                            "far_field condition 'center' must be 3 finite numbers [cx, cy, cz]",
+                        ));
+                    }
+                    Some([cv[0], cv[1], cv[2]])
+                } else {
+                    None
+                };
+                BcKind::FarField { order: order_i as usize, decay_power, center }
             }
             "temperature" => BcKind::Temperature(p.number("value")),
             "flux" => BcKind::Flux(p.number("value")),
@@ -342,6 +405,14 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             return Err(Error::invalid(format!("'{}' is not {expected} boundary condition", kind.name())));
         }
         bcs.push(Bc { labels: r.labels, kind });
+    }
+    if matches!(study, Study::Electrostatic)
+        && formulation == "planar_bem"
+        && bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. }))
+    {
+        return Err(Error::Unsupported(
+            "planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+        ));
     }
     let params = dfs.params();
     let pp = Params::new(&spec.params, &params);

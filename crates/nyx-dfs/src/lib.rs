@@ -143,6 +143,36 @@ impl Physics for Dfs {
                 vec![ParamDesc::text("name", "Terminal name", "", "unique terminal identifier").required()],
             ),
             b(
+                "far_field",
+                "Far-field open boundary",
+                "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+                vec![
+                    ParamDesc::integer(
+                        "order",
+                        "Asymptotic order",
+                        1,
+                        1,
+                        "1: first-order multipole Robin condition; 2: 3D second-order symmetric Laplace-Beltrami correction",
+                    )
+                    .range(Some(1.0), Some(2.0)),
+                    ParamDesc::number(
+                        "decay_power",
+                        "Decay power",
+                        "",
+                        1.0,
+                        "asymptotic potential decay power gamma > 0 (V ~ r^-gamma; 1.0 for monopole, 2.0 for dipole)",
+                    )
+                    .range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::vector(
+                        "center",
+                        "Multipole center",
+                        "m",
+                        3,
+                        "optional multipole expansion center [cx, cy, cz]; omit to use conductor area-weighted centroid",
+                    ),
+                ],
+            ),
+            b(
                 "temperature",
                 "Temperature",
                 "Fixed temperature (heat transfer).",
@@ -316,6 +346,14 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
     }
     check_mesh(mesh)?;
     problem.check_finite().map_err(Error::NonFinite)?;
+    if matches!(problem.study, Study::Electrostatic)
+        && problem.formulation == "planar_bem"
+        && problem.bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. }))
+    {
+        return Err(Error::Unsupported(
+            "planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+        ));
+    }
     let mut result = {
         let _s = progress::stage(format!("solving diffusion on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
         let d = discretise(mesh)?;

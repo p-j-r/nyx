@@ -70,6 +70,56 @@
     },
     {
       "applies": "boundary",
+      "doc": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+      "kind": "far_field",
+      "name": "Far-field open boundary",
+      "params": [
+        {
+          "doc": "1: first-order multipole Robin condition; 2: 3D second-order symmetric Laplace-Beltrami correction",
+          "kind": {
+            "default": 1,
+            "max": 2,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Asymptotic order",
+          "name": "order",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "asymptotic potential decay power gamma > 0 (V ~ r^-gamma; 1.0 for monopole, 2.0 for dipole)",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Decay power",
+          "name": "decay_power",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional multipole expansion center [cx, cy, cz]; omit to use conductor area-weighted centroid",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Multipole center",
+          "name": "center",
+          "required": false,
+          "unit": "m"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
       "doc": "Fixed temperature (heat transfer).",
       "kind": "temperature",
       "name": "Temperature",
@@ -624,6 +674,58 @@
                   "required": [
                     "name"
                   ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+              "properties": {
+                "kind": {
+                  "const": "far_field"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "center": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Multipole center [m]. optional multipole expansion center [cx, cy, cz]; omit to use conductor area-weighted centroid",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "decay_power": {
+                      "default": 1.0,
+                      "description": "Decay power. asymptotic potential decay power gamma > 0 (V ~ r^-gamma; 1.0 for monopole, 2.0 for dipole)",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "order": {
+                      "default": 1,
+                      "description": "Asymptotic order. 1: first-order multipole Robin condition; 2: 3D second-order symmetric Laplace-Beltrami correction",
+                      "maximum": 2,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [],
                   "type": "object"
                 }
               },

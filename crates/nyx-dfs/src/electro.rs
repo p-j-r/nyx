@@ -287,8 +287,13 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
     let m_work = qp_mesh.as_ref().map_or(mesh, |(m, _, _)| m);
     let eps = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
     let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
-    let k = if spec.materials.has_tensor(TensorKind::Permittivity) {
-        let mut t = plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?);
+    let eps_tensors_rel: Option<Vec<M3>> = if spec.materials.has_tensor(TensorKind::Permittivity) {
+        Some(plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?))
+    } else {
+        None
+    };
+    let mut k = if let Some(ref tr) = eps_tensors_rel {
+        let mut t = tr.clone();
         t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
         if m_work.dim == 3 && m_work.has_curved() {
             assemble_laplace_tensor_curved_3d(m_work, order, &t)
@@ -307,6 +312,19 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
     let mut f = if rho.iter().any(|&r| r != 0.0) { assemble_source(m_work, order, &rho) } else { vec![0.0; n] };
     let mut volt: BTreeMap<i32, f64> = BTreeMap::new();
     for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            if !(1..=2).contains(ff_order) {
+                return Err(format!("far_field condition 'order' must be 1 or 2, got {ff_order}"));
+            }
+            if !decay_power.is_finite() || *decay_power <= 0.0 {
+                return Err(format!("far_field condition 'decay_power' must be positive, got {decay_power}"));
+            }
+            if let Some(c) = center {
+                if c.iter().any(|x| !x.is_finite()) {
+                    return Err("far_field condition 'center' has a NaN or infinite coordinate".into());
+                }
+            }
+        }
         for &lab in &bc.labels {
             match &bc.kind {
                 BcKind::Potential(v) => {
@@ -327,12 +345,28 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
                         f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
                     }
                 }
+                BcKind::FarField { .. } => {}
                 other => return Err(format!("'{}' is not an electrostatics boundary condition", other.name())),
             }
         }
     }
     if volt.is_empty() {
         return Err("electrostatics needs at least one potential, ground or terminal boundary".into());
+    }
+    let ref_labels: Vec<i32> = volt.keys().copied().collect();
+    let eps_ff = match &eps_tensors_rel {
+        Some(tr) => FarFieldPermittivity::Tensor(tr),
+        None => FarFieldPermittivity::Scalar(&eps),
+    };
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !volt.contains_key(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid(m_work, &ref_labels));
+                let k_far = assemble_farfield_robin(m_work, &ff_labs, order, *ff_order, *decay_power, c, EPS0, eps_ff);
+                k = k.add_scaled(&k_far, 1.0);
+            }
+        }
     }
     let (fixed, vals) = dirichlet_constraints(m_work, &volt, order);
     Ok(ElectroAssembly { k, f, fixed, vals, volt })
@@ -478,6 +512,19 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
     }
 
     let tls = build_tls_meta(mesh, spec);
+    let ref_labels: Vec<i32> = asm.volt.keys().copied().collect();
+    let has_positive_farfield = spec.bcs.iter().any(|bc| {
+        if let BcKind::FarField { center, .. } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !asm.volt.contains_key(l)).collect();
+            if ff_labs.is_empty() {
+                return false;
+            }
+            let c = center.unwrap_or_else(|| farfield_centroid(mesh, &ref_labels));
+            farfield_positive_measure(mesh, &ff_labs, c) > 0.0
+        } else {
+            false
+        }
+    });
 
     if terminals.is_empty() {
         let (v, solver_note) = solve_potential(mesh, spec, &asm)?;
@@ -499,6 +546,11 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
             scalars.push((
                 "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
                 Scalar::Num(2.0 * w / (dv[1] - dv[0]).powi(2)),
+            ));
+        } else if dv.len() == 1 && has_positive_farfield && dv[0].abs() > 1e-12 {
+            scalars.push((
+                "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
+                Scalar::Num(2.0 * w / dv[0].powi(2)),
             ));
         }
         scalars.push(tls.scalar());
@@ -536,9 +588,9 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         }
     }
     let bg_dofs: BTreeSet<usize> = boundary_dofs(mesh, &bg_labels, order).into_iter().collect();
-    if n_term == 1 && bg_dofs.is_empty() {
+    if n_term == 1 && bg_dofs.is_empty() && !has_positive_farfield {
         return Err(
-            "electrostatics with a single terminal needs at least one ground or potential reference boundary".into()
+            "electrostatics with a single terminal needs at least one ground, potential, or far_field reference boundary".into()
         );
     }
 
