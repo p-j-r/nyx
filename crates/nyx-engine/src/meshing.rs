@@ -18,8 +18,10 @@ pub struct MeshedModel {
     mesh: Arc<Mesh>,
     eval: Arc<Evaluated>,
     labels: LabelMap,
-    /// the boundary labels of the two end faces of a model swept along y (`ymin`, `ymax`)
+    /// the boundary labels of the two end faces of a 2D model swept along y (`ymin`, `ymax`)
     ends: Option<(i32, i32)>,
+    /// the boundary label sets of the two end planes (`ymin`, `ymax`) of a 3D model swept along y
+    ends_3d: Option<(Vec<i32>, Vec<i32>)>,
     /// what the mesher reports (domains, cells per domain, the element size the waves asked for, the adaptation); absent for a swept mesh
     report: Option<femcore::meshing::request::MeshReport>,
     /// the solver view of the mesh (edges, P2 numbering), made on first use: what the plots read
@@ -35,11 +37,33 @@ impl MeshedModel {
         swept: bool,
     ) -> Result<MeshedModel, Error> {
         let top = mesh.facet_labels.iter().copied().max().unwrap_or(0);
-        let ends = swept.then_some((top - 1, top));
+        let (ends, ends_3d) = if swept && eval.list.dim == 2 {
+            (Some((top - 1, top)), None)
+        } else if swept && eval.list.dim == 3 && mesh.dim == 3 && mesh.n_points() > 0 {
+            let (lo, hi) = mesh.bbox();
+            let tol = 1e-8 * (hi[1] - lo[1]).abs().max(1e-30);
+            let mut ymin_l = Vec::new();
+            let mut ymax_l = Vec::new();
+            for f in 0..mesh.n_facets() {
+                let fv = mesh.facet(f);
+                if fv.iter().all(|&v| (mesh.point(v as usize)[1] - lo[1]).abs() <= tol) {
+                    ymin_l.push(mesh.facet_labels[f]);
+                } else if fv.iter().all(|&v| (mesh.point(v as usize)[1] - hi[1]).abs() <= tol) {
+                    ymax_l.push(mesh.facet_labels[f]);
+                }
+            }
+            ymin_l.sort_unstable();
+            ymin_l.dedup();
+            ymax_l.sort_unstable();
+            ymax_l.dedup();
+            (None, Some((ymin_l, ymax_l)))
+        } else {
+            (None, None)
+        };
         let exchange = Mesh::from_solver_mesh(&mesh).map_err(Error::Invalid)?;
         let solver = std::sync::OnceLock::new();
         let _ = solver.set(Arc::new(mesh));
-        Ok(MeshedModel { mesh: Arc::new(exchange), eval, labels, ends, report: None, solver })
+        Ok(MeshedModel { mesh: Arc::new(exchange), eval, labels, ends, ends_3d, report: None, solver })
     }
 
     /// The same, with the report the mesher made of it.
@@ -95,7 +119,7 @@ impl MeshedModel {
             "regions": self.labels.domains.iter().map(|d| json!({ "label": d.id, "name": d.name })).collect::<Vec<_>>(),
             "boundaries": boundaries,
             "groups": self.labels.groups.iter().map(|g| json!({ "name": g.name, "rule": g.rule })).collect::<Vec<_>>(),
-            "swept_ends": self.ends.map(|_| json!(["ymin", "ymax"])),
+            "swept_ends": (self.ends.is_some() || self.ends_3d.is_some()).then(|| json!(["ymin", "ymax"])),
             "report": self.report,
         })
     }
@@ -135,20 +159,37 @@ impl LabelResolver for MeshedModel {
 
     fn boundaries(&self, selector: &str) -> Result<Vec<i32>, Error> {
         let s = selector.trim();
-        match (s, self.ends) {
-            ("ymin", Some((a, _))) => return Ok(vec![a]),
-            ("ymax", Some((_, b))) => return Ok(vec![b]),
-            ("ymin" | "ymax", None) => {
-                return Err(Error::invalid(
-                    "ymin and ymax are the ends of a model swept along y; this model is not swept",
-                ))
+        if s == "ymin" {
+            if let Some((a, _)) = self.ends {
+                return Ok(vec![a]);
             }
-            _ => {}
+            if let Some((a, _)) = &self.ends_3d {
+                return Ok(a.clone());
+            }
+            return Err(Error::invalid("ymin and ymax are the ends of a model swept along y; this model is not swept"));
+        }
+        if s == "ymax" {
+            if let Some((_, b)) = self.ends {
+                return Ok(vec![b]);
+            }
+            if let Some((_, b)) = &self.ends_3d {
+                return Ok(b.clone());
+            }
+            return Err(Error::invalid("ymin and ymax are the ends of a model swept along y; this model is not swept"));
         }
         // a boundary name (`rib.top`, `air|rib`) or a tag first; these are not always valid selector text
         let named = self.labels.boundary(s);
         if !named.is_empty() {
             return Ok(named);
+        }
+        if let Some((lhs, rhs)) = s.split_once('|') {
+            if !lhs.contains('(') && !rhs.contains('(') && !lhs.contains('|') && !rhs.contains('|') {
+                let swapped = format!("{}|{}", rhs.trim(), lhs.trim());
+                let named_swapped = self.labels.boundary(&swapped);
+                if !named_swapped.is_empty() {
+                    return Ok(named_swapped);
+                }
+            }
         }
         let sel = Selector::parse(s).map_err(|e| Error::invalid(format!("selector '{s}': {e}")))?;
         let r = self.eval.resolve(&sel).map_err(|e| Error::invalid(format!("selector '{s}': {e}")))?;
@@ -192,14 +233,85 @@ fn mesh_error(message: String) -> Error {
 /// layers, element sizes from the waves of the study. A 2D model with `sweep` layers is extruded along y into a 3D mesh afterwards.
 pub struct FemcoreMesher;
 
+fn resolve_sweep_layers(
+    layers: &[crate::project::SweepLayer],
+    labels: &LabelMap,
+) -> Result<Vec<femcore::meshing::mesher::RemappedLayer>, Error> {
+    let all_names = || labels.domains.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ");
+    let mut out = Vec::with_capacity(layers.len());
+    for l in layers {
+        let fill = match &l.fill {
+            Some(name) => Some(labels.domain(name).ok_or_else(|| {
+                Error::invalid(format!("sweep layer fill: no region '{name}' (the regions are: {})", all_names()))
+            })?),
+            None => None,
+        };
+        let mut remap = std::collections::BTreeMap::new();
+        if let Some(map) = &l.regions {
+            for (src, dst) in map {
+                let sid = labels.domain(src).ok_or_else(|| {
+                    Error::invalid(format!("sweep layer regions: no region '{src}' (the regions are: {})", all_names()))
+                })?;
+                let did = labels.domain(dst).ok_or_else(|| {
+                    Error::invalid(format!("sweep layer regions: no region '{dst}' (the regions are: {})", all_names()))
+                })?;
+                remap.insert(sid, did);
+            }
+        }
+        out.push((
+            femcore::meshing::mesher::Layer { thickness: l.thickness, n: l.n, domain_offset: l.domain_offset, fill },
+            remap,
+        ));
+    }
+    Ok(out)
+}
+
 impl Mesher for FemcoreMesher {
     fn mesh(&self, geometry: &FeatureList, s: &MeshSettings, sizing: Option<&Sizing>) -> Result<MeshedModel, Error> {
         use femcore::meshing::request::{mesh_request, MeshRequest, MesherRequest, WavesRequest};
         if !(s.h > 0.0 && s.h.is_finite()) {
             return Err(Error::invalid("the element size must be a positive finite number"));
         }
-        if s.sweep.is_some() && geometry.dim != 2 {
-            return Err(Error::invalid("`sweep` extrudes a 2D cross-section; this model is 3D, mesh it directly"));
+        if let Some(layers) = &s.sweep {
+            if geometry.dim == 3 {
+                let _stage = femcore::progress::stage(format!("sweeping 3D geometry along y (element size {} m)", s.h));
+                let scale_factor = s.adapt_scale.unwrap_or(1.0);
+                if !(scale_factor > 0.0 && scale_factor.is_finite()) {
+                    return Err(Error::invalid("the adaptation scale must be positive"));
+                }
+                let ev = femcore::meshing::geomdrive::evaluate(geometry).map_err(mesh_error)?;
+                let labels = ev.label_map().map_err(|e| Error::invalid(e.to_string()))?;
+                let ls = resolve_sweep_layers(layers, &labels)?;
+                let nr = ev.regions().len();
+                let region_h = match (s.physics_sizing, sizing) {
+                    (true, Some(sz)) => {
+                        let ps = femcore::meshing::physics_size::PhysicsSizing {
+                            points_per_wavelength: s.points_per_wavelength,
+                            pml_relax: 1.5,
+                            eigen_headroom: sz.headroom.max(1.0),
+                        };
+                        let names: Vec<&str> = labels.domains.iter().map(|d| d.name.as_str()).collect();
+                        femcore::meshing::wave_sizes_by_region(&ev, &labels, &sz.expand_wildcards(&names), &ps)
+                            .map_err(mesh_error)?
+                            .into_iter()
+                            .map(|w| w * scale_factor)
+                            .collect()
+                    }
+                    _ => vec![f64::INFINITY; nr],
+                };
+                let sizes = femcore::meshing::geomdrive3::Sizes3 { region_h, skip: vec![] };
+                let mesh = femcore::meshing::mesher::sweep_model_3d(
+                    &ev,
+                    &labels,
+                    s.h * scale_factor,
+                    s.max_dev,
+                    25.0,
+                    &sizes,
+                    &ls,
+                )
+                .map_err(mesh_error)?;
+                return MeshedModel::new(mesh, Arc::new(ev), labels, true);
+            }
         }
         let waves = match (s.physics_sizing, sizing) {
             (true, Some(sz)) => Some(WavesRequest {
@@ -229,28 +341,11 @@ impl Mesher for FemcoreMesher {
         let (g, report) = mesh_request(geometry, &req).map_err(mesh_error)?;
         let (mut mesh, eval, labels) = (g.mesh, g.eval, g.labels);
         if let Some(layers) = &s.sweep {
-            let mut ls = Vec::with_capacity(layers.len());
-            for l in layers {
-                let fill = match &l.fill {
-                    Some(name) => Some(labels.domain(name).ok_or_else(|| {
-                        Error::invalid(format!(
-                            "sweep layer fill: no region '{name}' (the regions are: {})",
-                            labels.domains.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")
-                        ))
-                    })?),
-                    None => None,
-                };
-                ls.push(femcore::meshing::mesher::Layer {
-                    thickness: l.thickness,
-                    n: l.n,
-                    domain_offset: l.domain_offset,
-                    fill,
-                });
-            }
+            let ls = resolve_sweep_layers(layers, &labels)?;
             // numbered in the order of their coordinates, so that opposite side walls of a periodic cell are cut the same way
             // and a Floquet condition can pair them (`sort_nodes`)
             mesh = femcore::meshing::geomdrive::sort_nodes(&mesh);
-            mesh = femcore::meshing::mesher::extrude_y(&mesh, &ls, 0.0).map_err(mesh_error)?;
+            mesh = femcore::meshing::mesher::extrude_y_with_remap(&mesh, &ls, 0.0).map_err(mesh_error)?;
             return MeshedModel::new(mesh, eval, labels, true);
         }
         Ok(MeshedModel::new(mesh, eval, labels, false)?.with_report(report))

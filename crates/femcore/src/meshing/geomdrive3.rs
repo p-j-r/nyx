@@ -15,7 +15,7 @@ use crate::mesh::cells::CellMesh;
 use crate::mesh::SimplexMesh;
 use crate::meshing::curve3::curve_boundary_edges;
 use crate::meshing::geomdrive::{GeomMeshOpts, MeshedGeom};
-use crate::meshing::mesher3d::{mesh_3d, Domain3, Report3d, Spec3d};
+use crate::meshing::mesher3d::{mesh_3d, Domain3, PeriodicAxis3, Report3d, Spec3d};
 use geom::eval::Evaluated;
 use geom::labels::LabelMap;
 use geom::model::RegionKind;
@@ -34,6 +34,8 @@ pub struct GeomDomain3<'a> {
     face_label: Vec<i32>,
     /// per face: the element size next to it that a `Size` rule or the chord limit asks for (infinite: none), ADR 83
     face_h: Vec<f64>,
+    /// axis-aligned periodic face pairs whose planes are aligned and enforced parent->child by the lattice mesher
+    periodic_axes: Vec<PeriodicAxis3>,
 }
 
 impl<'a> GeomDomain3<'a> {
@@ -100,11 +102,47 @@ impl<'a> GeomDomain3<'a> {
                 }
             })
             .collect();
-        let boxes = (0..nf as u32).map(|i| cx.facet_bbox(i)).collect();
+        let boxes: Vec<geom::math::Aabb> = (0..nf as u32).map(|i| cx.facet_bbox(i)).collect();
         let face_label = (0..nf as u32)
             .map(|i| labels.label_of_edge(i).ok_or_else(|| format!("face '{}' has no boundary label", cx.facet_name(i))))
             .collect::<Result<Vec<i32>, String>>()?;
-        Ok(GeomDomain3 { ev, labels, region_h, meshable, sides, boxes, face_label, face_h })
+        let mut periodic_axes: Vec<PeriodicAxis3> = Vec::new();
+        for pp in ev.periodic_pairs() {
+            if let Some(pa) = Self::extract_periodic_axis(pp, &boxes) {
+                if !periodic_axes.iter().any(|x| x.axis == pa.axis) {
+                    periodic_axes.push(pa);
+                }
+            }
+        }
+        periodic_axes.sort_by_key(|p| p.axis);
+        Ok(GeomDomain3 { ev, labels, region_h, meshable, sides, boxes, face_label, face_h, periodic_axes })
+    }
+
+    fn extract_periodic_axis(pp: &geom::sim::PeriodicPair, boxes: &[geom::math::Aabb]) -> Option<PeriodicAxis3> {
+        if pp.a.kind != EntityKind::Faces || pp.b.kind != EntityKind::Faces || pp.a.ids.is_empty() || pp.b.ids.is_empty() {
+            return None;
+        }
+        let t = pp.translation;
+        let t_len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt();
+        if !(t_len > 0.0 && t_len.is_finite()) {
+            return None;
+        }
+        let axis = (0..3).find(|&k| (0..3).all(|m| m == k || t[m].abs() <= 1e-9 * t_len))?;
+        let union_box = |ids: &[u32]| -> geom::math::Aabb {
+            ids.iter().fold(geom::math::Aabb::EMPTY, |acc, &id| acc.union(&boxes[id as usize]))
+        };
+        let (ba, bb) = (union_box(&pp.a.ids), union_box(&pp.b.ids));
+        if (ba.hi[axis] - ba.lo[axis]).abs() > 1e-6 * t_len || (bb.hi[axis] - bb.lo[axis]).abs() > 1e-6 * t_len {
+            return None;
+        }
+        let ca = 0.5 * (ba.lo[axis] + ba.hi[axis]);
+        let cb = 0.5 * (bb.lo[axis] + bb.hi[axis]);
+        let (lo, hi) = (ca.min(cb), ca.max(cb));
+        if ((hi - lo) - t_len).abs() <= 1e-6 * t_len {
+            Some(PeriodicAxis3 { axis, lo, hi })
+        } else {
+            None
+        }
     }
 
     /// Adds the chord limit `max_dev` (metres) of the request to every curved face: the element size at which a chord stays within it
@@ -120,8 +158,8 @@ impl<'a> GeomDomain3<'a> {
         self
     }
 
-    /// A face with a size request that a periodic face is within reach of: refused (the two faces of a pair would be refined differently
-    /// and no longer match; congruent periodic faces are R30 of `capability-r7-periodic-cells`).
+    /// A face with a size request that a non-axis-aligned periodic face is within reach of: refused when not handled by axis-aligned
+    /// parent->child periodic conformance.
     pub fn check_periodic_faces(&self) -> Result<(), String> {
         if !self.face_h.iter().any(|h| h.is_finite()) {
             return Ok(());
@@ -129,6 +167,11 @@ impl<'a> GeomDomain3<'a> {
         let h_glob = self.coarsest_meshed_size();
         let gap = |a: &geom::math::Aabb, b: &geom::math::Aabb| (0..3).map(|k| (a.lo[k] - b.hi[k]).max(b.lo[k] - a.hi[k]).max(0.0)).fold(0.0, f64::max);
         for pp in self.ev.periodic_pairs() {
+            if Self::extract_periodic_axis(pp, &self.boxes)
+                .is_some_and(|pa| self.periodic_axes.iter().any(|x| x.axis == pa.axis && (x.lo - pa.lo).abs() <= 1e-6 * (pa.hi - pa.lo) && (x.hi - pa.hi).abs() <= 1e-6 * (pa.hi - pa.lo)))
+            {
+                continue;
+            }
             for &pf in pp.a.ids.iter().chain(pp.b.ids.iter()) {
                 for (i, &hf) in self.face_h.iter().enumerate() {
                     if hf.is_finite() && gap(&self.boxes[pf as usize], &self.boxes[i]) < (h_glob - hf).max(0.0) / 0.3 + 1e-12 {
@@ -265,6 +308,9 @@ impl Domain3 for GeomDomain3<'_> {
             }
         }
         false
+    }
+    fn periodic_axes(&self) -> Vec<PeriodicAxis3> {
+        self.periodic_axes.clone()
     }
 }
 

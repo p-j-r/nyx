@@ -71,3 +71,164 @@ fn a_fill_region_that_does_not_exist_is_refused_by_name() {
     let err = e.call("mesh_build", &json!({})).unwrap_err().to_string();
     assert!(err.contains("Nope") && err.contains("Host"), "{err}");
 }
+
+#[test]
+fn a_swept_2d_section_remaps_regions_per_layer_and_refuses_unknown_names() {
+    let (lx, lz, ly) = (1.0e-6, 0.8e-6, 0.4e-6);
+    let feats = json!([
+        {"id": 1, "name": "clad", "op": {"Rect": {"min": [0.0, 0.0], "max": [lx, lz]}}, "origin": "Code", "suppressed": false, "tags": []},
+        {"id": 2, "name": "core", "op": {"Rect": {"min": [0.25 * lx, 0.3 * lz], "max": [0.55 * lx, 0.7 * lz]}}, "origin": "Code", "suppressed": false, "tags": []},
+        {"id": 3, "name": "teeth", "op": {"Rect": {"min": [0.55 * lx, 0.3 * lz], "max": [0.75 * lx, 0.7 * lz]}}, "origin": "Code", "suppressed": false, "tags": []},
+        {"id": 4, "name": "overlay", "op": {"Overlay": {"naming": "Feature", "pins": [], "regions": [
+            {"input": 1, "kind": "Material", "name": "Host", "pinned_id": null},
+            {"input": 2, "kind": "Material", "name": "Core", "pinned_id": null},
+            {"input": 3, "kind": "Material", "name": "Teeth", "pinned_id": null}]}}, "origin": "Code", "suppressed": false, "tags": []}
+    ]);
+    let proj = json!({
+        "active": null, "format": 1, "title": "2D per-layer region remap",
+        "geometry": {"dim": 2, "features": feats, "format": 1, "params": []},
+        "mesh": {
+            "h": 0.2e-6,
+            "sweep": [
+                {"thickness": 0.5 * ly, "n": 2},
+                {"thickness": 0.5 * ly, "n": 2, "regions": {"Teeth": "Host"}}
+            ]
+        },
+        "physics": []
+    });
+    let mut e = Engine::new();
+    e.call("project_load", &json!({"json": proj.to_string()})).unwrap();
+    e.call("mesh_build", &json!({})).unwrap();
+    let model = e.model().unwrap().clone();
+    let core_id = model.regions().iter().find(|r| r.1 == "Core").unwrap().0;
+    let teeth_id = model.regions().iter().find(|r| r.1 == "Teeth").unwrap().0;
+    let m = model.solver_mesh();
+    let mut core_first_half = 0;
+    let mut core_second_half = 0;
+    let mut teeth_first_half = 0;
+    let mut teeth_second_half = 0;
+    for c in 0..m.n_cells() {
+        let ym: f64 = m.cell(c).iter().map(|&v| m.point(v as usize)[1]).sum::<f64>() / 4.0;
+        if m.cell_labels[c] == core_id {
+            if ym < 0.5 * ly {
+                core_first_half += 1;
+            } else {
+                core_second_half += 1;
+            }
+        } else if m.cell_labels[c] == teeth_id {
+            if ym < 0.5 * ly {
+                teeth_first_half += 1;
+            } else {
+                teeth_second_half += 1;
+            }
+        }
+    }
+    assert!(core_first_half > 0 && core_second_half > 0, "Core persists in both halves");
+    assert!(teeth_first_half > 0, "Teeth exists in the first half");
+    assert_eq!(teeth_second_half, 0, "Teeth is remapped to Host in the second half");
+
+    // Unknown region name in `regions` remap is refused clearly
+    let mut bad = proj;
+    bad["mesh"]["sweep"][1]["regions"] = json!({"Teeth": "MissingRegion"});
+    e.call("project_load", &json!({"json": bad.to_string()})).unwrap();
+    let err = e.call("mesh_build", &json!({})).unwrap_err().to_string();
+    assert!(err.contains("MissingRegion"), "{err}");
+}
+
+#[test]
+fn a_3d_corrugated_grating_swept_by_layers_keeps_3d_selectors_and_congruent_periodic_ends() {
+    use femcore::periodic::match_vertices;
+    use femcore::props::Periodic;
+    use geom::model::Model;
+    use geom::select::Selector;
+    use nyx_physics::LabelResolver;
+    use std::collections::BTreeSet;
+
+    let lambda = 0.44e-6;
+    let mut gm = Model::new_3d();
+    let clad = gm.box_("clad", (-1.0e-6, 0.0, -0.8e-6), (1.0e-6, lambda, 0.8e-6));
+    let core = gm.box_("core", (-0.225e-6, 0.0, -0.11e-6), (0.225e-6, lambda, 0.11e-6));
+    let teeth = gm.box_("teeth", (0.225e-6, 0.0, -0.11e-6), (0.325e-6, 0.5 * lambda, 0.11e-6));
+    gm.overlay(&[("SiO2", clad), ("Si_Core", core), ("Si_Teeth", teeth)]);
+    gm.size(
+        "si_size",
+        Selector::parse("region(Si_Core) | region(Si_Teeth)").unwrap(),
+        Some(0.09e-6.into()),
+        None,
+        None,
+    );
+    gm.periodic(
+        "py",
+        Selector::parse("outer & plane(y = 0)").unwrap(),
+        Selector::parse(&format!("outer & plane(y = {lambda:e})")).unwrap(),
+        (0.0, lambda, 0.0),
+    );
+    let proj = json!({
+        "active": null, "format": 1, "title": "3D swept corrugated grating",
+        "geometry": serde_json::to_value(&gm.list).unwrap(),
+        "mesh": {
+            "h": 0.25e-6,
+            "sweep": [
+                {"thickness": 0.5 * lambda, "n": 2},
+                {"thickness": 0.5 * lambda, "n": 2}
+            ]
+        },
+        "physics": []
+    });
+    let mut e = Engine::new();
+    e.call("project_load", &json!({"json": proj.to_string()})).unwrap();
+    e.call("mesh_build", &json!({})).unwrap();
+    let model = e.model().unwrap().clone();
+    let core_id = model.regions().iter().find(|r| r.1 == "Si_Core").unwrap().0;
+    let teeth_id = model.regions().iter().find(|r| r.1 == "Si_Teeth").unwrap().0;
+    let m = model.solver_mesh();
+    assert_eq!(m.dim, 3);
+
+    let mut teeth_in_first = 0;
+    let mut teeth_in_second = 0;
+    let mut core_in_first = 0;
+    let mut core_in_second = 0;
+    for c in 0..m.n_cells() {
+        let ym: f64 = m.cell(c).iter().map(|&v| m.point(v as usize)[1]).sum::<f64>() / 4.0;
+        if m.cell_labels[c] == teeth_id {
+            if ym < 0.5 * lambda {
+                teeth_in_first += 1;
+            } else {
+                teeth_in_second += 1;
+            }
+        } else if m.cell_labels[c] == core_id {
+            if ym < 0.5 * lambda {
+                core_in_first += 1;
+            } else {
+                core_in_second += 1;
+            }
+        }
+    }
+    assert!(core_in_first > 0 && core_in_second > 0, "Si_Core exists in both layers");
+    assert!(teeth_in_first > 0 && teeth_in_second == 0, "Si_Teeth exists only in first half-period");
+
+    // 3D selectors and ymin/ymax resolve cleanly and match periodic faces
+    let src = model.boundaries("outer & plane(y = 0)").unwrap();
+    let dst = model.boundaries(&format!("outer & plane(y = {lambda:e})")).unwrap();
+    let iface = model.boundaries("Si_Core|SiO2").unwrap();
+    assert!(!src.is_empty() && !dst.is_empty() && !iface.is_empty());
+    assert_eq!(model.boundaries("ymin").unwrap(), src);
+    assert_eq!(model.boundaries("ymax").unwrap(), dst);
+
+    let matched = match_vertices(&m, &Periodic { source: src, dest: dst.clone(), phase: 0.0 })
+        .expect("3D swept periodic ends must match vertex for vertex");
+    let dst_tris: BTreeSet<[u32; 3]> = (0..m.n_facets())
+        .filter(|&f| dst.contains(&m.facet_labels[f]))
+        .map(|f| {
+            let mut t = [m.facet(f)[0], m.facet(f)[1], m.facet(f)[2]];
+            t.sort_unstable();
+            t
+        })
+        .collect();
+    for &fc in &matched.src_facets {
+        let v = m.facet(fc);
+        let mut vt = [matched.map[&v[0]], matched.map[&v[1]], matched.map[&v[2]]];
+        vt.sort_unstable();
+        assert!(dst_tris.contains(&vt), "triangle {vt:?} missing on destination periodic face");
+    }
+}

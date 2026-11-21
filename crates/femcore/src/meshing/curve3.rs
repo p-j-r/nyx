@@ -80,7 +80,7 @@ pub fn curve_edges(
         }
     }
     let edges: Vec<[u32; 2]> = set.into_iter().collect();
-    let nodes: Vec<Option<[f64; 3]>> = edges
+    let mut nodes: Vec<Option<[f64; 3]>> = edges
         .par_iter()
         .map(|&[a, b]| {
             let (pa, pb) = (pos(a), pos(b));
@@ -94,6 +94,83 @@ pub fn curve_edges(
             (off > MIN_OFFSET * len && off < MAX_OFFSET * len && q.iter().all(|x| x.is_finite())).then_some(q)
         })
         .collect();
+
+    // Sync curved mid-edge projections across axis-aligned periodic boundary faces from parent (lo) to child (hi)
+    let periodic_axes = dom.periodic_axes();
+    let mut periodic_edge_parent: HashMap<[u32; 2], ([u32; 2], [f64; 3])> = HashMap::new();
+    if !periodic_axes.is_empty() && !edges.is_empty() {
+        let mut verts: BTreeSet<u32> = BTreeSet::new();
+        for &[a, b] in &edges {
+            verts.insert(a);
+            verts.insert(b);
+        }
+        let (mut blo, mut bhi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for &v in &verts {
+            let p = pos(v);
+            for k in 0..3 {
+                blo[k] = blo[k].min(p[k]);
+                bhi[k] = bhi[k].max(p[k]);
+            }
+        }
+        let extent = (0..3).map(|k| bhi[k] - blo[k]).fold(0.0f64, f64::max).max(1e-300);
+        let tol = 1e-10 * extent;
+        let mut per_axis: [Option<(f64, f64)>; 3] = [None; 3];
+        for pa in &periodic_axes {
+            if pa.axis < 3 && pa.hi > pa.lo {
+                per_axis[pa.axis] = Some((pa.lo, pa.hi));
+            }
+        }
+        let mut v_bits: HashMap<u32, u8> = HashMap::new();
+        for &v in &verts {
+            let p = pos(v);
+            let mut bits = 0u8;
+            for (k, slot) in per_axis.iter().enumerate() {
+                if let Some((lo, hi)) = *slot {
+                    if (p[k] - lo).abs() <= tol {
+                        bits |= 1 << (k + 3);
+                    } else if (p[k] - hi).abs() <= tol {
+                        bits |= 1 << k;
+                    }
+                }
+            }
+            if bits != 0 {
+                v_bits.insert(v, bits);
+            }
+        }
+        let bverts: Vec<(u32, [f64; 3], u8)> = v_bits.iter().map(|(&v, &b)| (v, pos(v), b)).collect();
+        let find_shifted = |v: u32, shift: [f64; 3]| -> Option<u32> {
+            let pv = pos(v);
+            let target = [pv[0] - shift[0], pv[1] - shift[1], pv[2] - shift[2]];
+            bverts
+                .iter()
+                .filter(|(_, p, _)| (0..3).all(|k| (p[k] - target[k]).abs() <= tol))
+                .min_by(|a, b| norm(sub(a.1, target)).total_cmp(&norm(sub(b.1, target))))
+                .map(|x| x.0)
+        };
+        let edge_idx: HashMap<[u32; 2], usize> = edges.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+        for (ei, &[a, b]) in edges.iter().enumerate() {
+            let (Some(&ba), Some(&bb)) = (v_bits.get(&a), v_bits.get(&b)) else { continue };
+            let child_shared = (ba & bb) & 0b111;
+            if child_shared == 0 {
+                continue;
+            }
+            let mut shift = [0.0; 3];
+            for (k, slot) in per_axis.iter().enumerate() {
+                if let Some((lo, hi)) = *slot {
+                    if (child_shared & (1 << k)) != 0 {
+                        shift[k] = hi - lo;
+                    }
+                }
+            }
+            if let (Some(pa), Some(pb)) = (find_shifted(a, shift), find_shifted(b, shift)) {
+                let pe = pair(pa, pb);
+                if let Some(&pi) = edge_idx.get(&pe) {
+                    periodic_edge_parent.insert([a, b], (pe, shift));
+                    nodes[ei] = nodes[pi].map(|q| [q[0] + shift[0], q[1] + shift[1], q[2] + shift[2]]);
+                }
+            }
+        }
+    }
     // candidate edges (those that moved), by index
     let mut cand: Vec<([u32; 2], [f64; 3])> = vec![];
     for (e, n) in edges.iter().zip(&nodes) {
@@ -185,6 +262,17 @@ pub fn curve_edges(
         }
         for e in bump {
             level[e] += 1;
+        }
+        if !periodic_edge_parent.is_empty() {
+            for (ci, (ce, _)) in cand.iter().enumerate() {
+                if let Some((pe, _)) = periodic_edge_parent.get(ce) {
+                    if let Some(&pi) = index.get(pe) {
+                        let mx = level[ci].max(level[pi]);
+                        level[ci] = mx;
+                        level[pi] = mx;
+                    }
+                }
+            }
         }
     }
 

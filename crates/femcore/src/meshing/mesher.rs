@@ -222,25 +222,44 @@ pub(crate) fn mesh_chains(
     Ok(SimplexMesh::new(2, points, cells, cell_labels, facets, facet_labels))
 }
 
+/// A sweep [`Layer`] paired with an optional domain-label remap `(source_domain -> target_domain)` for that layer.
+pub type RemappedLayer = (Layer, std::collections::BTreeMap<i32, i32>);
+
 /// Sweeps the x-z cross-section of the wafer frame (a 2D mesh with the columns `(x, z)`) along the propagation axis y through the given
 /// layers: a point `(x, z)` becomes `(x, y, z)`. Each prism is split into three tetrahedra consistently with the vertex numbers, so
 /// neighbours always match. The side walls keep the 2D boundary numbers, the end at `y0` is `nb + 1` and the far end `nb + 2`, with `nb` the
 /// largest 2D boundary number. The domain offsets of the layers are added to the cells' domain numbers.
 pub fn extrude_y(m2: &SimplexMesh, layers: &[Layer], y0: f64) -> Result<SimplexMesh, String> {
+    let mapped: Vec<RemappedLayer> =
+        layers.iter().cloned().map(|l| (l, std::collections::BTreeMap::new())).collect();
+    extrude_y_with_remap(m2, &mapped, y0)
+}
+
+/// Like [`extrude_y`], with an optional per-layer domain map `(source_domain -> target_domain)` applied when `l.fill` is `None`.
+pub fn extrude_y_with_remap(
+    m2: &SimplexMesh,
+    layers: &[RemappedLayer],
+    y0: f64,
+) -> Result<SimplexMesh, String> {
     extrude_with(m2, layers, y0, |p, t| [p[0], t, p[1]])
 }
 
-fn extrude_with(m2: &SimplexMesh, layers: &[Layer], z0: f64, place: impl Fn([f64; 2], f64) -> [f64; 3]) -> Result<SimplexMesh, String> {
+fn extrude_with(
+    m2: &SimplexMesh,
+    layers: &[RemappedLayer],
+    z0: f64,
+    place: impl Fn([f64; 2], f64) -> [f64; 3],
+) -> Result<SimplexMesh, String> {
     if m2.dim != 2 {
         return Err("only 2D meshes can be extruded".into());
     }
-    if layers.is_empty() || layers.iter().any(|l| l.thickness <= 0.0 || l.n == 0) {
+    if layers.is_empty() || layers.iter().any(|(l, _)| l.thickness <= 0.0 || l.n == 0) {
         return Err("every layer needs a positive thickness and at least one element layer".into());
     }
     let n2 = m2.n_points();
     let mut z = vec![z0];
     let mut layer_of_slab = vec![];
-    for (li, l) in layers.iter().enumerate() {
+    for (li, (l, _)) in layers.iter().enumerate() {
         for _ in 0..l.n {
             z.push(z.last().unwrap() + l.thickness / l.n as f64);
             layer_of_slab.push(li);
@@ -261,10 +280,12 @@ fn extrude_with(m2: &SimplexMesh, layers: &[Layer], z0: f64, place: impl Fn([f64
         for k in 0..nslab {
             let (b0, b1, b2) = (id(v[0], k), id(v[1], k), id(v[2], k));
             let (t0, t1, t2) = (id(v[0], k + 1), id(v[1], k + 1), id(v[2], k + 1));
+            let (l, remap) = &layers[layer_of_slab[k]];
+            let base = m2.cell_labels[c];
+            let dom = l.fill.or_else(|| remap.get(&base).copied()).unwrap_or(base + l.domain_offset);
             for tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
                 cells.extend_from_slice(&tet);
-                let l = &layers[layer_of_slab[k]];
-                cell_labels.push(l.fill.unwrap_or(m2.cell_labels[c] + l.domain_offset));
+                cell_labels.push(dom);
             }
         }
     }
@@ -287,5 +308,462 @@ fn extrude_with(m2: &SimplexMesh, layers: &[Layer], z0: f64, place: impl Fn([f64
             facet_labels.push(m2.facet_labels[f]);
         }
     }
+    Ok(SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels))
+}
+
+/// Sweeps a 3D `geom` model along the propagation axis `y` through `layers`: extracts the combined 2D `(x, z)` cross-section
+/// arrangement across all layer midpoints, triangulates it with local `Size` rules and `sort_nodes`, extrudes conformal Dompierre
+/// prisms from the model's `ymin`, assigns cell domain labels from `l.fill` / `l.regions` / `Evaluated::classify`, and tags outer,
+/// cap, and material-interface facets via `GeomDomain3::boundary_label` so all 3D selectors and periodic pairs work directly.
+pub fn sweep_model_3d(
+    ev: &geom::eval::Evaluated,
+    labels: &geom::labels::LabelMap,
+    h_global: f64,
+    max_dev: Option<f64>,
+    min_angle_deg: f64,
+    sizes: &crate::meshing::geomdrive3::Sizes3,
+    layers: &[RemappedLayer],
+) -> Result<SimplexMesh, String> {
+    use crate::meshing::geomdrive::sort_nodes;
+    use crate::meshing::geomdrive3::GeomDomain3;
+    use crate::meshing::mesher3d::Domain3;
+    use geom::query::DiscretizeOpts;
+
+    if ev.list.dim != 3 {
+        return Err("sweep_model_3d needs a 3D model".into());
+    }
+    if !(h_global > 0.0 && h_global.is_finite()) {
+        return Err("the element size must be positive".into());
+    }
+    if layers.is_empty() || layers.iter().any(|(l, _)| l.thickness <= 0.0 || l.n == 0) {
+        return Err("every layer needs a positive thickness and at least one element layer".into());
+    }
+    let dom = GeomDomain3::new_with(ev, labels, h_global, sizes)?.with_max_dev(max_dev);
+    let nr = ev.regions().len();
+    let y0 = (0..nr)
+        .filter(|&r| dom.is_meshed(r as u32))
+        .map(|r| ev.regions()[r].bbox.lo[1])
+        .fold(f64::INFINITY, f64::min);
+    let y0 = if y0.is_finite() { y0 } else { ev.bounds().lo[1] };
+
+    let mut y_planes = vec![y0];
+    let mut layer_of_slab = Vec::new();
+    let mut sample_ys = Vec::new();
+    for (li, (l, _)) in layers.iter().enumerate() {
+        let ys = *y_planes.last().unwrap();
+        sample_ys.push(ys + 0.5 * l.thickness);
+        for _ in 0..l.n {
+            let yn = *y_planes.last().unwrap() + l.thickness / l.n as f64;
+            sample_ys.push(0.5 * (*y_planes.last().unwrap() + yn));
+            y_planes.push(yn);
+            layer_of_slab.push(li);
+        }
+    }
+    for r in 0..nr {
+        if dom.is_meshed(r as u32) {
+            let b = ev.regions()[r].bbox;
+            if b.hi[1] > b.lo[1] {
+                sample_ys.push(0.5 * (b.lo[1] + b.hi[1]));
+            }
+        }
+    }
+    let tol = ev.tol().max(1e-12);
+    sample_ys.sort_by(|a, b| a.total_cmp(b));
+    sample_ys.dedup_by(|a, b| (*a - *b).abs() <= tol);
+
+    let md = max_dev.unwrap_or(h_global / 50.0);
+    let has_any_fill = layers.iter().any(|(l, _)| l.fill.is_some());
+
+    // Build combined 2D (x, z) cross-section mesh
+    let m2_raw = if ev.complex().axis == 1 && ev.complex().stack.is_some() {
+        let st = ev.complex().stack.as_ref().unwrap();
+        let ov = &st.overlay;
+        let ncell = ov.regions.len();
+        let nedge = ov.edges.len();
+        let mut cell_h = vec![h_global; ncell];
+        let mut cell_active = vec![false; ncell];
+        for c in 0..ncell {
+            for l in &st.layers {
+                if let Some(r) = l.region_of[c] {
+                    if dom.is_meshed(r) {
+                        cell_active[c] = true;
+                        cell_h[c] = cell_h[c].min(dom.region_sizes()[r as usize]);
+                    } else if has_any_fill {
+                        cell_active[c] = true;
+                    }
+                }
+            }
+        }
+        let mut chains = Vec::with_capacity(nedge);
+        let mut edge_h = vec![h_global; nedge];
+        for (ei, ed) in ov.edges.iter().enumerate() {
+            let eh = [ed.left, ed.right]
+                .into_iter()
+                .flatten()
+                .map(|c| cell_h[c as usize])
+                .fold(h_global, f64::min);
+            edge_h[ei] = eh;
+            let mut pts: Vec<[f64; 2]> = ov
+                .discretize_edge(ei as u32, DiscretizeOpts { max_dev: md, max_len: eh })
+                .into_iter()
+                .map(|(_, p)| [p[0], p[1]])
+                .collect();
+            let last = pts.len() - 1;
+            pts[0] = [ov.vertices[ed.v0 as usize].p[0], ov.vertices[ed.v0 as usize].p[1]];
+            pts[last] = [ov.vertices[ed.v1 as usize].p[0], ov.vertices[ed.v1 as usize].p[1]];
+            chains.push(Chain { pts, label: (ei + 1) as i32, part: ei });
+        }
+        let mut ov_bb = geom::math::Aabb::EMPTY;
+        for r in &ov.regions {
+            ov_bb = ov_bb.union(&r.bbox);
+        }
+        let fills: Vec<Fill> = (0..ncell)
+            .filter(|&c| cell_active[c] && cell_h[c] < h_global * 0.999)
+            .map(|c| {
+                let bb = ov.regions[c].bbox;
+                Fill {
+                    lo: [bb.lo[0], bb.lo[1]],
+                    hi: [bb.hi[0], bb.hi[1]],
+                    h: cell_h[c],
+                    owner: Box::new(move |p| ov.locate(p) == Some(c as u32)),
+                }
+            })
+            .collect();
+        let h_fine_min = cell_h.iter().copied().chain(edge_h).fold(h_global, f64::min).max(1e-12 * h_global);
+        mesh_chains(
+            &chains,
+            &fills,
+            &MeshParams {
+                h: h_global,
+                h_fine_min,
+                h_reach: h_global,
+                min_angle_deg,
+                lo: [ov_bb.lo[0], ov_bb.lo[1]],
+                hi: [ov_bb.hi[0], ov_bb.hi[1]],
+            },
+            &|cen| {
+                let c = ov.locate(cen)?;
+                cell_active[c as usize].then_some(c as i32 + 1)
+            },
+        )?
+    } else {
+        let cx = ev.complex();
+        let mut xs = Vec::new();
+        let mut zs = Vec::new();
+        for r in 0..nr {
+            if dom.is_meshed(r as u32) || has_any_fill {
+                let b = ev.regions()[r].bbox;
+                if !b.is_empty() {
+                    xs.extend_from_slice(&[b.lo[0], b.hi[0]]);
+                    zs.extend_from_slice(&[b.lo[2], b.hi[2]]);
+                }
+            }
+        }
+        for fi in 0..cx.facet_count() as u32 {
+            let b = cx.facet_bbox(fi);
+            if !b.is_empty() {
+                xs.extend_from_slice(&[b.lo[0], b.hi[0]]);
+                zs.extend_from_slice(&[b.lo[2], b.hi[2]]);
+            }
+        }
+        for v in ev.vertices() {
+            xs.push(v.p[0]);
+            zs.push(v.p[2]);
+        }
+        xs.retain(|x| x.is_finite());
+        zs.retain(|z| z.is_finite());
+        xs.sort_by(|a, b| a.total_cmp(b));
+        xs.dedup_by(|a, b| (*a - *b).abs() <= tol);
+        zs.sort_by(|a, b| a.total_cmp(b));
+        zs.dedup_by(|a, b| (*a - *b).abs() <= tol);
+        if xs.len() < 2 || zs.len() < 2 {
+            return Err("the 3D model has no (x, z) cross-section extent".into());
+        }
+        let (nx, nz) = (xs.len() - 1, zs.len() - 1);
+        let mut sig: Vec<Vec<Vec<Option<u32>>>> = vec![vec![Vec::new(); nz]; nx];
+        let mut active = vec![vec![false; nz]; nx];
+        let mut cell_h = vec![vec![h_global; nz]; nx];
+        for ix in 0..nx {
+            let cx0 = 0.5 * (xs[ix] + xs[ix + 1]);
+            for iz in 0..nz {
+                let cz0 = 0.5 * (zs[iz] + zs[iz + 1]);
+                let s: Vec<Option<u32>> = sample_ys.iter().map(|&ym| dom.region_at([cx0, ym, cz0])).collect();
+                let mut act = s.iter().any(|r| r.is_some());
+                if !act && has_any_fill && sample_ys.iter().any(|&ym| ev.classify([cx0, ym, cz0]).is_some()) {
+                    act = true;
+                }
+                let mut h = h_global;
+                for &r in s.iter().flatten() {
+                    h = h.min(dom.region_sizes()[r as usize]);
+                }
+                if dom.asks_size_at() {
+                    for &ym in &sample_ys {
+                        if let Some(sh) = dom.size_at([cx0, ym, cz0]) {
+                            h = h.min(sh);
+                        }
+                    }
+                }
+                sig[ix][iz] = s;
+                active[ix][iz] = act;
+                cell_h[ix][iz] = h;
+            }
+        }
+        let subdiv = |p0: [f64; 2], p1: [f64; 2], h_seg: f64| -> Vec<[f64; 2]> {
+            let len = (p1[0] - p0[0]).hypot(p1[1] - p0[1]);
+            let n = (len / h_seg.max(1e-15)).ceil().max(1.0) as usize;
+            (0..=n)
+                .map(|i| {
+                    if i == 0 {
+                        p0
+                    } else if i == n {
+                        p1
+                    } else {
+                        let t = i as f64 / n as f64;
+                        [p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])]
+                    }
+                })
+                .collect()
+        };
+        let mut chains = Vec::new();
+        for iz in 0..=nz {
+            for ix in 0..nx {
+                let below = (iz > 0 && active[ix][iz - 1]).then(|| &sig[ix][iz - 1]);
+                let above = (iz < nz && active[ix][iz]).then(|| &sig[ix][iz]);
+                if below != above {
+                    let mut h_seg = h_global;
+                    if iz > 0 && active[ix][iz - 1] {
+                        h_seg = h_seg.min(cell_h[ix][iz - 1]);
+                    }
+                    if iz < nz && active[ix][iz] {
+                        h_seg = h_seg.min(cell_h[ix][iz]);
+                    }
+                    let id = chains.len();
+                    chains.push(Chain {
+                        pts: subdiv([xs[ix], zs[iz]], [xs[ix + 1], zs[iz]], h_seg),
+                        label: (id + 1) as i32,
+                        part: id,
+                    });
+                }
+            }
+        }
+        for ix in 0..=nx {
+            for iz in 0..nz {
+                let left = (ix > 0 && active[ix - 1][iz]).then(|| &sig[ix - 1][iz]);
+                let right = (ix < nx && active[ix][iz]).then(|| &sig[ix][iz]);
+                if left != right {
+                    let mut h_seg = h_global;
+                    if ix > 0 && active[ix - 1][iz] {
+                        h_seg = h_seg.min(cell_h[ix - 1][iz]);
+                    }
+                    if ix < nx && active[ix][iz] {
+                        h_seg = h_seg.min(cell_h[ix][iz]);
+                    }
+                    let id = chains.len();
+                    chains.push(Chain {
+                        pts: subdiv([xs[ix], zs[iz]], [xs[ix], zs[iz + 1]], h_seg),
+                        label: (id + 1) as i32,
+                        part: id,
+                    });
+                }
+            }
+        }
+        let mut fills = Vec::new();
+        let mut h_fine_min = h_global;
+        for ix in 0..nx {
+            for iz in 0..nz {
+                if active[ix][iz] && cell_h[ix][iz] < h_global * 0.999 {
+                    let (x0, x1, z0, z1) = (xs[ix], xs[ix + 1], zs[iz], zs[iz + 1]);
+                    let ch = cell_h[ix][iz];
+                    h_fine_min = h_fine_min.min(ch);
+                    fills.push(Fill {
+                        lo: [x0, z0],
+                        hi: [x1, z1],
+                        h: ch,
+                        owner: Box::new(move |p| p[0] > x0 && p[0] < x1 && p[1] > z0 && p[1] < z1),
+                    });
+                }
+            }
+        }
+        let locate_grid = |p: [f64; 2]| -> Option<i32> {
+            let ix = xs.partition_point(|&x| x <= p[0]).checked_sub(1)?;
+            let iz = zs.partition_point(|&z| z <= p[1]).checked_sub(1)?;
+            if ix < nx && iz < nz && active[ix][iz] {
+                Some((iz * nx + ix + 1) as i32)
+            } else {
+                None
+            }
+        };
+        mesh_chains(
+            &chains,
+            &fills,
+            &MeshParams {
+                h: h_global,
+                h_fine_min: h_fine_min.max(1e-12 * h_global),
+                h_reach: h_global,
+                min_angle_deg,
+                lo: [xs[0], zs[0]],
+                hi: [*xs.last().unwrap(), *zs.last().unwrap()],
+            },
+            &locate_grid,
+        )?
+    };
+
+    let m2 = sort_nodes(&m2_raw);
+    let n2 = m2.n_points();
+    let ntri2 = m2.n_cells();
+    let nslab = y_planes.len() - 1;
+    let region_of_dom: HashMap<i32, u32> = labels.domains.iter().map(|d| (d.id, d.region)).collect();
+
+    // Determine active prisms (ti, k) -> (dom_id, eff_region_id)
+    let mut prism_info: Vec<Option<(i32, u32)>> = vec![None; nslab * ntri2];
+    let mut used_v = vec![u32::MAX; (nslab + 1) * n2];
+    for k in 0..nslab {
+        let ym = 0.5 * (y_planes[k] + y_planes[k + 1]);
+        let (l, remap) = &layers[layer_of_slab[k]];
+        for ti in 0..ntri2 {
+            let tv = m2.cell(ti);
+            let cx0 = (m2.points[2 * tv[0] as usize] + m2.points[2 * tv[1] as usize] + m2.points[2 * tv[2] as usize]) / 3.0;
+            let cz0 = (m2.points[2 * tv[0] as usize + 1] + m2.points[2 * tv[1] as usize + 1] + m2.points[2 * tv[2] as usize + 1]) / 3.0;
+            let r_raw = dom.region_at([cx0, ym, cz0]);
+            let info = if let Some(fdom) = l.fill {
+                if r_raw.is_some() || ev.classify([cx0, ym, cz0]).is_some() {
+                    let reff = region_of_dom.get(&fdom).copied().or(r_raw).unwrap_or(0);
+                    Some((fdom, reff))
+                } else {
+                    None
+                }
+            } else if let Some(r) = r_raw {
+                let base = dom.region_label(r);
+                let did = remap.get(&base).copied().unwrap_or(base + l.domain_offset);
+                let reff = region_of_dom.get(&did).copied().unwrap_or(r);
+                Some((did, reff))
+            } else {
+                None
+            };
+            if info.is_some() {
+                prism_info[k * ntri2 + ti] = info;
+                for &v in tv {
+                    used_v[k * n2 + v as usize] = 0;
+                    used_v[(k + 1) * n2 + v as usize] = 0;
+                }
+            }
+        }
+    }
+
+    let mut points = Vec::new();
+    let mut n_pts3 = 0u32;
+    for (k, &yk) in y_planes.iter().enumerate() {
+        for v2 in 0..n2 {
+            let slot = &mut used_v[k * n2 + v2];
+            if *slot == 0 {
+                *slot = n_pts3;
+                n_pts3 += 1;
+                points.extend_from_slice(&[m2.points[2 * v2], yk, m2.points[2 * v2 + 1]]);
+            }
+        }
+    }
+    let vid = |v2: u32, k: usize| -> u32 { used_v[k * n2 + v2 as usize] };
+    let pt3 = |v3: u32| -> [f64; 3] {
+        let i = 3 * v3 as usize;
+        [points[i], points[i + 1], points[i + 2]]
+    };
+    let det3 = |a: [f64; 3], b: [f64; 3], c: [f64; 3]| -> f64 {
+        a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])
+    };
+    let sub3 = |a: [f64; 3], b: [f64; 3]| -> [f64; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] };
+
+    let mut cells: Vec<u32> = Vec::new();
+    let mut cell_labels: Vec<i32> = Vec::new();
+    let mut cell_regions: Vec<u32> = Vec::new();
+    for k in 0..nslab {
+        for ti in 0..ntri2 {
+            let Some((did, reff)) = prism_info[k * ntri2 + ti] else { continue };
+            let mut v = [m2.cell(ti)[0], m2.cell(ti)[1], m2.cell(ti)[2]];
+            v.sort_unstable();
+            let (b0, b1, b2) = (vid(v[0], k), vid(v[1], k), vid(v[2], k));
+            let (t0, t1, t2) = (vid(v[0], k + 1), vid(v[1], k + 1), vid(v[2], k + 1));
+            for mut tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
+                let (p0, p1, p2, p3) = (pt3(tet[0]), pt3(tet[1]), pt3(tet[2]), pt3(tet[3]));
+                if det3(sub3(p1, p0), sub3(p2, p0), sub3(p3, p0)) < 0.0 {
+                    tet.swap(1, 2);
+                }
+                cells.extend_from_slice(&tet);
+                cell_labels.push(did);
+                cell_regions.push(reff);
+            }
+        }
+    }
+    if cell_labels.is_empty() {
+        return Err("the swept 3D model encloses no volume".into());
+    }
+
+    // Extract outer and material-interface facets and tag them via GeomDomain3::boundary_label
+    let nc = cell_labels.len();
+    let mut keyed: Vec<([u32; 3], u32, u8)> = Vec::with_capacity(nc * 4);
+    for c in 0..nc {
+        let t = &cells[4 * c..4 * c + 4];
+        for skip in 0..4u8 {
+            let mut f = [0u32; 3];
+            let mut m = 0;
+            for (q, &v) in t.iter().enumerate() {
+                if q != skip as usize {
+                    f[m] = v;
+                    m += 1;
+                }
+            }
+            f.sort_unstable();
+            keyed.push((f, c as u32, skip));
+        }
+    }
+    keyed.sort_unstable();
+
+    let outward = |&(_, c, skip): &([u32; 3], u32, u8)| -> [u32; 3] {
+        let t = &cells[4 * c as usize..4 * c as usize + 4];
+        let mut f = [0u32; 3];
+        let mut m = 0;
+        for (q, &v) in t.iter().enumerate() {
+            if q != skip as usize {
+                f[m] = v;
+                m += 1;
+            }
+        }
+        let (a, b, cc, d) = (pt3(f[0]), pt3(f[1]), pt3(f[2]), pt3(t[skip as usize]));
+        if det3(sub3(b, a), sub3(cc, a), sub3(d, a)) > 0.0 {
+            f.swap(1, 2);
+        }
+        f
+    };
+
+    let mut facets: Vec<u32> = Vec::new();
+    let mut facet_labels: Vec<i32> = Vec::new();
+    let mut i = 0;
+    while i < keyed.len() {
+        let mut j = i + 1;
+        while j < keyed.len() && keyed[j].0 == keyed[i].0 {
+            j += 1;
+        }
+        if j - i == 1 {
+            let tri = outward(&keyed[i]);
+            let r1 = cell_regions[keyed[i].1 as usize];
+            let (p0, p1, p2) = (pt3(tri[0]), pt3(tri[1]), pt3(tri[2]));
+            let cen = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0, (p0[2] + p1[2] + p2[2]) / 3.0];
+            facets.extend_from_slice(&tri);
+            facet_labels.push(dom.boundary_label(cen, Some(r1), None));
+        } else if j - i == 2 {
+            let (c1, c2) = (keyed[i].1 as usize, keyed[i + 1].1 as usize);
+            if cell_labels[c1] != cell_labels[c2] {
+                let first = if cell_labels[c1] < cell_labels[c2] { i } else { i + 1 };
+                let tri = outward(&keyed[first]);
+                let (r1, r2) = (cell_regions[c1], cell_regions[c2]);
+                let (p0, p1, p2) = (pt3(tri[0]), pt3(tri[1]), pt3(tri[2]));
+                let cen = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0, (p0[2] + p1[2] + p2[2]) / 3.0];
+                let sides = if r1 != r2 { (Some(r1.min(r2)), Some(r1.max(r2))) } else { (Some(r1), None) };
+                facets.extend_from_slice(&tri);
+                facet_labels.push(dom.boundary_label(cen, sides.0, sides.1));
+            }
+        }
+        i = j;
+    }
+
     Ok(SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels))
 }

@@ -128,7 +128,7 @@ impl Engine {
         scratch.project.mesh = mesh.clone();
         let sizing = scratch.sizing();
         let chain = chain_key(&scratch.default_targets());
-        let sweep_dim = if mesh.sweep.is_some() { geometry.dim + 1 } else { geometry.dim };
+        let sweep_dim = if mesh.sweep.is_some() { 3 } else { geometry.dim };
         Ok(SizeTask {
             mesher: self.mesher.clone(),
             geometry,

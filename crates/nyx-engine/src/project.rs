@@ -21,6 +21,9 @@ pub struct SweepLayer {
     /// slab); the offset is then not used
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<String>,
+    /// optional per-layer region remap (`source_region_name -> target_region_name` in this layer)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// How the geometry is meshed.

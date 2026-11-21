@@ -404,13 +404,13 @@ pub fn adapt_to_field(g: MeshedGeom, field: &dyn MetricField<2>, a: &Adaptive) -
     Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval }, result.report))
 }
 
-/// Boundary labels of the edges that take part in a periodic pair of the model. Their chains stay exactly as the start mesh has them, so
-/// the two sides of a pair keep matching vertex for vertex (the start mesh cuts congruent edges identically).
+/// Boundary labels of the edges (2D) or faces (3D) that take part in a periodic pair of the model. Their chains or patches stay
+/// exactly as the start mesh has them, so the two sides of a pair keep matching vertex for vertex.
 pub(crate) fn periodic_labels(g: &MeshedGeom) -> Vec<i32> {
     let mut v: Vec<i32> = vec![];
     for p in g.eval.periodic_pairs() {
         for set in [&p.a, &p.b] {
-            if set.kind == EntityKind::Edges {
+            if matches!(set.kind, EntityKind::Edges | EntityKind::Faces) {
                 v.extend(set.ids.iter().filter_map(|&e| g.labels.label_of_edge(e)));
             }
         }

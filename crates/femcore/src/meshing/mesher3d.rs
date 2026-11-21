@@ -25,7 +25,15 @@
 //! they lie on. Both are 1-based (ADR 32).
 
 use crate::mesh::cells::{CellMesh, CellType};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// One axis-aligned periodic face pair of a 3D domain (`lo` is the parent plane, `hi` the child plane along `axis` in `0..3`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PeriodicAxis3 {
+    pub axis: usize,
+    pub lo: f64,
+    pub hi: f64,
+}
 
 /// The geometry the mesher fits to. Regions are numbered `0..n_regions()`; a point outside every region is in the void.
 pub trait Domain3: Sync {
@@ -56,6 +64,10 @@ pub trait Domain3: Sync {
     /// Whether any face asks for a size (`size_at` can answer `Some`); the local refinement then runs even where no region is finer.
     fn asks_size_at(&self) -> bool {
         false
+    }
+    /// Axis-aligned periodic boundary planes of the domain (`lo` parent -> `hi` child). Empty by default.
+    fn periodic_axes(&self) -> Vec<PeriodicAxis3> {
+        Vec::new()
     }
 }
 
@@ -96,11 +108,15 @@ const TAG: u64 = 1 << 63;
 /// Largest number of cutting surfaces: the solid and the regions.
 pub const MAX_SURFACES: usize = 64;
 
-/// A vertex of a piece during cutting: its id (lattice number, or a tagged hash for a cut point), its position, its class with respect
-/// to every cutting surface (-1 inside, 0 on, +1 outside) and the region it certainly lies in (`-2`: on a surface, not known).
+/// A vertex of a piece during cutting: its id (lattice number, or a tagged hash for a cut point), its canonical periodic tie-break id
+/// (`canon_id == id` except on child periodic planes where it equals the parent-plane counterpart's id), its periodic plane bitmask
+/// (bits `0..3`: child planes, bits `3..6`: parent planes), its position, its class with respect to every cutting surface
+/// (-1 inside, 0 on, +1 outside) and the region it certainly lies in (`-2`: on a surface, not known).
 #[derive(Clone, Copy, Debug)]
 struct V {
     id: u64,
+    canon_id: u64,
+    plane_mask: u8,
     p: [f64; 3],
     cl: [i8; MAX_SURFACES],
     reg: i32,
@@ -132,15 +148,16 @@ fn cut_id(a: u64, b: u64, s: usize) -> u64 {
 }
 
 /// Splits a prism (triangles `v[0..3]` and `v[3..6]`, vertical edges v[i]-v[i+3]) into three tetrahedra by coning from its
-/// lowest-numbered vertex; quadrilateral faces are cut along the diagonal from their lowest-numbered vertex so neighbours agree.
+/// lowest-numbered vertex; quadrilateral faces are cut along the diagonal from their lowest-numbered vertex so neighbours
+/// (and periodic parent/child twin faces) agree.
 fn split_prism(v: [V; 6], out: &mut Vec<[V; 4]>) {
     const QUADS: [[usize; 4]; 3] = [[0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5]];
-    let m = (0..6).min_by_key(|&i| v[i].id).unwrap();
+    let m = (0..6).min_by_key(|&i| (v[i].canon_id, v[i].id)).unwrap();
     for q in QUADS {
         if q.contains(&m) {
             continue;
         }
-        let k = (0..4).min_by_key(|&i| v[q[i]].id).unwrap();
+        let k = (0..4).min_by_key(|&i| (v[q[i]].canon_id, v[q[i]].id)).unwrap();
         let c = |j: usize| v[q[(k + j) % 4]];
         out.push([v[m], c(0), c(1), c(2)]);
         out.push([v[m], c(0), c(2), c(3)]);
@@ -152,9 +169,9 @@ fn split_prism(v: [V; 6], out: &mut Vec<[V; 4]>) {
     }
 }
 
-/// The two triangles of a quadrilateral (cyclic order) along the diagonal from its lowest id.
+/// The two triangles of a quadrilateral (cyclic order) along the diagonal from its lowest `(canon_id, id)`.
 fn quad_tris(q: [V; 4], out: &mut Vec<[V; 3]>) {
-    let k = (0..4).min_by_key(|&i| q[i].id).unwrap();
+    let k = (0..4).min_by_key(|&i| (q[i].canon_id, q[i].id)).unwrap();
     let c = |j: usize| q[(k + j) % 4];
     out.push([c(0), c(1), c(2)]);
     out.push([c(0), c(2), c(3)]);
@@ -165,6 +182,7 @@ struct Lattice {
     origin: [f64; 3],
     h: [f64; 3],
     n_corners: usize,
+    per_axis: [Option<(f64, f64)>; 3],
 }
 
 impl Lattice {
@@ -177,16 +195,90 @@ impl Lattice {
     fn n_vertices(&self) -> usize {
         self.n_corners + self.n[0] * self.n[1] * self.n[2]
     }
-    fn pos(&self, v: u32) -> [f64; 3] {
-        let v = v as usize;
-        if v < self.n_corners {
+    fn corner_ijk(&self, v: u32) -> Option<[usize; 3]> {
+        let vi = v as usize;
+        if vi < self.n_corners {
             let (nx, ny) = (self.n[0] + 1, self.n[1] + 1);
-            let (i, j, k) = (v % nx, (v / nx) % ny, v / (nx * ny));
-            [self.origin[0] + i as f64 * self.h[0], self.origin[1] + j as f64 * self.h[1], self.origin[2] + k as f64 * self.h[2]]
+            Some([vi % nx, (vi / nx) % ny, vi / (nx * ny)])
         } else {
-            let c = v - self.n_corners;
-            let (i, j, k) = (c % self.n[0], (c / self.n[0]) % self.n[1], c / (self.n[0] * self.n[1]));
+            None
+        }
+    }
+    fn center_ijk(&self, v: u32) -> Option<[usize; 3]> {
+        let vi = v as usize;
+        if vi >= self.n_corners {
+            let c = vi - self.n_corners;
+            Some([c % self.n[0], (c / self.n[0]) % self.n[1], c / (self.n[0] * self.n[1])])
+        } else {
+            None
+        }
+    }
+    fn pos(&self, v: u32) -> [f64; 3] {
+        if let Some(ijk) = self.corner_ijk(v) {
+            let mut p = [0.0; 3];
+            for a in 0..3 {
+                p[a] = match self.per_axis[a] {
+                    Some((plo, _)) if ijk[a] == 1 => plo,
+                    Some((_, phi)) if ijk[a] + 1 == self.n[a] => phi,
+                    _ => self.origin[a] + ijk[a] as f64 * self.h[a],
+                };
+            }
+            p
+        } else {
+            let [i, j, k] = self.center_ijk(v).unwrap();
             [self.origin[0] + (i as f64 + 0.5) * self.h[0], self.origin[1] + (j as f64 + 0.5) * self.h[1], self.origin[2] + (k as f64 + 0.5) * self.h[2]]
+        }
+    }
+    /// Bitmask of periodic planes a lattice vertex lies on: bits `0..3` for child planes (`idx[a] == n[a] - 1`),
+    /// bits `3..6` for parent planes (`idx[a] == 1`).
+    fn plane_mask(&self, v: u32) -> u8 {
+        let Some(ijk) = self.corner_ijk(v) else { return 0 };
+        let mut mask = 0u8;
+        for a in 0..3 {
+            if self.per_axis[a].is_some() {
+                if ijk[a] == 1 {
+                    mask |= 1 << (a + 3);
+                } else if ijk[a] + 1 == self.n[a] {
+                    mask |= 1 << a;
+                }
+            }
+        }
+        mask
+    }
+    /// Maps a child-plane corner (`idx[a] == n[a] - 1`) to its canonical parent-plane corner (`idx[a] = 1`) and returns the translation shift.
+    fn parent_corner(&self, v: u32) -> (u32, [f64; 3]) {
+        let Some(mut ijk) = self.corner_ijk(v) else { return (v, [0.0; 3]) };
+        let mut shift = [0.0; 3];
+        for a in 0..3 {
+            if let Some((plo, phi)) = self.per_axis[a] {
+                if ijk[a] + 1 == self.n[a] {
+                    ijk[a] = 1;
+                    shift[a] = phi - plo;
+                }
+            }
+        }
+        (self.corner(ijk[0], ijk[1], ijk[2]), shift)
+    }
+    /// If `a` and `b` are the two cell centers straddling a periodic plane `axis` (either parent `0..1` or child `n[axis]-2..n[axis]-1`),
+    /// returns `(axis, is_child, parent_c0, parent_c1, shift)`.
+    fn dual_crossing_periodic(&self, a: u32, b: u32) -> Option<(usize, bool, u32, u32, [f64; 3])> {
+        let (ia, ib) = (self.center_ijk(a)?, self.center_ijk(b)?);
+        let axis = (0..3).find(|&k| ia[k].abs_diff(ib[k]) == 1 && (0..3).all(|m| m == k || ia[m] == ib[m]))?;
+        let (plo, phi) = self.per_axis[axis]?;
+        let lo_idx = ia[axis].min(ib[axis]);
+        let mut p0 = ia;
+        let mut p1 = ia;
+        p0[axis] = 0;
+        p1[axis] = 1;
+        let (c0, c1) = (self.center(p0[0], p0[1], p0[2]), self.center(p1[0], p1[1], p1[2]));
+        if lo_idx == 0 {
+            Some((axis, false, c0, c1, [0.0; 3]))
+        } else if lo_idx + 2 == self.n[axis] {
+            let mut shift = [0.0; 3];
+            shift[axis] = phi - plo;
+            Some((axis, true, c0, c1, shift))
+        } else {
+            None
         }
     }
     /// The (up to 14) lattice neighbours of a vertex.
@@ -322,6 +414,15 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
             hi[k] = hi[k].max(h[k]);
         }
     }
+    let periodic_axes = dom.periodic_axes();
+    let mut per_axis: [Option<(f64, f64)>; 3] = [None; 3];
+    for pa in &periodic_axes {
+        if pa.axis < 3 && pa.hi > pa.lo {
+            per_axis[pa.axis] = Some((pa.lo, pa.hi));
+            lo[pa.axis] = pa.lo;
+            hi[pa.axis] = pa.hi;
+        }
+    }
     // lattice spacing per axis: a thin region gets a finer lattice across its thickness
     let mut h_axis = [spec.h; 3];
     if spec.min_layers > 0.0 {
@@ -342,7 +443,8 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         if ext.is_nan() || ext <= 0.0 || !ext.is_finite() {
             return Err("the model has no extent in some direction".into());
         }
-        let cells = (ext / h_axis[k]).round().max(1.0) as usize;
+        let min_cells = if per_axis[k].is_some() { 2.0 } else { 1.0 };
+        let cells = (ext / h_axis[k]).round().max(min_cells) as usize;
         hh[k] = ext / cells as f64;
         n[k] = cells + 2; // one padding cell on each side keeps the lattice boundary outside the solid
     }
@@ -350,7 +452,14 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     if total_cells * 12 > 60_000_000 {
         return Err(format!("that would be about {} million tetrahedra; choose a larger element size (limit 60 million)", total_cells * 12 / 1_000_000));
     }
-    let lat = Lattice { n, origin: [lo[0] - hh[0], lo[1] - hh[1], lo[2] - hh[2]], h: hh, n_corners: (n[0] + 1) * (n[1] + 1) * (n[2] + 1) };
+    let lat = Lattice {
+        n,
+        origin: [lo[0] - hh[0], lo[1] - hh[1], lo[2] - hh[2]],
+        h: hh,
+        n_corners: (n[0] + 1) * (n[1] + 1) * (n[2] + 1),
+        per_axis,
+    };
+    let has_periodic = per_axis.iter().any(|x| x.is_some());
     let nv = lat.n_vertices();
     let ns = if nreg >= 2 { 1 + nreg } else { 1 };
     let sf = Surfaces { dom, ns };
@@ -363,7 +472,18 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     };
 
     // 1. the region at every lattice vertex, and from it the class for every cutting surface: -1 inside, +1 outside
-    let reg_lat: Vec<i32> = par_blocks(nv, 20_000, |r| r.map(|v| sf.region(lat.pos(v as u32))).collect::<Vec<i32>>()).into_iter().flatten().collect();
+    let mut reg_lat: Vec<i32> = par_blocks(nv, 20_000, |r| r.map(|v| sf.region(lat.pos(v as u32))).collect::<Vec<i32>>())
+        .into_iter()
+        .flatten()
+        .collect();
+    if has_periodic {
+        for v in 0..lat.n_corners as u32 {
+            let (p, _) = lat.parent_corner(v);
+            if p != v {
+                reg_lat[v as usize] = reg_lat[p as usize];
+            }
+        }
+    }
     let mut cls: Vec<Vec<i8>> = (0..ns).map(|s| reg_lat.iter().map(|&r| sf.sign(s, r)).collect()).collect();
     lap("  mesh3d: classify vertices");
     crate::progress::check()?;
@@ -373,8 +493,70 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         let mut out: Vec<(u32, [f64; 3], [i8; MAX_SURFACES])> = vec![];
         let mut nb = Vec::with_capacity(14);
         for v in r {
-            let pv = lat.pos(v as u32);
-            lat.neighbours(v as u32, &mut nb);
+            let vu = v as u32;
+            if has_periodic && lat.parent_corner(vu).0 != vu {
+                continue;
+            }
+            let pmask = if has_periodic { (lat.plane_mask(vu) >> 3) & 0b111 } else { 0 };
+            let pv = lat.pos(vu);
+            if pmask != 0 {
+                let mut pv_in = pv;
+                for a in 0..3 {
+                    if (pmask & (1 << a)) != 0 {
+                        pv_in[a] = per_axis[a].unwrap().0 + 1e-11 * hh[a];
+                    }
+                }
+                let r_in = sf.region(pv_in);
+                if r_in >= 0 {
+                    let mut cl = [0i8; MAX_SURFACES];
+                    cl[0] = 0;
+                    for (s, slot) in cl.iter_mut().enumerate().take(ns).skip(1) {
+                        *slot = if s == 1 + r_in as usize { 0 } else { 1 };
+                    }
+                    out.push((vu, pv, cl));
+                } else {
+                    lat.neighbours(vu, &mut nb);
+                    nb.retain(|&w| {
+                        let Some(w_ijk) = lat.corner_ijk(w) else { return false };
+                        (0..3).all(|a| (pmask & (1 << a)) == 0 || w_ijk[a] == 1)
+                    });
+                    let mut best: Option<(f64, Cut)> = None;
+                    for &w in &nb {
+                        let mut pw_in = lat.pos(w);
+                        for a in 0..3 {
+                            if (pmask & (1 << a)) != 0 {
+                                pw_in[a] = per_axis[a].unwrap().0 + 1e-11 * hh[a];
+                            }
+                        }
+                        if sf.region(pw_in) < 0 {
+                            continue;
+                        }
+                        let elen = len3(sub3(pw_in, pv_in));
+                        let pa = [pv_in[0] + alpha * (pw_in[0] - pv_in[0]), pv_in[1] + alpha * (pw_in[1] - pv_in[1]), pv_in[2] + alpha * (pw_in[2] - pv_in[2])];
+                        if sf.class(0, pa) != 1 {
+                            let c = sf.bisect(0, pv_in, pw_in);
+                            if c.t < alpha {
+                                let d = c.t * elen;
+                                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                                    best = Some((d, c));
+                                }
+                            }
+                        }
+                    }
+                    if let Some((_, mut c)) = best {
+                        let mut cl = sf.cut_classes(&c);
+                        cl[0] = 0;
+                        for a in 0..3 {
+                            if (pmask & (1 << a)) != 0 {
+                                c.p[a] = per_axis[a].unwrap().0;
+                            }
+                        }
+                        out.push((vu, c.p, cl));
+                    }
+                }
+                continue;
+            }
+            lat.neighbours(vu, &mut nb);
             // nearest cut point on an edge to an opposite-side vertex, over all surfaces
             let mut best: Option<(f64, Cut)> = None;
             for &w in &nb {
@@ -401,7 +583,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
                 }
             }
             if let Some((_, c)) = best {
-                out.push((v as u32, c.p, sf.cut_classes(&c)));
+                out.push((vu, c.p, sf.cut_classes(&c)));
             }
         }
         out
@@ -412,6 +594,30 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
             warped.insert(v, c);
             for (s, col) in cls.iter_mut().enumerate() {
                 col[v as usize] = cl[s];
+            }
+        }
+    }
+    if has_periodic {
+        for v in 0..lat.n_corners as u32 {
+            let (p, shift) = lat.parent_corner(v);
+            if p != v {
+                if let Some(&wp) = warped.get(&p) {
+                    let mut wc = [wp[0] + shift[0], wp[1] + shift[1], wp[2] + shift[2]];
+                    let mask = lat.plane_mask(v);
+                    for a in 0..3 {
+                        if let Some((plo, phi)) = per_axis[a] {
+                            if (mask & (1 << a)) != 0 {
+                                wc[a] = phi;
+                            } else if (mask & (1 << (a + 3))) != 0 {
+                                wc[a] = plo;
+                            }
+                        }
+                    }
+                    warped.insert(v, wc);
+                }
+                for col in cls.iter_mut() {
+                    col[v as usize] = col[p as usize];
+                }
             }
         }
     }
@@ -463,10 +669,72 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         if undo.is_empty() {
             break;
         }
+        if has_periodic {
+            let undo_parents: HashSet<u32> = undo
+                .iter()
+                .filter(|&&w| (w as usize) < lat.n_corners && lat.plane_mask(w) != 0)
+                .map(|&w| lat.parent_corner(w).0)
+                .collect();
+            if !undo_parents.is_empty() {
+                for v in 0..lat.n_corners as u32 {
+                    if lat.plane_mask(v) != 0 && undo_parents.contains(&lat.parent_corner(v).0) {
+                        undo.push(v);
+                    }
+                }
+            }
+            let extra_centers: Vec<u32> = undo
+                .iter()
+                .filter_map(|&w| {
+                    let ijk = lat.center_ijk(w)?;
+                    let mut twins = Vec::new();
+                    for a in 0..3 {
+                        if per_axis[a].is_some() {
+                            let mut t = ijk;
+                            if ijk[a] == 1 {
+                                t[a] = n[a] - 2;
+                                twins.push(lat.center(t[0], t[1], t[2]));
+                            } else if ijk[a] + 2 == n[a] {
+                                t[a] = 1;
+                                twins.push(lat.center(t[0], t[1], t[2]));
+                            }
+                        }
+                    }
+                    Some(twins)
+                })
+                .flatten()
+                .collect();
+            undo.extend(extra_centers);
+            undo.sort_unstable();
+            undo.dedup();
+        }
         for w in undo {
             warped.remove(&w);
             for (s, col) in cls.iter_mut().enumerate() {
                 col[w as usize] = sf.sign(s, reg_lat[w as usize]);
+            }
+        }
+    }
+    if has_periodic {
+        for a in 0..3 {
+            if per_axis[a].is_none() {
+                continue;
+            }
+            for c in 0..(n[0] * n[1] * n[2]) {
+                let ijk = [c % n[0], (c / n[0]) % n[1], c / (n[0] * n[1])];
+                if ijk[a] != 1 {
+                    continue;
+                }
+                let mut t = ijk;
+                t[a] = n[a] - 2;
+                let (c_lo, c_hi) = (lat.center(ijk[0], ijk[1], ijk[2]), lat.center(t[0], t[1], t[2]));
+                if (cls[0][c_lo as usize] >= 0) != (cls[0][c_hi as usize] >= 0) {
+                    for w in [c_lo, c_hi] {
+                        warped.remove(&w);
+                        for (s, col) in cls.iter_mut().enumerate() {
+                            col[w as usize] = sf.sign(s, reg_lat[w as usize]);
+                        }
+                    }
+                }
             }
         }
     }
@@ -487,15 +755,17 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     struct Part {
         inner: Vec<([u32; 4], i32)>,
         surf: Vec<([u64; 4], i32)>,
-        /// cut points made here: id and position
-        cuts: Vec<(u64, [f64; 3])>,
+        /// cut points made here: (id, position, canon_id, plane_mask)
+        cuts: Vec<(u64, [f64; 3], u64, u8)>,
     }
     let make_v = |v: u32| -> V {
         let mut cl = [0i8; MAX_SURFACES];
         for s in 0..ns {
             cl[s] = cls[s][v as usize];
         }
-        V { id: v as u64, p: pos_of(v), cl, reg: known_region(v) }
+        let pmask = if has_periodic { lat.plane_mask(v) } else { 0 };
+        let canon_id = if pmask != 0 { lat.parent_corner(v).0 as u64 } else { v as u64 };
+        V { id: v as u64, canon_id, plane_mask: pmask, p: pos_of(v), cl, reg: known_region(v) }
     };
     let parts = par_blocks(n[0] * n[1] * n[2], 4_000, |range| {
         let mut part = Part { inner: vec![], surf: vec![], cuts: vec![] };
@@ -545,7 +815,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
                         for t in pieces.iter() {
                             let sides: &[i8] = if s == 0 { &[-1] } else { &[-1, 1] };
                             for &side in sides {
-                                clip_piece(&sf, s, side, t, &mut part.cuts, &mut next);
+                                clip_piece(&sf, &lat, s, side, t, &mut part.cuts, &mut next);
                             }
                         }
                         std::mem::swap(&mut pieces, &mut next);
@@ -571,7 +841,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
 
     // 4. number the vertices: used lattice vertices, then the cut points
     let mut used = vec![false; nv];
-    let mut cut_list: Vec<(u64, [f64; 3])> = vec![];
+    let mut cut_list: Vec<(u64, [f64; 3], u64, u8)> = vec![];
     for p in &parts {
         for (t, _) in &p.inner {
             for &v in t {
@@ -596,6 +866,8 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     let mut points: Vec<[f64; 3]> = Vec::new();
     // a vertex may lie on a boundary or an interface: a lattice vertex that was moved or whose classes include a zero, and every cut point
     let mut vflag: Vec<bool> = vec![];
+    let mut v_plane_mask: Vec<u8> = vec![];
+    let mut v_canon_key: Vec<u64> = vec![];
     let mut next_id = 0u32;
     for v in 0..nv {
         if used[v] {
@@ -603,12 +875,17 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
             next_id += 1;
             points.push(pos_of(v as u32));
             vflag.push((0..ns).any(|s| cls[s][v] == 0));
+            let pmask = if has_periodic { lat.plane_mask(v as u32) } else { 0 };
+            v_plane_mask.push(pmask);
+            v_canon_key.push(if pmask != 0 { lat.parent_corner(v as u32).0 as u64 } else { v as u64 });
         }
     }
     let n_lattice_used = next_id as usize;
-    for (_, p) in &cut_list {
-        points.push(*p);
+    for &(_, p, ckey, pmask) in &cut_list {
+        points.push(p);
         vflag.push(true);
+        v_plane_mask.push(pmask);
+        v_canon_key.push(ckey);
     }
     let vid = |k: u64| -> u32 {
         if k & TAG != 0 {
@@ -677,6 +954,46 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
         out
     });
     if close.iter().any(|b| !b.is_empty()) {
+        let mut weld_pairs: Vec<(u32, u32)> = close.into_iter().flatten().collect();
+        if has_periodic {
+            let mut by_canon: HashMap<u64, Vec<u32>> = HashMap::new();
+            for u in 0..points.len() as u32 {
+                if v_plane_mask[u as usize] != 0 {
+                    by_canon.entry(v_canon_key[u as usize]).or_default().push(u);
+                }
+            }
+            let mut extra_pairs: Vec<(u32, u32)> = Vec::new();
+            for &(a, b) in &weld_pairs {
+                let (ma, mb) = (v_plane_mask[a as usize], v_plane_mask[b as usize]);
+                if (ma & mb) == 0 {
+                    continue;
+                }
+                let (Some(ta), Some(tb)) = (by_canon.get(&v_canon_key[a as usize]), by_canon.get(&v_canon_key[b as usize])) else {
+                    continue;
+                };
+                for &ua in ta {
+                    for &ub in tb {
+                        if ua != ub && (v_plane_mask[ua as usize] & 0b111) == (v_plane_mask[ub as usize] & 0b111) {
+                            extra_pairs.push((ua.min(ub), ua.max(ub)));
+                        }
+                    }
+                }
+            }
+            weld_pairs.extend(extra_pairs);
+        }
+        let plane_rank = |u: u32| -> u8 {
+            let m = v_plane_mask[u as usize];
+            ((m | (m >> 3)) & 0b111).count_ones() as u8
+        };
+        // Return true if `a` should be the surviving representative over `b`.
+        let prefers = |a: u32, b: u32| -> bool {
+            let (ra, rb) = (plane_rank(a), plane_rank(b));
+            if ra != rb {
+                ra > rb
+            } else {
+                (v_canon_key[a as usize], a) < (v_canon_key[b as usize], b)
+            }
+        };
         let mut rep: Vec<u32> = (0..points.len() as u32).collect();
         let find = |rep: &mut Vec<u32>, mut x: u32| {
             while rep[x as usize] != x {
@@ -685,16 +1002,46 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
             }
             x
         };
-        for (a, b) in close.into_iter().flatten() {
+        for (a, b) in weld_pairs {
             let (ra, rb) = (find(&mut rep, a), find(&mut rep, b));
             if ra != rb {
-                rep[ra.max(rb) as usize] = ra.min(rb);
+                if prefers(ra, rb) {
+                    rep[rb as usize] = ra;
+                } else {
+                    rep[ra as usize] = rb;
+                }
             }
         }
         for v in 0..points.len() as u32 {
             let r = find(&mut rep, v);
             if r != v && vflag[v as usize] {
                 vflag[r as usize] = true;
+            }
+        }
+        if has_periodic {
+            let mut parent_rep_pos: HashMap<u64, [f64; 3]> = HashMap::new();
+            for u in 0..points.len() as u32 {
+                if find(&mut rep, u) == u && v_plane_mask[u as usize] != 0 && (v_plane_mask[u as usize] & 0b111) == 0 {
+                    parent_rep_pos.insert(v_canon_key[u as usize], points[u as usize]);
+                }
+            }
+            for u in 0..points.len() as u32 {
+                let mask = v_plane_mask[u as usize];
+                if find(&mut rep, u) == u && (mask & 0b111) != 0 {
+                    if let Some(&pp) = parent_rep_pos.get(&v_canon_key[u as usize]) {
+                        let mut p = pp;
+                        for a in 0..3 {
+                            if let Some((plo, phi)) = per_axis[a] {
+                                if (mask & (1 << a)) != 0 {
+                                    p[a] = phi;
+                                } else if (mask & (1 << (a + 3))) != 0 {
+                                    p[a] = plo;
+                                }
+                            }
+                        }
+                        points[u as usize] = p;
+                    }
+                }
             }
         }
         let mut kept = Vec::with_capacity(cells.len());
@@ -821,7 +1168,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
             _ => mid,
         }
     };
-    let (mesh, rr) = super::refine3d::refine_to_size(&mesh, &size, &project, 1.3, 60_000_000 / 12)?;
+    let (mesh, rr) = super::refine3d::refine_to_size_periodic(&mesh, &size, &project, 1.3, 60_000_000 / 12, &periodic_axes)?;
     report.cells = rr.cells_after;
     report.refined = rr.bisections;
     lap("  mesh3d: local refinement");
@@ -849,7 +1196,15 @@ fn resolve_region(dom: &dyn Domain3, q: &[[f64; 3]; 4]) -> i32 {
 
 /// Cuts a tetrahedron (given as four vertices) along surface `s` and keeps the part on `side` (-1: inside the surface, +1: outside);
 /// vertices on the surface count for both sides.
-fn clip_piece(sf: &Surfaces, s: usize, side: i8, t: &[V; 4], cuts: &mut Vec<(u64, [f64; 3])>, out: &mut Vec<[V; 4]>) {
+fn clip_piece(
+    sf: &Surfaces,
+    lat: &Lattice,
+    s: usize,
+    side: i8,
+    t: &[V; 4],
+    cuts: &mut Vec<(u64, [f64; 3], u64, u8)>,
+    out: &mut Vec<[V; 4]>,
+) {
     let (mut ins, mut outs, mut ons): (Vec<V>, Vec<V>, Vec<V>) = (vec![], vec![], vec![]);
     for k in 0..4 {
         let c = t[k].cl[s];
@@ -861,6 +1216,21 @@ fn clip_piece(sf: &Surfaces, s: usize, side: i8, t: &[V; 4], cuts: &mut Vec<(u64
             ons.push(t[k]);
         }
     }
+    if ins.is_empty() && outs.is_empty() {
+        let vol6 = det3(sub3(t[1].p, t[0].p), sub3(t[2].p, t[0].p), sub3(t[3].p, t[0].p)).abs();
+        let h_min = lat.h[0].min(lat.h[1]).min(lat.h[2]);
+        if vol6 > 1e-6 * h_min * h_min * h_min {
+            let cen = [
+                0.25 * (t[0].p[0] + t[1].p[0] + t[2].p[0] + t[3].p[0]),
+                0.25 * (t[0].p[1] + t[1].p[1] + t[2].p[1] + t[3].p[1]),
+                0.25 * (t[0].p[2] + t[1].p[2] + t[2].p[2] + t[3].p[2]),
+            ];
+            if sf.class(s, cen) == side {
+                out.push(*t);
+            }
+        }
+        return;
+    }
     if ins.is_empty() {
         return;
     }
@@ -869,11 +1239,102 @@ fn clip_piece(sf: &Surfaces, s: usize, side: i8, t: &[V; 4], cuts: &mut Vec<(u64
         return;
     }
     let mut cut = |a: V, b: V| -> V {
-        let (lo, hi) = if a.id < b.id { (a, b) } else { (b, a) };
+        if s == 0 && (a.id & TAG == 0) && (b.id & TAG == 0) {
+            if let Some((axis, is_child, c0, c1, shift)) = lat.dual_crossing_periodic(a.id as u32, b.id as u32) {
+                let mut cp = sf.bisect(0, lat.pos(c0), lat.pos(c1));
+                if (cp.t - 0.5).abs() <= 1e-5 {
+                    let (plo, phi) = lat.per_axis[axis].unwrap();
+                    cp.p[axis] = plo;
+                    let cl = sf.cut_classes(&cp);
+                    let canon_id = cut_id(c0 as u64, c1 as u64, 0);
+                    let id = cut_id(a.id, b.id, 0);
+                    let (p, pmask) = if is_child {
+                        let mut q = [cp.p[0] + shift[0], cp.p[1] + shift[1], cp.p[2] + shift[2]];
+                        q[axis] = phi;
+                        (q, 1u8 << axis)
+                    } else {
+                        (cp.p, 1u8 << (axis + 3))
+                    };
+                    cuts.push((id, p, canon_id, pmask));
+                    return V { id, canon_id, plane_mask: pmask, p, cl, reg: -2 };
+                }
+            }
+        }
+        let shared_planes = a.plane_mask & b.plane_mask;
+        let shared_child = shared_planes & 0b111;
+        let (lo, hi) = if (a.canon_id, a.id) < (b.canon_id, b.id) { (a, b) } else { (b, a) };
         let id = cut_id(lo.id, hi.id, s);
-        let c = sf.bisect(s, lo.p, hi.p);
-        cuts.push((id, c.p));
-        V { id, p: c.p, cl: sf.cut_classes(&c), reg: -2 }
+        let canon_id = if shared_planes != 0 && lo.canon_id != hi.canon_id {
+            cut_id(lo.canon_id, hi.canon_id, s)
+        } else {
+            id
+        };
+        if shared_child != 0 {
+            let mut shift = [0.0; 3];
+            for k in 0..3 {
+                if (shared_child & (1 << k)) != 0 {
+                    let (plo, phi) = lat.per_axis[k].unwrap();
+                    shift[k] = phi - plo;
+                }
+            }
+            let mut p0 = sub3(lo.p, shift);
+            let mut p1 = sub3(hi.p, shift);
+            for k in 0..3 {
+                if ((shared_planes & ((1 << k) | (1 << (k + 3)))) != 0) && lat.per_axis[k].is_some() {
+                    let plo = lat.per_axis[k].unwrap().0;
+                    p0[k] = plo + 1e-11 * lat.h[k];
+                    p1[k] = plo + 1e-11 * lat.h[k];
+                }
+            }
+            let c = sf.bisect(s, p0, p1);
+            let mut cl = sf.cut_classes(&c);
+            for (s2, slot) in cl.iter_mut().enumerate().take(sf.ns) {
+                if lo.cl[s2] == 0 && hi.cl[s2] == 0 {
+                    *slot = 0;
+                }
+            }
+            let mut p = [c.p[0] + shift[0], c.p[1] + shift[1], c.p[2] + shift[2]];
+            for k in 0..3 {
+                if let Some((plo, phi)) = lat.per_axis[k] {
+                    if (shared_child & (1 << k)) != 0 {
+                        p[k] = phi;
+                    } else if (shared_planes & (1 << (k + 3))) != 0 {
+                        p[k] = plo;
+                    }
+                }
+            }
+            cuts.push((id, p, canon_id, shared_planes));
+            V { id, canon_id, plane_mask: shared_planes, p, cl, reg: -2 }
+        } else if shared_planes != 0 {
+            let mut p0 = lo.p;
+            let mut p1 = hi.p;
+            for k in 0..3 {
+                if (shared_planes & (1 << (k + 3))) != 0 {
+                    let plo = lat.per_axis[k].unwrap().0;
+                    p0[k] = plo + 1e-11 * lat.h[k];
+                    p1[k] = plo + 1e-11 * lat.h[k];
+                }
+            }
+            let mut c = sf.bisect(s, p0, p1);
+            let mut cl = sf.cut_classes(&c);
+            for (s2, slot) in cl.iter_mut().enumerate().take(sf.ns) {
+                if lo.cl[s2] == 0 && hi.cl[s2] == 0 {
+                    *slot = 0;
+                }
+            }
+            for k in 0..3 {
+                if (shared_planes & (1 << (k + 3))) != 0 {
+                    c.p[k] = lat.per_axis[k].unwrap().0;
+                }
+            }
+            cuts.push((id, c.p, canon_id, shared_planes));
+            V { id, canon_id, plane_mask: shared_planes, p: c.p, cl, reg: -2 }
+        } else {
+            let c = sf.bisect(s, lo.p, hi.p);
+            let cl = sf.cut_classes(&c);
+            cuts.push((id, c.p, canon_id, shared_planes));
+            V { id, canon_id, plane_mask: shared_planes, p: c.p, cl, reg: -2 }
+        }
     };
     let mut tmp: Vec<[V; 4]> = vec![];
     match (ins.len(), outs.len()) {
