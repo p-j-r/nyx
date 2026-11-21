@@ -1090,6 +1090,7 @@ pub fn solve_planar_bem_with_stack(
         maxwell_matrix_f,
         mutual_matrix_f,
         ec_matrix_hz,
+        ..Default::default()
     };
     scalars.push(cap_data.scalar());
     scalars.push(tls.scalar());

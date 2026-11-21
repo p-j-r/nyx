@@ -31,6 +31,7 @@ pub mod expr;
 pub mod fieldexpr;
 pub mod formula;
 pub mod fem;
+pub mod rt;
 pub mod fields;
 pub mod material;
 pub mod adapt;

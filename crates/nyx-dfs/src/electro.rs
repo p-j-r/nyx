@@ -732,6 +732,7 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         maxwell_matrix_f,
         mutual_matrix_f,
         ec_matrix_hz,
+        ..Default::default()
     };
     scalars.push(cap_data.scalar());
     scalars.push(tls.scalar());
