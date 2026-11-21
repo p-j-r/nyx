@@ -2,8 +2,18 @@
 // Copyright (C) 2026 p-j-r
 //! Pure-Rust HDF5 storage engine types, read-budget guards, and layout configuration for `nyx`.
 
+pub mod reader;
+pub mod sweep;
+pub mod writer;
+pub mod xdmf;
+
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+
+pub use reader::{fuzz_walk_untrusted, NyxReader, NyxSolutionData, NyxV3Summary};
+pub use sweep::{atomic_rename, atomic_write_bytes, SweepCheckpoint, SweepPoint};
+pub use writer::{append_solved_mode_in_place, init_nyx_packed_streaming, write_nyx_packed, write_nyx_v3};
+pub use xdmf::{generate_direct_xdmf, viz_link_name, write_direct_xdmf};
 
 /// Dataset storage layout for FEM cell and nodal fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -28,6 +38,16 @@ impl FieldStorageLayout {
             Self::L1LegacyGzip3 => "L1LegacyGzip3",
             Self::L2ShuffleLzfPacked => "L2ShuffleLzfPacked",
             Self::L3ContiguousPacked => "L3ContiguousPacked",
+        }
+    }
+
+    /// Parses a `@field_layout` attribute string back into [`FieldStorageLayout`].
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "L1LegacyGzip3" => Some(Self::L1LegacyGzip3),
+            "L2ShuffleLzfPacked" => Some(Self::L2ShuffleLzfPacked),
+            "L3ContiguousPacked" => Some(Self::L3ContiguousPacked),
+            _ => None,
         }
     }
 }
@@ -106,4 +126,39 @@ pub fn assert_f64_bits_eq(context: &str, actual: &[f64], expected: &[f64]) -> Re
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_string_round_trip() {
+        for l in [
+            FieldStorageLayout::L1LegacyGzip3,
+            FieldStorageLayout::L2ShuffleLzfPacked,
+            FieldStorageLayout::L3ContiguousPacked,
+        ] {
+            assert_eq!(FieldStorageLayout::parse(l.as_str()), Some(l));
+        }
+        assert_eq!(FieldStorageLayout::default(), FieldStorageLayout::L2ShuffleLzfPacked);
+        assert_eq!(FieldStorageLayout::parse("unknown"), None);
+    }
+
+    #[test]
+    fn f64_bits_eq_distinguishes_signed_zero_and_nan_payloads() {
+        assert!(assert_f64_bits_eq("pos_zero", &[0.0], &[0.0]).is_ok());
+        assert!(assert_f64_bits_eq("sign_zero", &[0.0], &[-0.0]).is_err());
+        let nan1 = f64::from_bits(0x7ff8_0000_0000_1234);
+        let nan2 = f64::from_bits(0x7ff8_0000_0000_5678);
+        assert!(assert_f64_bits_eq("same_nan", &[nan1], &[nan1]).is_ok());
+        assert!(assert_f64_bits_eq("diff_nan", &[nan1], &[nan2]).is_err());
+    }
+
+    #[test]
+    fn viz_link_sanitization() {
+        assert_eq!(viz_link_name("00_|E|"), "_E_");
+        assert_eq!(viz_link_name("03_Re Ex"), "Re_Ex");
+        assert_eq!(viz_link_name("plain_name"), "plain_name");
+    }
 }
