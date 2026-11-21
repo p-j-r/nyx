@@ -2941,6 +2941,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "hdf5-pure"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70485cc6c7ae0829c1b702454c1159b887fa36324cc728b5a950cba4039ee2d6"
+dependencies = [
+ "hdf5-pure-core",
+ "hdf5-pure-filter",
+ "hdf5-pure-format",
+ "hdf5-pure-space",
+]
+
+[[package]]
+name = "hdf5-pure-core"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2be8b744ebcbbb06399f515fd545bfda0befdc84d7aa8191403868126b02156c"
+
+[[package]]
+name = "hdf5-pure-filter"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "356a1b586a0af9acbf57ddfde1907c83a16adb053a258d165d4632e6d4029ac5"
+dependencies = [
+ "flate2",
+ "hdf5-pure-core",
+]
+
+[[package]]
+name = "hdf5-pure-format"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92c76b7b4f591755c8b87911f48ba5fe32014739f309ea4d599857639f662083"
+dependencies = [
+ "byteorder",
+ "hdf5-pure-core",
+]
+
+[[package]]
+name = "hdf5-pure-space"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72ecfd5315cd3f684fb3714353b8e4c0fa7ac0d97b098f00c8622733f5e5f643"
+dependencies = [
+ "hdf5-pure-core",
+]
+
+[[package]]
 name = "heapless"
 version = "0.7.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4152,9 +4199,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.31.4"
+version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bc81ce8148d3b4f3274da811f11cdd824ae661ee4ef732cdb229825cf5be7f7"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
@@ -4411,6 +4458,18 @@ dependencies = [
  "geom",
  "nyx-physics",
  "rayon",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "hdf5-pure",
+ "rayon",
+ "serde",
  "serde_json",
 ]
 
