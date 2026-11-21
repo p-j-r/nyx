@@ -8,6 +8,14 @@
       "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface",
       "type": "boolean"
     },
+    "gap_cells": {
+      "description": "3D sheet mesher: target number of cells across narrow coplanar gaps",
+      "exclusiveMinimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "h": {
       "description": "global element size (m)",
       "exclusiveMinimum": 0,
@@ -124,6 +132,11 @@
         "object",
         "null"
       ]
+    },
+    "z_coarsen": {
+      "default": false,
+      "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes",
+      "type": "boolean"
     }
   },
   "required": [
