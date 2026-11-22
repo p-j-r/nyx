@@ -12,6 +12,10 @@
 //! preconditioned with smoothed-aggregation multigrid (`AmgSystem`, `amg`), falling back to the factorisation if
 //! multigrid does not converge. The thresholds that decide are `AMG_THRESHOLD*` and `LOBPCG_MIN_FREE`.
 
+pub use crate::farfield::{
+    assemble_boundary_mass_weighted, assemble_farfield_robin, farfield_centroid, farfield_positive_measure,
+    FarFieldPermittivity,
+};
 use crate::linalg::driver::DirectSolver;
 use crate::mesh::SimplexMesh;
 use crate::linalg::csr::{Coo, RCsr as Csr};
@@ -305,7 +309,7 @@ impl CurvedTet {
 
     /// Derivatives of the position with respect to each barycentric coordinate treated as independent: `d[b]` is the sum over nodes of
     /// the node position times the derivative of its shape function with respect to `lambda_b`.
-    fn dx_dlam(&self, lam: &[f64; 4]) -> [[f64; 3]; 4] {
+    pub fn dx_dlam(&self, lam: &[f64; 4]) -> [[f64; 3]; 4] {
         let mut d = [[0.0; 3]; 4];
         for a in 0..4 {
             // vertex function l_a (2 l_a - 1): derivative (4 l_a - 1) with respect to l_a
@@ -573,6 +577,48 @@ pub fn assemble_source(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Vec<f
 }
 
 // ------------------------------------------------------------------ boundaries
+
+/// Local vertex triples of the four faces of a tetrahedron.
+pub const TET_FACES: [[usize; 3]; 4] = [[1, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]];
+
+/// Builds a map from each sorted triangle face `[v0, v1, v2]` in a 3D tetrahedral mesh to one adjacent
+/// cell index `ci` (lowest cell index) and its 3 local vertex indices `[la, lb, lc]` in `0..4` ordered
+/// so that `[v[la], v[lb], v[lc]] == [v0, v1, v2]`.
+pub fn build_face_to_cell_3d(mesh: &SimplexMesh) -> std::collections::HashMap<[u32; 3], (usize, [usize; 3])> {
+    let mut map = std::collections::HashMap::with_capacity(mesh.n_cells() * 2);
+    if mesh.dim != 3 {
+        return map;
+    }
+    for ci in 0..mesh.n_cells() {
+        let v = mesh.cell(ci);
+        for mut lf in TET_FACES {
+            lf.sort_by_key(|&l| v[l]);
+            let key = [v[lf[0]], v[lf[1]], v[lf[2]]];
+            map.entry(key).or_insert((ci, lf));
+        }
+    }
+    map
+}
+
+/// Builds a map from each sorted triangle face `[v0, v1, v2]` in a 3D tetrahedral mesh to all adjacent
+/// cells `(ci, [la, lb, lc])` in ascending cell index order, where `[la, lb, lc]` are the local vertex
+/// indices in `0..4` ordered so that `[v[la], v[lb], v[lc]] == [v0, v1, v2]`.
+pub fn build_face_to_cells_3d(mesh: &SimplexMesh) -> std::collections::HashMap<[u32; 3], Vec<(usize, [usize; 3])>> {
+    let mut map: std::collections::HashMap<[u32; 3], Vec<(usize, [usize; 3])>> =
+        std::collections::HashMap::with_capacity(mesh.n_cells() * 2);
+    if mesh.dim != 3 {
+        return map;
+    }
+    for ci in 0..mesh.n_cells() {
+        let v = mesh.cell(ci);
+        for mut lf in TET_FACES {
+            lf.sort_by_key(|&l| v[l]);
+            let key = [v[lf[0]], v[lf[1]], v[lf[2]]];
+            map.entry(key).or_default().push((ci, lf));
+        }
+    }
+    map
+}
 
 pub fn facet_measure(mesh: &SimplexMesh, f: usize) -> f64 {
     let v = mesh.facet(f);

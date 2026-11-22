@@ -9,6 +9,7 @@
 // The kernels index several arrays with one loop variable, the form that matches the formulas (as in femcore).
 #![allow(clippy::needless_range_loop)]
 
+pub mod ac_loss;
 mod common;
 pub mod electro;
 pub mod heat;
@@ -69,6 +70,65 @@ impl Physics for Dfs {
                         false,
                         "in planar_bem, solve on 1->4 subdivided sheet panels and apply log-space SPD Richardson extrapolation",
                     ),
+                    ParamDesc::integer(
+                        "adapt_passes",
+                        "Adaptive passes",
+                        1,
+                        1,
+                        "number of goal-oriented h-adaptive mesh refinement passes (1 disables AMR)",
+                    ),
+                    ParamDesc::number(
+                        "adapt_rel_tol",
+                        "Adaptive relative tolerance",
+                        "",
+                        0.001,
+                        "pass-to-pass relative capacitance convergence threshold",
+                    )
+                    .range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::integer(
+                        "adapt_min_converged_passes",
+                        "Minimum converged passes",
+                        1,
+                        1,
+                        "consecutive passes below adapt_rel_tol required to stop",
+                    ),
+                    ParamDesc::number(
+                        "adapt_growth",
+                        "Adaptive cell growth factor",
+                        "",
+                        1.35,
+                        "target mesh complexity / cell growth factor per adaptive pass (> 1)",
+                    )
+                    .range(Some(1.0 + 1e-9), None),
+                    ParamDesc::choice(
+                        "adapt_mode",
+                        "Adaptive meshing mode",
+                        &["auto", "sheet_2d_z", "full_3d"],
+                        "auto",
+                        "auto: sheet_2d_z on 3D sheet stacks, full_3d on general 3D, 2D metric adaptation in 2D",
+                    ),
+                    ParamDesc::choice(
+                        "adapt_estimator",
+                        "Adaptive error estimator",
+                        &["flux_jump_goal", "prager_synge", "hessian"],
+                        "flux_jump_goal",
+                        "a posteriori cell error indicator driving h-adaptation",
+                    ),
+                    ParamDesc::choice(
+                        "flux_bounds",
+                        "Complementary flux bounds",
+                        &["none", "report", "midpoint"],
+                        "none",
+                        "Prager-Synge H(div) equilibrated-flux lower/upper capacitance bounds; midpoint sets C = 0.5 * (C^up + C^low)",
+                    ),
+                    ParamDesc::number(
+                        "freq",
+                        "Operating frequency",
+                        "Hz",
+                        0.0,
+                        "operating frequency for AC quasi-static dielectric loss (G and Q_diel; 0 for DC)",
+                    )
+                    .range(Some(0.0), None),
                 ],
             },
             StudyDesc {
@@ -155,6 +215,36 @@ impl Physics for Dfs {
                 )],
             ),
             b(
+                "far_field",
+                "Far-field open boundary",
+                "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+                vec![
+                    ParamDesc::integer(
+                        "order",
+                        "Asymptotic order",
+                        1,
+                        1,
+                        "1: first-order multipole Robin condition; 2: 3D second-order symmetric Laplace-Beltrami correction",
+                    )
+                    .range(Some(1.0), Some(2.0)),
+                    ParamDesc::number(
+                        "decay_power",
+                        "Decay power",
+                        "",
+                        1.0,
+                        "asymptotic potential decay power gamma > 0 (V ~ r^-gamma; 1.0 for monopole, 2.0 for dipole)",
+                    )
+                    .range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::vector(
+                        "center",
+                        "Multipole center",
+                        "m",
+                        3,
+                        "optional multipole expansion center [cx, cy, cz]; omit to use conductor area-weighted centroid",
+                    ),
+                ],
+            ),
+            b(
                 "temperature",
                 "Temperature",
                 "Fixed temperature (heat transfer).",
@@ -228,6 +318,8 @@ impl Physics for Dfs {
         use PropKind::*;
         vec![
             PropDesc::new("eps_r", "Relative permittivity", "", Tensor, &["electrostatic"], None),
+            PropDesc::new("tan_delta", "Dielectric loss tangent", "", Tensor, &["electrostatic"], Some(0.0)),
+            PropDesc::new("sigma", "Electrical conductivity", "S/m", Tensor, &["electrostatic"], Some(0.0)),
             PropDesc::new("rho_v", "Charge density", "C/m^3", Scalar, &["electrostatic"], Some(0.0)),
             PropDesc::new("k", "Thermal conductivity", "W/(m K)", Tensor, &["heat_stationary", "heat_transient"], None),
             PropDesc::new("rho", "Density", "kg/m^3", Scalar, &["heat_transient"], None),
@@ -310,6 +402,10 @@ impl Physics for Dfs {
     fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error> {
         validate_spec(self, spec)?;
         self.validate(spec, mesh)?;
+        if ctx.frequency.is_none() && spec.study.kind == "electrostatic" {
+            ctx.frequency =
+                spec.study.params.get("freq").and_then(|v| v.as_f64()).filter(|&f| f > 0.0 && f.is_finite());
+        }
         let problem = decode(spec, ctx)?;
         run(mesh, &problem, &ctx.progress)
     }
@@ -328,9 +424,69 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
     }
     check_mesh(mesh)?;
     problem.check_finite().map_err(Error::NonFinite)?;
+    let d = discretise(mesh)?;
+    if matches!(problem.study, Study::Electrostatic) {
+        if !(problem.adapt_rel_tol > 0.0
+            && problem.adapt_passes >= 1
+            && problem.adapt_min_converged_passes >= 1
+            && problem.adapt_growth > 1.0
+            && problem.freq >= 0.0)
+        {
+            return Err(Error::invalid(
+                "electrostatic study parameters require adapt_passes >= 1, adapt_min_converged_passes >= 1, adapt_rel_tol > 0, adapt_growth > 1, and freq >= 0",
+            ));
+        }
+        if !matches!(problem.flux_bounds.as_str(), "none" | "report" | "midpoint") {
+            return Err(Error::invalid(format!(
+                "flux_bounds must be 'none', 'report', or 'midpoint', got '{}'",
+                problem.flux_bounds
+            )));
+        }
+        let need_rt =
+            problem.flux_bounds != "none" || (problem.adapt_passes > 1 && problem.adapt_estimator == "prager_synge");
+        if need_rt {
+            if problem.singular_edges == "quarter_point" || (problem.order >= 2 && d.has_qp()) {
+                return Err(Error::invalid(
+                    "flux_bounds / prager_synge cannot be combined with singular_edges='quarter_point': contravariant Piola-mapped Raviart-Thomas fluxes have divergent L^2 energy on singular quarter-point (det J -> 0) CurvedTets",
+                ));
+            }
+            let has_rho = problem
+                .materials
+                .cell_values(&d, "rho_v", Some(0.0))
+                .map(|v| v.iter().any(|&x| x.abs() > 0.0))
+                .unwrap_or(false);
+            let has_sigma_s = problem.bcs.iter().any(|bc| matches!(bc.kind, BcKind::SurfaceCharge(s) if s.abs() > 0.0));
+            if has_rho || has_sigma_s {
+                return Err(Error::invalid(
+                    "flux_bounds / prager_synge requires source-free electrostatics (rho_v == 0 and surface_charge == 0)",
+                ));
+            }
+        }
+        if problem.formulation == "planar_bem" {
+            if problem.adapt_passes > 1 {
+                return Err(Error::Unsupported(
+                    "planar_bem is a single-pass 2D boundary-element formulation and does not support volumetric multi-pass AMR (`adapt_passes > 1`)".into(),
+                ));
+            }
+            if problem.bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. })) {
+                return Err(Error::Unsupported(
+                    "planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+                ));
+            }
+            if problem.flux_bounds != "none" {
+                return Err(Error::Unsupported(
+                    "planar_bem is a 2D boundary-element formulation and does not support 3D volumetric Prager-Synge 'flux_bounds'".into(),
+                ));
+            }
+            if planar_bem::has_thick_sheet_or_trench_geometry(&d, problem) {
+                return Err(Error::Unsupported(
+                    "planar_bem requires zero-thickness planar conductor sheets on a flat interface and does not support finite sheet thickness > 0 or substrate etch_depth > 0".into(),
+                ));
+            }
+        }
+    }
     let mut result = {
         let _s = progress::stage(format!("solving diffusion on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
-        let d = discretise(mesh)?;
         match problem.study {
             Study::Electrostatic => solve_electrostatics(&d, problem),
             Study::Magnetostatic { .. } => solve_magnetostatics(&d, problem),

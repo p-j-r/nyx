@@ -483,6 +483,96 @@ fn parse_eliminate_mode(params_map: &Map<String, Value>) -> Result<EliminateMode
     }
 }
 
+fn reduce_maxwell_matrix(
+    raw: &[Vec<f64>],
+    sig_indices: &[usize],
+    ground_indices: &[usize],
+    eliminate: EliminateMode,
+    strict_psd_gg: bool,
+) -> Result<Vec<Vec<f64>>, Error> {
+    let m = sig_indices.len();
+    let mut reduced = vec![vec![0.0; m]; m];
+    for a in 0..m {
+        for b in a..m {
+            let (ia, ib) = (sig_indices[a], sig_indices[b]);
+            let sym = 0.5 * (raw[ia][ib] + raw[ib][ia]);
+            reduced[a][b] = sym;
+            reduced[b][a] = sym;
+        }
+    }
+
+    if eliminate == EliminateMode::FloatingSchur && !ground_indices.is_empty() {
+        let kg = ground_indices.len();
+        let mut flat_gg = Vec::with_capacity(kg * kg);
+        for &ig in ground_indices {
+            for &jg in ground_indices {
+                flat_gg.push(0.5 * (raw[ig][jg] + raw[jg][ig]));
+            }
+        }
+        let (eigs_gg, vecs_gg) = dense_eigh(&flat_gg, kg).map_err(Error::from_kernel)?;
+        let lam_max_gg = eigs_gg.iter().copied().fold(0.0_f64, f64::max);
+        let lam_min_gg = eigs_gg.iter().copied().fold(f64::INFINITY, f64::min);
+        if (strict_psd_gg && lam_max_gg <= 0.0) || lam_min_gg < -1.0e-8 * lam_max_gg.max(1.0e-30) {
+            return Err(Error::invalid("ground submatrix C_gg is not positive semi-definite in floating_schur"));
+        }
+        if lam_max_gg > 0.0 {
+            let thresh_gg = NULL_MODE_REL_TOL * lam_max_gg;
+            let mut c_sg = vec![vec![0.0; kg]; m];
+            for (a, &ia) in sig_indices.iter().enumerate() {
+                for (p, &ig) in ground_indices.iter().enumerate() {
+                    c_sg[a][p] = 0.5 * (raw[ia][ig] + raw[ig][ia]);
+                }
+            }
+            for (k, &lam) in eigs_gg.iter().enumerate().take(kg) {
+                if lam > thresh_gg {
+                    let vk = &vecs_gg[k];
+                    let w: Vec<f64> = (0..m).map(|a| (0..kg).map(|p| c_sg[a][p] * vk[p]).sum()).collect();
+                    for a in 0..m {
+                        for b in a..m {
+                            let sub = (w[a] * w[b]) / lam;
+                            reduced[a][b] -= sub;
+                            if a != b {
+                                reduced[b][a] -= sub;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(reduced)
+}
+
+fn qubit_c_sigma_from_psd_bound(c_red: &[Vec<f64>], pad_indices: &[usize]) -> Option<f64> {
+    if pad_indices.len() == 1 {
+        let c_ss = c_red[pad_indices[0]][pad_indices[0]];
+        return (c_ss.is_finite() && c_ss >= 0.0).then_some(c_ss);
+    }
+    let (s, b) = (pad_indices[0], pad_indices[1]);
+    let c_ss = c_red[s][s];
+    let c_bb = c_red[b][b];
+    let c_sb = 0.5 * (c_red[s][b] + c_red[b][s]);
+    if !(c_ss.is_finite() && c_bb.is_finite() && c_sb.is_finite()) || c_ss < 0.0 || c_bb < 0.0 {
+        return None;
+    }
+    let sum_diag = c_ss + c_bb;
+    if sum_diag <= 0.0 {
+        return Some(0.0);
+    }
+    let denom = sum_diag + 2.0 * c_sb;
+    let det = (c_ss * c_bb - c_sb * c_sb).max(0.0);
+    if denom > 1.0e-14 * sum_diag {
+        Some(det / denom)
+    } else if denom >= -1.0e-12 * sum_diag && c_sb <= 0.0 {
+        Some((-c_sb).max(0.0))
+    } else {
+        None
+    }
+}
+
+type MatrixBoundsSlice<'a> = (&'a [Vec<f64>], &'a [Vec<f64>]);
+
+#[allow(clippy::too_many_arguments)]
 fn parse_qubits(
     q_val: &Value,
     all_terminals: &[String],
@@ -490,6 +580,7 @@ fn parse_qubits(
     reduced_terminals: &[String],
     red_idx_of: &BTreeMap<&str, usize>,
     c_red: &[Vec<f64>],
+    c_red_bounds: Option<MatrixBoundsSlice<'_>>,
 ) -> Result<Vec<ComputedQubit>, Error> {
     let arr = q_val.as_array().ok_or_else(|| Error::invalid("parameter 'qubits' must be an array of objects"))?;
     let mut seen_names = BTreeSet::new();
@@ -630,6 +721,29 @@ fn parse_qubits(
         }
         q_json.insert("C_Sigma_F".into(), json!(c_sigma_f));
         q_json.insert("E_C_Hz".into(), json!(e_c_hz));
+        if let Some((c_low_red, c_up_red)) = c_red_bounds {
+            if let (Some(cs_low_raw), Some(cs_up_raw)) = (
+                qubit_c_sigma_from_psd_bound(c_low_red, &pad_indices),
+                qubit_c_sigma_from_psd_bound(c_up_red, &pad_indices),
+            ) {
+                if cs_up_raw > 0.0 {
+                    if cs_low_raw > cs_up_raw * (1.0 + 1.0e-8) {
+                        return Err(Error::invalid(format!(
+                            "qubit '{name}' lower bound C_Sigma_low_F ({cs_low_raw:e}) exceeds upper bound C_Sigma_up_F ({cs_up_raw:e})"
+                        )));
+                    }
+                    let cs_low = cs_low_raw.min(cs_up_raw);
+                    let cs_up = cs_up_raw.max(cs_low_raw);
+                    let ec_low = ec_scale / cs_up;
+                    q_json.insert("C_Sigma_low_F".into(), json!(cs_low));
+                    q_json.insert("C_Sigma_up_F".into(), json!(cs_up));
+                    q_json.insert("E_C_low_Hz".into(), json!(ec_low));
+                    if cs_low > 0.0 {
+                        q_json.insert("E_C_up_Hz".into(), json!(ec_scale / cs_low));
+                    }
+                }
+            }
+        }
         q_json.insert("C_eff_F".into(), json!(c_eff_map));
         q_json.insert("beta".into(), json!(beta_map));
 
@@ -769,25 +883,56 @@ fn parse_resonators(
     Ok(out)
 }
 
+fn insert_optional_bound_matrices(out: &mut Map<String, Value>, cap: &CapacitanceMatrixData) {
+    if let Some(low) = &cap.maxwell_lower_matrix_f {
+        out.insert("maxwell_lower_matrix_F".into(), json!(low));
+    }
+    if let Some(up) = &cap.maxwell_upper_matrix_f {
+        out.insert("maxwell_upper_matrix_F".into(), json!(up));
+    }
+    if let Some(mid) = &cap.maxwell_mid_matrix_f {
+        out.insert("maxwell_mid_matrix_F".into(), json!(mid));
+    }
+    if let Some(err) = &cap.maxwell_error_bound_f {
+        out.insert("maxwell_error_bound_F".into(), json!(err));
+    }
+    if let Some(cond) = &cap.conductance_matrix_s {
+        out.insert("conductance_matrix_S".into(), json!(cond));
+    }
+    if let Some(qd) = &cap.q_dielectric_matrix {
+        out.insert("q_dielectric_matrix".into(), json!(qd));
+    }
+    if !cap.adapt_history.is_empty() {
+        out.insert("adapt_history".into(), json!(cap.adapt_history));
+    }
+}
+
+fn validate_optional_bound_matrix(name: &str, mat_opt: &Option<Vec<Vec<f64>>>, n: usize) -> Result<(), Error> {
+    if let Some(mat) = mat_opt {
+        if mat.len() != n || mat.iter().any(|r| r.len() != n) {
+            return Err(Error::invalid(format!("{name} dimensions do not match terminal count {n}")));
+        }
+        if mat.iter().flatten().any(|x| !x.is_finite()) {
+            return Err(Error::NonFinite(format!("{name} contains non-finite entries")));
+        }
+    }
+    Ok(())
+}
+
 fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params: &Value) -> Result<Value, Error> {
     let cap = capacitance_matrix(result)?;
+    let base_reply = |cap: &CapacitanceMatrixData| -> Value {
+        let mut out = Map::new();
+        out.insert("terminals".into(), json!(cap.terminals));
+        out.insert("maxwell_matrix_F".into(), json!(cap.maxwell_matrix_f));
+        out.insert("mutual_matrix_F".into(), json!(cap.mutual_matrix_f));
+        out.insert("ec_matrix_Hz".into(), json!(cap.ec_matrix_hz));
+        insert_optional_bound_matrices(&mut out, cap);
+        Value::Object(out)
+    };
     let params_map = match params {
-        Value::Null => {
-            return Ok(json!({
-                "terminals": cap.terminals,
-                "maxwell_matrix_F": cap.maxwell_matrix_f,
-                "mutual_matrix_F": cap.mutual_matrix_f,
-                "ec_matrix_Hz": cap.ec_matrix_hz,
-            }));
-        }
-        Value::Object(m) if m.is_empty() => {
-            return Ok(json!({
-                "terminals": cap.terminals,
-                "maxwell_matrix_F": cap.maxwell_matrix_f,
-                "mutual_matrix_F": cap.mutual_matrix_f,
-                "ec_matrix_Hz": cap.ec_matrix_hz,
-            }));
-        }
+        Value::Null => return Ok(base_reply(&cap)),
+        Value::Object(m) if m.is_empty() => return Ok(base_reply(&cap)),
         Value::Object(m) => m,
         _ => return Err(Error::invalid("capacitance_matrix params must be a JSON object or null")),
     };
@@ -810,6 +955,10 @@ fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params
     if cap.maxwell_matrix_f.iter().flatten().any(|x| !x.is_finite()) {
         return Err(Error::NonFinite("Maxwell capacitance matrix contains non-finite entries".into()));
     }
+    validate_optional_bound_matrix("maxwell_lower_matrix_f", &cap.maxwell_lower_matrix_f, n)?;
+    validate_optional_bound_matrix("maxwell_upper_matrix_f", &cap.maxwell_upper_matrix_f, n)?;
+    validate_optional_bound_matrix("maxwell_mid_matrix_f", &cap.maxwell_mid_matrix_f, n)?;
+    validate_optional_bound_matrix("maxwell_error_bound_f", &cap.maxwell_error_bound_f, n)?;
 
     // Optional FR-11 Pt 1 3D matched-asymptotic finite-thickness correction BEFORE Schur/qubit reduction
     let thickness_corr = match params_map.get("metal_thickness_m") {
@@ -859,55 +1008,16 @@ fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params
         return Err(Error::invalid("ground cannot eliminate all terminals; at least one signal terminal must remain"));
     }
 
-    let m = sig_indices.len();
     let reduced_terminals: Vec<String> = sig_indices.iter().map(|&i| cap.terminals[i].clone()).collect();
-    let mut maxwell_reduced_f = vec![vec![0.0; m]; m];
-    for a in 0..m {
-        for b in a..m {
-            let (ia, ib) = (sig_indices[a], sig_indices[b]);
-            let sym = 0.5 * (active_maxwell[ia][ib] + active_maxwell[ib][ia]);
-            maxwell_reduced_f[a][b] = sym;
-            maxwell_reduced_f[b][a] = sym;
+    let maxwell_reduced_f = reduce_maxwell_matrix(active_maxwell, &sig_indices, &ground_indices, eliminate, true)?;
+    let reduced_bounds = match (thickness_corr.is_none(), &cap.maxwell_lower_matrix_f, &cap.maxwell_upper_matrix_f) {
+        (true, Some(low), Some(up)) => {
+            let red_low = reduce_maxwell_matrix(low, &sig_indices, &ground_indices, eliminate, false)?;
+            let red_up = reduce_maxwell_matrix(up, &sig_indices, &ground_indices, eliminate, true)?;
+            Some((red_low, red_up))
         }
-    }
-
-    if eliminate == EliminateMode::FloatingSchur && !ground_indices.is_empty() {
-        let kg = ground_indices.len();
-        let mut flat_gg = Vec::with_capacity(kg * kg);
-        for &ig in &ground_indices {
-            for &jg in &ground_indices {
-                flat_gg.push(0.5 * (active_maxwell[ig][jg] + active_maxwell[jg][ig]));
-            }
-        }
-        let (eigs_gg, vecs_gg) = dense_eigh(&flat_gg, kg).map_err(Error::from_kernel)?;
-        let lam_max_gg = eigs_gg.iter().copied().fold(0.0_f64, f64::max);
-        let lam_min_gg = eigs_gg.iter().copied().fold(f64::INFINITY, f64::min);
-        if lam_max_gg <= 0.0 || lam_min_gg < -1.0e-8 * lam_max_gg {
-            return Err(Error::invalid("ground submatrix C_gg is not positive semi-definite in floating_schur"));
-        }
-        let thresh_gg = NULL_MODE_REL_TOL * lam_max_gg;
-        let mut c_sg = vec![vec![0.0; kg]; m];
-        for (a, &ia) in sig_indices.iter().enumerate() {
-            for (p, &ig) in ground_indices.iter().enumerate() {
-                c_sg[a][p] = 0.5 * (active_maxwell[ia][ig] + active_maxwell[ig][ia]);
-            }
-        }
-        for (k, &lam) in eigs_gg.iter().enumerate().take(kg) {
-            if lam > thresh_gg {
-                let vk = &vecs_gg[k];
-                let w: Vec<f64> = (0..m).map(|a| (0..kg).map(|p| c_sg[a][p] * vk[p]).sum()).collect();
-                for a in 0..m {
-                    for b in a..m {
-                        let sub = (w[a] * w[b]) / lam;
-                        maxwell_reduced_f[a][b] -= sub;
-                        if a != b {
-                            maxwell_reduced_f[b][a] -= sub;
-                        }
-                    }
-                }
-            }
-        }
-    }
+        _ => None,
+    };
 
     let mutual_reduced_f = mutual_from_maxwell(&maxwell_reduced_f);
     let (ec_reduced_hz, condition_number, null_modes) = spectral_ec_and_cond(&maxwell_reduced_f)?;
@@ -925,6 +1035,7 @@ fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params
             &reduced_terminals,
             &red_idx_of,
             &maxwell_reduced_f,
+            reduced_bounds.as_ref().map(|(lo, hi)| (lo.as_slice(), hi.as_slice())),
         )?),
     };
 
@@ -938,10 +1049,17 @@ fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params
     out.insert("maxwell_matrix_F".into(), json!(active_maxwell));
     out.insert("mutual_matrix_F".into(), json!(active_mutual));
     out.insert("ec_matrix_Hz".into(), json!(active_ec));
+    if thickness_corr.is_none() {
+        insert_optional_bound_matrices(&mut out, &cap);
+    }
     out.insert("eliminate".into(), json!(eliminate.as_str()));
     out.insert("ground_terminals".into(), json!(ground_terminals));
     out.insert("reduced_terminals".into(), json!(reduced_terminals));
     out.insert("maxwell_reduced_F".into(), json!(maxwell_reduced_f));
+    if let Some((red_low, red_up)) = &reduced_bounds {
+        out.insert("maxwell_reduced_lower_F".into(), json!(red_low));
+        out.insert("maxwell_reduced_upper_F".into(), json!(red_up));
+    }
     out.insert("mutual_reduced_F".into(), json!(mutual_reduced_f));
     out.insert("ec_reduced_Hz".into(), json!(ec_reduced_hz));
     out.insert("condition_number".into(), json!(condition_number));
@@ -1103,6 +1221,7 @@ mod tests {
             maxwell_matrix_f: vec![vec![80e-15, -30e-15], vec![-30e-15, 85e-15]],
             mutual_matrix_f: vec![vec![50e-15, 30e-15], vec![30e-15, 55e-15]],
             ec_matrix_hz: vec![vec![2.8e8, 1.0e8], vec![1.0e8, 2.6e8]],
+            ..Default::default()
         };
         let ind = InductanceMatrixData {
             terminals: vec!["loop1".into()],

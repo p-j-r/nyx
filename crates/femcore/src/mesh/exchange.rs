@@ -37,6 +37,7 @@ fn cells_of<const D: usize>(m: &SimplexMesh) -> CellMesh<D> {
             q.copy_from_slice(&p[..D]);
             (pr, q)
         }));
+        out.qp_edges = m.qp_edge_list();
     }
     out
 }

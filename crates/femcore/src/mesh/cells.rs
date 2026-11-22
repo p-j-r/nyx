@@ -104,6 +104,8 @@ pub struct CellMesh<const D: usize> {
     /// cells around it are quadratic (isoparametric) there. Sorted by pair. Empty by default; an edge that is not listed is straight
     /// (its node is the midpoint), so an empty list is the straight mesh of ADR 18.
     pub edge_nodes: Vec<([u32; 2], [f64; D])>,
+    /// Barsoum quarter-point singularity edges (`AF-2`), given as sorted vertex pairs `[a, b]` (`a < b`), sorted by pair.
+    pub qp_edges: Vec<[u32; 2]>,
 }
 
 impl<const D: usize> CellMesh<D> {
@@ -205,6 +207,7 @@ impl<const D: usize> CellMesh<D> {
             }
         }
         self.edge_nodes.retain(|e| exist.contains(&e.0));
+        self.qp_edges.retain(|e| exist.contains(e));
     }
 
     /// Number of cells of each shape.

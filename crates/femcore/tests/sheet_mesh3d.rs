@@ -209,6 +209,9 @@ fn sheet_edge_size_rule_refines_perimeter_and_grades_z_slabs_without_warnings() 
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: false,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
     let (g_coarse, rep_coarse) = mesh_request(&coarse_m.list, &req).unwrap();
     let (g_fine, rep_fine) = mesh_request(&fine_m.list, &req).unwrap();
@@ -266,6 +269,9 @@ fn suspended_airbridge_sheet_preserved_under_structured_pml_for_both_z_coarsen_m
             z_growth_ratio: None,
             max_steiner_multiplier: None,
             strict_mesh: true,
+            singular_edges: None,
+            quarter_point_xi: None,
+            corner_grading: false,
         };
         let (g, rep) = mesh_request(&m.list, &req).unwrap_or_else(|e| panic!("z_coarsen={z_coarsen}: {e}"));
         assert!(rep.warnings.is_empty(), "z_coarsen={z_coarsen}: {:?}", rep.warnings);
@@ -384,6 +390,9 @@ fn circular_disk_sheet3d_curved_mid_edge_projection_populates_valid_curved_tets(
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: true,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
     let (g_straight, rep_straight) = mesh_request(&m.list, &straight_req).unwrap();
     assert!(!g_straight.mesh.has_curved());

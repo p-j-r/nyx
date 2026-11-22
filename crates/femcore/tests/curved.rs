@@ -230,6 +230,9 @@ fn sheet3d_circular_disk_curved_mid_edge_nodes_converge_area_and_stay_positive_j
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: true,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
     let (g, rep) = mesh_request(&m.list, &req).unwrap();
     assert!(g.mesh.has_curved());

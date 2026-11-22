@@ -41,6 +41,7 @@ fn make_result(terminals: &[&str], maxwell_f: Vec<Vec<f64>>) -> SolveResult {
         maxwell_matrix_f: maxwell_f,
         mutual_matrix_f,
         ec_matrix_hz,
+        ..Default::default()
     };
     SolveResult {
         physics: "dfs".into(),

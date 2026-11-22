@@ -407,6 +407,11 @@ pub fn write_results_with_options(
             fill_u32(m.create_dataset("edge_node_pairs"), &pairs, 2, layout);
             fill_f64(m.create_dataset("edge_node_points"), &pos, 3, layout);
         }
+        let qp = mesh.qp_edge_list();
+        if !qp.is_empty() {
+            let qp_pairs: Vec<u32> = qp.iter().flat_map(|e| *e).collect();
+            fill_u32(m.create_dataset("qp_edge_pairs"), &qp_pairs, 2, layout);
+        }
         fb.add_group(m.finish());
     }
 
@@ -824,6 +829,13 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
             let nodes: Vec<([u32; 2], [f64; 3])> =
                 pairs.as_chunks::<2>().0.iter().copied().zip(pos.as_chunks::<3>().0.iter().copied()).collect();
             mesh.set_edge_nodes(&nodes);
+        }
+        if let Ok(qp_ds) = m.dataset("qp_edge_pairs") {
+            check_budget(&qp_ds, 4, &budget, "qp edge pairs")?;
+            let qp_raw = qp_ds.read_u32().map_err(e("qp edge pairs"))?;
+            add_total((qp_raw.len() as u64) * 4, "qp edge pairs")?;
+            let qp_edges: Vec<[u32; 2]> = qp_raw.as_chunks::<2>().0.to_vec();
+            mesh.set_qp_edges(&qp_edges);
         }
         mesh
     } else {

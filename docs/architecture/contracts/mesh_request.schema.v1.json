@@ -3,6 +3,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "corner_grading": {
+      "default": false,
+      "description": "3D sheet mesher: radical corner grading toward sharp 2D sheet corners",
+      "type": "boolean"
+    },
     "curved": {
       "default": false,
       "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface",
@@ -104,6 +109,27 @@
           ],
           "type": "object"
         }
+      ]
+    },
+    "quarter_point_xi": {
+      "description": "3D sheet mesher: Barsoum quarter-point mid-edge parameter in [0.25, 0.50] (default 0.25)",
+      "maximum": 0.5,
+      "minimum": 0.25,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "singular_edges": {
+      "description": "3D sheet mesher: edge singularity enrichment ('none' or 'quarter_point')",
+      "enum": [
+        "none",
+        "quarter_point",
+        null
+      ],
+      "type": [
+        "string",
+        "null"
       ]
     },
     "strict_mesh": {

@@ -529,10 +529,90 @@ fn domain_scalar_eps(mesh: &Discretisation, spec: &Problem) -> BTreeMap<i32, f64
     map
 }
 
+/// Detects whether `mesh` or `spec` represents a 3D resolved finite-thickness conductor sheet
+/// (`thickness > 0`) or substrate over-etch trench (`etch_depth > 0`), which cannot be reduced to
+/// a zero-thickness 2D planar interface in `planar_bem`.
+pub fn has_thick_sheet_or_trench_geometry(mesh: &Discretisation, spec: &Problem) -> bool {
+    if spec.sheet_thickness_m.values().any(|&t| t > 0.0) || spec.sheet_etch_depth_m.values().any(|&t| t > 0.0) {
+        return true;
+    }
+    if mesh.dim != 3 || mesh.n_cells() == 0 {
+        return false;
+    }
+    let mut term_labels = BTreeSet::new();
+    for bc in &spec.bcs {
+        if matches!(bc.kind, BcKind::Terminal(_)) {
+            term_labels.extend(bc.labels.iter().copied());
+        }
+    }
+    let (lo, hi) = mesh.bbox();
+    let span = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]).max(1e-30);
+    let bbox_tol = 1e-7 * span;
+    let is_on_outer = |p0: &[f64], p1: &[f64], p2: &[f64]| -> bool {
+        (0..3).any(|ax| {
+            ((p0[ax] - lo[ax]).abs() < bbox_tol
+                && (p1[ax] - lo[ax]).abs() < bbox_tol
+                && (p2[ax] - lo[ax]).abs() < bbox_tol)
+                || ((p0[ax] - hi[ax]).abs() < bbox_tol
+                    && (p1[ax] - hi[ax]).abs() < bbox_tol
+                    && (p2[ax] - hi[ax]).abs() < bbox_tol)
+        })
+    };
+    let normal_z_ratio = |p0: &[f64], p1: &[f64], p2: &[f64]| -> f64 {
+        let u = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+        let v = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let nl = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        if nl > 1e-30 {
+            n[2].abs() / nl
+        } else {
+            1.0
+        }
+    };
+    let exterior = mesh.exterior_facets();
+    for f in 0..mesh.n_facets() {
+        if term_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            let (p0, p1, p2) = (mesh.point(fv[0] as usize), mesh.point(fv[1] as usize), mesh.point(fv[2] as usize));
+            if normal_z_ratio(p0, p1, p2) < 0.99 || (exterior[f] && !is_on_outer(p0, p1, p2)) {
+                return true;
+            }
+        }
+    }
+    let dom_eps = domain_scalar_eps(mesh, spec);
+    let f2c = femcore::fem::build_face_to_cells_3d(mesh);
+    for (key, cs) in &f2c {
+        if cs.len() == 2 {
+            let e0 = dom_eps.get(&mesh.cell_labels[cs[0].0]).copied().unwrap_or(1.0);
+            let e1 = dom_eps.get(&mesh.cell_labels[cs[1].0]).copied().unwrap_or(1.0);
+            if (e0 - e1).abs() > 1e-6 {
+                let (p0, p1, p2) =
+                    (mesh.point(key[0] as usize), mesh.point(key[1] as usize), mesh.point(key[2] as usize));
+                if normal_z_ratio(p0, p1, p2) < 0.99 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Checks whether `mesh` and `spec` represent a planar sheet capacitance problem suitable for
 /// automatic selection (`formulation = "auto"`).
 pub fn can_use_planar_bem(mesh: &Discretisation, spec: &Problem) -> bool {
     if mesh.dim != 3 {
+        return false;
+    }
+    if spec.adapt_passes > 1 {
+        return false;
+    }
+    if spec.flux_bounds != "none" {
+        return false;
+    }
+    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. })) {
+        return false;
+    }
+    if has_thick_sheet_or_trench_geometry(mesh, spec) {
         return false;
     }
     let has_terminal = spec.bcs.iter().any(|b| matches!(b.kind, BcKind::Terminal(_)));
@@ -969,10 +1049,276 @@ fn build_tls_meta(mesh: &Discretisation, spec: &Problem) -> TlsMeta {
         domain_names: spec.domain_names.clone(),
         conductor_labels,
         sheet_labels: sheet_set.into_iter().collect(),
-        sheet_thickness_m: BTreeMap::new(),
+        sheet_thickness_m: spec.sheet_thickness_m.iter().filter(|&(_, &t)| t > 0.0).map(|(&k, &v)| (k, v)).collect(),
         pec_labels: pec_set.into_iter().collect(),
         interfaces: spec.tls_interfaces.clone(),
     }
+}
+
+#[inline]
+fn c2_add(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
+    [a[0] + b[0], a[1] + b[1]]
+}
+#[inline]
+fn c2_sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
+    [a[0] - b[0], a[1] - b[1]]
+}
+#[inline]
+fn c2_mul(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
+    [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]
+}
+#[inline]
+fn c2_div(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
+    let d = (b[0] * b[0] + b[1] * b[1]).max(1e-300);
+    [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d]
+}
+#[inline]
+fn c2_abs(a: [f64; 2]) -> f64 {
+    a[0].hypot(a[1])
+}
+
+fn solve_complex_linear_multi(
+    p_re: &[f64],
+    p_im: &[f64],
+    rhs_re: &[Vec<f64>],
+    n: usize,
+) -> Result<(Matrix, Matrix), String> {
+    let nrhs = rhs_re.len();
+    let mut a = vec![[0.0_f64; 2]; n * n];
+    for idx in 0..(n * n) {
+        a[idx] = [p_re[idx], p_im[idx]];
+    }
+    let mut b = vec![vec![[0.0_f64; 2]; nrhs]; n];
+    for i in 0..n {
+        for r in 0..nrhs {
+            b[i][r] = [rhs_re[r][i], 0.0];
+        }
+    }
+    for k in 0..n {
+        let mut piv = k;
+        let mut best = c2_abs(a[k * n + k]);
+        for i in (k + 1)..n {
+            let v = c2_abs(a[i * n + k]);
+            if v > best {
+                best = v;
+                piv = i;
+            }
+        }
+        if best <= 1e-300 {
+            return Err("planar_bem complex elastance matrix is singular".into());
+        }
+        if piv != k {
+            for j in k..n {
+                a.swap(k * n + j, piv * n + j);
+            }
+            b.swap(k, piv);
+        }
+        let akk = a[k * n + k];
+        for i in (k + 1)..n {
+            let factor = c2_div(a[i * n + k], akk);
+            a[i * n + k] = [0.0, 0.0];
+            if factor[0] == 0.0 && factor[1] == 0.0 {
+                continue;
+            }
+            for j in (k + 1)..n {
+                a[i * n + j] = c2_sub(a[i * n + j], c2_mul(factor, a[k * n + j]));
+            }
+            for r in 0..nrhs {
+                b[i][r] = c2_sub(b[i][r], c2_mul(factor, b[k][r]));
+            }
+        }
+    }
+    let mut x_re = vec![vec![0.0; n]; nrhs];
+    let mut x_im = vec![vec![0.0; n]; nrhs];
+    for i in (0..n).rev() {
+        let aii = a[i * n + i];
+        for r in 0..nrhs {
+            let mut sum = b[i][r];
+            for j in (i + 1)..n {
+                let xjr = [x_re[r][j], x_im[r][j]];
+                sum = c2_sub(sum, c2_mul(a[i * n + j], xjr));
+            }
+            let xi = c2_div(sum, aii);
+            x_re[r][i] = xi[0];
+            x_im[r][i] = xi[1];
+        }
+    }
+    Ok((x_re, x_im))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn assemble_and_solve_bem_complex_loss(
+    panels: &[Panel],
+    n_term: usize,
+    stack: &LayeredStack,
+    eps_top_im: f64,
+    eps_sub_im: f64,
+    eps_bot_im: f64,
+) -> Result<(Matrix, Matrix), String> {
+    let n = panels.len();
+    // Complex relative permittivities: eps_m_tilde = eps_m - i * eps_m_im
+    let e1 = [stack.eps_top, -eps_top_im];
+    let e2 = [stack.eps_sub, -eps_sub_im];
+    let e3 = [stack.eps_bot, -eps_bot_im];
+    let eps_eff = [0.5 * (e1[0] + e2[0]), 0.5 * (e1[1] + e2[1])];
+    let c0 = c2_div([1.0 / (4.0 * PI * EPS0), 0.0], eps_eff);
+
+    let mut c_images: Vec<([f64; 2], f64)> = Vec::new();
+    if stack.t_sub.is_finite() && stack.t_sub > 0.0 {
+        let k21 = c2_div(c2_sub(e2, e1), c2_add(e2, e1));
+        let k23 = if stack.grounded_backplane { [-1.0, 0.0] } else { c2_div(c2_sub(e2, e3), c2_add(e2, e3)) };
+        if c2_abs(k23) >= 1e-15 {
+            let scale = c2_div([2.0 * e2[0], 2.0 * e2[1]], c2_add(e1, e2));
+            let r = c2_mul(k21, k23);
+            let mut coeff = k23;
+            let mut last_n = 0usize;
+            for m in 1..=MAX_IMAGES {
+                if c2_abs(coeff) < IMAGE_TOL {
+                    break;
+                }
+                c_images.push((c2_mul(scale, coeff), 2.0 * (m as f64) * stack.t_sub));
+                last_n = m;
+                coeff = c2_mul(coeff, r);
+            }
+            let one_minus_r = c2_sub([1.0, 0.0], r);
+            if last_n == MAX_IMAGES && c2_abs(coeff) >= IMAGE_TOL && c2_abs(one_minus_r) > 1e-12 {
+                c_images
+                    .push((c2_mul(scale, c2_div(coeff, one_minus_r)), 2.0 * ((MAX_IMAGES + 1) as f64) * stack.t_sub));
+            }
+        }
+    }
+
+    let re_imgs: Vec<(f64, f64)> = c_images.iter().map(|&(w, d)| (w[0], d)).collect();
+    let im_imgs: Vec<(f64, f64)> = c_images.iter().map(|&(w, d)| (w[1], d)).collect();
+    let par = n >= 48 && femcore::par::threads() > 1;
+    let rows: Vec<Vec<[f64; 2]>> = femcore::linalg::par::chunk_map(n, par, |i| {
+        let mut row_u = Vec::with_capacity(n - i);
+        for j in i..n {
+            let s_re = panel_pair_elastance(&panels[i], &panels[j], 1.0, &re_imgs, i == j);
+            let s_im = if c_images.is_empty() {
+                0.0
+            } else {
+                // Subtract the direct 1/rho term from panel_pair_elastance so s_im contains only image terms
+                panel_pair_elastance(&panels[i], &panels[j], 1.0, &im_imgs, i == j)
+                    - panel_pair_elastance(&panels[i], &panels[j], 1.0, &[], i == j)
+            };
+            row_u.push(c2_mul(c0, [s_re, s_im]));
+        }
+        row_u
+    });
+
+    let mut p_re = vec![0.0; n * n];
+    let mut p_im = vec![0.0; n * n];
+    for i in 0..n {
+        for (off, &v) in rows[i].iter().enumerate() {
+            let j = i + off;
+            p_re[i * n + j] = v[0];
+            p_re[j * n + i] = v[0];
+            p_im[i * n + j] = v[1];
+            p_im[j * n + i] = v[1];
+        }
+    }
+
+    let mut rhs = vec![vec![0.0; n]; n_term];
+    for (i, pan) in panels.iter().enumerate() {
+        if let Some(t) = pan.terminal {
+            rhs[t][i] = 1.0;
+        }
+    }
+    let (q_re, q_im) = solve_complex_linear_multi(&p_re, &p_im, &rhs, n)?;
+    // C_tilde = K^T (q_re + i q_im) = C_re - i C_im => C_re = K^T q_re, C_im = -K^T q_im
+    let mut c_re = vec![vec![0.0; n_term]; n_term];
+    let mut c_im = vec![vec![0.0; n_term]; n_term];
+    for a in 0..n_term {
+        for b in a..n_term {
+            let mut sr = 0.0;
+            let mut si = 0.0;
+            for i in 0..n {
+                if panels[i].terminal == Some(a) {
+                    sr += q_re[b][i];
+                    si -= q_im[b][i];
+                }
+                if a != b && panels[i].terminal == Some(b) {
+                    sr += q_re[a][i];
+                    si -= q_im[a][i];
+                }
+            }
+            if a != b {
+                sr *= 0.5;
+                si *= 0.5;
+            }
+            c_re[a][b] = sr;
+            c_re[b][a] = sr;
+            c_im[a][b] = si;
+            c_im[b][a] = si;
+        }
+    }
+    Ok((c_re, c_im))
+}
+
+fn detect_stack_layer_loss(mesh: &Discretisation, spec: &Problem, stack: &LayeredStack, omega: f64) -> ([f64; 3], f64) {
+    let dom_loss = |d: i32| -> (f64, f64) {
+        let er = spec.materials.get(d, "eps_r").or_else(|| spec.materials.default.get("eps_r").copied()).unwrap_or(1.0);
+        let td = spec
+            .materials
+            .get(d, "tan_delta")
+            .or_else(|| spec.materials.default.get("tan_delta").copied())
+            .unwrap_or(0.0);
+        let eim = spec
+            .materials
+            .get(d, "eps_r_im")
+            .or_else(|| spec.materials.default.get("eps_r_im").copied())
+            .unwrap_or(er * td);
+        let sig =
+            spec.materials.get(d, "sigma").or_else(|| spec.materials.default.get("sigma").copied()).unwrap_or(0.0);
+        let c_loss = omega * EPS0 * eim + sig;
+        let td_eff = if er.abs() > 0.0 {
+            if omega > 0.0 {
+                (c_loss / (omega * EPS0 * er)).abs()
+            } else {
+                (eim / er).abs()
+            }
+        } else {
+            0.0
+        };
+        (c_loss, td_eff)
+    };
+    let omega_eff = if omega > 0.0 { omega } else { 1.0 };
+    if mesh.dim != 3 {
+        if let Some(d0) = mesh.domain_labels().into_iter().next() {
+            let (cl, td) = dom_loss(d0);
+            let eim = cl / (omega_eff * EPS0);
+            return ([eim, eim, eim], td);
+        }
+        return ([0.0; 3], 0.0);
+    }
+    let mut dom_z: BTreeMap<i32, (f64, usize)> = BTreeMap::new();
+    for c in 0..mesh.n_cells() {
+        let dom = mesh.cell_labels[c];
+        let zc: f64 = mesh.cell(c).iter().map(|&v| 0.25 * mesh.point(v as usize)[2]).sum();
+        let e = dom_z.entry(dom).or_insert((0.0, 0));
+        e.0 += zc;
+        e.1 += 1;
+    }
+    let mut sorted_doms: Vec<(i32, f64)> =
+        dom_z.into_iter().map(|(d, (zs, cnt))| (d, zs / (cnt.max(1) as f64))).collect();
+    // Match domains to top / sub / bot by z-ordering and permittivity
+    sorted_doms.sort_by(|a, b| b.1.total_cmp(&a.1)); // highest z first
+    let mut max_td = 0.0_f64;
+    for &(d, _) in &sorted_doms {
+        max_td = max_td.max(dom_loss(d).1);
+    }
+    let top_d = sorted_doms.first().map(|x| x.0);
+    let sub_d = if sorted_doms.len() >= 2 { Some(sorted_doms[1].0) } else { top_d };
+    let bot_d = if sorted_doms.len() >= 3 {
+        Some(sorted_doms[2].0)
+    } else if !stack.t_sub.is_finite() {
+        sub_d
+    } else {
+        top_d
+    };
+    let eim_of = |d_opt: Option<i32>| -> f64 { d_opt.map_or(0.0, |d| dom_loss(d).0 / (omega_eff * EPS0)) };
+    ([eim_of(top_d), eim_of(sub_d), eim_of(bot_d)], max_td)
 }
 
 /// Solves a multi-terminal planar sheet capacitance problem with an explicit [`LayeredStack`].
@@ -984,6 +1330,21 @@ pub fn solve_planar_bem_with_stack(
     let t0 = Instant::now();
     let order = spec.order;
     check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
+    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. })) {
+        return Err(
+            "unsupported: planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+        );
+    }
+    if spec.flux_bounds != "none" {
+        return Err(
+            "unsupported: planar_bem is a 2D boundary-element formulation and does not support 3D volumetric Prager-Synge 'flux_bounds'".into(),
+        );
+    }
+    if has_thick_sheet_or_trench_geometry(mesh, spec) {
+        return Err(
+            "unsupported: planar_bem requires zero-thickness planar conductor sheets on a flat interface and does not support finite sheet thickness > 0 or substrate etch_depth > 0".into(),
+        );
+    }
 
     let (terminals, panels, detected_stack) = if mesh.dim == 3 {
         let (t, p, s, _z) = extract_3d_panels_and_stack(mesh, spec)?;
@@ -997,10 +1358,10 @@ pub fn solve_planar_bem_with_stack(
 
     let (c_coarse, _q_coarse) = assemble_and_solve_bem(&panels, n_term, &stack)?;
     let mut log = Vec::new();
-    let maxwell_matrix_f = if spec.richardson {
-        let fine_panels = subdivide_panels_1_to_4(&panels);
+    let fine_panels_opt = spec.richardson.then(|| subdivide_panels_1_to_4(&panels));
+    let mut maxwell_matrix_f = if let Some(ref fine_panels) = fine_panels_opt {
         let n_fine = fine_panels.len();
-        let (c_fine, _) = assemble_and_solve_bem(&fine_panels, n_term, &stack)?;
+        let (c_fine, _) = assemble_and_solve_bem(fine_panels, n_term, &stack)?;
         let c_ext = extrapolate_spd_log_space(&c_coarse, &c_fine, 2.0)?;
         log.push(format!(
             "planar_bem (Richardson 1->4, w_1=2.0): {n_panels} -> {n_fine} sheet panels, eps_top={:.3}, eps_sub={:.3}, eps_bot={:.3}, t_sub={:.2e} m, grounded_backplane={}",
@@ -1013,6 +1374,51 @@ pub fn solve_planar_bem_with_stack(
             stack.eps_top, stack.eps_sub, stack.eps_bot, stack.t_sub, stack.grounded_backplane
         ));
         c_coarse
+    };
+
+    let omega = if spec.freq > 0.0 && spec.freq.is_finite() { 2.0 * PI * spec.freq } else { 0.0 };
+    let ([eim_top, eim_sub, eim_bot], max_td_eff) = detect_stack_layer_loss(mesh, spec, &stack, omega);
+    let has_loss = eim_top.abs() + eim_sub.abs() + eim_bot.abs() > 0.0;
+    let (conductance_matrix_s, q_dielectric_matrix) = if has_loss {
+        let omega_eff = if omega > 0.0 { omega } else { 1.0 };
+        let active_panels = fine_panels_opt.as_deref().unwrap_or(&panels);
+        let (c_re_loss, c_im_loss) =
+            assemble_and_solve_bem_complex_loss(active_panels, n_term, &stack, eim_top, eim_sub, eim_bot)?;
+        if max_td_eff > 1.0e-2 && omega > 0.0 {
+            if fine_panels_opt.is_some() {
+                let (c_re_coarse, _) =
+                    assemble_and_solve_bem_complex_loss(&panels, n_term, &stack, eim_top, eim_sub, eim_bot)?;
+                maxwell_matrix_f = extrapolate_spd_log_space(&c_re_coarse, &c_re_loss, 2.0)?;
+            } else {
+                maxwell_matrix_f = c_re_loss;
+            }
+        }
+        let mut g_mat = vec![vec![0.0; n_term]; n_term];
+        for i in 0..n_term {
+            for j in 0..n_term {
+                g_mat[i][j] = omega_eff * c_im_loss[i][j];
+            }
+        }
+        let q_mat = if omega > 0.0 {
+            let mut qm = vec![vec![None; n_term]; n_term];
+            for i in 0..n_term {
+                for j in 0..n_term {
+                    let ga = g_mat[i][j].abs();
+                    if ga > 1.0e-300 {
+                        let qv = omega * maxwell_matrix_f[i][j].abs() / ga;
+                        if qv.is_finite() {
+                            qm[i][j] = Some(qv);
+                        }
+                    }
+                }
+            }
+            Some(qm)
+        } else {
+            None
+        };
+        (Some(g_mat), q_mat)
+    } else {
+        (None, None)
     };
 
     let mut mutual_matrix_f = vec![vec![0.0; n_term]; n_term];
@@ -1091,6 +1497,9 @@ pub fn solve_planar_bem_with_stack(
         maxwell_matrix_f,
         mutual_matrix_f,
         ec_matrix_hz,
+        conductance_matrix_s,
+        q_dielectric_matrix,
+        ..Default::default()
     };
     scalars.push(cap_data.scalar());
     scalars.push(tls.scalar());

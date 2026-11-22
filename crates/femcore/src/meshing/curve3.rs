@@ -178,20 +178,35 @@ pub fn curve_edges(
             cand.push((*e, *q));
         }
     }
-    if cand.is_empty() {
-        return (vec![], CurveReport::default());
-    }
-    validate_and_relax_candidates(pos, cells, cand, &periodic_edge_parent)
+    let report = relax_edge_nodes_periodic(pos, cells, &mut cand, &periodic_edge_parent);
+    (cand, report)
 }
 
-fn validate_and_relax_candidates(
+/// Validates and relaxes curved mid-edge nodes `nodes` over `cells`: any cell whose scaled Jacobian determinant ratio
+/// (`det J / det_straight` over the ten Lagrange nodes and `quad_rule_collapsed(6)`) falls at or below [`MIN_SCALED_JACOBIAN`]
+/// (`0.10`) has its curved-edge offsets halved (up to [`MAX_HALVINGS`] = 4 times, after which the edge is straightened).
+/// Updates `nodes` in place (sorted by vertex pair) and returns the [`CurveReport`].
+pub fn relax_edge_nodes(
     pos: &(dyn Fn(u32) -> [f64; 3] + Sync),
     cells: &[[u32; 4]],
-    cand: EdgeNodes,
+    nodes: &mut EdgeNodes,
+) -> CurveReport {
+    for (e, _) in nodes.iter_mut() {
+        *e = pair(e[0], e[1]);
+    }
+    nodes.sort_by_key(|(e, _)| *e);
+    nodes.dedup_by_key(|(e, _)| *e);
+    relax_edge_nodes_periodic(pos, cells, nodes, &HashMap::new())
+}
+
+fn relax_edge_nodes_periodic(
+    pos: &(dyn Fn(u32) -> [f64; 3] + Sync),
+    cells: &[[u32; 4]],
+    cand: &mut EdgeNodes,
     periodic_edge_parent: &HashMap<[u32; 2], ([u32; 2], [f64; 3])>,
-) -> (EdgeNodes, CurveReport) {
+) -> CurveReport {
     if cand.is_empty() {
-        return (vec![], CurveReport::default());
+        return CurveReport::default();
     }
     let index: HashMap<[u32; 2], usize> = cand.iter().enumerate().map(|(i, (e, _))| (*e, i)).collect();
     let mut level = vec![0u8; cand.len()];
@@ -316,7 +331,8 @@ fn validate_and_relax_candidates(
     }
     report.curved_cells = n_cells;
     report.min_scaled_jacobian = if min_sj.is_finite() { min_sj } else { 1.0 };
-    (out, report)
+    *cand = out;
+    report
 }
 
 /// The smallest ratio of the Jacobian determinant to the straight cell's over cell `c` of a solver mesh (ten nodes and a degree-6 rule).
@@ -331,6 +347,24 @@ pub fn scaled_jacobian_min(mesh: &SimplexMesh, c: usize) -> f64 {
     let mut m = f64::INFINITY;
     for l in rule.lam.iter().map(|l| [l[0], l[1], l[2], l[3]]).chain(node_points()) {
         m = m.min(ct.jacobian(&l).1 / det_s);
+    }
+    m
+}
+
+/// The smallest ratio of the Jacobian determinant to the straight cell's over all 216 interior Gauss points of
+/// `quad_rule_collapsed(8)` on cell `c` of a solver mesh (used to validate Barsoum quarter-point singularity cells,
+/// where vertex/rim nodes intentionally have `det J = 0`).
+pub fn scaled_jacobian_min_interior_q8(mesh: &SimplexMesh, c: usize) -> f64 {
+    let ct = CurvedTet::new(mesh.cell_geometry_nodes(c));
+    let v = [ct.x[0], ct.x[1], ct.x[2], ct.x[3]];
+    let det_s = CurvedTet::straight(v).jacobian(&[0.25; 4]).1;
+    if det_s == 0.0 || !det_s.is_finite() {
+        return 0.0;
+    }
+    let rule = quad_rule_collapsed(8);
+    let mut m = f64::INFINITY;
+    for l in &rule.lam {
+        m = m.min(ct.jacobian(&[l[0], l[1], l[2], l[3]]).1 / det_s);
     }
     m
 }
@@ -376,7 +410,7 @@ pub fn curve_solver_mesh(mesh: &mut SimplexMesh, dom: &dyn Domain3) -> CurveRepo
 
 /// Validates and relaxes pre-projected candidate mid-edge nodes against all incident 3D tetrahedra of `mesh`
 /// (backing off or straightening any edge that would drive `scaled_jacobian_min <= MIN_SCALED_JACOBIAN`) and stores them on `mesh`.
-pub(crate) fn apply_edge_nodes_validated(mesh: &mut SimplexMesh, raw_cand: EdgeNodes) -> CurveReport {
+pub fn apply_edge_nodes_validated(mesh: &mut SimplexMesh, raw_cand: EdgeNodes) -> CurveReport {
     if mesh.dim != 3 || raw_cand.is_empty() {
         return CurveReport::default();
     }
@@ -394,13 +428,11 @@ pub(crate) fn apply_edge_nodes_validated(mesh: &mut SimplexMesh, raw_cand: EdgeN
     }
     let cells: Vec<[u32; 4]> = (0..mesh.n_cells()).map(|c| [mesh.cell(c)[0], mesh.cell(c)[1], mesh.cell(c)[2], mesh.cell(c)[3]]).collect();
     let pts = mesh.points.clone();
-    let empty_per = HashMap::new();
-    let (nodes, report) = validate_and_relax_candidates(
+    let report = relax_edge_nodes(
         &|v| [pts[3 * v as usize], pts[3 * v as usize + 1], pts[3 * v as usize + 2]],
         &cells,
-        cand,
-        &empty_per,
+        &mut cand,
     );
-    mesh.set_edge_nodes(&nodes);
+    mesh.set_edge_nodes(&cand);
     report
 }

@@ -24,6 +24,8 @@ pub struct MeshedModel {
     ends_3d: Option<(Vec<i32>, Vec<i32>)>,
     /// what the mesher reports (domains, cells per domain, the element size the waves asked for, the adaptation); absent for a swept mesh
     report: Option<femcore::meshing::request::MeshReport>,
+    /// true when produced by multi-pass a posteriori AMR (`AF-1`) rather than the initial `Mesher::mesh` call
+    amr_adapted: bool,
     /// the solver view of the mesh (edges, P2 numbering), made on first use: what the plots read
     solver: std::sync::OnceLock<Arc<femcore::mesh::SimplexMesh>>,
 }
@@ -63,13 +65,33 @@ impl MeshedModel {
         let exchange = Mesh::from_solver_mesh(&mesh).map_err(Error::Invalid)?;
         let solver = std::sync::OnceLock::new();
         let _ = solver.set(Arc::new(mesh));
-        Ok(MeshedModel { mesh: Arc::new(exchange), eval, labels, ends, ends_3d, report: None, solver })
+        Ok(MeshedModel {
+            mesh: Arc::new(exchange),
+            eval,
+            labels,
+            ends,
+            ends_3d,
+            report: None,
+            amr_adapted: false,
+            solver,
+        })
     }
 
     /// The same, with the report the mesher made of it.
     pub(crate) fn with_report(mut self, report: femcore::meshing::request::MeshReport) -> MeshedModel {
         self.report = Some(report);
         self
+    }
+
+    /// Marks this model as produced by multi-pass AMR (`AF-1`).
+    pub(crate) fn with_amr_adapted(mut self) -> MeshedModel {
+        self.amr_adapted = true;
+        self
+    }
+
+    /// True when this model was adapted during multi-pass AMR rather than built solely from `MeshSettings`.
+    pub fn is_amr_adapted(&self) -> bool {
+        self.amr_adapted
     }
 
     pub fn mesh(&self) -> &Arc<Mesh> {
@@ -207,6 +229,14 @@ impl LabelResolver for MeshedModel {
             }
         }
     }
+
+    fn sheet_thickness_m(&self) -> std::collections::BTreeMap<i32, f64> {
+        self.labels.sheet_thickness_m.clone()
+    }
+
+    fn sheet_etch_depth_m(&self) -> std::collections::BTreeMap<i32, f64> {
+        self.labels.sheet_etch_depth_m.clone()
+    }
 }
 
 /// Builds the mesh of a model. `sizing` is what the physics of the project want resolved (`MeshSettings::physics_sizing`); the engine
@@ -266,37 +296,109 @@ fn resolve_sweep_layers(
     Ok(out)
 }
 
+/// Validates `MeshSettings` and builds the corresponding [`femcore::meshing::request::MeshRequest`].
+pub(crate) fn build_mesh_request(
+    s: &MeshSettings,
+    sizing: Option<&Sizing>,
+) -> Result<femcore::meshing::request::MeshRequest, Error> {
+    use femcore::meshing::request::{MeshRequest, MesherRequest, WavesRequest};
+    if !(s.h > 0.0 && s.h.is_finite()) {
+        return Err(Error::invalid("the element size must be a positive finite number"));
+    }
+    if let Some(gc) = s.gap_cells {
+        if !(gc > 0.0 && gc.is_finite()) {
+            return Err(Error::invalid("`gap_cells` must be a positive finite number"));
+        }
+    }
+    if let Some(mc) = s.max_cells {
+        if mc < 1 {
+            return Err(Error::invalid("`max_cells` must be an integer >= 1"));
+        }
+    }
+    if let Some(dz) = s.dz_min {
+        if !(dz > 0.0 && dz.is_finite()) {
+            return Err(Error::invalid("`dz_min` must be a positive finite number"));
+        }
+    }
+    if let Some(ms) = s.max_z_slabs {
+        if ms < 1 {
+            return Err(Error::invalid("`max_z_slabs` must be an integer >= 1"));
+        }
+    }
+    if let Some(zr) = s.z_growth_ratio {
+        if !(zr > 1.0 && zr.is_finite()) {
+            return Err(Error::invalid("`z_growth_ratio` must be a finite number strictly greater than 1.0"));
+        }
+    }
+    if let Some(gr) = s.adapt_grade {
+        if !(gr > 0.0 && gr.is_finite()) {
+            return Err(Error::invalid("`adapt_grade` must be a positive finite number"));
+        }
+    }
+    if let Some(mc) = s.adapt_max_cells {
+        if mc == 0 {
+            return Err(Error::invalid("`adapt_max_cells` must be at least 1"));
+        }
+    }
+    if let Some(se) = &s.singular_edges {
+        if !matches!(se.as_str(), "none" | "quarter_point") {
+            return Err(Error::invalid(format!(
+                "`singular_edges` must be \"none\" or \"quarter_point\", got \"{se}\""
+            )));
+        }
+    }
+    if let Some(xi) = s.quarter_point_xi {
+        if !(xi.is_finite() && (0.25..=0.50).contains(&xi)) {
+            return Err(Error::invalid("`quarter_point_xi` must be in [0.25, 0.50]"));
+        }
+    }
+    let waves = match (s.physics_sizing, sizing) {
+        (true, Some(sz)) => Some(WavesRequest {
+            sizing: sz.clone(),
+            points_per_wavelength: s.points_per_wavelength,
+            pml_relax: 1.5,
+            eigen_headroom: sz.headroom.max(1.0),
+        }),
+        _ => None,
+    };
+    let grade = s.adapt_grade.unwrap_or(0.4);
+    let max_cells = match (s.max_cells, s.adapt_max_cells) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => Some(2_000_000),
+    };
+    // wave sizing adapts the mesh to the waves; an explicit `adapt_scale` sets the factor on every size
+    let mesher = match (s.adapt_scale, waves.is_some()) {
+        (Some(scale), _) => MesherRequest::Adaptive { scale, grade, max_cells },
+        (None, true) => MesherRequest::Adaptive { scale: 1.0, grade, max_cells },
+        (None, false) => MesherRequest::Simple,
+    };
+    Ok(MeshRequest {
+        h: s.h,
+        max_dev: s.max_dev,
+        mesher,
+        structured_pml: s.structured_pml,
+        waves,
+        curved: s.curved,
+        gap_cells: s.gap_cells,
+        z_coarsen: s.z_coarsen,
+        max_cells: s.max_cells,
+        dz_min: s.dz_min,
+        max_z_slabs: s.max_z_slabs,
+        z_growth_ratio: s.z_growth_ratio,
+        max_steiner_multiplier: s.max_steiner_multiplier,
+        strict_mesh: s.strict_mesh,
+        singular_edges: s.singular_edges.clone(),
+        quarter_point_xi: s.quarter_point_xi,
+        corner_grading: s.corner_grading,
+    })
+}
+
 impl Mesher for FemcoreMesher {
     fn mesh(&self, geometry: &FeatureList, s: &MeshSettings, sizing: Option<&Sizing>) -> Result<MeshedModel, Error> {
-        use femcore::meshing::request::{mesh_request, MeshRequest, MesherRequest, WavesRequest};
-        if !(s.h > 0.0 && s.h.is_finite()) {
-            return Err(Error::invalid("the element size must be a positive finite number"));
-        }
-        if let Some(gc) = s.gap_cells {
-            if !(gc > 0.0 && gc.is_finite()) {
-                return Err(Error::invalid("`gap_cells` must be a positive finite number"));
-            }
-        }
-        if let Some(mc) = s.max_cells {
-            if mc < 1 {
-                return Err(Error::invalid("`max_cells` must be an integer >= 1"));
-            }
-        }
-        if let Some(dz) = s.dz_min {
-            if !(dz > 0.0 && dz.is_finite()) {
-                return Err(Error::invalid("`dz_min` must be a positive finite number"));
-            }
-        }
-        if let Some(ms) = s.max_z_slabs {
-            if ms < 1 {
-                return Err(Error::invalid("`max_z_slabs` must be an integer >= 1"));
-            }
-        }
-        if let Some(zr) = s.z_growth_ratio {
-            if !(zr > 1.0 && zr.is_finite()) {
-                return Err(Error::invalid("`z_growth_ratio` must be a finite number strictly greater than 1.0"));
-            }
-        }
+        use femcore::meshing::request::mesh_request;
+        let req = build_mesh_request(s, sizing)?;
         if let Some(layers) = &s.sweep {
             if geometry.dim == 3 {
                 let _stage = femcore::progress::stage(format!("sweeping 3D geometry along y (element size {} m)", s.h));
@@ -338,38 +440,6 @@ impl Mesher for FemcoreMesher {
                 return MeshedModel::new(mesh, Arc::new(ev), labels, true);
             }
         }
-        let waves = match (s.physics_sizing, sizing) {
-            (true, Some(sz)) => Some(WavesRequest {
-                sizing: sz.clone(),
-                points_per_wavelength: s.points_per_wavelength,
-                pml_relax: 1.5,
-                eigen_headroom: sz.headroom.max(1.0),
-            }),
-            _ => None,
-        };
-        // wave sizing adapts the mesh to the waves; an explicit `adapt_scale` sets the factor on every size
-        let adapt_max_cells = s.max_cells.or(Some(2_000_000));
-        let mesher = match (s.adapt_scale, waves.is_some()) {
-            (Some(scale), _) => MesherRequest::Adaptive { scale, grade: 0.4, max_cells: adapt_max_cells },
-            (None, true) => MesherRequest::Adaptive { scale: 1.0, grade: 0.4, max_cells: adapt_max_cells },
-            (None, false) => MesherRequest::Simple,
-        };
-        let req = MeshRequest {
-            h: s.h,
-            max_dev: s.max_dev,
-            mesher,
-            structured_pml: s.structured_pml,
-            waves,
-            curved: s.curved,
-            gap_cells: s.gap_cells,
-            z_coarsen: s.z_coarsen,
-            max_cells: s.max_cells,
-            dz_min: s.dz_min,
-            max_z_slabs: s.max_z_slabs,
-            z_growth_ratio: s.z_growth_ratio,
-            max_steiner_multiplier: s.max_steiner_multiplier,
-            strict_mesh: s.strict_mesh,
-        };
         // the stage a job reports while it meshes (its log gets the mesher's laps below it)
         let _stage = femcore::progress::stage(format!("meshing the geometry (element size {} m)", s.h));
         let (g, report) = mesh_request(geometry, &req).map_err(mesh_error)?;

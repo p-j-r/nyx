@@ -23,6 +23,14 @@ pub trait LabelResolver {
     fn domains(&self, region: &str) -> Result<Vec<i32>, Error>;
     /// The boundary labels a selector picks (`outer & plane(x = 0)`).
     fn boundaries(&self, selector: &str) -> Result<Vec<i32>, Error>;
+    /// Optional 1-based boundary label -> physical metal film thickness `t_m` (m) for finite-thickness `Op::Sheet` facets.
+    fn sheet_thickness_m(&self) -> BTreeMap<i32, f64> {
+        BTreeMap::new()
+    }
+    /// Optional 1-based boundary label -> substrate over-etch trench depth `t_e` (m) for etched `Op::Sheet` facets.
+    fn sheet_etch_depth_m(&self) -> BTreeMap<i32, f64> {
+        BTreeMap::new()
+    }
 }
 
 /// What a solve may use besides the mesh and the problem: the label resolver, progress and cancellation, and the fields that other

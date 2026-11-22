@@ -60,12 +60,13 @@ pub enum VClass {
     Corner,
 }
 
-/// What a chain separates: the label of its boundary facets, or the two cell labels of an
-/// interface. Unlabelled boundary edges use `Bnd(i32::MIN)`.
+/// What a chain separates: the label of its boundary facets, the two cell labels of an
+/// interface, or a two-sided interior conductive sheet. Unlabelled boundary edges use `Bnd(i32::MIN)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Sig {
     Bnd(i32),
     Iface(i32, i32),
+    Sheet(i32),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -209,7 +210,10 @@ impl Work2 {
             }
             let id = w.chains.len() as u32;
             let sig = sig_of[&e];
-            w.chains.push(ChainInfo { sig, frozen: matches!(sig, Sig::Bnd(l) if opt.frozen_labels.contains(&l)) });
+            w.chains.push(ChainInfo {
+                sig,
+                frozen: matches!(sig, Sig::Bnd(l) | Sig::Sheet(l) if opt.frozen_labels.contains(&l)),
+            });
             let mut stack = vec![e];
             w.chain_of.insert(e, id);
             while let Some(cur) = stack.pop() {

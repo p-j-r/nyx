@@ -102,6 +102,15 @@ pub struct MeshRequest {
     /// fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub strict_mesh: bool,
+    /// 3D sheet mesher: edge singularity enrichment (`"none"` or `"quarter_point"`); absent: disabled
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_edges: Option<String>,
+    /// 3D sheet mesher: Barsoum quarter-point mid-edge parameter `xi_QP` in `[0.25, 0.50]`; absent: `0.25`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quarter_point_xi: Option<f64>,
+    /// 3D sheet mesher: radical corner grading toward sharp 2D sheet corners
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub corner_grading: bool,
 }
 
 impl MeshRequest {
@@ -118,6 +127,9 @@ impl MeshRequest {
         opts.z_growth_ratio = self.z_growth_ratio;
         opts.max_steiner_multiplier = self.max_steiner_multiplier;
         opts.strict_mesh = self.strict_mesh;
+        opts.singular_edges = self.singular_edges.clone();
+        opts.quarter_point_xi = self.quarter_point_xi;
+        opts.corner_grading = self.corner_grading;
         MeshPlan {
             opts,
             mesher: match self.mesher {
@@ -185,6 +197,32 @@ pub struct CurvedSummary {
     pub min_scaled_jacobian: f64,
 }
 
+impl CurvedSummary {
+    /// Summarizes the curved and/or quarter-point geometry of a 3D mesh, evaluating quarter-point cells
+    /// (`m.cell_is_qp(c)`) on the 216 interior Gauss points of `quad_rule_collapsed(8)` and regular curved
+    /// cells on the ten Lagrange nodes plus `quad_rule_collapsed(6)`.
+    pub fn from_mesh(m: &crate::mesh::SimplexMesh) -> Option<Self> {
+        (m.dim == 3 && m.has_curved()).then(|| {
+            let cells: Vec<usize> = (0..m.n_cells()).filter(|&c| m.cell_is_curved(c)).collect();
+            let min_sj = cells
+                .iter()
+                .map(|&c| {
+                    if m.cell_is_qp(c) {
+                        crate::meshing::curve3::scaled_jacobian_min_interior_q8(m, c)
+                    } else {
+                        crate::meshing::curve3::scaled_jacobian_min(m, c)
+                    }
+                })
+                .fold(f64::INFINITY, f64::min);
+            CurvedSummary {
+                edges: m.edge_node_list().len(),
+                cells: cells.len(),
+                min_scaled_jacobian: if min_sj.is_finite() { min_sj } else { 1.0 },
+            }
+        })
+    }
+}
+
 fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, sizes: &[Option<f64>]) -> MeshReport {
     let m = &g.mesh;
     let domains = g
@@ -234,8 +272,18 @@ fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, si
         }
     }
     let curved = (m.dim == 3 && m.has_curved()).then(|| {
+        let use_qp = m.has_qp() || req.singular_edges.as_deref() == Some("quarter_point");
         let cells: Vec<usize> = (0..m.n_cells()).filter(|&c| m.cell_is_curved(c)).collect();
-        let min_sj = cells.iter().map(|&c| crate::meshing::curve3::scaled_jacobian_min(m, c)).fold(f64::INFINITY, f64::min);
+        let min_sj = cells
+            .iter()
+            .map(|&c| {
+                if use_qp && (m.cell_is_qp(c) || !m.has_qp()) {
+                    crate::meshing::curve3::scaled_jacobian_min_interior_q8(m, c)
+                } else {
+                    crate::meshing::curve3::scaled_jacobian_min(m, c)
+                }
+            })
+            .fold(f64::INFINITY, f64::min);
         CurvedSummary { edges: m.edge_node_list().len(), cells: cells.len(), min_scaled_jacobian: if min_sj.is_finite() { min_sj } else { 1.0 } }
     });
     MeshReport { dim: m.dim, vertices: m.n_points(), cells: m.n_cells(), facets: m.n_facets(), domains, adaptation, structured_layers, curved, warnings }
@@ -267,6 +315,55 @@ pub fn mesh_request(list: &FeatureList, req: &MeshRequest) -> Result<(MeshedGeom
 
 /// JSON Schema of [`MeshRequest`].
 pub fn request_schema() -> Value {
+    let mesher_schema = json!({
+        "oneOf": [
+            { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "simple" } } },
+            { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": {
+                "kind": { "const": "adaptive" },
+                "scale": { "type": "number", "exclusiveMinimum": 0, "default": 1.0 },
+                "grade": { "type": "number", "exclusiveMinimum": 0, "default": 0.4 },
+                "max_cells": { "type": ["integer", "null"], "minimum": 1 }
+            } }
+        ]
+    });
+    let waves_schema = json!({
+        "type": ["object", "null"],
+        "required": ["sizing"],
+        "additionalProperties": false,
+        "properties": {
+            "sizing": {
+                "type": "object",
+                "required": ["order", "headroom", "wavelengths"],
+                "additionalProperties": false,
+                "properties": {
+                    "order": { "type": "integer", "minimum": 1 },
+                    "headroom": { "type": "number", "exclusiveMinimum": 0 },
+                    "wavelengths": { "type": "object", "additionalProperties": { "type": "number", "exclusiveMinimum": 0 } }
+                }
+            },
+            "points_per_wavelength": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+            "pml_relax": { "type": "number", "minimum": 1, "default": 1.5 },
+            "eigen_headroom": { "type": "number", "exclusiveMinimum": 0, "default": 1.5 }
+        }
+    });
+    let mut props = serde_json::Map::new();
+    props.insert("h".into(), json!({ "type": "number", "exclusiveMinimum": 0, "description": "global element size (m)" }));
+    props.insert("max_dev".into(), json!({ "type": ["number", "null"], "exclusiveMinimum": 0, "description": "largest distance of a chord from a curved edge or face (m); default h / 50" }));
+    props.insert("mesher".into(), mesher_schema);
+    props.insert("structured_pml".into(), json!({ "type": "boolean", "default": false }));
+    props.insert("curved".into(), json!({ "type": "boolean", "default": false, "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface" }));
+    props.insert("gap_cells".into(), json!({ "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: target number of cells across narrow coplanar gaps" }));
+    props.insert("z_coarsen".into(), json!({ "type": "boolean", "default": false, "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes" }));
+    props.insert("max_cells".into(), json!({ "type": ["integer", "null"], "minimum": 1, "description": "maximum number of cells allowed before aborting meshing" }));
+    props.insert("dz_min".into(), json!({ "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: floor on initial vertical z-slab thickness near sheet planes (m)" }));
+    props.insert("max_z_slabs".into(), json!({ "type": ["integer", "null"], "minimum": 1, "description": "3D sheet mesher: maximum total number of horizontal z-slabs across active stack layers" }));
+    props.insert("z_growth_ratio".into(), json!({ "type": ["number", "null"], "exclusiveMinimum": 1.0, "description": "3D sheet mesher: geometric growth ratio for z-slab thickness away from sheet planes (default 1.35)" }));
+    props.insert("max_steiner_multiplier".into(), json!({ "type": ["integer", "null"], "minimum": 0, "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices" }));
+    props.insert("strict_mesh".into(), json!({ "type": "boolean", "default": false, "description": "fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles" }));
+    props.insert("singular_edges".into(), json!({ "type": ["string", "null"], "enum": ["none", "quarter_point", null], "description": "3D sheet mesher: edge singularity enrichment ('none' or 'quarter_point')" }));
+    props.insert("quarter_point_xi".into(), json!({ "type": ["number", "null"], "minimum": 0.25, "maximum": 0.5, "description": "3D sheet mesher: Barsoum quarter-point mid-edge parameter in [0.25, 0.50] (default 0.25)" }));
+    props.insert("corner_grading".into(), json!({ "type": "boolean", "default": false, "description": "3D sheet mesher: radical corner grading toward sharp 2D sheet corners" }));
+    props.insert("waves".into(), waves_schema);
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "nyx:mesh_request.v1",
@@ -274,51 +371,7 @@ pub fn request_schema() -> Value {
         "type": "object",
         "required": ["h", "mesher"],
         "additionalProperties": false,
-        "properties": {
-            "h": { "type": "number", "exclusiveMinimum": 0, "description": "global element size (m)" },
-            "max_dev": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "largest distance of a chord from a curved edge or face (m); default h / 50" },
-            "mesher": {
-                "oneOf": [
-                    { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "simple" } } },
-                    { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": {
-                        "kind": { "const": "adaptive" },
-                        "scale": { "type": "number", "exclusiveMinimum": 0, "default": 1.0 },
-                        "grade": { "type": "number", "exclusiveMinimum": 0, "default": 0.4 },
-                        "max_cells": { "type": ["integer", "null"], "minimum": 1 }
-                    } }
-                ]
-            },
-            "structured_pml": { "type": "boolean", "default": false },
-            "curved": { "type": "boolean", "default": false, "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface" },
-            "gap_cells": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: target number of cells across narrow coplanar gaps" },
-            "z_coarsen": { "type": "boolean", "default": false, "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes" },
-            "max_cells": { "type": ["integer", "null"], "minimum": 1, "description": "maximum number of cells allowed before aborting meshing" },
-            "dz_min": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: floor on initial vertical z-slab thickness near sheet planes (m)" },
-            "max_z_slabs": { "type": ["integer", "null"], "minimum": 1, "description": "3D sheet mesher: maximum total number of horizontal z-slabs across active stack layers" },
-            "z_growth_ratio": { "type": ["number", "null"], "exclusiveMinimum": 1.0, "description": "3D sheet mesher: geometric growth ratio for z-slab thickness away from sheet planes (default 1.35)" },
-            "max_steiner_multiplier": { "type": ["integer", "null"], "minimum": 0, "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices" },
-            "strict_mesh": { "type": "boolean", "default": false, "description": "fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles" },
-            "waves": {
-                "type": ["object", "null"],
-                "required": ["sizing"],
-                "additionalProperties": false,
-                "properties": {
-                    "sizing": {
-                        "type": "object",
-                        "required": ["order", "headroom", "wavelengths"],
-                        "additionalProperties": false,
-                        "properties": {
-                            "order": { "type": "integer", "minimum": 1 },
-                            "headroom": { "type": "number", "exclusiveMinimum": 0 },
-                            "wavelengths": { "type": "object", "additionalProperties": { "type": "number", "exclusiveMinimum": 0 } }
-                        }
-                    },
-                    "points_per_wavelength": { "type": ["number", "null"], "exclusiveMinimum": 0 },
-                    "pml_relax": { "type": "number", "minimum": 1, "default": 1.5 },
-                    "eigen_headroom": { "type": "number", "exclusiveMinimum": 0, "default": 1.5 }
-                }
-            }
-        }
+        "properties": Value::Object(props)
     })
 }
 

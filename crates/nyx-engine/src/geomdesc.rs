@@ -138,11 +138,12 @@ pub fn all() -> Vec<OpDesc> {
             req("pts", Points(2), "the corners (x, z)"),
             opt("names", TextList, "role names of the edges (default e0, e1, ...), used in boundary names", json!([])),
         ]),
-        d("Polygons", "Polygon batch", "A batch of outer polygon rings and optional hole rings in 2D or 3D, with Ramer-Douglas-Peucker closed-ring simplification (shared corners pinned) and minimum hole area filtering.", Shape, &[2, 3], vec![
+        d("Polygons", "Polygon batch", "A batch of outer polygon rings and optional hole rings in 2D or 3D, with Ramer-Douglas-Peucker closed-ring simplification (shared corners pinned), 1-DOF endpoint-anchored circular arc fitting, and minimum hole area filtering.", Shape, &[2, 3], vec![
             req("polygons", Rings(2), "outer polygon rings, each a list of 2D corners in metres"),
             opt("holes", Rings(2), "hole polygon rings to subtract", json!([])),
             opt("simplify_tol", Expr, "Ramer-Douglas-Peucker simplification tolerance in metres", json!(50e-9)),
             opt("min_hole_area", Expr, "drop hole rings with unsigned shoelace area below this threshold in m^2", json!(0.0)),
+            opt("arc_tol", Expr, "1-DOF endpoint-anchored circular arc fitting tolerance in metres (0 disables arc fitting)", json!(0.0)),
         ]),
         d("RoundedRect", "Rounded rectangle", "A rectangle with quarter-circle corners.", Shape, &[2], vec![
             req("min", Exprs(2), "lower-left corner (x, z)"),
@@ -187,9 +188,11 @@ pub fn all() -> Vec<OpDesc> {
             req("to", Expr, "end coordinate along the axis"),
             opt("taper_deg", Expr, "wall angle in degrees (positive narrows towards `to`); makes the solid polyhedral", Value::Null),
         ]),
-        d("Sheet", "2D sheet in 3D", "Embeds a 2D profile or boolean feature as a zero-thickness conductive sheet at plane z (3D).", Build, &[3], vec![
+        d("Sheet", "2D sheet or conformal slab in 3D", "Embeds a 2D profile or boolean feature at plane z (3D) as a zero-thickness conductive sheet (default) or a conformal finite-thickness conductor slab (`thickness > 0`) with optional substrate over-etch trench (`etch_depth > 0`).", Build, &[3], vec![
             req("input", Feature, "the 2D profile or boolean feature"),
             opt("z", Expr, "z coordinate of the sheet plane in metres", json!(0.0)),
+            opt("thickness", Expr, "conformal metal film thickness above z in metres (0 for zero-thickness sheet)", json!(0.0)),
+            opt("etch_depth", Expr, "substrate over-etch trench depth below z in metres (0 for unetched interface)", json!(0.0)),
         ]),
         d("Transform", "Transform", "Moves, rotates, mirrors or scales a feature; the steps apply in order.", Build, &[2, 3], vec![
             req("input", Feature, "the feature to transform"),

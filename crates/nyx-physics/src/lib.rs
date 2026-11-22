@@ -32,8 +32,9 @@ pub mod testkit;
 pub mod validate;
 
 pub use cqed::{
-    CapacitanceMatrixData, CircuitRom, DrivenPortData, InductanceMatrixData, ModeEnergyRow, RomPort, TlsInterfaceSpec,
-    TlsInterfaces, TlsMeta, CAPACITANCE_KEY, CIRCUIT_ROM_KEY, DRIVEN_PORT_KEY, INDUCTANCE_KEY, TLS_META_KEY,
+    AdaptPassRecord, CapacitanceMatrixData, CircuitRom, DrivenPortData, ElectroAmrData, InductanceMatrixData,
+    ModeEnergyRow, RomPort, TlsInterfaceSpec, TlsInterfaces, TlsMeta, CAPACITANCE_KEY, CIRCUIT_ROM_KEY,
+    DRIVEN_PORT_KEY, ELECTRO_AMR_KEY, INDUCTANCE_KEY, TLS_META_KEY,
 };
 pub use decode::{tls_interface_from_material_name, tls_interfaces_from_spec};
 pub use desc::*;

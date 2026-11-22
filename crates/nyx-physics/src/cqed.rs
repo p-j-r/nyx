@@ -21,6 +21,8 @@ pub const TLS_META_KEY: &str = "tls metadata";
 pub const CIRCUIT_ROM_KEY: &str = "circuit rom";
 /// Scalar key carrying `DrivenPortData` on `ems` `driven` results.
 pub const DRIVEN_PORT_KEY: &str = "driven port matrix";
+/// Transient scalar key carrying per-cell `ElectroAmrData` during multi-pass electrostatic AMR (`AF-1`).
+pub const ELECTRO_AMR_KEY: &str = "electrostatic amr indicators";
 
 fn encode_json<T: Serialize>(key: &str, value: &T) -> (String, Scalar) {
     let text = serde_json::to_string(value).expect("cQED payload is plain serialisable data");
@@ -34,13 +36,60 @@ fn decode_json<T: for<'de> Deserialize<'de>>(key: &str, result: &SolveResult) ->
     })
 }
 
-/// Multi-terminal Maxwell, SPICE/mutual capacitance matrices (F) and charging energy matrix `E_C / h` (Hz).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Convergence record of one pass in a multi-pass goal-oriented electrostatic AMR loop (`AF-1`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AdaptPassRecord {
+    pub pass: usize,
+    pub n_cells: usize,
+    pub n_dofs: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rel_delta: Option<f64>,
+    pub total_eta: f64,
+}
+
+/// Per-cell electrostatic error indicators transferred from `nyx-dfs` to `nyx-engine` during multi-pass AMR (`AF-1`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ElectroAmrData {
+    pub eta2: Vec<f64>,
+    pub total_eta: f64,
+}
+
+impl ElectroAmrData {
+    pub fn of(result: &SolveResult) -> Option<Self> {
+        decode_json(ELECTRO_AMR_KEY, result)
+    }
+
+    pub fn scalar(&self) -> (String, Scalar) {
+        encode_json(ELECTRO_AMR_KEY, self)
+    }
+
+    pub fn strip_from(result: &mut SolveResult) {
+        result.scalars.retain(|(k, _)| k != ELECTRO_AMR_KEY);
+    }
+}
+
+/// Multi-terminal Maxwell, SPICE/mutual capacitance matrices (F), charging energy matrix `E_C / h` (Hz), and optional
+/// Prager–Synge complementary lower/upper/midpoint bounds, AC dielectric conductance / Q matrices, and AMR pass history.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapacitanceMatrixData {
     pub terminals: Vec<String>,
     pub maxwell_matrix_f: Vec<Vec<f64>>,
     pub mutual_matrix_f: Vec<Vec<f64>>,
     pub ec_matrix_hz: Vec<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maxwell_lower_matrix_f: Option<Vec<Vec<f64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maxwell_upper_matrix_f: Option<Vec<Vec<f64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maxwell_mid_matrix_f: Option<Vec<Vec<f64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maxwell_error_bound_f: Option<Vec<Vec<f64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conductance_matrix_s: Option<Vec<Vec<f64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub q_dielectric_matrix: Option<Vec<Vec<Option<f64>>>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adapt_history: Vec<AdaptPassRecord>,
 }
 
 impl CapacitanceMatrixData {
@@ -234,7 +283,24 @@ mod tests {
             maxwell_matrix_f: vec![vec![60e-15, -20e-15], vec![-20e-15, 65e-15]],
             mutual_matrix_f: vec![vec![40e-15, 20e-15], vec![20e-15, 45e-15]],
             ec_matrix_hz: vec![vec![3.5e8, 1.1e8], vec![1.1e8, 3.2e8]],
+            ..Default::default()
         };
+        let (_, Scalar::Text(cap_none_json)) = cap.scalar() else { panic!("expected text scalar") };
+        let cap_none_val: serde_json::Value = serde_json::from_str(&cap_none_json).unwrap();
+        assert!(cap_none_val.get("maxwell_lower_matrix_f").is_none());
+        assert!(cap_none_val.get("maxwell_upper_matrix_f").is_none());
+        assert!(cap_none_val.get("maxwell_mid_matrix_f").is_none());
+        assert!(cap_none_val.get("maxwell_error_bound_f").is_none());
+
+        let cap_with_bounds = CapacitanceMatrixData {
+            maxwell_lower_matrix_f: Some(vec![vec![58e-15, -19e-15], vec![-19e-15, 63e-15]]),
+            maxwell_upper_matrix_f: Some(vec![vec![62e-15, -21e-15], vec![-21e-15, 67e-15]]),
+            maxwell_mid_matrix_f: Some(vec![vec![60e-15, -20e-15], vec![-20e-15, 65e-15]]),
+            maxwell_error_bound_f: Some(vec![vec![2e-15, 2e-15], vec![2e-15, 2e-15]]),
+            ..cap.clone()
+        };
+        let res_bounds = SolveResult { scalars: vec![cap_with_bounds.scalar()], ..Default::default() };
+        assert_eq!(CapacitanceMatrixData::of(&res_bounds), Some(cap_with_bounds));
         let tls = TlsMeta {
             domain_eps_r: [(1, 1.0), (2, 11.45)].into(),
             domain_names: [(1, "vacuum".into()), (2, "silicon".into())].into(),

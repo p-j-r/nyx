@@ -64,12 +64,17 @@ fn mesh_args(m: &MeshSettings) -> Value {
     put("curved", json!(m.curved), json!(d.curved));
     put("gap_cells", json!(m.gap_cells), json!(d.gap_cells));
     put("z_coarsen", json!(m.z_coarsen), json!(d.z_coarsen));
+    put("adapt_grade", json!(m.adapt_grade), json!(d.adapt_grade));
+    put("adapt_max_cells", json!(m.adapt_max_cells), json!(d.adapt_max_cells));
     put("max_cells", json!(m.max_cells), json!(d.max_cells));
     put("dz_min", json!(m.dz_min), json!(d.dz_min));
     put("max_z_slabs", json!(m.max_z_slabs), json!(d.max_z_slabs));
     put("z_growth_ratio", json!(m.z_growth_ratio), json!(d.z_growth_ratio));
     put("max_steiner_multiplier", json!(m.max_steiner_multiplier), json!(d.max_steiner_multiplier));
     put("strict_mesh", json!(m.strict_mesh), json!(d.strict_mesh));
+    put("singular_edges", json!(m.singular_edges), json!(d.singular_edges));
+    put("quarter_point_xi", json!(m.quarter_point_xi), json!(d.quarter_point_xi));
+    put("corner_grading", json!(m.corner_grading), json!(d.corner_grading));
     put("sweep", json!(m.sweep), json!(d.sweep));
     Value::Object(a)
 }

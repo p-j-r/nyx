@@ -25,7 +25,7 @@ use geom::select::{EntityKind, Selector};
 use std::collections::BTreeMap;
 
 /// Sizes of a mesh made from a model.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GeomMeshOpts {
     /// global element size
     pub h: f64,
@@ -50,6 +50,12 @@ pub struct GeomMeshOpts {
     pub max_steiner_multiplier: Option<usize>,
     /// Fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles; off by default (`false`).
     pub strict_mesh: bool,
+    /// 3D sheet mesher: edge singularity enrichment (`"none"` or `"quarter_point"`); off by default (`None`).
+    pub singular_edges: Option<String>,
+    /// 3D sheet mesher: Barsoum quarter-point mid-edge parameter `xi_QP` in `[0.25, 0.50]`; default `0.25` when `None`.
+    pub quarter_point_xi: Option<f64>,
+    /// 3D sheet mesher: Morrison-Lewis / Babuska radical corner grading at sharp sheet corners; off by default (`false`).
+    pub corner_grading: bool,
 }
 
 impl GeomMeshOpts {
@@ -67,6 +73,9 @@ impl GeomMeshOpts {
             z_growth_ratio: None,
             max_steiner_multiplier: None,
             strict_mesh: false,
+            singular_edges: None,
+            quarter_point_xi: None,
+            corner_grading: false,
         }
     }
 }

@@ -407,7 +407,7 @@ fn probe_mesh_hashes() {
         return;
     }
     let plans = [MeshPlan::simple(0.5), MeshPlan::adaptive(0.6, 0.8), structured(MeshPlan::simple(0.5)), structured(MeshPlan::adaptive(0.6, 0.8))];
-    let hashes: Vec<String> = plans.iter().map(|p| format!("{:016x}", mesh_hash(*p))).collect();
+    let hashes: Vec<String> = plans.iter().map(|p| format!("{:016x}", mesh_hash(p.clone()))).collect();
     println!("HASHES={}", hashes.join(","));
 }
 

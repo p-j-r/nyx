@@ -2,14 +2,17 @@
 
 **Set the mesh settings** · access `edit`: changes the project
 
-Give only what changes. `adapt_scale`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, or `sweep` set to null return to the default setting. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.
+Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.
 
 ## Arguments
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
+| `adapt_grade` | number or null | no |  | adaptive / AMR metric gradation slope (> 0); null uses 0.4 |
+| `adapt_max_cells` | integer or null | no |  | adaptive / AMR maximum cell count (>= 1); null uses 2000000 |
 | `adapt_scale` | number or null | no |  | adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher |
-| `curved` | true or false | no |  | 3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity and bloch studies, default false |
+| `corner_grading` | true or false | no |  | 3D sheet stack: radical Morrison-Lewis corner grading toward sharp 2D sheet corners, default false |
+| `curved` | true or false | no |  | 3D: curved (quadratic) isoparametric geometry for cells on curved surfaces and fitted sheet arc rims (ems, dfs, and sheet3d), default false |
 | `dz_min` | number or null | no |  | 3D sheet stack: floor on initial vertical z-slab thickness near sheet planes in metres; null disables the floor |
 | `gap_cells` | number or null | no |  | 3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping |
 | `h` | number | no |  | global element size in metres |
@@ -19,6 +22,8 @@ Give only what changes. `adapt_scale`, `gap_cells`, `max_cells`, `dz_min`, `max_
 | `max_z_slabs` | integer or null | no |  | 3D sheet stack: maximum total number of horizontal z-slabs across active stack layers (must be >= active stack layers); null disables the cap |
 | `physics_sizing` | true or false | no |  | size the elements from the waves of the physics (points per wavelength) |
 | `points_per_wavelength` | number or null | no |  | points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2 |
+| `quarter_point_xi` | number or null | no |  | 3D sheet stack: Barsoum quarter-point mid-edge parameter xi_QP in [0.25, 0.50]; null uses 0.25 |
+| `singular_edges` | text or null: `none`, `quarter_point`, `null` | no |  | 3D sheet stack: edge singularity enrichment on zero-thickness conductor rims ("none" or "quarter_point"); null uses study defaults |
 | `strict_mesh` | true or false | no |  | fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default false |
 | `structured_pml` | true or false | no |  | rebuild the absorbing layers as structured layers |
 | `sweep` | list of object or null | no |  | layers to sweep a 2D cross-section or 3D geometry model along y |

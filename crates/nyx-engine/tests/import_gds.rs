@@ -338,3 +338,80 @@ fn import_gds_validates_dim3_path_guard_and_cell_bbox_mode() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn import_gds_lateral_pad_and_add_chip_stack_build_padded_collar_and_solve_farfield() {
+    let dir = temp_dir("collar");
+    let gds_path = dir.join("transmon.gds");
+    std::fs::write(&gds_path, synth_transmon_gds()).unwrap();
+
+    let mut e = Engine::new();
+    e.call("project_new", &json!({ "title": "Padded Chip Stack", "dim": 3, "h": 80.0e-6 })).unwrap();
+
+    // Negative lateral_pad must be rejected cleanly
+    assert!(e
+        .import_gds(&json!({
+            "path": gds_path.to_str().unwrap(),
+            "layers": { "sig": [1, 10] },
+            "lateral_pad": -10.0e-6
+        }))
+        .is_err());
+
+    let pad = 150.0e-6;
+    let imported = e
+        .import_gds(&json!({
+            "path": gds_path.to_str().unwrap(),
+            "layers": {
+                "gnd": [1, 0],
+                "sig": [1, 10]
+            },
+            "pin_layer": [1, 20],
+            "lateral_pad": pad
+        }))
+        .unwrap();
+
+    assert_eq!(imported["unpadded_bbox"], json!([-200.0e-6, -200.0e-6, 200.0e-6, 200.0e-6]));
+    assert_eq!(imported["padded_bbox"], json!([-350.0e-6, -350.0e-6, 350.0e-6, 350.0e-6]));
+    assert_eq!(imported["bbox"], json!([-350.0e-6, -350.0e-6, 350.0e-6, 350.0e-6]));
+    assert_eq!(imported["lateral_pad"], json!(pad));
+
+    // Build padded (VacBot, Si, VacTop) stack via Engine::add_chip_stack (inferring unpadded bbox + lateral_pad)
+    assert!(e.add_chip_stack(&json!({ "lateral_pad": -1.0 })).is_err());
+    let stack = e
+        .add_chip_stack(&json!({
+            "t_sub": 100.0e-6,
+            "h_vac_top": 150.0e-6,
+            "h_vac_bot": 150.0e-6,
+            "lateral_pad": pad
+        }))
+        .unwrap();
+    assert_eq!(stack["unpadded_bbox"], json!([-200.0e-6, -200.0e-6, 200.0e-6, 200.0e-6]));
+    assert_eq!(stack["padded_bbox"], json!([-350.0e-6, -350.0e-6, 350.0e-6, 350.0e-6]));
+    assert_eq!(stack["regions"], json!(["VacBot", "Si", "VacTop"]));
+
+    e.call("mesh_build", &json!({ "wait": true })).unwrap();
+    e.call("add_physics", &json!({ "physics": "dfs", "study": "electrostatic", "order": 1 })).unwrap();
+    e.call("set_material", &json!({ "physics": "dfs", "region": "Si", "material": { "eps_r": 11.45 } })).unwrap();
+    e.call("set_material", &json!({ "physics": "dfs", "region": "VacTop", "material": { "eps_r": 1.0 } })).unwrap();
+    e.call("set_material", &json!({ "physics": "dfs", "region": "VacBot", "material": { "eps_r": 1.0 } })).unwrap();
+    e.call("add_condition", &json!({ "physics": "dfs", "on": "gnd", "kind": "ground" })).unwrap();
+    e.call(
+        "add_condition",
+        &json!({ "physics": "dfs", "on": "outer", "kind": "far_field", "params": { "order": 1, "decay_power": 1.0 } }),
+    )
+    .unwrap();
+    for term in ["Q1_padA", "Q1_padB"] {
+        e.call(
+            "add_condition",
+            &json!({ "physics": "dfs", "on": term, "kind": "terminal", "params": { "name": term } }),
+        )
+        .unwrap();
+    }
+    e.call("solve_run", &json!({ "physics": "dfs", "wait": true })).unwrap();
+    let cap = e.call("analyse", &json!({ "analysis": "capacitance_matrix", "physics": "dfs" })).unwrap();
+    assert_eq!(cap["terminals"], json!(["Q1_padA", "Q1_padB"]));
+    let c00 = cap["maxwell_matrix_F"][0][0].as_f64().unwrap();
+    assert!(c00 > 1.0e-15, "c00 = {c00:e}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

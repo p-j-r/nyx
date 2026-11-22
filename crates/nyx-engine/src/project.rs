@@ -50,8 +50,8 @@ pub struct MeshSettings {
     /// largest distance of a chord from a curved edge or face in metres; absent: h / 50
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_dev: Option<f64>,
-    /// 3D: give the cells on a curved surface quadratic (isoparametric) geometry, so a sphere is a sphere to third order in the element size
-    /// instead of a polyhedron (ADR 82). Only the `ems` cavity study uses it; the other physics see straight cells
+    /// 3D: give the cells on a curved surface or fitted sheet arc rim quadratic (isoparametric) geometry (`CurvedTet`, ADR 82, AF-5)
+    /// instead of a polyhedron; used by `ems`, `dfs`, and `sheet3d`
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub curved: bool,
     /// 3D sheet stack (`sheet3d`): target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets; `None` uses
@@ -62,6 +62,12 @@ pub struct MeshSettings {
     /// pure-tetrahedral transition slabs (default `false`)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub z_coarsen: bool,
+    /// adaptive / AMR metric gradation slope (`> 0`); `None` uses `0.4`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapt_grade: Option<f64>,
+    /// adaptive / AMR cell cap (`>= 1`); `None` uses `2_000_000`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapt_max_cells: Option<usize>,
     /// maximum number of cells allowed before aborting meshing; absent: disabled (or `2_000_000` for adaptive meshing)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cells: Option<usize>,
@@ -80,6 +86,15 @@ pub struct MeshSettings {
     /// fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles (default `false`)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub strict_mesh: bool,
+    /// 3D sheet stack (`sheet3d`): edge singularity enrichment (`"none"` or `"quarter_point"`); `None` uses study defaults
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_edges: Option<String>,
+    /// 3D sheet stack (`sheet3d`): Barsoum quarter-point mid-edge parameter `xi_QP` in `[0.25, 0.50]`; `None` uses `0.25`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quarter_point_xi: Option<f64>,
+    /// 3D sheet stack (`sheet3d`): radical Morrison-Lewis corner grading toward sharp 2D sheet corners (default `false`)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub corner_grading: bool,
 }
 
 impl Default for MeshSettings {
@@ -95,12 +110,17 @@ impl Default for MeshSettings {
             curved: false,
             gap_cells: None,
             z_coarsen: false,
+            adapt_grade: None,
+            adapt_max_cells: None,
             max_cells: None,
             dz_min: None,
             max_z_slabs: None,
             z_growth_ratio: None,
             max_steiner_multiplier: None,
             strict_mesh: false,
+            singular_edges: None,
+            quarter_point_xi: None,
+            corner_grading: false,
         }
     }
 }

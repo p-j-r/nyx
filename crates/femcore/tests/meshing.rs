@@ -76,7 +76,7 @@ fn adapted_interface_vertices_lie_on_the_circle_and_the_core_area_converges() {
     // a coarse chord polygon on purpose: max_dev h/4
     let mut plan = MeshPlan::adaptive(0.25, 0.4);
     plan.opts.max_dev = Some(0.25 / 4.0);
-    let simple_plan = MeshPlan { mesher: Mesher::Simple, ..plan };
+    let simple_plan = MeshPlan { mesher: Mesher::Simple, ..plan.clone() };
     let simple = mesh_model(&m.list, &simple_plan).unwrap();
     let adapted = mesh_model(&m.list, &plan).unwrap();
     let core = adapted.domain("core").unwrap();
@@ -499,6 +499,9 @@ fn ruppert_10_finger_idc_completes_cleanly_and_reports_steiner_cap_warning_or_st
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: true,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
 
     // 1. Default Steiner budget on 10-finger IDC completes cleanly with 0 dropped slivers & logs via Progress
@@ -567,6 +570,9 @@ fn fill_grid_1000_to_1_ratio_via_geom_completes_under_250ms_and_matches_across_t
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: true,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
 
     let t0 = std::time::Instant::now();

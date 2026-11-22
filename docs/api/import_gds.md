@@ -2,13 +2,15 @@
 
 **Import GDSII conductive sheets** · access `edit`: changes the project
 
-Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, pins }`.
+Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, fits circular arcs within `arc_tol`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, unpadded_bbox, padded_bbox, lateral_pad, pins }`.
 
 ## Arguments
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
+| `arc_tol` | number | no |  | 1-DOF endpoint-anchored circular arc fitting tolerance in metres (0 disables arc fitting), default 0 |
 | `cell` | text | no |  | top structure cell name to flatten; omit to auto-select the unreferenced root cell |
+| `lateral_pad` | number | no |  | non-negative lateral buffer margin in metres added around the returned bbox, default 0 |
 | `layer_bbox` | true or false | no |  | when true (default), return bbox over imported layers only; when false, return full top-cell bbox |
 | `layers` | object | yes |  | map from base sheet name to [layer, datatype] GDSII integer pair, e.g. {"gnd": [1, 0], "sig": [1, 10]} |
 | `path` | text | yes |  | file path to the binary GDSII (.gds) stream |

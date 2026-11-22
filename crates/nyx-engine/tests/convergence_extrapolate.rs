@@ -52,6 +52,7 @@ fn build_cap_data(terminals: &[&str], maxwell: Vec<Vec<f64>>) -> CapacitanceMatr
         maxwell_matrix_f: maxwell,
         mutual_matrix_f: mutual,
         ec_matrix_hz: ec,
+        ..Default::default()
     }
 }
 

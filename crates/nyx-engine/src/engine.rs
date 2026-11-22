@@ -487,8 +487,14 @@ impl Engine {
         let (registry, mesher, project, sizing) = (s.registry.clone(), s.mesher.clone(), s.project.clone(), s.sizing());
         let base_library = s.base_library.clone();
         let library = s.library()?;
-        // a point of a sweep has its own geometry and mesh settings: it never takes the mesh this engine holds
-        let cached = if matches!(purpose, Purpose::Current) { s.model().cloned() } else { None };
+        // a point of a sweep has its own geometry and mesh settings: it never takes the mesh this engine holds;
+        // an AMR solve (`adapt_passes > 1`) also starts from the unadapted initial mesh rather than a prior adapted one
+        let cached = if matches!(purpose, Purpose::Current) && !crate::amr::project_uses_electro_amr(&project, &targets)
+        {
+            s.model().filter(|m| !m.is_amr_adapted()).cloned()
+        } else {
+            None
+        };
         let stages = self.stages.clone();
         let (mesh_key, solve_keys) = (key.clone(), keys.clone());
         let label = match purpose {
@@ -563,7 +569,7 @@ impl Engine {
             let project = project.clone();
             move |progress| {
                 // the mesh: the one the engine held when the request was made, else one an earlier request built, else built here
-                let model = match cached {
+                let mut model = match cached {
                     Some(m) => m,
                     None => {
                         let _stage = femcore::progress::install(&progress);
@@ -611,16 +617,31 @@ impl Engine {
                 let mut warm_done: Option<crate::reuse::WarmDone> = None;
                 let (results, failed, worker, fields_saved, post_out) = match (&shared, &remote) {
                     (_, None) => {
-                        let (mut r, f) = match &resolved {
+                        let (next_model, mut r, f) = match &resolved {
                             Some(rs) => {
                                 let (out, wd) = crate::reuse::with_context(rs, || {
-                                    crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress)
+                                    crate::solve::run_chain_partial_amr(
+                                        &registry,
+                                        &project,
+                                        model.clone(),
+                                        &chain,
+                                        &library,
+                                        progress,
+                                    )
                                 });
                                 warm_done = Some(wd);
                                 out
                             }
-                            None => crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress),
+                            None => crate::solve::run_chain_partial_amr(
+                                &registry,
+                                &project,
+                                model.clone(),
+                                &chain,
+                                &library,
+                                progress,
+                            ),
                         };
+                        model = next_model;
                         let mut pa_out = Vec::new();
                         if f.is_none() && !post_analyses.is_empty() {
                             let mut tmp = Engine::with(registry.clone(), mesher.clone());
@@ -705,9 +726,23 @@ impl Engine {
                         if done.fields_saved {
                             if let Some(m) = &done.mesh {
                                 if !crate::worker::same_mesh(m, &model.solver_mesh()) {
-                                    return Err(Error::Solver(
-                                        "the worker meshed the project to something else than this process did, so its results cannot be shown on this mesh (a worker of another version of nyx?)".into(),
-                                    ));
+                                    if crate::amr::project_uses_electro_amr(&project, &chain)
+                                        && m.dim == model.solver_mesh().dim
+                                    {
+                                        model = Arc::new(
+                                            MeshedModel::new(
+                                                m.clone(),
+                                                model.evaluated().clone(),
+                                                model.labels().clone(),
+                                                project.mesh.sweep.is_some(),
+                                            )?
+                                            .with_amr_adapted(),
+                                        );
+                                    } else {
+                                        return Err(Error::Solver(
+                                            "the worker meshed the project to something else than this process did, so its results cannot be shown on this mesh (a worker of another version of nyx?)".into(),
+                                        ));
+                                    }
                                 }
                             }
                         }

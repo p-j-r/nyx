@@ -374,6 +374,9 @@ fn repro_concentric_mesh_fail_p2_fast_meshes_cleanly() {
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: false,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
     let (g_zc, _) = mesh_request(&m.list, &req_coarse).expect("concentric model with z_coarsen=true must mesh cleanly");
     verify_watertight_pure_tet_mesh(&g_zc, expected_vol, &["c0", "c1", "c2", "Si|VacTop", "Si|VacBot"]);
@@ -428,6 +431,9 @@ fn gap_cells_refines_coplanar_gaps_symmetrically_on_both_sides() {
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: false,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
     let req_gap = MeshRequest { gap_cells: Some(2.5), ..req_base.clone() };
 
@@ -551,6 +557,9 @@ fn z_coarsen_pure_tet_watertight_3x_dof_reduction_and_sub_0_2_pct_capacitance() 
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: false,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
     let req_coarse = MeshRequest { z_coarsen: true, ..req_full.clone() };
 
@@ -680,6 +689,9 @@ fn squadds_hfss_v1_z_slab_controls_preserve_interfaces_within_15_slabs_and_abort
         z_growth_ratio: None,
         max_steiner_multiplier: None,
         strict_mesh: true,
+        singular_edges: None,
+        quarter_point_xi: None,
+        corner_grading: false,
     };
 
     // 1. Unconstrained baseline produces > 30 z-slabs due to the 200 nm JJ edge

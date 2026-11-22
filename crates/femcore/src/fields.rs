@@ -7,7 +7,7 @@
 //! cell and then averaged over the cells that share a node). `Display` keeps only the boundary facets
 //! (3D) or the cells (2D); for P2 results each triangle is split in four so the midpoint values show.
 
-use crate::fem::{geometry, shape};
+use crate::fem::{geometry, shape, CurvedTet};
 use crate::mesh::SimplexMesh;
 use rayon::prelude::*;
 
@@ -27,6 +27,11 @@ pub fn local_bary(dim: usize, order: usize) -> Vec<Vec<f64>> {
 
 /// Gradients of `ncomp` stacked scalar dof fields (each `n_dofs` long) at the local dofs of
 /// every cell: `out[((c*nloc + a)*ncomp + i)*d + k] = d u_i / d x_k`.
+///
+/// On 3D curved/quarter-point cells (`mesh.dim == 3 && mesh.cell_is_curved(c)`), evaluates [`CurvedTet::jacobian`],
+/// clamping barycentric coordinates `lam[k] = lam[k].max(1e-3)` and renormalizing `sum(lam) == 1` whenever
+/// `|det J| < 1e-12 * |det_straight|` so nodal gradients at singular quarter-point tips (`xi_QP = 0.25`, `det J = 0`)
+/// stay strictly finite (`0` `NaN`/`Inf`).
 pub fn gradients_at_nodes(mesh: &SimplexMesh, u: &[f64], ncomp: usize, order: usize) -> Vec<f64> {
     let d = mesh.dim;
     let n1 = mesh.n_dofs(order);
@@ -39,7 +44,7 @@ pub fn gradients_at_nodes(mesh: &SimplexMesh, u: &[f64], ncomp: usize, order: us
     let mut out = vec![0.0; mesh.n_cells() * per_cell];
     let nt = if mesh.n_cells() < 2000 { 1 } else { crate::par::threads() };
     let chunk = mesh.n_cells().div_ceil(nt).max(1);
-    let (geo, dn) = (&geo, &dn);
+    let (geo, dn, lam) = (&geo, &dn, &lam);
     out.par_chunks_mut((chunk * per_cell).max(1)).enumerate().for_each(|(ci, block)| {
         let mut dofs = Vec::new();
         let mut s = vec![0.0; ncomp * d];
@@ -47,23 +52,75 @@ pub fn gradients_at_nodes(mesh: &SimplexMesh, u: &[f64], ncomp: usize, order: us
             let c = ci * chunk + lc;
             mesh.cell_dofs(c, order, &mut dofs);
             let base = c * (d + 1) * d;
-            for p in 0..nloc {
-                s.iter_mut().for_each(|x| *x = 0.0);
-                for a in 0..nloc {
-                    let mut ga = [0.0; 3];
-                    for k in 0..d {
-                        for b in 0..=d {
-                            ga[k] += dn[p][a * (d + 1) + b] * geo.g[base + b * d + k];
+            if d == 3 && mesh.cell_is_curved(c) {
+                let ct = CurvedTet::new(mesh.cell_geometry_nodes(c));
+                let v = [ct.x[0], ct.x[1], ct.x[2], ct.x[3]];
+                let det_straight = CurvedTet::straight(v).jacobian(&[0.25; 4]).1;
+                let thresh = 1e-12 * det_straight.abs();
+                for p in 0..nloc {
+                    s.iter_mut().for_each(|x| *x = 0.0);
+                    let lp = [lam[p][0], lam[p][1], lam[p][2], lam[p][3]];
+                    let (mut g_bary, mut det) = ct.jacobian(&lp);
+                    let clamped_dn;
+                    let dn_p: &[f64] = if !det.is_finite()
+                        || det.abs() < thresh
+                        || g_bary.iter().flatten().any(|x| !x.is_finite())
+                    {
+                        let mut lc = [lp[0].max(1e-3), lp[1].max(1e-3), lp[2].max(1e-3), lp[3].max(1e-3)];
+                        let sum_l: f64 = lc.iter().sum();
+                        for x in &mut lc {
+                            *x /= sum_l;
+                        }
+                        let (gc, det_c) = ct.jacobian(&lc);
+                        g_bary = gc;
+                        det = det_c;
+                        clamped_dn = shape(&lc, order).1;
+                        &clamped_dn
+                    } else {
+                        &dn[p]
+                    };
+                    if !det.is_finite() || det.abs() <= 1e-30 || g_bary.iter().flatten().any(|x| !x.is_finite()) {
+                        for b in 0..4 {
+                            for k in 0..3 {
+                                g_bary[b][k] = geo.g[base + b * 3 + k];
+                            }
                         }
                     }
-                    for i in 0..ncomp {
-                        let ua = u[i * n1 + dofs[a]];
-                        for k in 0..d {
-                            s[i * d + k] += ua * ga[k];
+                    for a in 0..nloc {
+                        let mut ga = [0.0; 3];
+                        for k in 0..3 {
+                            for b in 0..4 {
+                                ga[k] += dn_p[a * 4 + b] * g_bary[b][k];
+                            }
+                        }
+                        for i in 0..ncomp {
+                            let ua = u[i * n1 + dofs[a]];
+                            for k in 0..3 {
+                                s[i * 3 + k] += ua * ga[k];
+                            }
                         }
                     }
+                    cell_out[p * ncomp * d..(p + 1) * ncomp * d].copy_from_slice(&s);
                 }
-                cell_out[p * ncomp * d..(p + 1) * ncomp * d].copy_from_slice(&s);
+            } else {
+                for p in 0..nloc {
+                    s.iter_mut().for_each(|x| *x = 0.0);
+                    for a in 0..nloc {
+                        let mut ga = [0.0; 3];
+                        for k in 0..d {
+                            for b in 0..=d {
+                                ga[k] += dn[p][a * (d + 1) + b] * geo.g[base + b * d + k];
+                            }
+                        }
+                        for i in 0..ncomp {
+                            let ua = u[i * n1 + dofs[a]];
+                            for k in 0..d {
+                                s[i * d + k] += ua * ga[k];
+                            }
+                        }
+                    }
+                    cell_out[p * ncomp * d..(p + 1) * ncomp * d].copy_from_slice(&s);
+                }
             }
         }
     });

@@ -713,58 +713,21 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
     (Level2D { tris: next_tris }, SlabTransition { map_v, rank, tri_collapse })
 }
 
-fn curve_sheet_mesh_edges(
-    mesh: &mut SimplexMesh,
-    cx: &geom::complex::Complex,
-    pt2: impl Fn(u32) -> V2,
-    bnd_edges2: &[(u32, u32, u32)],
-    z_planes: &[f64],
-    used_v: &[u32],
-    n2: usize,
-) {
-    let Some(st) = cx.stack.as_ref() else { return };
-    let ov = &st.overlay;
-    let mut cand: crate::meshing::curve3::EdgeNodes = Vec::new();
-    for &(a, b, oe) in bnd_edges2 {
-        let ed = &ov.edges[oe as usize];
-        if matches!(ov.curves[ed.curve as usize], Curve::Line { .. }) {
-            continue;
-        }
-        let (pa2, pb2) = (pt2(a), pt2(b));
-        let len2 = dist2(pa2, pb2);
-        if !(len2 > 0.0) {
-            continue;
-        }
-        let mid2 = [0.5 * (pa2[0] + pb2[0]), 0.5 * (pa2[1] + pb2[1])];
-        let q2 = ov.project_edge(oe, mid2);
-        let off2 = dist2(q2, mid2);
-        if !(off2 > 1e-9 * len2 && off2 < 0.25 * len2 && q2[0].is_finite() && q2[1].is_finite()) {
-            continue;
-        }
-        for (zp, &z) in z_planes.iter().enumerate() {
-            let va = used_v[zp * n2 + a as usize];
-            let vb = used_v[zp * n2 + b as usize];
-            if va != u32::MAX && vb != u32::MAX && va != vb {
-                let pr = [va.min(vb), va.max(vb)];
-                let qw = cx.wv([q2[0], q2[1], z]);
-                cand.push((pr, qw));
-            }
-        }
-    }
-    if !cand.is_empty() {
-        crate::meshing::curve3::apply_edge_nodes_validated(mesh, cand);
-    }
+struct Sheet3dSizing {
+    h_global: f64,
+    max_dev: f64,
+    eff_max_cells: Option<usize>,
+    meshable: Vec<bool>,
+    region_h: Vec<f64>,
+    face_h: Vec<f64>,
+    edge3_h: Vec<f64>,
+    cell_h: Vec<f64>,
+    ov_edge_h: Vec<f64>,
+    sharp_corners_by_z: Vec<(f64, Vec<crate::meshing::singularity::SheetCorner>)>,
+    all_sharp_corners: Vec<crate::meshing::singularity::SheetCorner>,
 }
 
-/// Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a conformal tetrahedral `MeshedGeom`.
-pub fn mesh_sheet_stack_3d(
-    ev: Evaluated,
-    plan: &MeshPlan,
-    waves: Option<(&Sizing, &PhysicsSizing)>,
-) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
-    if ev.list.dim != 3 {
-        return Err("mesh_sheet_stack_3d requires a 3D model".into());
-    }
+fn validate_sheet_plan_opts(plan: &MeshPlan) -> Result<(), String> {
     if !(plan.opts.h > 0.0 && plan.opts.h.is_finite()) {
         return Err("the element size must be positive".into());
     }
@@ -793,6 +756,29 @@ pub fn mesh_sheet_stack_3d(
             return Err("max_cells must be at least 1".into());
         }
     }
+    if let Some(se) = plan.opts.singular_edges.as_deref() {
+        if se != "none" && se != "quarter_point" {
+            return Err(format!("singular_edges must be \"none\" or \"quarter_point\", got '{se}'"));
+        }
+    }
+    if let Some(xi) = plan.opts.quarter_point_xi {
+        if !(xi.is_finite() && (0.25..=0.5).contains(&xi)) {
+            return Err(format!("quarter_point_xi must be in [0.25, 0.50], got {xi}"));
+        }
+    }
+    Ok(())
+}
+
+fn compute_sheet3d_sizing(
+    ev: &Evaluated,
+    labels: &geom::labels::LabelMap,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<Sheet3dSizing, String> {
+    if ev.list.dim != 3 {
+        return Err("mesh_sheet_stack_3d requires a 3D model".into());
+    }
+    validate_sheet_plan_opts(plan)?;
     let (scale_factor, adapt_max_cells) = match plan.mesher {
         Mesher::Simple => (1.0, None),
         Mesher::Adaptive(a) => {
@@ -815,7 +801,6 @@ pub fn mesh_sheet_stack_3d(
     };
     let h_global = plan.opts.h * scale_factor;
     let max_dev = plan.opts.max_dev.unwrap_or(h_global / 50.0);
-    let labels = ev.label_map().map_err(|e| e.to_string())?;
     let cx = ev.complex();
     let st = cx.stack.as_ref().ok_or("3D sheet mesher requires a prismatic layer stack")?;
     let ov = &st.overlay;
@@ -827,7 +812,7 @@ pub fn mesh_sheet_stack_3d(
         region_h[p.region as usize] = region_h[p.region as usize].min((p.thickness / p.layers) * scale_factor);
     }
     if let Some((sizing, sz)) = waves {
-        for (r, w) in wave_sizes_by_region(&ev, &labels, sizing, sz)?.into_iter().enumerate().take(nr) {
+        for (r, w) in wave_sizes_by_region(ev, labels, sizing, sz)?.into_iter().enumerate().take(nr) {
             if w.is_finite() && w > 0.0 {
                 region_h[r] = region_h[r].min(w * scale_factor);
             }
@@ -926,6 +911,8 @@ pub fn mesh_sheet_stack_3d(
     let grade = 0.35;
     let has_explicit_fine =
         ov_edge_h.iter().any(|&h| h < h_global * 0.999) || cell_h.iter().any(|&h| h < h_global * 0.999);
+    let want_qp = plan.opts.singular_edges.as_deref() == Some("quarter_point");
+    let eff_gap_cells = plan.opts.gap_cells.map(|gc| if want_qp { gc.max(2.0) } else { gc });
 
     // Coplanar gap proximity pass across all 2D sheet planes:
     // 1. When `gap_cells = Some(gc)`, clamps `ov_edge_h[e] <= d_gap / gc` symmetrically on both facing rims.
@@ -941,7 +928,7 @@ pub fn mesh_sheet_stack_3d(
             }
         }
     }
-    if plan.opts.gap_cells.is_some() || has_explicit_fine {
+    if eff_gap_cells.is_some() || has_explicit_fine {
         struct RimEdge {
             e: usize,
             v0: u32,
@@ -1029,7 +1016,7 @@ pub fn mesh_sheet_stack_3d(
                     if !(dot_a > 0.15 * d && dot_b > 0.15 * d && dot_nn < 0.25) {
                         return;
                     }
-                    if let Some(gc) = plan.opts.gap_cells {
+                    if let Some(gc) = eff_gap_cells {
                         let h_gap = d / gc;
                         gap_clamps.push((ra.e, h_gap));
                         gap_clamps.push((rb.e, h_gap));
@@ -1048,11 +1035,52 @@ pub fn mesh_sheet_stack_3d(
         }
     }
 
+    let mut sharp_corners_by_z = Vec::new();
+    let mut all_sharp_corners = Vec::new();
+    if plan.opts.corner_grading {
+        for &z_s in &sheet_zs {
+            let cs = crate::meshing::singularity::collect_overlay_sheet_corners(cx, z_s, &ov_edge_h, 1.0);
+            if !cs.is_empty() {
+                all_sharp_corners.extend(cs.iter().copied());
+                sharp_corners_by_z.push((z_s, cs));
+            }
+        }
+    }
+
+    Ok(Sheet3dSizing {
+        h_global,
+        max_dev,
+        eff_max_cells,
+        meshable,
+        region_h,
+        face_h,
+        edge3_h,
+        cell_h,
+        ov_edge_h,
+        sharp_corners_by_z,
+        all_sharp_corners,
+    })
+}
+
+fn build_overlay_mesh_2d_with_sizing(
+    ev: &Evaluated,
+    plan: &MeshPlan,
+    sz: &Sheet3dSizing,
+) -> Result<(SimplexMesh, Vec<String>), String> {
+    let cx = ev.complex();
+    let st = cx.stack.as_ref().ok_or("3D sheet mesher requires a prismatic layer stack")?;
+    let ov = &st.overlay;
+    let ncell = ov.regions.len();
+    let nedge = ov.edges.len();
+    let h_global = sz.h_global;
+    let max_dev = sz.max_dev;
+    let grade = 0.35;
+
     let mut fine_edges: Vec<(usize, f64)> =
-        (0..nedge).filter(|&e| ov_edge_h[e] < h_global * 0.999).map(|e| (e, ov_edge_h[e])).collect();
+        (0..nedge).filter(|&e| sz.ov_edge_h[e] < h_global * 0.999).map(|e| (e, sz.ov_edge_h[e])).collect();
     fine_edges.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
     let fine_cells: Vec<(usize, f64)> =
-        (0..ncell).filter(|&c| cell_h[c] < h_global * 0.999).map(|c| (c, cell_h[c])).collect();
+        (0..ncell).filter(|&c| sz.cell_h[c] < h_global * 0.999).map(|c| (c, sz.cell_h[c])).collect();
     let fine_edge_bvh = Bvh2::build(
         fine_edges
             .iter()
@@ -1065,18 +1093,23 @@ pub fn mesh_sheet_stack_3d(
             .map(|&(c, ch)| BvhItem2 { id: c, bbox: ov.regions[c].bbox, min_h: ch })
             .collect(),
     );
+    let corners_ref = &sz.all_sharp_corners;
     let local_h_2d = |p: V2| -> f64 {
         let h = fine_edge_bvh.min_graded(p, grade, h_global, |e, eh, _db| {
             let d = dist2(ov.project_edge(e as u32, p), p);
             eh + grade * d
         });
-        fine_cell_bvh.min_graded(p, grade, h, |_c, ch, db| ch + grade * db)
+        let mut h = fine_cell_bvh.min_graded(p, grade, h, |_c, ch, db| ch + grade * db);
+        if !corners_ref.is_empty() {
+            h = crate::meshing::singularity::corner_graded_h_at(p, corners_ref, h);
+        }
+        h
     };
 
     // Discretize every 1D PSLG edge of stack.overlay once (graded along the curve)
     let mut chains = Vec::with_capacity(nedge);
     for (e, ed) in ov.edges.iter().enumerate() {
-        let eh = ov_edge_h[e];
+        let eh = sz.ov_edge_h[e];
         let mut t_pts = ov.discretize_edge(e as u32, DiscretizeOpts { max_dev, max_len: eh });
         let curve = &ov.curves[ed.curve as usize];
         let mut k = 0;
@@ -1102,7 +1135,7 @@ pub fn mesh_sheet_stack_3d(
         chains.push(Chain { pts, label: (e + 1) as i32, part: e });
     }
 
-    // Interior lattice fills for fine cells and graded collars around fine 1D edges
+    // Interior lattice fills for fine cells, graded collars around fine 1D edges, and sharp corner balls
     let mut fills: Vec<Fill> = Vec::new();
     for &(c, ch) in &fine_cells {
         let bb = ov.regions[c].bbox;
@@ -1121,7 +1154,7 @@ pub fn mesh_sheet_stack_3d(
             }
             let reach = eh * reach_k;
             let bb = ov.edges[e].bbox.pad(reach);
-            let cell_h_ref = &cell_h;
+            let cell_h_ref = &sz.cell_h;
             fills.push(Fill {
                 lo: [bb.lo[0], bb.lo[1]],
                 hi: [bb.hi[0], bb.hi[1]],
@@ -1134,15 +1167,46 @@ pub fn mesh_sheet_stack_3d(
             });
         }
     }
+    if !corners_ref.is_empty() {
+        for sc in corners_ref {
+            for (mult, rad_k) in [(0.25, 0.5), (0.55, 1.2)] {
+                let h_c = (sc.h_edge * mult).max(sc.h_min());
+                if h_c >= h_global * 0.999 {
+                    continue;
+                }
+                let r_fill = sc.h_edge * rad_k;
+                let cp = sc.pos;
+                fills.push(Fill {
+                    lo: [cp[0] - r_fill, cp[1] - r_fill],
+                    hi: [cp[0] + r_fill, cp[1] + r_fill],
+                    h: h_c,
+                    owner: Box::new(move |p| {
+                        ov.locate(p).is_some()
+                            && dist2(cp, p) <= r_fill
+                            && local_h_2d(p) >= 0.4 * h_c
+                    }),
+                });
+            }
+        }
+    }
 
     let mut ov_bb = Aabb::EMPTY;
     for r in &ov.regions {
         ov_bb = ov_bb.union(&r.bbox);
     }
-    let h_fine_min =
-        cell_h.iter().copied().chain(ov_edge_h.iter().copied()).fold(h_global, f64::min).max(1e-12 * h_global);
+    let corner_h_min = corners_ref
+        .iter()
+        .map(|c| c.h_min())
+        .fold(h_global, f64::min);
+    let h_fine_min = sz
+        .cell_h
+        .iter()
+        .copied()
+        .chain(sz.ov_edge_h.iter().copied())
+        .fold(corner_h_min, f64::min)
+        .max(1e-12 * h_global);
     let cell_active: Vec<bool> =
-        (0..ncell).map(|c| st.layers.iter().any(|l| l.region_of[c].is_some_and(|r| meshable[r as usize]))).collect();
+        (0..ncell).map(|c| st.layers.iter().any(|l| l.region_of[c].is_some_and(|r| sz.meshable[r as usize]))).collect();
     let domain_at = |cen: V2| -> Option<i32> {
         let c = ov.locate(cen)?;
         if cell_active[c as usize] {
@@ -1167,7 +1231,112 @@ pub fn mesh_sheet_stack_3d(
         &domain_at,
     )?;
     drop(fills);
-    let warnings = mc_rep.warnings;
+    Ok((m2, mc_rep.warnings))
+}
+
+/// Builds the sized 2D conformal overlay triangulation `m2` (`cell_labels = ov_cell + 1`, boundary
+/// `facet_labels = ov_edge + 1`) honoring `Size` rules, `gap_cells`, `waves`, and `corner_grading`.
+pub fn build_sized_overlay_mesh_2d(
+    ev: &Evaluated,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<SimplexMesh, String> {
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let sz = compute_sheet3d_sizing(ev, &labels, plan, waves)?;
+    Ok(build_overlay_mesh_2d_with_sizing(ev, plan, &sz)?.0)
+}
+
+fn zero_thickness_sheet_labels(g: &MeshedGeom) -> Vec<i32> {
+    let mut out = Vec::new();
+    for sname in g.eval.complex().sheet_names() {
+        if g.eval.complex().sheet_thickness(&sname).unwrap_or(0.0) <= 0.0 {
+            for lab in g.labels.boundary(&sname) {
+                if g.labels.sheet_thickness_m.get(&lab).copied().unwrap_or(0.0) <= 0.0 {
+                    out.push(lab);
+                }
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn apply_quarter_point_on_meshed_geom(
+    g: &mut MeshedGeom,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) {
+    let want_qp = plan.opts.singular_edges.as_deref() == Some("quarter_point")
+        && waves.is_none_or(|(sz, _)| sz.order >= 2);
+    if !want_qp {
+        return;
+    }
+    // Cross-Feature Compatibility Rule 2: automatically skip thick sheets (`thickness > 0`), where
+    // 270 deg physical corners induce `r^(2/3)` rather than `r^(1/2)` singularities.
+    let zero_thick_labels = zero_thickness_sheet_labels(g);
+    if zero_thick_labels.is_empty() {
+        return;
+    }
+    let rim_verts = crate::meshing::singularity::sheet_rim_vertices(&g.mesh, &zero_thick_labels);
+    let mut curved_rim_edges = std::collections::BTreeSet::new();
+    for ([a, b], _) in g.mesh.edge_node_list() {
+        if rim_verts.get(a as usize).copied().unwrap_or(false)
+            && rim_verts.get(b as usize).copied().unwrap_or(false)
+        {
+            curved_rim_edges.insert([a.min(b), a.max(b)]);
+        }
+    }
+    let xi = plan
+        .opts
+        .quarter_point_xi
+        .unwrap_or(crate::meshing::singularity::DEFAULT_QUARTER_POINT_XI);
+    crate::meshing::singularity::apply_quarter_point_nodes(&mut g.mesh, &rim_verts, xi, &curved_rim_edges);
+}
+
+/// Applies post-adaptation `AF-5` (`curved`) and `AF-2` (`singular_edges = "quarter_point"`) `EdgeNodes`
+/// enrichment to an unstructured 3D [`MeshedGeom`] (e.g. after `full_3d` `adapt3`).
+pub fn apply_sheet_post_enrichment(
+    g: &mut MeshedGeom,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) {
+    if plan.opts.curved {
+        if let Ok(dom) = crate::meshing::geomdrive3::GeomDomain3::new(&g.eval, &g.labels, plan.opts.h) {
+            crate::meshing::curve3::curve_solver_mesh(&mut g.mesh, &dom);
+        }
+    }
+    apply_quarter_point_on_meshed_geom(g, plan, waves);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn extrude_overlay_2d_inner(
+    ev: Evaluated,
+    labels: geom::labels::LabelMap,
+    m2: &SimplexMesh,
+    plan: &MeshPlan,
+    sz: &Sheet3dSizing,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+    sheet_dz_override: Option<f64>,
+    infer_dz_from_m2: bool,
+    warnings: Vec<String>,
+) -> Result<MeshedGeom, String> {
+    if ev.list.dim != 3 || m2.dim != 2 {
+        return Err("extrude_overlay_2d requires a 3D Evaluated model and a 2D overlay mesh".into());
+    }
+    let cx = ev.complex();
+    let st = cx.stack.as_ref().ok_or("3D sheet mesher requires a prismatic layer stack")?;
+    let ov = &st.overlay;
+    let tol = cx.tol;
+    let h_global = sz.h_global;
+    let eff_max_cells = sz.eff_max_cells;
+    let meshable = &sz.meshable;
+    let region_h = &sz.region_h;
+    let face_h = &sz.face_h;
+    let edge3_h = &sz.edge3_h;
+    let cell_h = &sz.cell_h;
+    let ov_edge_h = &sz.ov_edge_h;
+    let nf = cx.faces.len();
 
     // Map every 2D mesh edge separating distinct overlay cells (or the outer boundary) to its overlay edge id
     let ntri2 = m2.n_cells();
@@ -1232,38 +1401,84 @@ pub fn mesh_sheet_stack_3d(
         }
     }
 
+    let scene_sheets = &ev.scene().sheets;
+    let has_thick_or_etch = scene_sheets.iter().any(|s| s.thickness > 0.0 || s.etch_depth > 0.0);
+
     // Build graded z-slabs across every 3D layer
-    let sheet_dz_at = |z: f64, default_h: f64| -> Option<f64> {
+    let sheet_dz_at_raw = |z_query: f64, default_h: f64| -> Option<f64> {
         let mut has_sheet = false;
         let mut dz = default_h;
+        let mut sheet_cells = if infer_dz_from_m2 { vec![false; ov.regions.len()] } else { Vec::new() };
         for (fi, f) in cx.faces.iter().enumerate() {
             if let FaceGeom::Cap { cell, z: fz } = f.geom {
-                if (fz - z).abs() <= tol && f.is_sheet() {
+                if (fz - z_query).abs() <= tol && f.is_sheet() {
                     has_sheet = true;
                     dz = dz.min(face_h[fi]).min(cell_h[cell as usize]);
+                    if infer_dz_from_m2 && (cell as usize) < sheet_cells.len() {
+                        sheet_cells[cell as usize] = true;
+                    }
                 }
             }
         }
         for (ei, e3) in cx.edges3.iter().enumerate() {
             if let EdgeGeom::Horizontal { edge, z: ez } = e3.geom {
-                if (ez - z).abs() <= tol && e3.faces.iter().any(|&fi| cx.faces[fi as usize].is_sheet()) {
+                if (ez - z_query).abs() <= tol && e3.faces.iter().any(|&fi| cx.faces[fi as usize].is_sheet()) {
                     has_sheet = true;
                     dz = dz.min(edge3_h[ei]).min(ov_edge_h[edge as usize]);
                 }
             }
         }
-        if has_sheet {
-            if let Some(dz_min) = plan.opts.dz_min {
+        if infer_dz_from_m2 && has_sheet {
+            let mut min_m2_edge = default_h;
+            for (ti, &ov_c) in tri_ov_cell.iter().enumerate() {
+                if ov_c < sheet_cells.len() && sheet_cells[ov_c] {
+                    let v = m2.cell(ti);
+                    for (a, b) in [(v[0], v[1]), (v[1], v[2]), (v[2], v[0])] {
+                        min_m2_edge = min_m2_edge.min(dist2(pt2(a), pt2(b)));
+                    }
+                }
+            }
+            dz = dz.min(min_m2_edge.max(default_h * 1e-3));
+        }
+        if plan.opts.corner_grading && has_sheet {
+            for &(zs, ref cs) in &sz.sharp_corners_by_z {
+                if (zs - z_query).abs() <= tol {
+                    dz = crate::meshing::singularity::coupled_corner_dz(dz, cs);
+                }
+            }
+        }
+        if let Some(dz_min) = plan.opts.dz_min {
+            if has_sheet {
                 dz = dz.max(dz_min).min(default_h);
             }
-            Some(dz)
-        } else {
-            None
         }
+        if let Some(ovr) = sheet_dz_override {
+            if has_sheet {
+                dz = ovr.min(default_h);
+            }
+        }
+        has_sheet.then_some(dz)
+    };
+
+    let sheet_dz_at = |z: f64, default_h: f64| -> Option<f64> {
+        if let Some(dz) = sheet_dz_at_raw(z, default_h) {
+            return Some(dz);
+        }
+        if has_thick_or_etch {
+            // Also match trench floor `z_s - t_e` to the parent sheet plane `z_s` so substrate slabs grade smoothly up to trenches.
+            for sh in scene_sheets {
+                if sh.etch_depth > 0.0 && (z - (sh.z - sh.etch_depth)).abs() <= tol {
+                    if let Some(dz) = sheet_dz_at_raw(sh.z, default_h) {
+                        return Some(dz);
+                    }
+                }
+            }
+        }
+        None
     };
 
     let z_ratio = plan.opts.z_growth_ratio.unwrap_or(1.35);
-    let mut active_layers: Vec<(usize, f64, f64, f64, f64, f64)> = Vec::new();
+    let mut active_layers: Vec<(usize, f64, f64, f64, f64, f64, bool)> = Vec::new();
     for (k, l) in st.layers.iter().enumerate() {
         let active_in_layer = l.region_of.iter().flatten().any(|&r| meshable[r as usize]);
         if !active_in_layer {
@@ -1276,9 +1491,15 @@ pub fn mesh_sheet_stack_3d(
             .filter(|&&r| meshable[r as usize])
             .map(|&r| region_h[r as usize])
             .fold(h_global, f64::min);
+        let is_thin_sheet_slab = has_thick_or_etch
+            && (l.is_conductor_cavity.iter().any(|&b| b)
+                || scene_sheets.iter().any(|sh| {
+                    (sh.thickness > 0.0 && l.z0 >= sh.z - tol && l.z1 <= sh.z + sh.thickness + tol)
+                        || (sh.etch_depth > 0.0 && l.z0 >= sh.z - sh.etch_depth - tol && l.z1 <= sh.z + tol)
+                }));
         let dz0 = sheet_dz_at(l.z0, h_layer).unwrap_or(h_layer);
         let dz1 = sheet_dz_at(l.z1, h_layer).unwrap_or(h_layer);
-        active_layers.push((k, l.z0, l.z1, dz0, dz1, h_layer));
+        active_layers.push((k, l.z0, l.z1, dz0, dz1, h_layer, is_thin_sheet_slab));
     }
     if active_layers.is_empty() {
         return Err("the 3D model has no active layers to mesh".into());
@@ -1294,7 +1515,10 @@ pub fn mesh_sheet_stack_3d(
     let build_layer_zs = |alpha: f64| -> Vec<(usize, Vec<f64>)> {
         active_layers
             .iter()
-            .map(|&(k, z0, z1, dz0, dz1, h_layer)| {
+            .map(|&(k, z0, z1, dz0, dz1, h_layer, is_thin_sheet_slab)| {
+                if is_thin_sheet_slab {
+                    return (k, vec![z0, z1]);
+                }
                 let (d0, d1, hl, rt) = if alpha <= 1.0 {
                     (dz0, dz1, h_layer, z_ratio)
                 } else {
@@ -1432,7 +1656,7 @@ pub fn mesh_sheet_stack_3d(
                 ));
             }
         }
-        // Default exact prismatic Dompierre path (bit-identical to baseline)
+        // Default exact prismatic Dompierre path (bit-identical to baseline when AF-2/5/6 flags are off)
         let mut used_v = vec![u32::MAX; nz * n2];
         for (s, &layer_opt) in slab_layer.iter().enumerate() {
             let Some(k) = layer_opt else { continue };
@@ -1536,14 +1760,31 @@ pub fn mesh_sheet_stack_3d(
 
         let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
         let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
-        if matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty() {
+        let ran_pml = matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty();
+        if ran_pml {
             g = crate::meshing::pml_geom3::structured_pml_3d(g)?.0;
         }
+        // Cross-Feature Compatibility Rule 4: AF-5 (`curved`) runs FIRST, AF-2 (`quarter_point`) runs SECOND.
         if plan.opts.curved {
-            let gcx = g.eval.complex();
-            curve_sheet_mesh_edges(&mut g.mesh, gcx, pt2, &bnd_edges2, &z_planes, &used_v, n2);
+            if ran_pml {
+                crate::meshing::sheet3d_curve::apply_sheet3d_curved_edges(&mut g);
+            } else {
+                let level_zero = vec![0usize; nz];
+                crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
+                    g.eval.complex(),
+                    m2,
+                    &bnd_edges2,
+                    &z_planes,
+                    &used_v,
+                    &slab_layer,
+                    &level_zero,
+                    &[],
+                    &mut g.mesh,
+                );
+            }
         }
-        return Ok((g, None));
+        apply_quarter_point_on_meshed_geom(&mut g, plan, waves);
+        return Ok(g);
     }
 
     // `z_coarsen = true`: Conforming pure-tetrahedral vertical coarsening away from sheet planes
@@ -1896,12 +2137,74 @@ pub fn mesh_sheet_stack_3d(
 
     let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
     let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
-    if matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty() {
+    let ran_pml = matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty();
+    if ran_pml {
         g = crate::meshing::pml_geom3::structured_pml_3d(g)?.0;
     }
+    // Cross-Feature Compatibility Rule 4: AF-5 (`curved`) runs FIRST, AF-2 (`quarter_point`) runs SECOND.
     if plan.opts.curved {
-        let gcx = g.eval.complex();
-        curve_sheet_mesh_edges(&mut g.mesh, gcx, pt2, &bnd_edges2, &z_planes, &used_v, n2);
+        if ran_pml {
+            crate::meshing::sheet3d_curve::apply_sheet3d_curved_edges(&mut g);
+        } else {
+            let transition_refs: Vec<crate::meshing::sheet3d_curve::Sheet3dTransitionRef<'_>> = transitions
+                .iter()
+                .map(|tr| crate::meshing::sheet3d_curve::Sheet3dTransitionRef {
+                    map_v: &tr.map_v,
+                    rank: &tr.rank,
+                })
+                .collect();
+            crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
+                g.eval.complex(),
+                m2,
+                &bnd_edges2,
+                &z_planes,
+                &used_v,
+                &slab_layer,
+                &level_of_zp,
+                &transition_refs,
+                &mut g.mesh,
+            );
+        }
     }
+    apply_quarter_point_on_meshed_geom(&mut g, plan, waves);
+    Ok(g)
+}
+
+/// Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` using the full
+/// [`MeshPlan`] (`z_coarsen`, `AF-6` thin-slab single-layer extrusion, `PmlMode::Structured`,
+/// `AF-5` `curved` projection, and `AF-2` `quarter_point` enrichment).
+pub fn extrude_overlay_2d_with_plan(
+    ev: Evaluated,
+    m2: &SimplexMesh,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+    sheet_dz_override: Option<f64>,
+) -> Result<MeshedGeom, String> {
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let sz = compute_sheet3d_sizing(&ev, &labels, plan, waves)?;
+    extrude_overlay_2d_inner(ev, labels, m2, plan, &sz, waves, sheet_dz_override, true, Vec::new())
+}
+
+/// Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` at global
+/// element size `h_global` (shared between initial `sheet3d` meshing and `AF-1` `sheet_2d_z` AMR).
+pub fn extrude_overlay_2d(
+    ev: Evaluated,
+    m2: &SimplexMesh,
+    h_global: f64,
+    sheet_dz_override: Option<f64>,
+) -> Result<MeshedGeom, String> {
+    extrude_overlay_2d_with_plan(ev, m2, &MeshPlan::simple(h_global), None, sheet_dz_override)
+}
+
+/// Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a conformal tetrahedral `MeshedGeom`.
+pub fn mesh_sheet_stack_3d(
+    ev: Evaluated,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let sz = compute_sheet3d_sizing(&ev, &labels, plan, waves)?;
+    let (m2, warnings) = build_overlay_mesh_2d_with_sizing(&ev, plan, &sz)?;
+    let g = extrude_overlay_2d_inner(ev, labels, &m2, plan, &sz, waves, None, false, warnings)?;
     Ok((g, None))
 }

@@ -227,6 +227,7 @@ fn overlapping_and_keyhole_polygons_extract_ccw_hulls_and_cw_holes_with_exact_si
         split_islands: true,
         pin_layer: None,
         simplify_tol: 0.0,
+        ..Default::default()
     };
     let res = import_gds_bytes(&w.buf, &opts).unwrap();
     assert_eq!(res.cell, "TOP");
@@ -322,6 +323,7 @@ fn sref_aref_hierarchy_reflection_mag_rotation_paths_and_pins() {
         split_islands: true,
         pin_layer: Some((1, 20)),
         simplify_tol: 0.0,
+        ..Default::default()
     };
     let res = import_gds_bytes(&w.buf, &opts).unwrap();
     assert_eq!(res.cell, "CHIP_TOP");
@@ -426,6 +428,7 @@ fn pin_inside_hole_does_not_match_outer_ring_and_simplify_tol_pins_shared_contac
         split_islands: true,
         pin_layer: Some((1, 20)),
         simplify_tol: 100e-9,
+        ..Default::default()
     };
     let res = import_gds_bytes(&w.buf, &opts).unwrap();
     assert_eq!(res.sheets[0].name, "ground_plane");
@@ -465,6 +468,7 @@ fn diagnostics_reject_malformed_or_cyclic_streams_and_split_islands_false_merges
         split_islands: true,
         pin_layer: None,
         simplify_tol: 0.0,
+        ..Default::default()
     };
     let err = import_gds_bytes(&cyc.buf, &opts).unwrap_err().0;
     assert!(err.contains("64 levels") || err.contains("cyclic"), "unexpected cyclic error: {err}");
@@ -486,6 +490,7 @@ fn diagnostics_reject_malformed_or_cyclic_streams_and_split_islands_false_merges
             split_islands: false,
             pin_layer: None,
             simplify_tol: 0.0,
+            ..Default::default()
         },
     )
     .unwrap();

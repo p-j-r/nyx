@@ -689,14 +689,22 @@
   },
   {
     "access": "edit",
-    "description": "Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, pins }`.",
+    "description": "Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, fits circular arcs within `arc_tol`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, unpadded_bbox, padded_bbox, lateral_pad, pins }`.",
     "name": "import_gds",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "arc_tol": {
+          "description": "1-DOF endpoint-anchored circular arc fitting tolerance in metres (0 disables arc fitting), default 0",
+          "type": "number"
+        },
         "cell": {
           "description": "top structure cell name to flatten; omit to auto-select the unreferenced root cell",
           "type": "string"
+        },
+        "lateral_pad": {
+          "description": "non-negative lateral buffer margin in metres added around the returned bbox, default 0",
+          "type": "number"
         },
         "layer_bbox": {
           "description": "when true (default), return bbox over imported layers only; when false, return full top-cell bbox",
@@ -742,11 +750,116 @@
   },
   {
     "access": "edit",
-    "description": "Give only what changes. `adapt_scale`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, or `sweep` set to null return to the default setting. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
+    "description": "Constructs a 3D chip dielectric stack (`VacBot`, `Si`, `VacTop` boxes and `Overlay`) over a 2D `[xmin, ymin, xmax, ymax]` bounding box (explicitly given or inferred from existing 2D/sheet features in the project), expanded laterally by `lateral_pad >= 0`.",
+    "name": "add_chip_stack",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "bbox": {
+          "description": "optional unpadded 2D bounding box [xmin, ymin, xmax, ymax] in metres; omit to infer from existing 2D/sheet features",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "h_vac_bot": {
+          "description": "bottom vacuum thickness below the substrate in metres (0 omits bottom vacuum; aliases: t_vac_bot, vac_bot_thickness), default h_vac_top",
+          "type": "number"
+        },
+        "h_vac_top": {
+          "description": "top vacuum thickness above z in metres (aliases: t_vac_top, vac_top_thickness), default 3 * t_sub",
+          "type": "number"
+        },
+        "lateral_pad": {
+          "description": "non-negative lateral buffer margin in metres added on all 4 horizontal sides, default 0",
+          "type": "number"
+        },
+        "overlay": {
+          "description": "create or update the project's Overlay feature with the stack regions, default true",
+          "type": "boolean"
+        },
+        "substrate_box": {
+          "description": "feature name of the substrate Box, default \"si_sub\"",
+          "type": "string"
+        },
+        "substrate_region": {
+          "description": "region name of the substrate in Overlay, default \"Si\"",
+          "type": "string"
+        },
+        "substrate_thickness": {
+          "description": "alias for t_sub: substrate thickness in metres",
+          "type": "number"
+        },
+        "t_sub": {
+          "description": "substrate thickness in metres (alias: substrate_thickness), default 350e-6",
+          "type": "number"
+        },
+        "t_vac_bot": {
+          "description": "alias for h_vac_bot: bottom vacuum thickness in metres",
+          "type": "number"
+        },
+        "t_vac_top": {
+          "description": "alias for h_vac_top: top vacuum thickness in metres",
+          "type": "number"
+        },
+        "vac_bot_box": {
+          "description": "feature name of the bottom vacuum Box, default \"vac_bot\"",
+          "type": "string"
+        },
+        "vac_bot_region": {
+          "description": "region name of the bottom vacuum in Overlay, default \"VacBot\"",
+          "type": "string"
+        },
+        "vac_bot_thickness": {
+          "description": "alias for h_vac_bot: bottom vacuum thickness in metres",
+          "type": "number"
+        },
+        "vac_top_box": {
+          "description": "feature name of the top vacuum Box, default \"vac_top\"",
+          "type": "string"
+        },
+        "vac_top_region": {
+          "description": "region name of the top vacuum in Overlay, default \"VacTop\"",
+          "type": "string"
+        },
+        "vac_top_thickness": {
+          "description": "alias for h_vac_top: top vacuum thickness in metres",
+          "type": "number"
+        },
+        "z": {
+          "description": "wafer-normal z coordinate of the top substrate interface in metres, default 0",
+          "type": "number"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Add a 3D chip dielectric stack"
+  },
+  {
+    "access": "edit",
+    "description": "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
     "name": "set_mesh",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "adapt_grade": {
+          "description": "adaptive / AMR metric gradation slope (> 0); null uses 0.4",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "adapt_max_cells": {
+          "description": "adaptive / AMR maximum cell count (>= 1); null uses 2000000",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "adapt_scale": {
           "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher",
           "type": [
@@ -754,8 +867,12 @@
             "null"
           ]
         },
+        "corner_grading": {
+          "description": "3D sheet stack: radical Morrison-Lewis corner grading toward sharp 2D sheet corners, default false",
+          "type": "boolean"
+        },
         "curved": {
-          "description": "3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity and bloch studies, default false",
+          "description": "3D: curved (quadratic) isoparametric geometry for cells on curved surfaces and fitted sheet arc rims (ems, dfs, and sheet3d), default false",
           "type": "boolean"
         },
         "dz_min": {
@@ -816,6 +933,27 @@
           "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "quarter_point_xi": {
+          "description": "3D sheet stack: Barsoum quarter-point mid-edge parameter xi_QP in [0.25, 0.50]; null uses 0.25",
+          "maximum": 0.5,
+          "minimum": 0.25,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "singular_edges": {
+          "description": "3D sheet stack: edge singularity enrichment on zero-thickness conductor rims (\"none\" or \"quarter_point\"); null uses study defaults",
+          "enum": [
+            "none",
+            "quarter_point",
+            null
+          ],
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -3275,11 +3413,24 @@
   },
   {
     "access": "edit",
-    "description": "A batch of outer polygon rings and optional hole rings in 2D or 3D, with Ramer-Douglas-Peucker closed-ring simplification (shared corners pinned) and minimum hole area filtering. [shape; dimensions [2, 3]]",
+    "description": "A batch of outer polygon rings and optional hole rings in 2D or 3D, with Ramer-Douglas-Peucker closed-ring simplification (shared corners pinned), 1-DOF endpoint-anchored circular arc fitting, and minimum hole area filtering. [shape; dimensions [2, 3]]",
     "name": "add_polygons",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "arc_tol": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "1-DOF endpoint-anchored circular arc fitting tolerance in metres (0 disables arc fitting)"
+        },
         "holes": {
           "default": [],
           "items": {
@@ -3894,11 +4045,24 @@
   },
   {
     "access": "edit",
-    "description": "Embeds a 2D profile or boolean feature as a zero-thickness conductive sheet at plane z (3D). [build; dimensions [3]]",
+    "description": "Embeds a 2D profile or boolean feature at plane z (3D) as a zero-thickness conductive sheet (default) or a conformal finite-thickness conductor slab (`thickness > 0`) with optional substrate over-etch trench (`etch_depth > 0`). [build; dimensions [3]]",
     "name": "add_sheet",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "etch_depth": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "substrate over-etch trench depth below z in metres (0 for unetched interface)"
+        },
         "input": {
           "description": "the name of an earlier feature (or its id)",
           "oneOf": [
@@ -3914,6 +4078,19 @@
         "name": {
           "description": "a name for the feature; default the kind and a number (`rect1`)",
           "type": "string"
+        },
+        "thickness": {
+          "default": 0.0,
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "conformal metal film thickness above z in metres (0 for zero-thickness sheet)"
         },
         "z": {
           "default": 0.0,
@@ -3934,7 +4111,7 @@
       ],
       "type": "object"
     },
-    "title": "2D sheet in 3D"
+    "title": "2D sheet or conformal slab in 3D"
   },
   {
     "access": "edit",

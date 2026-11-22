@@ -24,8 +24,10 @@ pub struct Layer {
     pub partition: Complex,
     /// final region id of every region of `partition`
     pub region_ids: Vec<Option<u32>>,
-    /// final region id of every overlay cell in this layer (`None`: void)
+    /// final region id of every overlay cell in this layer (`None`: void or conductor cavity)
     pub region_of: Vec<Option<u32>>,
+    /// true for overlay cells in this layer that lie inside a finite-thickness `Op::Sheet` conductor cavity (`[z_s, z_s + t_m]`)
+    pub is_conductor_cavity: Vec<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -34,6 +36,10 @@ pub struct LayerStack {
     pub layers: Vec<Layer>,
     /// the common refinement of all layer partitions and 2D sheets
     pub overlay: Complex,
+    /// sheet name -> physical metal film thickness `t_m` (m) for `Op::Sheet` features
+    pub sheet_thickness_m: std::collections::BTreeMap<String, f64>,
+    /// sheet name -> substrate over-etch trench depth `t_e` (m) for `Op::Sheet` features
+    pub sheet_etch_depth_m: std::collections::BTreeMap<String, f64>,
 }
 
 impl LayerStack {
@@ -120,8 +126,20 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
     if diag.is_nan() || diag <= 0.0 || !diag.is_finite() {
         return Err(GeomError("the model has no extent: no region has any volume".into()));
     }
-    let tol = 1e-9 * diag;
-    let band = crate::arrange::GRAZE_K * tol;
+    let has_thick_or_etch = scene.sheets.iter().any(|s| s.thickness > 0.0 || s.etch_depth > 0.0);
+    let base_tol = 1e-9 * diag;
+    let band = crate::arrange::GRAZE_K * base_tol;
+    let tol = if has_thick_or_etch {
+        let min_slab = scene
+            .sheets
+            .iter()
+            .flat_map(|s| [s.thickness, s.etch_depth])
+            .filter(|&d| d > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        base_tol.min(1e-3 * min_slab)
+    } else {
+        base_tol
+    };
     let prims = &scene.prims;
     let np = prims.len();
 
@@ -146,6 +164,45 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
                 )));
             }
             _ => levels.push(z),
+        }
+    }
+    if has_thick_or_etch {
+        if levels.len() >= 2 {
+            let z_min_outer = levels[0];
+            let z_max_outer = *levels.last().unwrap();
+            for s in &scene.sheets {
+                if s.thickness > 0.0 || s.etch_depth > 0.0 {
+                    let z_bot = s.z - s.etch_depth;
+                    let z_top = s.z + s.thickness;
+                    if z_bot <= z_min_outer + tol
+                        || z_top >= z_max_outer - tol
+                        || s.z <= z_min_outer + tol
+                        || s.z >= z_max_outer - tol
+                    {
+                        return Err(GeomError(format!(
+                            "Sheet '{}' at z = {:.3e} m (thickness = {:.3e} m, etch_depth = {:.3e} m) touches or exceeds the outer z bounds [{:.3e}, {:.3e}] m",
+                            s.name, s.z, s.thickness, s.etch_depth, z_min_outer, z_max_outer
+                        )));
+                    }
+                }
+            }
+        }
+        let mut all_zs = levels.clone();
+        for s in &scene.sheets {
+            let sz = levels.iter().copied().find(|l| (s.z - l).abs() <= tol).unwrap_or(s.z);
+            if s.etch_depth > 0.0 {
+                all_zs.push(sz - s.etch_depth);
+            }
+            if s.thickness > 0.0 {
+                all_zs.push(sz + s.thickness);
+            }
+        }
+        all_zs.sort_by(f64::total_cmp);
+        levels.clear();
+        for z in all_zs {
+            if !levels.last().is_some_and(|&l| z - l <= tol) {
+                levels.push(z);
+            }
         }
     }
     let snap = |z: f64| -> f64 { levels.iter().copied().find(|l| (z - l).abs() <= tol).unwrap_or(z) };
@@ -259,6 +316,21 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
             None => sheet_levels.push((sz, vec![si])),
         }
     }
+    if has_thick_or_etch {
+        for &(sz, ref idxs) in &sheet_levels {
+            for a in 0..idxs.len() {
+                for b in (a + 1)..idxs.len() {
+                    let (sa, sb) = (&scene.sheets[idxs[a]], &scene.sheets[idxs[b]]);
+                    if (sa.etch_depth - sb.etch_depth).abs() > tol {
+                        return Err(GeomError(format!(
+                            "sheets '{}' and '{}' at z = {:.3e} m specify conflicting etch_depth ({:.3e} m vs {:.3e} m) on the same plane",
+                            sa.name, sb.name, sz, sa.etch_depth, sb.etch_depth
+                        )));
+                    }
+                }
+            }
+        }
+    }
     let sheet_painter = |indices: &[usize], bit: &dyn Fn(usize) -> bool| -> Option<usize> {
         indices.iter().rev().copied().find(|&si| scene.sheets[si].expr.eval(bit))
     };
@@ -266,7 +338,24 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
     // overlay: classes are pairs of (per-layer 3D region tuple, per-sheet-level winning 2D sheet tuple)
     type ClassTuple = (Vec<Option<u32>>, Vec<Option<usize>>);
     let classes: RefCell<Vec<ClassTuple>> = RefCell::new(vec![]);
+    let sheet_conflict: RefCell<Option<String>> = RefCell::new(None);
     let classify = |bit: &dyn Fn(usize) -> bool| -> Option<usize> {
+        if has_thick_or_etch && sheet_conflict.borrow().is_none() {
+            for &(sz, ref idxs) in &sheet_levels {
+                let active: Vec<usize> = idxs.iter().copied().filter(|&si| scene.sheets[si].expr.eval(bit)).collect();
+                for a in 0..active.len() {
+                    for b in (a + 1)..active.len() {
+                        let (sa, sb) = (&scene.sheets[active[a]], &scene.sheets[active[b]]);
+                        if (sa.thickness - sb.thickness).abs() > tol || (sa.etch_depth - sb.etch_depth).abs() > tol {
+                            *sheet_conflict.borrow_mut() = Some(format!(
+                                "overlapping sheets '{}' and '{}' at z = {:.3e} m have conflicting thickness ({:.3e} m vs {:.3e} m) or etch_depth ({:.3e} m vs {:.3e} m)",
+                                sa.name, sb.name, sz, sa.thickness, sb.thickness, sa.etch_depth, sb.etch_depth
+                            ));
+                        }
+                    }
+                }
+            }
+        }
         let rtuple: Vec<Option<u32>> =
             raws.iter().map(|l| painter(&scene.regions, &l.exprs, bit).and_then(|s| fin[s])).collect();
         let stuple: Vec<Option<usize>> = sheet_levels.iter().map(|(_, idxs)| sheet_painter(idxs, bit)).collect();
@@ -307,6 +396,9 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         auto_tags: vec![],
     };
     let mut overlay = arrange_with(&ov_scene, cache, &classify, &synth)?;
+    if let Some(msg) = sheet_conflict.into_inner() {
+        return Err(GeomError(msg));
+    }
     let tuples = classes.into_inner();
     let ncell = overlay.regions.len();
     let cell_tuple: Vec<&Vec<Option<u32>>> = overlay.regions.iter().map(|r| &tuples[r.scene_index].0).collect();
@@ -314,21 +406,93 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
     for r in &mut overlay.regions {
         r.name = format!("cell{}", r.scene_index);
     }
+    if has_thick_or_etch {
+        for oe in &overlay.edges {
+            if let (Some(cl), Some(cr)) = (oe.left, oe.right) {
+                for (sl, &(sz, _)) in sheet_levels.iter().enumerate() {
+                    if let (Some(si_l), Some(si_r)) = (cell_sheets[cl as usize][sl], cell_sheets[cr as usize][sl]) {
+                        if si_l != si_r {
+                            let (sa, sb) = (&scene.sheets[si_l], &scene.sheets[si_r]);
+                            if (sa.thickness - sb.thickness).abs() > tol || (sa.etch_depth - sb.etch_depth).abs() > tol
+                            {
+                                return Err(GeomError(format!(
+                                    "touching sheets '{}' and '{}' at z = {:.3e} m have conflicting thickness ({:.3e} m vs {:.3e} m) or etch_depth ({:.3e} m vs {:.3e} m)",
+                                    sa.name, sb.name, sz, sa.thickness, sb.thickness, sa.etch_depth, sb.etch_depth
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-    // per-layer tables
+    // per-layer tables (incorporating thick-sheet conductor cavities `[z_s, z_s + t_m]` and over-etch trenches `[z_s - t_e, z_s]`)
+    let mut conductor_sheet: Vec<Vec<Option<usize>>> = vec![vec![None; ncell]; raws.len()];
     let layers: Vec<Layer> = raws
         .iter()
         .enumerate()
-        .map(|(k, l)| Layer {
-            z0: l.z0,
-            z1: l.z1,
-            partition: l.cx.clone(),
-            region_ids: l.cx.regions.iter().map(|r| fin[r.scene_index]).collect(),
-            region_of: (0..ncell).map(|c| cell_tuple[c][k]).collect(),
+        .map(|(k, l)| {
+            let mut region_of: Vec<Option<u32>> = (0..ncell).map(|c| cell_tuple[c][k]).collect();
+            let mut is_conductor_cavity = vec![false; ncell];
+            if has_thick_or_etch {
+                for (sl, &(sz, ref idxs)) in sheet_levels.iter().enumerate() {
+                    let t_e_plane = idxs.iter().map(|&si| scene.sheets[si].etch_depth).fold(0.0_f64, f64::max);
+                    if t_e_plane > 0.0 && l.z0 >= sz - t_e_plane - tol && l.z1 <= sz + tol {
+                        let k_above = raws.iter().position(|r| (r.z0 - sz).abs() <= tol);
+                        for c in 0..ncell {
+                            if cell_sheets[c][sl].is_none() && region_of[c].is_some() {
+                                if let Some(r_above) = k_above.and_then(|ka| cell_tuple[c][ka]) {
+                                    region_of[c] = Some(r_above);
+                                }
+                            }
+                        }
+                    }
+                    for c in 0..ncell {
+                        if let Some(si) = cell_sheets[c][sl] {
+                            let t_m = scene.sheets[si].thickness;
+                            if t_m > 0.0 && l.z0 >= sz - tol && l.z1 <= sz + t_m + tol {
+                                region_of[c] = None;
+                                is_conductor_cavity[c] = true;
+                                conductor_sheet[k][c] = Some(si);
+                            }
+                        }
+                    }
+                }
+            }
+            Layer {
+                z0: l.z0,
+                z1: l.z1,
+                partition: l.cx.clone(),
+                region_ids: l.cx.regions.iter().map(|r| fin[r.scene_index]).collect(),
+                region_of,
+                is_conductor_cavity,
+            }
         })
         .collect();
 
-    // lateral faces: overlay edges against the edges of each layer (which carry the names)
+    if has_thick_or_etch {
+        for r in &mut regions {
+            r.measure = 0.0;
+            r.bbox = Aabb::EMPTY;
+        }
+        for l in &layers {
+            let dz = l.z1 - l.z0;
+            for (c, &r_opt) in l.region_of.iter().enumerate() {
+                if let Some(g) = r_opt {
+                    let cell = &overlay.regions[c];
+                    let reg = &mut regions[g as usize];
+                    reg.measure += cell.measure * dz;
+                    let mut b = cell.bbox;
+                    b.lo[2] = l.z0;
+                    b.hi[2] = l.z1;
+                    reg.bbox = reg.bbox.union(&b);
+                }
+            }
+        }
+    }
+
+    // lateral faces: overlay edges against the edges of each layer (plus thick-sheet and trench vertical sidewalls)
     struct Lat {
         edge: u32,
         k0: usize,
@@ -338,60 +502,111 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         second: Option<u32>,
         prov: Vec<Prov>,
     }
+    let closest_layer_edge = |part: &Complex, mid: V2| -> Option<(f64, u32)> {
+        let mut best: Option<(f64, u32)> = None;
+        if part.bvh.edges.item_boxes.len() == part.edges.len() && !part.bvh.edges.is_empty() {
+            part.bvh.edges.query_point(mid, 8.0 * tol, |li| {
+                let d = dist2(part.project_edge(li, mid), mid);
+                if d <= 8.0 * tol && best.is_none_or(|b| d < b.0 || (d == b.0 && li < b.1)) {
+                    best = Some((d, li));
+                }
+            });
+        } else {
+            for (li, le) in part.edges.iter().enumerate() {
+                let bb = le.bbox.pad(8.0 * tol);
+                if mid[0] < bb.lo[0] || mid[0] > bb.hi[0] || mid[1] < bb.lo[1] || mid[1] > bb.hi[1] {
+                    continue;
+                }
+                let d = dist2(part.project_edge(li as u32, mid), mid);
+                if d <= 8.0 * tol && best.is_none_or(|b| d < b.0) {
+                    best = Some((d, li as u32));
+                }
+            }
+        }
+        best
+    };
     let mut lats: Vec<Lat> = vec![];
     for (ei, oe) in overlay.edges.iter().enumerate() {
         let c = &overlay.curves[oe.curve as usize];
         let mid = c.eval(0.5 * (oe.t0 + oe.t1));
         let tg = c.tangent(0.5 * (oe.t0 + oe.t1));
         for (k, l) in layers.iter().enumerate() {
-            let mut best: Option<(f64, u32)> = None;
-            if l.partition.bvh.edges.item_boxes.len() == l.partition.edges.len() && !l.partition.bvh.edges.is_empty() {
-                l.partition.bvh.edges.query_point(mid, 8.0 * tol, |li| {
-                    let d = dist2(l.partition.project_edge(li, mid), mid);
-                    if d <= 8.0 * tol && best.is_none_or(|b| d < b.0 || (d == b.0 && li < b.1)) {
-                        best = Some((d, li));
-                    }
-                });
-            } else {
-                for (li, le) in l.partition.edges.iter().enumerate() {
-                    let bb = le.bbox.pad(8.0 * tol);
-                    if mid[0] < bb.lo[0] || mid[0] > bb.hi[0] || mid[1] < bb.lo[1] || mid[1] > bb.hi[1] {
+            if !has_thick_or_etch {
+                let Some((_, li)) = closest_layer_edge(&l.partition, mid) else { continue };
+                let le = &l.partition.edges[li as usize];
+                let lc = &l.partition.curves[le.curve as usize];
+                let ltg = lc.tangent(lc.closest(mid).0);
+                let (a, b) =
+                    (le.left.and_then(|r| l.region_ids[r as usize]), le.right.and_then(|r| l.region_ids[r as usize]));
+                let (first, second) = if dot2(ltg, tg) >= 0.0 { (a, b) } else { (b, a) };
+                if let Some(prev) = lats.last_mut() {
+                    if prev.edge == ei as u32
+                        && prev.k1 + 1 == k
+                        && prev.first == first
+                        && prev.second == second
+                        && prev.name == le.name
+                        && (layers[k - 1].z1 - l.z0).abs() <= tol
+                    {
+                        prev.k1 = k;
                         continue;
                     }
-                    let d = dist2(l.partition.project_edge(li as u32, mid), mid);
-                    if d <= 8.0 * tol && best.is_none_or(|b| d < b.0) {
-                        best = Some((d, li as u32));
-                    }
                 }
+                lats.push(Lat {
+                    edge: ei as u32,
+                    k0: k,
+                    k1: k,
+                    name: le.name.clone(),
+                    first,
+                    second,
+                    prov: le.prov.clone(),
+                });
+                continue;
             }
-            let Some((_, li)) = best else { continue };
-            let le = &l.partition.edges[li as usize];
-            let lc = &l.partition.curves[le.curve as usize];
-            let ltg = lc.tangent(lc.closest(mid).0);
-            let (a, b) =
-                (le.left.and_then(|r| l.region_ids[r as usize]), le.right.and_then(|r| l.region_ids[r as usize]));
-            let (first, second) = if dot2(ltg, tg) >= 0.0 { (a, b) } else { (b, a) };
+
+            let first = oe.left.and_then(|c| l.region_of[c as usize]);
+            let second = oe.right.and_then(|c| l.region_of[c as usize]);
+            if first == second {
+                continue;
+            }
+            let cav_l = oe.left.and_then(|c| conductor_sheet[k][c as usize]);
+            let cav_r = oe.right.and_then(|c| conductor_sheet[k][c as usize]);
+            let (name, prov) = if let Some(si) = cav_l.or(cav_r) {
+                let sh = &scene.sheets[si];
+                (
+                    sh.name.clone(),
+                    vec![Prov { feature: sh.feature, instance: sh.name.clone(), role: "sheet".to_string() }],
+                )
+            } else {
+                let best = closest_layer_edge(&l.partition, mid);
+                match (first, second, best) {
+                    (Some(x), Some(y), _) => {
+                        let (mut p, mut q) = (regions[x as usize].name.clone(), regions[y as usize].name.clone());
+                        if p > q {
+                            std::mem::swap(&mut p, &mut q);
+                        }
+                        let prov = best.map_or_else(Vec::new, |(_, li)| l.partition.edges[li as usize].prov.clone());
+                        (format!("{p}|{q}"), prov)
+                    }
+                    (_, _, Some((_, li))) => {
+                        let le = &l.partition.edges[li as usize];
+                        (le.name.clone(), le.prov.clone())
+                    }
+                    _ => continue,
+                }
+            };
             if let Some(prev) = lats.last_mut() {
                 if prev.edge == ei as u32
                     && prev.k1 + 1 == k
                     && prev.first == first
                     && prev.second == second
-                    && prev.name == le.name
+                    && prev.name == name
                     && (layers[k - 1].z1 - l.z0).abs() <= tol
                 {
                     prev.k1 = k;
                     continue;
                 }
             }
-            lats.push(Lat {
-                edge: ei as u32,
-                k0: k,
-                k1: k,
-                name: le.name.clone(),
-                first,
-                second,
-                prov: le.prov.clone(),
-            });
+            lats.push(Lat { edge: ei as u32, k0: k, k1: k, name, first, second, prov });
         }
     }
     let mut faces: Vec<Face> = vec![];
@@ -442,7 +657,13 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
                 if rb.is_none() && ra.is_none() {
                     continue;
                 }
-                if let Some(si) = sl_idx.and_then(|sl| cell_sheets[c][sl]) {
+                let cav_b = b.and_then(|b| conductor_sheet[b][c]);
+                let cav_a = a.and_then(|a| conductor_sheet[a][c]);
+                let sheet_cap_si = sl_idx
+                    .and_then(|sl| cell_sheets[c][sl])
+                    .filter(|&si| scene.sheets[si].thickness == 0.0)
+                    .or_else(|| if cav_a != cav_b { cav_a.or(cav_b) } else { None });
+                if let Some(si) = sheet_cap_si {
                     let sh = &scene.sheets[si];
                     let cell = &overlay.regions[c];
                     let mut bbox = cell.bbox;
@@ -557,7 +778,19 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         }
     }
 
-    let stack = LayerStack { axis: [Axis::X, Axis::Y, Axis::Z][scene.axis], layers, overlay: overlay.clone() };
+    let mut sheet_thickness_m = std::collections::BTreeMap::new();
+    let mut sheet_etch_depth_m = std::collections::BTreeMap::new();
+    for s in &scene.sheets {
+        sheet_thickness_m.insert(s.name.clone(), s.thickness);
+        sheet_etch_depth_m.insert(s.name.clone(), s.etch_depth);
+    }
+    let stack = LayerStack {
+        axis: [Axis::X, Axis::Y, Axis::Z][scene.axis],
+        layers,
+        overlay: overlay.clone(),
+        sheet_thickness_m,
+        sheet_etch_depth_m,
+    };
     let cx = Complex {
         dim: 3,
         tol,

@@ -2,6 +2,7 @@
 
 pub mod drive;
 pub mod drive3;
+pub mod electro;
 pub mod field;
 pub mod field3;
 pub mod geom;

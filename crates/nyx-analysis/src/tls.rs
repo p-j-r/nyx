@@ -700,10 +700,13 @@ pub(crate) struct SheetPerimeter3D {
     pub(crate) bvh: SegmentBvh3,
     pub(crate) total_perim_len: f64,
     pub(crate) h_edge_mean: f64,
+    pub(crate) has_resolved_3d_step: bool,
+    pub(crate) inferred_cavity_thickness: Option<f64>,
 }
 
-/// Detects interior zero-thickness superconducting sheet triangles, uncovered substrate-air triangles,
-/// and the 1D singular sheet perimeter `\partial\Gamma_{SC}` indexed in a [`SegmentBvh3`].
+/// Detects interior zero-thickness superconducting sheet triangles (plus conformal 3D thick-sheet
+/// cavity walls when present), uncovered substrate-air triangles, and the 1D singular sheet perimeter
+/// `\partial\Gamma_{SC}` indexed in a [`SegmentBvh3`].
 pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, cell_eps: &[f64]) -> SheetPerimeter3D {
     let nc = disc.n_cells();
     let mut face_to_cells: FaceToCells3D = HashMap::with_capacity(nc * 2);
@@ -718,45 +721,87 @@ pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, c
         }
     }
 
+    let (lo, hi) = disc.bbox();
+    let span = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]).max(1e-30);
+    let bbox_tol = 1e-7 * span;
+    let is_on_outer_bbox = |p0: [f64; 3], p1: [f64; 3], p2: [f64; 3]| -> bool {
+        (0..3).any(|ax| {
+            ((p0[ax] - lo[ax]).abs() < bbox_tol
+                && (p1[ax] - lo[ax]).abs() < bbox_tol
+                && (p2[ax] - lo[ax]).abs() < bbox_tol)
+                || ((p0[ax] - hi[ax]).abs() < bbox_tol
+                    && (p1[ax] - hi[ax]).abs() < bbox_tol
+                    && (p2[ax] - hi[ax]).abs() < bbox_tol)
+        })
+    };
+
     let exterior = disc.exterior_facets();
     let sheet_set: BTreeSet<i32> = if !meta.sheet_labels.is_empty() {
         meta.sheet_labels.iter().copied().collect()
     } else {
         meta.conductor_labels.iter().copied().collect()
     };
+    let is_cond_label = |lab: i32| -> bool {
+        sheet_set.contains(&lab) || meta.conductor_labels.contains(&lab) || meta.sheet_thickness_m.contains_key(&lab)
+    };
+    let has_interior_cond = (0..disc.n_facets()).any(|f| {
+        let fv = disc.facet(f);
+        is_cond_label(disc.facet_labels[f]) && !is_on_outer_bbox(pt3(disc, fv[0]), pt3(disc, fv[1]), pt3(disc, fv[2]))
+    });
 
     let mut sheet_tris: BTreeMap<[u32; 3], i32> = BTreeMap::new();
+    let mut zero_thick_sheet_tris: BTreeSet<[u32; 3]> = BTreeSet::new();
+    let mut cavity_cond_tris: BTreeMap<[u32; 3], i32> = BTreeMap::new();
     let mut ext_edges: BTreeSet<(u32, u32)> = BTreeSet::new();
     for (f, &is_ext) in exterior.iter().enumerate().take(disc.n_facets()) {
         let fv = disc.facet(f);
         let key = sorted3(fv[0], fv[1], fv[2]);
         let lab = disc.facet_labels[f];
-        if is_ext {
+        let (p0, p1, p2) = (pt3(disc, key[0]), pt3(disc, key[1]), pt3(disc, key[2]));
+        let on_outer_bbox = is_on_outer_bbox(p0, p1, p2);
+        if is_ext && on_outer_bbox {
             for (a, b) in [(key[0], key[1]), (key[1], key[2]), (key[0], key[2])] {
                 ext_edges.insert((a.min(b), a.max(b)));
             }
         }
-        if !is_ext && (sheet_set.contains(&lab) || meta.conductor_labels.contains(&lab)) {
-            sheet_tris.entry(key).or_insert(lab);
+        if is_cond_label(lab) {
+            if !is_ext {
+                sheet_tris.entry(key).or_insert(lab);
+                zero_thick_sheet_tris.insert(key);
+            } else if !has_interior_cond || !on_outer_bbox {
+                sheet_tris.entry(key).or_insert(lab);
+                cavity_cond_tris.entry(key).or_insert(lab);
+            }
         }
     }
 
     let mut sa_tris: Vec<[u32; 3]> = Vec::new();
+    let mut has_vertical_sa_trench = false;
     for (&key, cells) in &face_to_cells {
         if sheet_tris.contains_key(&key) || cells.len() != 2 {
             continue;
         }
         let (e0, e1) = (cell_eps[cells[0].0], cell_eps[cells[1].0]);
         if (e0 <= 1.5 && e1 > 1.5) || (e1 <= 1.5 && e0 > 1.5) {
+            let (p0, p1, p2) = (pt3(disc, key[0]), pt3(disc, key[1]), pt3(disc, key[2]));
+            let n_raw = cross3(sub3(p1, p0), sub3(p2, p0));
+            let n_len = norm3(n_raw);
+            if n_len > 0.0 && (n_raw[2].abs() / n_len) < 0.99 {
+                has_vertical_sa_trench = true;
+            }
             sa_tris.push(key);
         }
     }
     sa_tris.sort_unstable();
 
+    let has_resolved_3d_step = !cavity_cond_tris.is_empty() || has_vertical_sa_trench;
+
     let mut sheet_edge_count: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    for &tri in sheet_tris.keys() {
-        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
-            *sheet_edge_count.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+    if !has_resolved_3d_step {
+        for &tri in &zero_thick_sheet_tris {
+            for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+                *sheet_edge_count.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+            }
         }
     }
 
@@ -795,7 +840,32 @@ pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, c
     let h_edge_mean = if h_perp_cnt > 0 { h_perp_sum / (h_perp_cnt as f64) } else { 1.0e-6 };
     let bvh = SegmentBvh3::build(perim_segments);
 
-    SheetPerimeter3D { face_to_cells, sheet_tris, sa_tris, bvh, total_perim_len, h_edge_mean }
+    let inferred_cavity_thickness = if !cavity_cond_tris.is_empty() {
+        let mut z_min_c = f64::INFINITY;
+        let mut z_max_c = f64::NEG_INFINITY;
+        for &tri in cavity_cond_tris.keys() {
+            for &v in &tri {
+                let z = pt3(disc, v)[2];
+                z_min_c = z_min_c.min(z);
+                z_max_c = z_max_c.max(z);
+            }
+        }
+        let dz = z_max_c - z_min_c;
+        (dz > 0.0 && dz.is_finite()).then_some(dz)
+    } else {
+        None
+    };
+
+    SheetPerimeter3D {
+        face_to_cells,
+        sheet_tris,
+        sa_tris,
+        bvh,
+        total_perim_len,
+        h_edge_mean,
+        has_resolved_3d_step,
+        inferred_cavity_thickness,
+    }
 }
 
 /// Generates `n_sub^2` sub-triangles on the 2D reference simplex, returning `(bary3, weight)`
@@ -898,8 +968,15 @@ fn run_tls_3d(
 
     // 2. Detect sheet triangles, SA triangles, and build flat 3D AABB BVH over singular perimeter
     let perim = detect_sheet_perimeter_3d(disc, meta, &cell_eps);
-    let d_film = p.d.or_else(|| meta.sheet_thickness_m.values().next().copied()).unwrap_or(100.0e-9);
-    let r0 = p.edge_cutoff.unwrap_or_else(|| (1.15 * perim.h_edge_mean).max(4.0 * d_film));
+    let d_film =
+        p.d.or_else(|| meta.sheet_thickness_m.values().copied().find(|&t| t > 0.0))
+            .or(perim.inferred_cavity_thickness)
+            .unwrap_or(100.0e-9);
+    let r0 = if perim.has_resolved_3d_step {
+        0.0
+    } else {
+        p.edge_cutoff.unwrap_or_else(|| (1.15 * perim.h_edge_mean).max(4.0 * d_film))
+    };
     let r0_sq = r0 * r0;
     let half_r0_sq = (0.5 * r0) * (0.5 * r0);
 
