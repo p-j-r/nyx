@@ -208,16 +208,64 @@ fn gb(b: u64) -> String {
     format!("{:.1} GB", b as f64 / 1e9)
 }
 
+/// Validates a memory-wait timeout in seconds (`finite` and `>= 0.0`).
+pub fn validate_memory_wait_timeout(timeout_s: f64, source: &str) -> Result<f64, nyx_physics::Error> {
+    if !(timeout_s.is_finite() && timeout_s >= 0.0) {
+        return Err(nyx_physics::Error::invalid(format!(
+            "{source} must be a finite number of seconds >= 0, got {timeout_s}"
+        )));
+    }
+    Ok(timeout_s)
+}
+
+/// Reads `NYX_MEMORY_WAIT_TIMEOUT_S` when set to a non-empty value.
+pub fn env_memory_wait_timeout_s() -> Result<Option<f64>, nyx_physics::Error> {
+    let Ok(raw) = std::env::var("NYX_MEMORY_WAIT_TIMEOUT_S") else {
+        return Ok(None);
+    };
+    let s = raw.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+    let val: f64 = s.parse().map_err(|_| {
+        nyx_physics::Error::invalid(format!(
+            "`NYX_MEMORY_WAIT_TIMEOUT_S` must be a finite number of seconds >= 0, got '{s}'"
+        ))
+    })?;
+    validate_memory_wait_timeout(val, "`NYX_MEMORY_WAIT_TIMEOUT_S`").map(Some)
+}
+
+/// Resolves the effective memory-wait timeout in priority order:
+/// explicit `timeout_s` > `NYX_MEMORY_WAIT_TIMEOUT_S` env var > `caller_default`.
+pub fn resolve_memory_wait_timeout(
+    explicit: Option<f64>,
+    caller_default: Option<f64>,
+) -> Result<Option<f64>, nyx_physics::Error> {
+    if let Some(t) = explicit {
+        return validate_memory_wait_timeout(t, "`memory_wait_timeout_s`").map(Some);
+    }
+    if let Some(d) = caller_default {
+        validate_memory_wait_timeout(d, "default `memory_wait_timeout_s`")?;
+    }
+    if let Some(env_t) = env_memory_wait_timeout_s()? {
+        return Ok(Some(env_t));
+    }
+    Ok(caller_default)
+}
+
 /// Lets a solve start only when its estimate fits. Above `REFUSE_ABOVE` of the physical memory it fails at once, unless `force`: it cannot be
 /// waited for. When it fits the machine but not what is free now (another program, another solve), it waits, shows "waiting for memory:
-/// needs about 9.0 GB, 6.0 GB free" as its stage and re-asks every quarter second, until it fits or is cancelled. A machine that does not
+/// needs about 9.0 GB, 6.0 GB free" as its stage and re-asks every quarter second (clamped to any remaining timeout), until it fits, times out,
+/// or is cancelled. Priority of timeout: explicit `timeout_s` > `NYX_MEMORY_WAIT_TIMEOUT_S` > infinite wait (`None`). A machine that does not
 /// say how much memory it has admits everything.
 pub fn admit(
     est: &Estimate,
     force: bool,
     probe: &MemoryProbe,
     progress: &std::sync::Arc<femcore::progress::Progress>,
+    timeout_s: Option<f64>,
 ) -> Result<(), nyx_physics::Error> {
+    let effective_timeout = resolve_memory_wait_timeout(timeout_s, None)?;
     if force {
         return Ok(());
     }
@@ -234,12 +282,31 @@ pub fn admit(
         )));
     }
     let _installed = femcore::progress::install(progress);
+    let started = std::time::Instant::now();
+    let deadline = effective_timeout.map(std::time::Duration::from_secs_f64);
     let mut shown = String::new();
     let mut stage = None;
     loop {
-        let free = probe().map(|(_, f)| f).unwrap_or(u64::MAX);
+        let (total_now, free) = match probe() {
+            Some((t, f)) => (t, f),
+            None => return Ok(()),
+        };
         if need <= free {
             return Ok(());
+        }
+        if progress.is_cancelled() {
+            return Err(nyx_physics::Error::Cancelled);
+        }
+        if let Some(limit) = deadline {
+            if started.elapsed() >= limit {
+                let timeout_val = effective_timeout.unwrap_or(0.0);
+                return Err(nyx_physics::Error::invalid(format!(
+                    "timed out after {timeout_val:.3} s (timeout_s = {timeout_val}) waiting for memory: need {} ({need} B), free {} ({free} B), total {} ({total_now} B); free memory, raise `memory_wait_timeout_s`, use a coarser mesh, or pass `force: true`",
+                    gb(need),
+                    gb(free),
+                    gb(total_now),
+                )));
+            }
         }
         let text = format!("waiting for memory: needs about {}, {} free", gb(need), gb(free));
         if text != shown {
@@ -247,10 +314,14 @@ pub fn admit(
             stage = Some(femcore::progress::stage(text.clone()));
             shown = text;
         }
-        if progress.is_cancelled() {
-            return Err(nyx_physics::Error::Cancelled);
+        let poll = std::time::Duration::from_millis(250);
+        let sleep_dur = match deadline {
+            Some(limit) => poll.min(limit.saturating_sub(started.elapsed())),
+            None => poll,
+        };
+        if !sleep_dur.is_zero() {
+            std::thread::sleep(sleep_dur);
         }
-        std::thread::sleep(std::time::Duration::from_millis(250));
     }
 }
 

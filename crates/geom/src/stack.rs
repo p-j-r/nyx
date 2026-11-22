@@ -345,14 +345,23 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         let tg = c.tangent(0.5 * (oe.t0 + oe.t1));
         for (k, l) in layers.iter().enumerate() {
             let mut best: Option<(f64, u32)> = None;
-            for (li, le) in l.partition.edges.iter().enumerate() {
-                let bb = le.bbox.pad(8.0 * tol);
-                if mid[0] < bb.lo[0] || mid[0] > bb.hi[0] || mid[1] < bb.lo[1] || mid[1] > bb.hi[1] {
-                    continue;
-                }
-                let d = dist2(l.partition.project_edge(li as u32, mid), mid);
-                if d <= 8.0 * tol && best.is_none_or(|b| d < b.0) {
-                    best = Some((d, li as u32));
+            if l.partition.bvh.edges.item_boxes.len() == l.partition.edges.len() && !l.partition.bvh.edges.is_empty() {
+                l.partition.bvh.edges.query_point(mid, 8.0 * tol, |li| {
+                    let d = dist2(l.partition.project_edge(li, mid), mid);
+                    if d <= 8.0 * tol && best.is_none_or(|b| d < b.0 || (d == b.0 && li < b.1)) {
+                        best = Some((d, li));
+                    }
+                });
+            } else {
+                for (li, le) in l.partition.edges.iter().enumerate() {
+                    let bb = le.bbox.pad(8.0 * tol);
+                    if mid[0] < bb.lo[0] || mid[0] > bb.hi[0] || mid[1] < bb.lo[1] || mid[1] > bb.hi[1] {
+                        continue;
+                    }
+                    let d = dist2(l.partition.project_edge(li as u32, mid), mid);
+                    if d <= 8.0 * tol && best.is_none_or(|b| d < b.0) {
+                        best = Some((d, li as u32));
+                    }
                 }
             }
             let Some((_, li)) = best else { continue };
@@ -564,6 +573,7 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         planar: vec![],
         axis: 2,
         stack: Some(Box::new(stack)),
+        bvh: crate::bvh::ComplexBvh::default(),
     };
     let mut cx = cx;
     let circles = add_bodies(scene, &mut cx, band)?;

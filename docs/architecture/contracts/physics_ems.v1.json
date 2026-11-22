@@ -238,6 +238,17 @@
           "name": "film_model",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "zero surface resistance R_s after BCS evaluation so 3D cavity solves use the fast real symmetric eigensolver while retaining L_k_sq",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Lossless kinetic inductance",
+          "name": "lossless",
+          "required": false,
+          "unit": ""
         }
       ]
     },
@@ -337,6 +348,19 @@
           "unit": "2e"
         },
         {
+          "doc": "optional DC-SQUID junction asymmetry d in [0, 1)",
+          "kind": {
+            "default": 0.0,
+            "max": 1.0,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "SQUID junction asymmetry",
+          "name": "squid_asymmetry",
+          "required": false,
+          "unit": ""
+        },
+        {
           "doc": "unit vector along junction current flow",
           "kind": {
             "default": [
@@ -371,7 +395,7 @@
     },
     {
       "applies": "boundary",
-      "doc": "Lumped voltage/current sheet port with reference impedance Z_0 across two conductors in a 3D driven frequency sweep.",
+      "doc": "Lumped voltage/current sheet port with reference impedance Z_0 across two conductors in a 3D cavity or driven study.",
       "kind": "lumped_port",
       "name": "Lumped sheet port",
       "params": [
@@ -414,6 +438,32 @@
           "name": "direction",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "include resistive port damping directly in 3D cavity eigensolve (when false, cavity stays real and exports port damping in CircuitRom)",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Complex port damping",
+          "name": "complex_damping",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "single-gap port ('single') or balanced two-slot CPW even mode ('cpw_even')",
+          "kind": {
+            "default": "single",
+            "options": [
+              "single",
+              "cpw_even"
+            ],
+            "type": "choice"
+          },
+          "label": "Port mode",
+          "name": "mode",
+          "required": false,
+          "unit": ""
         }
       ]
     },
@@ -446,6 +496,32 @@
           "name": "mode",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "optional target effective index for 2D boundary-mode selection (sorts propagating modes by |n_eff - n_eff_guess|)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Effective index guess",
+          "name": "n_eff_guess",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional circuit reference impedance Z_0 for DrivenPortData and S->Z/Y conversion (0 or null uses modal wave impedance)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Reference circuit impedance",
+          "name": "z0_ohm",
+          "required": false,
+          "unit": "Ohm"
         }
       ]
     }
@@ -627,6 +703,22 @@
       "kind": "tensor",
       "label": "Relative permittivity",
       "name": "eps_r",
+      "needed_by": [],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "tensor",
+      "label": "Imaginary permittivity",
+      "name": "eps_r_im",
+      "needed_by": [],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "tensor",
+      "label": "Dielectric loss tangent",
+      "name": "loss_tangent",
       "needed_by": [],
       "unit": ""
     },
@@ -843,6 +935,11 @@
                       ],
                       "type": "string"
                     },
+                    "lossless": {
+                      "default": false,
+                      "description": "Lossless kinetic inductance. zero surface resistance R_s after BCS evaluation so 3D cavity solves use the fast real symmetric eigensolver while retaining L_k_sq",
+                      "type": "boolean"
+                    },
                     "material": {
                       "default": "",
                       "description": "Superconducting material. optional material from the library with a [superconducting] block",
@@ -946,6 +1043,13 @@
                       "default": 0.0,
                       "description": "External flux bias [rad]. external reduced flux bias phi_ext = 2 pi Phi_ext / Phi_0",
                       "type": "number"
+                    },
+                    "squid_asymmetry": {
+                      "default": 0.0,
+                      "description": "SQUID junction asymmetry. optional DC-SQUID junction asymmetry d in [0, 1)",
+                      "maximum": 1.0,
+                      "minimum": 0.0,
+                      "type": "number"
                     }
                   },
                   "required": [
@@ -962,7 +1066,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "Lumped voltage/current sheet port with reference impedance Z_0 across two conductors in a 3D driven frequency sweep.",
+              "description": "Lumped voltage/current sheet port with reference impedance Z_0 across two conductors in a 3D cavity or driven study.",
               "properties": {
                 "kind": {
                   "const": "lumped_port"
@@ -980,6 +1084,11 @@
                       "minimum": 2.2250738585072014e-308,
                       "type": "number"
                     },
+                    "complex_damping": {
+                      "default": false,
+                      "description": "Complex port damping. include resistive port damping directly in 3D cavity eigensolve (when false, cavity stays real and exports port damping in CircuitRom)",
+                      "type": "boolean"
+                    },
                     "direction": {
                       "default": [
                         1.0,
@@ -993,6 +1102,15 @@
                       "maxItems": 3,
                       "minItems": 3,
                       "type": "array"
+                    },
+                    "mode": {
+                      "default": "single",
+                      "description": "Port mode. single-gap port ('single') or balanced two-slot CPW even mode ('cpw_even')",
+                      "enum": [
+                        "single",
+                        "cpw_even"
+                      ],
+                      "type": "string"
                     },
                     "name": {
                       "default": "",
@@ -1032,10 +1150,22 @@
                       "minimum": 1,
                       "type": "integer"
                     },
+                    "n_eff_guess": {
+                      "default": 0.0,
+                      "description": "Effective index guess. optional target effective index for 2D boundary-mode selection (sorts propagating modes by |n_eff - n_eff_guess|)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
                     "name": {
                       "default": "",
                       "description": "Port name. unique port identifier",
                       "type": "string"
+                    },
+                    "z0_ohm": {
+                      "default": 0.0,
+                      "description": "Reference circuit impedance [Ohm]. optional circuit reference impedance Z_0 for DrivenPortData and S->Z/Y conversion (0 or null uses modal wave impedance)",
+                      "minimum": 0.0,
+                      "type": "number"
                     }
                   },
                   "required": [
@@ -1066,6 +1196,80 @@
               "properties": {
                 "eps_r": {
                   "description": "Relative permittivity []",
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "eps_r_im": {
+                  "description": "Imaginary permittivity []",
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "loss_tangent": {
+                  "description": "Dielectric loss tangent []",
                   "oneOf": [
                     {
                       "type": "number"
@@ -1353,15 +1557,30 @@
                 "properties": {
                   "f_max": {
                     "default": 8000000000.0,
-                    "description": "Stop frequency [Hz]. maximum sweep frequency (>= f_min)",
+                    "description": "Stop frequency [Hz]. maximum sweep frequency (>= f_min, required unless freqs_hz is given)",
                     "minimum": 2.2250738585072014e-308,
                     "type": "number"
                   },
                   "f_min": {
                     "default": 4000000000.0,
-                    "description": "Start frequency [Hz]. minimum sweep frequency",
+                    "description": "Start frequency [Hz]. minimum sweep frequency (required unless freqs_hz is given)",
                     "minimum": 2.2250738585072014e-308,
                     "type": "number"
+                  },
+                  "freqs_hz": {
+                    "default": [],
+                    "description": "Explicit frequencies [Hz]. optional explicit ascending frequency grid in Hz; overrides f_min, f_max, and n_points when non-empty",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "max_hdm_solves": {
+                    "default": 16,
+                    "description": "Maximum HDM solves. maximum number of greedy full-order HDM anchor factorizations during PROM sweep",
+                    "maximum": 64,
+                    "minimum": 1,
+                    "type": "integer"
                   },
                   "n_points": {
                     "default": 201,
@@ -1374,12 +1593,22 @@
                     "description": "PROM residual tolerance. relative residual tolerance for Hermite/Galerkin PROM fast sweep (0 or null disables PROM and solves point-by-point HDM)",
                     "minimum": 0.0,
                     "type": "number"
+                  },
+                  "seed_freqs_hz": {
+                    "default": [],
+                    "description": "Seed anchor frequencies [Hz]. optional initial PROM anchor frequencies merged with [f_min, f_mid, f_max]",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "strict_prom_tol": {
+                    "default": false,
+                    "description": "Strict PROM tolerance. return an error if max_prom_residual still exceeds prom_tol after max_hdm_solves",
+                    "type": "boolean"
                   }
                 },
-                "required": [
-                  "f_min",
-                  "f_max"
-                ],
+                "required": [],
                 "type": "object"
               }
             },
@@ -1672,7 +1901,7 @@
       "name": "Driven frequency sweep",
       "params": [
         {
-          "doc": "minimum sweep frequency",
+          "doc": "minimum sweep frequency (required unless freqs_hz is given)",
           "kind": {
             "default": 4000000000.0,
             "max": null,
@@ -1681,11 +1910,11 @@
           },
           "label": "Start frequency",
           "name": "f_min",
-          "required": true,
+          "required": false,
           "unit": "Hz"
         },
         {
-          "doc": "maximum sweep frequency (>= f_min)",
+          "doc": "maximum sweep frequency (>= f_min, required unless freqs_hz is given)",
           "kind": {
             "default": 8000000000.0,
             "max": null,
@@ -1694,7 +1923,7 @@
           },
           "label": "Stop frequency",
           "name": "f_max",
-          "required": true,
+          "required": false,
           "unit": "Hz"
         },
         {
@@ -1711,6 +1940,17 @@
           "unit": ""
         },
         {
+          "doc": "optional explicit ascending frequency grid in Hz; overrides f_min, f_max, and n_points when non-empty",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Explicit frequencies",
+          "name": "freqs_hz",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
           "doc": "relative residual tolerance for Hermite/Galerkin PROM fast sweep (0 or null disables PROM and solves point-by-point HDM)",
           "kind": {
             "default": 0.001,
@@ -1722,6 +1962,41 @@
           "name": "prom_tol",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "maximum number of greedy full-order HDM anchor factorizations during PROM sweep",
+          "kind": {
+            "default": 16,
+            "max": 64,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Maximum HDM solves",
+          "name": "max_hdm_solves",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "return an error if max_prom_residual still exceeds prom_tol after max_hdm_solves",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Strict PROM tolerance",
+          "name": "strict_prom_tol",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional initial PROM anchor frequencies merged with [f_min, f_mid, f_max]",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Seed anchor frequencies",
+          "name": "seed_freqs_hz",
+          "required": false,
+          "unit": "Hz"
         }
       ]
     }

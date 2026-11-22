@@ -15,13 +15,13 @@
 use crate::cavity::{basis3, Ned3};
 use crate::ibc::{build_face_to_cell_3d, sorted3, MU0};
 use crate::modes::{assemble_modes_with_bcs, solve_mode_pairs, EpsCell, C0};
-use crate::problem::{LumpedPortBc, SurfaceImpedanceBc, WavePortBc};
+use crate::problem::{symmetry_facet_flags, LumpedPortBc, Problem, SurfaceImpedanceBc, WavePortBc};
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::fem::{geometry, quad_rule, CurvedTet};
 use femcore::linalg::csr::{Coo, RCsr};
 use femcore::mesh::SimplexMesh;
 use nyx_physics::Discretisation;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::f64::consts::PI;
 
 #[inline]
@@ -59,7 +59,11 @@ pub struct AssembledLumpedPort {
     pub n_hat: [f64; 3],
     pub length_m: f64,
     pub width_m: f64,
+    pub u_min: f64,
+    pub u_max: f64,
     pub triangles: Vec<[u32; 3]>,
+    /// When `bc.mode == "cpw_even"`, the two disjoint lateral slot components `(comp_left, comp_right)` ordered along `d_hat`.
+    pub cpw_slots: Option<(Vec<[u32; 3]>, Vec<[u32; 3]>)>,
     /// Terminal voltage functional `b_p` on all full Nedelec DOFs (`n`).
     pub b_full: Vec<f64>,
     /// Terminal voltage functional `b_p` on reduced free Nedelec DOFs (`nred`).
@@ -193,6 +197,295 @@ pub fn eval_triangle_tangential_basis_ordered(
     Ok((ci, area, n_out, bnd_dofs, weights, psi_q))
 }
 
+/// Partitions a slice of boundary triangles into vertex-connected components, ordered deterministically.
+fn partition_tri_components(tris: &[[u32; 3]]) -> Vec<Vec<[u32; 3]>> {
+    let m = tris.len();
+    if m == 0 {
+        return Vec::new();
+    }
+    let mut parent: Vec<usize> = (0..m).collect();
+    fn find(p: &mut [usize], mut i: usize) -> usize {
+        while p[i] != i {
+            p[i] = p[p[i]];
+            i = p[i];
+        }
+        i
+    }
+    let mut vert_owner: HashMap<u32, usize> = HashMap::new();
+    for (ti, tri) in tris.iter().enumerate() {
+        for &v in tri {
+            if let Some(&prev) = vert_owner.get(&v) {
+                let (ra, rb) = (find(&mut parent, prev), find(&mut parent, ti));
+                if ra != rb {
+                    parent[ra.max(rb)] = ra.min(rb);
+                }
+            } else {
+                vert_owner.insert(v, ti);
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<[u32; 3]>> = BTreeMap::new();
+    for (ti, &tri) in tris.iter().enumerate() {
+        let r = find(&mut parent, ti);
+        groups.entry(r).or_default().push(tri);
+    }
+    groups.into_values().collect()
+}
+
+/// Computes the orthonormal sheet frame `(n_hat, d_hat, w_hat)` for a set of port triangles and nominal `direction`.
+fn sheet_frame(
+    mesh: &Discretisation,
+    tris: &[[u32; 3]],
+    direction: [f64; 3],
+    kind: &str,
+    name: &str,
+) -> Result<([f64; 3], [f64; 3], [f64; 3]), String> {
+    let mut n_acc = [0.0; 3];
+    let mut n_ref: Option<[f64; 3]> = None;
+    for &tri in tris {
+        let (p0, p1, p2) = (pt3(mesh, tri[0]), pt3(mesh, tri[1]), pt3(mesh, tri[2]));
+        let mut nr = cross3(sub3(p1, p0), sub3(p2, p0));
+        if let Some(r) = n_ref {
+            if dot3(nr, r) < 0.0 {
+                nr = [-nr[0], -nr[1], -nr[2]];
+            }
+        } else if norm3(nr) > 0.0 {
+            n_ref = Some(nr);
+        }
+        n_acc[0] += nr[0];
+        n_acc[1] += nr[1];
+        n_acc[2] += nr[2];
+    }
+    let nl = norm3(n_acc);
+    if nl <= 0.0 {
+        return Err(format!("{kind} '{name}' triangles have zero normal"));
+    }
+    let n_hat = [n_acc[0] / nl, n_acc[1] / nl, n_acc[2] / nl];
+    let dn = dot3(direction, n_hat);
+    let d_proj = [direction[0] - dn * n_hat[0], direction[1] - dn * n_hat[1], direction[2] - dn * n_hat[2]];
+    let dl = norm3(d_proj);
+    if dl <= 1e-12 {
+        return Err(format!(
+            "{kind} '{name}': direction {:?} is normal to the sheet plane (normal {:?})",
+            direction, n_hat
+        ));
+    }
+    let d_hat = [d_proj[0] / dl, d_proj[1] / dl, d_proj[2] / dl];
+    let w_raw = cross3(n_hat, d_hat);
+    let wl = norm3(w_raw).max(1e-300);
+    let w_hat = [w_raw[0] / wl, w_raw[1] / wl, w_raw[2] / wl];
+    Ok((n_hat, d_hat, w_hat))
+}
+
+/// Startup two-conductor contact validator for 3D `lumped_jj` and `lumped_port` sheets.
+///
+/// Treats explicit `pec`, `surface_impedance`, and exterior default PEC walls as valid conductors.
+/// Verifies that BOTH `-d` and `+d` ends of every `lumped_jj` and `lumped_port` sheet (and both lateral
+/// slots of a `cpw_even` `lumped_port`) touch conductor vertices, and that no port/JJ sheet is completely
+/// shorted by PEC or bridged directly across a single explicit PEC sheet.
+pub fn validate_port_contacts_3d(mesh: &Discretisation, problem: &Problem) -> Result<(), String> {
+    if problem.lumped_jj.is_empty() && problem.lumped_ports.is_empty() {
+        return Ok(());
+    }
+    if mesh.dim != 3 {
+        return Ok(());
+    }
+    let nv = mesh.n_points();
+    let exterior = mesh.exterior_facets();
+    let (sym_pec_facets, sym_pmc_facets) = symmetry_facet_flags(mesh, problem.symmetry)?;
+
+    let periodic_labels: Vec<i32> =
+        problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
+    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let wp_labels: Vec<i32> = problem.waveports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+
+    let mut seen_pec_tris: BTreeSet<[u32; 3]> = BTreeSet::new();
+    let mut conductor_vertex = vec![false; nv];
+    let mut all_pec_edges: BTreeSet<(u32, u32)> = BTreeSet::new();
+    let mut explicit_pec_adj: HashMap<u32, Vec<u32>> = HashMap::new();
+
+    for f in 0..mesh.n_facets() {
+        let l = mesh.facet_labels[f];
+        let fv = mesh.facet(f);
+        let tri = sorted3(fv[0], fv[1], fv[2]);
+        let is_explicit_pec = problem.pec.contains(&l);
+        let is_ibc = ibc_labels.contains(&l);
+        let is_ext_pec = exterior[f]
+            && !periodic_labels.contains(&l)
+            && (sym_pec_facets[f]
+                || (!problem.pmc.contains(&l)
+                    && !sym_pmc_facets[f]
+                    && !is_ibc
+                    && !jj_labels.contains(&l)
+                    && !lp_labels.contains(&l)
+                    && !wp_labels.contains(&l)));
+
+        if is_explicit_pec {
+            seen_pec_tris.insert(tri);
+        }
+        if is_explicit_pec || is_ibc || is_ext_pec {
+            for &v in fv {
+                conductor_vertex[v as usize] = true;
+            }
+        }
+        if is_explicit_pec || is_ext_pec {
+            for (a, b) in [(fv[0], fv[1]), (fv[1], fv[2]), (fv[0], fv[2])] {
+                all_pec_edges.insert((a.min(b), a.max(b)));
+            }
+        }
+        if is_explicit_pec {
+            for (a, b) in [(fv[0], fv[1]), (fv[1], fv[2]), (fv[0], fv[2])] {
+                explicit_pec_adj.entry(a).or_default().push(b);
+                explicit_pec_adj.entry(b).or_default().push(a);
+            }
+        }
+    }
+
+    let check_component = |kind: &str, name: &str, tris: &[[u32; 3]], direction: [f64; 3]| -> Result<(), String> {
+        let (_, d_hat, _) = sheet_frame(mesh, tris, direction, kind, name)?;
+        let mut verts = BTreeSet::new();
+        let mut has_free_edge = false;
+        for &tri in tris {
+            for v in tri {
+                verts.insert(v);
+            }
+            for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+                if !all_pec_edges.contains(&(a.min(b), a.max(b))) {
+                    has_free_edge = true;
+                }
+            }
+        }
+        if !has_free_edge {
+            return Err(format!("{kind} '{name}' is shorted: all tangential edges of the sheet lie on PEC boundaries"));
+        }
+
+        let (mut u_min, mut u_max) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &v in &verts {
+            let u = dot3(pt3(mesh, v), d_hat);
+            u_min = u_min.min(u);
+            u_max = u_max.max(u);
+        }
+        let len = u_max - u_min;
+        if !(len > 1e-15 && len.is_finite()) {
+            return Err(format!("{kind} '{name}' has degenerate zero length along direction {:?}", direction));
+        }
+
+        let mut end_minus = BTreeSet::new();
+        let mut end_plus = BTreeSet::new();
+        for &v in &verts {
+            let u = dot3(pt3(mesh, v), d_hat);
+            if u <= u_min + 0.15 * len {
+                end_minus.insert(v);
+            }
+            if u >= u_max - 0.15 * len {
+                end_plus.insert(v);
+            }
+        }
+
+        let minus_ok = end_minus.iter().any(|&v| conductor_vertex[v as usize]);
+        let plus_ok = end_plus.iter().any(|&v| conductor_vertex[v as usize]);
+        if !minus_ok || !plus_ok {
+            let which = match (minus_ok, plus_ok) {
+                (false, false) => "neither -d nor +d terminal end touches",
+                (false, true) => "its -d terminal end does not touch",
+                (true, false) => "its +d terminal end does not touch",
+                (true, true) => unreachable!(),
+            };
+            return Err(format!(
+                "{kind} '{name}' is disconnected: {which} any conductor (pec, surface_impedance, or exterior PEC wall)"
+            ));
+        }
+
+        // Check whether explicit PEC edges restricted to the port's own vertices directly bridge -d to +d
+        // (i.e. the port is stamped inside one single continuous explicit PEC sheet without a gap).
+        let mut visited: BTreeSet<u32> = BTreeSet::new();
+        let mut queue: VecDeque<u32> = VecDeque::new();
+        for &v in &end_minus {
+            if explicit_pec_adj.contains_key(&v) && visited.insert(v) {
+                queue.push_back(v);
+            }
+        }
+        while let Some(curr) = queue.pop_front() {
+            if end_plus.contains(&curr) {
+                return Err(format!(
+                    "{kind} '{name}' is shorted inside a single PEC sheet: explicit PEC edges directly connect its -d and +d ends"
+                ));
+            }
+            if let Some(nbrs) = explicit_pec_adj.get(&curr) {
+                for &nb in nbrs {
+                    if verts.contains(&nb) && visited.insert(nb) {
+                        queue.push_back(nb);
+                    }
+                }
+            }
+        }
+        Ok(())
+    };
+
+    for jj in &problem.lumped_jj {
+        let mut port_tris = Vec::new();
+        let mut seen = BTreeSet::new();
+        for f in 0..mesh.n_facets() {
+            if !jj.labels.contains(&mesh.facet_labels[f]) {
+                continue;
+            }
+            let fv = mesh.facet(f);
+            let key = sorted3(fv[0], fv[1], fv[2]);
+            if seen_pec_tris.contains(&key) || !seen.insert(key) {
+                continue;
+            }
+            port_tris.push(key);
+        }
+        if port_tris.is_empty() {
+            return Err(format!(
+                "lumped_jj '{}' has no active non-PEC boundary triangles (shorted by PEC or empty selection)",
+                jj.name
+            ));
+        }
+        check_component("lumped_jj", &jj.name, &port_tris, jj.direction)?;
+    }
+
+    for lp in &problem.lumped_ports {
+        let mut port_tris = Vec::new();
+        let mut seen = BTreeSet::new();
+        for f in 0..mesh.n_facets() {
+            if !lp.labels.contains(&mesh.facet_labels[f]) {
+                continue;
+            }
+            let fv = mesh.facet(f);
+            let key = sorted3(fv[0], fv[1], fv[2]);
+            if seen_pec_tris.contains(&key) || !seen.insert(key) {
+                continue;
+            }
+            port_tris.push(key);
+        }
+        if port_tris.is_empty() {
+            return Err(format!(
+                "lumped_port '{}' has no active non-PEC boundary triangles (shorted by PEC or empty selection)",
+                lp.name
+            ));
+        }
+        if lp.mode == "cpw_even" {
+            let comps = partition_tri_components(&port_tris);
+            if comps.len() != 2 {
+                return Err(format!(
+                    "lumped_port '{}' with mode='cpw_even' requires exactly 2 disjoint lateral slot components, found {}",
+                    lp.name,
+                    comps.len()
+                ));
+            }
+            check_component("lumped_port", &lp.name, &comps[0], lp.direction)?;
+            check_component("lumped_port", &lp.name, &comps[1], lp.direction)?;
+        } else {
+            check_component("lumped_port", &lp.name, &port_tris, lp.direction)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Assembles all 3D `lumped_port` boundary conditions following the single-facet rule.
 pub fn assemble_lumped_ports_3d(
     mesh: &Discretisation,
@@ -234,47 +527,13 @@ pub fn assemble_lumped_ports_3d(
             return Err(format!("lumped_port '{}' has no active boundary triangles", bc.name));
         }
 
-        let mut n_acc = [0.0; 3];
-        let mut n_ref: Option<[f64; 3]> = None;
+        let (n_hat, d_hat, w_hat) = sheet_frame(mesh, &port_tris, bc.direction, "lumped_port", &bc.name)?;
         let mut port_verts = BTreeSet::new();
         for &tri in &port_tris {
             for v in tri {
                 port_verts.insert(v);
             }
-            let (p0, p1, p2) = (pt3(mesh, tri[0]), pt3(mesh, tri[1]), pt3(mesh, tri[2]));
-            let mut nr = cross3(sub3(p1, p0), sub3(p2, p0));
-            if let Some(r) = n_ref {
-                if dot3(nr, r) < 0.0 {
-                    nr = [-nr[0], -nr[1], -nr[2]];
-                }
-            } else if norm3(nr) > 0.0 {
-                n_ref = Some(nr);
-            }
-            n_acc[0] += nr[0];
-            n_acc[1] += nr[1];
-            n_acc[2] += nr[2];
         }
-        let nl = norm3(n_acc);
-        if nl <= 0.0 {
-            return Err(format!("lumped_port '{}' triangles have zero normal", bc.name));
-        }
-        let n_hat = [n_acc[0] / nl, n_acc[1] / nl, n_acc[2] / nl];
-
-        let dn = dot3(bc.direction, n_hat);
-        let d_proj =
-            [bc.direction[0] - dn * n_hat[0], bc.direction[1] - dn * n_hat[1], bc.direction[2] - dn * n_hat[2]];
-        let dl = norm3(d_proj);
-        if dl <= 1e-12 {
-            return Err(format!(
-                "lumped_port '{}': direction {:?} is normal to the sheet plane (normal {:?})",
-                bc.name, bc.direction, n_hat
-            ));
-        }
-        let d_hat = [d_proj[0] / dl, d_proj[1] / dl, d_proj[2] / dl];
-        let w_raw = cross3(n_hat, d_hat);
-        let wl = norm3(w_raw).max(1e-300);
-        let w_hat = [w_raw[0] / wl, w_raw[1] / wl, w_raw[2] / wl];
-
         let (mut u_min, mut u_max) = (f64::INFINITY, f64::NEG_INFINITY);
         let (mut v_min, mut v_max) = (f64::INFINITY, f64::NEG_INFINITY);
         for &v in &port_verts {
@@ -287,16 +546,77 @@ pub fn assemble_lumped_ports_3d(
             v_max = v_max.max(w);
         }
         let length_m = (u_max - u_min).max(1e-15);
-        let width_m = (v_max - v_min).max(1e-15);
-
+        let mut width_m = (v_max - v_min).max(1e-15);
         let mut b_full = vec![0.0; n];
-        for &tri in &port_tris {
-            let (_, _, _, bnd_dofs, weights, psi_q) =
-                eval_triangle_tangential_basis_ordered(mesh, ned, &geo, &face_to_cell, tri)?;
-            for (q, &wq) in weights.iter().enumerate() {
-                let pq = &psi_q[q];
-                for (a, &dof) in bnd_dofs.iter().enumerate() {
-                    b_full[dof] += (wq / width_m) * dot3(pq[a], d_hat);
+        let mut cpw_slots = None;
+
+        if bc.mode == "cpw_even" {
+            let comps = partition_tri_components(&port_tris);
+            if comps.len() != 2 {
+                return Err(format!(
+                    "lumped_port '{}' with mode='cpw_even' requires exactly 2 disjoint lateral slot components, found {}",
+                    bc.name,
+                    comps.len()
+                ));
+            }
+            let comp_stats = |tris: &[[u32; 3]]| -> (f64, f64) {
+                let mut vs = BTreeSet::new();
+                for &tri in tris {
+                    for v in tri {
+                        vs.insert(v);
+                    }
+                }
+                let mut u_sum = 0.0;
+                let (mut w_lo, mut w_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                for &v in &vs {
+                    let p = pt3(mesh, v);
+                    u_sum += dot3(p, d_hat);
+                    let w = dot3(p, w_hat);
+                    w_lo = w_lo.min(w);
+                    w_hi = w_hi.max(w);
+                }
+                (u_sum / (vs.len().max(1) as f64), (w_hi - w_lo).max(1e-15))
+            };
+            let (u0, w0) = comp_stats(&comps[0]);
+            let (u1, w1) = comp_stats(&comps[1]);
+            let ((comp_left, width_l), (comp_right, width_r)) = if u0 <= u1 {
+                ((comps[0].clone(), w0), (comps[1].clone(), w1))
+            } else {
+                ((comps[1].clone(), w1), (comps[0].clone(), w0))
+            };
+            width_m = 0.5 * (width_l + width_r);
+
+            // Balanced even-mode functional: b_even = 0.5 * (b_R - b_L)
+            for &tri in &comp_left {
+                let (_, _, _, bnd_dofs, weights, psi_q) =
+                    eval_triangle_tangential_basis_ordered(mesh, ned, &geo, &face_to_cell, tri)?;
+                for (q, &wq) in weights.iter().enumerate() {
+                    let pq = &psi_q[q];
+                    for (a, &dof) in bnd_dofs.iter().enumerate() {
+                        b_full[dof] += (-0.5 * wq / width_l) * dot3(pq[a], d_hat);
+                    }
+                }
+            }
+            for &tri in &comp_right {
+                let (_, _, _, bnd_dofs, weights, psi_q) =
+                    eval_triangle_tangential_basis_ordered(mesh, ned, &geo, &face_to_cell, tri)?;
+                for (q, &wq) in weights.iter().enumerate() {
+                    let pq = &psi_q[q];
+                    for (a, &dof) in bnd_dofs.iter().enumerate() {
+                        b_full[dof] += (0.5 * wq / width_r) * dot3(pq[a], d_hat);
+                    }
+                }
+            }
+            cpw_slots = Some((comp_left, comp_right));
+        } else {
+            for &tri in &port_tris {
+                let (_, _, _, bnd_dofs, weights, psi_q) =
+                    eval_triangle_tangential_basis_ordered(mesh, ned, &geo, &face_to_cell, tri)?;
+                for (q, &wq) in weights.iter().enumerate() {
+                    let pq = &psi_q[q];
+                    for (a, &dof) in bnd_dofs.iter().enumerate() {
+                        b_full[dof] += (wq / width_m) * dot3(pq[a], d_hat);
+                    }
                 }
             }
         }
@@ -317,7 +637,10 @@ pub fn assemble_lumped_ports_3d(
             n_hat,
             length_m,
             width_m,
+            u_min,
+            u_max,
             triangles: port_tris,
+            cpw_slots,
             b_full,
             b_red: Vec::new(),
             c_port_full: c_coo.to_csr(),
@@ -686,8 +1009,11 @@ pub fn assemble_waveports_3d(
 
         let n_max =
             eps_2d.iter().zip(&mur_2d).map(|(e, &m)| ((e.xx.max(e.yy)) * m).max(1.0).sqrt()).fold(1.0_f64, f64::max);
-        let n_search = 1.02 * n_max;
-        let k_ask = (bc.mode + 3).max(4);
+        let (n_search, k_ask) = if let Some(ng) = bc.n_eff_guess {
+            (ng, (bc.mode + 6).max(8))
+        } else {
+            (1.02 * n_max, (bc.mode + 3).max(4))
+        };
 
         let solve_2d_at = |freq: f64| -> Result<Vec<(f64, Vec<Vec<[f64; 3]>>)>, String> {
             let asm2 = assemble_modes_with_bcs(&mesh_2d, freq, &eps_2d, &mur_2d, order, &[1], &ibc_2d, &[2])?;
@@ -711,15 +1037,33 @@ pub fn assemble_waveports_3d(
                 );
                 candidates.push((beta2, score, e_field));
             }
-            // Sort by descending beta^2 (fundamental guided mode first), breaking ties deterministically by orientation score
-            candidates.sort_by(|a, b| {
-                let scale = a.0.abs().max(b.0.abs()).max(1.0);
-                if (a.0 - b.0).abs() > 1e-5 * scale {
-                    b.0.partial_cmp(&a.0).unwrap()
-                } else {
-                    b.1.partial_cmp(&a.1).unwrap()
-                }
-            });
+            if let Some(ng) = bc.n_eff_guess {
+                // Sort propagating modes (beta^2 > 0) by |n_eff - n_eff_guess| ascending, breaking ties by orientation score
+                candidates.sort_by(|a, b| match (a.0 > 0.0, b.0 > 0.0) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    (true, true) => {
+                        let da = (a.0.sqrt() / k0 - ng).abs();
+                        let db = (b.0.sqrt() / k0 - ng).abs();
+                        if (da - db).abs() > 1e-6 * ng.max(1.0) {
+                            da.total_cmp(&db)
+                        } else {
+                            b.1.total_cmp(&a.1)
+                        }
+                    }
+                    (false, false) => b.0.total_cmp(&a.0),
+                });
+            } else {
+                // Sort by descending beta^2 (fundamental guided mode first), breaking ties deterministically by orientation score
+                candidates.sort_by(|a, b| {
+                    let scale = a.0.abs().max(b.0.abs()).max(1.0);
+                    if (a.0 - b.0).abs() > 1e-5 * scale {
+                        b.0.partial_cmp(&a.0).unwrap()
+                    } else {
+                        b.1.partial_cmp(&a.1).unwrap()
+                    }
+                });
+            }
             Ok(candidates.into_iter().map(|(b2, _, ef)| (b2, ef)).collect())
         };
 

@@ -58,13 +58,40 @@ pub struct ReadBudgetConfig {
     /// Maximum allowed bytes for a single whole-dataset read call (default: 512 MiB).
     /// Prevents corrupted v1 dataspace dimensions from triggering multi-TB allocations.
     pub max_dataset_bytes: u64,
+    /// Maximum cumulative bytes across all datasets when materializing a full result file in memory
+    /// (default: 8 GiB, overridable via `NYX_H5_MAX_BYTES`).
+    pub max_total_result_bytes: u64,
     /// Maximum group traversal recursion depth (default: 24).
     pub max_group_depth: usize,
 }
 
 impl Default for ReadBudgetConfig {
     fn default() -> Self {
-        Self { max_dataset_bytes: 512 * 1024 * 1024, max_group_depth: 24 }
+        Self {
+            max_dataset_bytes: 512 * 1024 * 1024,
+            max_total_result_bytes: 8 * 1024 * 1024 * 1024,
+            max_group_depth: 24,
+        }
+    }
+}
+
+impl ReadBudgetConfig {
+    /// Returns [`ReadBudgetConfig::default()`], overriding `max_total_result_bytes` when the
+    /// `NYX_H5_MAX_BYTES` environment variable is set to a positive integer byte count
+    /// (and clamping `max_dataset_bytes` to `max_total_result_bytes` when `max_dataset_bytes > max_total_result_bytes`).
+    pub fn from_env() -> Self {
+        let mut cfg = Self::default();
+        if let Some(limit) = std::env::var("NYX_H5_MAX_BYTES")
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .filter(|&n| n > 0)
+        {
+            cfg.max_total_result_bytes = limit;
+            if cfg.max_dataset_bytes > limit {
+                cfg.max_dataset_bytes = limit;
+            }
+        }
+        cfg
     }
 }
 
@@ -160,5 +187,15 @@ mod tests {
         assert_eq!(viz_link_name("00_|E|"), "_E_");
         assert_eq!(viz_link_name("03_Re Ex"), "Re_Ex");
         assert_eq!(viz_link_name("plain_name"), "plain_name");
+    }
+
+    #[test]
+    fn read_budget_config_defaults_and_env() {
+        let def = ReadBudgetConfig::default();
+        assert_eq!(def.max_dataset_bytes, 512 * 1024 * 1024);
+        assert_eq!(def.max_total_result_bytes, 8 * 1024 * 1024 * 1024);
+        assert_eq!(def.max_group_depth, 24);
+        let env_cfg = ReadBudgetConfig::from_env();
+        assert!(env_cfg.max_total_result_bytes > 0);
     }
 }

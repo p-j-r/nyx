@@ -632,6 +632,57 @@ pub fn ruiz_unscale_and_rayleigh(d: &[f64], y: &[C], kc: &CCsr, mc: &CCsr) -> (V
     (x, f)
 }
 
+/// Unscales a Ruiz-equilibrated eigenvector `x = D y` and evaluates the mode-exact damped Rayleigh quotient
+/// `k_R^2 = (x^H K_no_damp x) / (x^H M x)` and `gamma_C = (x^H C_damp x) / (x^H M x)`, returning
+/// `f = (c_0 / (2 pi)) sqrt(k_R^2 + i k_R gamma_C)` so `Q_m = k_R / gamma_C` and `kappa_m / (2 pi) = (c_0 / (2 pi)) gamma_C`
+/// are independent of `f_ref`/`f_search` and preserve `Re(k_0^2) = k_R^2` energy equipartition.
+pub fn ruiz_unscale_and_rayleigh_damped(
+    d: &[f64],
+    y: &[C],
+    kc_no_damp: &CCsr,
+    c_damp: &RCsr,
+    mc: &CCsr,
+) -> (Vec<C>, C) {
+    let x: Vec<C> = y.iter().zip(d).map(|(&yi, &di)| yi * di).collect();
+    let kx = kc_no_damp.matvec(&x);
+    let mx = mc.matvec(&x);
+    let num_k: C = x.iter().zip(&kx).fold(c(0.0, 0.0), |acc, (&xi, &kxi)| acc + xi.conj() * kxi);
+    let den: C = x.iter().zip(&mx).fold(c(0.0, 0.0), |acc, (&xi, &mxi)| acc + xi.conj() * mxi);
+    if den.norm() <= 1e-300 {
+        return (x, c(0.0, 0.0));
+    }
+    let q_k = num_k / den;
+    let lam = if c_damp.nnz() > 0 {
+        let mut num_c = c(0.0, 0.0);
+        for i in 0..c_damp.nrows() {
+            let xi_conj = x[i].conj();
+            let (cols, vals) = c_damp.row(i);
+            let mut rs = c(0.0, 0.0);
+            for (&col, &v) in cols.iter().zip(vals) {
+                rs += x[col as usize] * v;
+            }
+            num_c += xi_conj * rs;
+        }
+        let gamma_c = num_c / den;
+        let k_r = q_k.re.max(0.0).sqrt();
+        // Overdamped non-oscillatory RC relaxation pole (gamma_c > 2 k_r, e.g. floating feedline on lumped_port):
+        // its exact QEP root k_0^2 - i gamma_c k_0 - k_r^2 = 0 is purely imaginary (Re(f) = 0).
+        if gamma_c.re > 2.0 * k_r && q_k.im.abs() <= 1e-6 * q_k.re.abs().max(1.0) {
+            let disc = (gamma_c.re * gamma_c.re - 4.0 * q_k.re.max(0.0)).max(0.0).sqrt();
+            let k_im = 0.5 * (gamma_c.re + disc);
+            return (x, c(0.0, k_im * (C0 / (2.0 * PI))));
+        }
+        q_k + c(0.0, 1.0) * (gamma_c * k_r)
+    } else {
+        q_k
+    };
+    let mut f = lam.sqrt() * (C0 / (2.0 * PI));
+    if f.re < 0.0 {
+        f = -f;
+    }
+    (x, f)
+}
+
 // ------------------------------------------------------------------ 2D PEC and surface_impedance assembly
 
 /// Builds a map from each sorted 1D edge `(v0, v1)` in a 2D triangular mesh to one adjacent triangle `ci`

@@ -181,6 +181,18 @@ pub fn curve_edges(
     if cand.is_empty() {
         return (vec![], CurveReport::default());
     }
+    validate_and_relax_candidates(pos, cells, cand, &periodic_edge_parent)
+}
+
+fn validate_and_relax_candidates(
+    pos: &(dyn Fn(u32) -> [f64; 3] + Sync),
+    cells: &[[u32; 4]],
+    cand: EdgeNodes,
+    periodic_edge_parent: &HashMap<[u32; 2], ([u32; 2], [f64; 3])>,
+) -> (EdgeNodes, CurveReport) {
+    if cand.is_empty() {
+        return (vec![], CurveReport::default());
+    }
     let index: HashMap<[u32; 2], usize> = cand.iter().enumerate().map(|(i, (e, _))| (*e, i)).collect();
     let mut level = vec![0u8; cand.len()];
 
@@ -358,6 +370,37 @@ pub fn curve_solver_mesh(mesh: &mut SimplexMesh, dom: &dyn Domain3) -> CurveRepo
     let facets: Vec<[u32; 3]> = (0..mesh.n_facets()).map(|f| [mesh.facet(f)[0], mesh.facet(f)[1], mesh.facet(f)[2]]).collect();
     let pts = mesh.points.clone();
     let (nodes, report) = curve_edges(&|v| [pts[3 * v as usize], pts[3 * v as usize + 1], pts[3 * v as usize + 2]], &cells, &facets, dom);
+    mesh.set_edge_nodes(&nodes);
+    report
+}
+
+/// Validates and relaxes pre-projected candidate mid-edge nodes against all incident 3D tetrahedra of `mesh`
+/// (backing off or straightening any edge that would drive `scaled_jacobian_min <= MIN_SCALED_JACOBIAN`) and stores them on `mesh`.
+pub(crate) fn apply_edge_nodes_validated(mesh: &mut SimplexMesh, raw_cand: EdgeNodes) -> CurveReport {
+    if mesh.dim != 3 || raw_cand.is_empty() {
+        return CurveReport::default();
+    }
+    let mut cand: EdgeNodes = raw_cand
+        .into_iter()
+        .filter_map(|([a, b], q)| {
+            let pr = pair(a, b);
+            (pr[0] != pr[1] && q.iter().all(|x| x.is_finite()) && mesh.edges().binary_search(&(pr[0], pr[1])).is_ok()).then_some((pr, q))
+        })
+        .collect();
+    cand.sort_by_key(|(pr, _)| *pr);
+    cand.dedup_by_key(|(pr, _)| *pr);
+    if cand.is_empty() {
+        return CurveReport::default();
+    }
+    let cells: Vec<[u32; 4]> = (0..mesh.n_cells()).map(|c| [mesh.cell(c)[0], mesh.cell(c)[1], mesh.cell(c)[2], mesh.cell(c)[3]]).collect();
+    let pts = mesh.points.clone();
+    let empty_per = HashMap::new();
+    let (nodes, report) = validate_and_relax_candidates(
+        &|v| [pts[3 * v as usize], pts[3 * v as usize + 1], pts[3 * v as usize + 2]],
+        &cells,
+        cand,
+        &empty_per,
+    );
     mesh.set_edge_nodes(&nodes);
     report
 }

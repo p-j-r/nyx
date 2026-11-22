@@ -62,6 +62,24 @@ pub struct MeshSettings {
     /// pure-tetrahedral transition slabs (default `false`)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub z_coarsen: bool,
+    /// maximum number of cells allowed before aborting meshing; absent: disabled (or `2_000_000` for adaptive meshing)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cells: Option<usize>,
+    /// 3D sheet stack (`sheet3d`): floor on initial vertical z-slab thickness near sheet planes in metres
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dz_min: Option<f64>,
+    /// 3D sheet stack (`sheet3d`): maximum total number of horizontal z-slabs across active stack layers
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_z_slabs: Option<usize>,
+    /// 3D sheet stack (`sheet3d`): geometric growth ratio for z-slab thickness away from sheet planes (default `1.35`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_growth_ratio: Option<f64>,
+    /// 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_steiner_multiplier: Option<usize>,
+    /// fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles (default `false`)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strict_mesh: bool,
 }
 
 impl Default for MeshSettings {
@@ -77,6 +95,12 @@ impl Default for MeshSettings {
             curved: false,
             gap_cells: None,
             z_coarsen: false,
+            max_cells: None,
+            dz_min: None,
+            max_z_slabs: None,
+            z_growth_ratio: None,
+            max_steiner_multiplier: None,
+            strict_mesh: false,
         }
     }
 }
@@ -207,6 +231,26 @@ impl Project {
         if let Some(gc) = self.mesh.gap_cells {
             if !(gc > 0.0 && gc.is_finite()) {
                 return Err(Error::invalid("`gap_cells` must be a positive finite number"));
+            }
+        }
+        if let Some(mc) = self.mesh.max_cells {
+            if mc < 1 {
+                return Err(Error::invalid("`max_cells` must be an integer >= 1"));
+            }
+        }
+        if let Some(dz) = self.mesh.dz_min {
+            if !(dz > 0.0 && dz.is_finite()) {
+                return Err(Error::invalid("`dz_min` must be a positive finite number"));
+            }
+        }
+        if let Some(ms) = self.mesh.max_z_slabs {
+            if ms < 1 {
+                return Err(Error::invalid("`max_z_slabs` must be an integer >= 1"));
+            }
+        }
+        if let Some(zr) = self.mesh.z_growth_ratio {
+            if !(zr > 1.0 && zr.is_finite()) {
+                return Err(Error::invalid("`z_growth_ratio` must be a finite number strictly greater than 1.0"));
             }
         }
         for (i, s) in self.physics.iter().enumerate() {

@@ -209,3 +209,104 @@ fn the_history_file_is_written_beside_the_caller_in_order() {
     assert_eq!(again.rows().last().unwrap().cells, 9_999);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn nyx_memory_wait_timeout_env_child_probe() {
+    let Ok(mode) = std::env::var("NYX_TEST_MEM_TIMEOUT_MODE") else {
+        return;
+    };
+    let (mut e, ..) = engine_with_history("02_cantilever", 100.0, 400.0);
+    let (_, probe) = machine(2000.0, 4.0);
+    e.set_memory_probe(probe);
+    match mode.as_str() {
+        "env_beats_caller_default" => {
+            // Caller default is 10.0 s, NYX_MEMORY_WAIT_TIMEOUT_S is 0.35 s -> aborts in < 1.2 s naming 0.35
+            e.set_memory_wait_timeout(Some(10.0));
+            let t0 = Instant::now();
+            let err = e.call("solve_run", &json!({ "isolate": false })).unwrap_err().to_string();
+            let dt = t0.elapsed().as_secs_f64();
+            assert!((0.30..=0.85).contains(&dt), "env override timing {dt} s: {err}");
+            assert!(
+                err.contains("0.35") && err.contains("need") && err.contains("free") && err.contains("total"),
+                "{err}"
+            );
+        }
+        "explicit_beats_env" => {
+            // NYX_MEMORY_WAIT_TIMEOUT_S is 10.0 s, explicit memory_wait_timeout_s is 0.2 s -> aborts in < 0.8 s naming 0.2
+            e.set_memory_wait_timeout(Some(20.0));
+            let t0 = Instant::now();
+            let err = e
+                .call("solve_run", &json!({ "isolate": false, "memory_wait_timeout_s": 0.2 }))
+                .unwrap_err()
+                .to_string();
+            let dt = t0.elapsed().as_secs_f64();
+            assert!((0.15..=0.70).contains(&dt), "explicit override timing {dt} s: {err}");
+            assert!(
+                err.contains("0.2") && err.contains("need") && err.contains("free") && err.contains("total"),
+                "{err}"
+            );
+        }
+        other => panic!("unknown probe mode {other}"),
+    }
+}
+
+#[test]
+fn admit_timeout_aborts_promptly_names_need_free_total_timeout_and_obeys_priority() {
+    // 1. Direct `estimate::admit` with `timeout_s = Some(0.5)` completes within `<= 0.5 + 0.5 s` (< 1.5 s)
+    let (mut e, chain, dim, cells) = engine_with_history("02_cantilever", 100.0, 400.0);
+    let est = e.history().estimate(&chain, dim, cells).expect("estimate from 2 history rows");
+    let (_, probe) = machine(2000.0, 4.0);
+    let progress = femcore::progress::Progress::new();
+
+    let t0 = Instant::now();
+    let err = nyx_engine::estimate::admit(&est, false, &probe, &progress, Some(0.5)).unwrap_err();
+    let elapsed = t0.elapsed().as_secs_f64();
+    assert!(
+        (0.45..=1.0).contains(&elapsed),
+        "admit(Some(0.5)) must abort within [0.45, 1.0] s (< 1.5 s), took {elapsed:.3} s"
+    );
+    assert!(matches!(err, nyx_physics::Error::Invalid(_)), "expected Error::Invalid, got {err:?}");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("need")
+            && msg.contains("free")
+            && msg.contains("total")
+            && msg.contains("timeout_s")
+            && msg.contains("0.5"),
+        "timeout message must name need, free, total, and timeout_s: {msg}"
+    );
+
+    // 2. Zero timeout aborts immediately (< 0.1 s), and invalid negative/NaN timeouts are rejected upfront
+    let t_zero = Instant::now();
+    assert!(nyx_engine::estimate::admit(&est, false, &probe, &progress, Some(0.0)).is_err());
+    assert!(t_zero.elapsed() < Duration::from_millis(100));
+    assert!(nyx_engine::estimate::admit(&est, false, &probe, &progress, Some(-1.0)).is_err());
+    assert!(nyx_engine::estimate::admit(&est, false, &probe, &progress, Some(f64::NAN)).is_err());
+    assert!(nyx_engine::estimate::admit(&est, false, &probe, &progress, Some(f64::INFINITY)).is_err());
+
+    // 3. Engine `solve_run` and `set_memory_wait_timeout` plumbing
+    e.set_memory_probe(probe);
+    assert!(e.call("solve_run", &json!({ "isolate": false, "memory_wait_timeout_s": -0.5 })).is_err());
+    let t_eng = Instant::now();
+    let eng_err =
+        e.call("solve_run", &json!({ "isolate": false, "memory_wait_timeout_s": 0.5 })).unwrap_err().to_string();
+    assert!(t_eng.elapsed().as_secs_f64() < 1.5, "solve_run timeout took {:?}", t_eng.elapsed());
+    assert!(eng_err.contains("need") && eng_err.contains("free") && eng_err.contains("total"), "{eng_err}");
+
+    // 4. Priority order: explicit `timeout_s` > `NYX_MEMORY_WAIT_TIMEOUT_S` > caller default (`set_memory_wait_timeout`)
+    let cur_exe = std::env::current_exe().unwrap();
+    for (mode, env_val) in [("env_beats_caller_default", "0.35"), ("explicit_beats_env", "10.0")] {
+        let out = std::process::Command::new(&cur_exe)
+            .args(["--exact", "nyx_memory_wait_timeout_env_child_probe", "--nocapture"])
+            .env("NYX_TEST_MEM_TIMEOUT_MODE", mode)
+            .env("NYX_MEMORY_WAIT_TIMEOUT_S", env_val)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "priority probe {mode} failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

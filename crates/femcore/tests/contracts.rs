@@ -499,6 +499,12 @@ fn mesh_request_and_report_match_their_exemplars_and_schemas() {
         curved: false,
         gap_cells: None,
         z_coarsen: false,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: false,
         waves: Some(WavesRequest {
             sizing: Sizing { order: 2, headroom: 1.0, wavelengths: [("air".to_string(), 4.0), ("ball".to_string(), 1.2)].into_iter().collect() },
             points_per_wavelength: None,

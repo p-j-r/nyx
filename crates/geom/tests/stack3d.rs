@@ -795,3 +795,109 @@ fn polygons_and_sheets_complement_subtraction_and_edge_selectors() {
     let br_perim: f64 = br_edges.ids.iter().map(|&e| ev.edges3()[e as usize].length).sum();
     assert!(close(br_perim, 2.0 * (20e-6 + 30e-6)), "bridge exterior perimeter = {br_perim:e}");
 }
+
+#[test]
+fn abutting_sheets_placed_via_transform_and_pattern_pin_shared_vertices_conformally() {
+    use geom::expr::Expr;
+    let pt = |x: f64, y: f64| [Expr::Num(x), Expr::Num(y)];
+
+    // 1. Two abutting sheets where sheet_b is placed via Op::Transform (Translate +50 um in x).
+    // Both have a shared contact vertex at world (50e-6, 20e-9) (20 nm deflection < 50 nm simplify_tol)
+    // and an unshared 10 nm jitter that should be simplified away.
+    let mut m = Model::new_3d();
+    let sub = m.box_("sub", (-200e-6, -200e-6, -100e-6), (200e-6, 200e-6, 0.0));
+    let vac = m.box_("vac", (-200e-6, -200e-6, 0.0), (200e-6, 200e-6, 100e-6));
+
+    let ring_a = vec![
+        pt(0.0, -20e-6),
+        pt(25e-6, -20e-6 + 10e-9), // unshared 10 nm jitter -> simplified
+        pt(50e-6, -20e-6),
+        pt(50e-6, 20e-9), // shared with transformed sheet_b at world (50e-6, 20e-9) -> MUST be pinned!
+        pt(50e-6, 20e-6),
+        pt(0.0, 20e-6),
+    ];
+    let poly_a = m.polygons_with("poly_a", vec![ring_a], vec![], 50e-9, 0.0);
+
+    // Local coordinates for sheet_b before +50 um x-translation: contact vertex is at local (0.0, 20e-9)
+    let ring_b_local = vec![
+        pt(0.0, -20e-6),
+        pt(50e-6, -20e-6),
+        pt(50e-6, 20e-6),
+        pt(0.0, 20e-6),
+        pt(0.0, 20e-9), // maps to world (50e-6, 20e-9) after translate -> MUST be pinned!
+    ];
+    let poly_b_local = m.polygons_with("poly_b_local", vec![ring_b_local], vec![], 50e-9, 0.0);
+    let poly_b_xf = m.translate("poly_b_xf", poly_b_local, (50e-6, 0.0, 0.0));
+
+    // 2. Also pattern a unit cell with Op::Pattern (Linear step 50e-6, count = 2) at y in [40e-6, 80e-6],
+    // and abut a distinct sheet_c at x = 100e-6 against instance [1]'s right contact vertex (100e-6 + 20e-9, 60e-6)!
+    let unit_ring = vec![
+        pt(0.0, 40e-6),
+        pt(25e-6, 40e-6 + 10e-9), // unshared 10 nm jitter -> simplified
+        pt(50e-6, 40e-6),
+        pt(50e-6 + 20e-9, 60e-6), // right contact protrusion -> instance [1] places this at (100e-6 + 20e-9, 60e-6)!
+        pt(50e-6, 80e-6),
+        pt(0.0, 80e-6),
+        pt(20e-9, 60e-6), // left contact notch -> instance [1] places this at (50e-6 + 20e-9, 60e-6)
+    ];
+    let unit_poly = m.polygons_with("unit_poly", vec![unit_ring], vec![], 50e-9, 0.0);
+    let pat_poly = m.linear_pattern("pat_poly", unit_poly, (50e-6, 0.0, 0.0), 2);
+
+    let ring_c = vec![
+        pt(100e-6, 40e-6),
+        pt(150e-6, 40e-6),
+        pt(150e-6, 80e-6),
+        pt(100e-6, 80e-6),
+        pt(100e-6 + 20e-9, 60e-6), // abuts instance [1] of pat_poly at (100e-6 + 20e-9, 60e-6)!
+    ];
+    let poly_c = m.polygons_with("poly_c", vec![ring_c], vec![], 50e-9, 0.0);
+
+    m.sheet("sheet_a", poly_a, 0.0);
+    m.sheet("sheet_b", poly_b_xf, 0.0);
+    m.sheet("sheet_pat", pat_poly, 0.0);
+    m.sheet("sheet_c", poly_c, 0.0);
+    m.overlay(&[("substrate", sub), ("vacuum", vac)]);
+
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+
+    // Verify the shared contact vertex (50e-6, 20e-9, 0.0) and pattern contact vertex (100e-6 + 20e-9, 60e-6, 0.0)
+    // both exist in the 3D complex vertices, while the unshared 10 nm jitter (25e-6, -20e-6 + 10e-9, 0.0) was removed!
+    let has_v = |wx: f64, wy: f64| -> bool {
+        ev.vertices().iter().any(|v| (v.p[0] - wx).abs() < 1e-12 && (v.p[1] - wy).abs() < 1e-12 && v.p[2].abs() < 1e-12)
+    };
+    assert!(has_v(50e-6, 20e-9), "transformed contact vertex (50 um, 20 nm) must be pinned");
+    assert!(has_v(100e-6 + 20e-9, 60e-6), "patterned contact vertex (100.02 um, 60 um) must be pinned");
+    assert!(!has_v(25e-6, -20e-6 + 10e-9), "unshared 10 nm jitter must be simplified away");
+}
+
+#[test]
+fn stepped_airbridge_stays_prismatic_and_evaluates_conformally_in_3d() {
+    let mut m = Model::new_3d();
+    let sub = m.box_("sub", (-200e-6, -200e-6, -100e-6), (200e-6, 200e-6, 0.0));
+    let vac = m.box_("vac", (-200e-6, -200e-6, 0.0), (200e-6, 200e-6, 100e-6));
+    let cpw_rect = m.rect("cpw_rect", (-10e-6, -150e-6), (10e-6, 150e-6));
+    m.sheet("cpw", cpw_rect, 0.0);
+    m.overlay(&[("substrate", sub), ("vacuum", vac)]);
+
+    // Add stepped airbridge spanning across the CPW from x = -15 um to x = +15 um at z = 3 um
+    let ab = m.stepped_airbridge("ab1", (-15e-6, 0.0), (15e-6, 0.0), 10e-6, 8e-6, 0.0, 3e-6);
+    assert!(!geom::planar::needs_planar(&m.list), "stepped_airbridge must keep needs_planar == false");
+    assert_eq!(ab.hole_region("ab1_pads").kind, RegionKind::Hole);
+
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert!(ev.complex().has_sheets());
+    assert_eq!(ev.complex().sheet_names(), vec!["ab1".to_string(), "cpw".to_string()]);
+
+    // Vacuum volume has the two 8 um x 10 um x 3 um landing pad pillars removed
+    let vac_vol = 400e-6 * 400e-6 * 100e-6 - 2.0 * (8e-6 * 10e-6 * 3e-6);
+    assert!(close(ev.volume(1), vac_vol), "got {:e} vs {:e}", ev.volume(1), vac_vol);
+
+    // Bridge deck sheet area is 30 um x 10 um = 300 um^2, and ab1:edge perimeter is 80 um
+    let ab_area: f64 = ev.faces().iter().filter(|f| f.name == "ab1").map(|f| f.area).sum();
+    assert!(close(ab_area, 30e-6 * 10e-6));
+    let ab_edges = ev.resolve(&Selector::parse("ab1:edge").unwrap()).unwrap().set;
+    let ab_perim: f64 = ab_edges.ids.iter().map(|&e| ev.edges3()[e as usize].length).sum();
+    assert!(close(ab_perim, 2.0 * (30e-6 + 10e-6)));
+}

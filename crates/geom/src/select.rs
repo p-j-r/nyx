@@ -550,6 +550,34 @@ impl Ctx<'_> {
         (0..self.ev.complex().facet_count() as u32).collect()
     }
 
+    fn all_of_kind(&self, kind: EntityKind) -> EntitySet {
+        let cx = self.ev.complex();
+        let n = match kind {
+            EntityKind::Regions => cx.regions.len(),
+            EntityKind::Faces => cx.faces.len(),
+            EntityKind::Edges => {
+                if self.ev.list.dim == 2 {
+                    cx.edges.len()
+                } else {
+                    cx.edges3.len()
+                }
+            }
+            EntityKind::Vertices => cx.vertices.len(),
+        } as u32;
+        EntitySet::new(kind, (0..n).collect())
+    }
+
+    fn is_polymorphic_box(s: &Selector) -> bool {
+        match s {
+            Selector::InBox(..) => true,
+            Selector::Not(a) => Self::is_polymorphic_box(a),
+            Selector::Union(a, b) | Selector::Inter(a, b) | Selector::Diff(a, b) => {
+                Self::is_polymorphic_box(a) && Self::is_polymorphic_box(b)
+            }
+            _ => false,
+        }
+    }
+
     fn region_id(&self, name: &str) -> Option<u32> {
         self.ev.complex().regions.iter().position(|r| r.name == name).map(|i| i as u32)
     }
@@ -790,12 +818,20 @@ impl Ctx<'_> {
                         num(self.ev, &v[2], "in_box()")?,
                     ])
                 };
-                let (lo, hi) = (ev3(lo)?, ev3(hi)?);
+                let (a, b) = (ev3(lo)?, ev3(hi)?);
+                let (lo, hi) = (
+                    [a[0].min(b[0]), a[1].min(b[1]), a[2].min(b[2])],
+                    [a[0].max(b[0]), a[1].max(b[1]), a[2].max(b[2])],
+                );
                 let t = self.gtol();
                 let bx = Aabb::new(lo, hi).pad(t);
                 let two_d = self.ev.list.dim == 2;
-                let ids = self.filter(universe, |i| {
-                    let mut b = cx.facet_bbox(i);
+                let kind = universe.map_or(facets, |u| u.kind);
+                let pool: Vec<u32> = match universe {
+                    Some(u) if u.kind == kind => u.ids.clone(),
+                    _ => self.all_of_kind(kind).ids,
+                };
+                let matches_box = |mut b: Aabb| -> bool {
                     if two_d {
                         // y is out of the x-z cross-section: ignore it
                         b.lo[1] = lo[1];
@@ -805,8 +841,48 @@ impl Ctx<'_> {
                         BoxMode::Within => (0..3).all(|k| b.lo[k] >= bx.lo[k] && b.hi[k] <= bx.hi[k]),
                         BoxMode::Touching => b.overlaps(&bx),
                     }
-                });
-                self.empty_warn(s, EntitySet::new(facets, ids))
+                };
+                let ids: Vec<u32> = pool
+                    .into_iter()
+                    .filter(|&i| match kind {
+                        k if k == facets => matches_box(cx.facet_bbox(i)),
+                        EntityKind::Edges => {
+                            let e = &cx.edges3[i as usize];
+                            let p0 = cx.vertices[e.v0 as usize].p;
+                            let p1 = cx.vertices[e.v1 as usize].p;
+                            let pm = cx.edge3_point(i, 0.5);
+                            let mut b = e.bbox;
+                            b.grow(p0);
+                            b.grow(p1);
+                            b.grow(pm);
+                            match mode {
+                                BoxMode::Within => {
+                                    (0..3).all(|k| b.lo[k] >= bx.lo[k] && b.hi[k] <= bx.hi[k])
+                                        && bx.contains(p0)
+                                        && bx.contains(p1)
+                                        && bx.contains(pm)
+                                }
+                                BoxMode::Touching => {
+                                    b.overlaps(&bx)
+                                        && (bx.contains(p0)
+                                            || bx.contains(p1)
+                                            || bx.contains(pm)
+                                            || bx.contains(cx.edge3_closest(i, bx.center()).0))
+                                }
+                            }
+                        }
+                        EntityKind::Regions => matches_box(cx.regions[i as usize].bbox),
+                        EntityKind::Vertices => {
+                            let mut p = cx.vertices[i as usize].p;
+                            if two_d {
+                                p[1] = lo[1];
+                            }
+                            bx.contains(p)
+                        }
+                        _ => false,
+                    })
+                    .collect();
+                self.empty_warn(s, EntitySet::new(kind, ids))
             }
             Selector::Adjacent(inner) => {
                 let r = self.go(inner, None)?;
@@ -845,10 +921,47 @@ impl Ctx<'_> {
                 self.empty_warn(s, EntitySet::new(facets, ids))
             }
             Selector::Union(a, b) | Selector::Inter(a, b) | Selector::Diff(a, b) => {
-                let x = self.go(a, universe)?;
-                let y = match s {
-                    Selector::Inter(..) => self.go(b, Some(&x))?,
-                    _ => self.go(b, universe)?,
+                let (poly_a, poly_b) = (Self::is_polymorphic_box(a), Self::is_polymorphic_box(b));
+                let (x, y) = match s {
+                    Selector::Inter(..) => {
+                        if poly_a && !poly_b {
+                            let y = self.go(b, universe)?;
+                            let x = self.go(a, Some(&y))?;
+                            (x, y)
+                        } else {
+                            let x = self.go(a, universe)?;
+                            let y = self.go(b, Some(&x))?;
+                            (x, y)
+                        }
+                    }
+                    Selector::Diff(..) => {
+                        if poly_a && !poly_b {
+                            let y = self.go(b, universe)?;
+                            let full = self.all_of_kind(y.kind);
+                            let x = self.go(a, Some(universe.unwrap_or(&full)))?;
+                            (x, y)
+                        } else {
+                            let x = self.go(a, universe)?;
+                            let y = if poly_b { self.go(b, Some(&x))? } else { self.go(b, universe)? };
+                            (x, y)
+                        }
+                    }
+                    Selector::Union(..) => {
+                        if poly_a && !poly_b {
+                            let y = self.go(b, universe)?;
+                            let full = self.all_of_kind(y.kind);
+                            let x = self.go(a, Some(universe.unwrap_or(&full)))?;
+                            (x, y)
+                        } else if !poly_a && poly_b {
+                            let x = self.go(a, universe)?;
+                            let full = self.all_of_kind(x.kind);
+                            let y = self.go(b, Some(universe.unwrap_or(&full)))?;
+                            (x, y)
+                        } else {
+                            (self.go(a, universe)?, self.go(b, universe)?)
+                        }
+                    }
+                    _ => unreachable!(),
                 };
                 if x.kind != y.kind && !x.ids.is_empty() && !y.ids.is_empty() {
                     return bad(format!(
@@ -865,13 +978,11 @@ impl Ctx<'_> {
                 EntitySet::new(kind, ids)
             }
             Selector::Not(a) => {
-                let x = self.go(a, None)?;
-                let n = match x.kind {
-                    EntityKind::Regions => cx.regions.len(),
-                    EntityKind::Vertices => cx.vertices.len(),
-                    _ => cx.facet_count(),
-                } as u32;
-                EntitySet::new(x.kind, (0..n).filter(|i| !x.ids.contains(i)).collect())
+                let target_kind = if Self::is_polymorphic_box(a) { universe.map(|u| u.kind) } else { None };
+                let full_opt = target_kind.map(|k| self.all_of_kind(k));
+                let x = self.go(a, full_opt.as_ref())?;
+                let full = full_opt.unwrap_or_else(|| self.all_of_kind(x.kind));
+                EntitySet::new(x.kind, full.ids.into_iter().filter(|i| !x.ids.contains(i)).collect())
             }
         })
     }

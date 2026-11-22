@@ -18,6 +18,7 @@ pub fn default_value(d: &ParamDesc) -> Value {
         ParamKind::Vector { default, .. } => json!(default),
         ParamKind::Text { default } => json!(default),
         ParamKind::Names { default } => json!(default),
+        ParamKind::Numbers { default } => json!(default),
     }
 }
 
@@ -124,6 +125,17 @@ pub fn param_form(ui: &mut Ui, salt: &str, descs: &[ParamDesc], value: &mut Valu
                     if ui.add(egui::TextEdit::singleline(&mut s).id(ui.make_persistent_id((&d.name, "names"))).min_size(egui::vec2(110.0, 28.0)).desired_width(180.0).hint_text("region names, comma separated")).changed() {
                         let names: Vec<String> = s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
                         set = Some(json!(names));
+                    }
+                }
+                ParamKind::Numbers { default } => {
+                    let cur: Vec<f64> = given.as_ref().and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_else(|| default.clone());
+                    let mut s = cur.iter().map(f64::to_string).collect::<Vec<_>>().join(", ");
+                    if ui.add(egui::TextEdit::singleline(&mut s).id(ui.make_persistent_id((&d.name, "numbers"))).min_size(egui::vec2(110.0, 28.0)).desired_width(180.0).hint_text("numbers, comma separated")).changed() {
+                        if let Ok(nums) = s.split(',').map(str::trim).filter(|x| !x.is_empty()).map(|x| x.parse::<f64>()).collect::<Result<Vec<f64>, _>>() {
+                            if nums.iter().all(|x| x.is_finite()) {
+                                set = Some(json!(nums));
+                            }
+                        }
                     }
                 }
             }

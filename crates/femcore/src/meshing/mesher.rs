@@ -5,7 +5,7 @@
 use crate::mesh::SimplexMesh;
 use serde::{Deserialize, Serialize};
 use spade::{AngleLimit, ConstrainedDelaunayTriangulation, Point2, RefinementParameters, Triangulation};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
@@ -46,13 +46,314 @@ pub(crate) struct Fill<'a> {
 pub(crate) struct MeshParams {
     /// global element size (the area limit of the refinement)
     pub h: f64,
-    /// the smallest size asked for anywhere (spacing of the lattice test) and the largest (reach of the boundary test)
+    /// the smallest size asked for anywhere (base spacing of the octave lattice grid)
     pub h_fine_min: f64,
-    pub h_reach: f64,
     pub min_angle_deg: f64,
     /// bounding box of the chains
     pub lo: [f64; 2],
     pub hi: [f64; 2],
+    /// cap on additional Steiner vertices as a multiple of initial vertices (`None`: `(20 * n_init).max(100_000)`)
+    pub max_steiner_multiplier: Option<usize>,
+    /// fail with `Err` if Ruppert refinement stops before completion or leaves unhealed interior slivers
+    pub strict_mesh: bool,
+    /// optional upper cap on 2D cell / additional vertex budget
+    pub max_cells: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MeshChainsReport {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub n_init: usize,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub added_vertices: usize,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub refinement_complete: bool,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub healed_caps: usize,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub dropped_slivers: usize,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+struct SegEntry {
+    a: [f64; 2],
+    b: [f64; 2],
+    part: usize,
+    label: i32,
+    orig_idx: usize,
+    bbox: [f64; 4],
+}
+
+enum SegBvhKind {
+    Leaf { start: usize, end: usize },
+    Branch { left: usize, right: usize },
+}
+
+struct SegBvhNode {
+    bbox: [f64; 4],
+    kind: SegBvhKind,
+}
+
+/// Flat `Vec`-backed 2D AABB BVH over chain segments for $O(\log N)$ boundary proximity and facet labelling.
+struct SegBvh2 {
+    segs: Vec<SegEntry>,
+    nodes: Vec<SegBvhNode>,
+}
+
+impl SegBvh2 {
+    fn build(chains: &[Chain]) -> Self {
+        let mut segs = Vec::new();
+        for ch in chains {
+            for w in ch.pts.windows(2) {
+                let orig_idx = segs.len();
+                let bbox = [w[0][0].min(w[1][0]), w[0][1].min(w[1][1]), w[0][0].max(w[1][0]), w[0][1].max(w[1][1])];
+                segs.push(SegEntry { a: w[0], b: w[1], part: ch.part, label: ch.label, orig_idx, bbox });
+            }
+        }
+        let mut nodes = Vec::with_capacity(segs.len().saturating_mul(2));
+        if !segs.is_empty() {
+            let n = segs.len();
+            Self::build_rec(&mut segs, 0, n, &mut nodes);
+        }
+        Self { segs, nodes }
+    }
+
+    fn build_rec(segs: &mut [SegEntry], start: usize, end: usize, nodes: &mut Vec<SegBvhNode>) -> usize {
+        let mut bbox = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        let mut cbox = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for s in &segs[start..end] {
+            bbox[0] = bbox[0].min(s.bbox[0]);
+            bbox[1] = bbox[1].min(s.bbox[1]);
+            bbox[2] = bbox[2].max(s.bbox[2]);
+            bbox[3] = bbox[3].max(s.bbox[3]);
+            let cx = 0.5 * (s.bbox[0] + s.bbox[2]);
+            let cy = 0.5 * (s.bbox[1] + s.bbox[3]);
+            cbox[0] = cbox[0].min(cx);
+            cbox[1] = cbox[1].min(cy);
+            cbox[2] = cbox[2].max(cx);
+            cbox[3] = cbox[3].max(cy);
+        }
+        let idx = nodes.len();
+        nodes.push(SegBvhNode { bbox, kind: SegBvhKind::Leaf { start, end } });
+        if end - start <= 8 {
+            return idx;
+        }
+        let axis = usize::from(cbox[3] - cbox[1] > cbox[2] - cbox[0]);
+        let mid = start + (end - start) / 2;
+        segs[start..end].select_nth_unstable_by(mid - start, |x, y| {
+            let cx = 0.5 * (x.bbox[axis] + x.bbox[axis + 2]);
+            let cy = 0.5 * (y.bbox[axis] + y.bbox[axis + 2]);
+            cx.total_cmp(&cy).then_with(|| x.orig_idx.cmp(&y.orig_idx))
+        });
+        let left = Self::build_rec(segs, start, mid, nodes);
+        let right = Self::build_rec(segs, mid, end, nodes);
+        nodes[idx].kind = SegBvhKind::Branch { left, right };
+        idx
+    }
+
+    #[inline]
+    fn box_dist_sq(b: &[f64; 4], p: [f64; 2]) -> f64 {
+        let dx = (b[0] - p[0]).max(p[0] - b[2]).max(0.0);
+        let dy = (b[1] - p[1]).max(p[1] - b[3]).max(0.0);
+        dx * dx + dy * dy
+    }
+
+    fn any_within(&self, p: [f64; 2], r: f64) -> bool {
+        if self.nodes.is_empty() {
+            return false;
+        }
+        let r2 = r * r;
+        let mut stack = [0usize; 64];
+        let mut sp = 1usize;
+        while sp > 0 {
+            sp -= 1;
+            let node = &self.nodes[stack[sp]];
+            if Self::box_dist_sq(&node.bbox, p) >= r2 {
+                continue;
+            }
+            match node.kind {
+                SegBvhKind::Leaf { start, end } => {
+                    for s in &self.segs[start..end] {
+                        if Self::box_dist_sq(&s.bbox, p) < r2 && dist_point_segment(p, s.a, s.b) < r {
+                            return true;
+                        }
+                    }
+                }
+                SegBvhKind::Branch { left, right } => {
+                    stack[sp] = right;
+                    stack[sp + 1] = left;
+                    sp += 2;
+                }
+            }
+        }
+        false
+    }
+
+    fn candidates_within(&self, p: [f64; 2], r: f64, out: &mut Vec<usize>) {
+        out.clear();
+        if self.nodes.is_empty() {
+            return;
+        }
+        let r2 = r * r;
+        let mut stack = [0usize; 64];
+        let mut sp = 1usize;
+        while sp > 0 {
+            sp -= 1;
+            let node = &self.nodes[stack[sp]];
+            if Self::box_dist_sq(&node.bbox, p) >= r2 {
+                continue;
+            }
+            match node.kind {
+                SegBvhKind::Leaf { start, end } => {
+                    for (i, s) in self.segs[start..end].iter().enumerate() {
+                        if Self::box_dist_sq(&s.bbox, p) < r2 {
+                            out.push(start + i);
+                        }
+                    }
+                }
+                SegBvhKind::Branch { left, right } => {
+                    stack[sp] = right;
+                    stack[sp + 1] = left;
+                    sp += 2;
+                }
+            }
+        }
+        out.sort_unstable_by_key(|&idx| self.segs[idx].orig_idx);
+    }
+}
+
+struct OctaveLevel {
+    cell_size: f64,
+    pts: HashMap<(i64, i64), Vec<[f64; 2]>>,
+    has_finer: HashSet<(i64, i64)>,
+}
+
+/// Hierarchical octave-bucketed hash grid (`l_k = 2^k * 0.6 * h_fine_min`) bounding proximity probes to $\le 5 \times 5$
+/// per active octave while preserving exact distance rejection `< 0.6 * h` across arbitrary size ratios.
+struct OctaveFillGrid {
+    l0: f64,
+    h_fine_min: f64,
+    levels: Vec<OctaveLevel>,
+}
+
+impl OctaveFillGrid {
+    fn new(l0: f64, h_fine_min: f64, fills: &[Fill]) -> Self {
+        let mut k_max = 0usize;
+        for f in fills {
+            let k = Self::octave_of_static(f.h, h_fine_min);
+            k_max = k_max.max(k);
+        }
+        let levels = (0..=k_max)
+            .map(|m| OctaveLevel {
+                cell_size: l0 * ((1u64 << m) as f64),
+                pts: HashMap::new(),
+                has_finer: HashSet::new(),
+            })
+            .collect();
+        Self { l0, h_fine_min, levels }
+    }
+
+    #[inline]
+    fn octave_of_static(h: f64, h_fine_min: f64) -> usize {
+        let ratio = (h / (h_fine_min * (1.0 + 1e-11))).max(1.0);
+        (ratio.log2().floor() as usize).min(30)
+    }
+
+    #[inline]
+    fn octave_of(&self, h: f64) -> usize {
+        Self::octave_of_static(h, self.h_fine_min).min(self.levels.len().saturating_sub(1))
+    }
+
+    #[inline]
+    fn base_cell(&self, x: f64) -> i64 {
+        (x / self.l0).floor() as i64
+    }
+
+    fn insert(&mut self, p: [f64; 2], h: f64) {
+        let k = self.octave_of(h);
+        let cx0 = self.base_cell(p[0]);
+        let cy0 = self.base_cell(p[1]);
+        self.levels[k].pts.entry((cx0 >> k, cy0 >> k)).or_default().push(p);
+        for m in (k + 1)..self.levels.len() {
+            self.levels[m].has_finer.insert((cx0 >> m, cy0 >> m));
+        }
+    }
+
+    fn near_any(&self, p: [f64; 2], r: f64, h: f64) -> bool {
+        let k = self.octave_of(h);
+        let r_pad = r * (1.0 + 1e-12);
+        let bx_lo = self.base_cell(p[0] - r_pad);
+        let bx_hi = self.base_cell(p[0] + r_pad);
+        let by_lo = self.base_cell(p[1] - r_pad);
+        let by_hi = self.base_cell(p[1] + r_pad);
+
+        // 1. Active octaves `m >= k`: window `(cx_lo..=cx_hi) x (cy_lo..=cy_hi)` is guaranteed <= 5x5 cells
+        for m in k..self.levels.len() {
+            let lvl = &self.levels[m];
+            if lvl.pts.is_empty() {
+                continue;
+            }
+            let (cx_lo, cx_hi) = (bx_lo >> m, bx_hi >> m);
+            let (cy_lo, cy_hi) = (by_lo >> m, by_hi >> m);
+            debug_assert!(cx_hi - cx_lo <= 4 && cy_hi - cy_lo <= 4);
+            for cx in cx_lo..=cx_hi {
+                for cy in cy_lo..=cy_hi {
+                    if let Some(bucket) = lvl.pts.get(&(cx, cy)) {
+                        if bucket.iter().any(|q| (q[0] - p[0]).hypot(q[1] - p[1]) < r) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Finer octaves `m < k`: prune empty / distant / wholly-contained coarse cells via `has_finer`
+        if k > 0 && !self.levels[k].has_finer.is_empty() {
+            let mut stack: Vec<(usize, i64, i64)> = Vec::with_capacity(32);
+            let (cx_lo, cx_hi) = (bx_lo >> k, bx_hi >> k);
+            let (cy_lo, cy_hi) = (by_lo >> k, by_hi >> k);
+            for cx in cx_lo..=cx_hi {
+                for cy in cy_lo..=cy_hi {
+                    if self.levels[k].has_finer.contains(&(cx, cy)) {
+                        stack.push((k, cx, cy));
+                    }
+                }
+            }
+            while let Some((m, cx, cy)) = stack.pop() {
+                let lm = self.levels[m].cell_size;
+                let (x0, x1) = (cx as f64 * lm, (cx + 1) as f64 * lm);
+                let (y0, y1) = (cy as f64 * lm, (cy + 1) as f64 * lm);
+                let pad = 1e-11 * x0.abs().max(x1.abs()).max(y0.abs()).max(y1.abs()).max(lm);
+                let dx_min = (x0 - pad - p[0]).max(p[0] - (x1 + pad)).max(0.0);
+                let dy_min = (y0 - pad - p[1]).max(p[1] - (y1 + pad)).max(0.0);
+                if dx_min.hypot(dy_min) >= r {
+                    continue;
+                }
+                let dx_max = (p[0] - (x0 - pad)).abs().max((p[0] - (x1 + pad)).abs());
+                let dy_max = (p[1] - (y0 - pad)).abs().max((p[1] - (y1 + pad)).abs());
+                if dx_max.hypot(dy_max) < r {
+                    return true;
+                }
+                let child_m = m - 1;
+                let child_lvl = &self.levels[child_m];
+                for dcx in 0..=1 {
+                    for dcy in 0..=1 {
+                        let (ccx, ccy) = ((cx << 1) + dcx, (cy << 1) + dcy);
+                        if let Some(bucket) = child_lvl.pts.get(&(ccx, ccy)) {
+                            if bucket.iter().any(|q| (q[0] - p[0]).hypot(q[1] - p[1]) < r) {
+                                return true;
+                            }
+                        }
+                        if child_m > 0 && child_lvl.has_finer.contains(&(ccx, ccy)) {
+                            stack.push((child_m, ccx, ccy));
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 /// The shared tail of the meshers: constrained Delaunay triangulation of the chains (conforming, labelled), lattice points, Ruppert refinement,
@@ -62,7 +363,7 @@ pub(crate) fn mesh_chains(
     fills: &[Fill],
     mp: &MeshParams,
     domain_at: &dyn Fn([f64; 2]) -> Option<i32>,
-) -> Result<SimplexMesh, String> {
+) -> Result<(SimplexMesh, MeshChainsReport), String> {
     let (lo, hi, h_global) = (mp.lo, mp.hi, mp.h);
     let scale = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-300);
     // triangulate in coordinates centred on the shapes and scaled to about one, so rounding errors are
@@ -90,69 +391,52 @@ pub(crate) fn mesh_chains(
     // overlapping shapes do not interleave two lattices, and never close to a boundary sample or to
     // an earlier lattice point (which would give needle triangles)
     let h_fine_min = mp.h_fine_min.max(1e-300);
-    let reach = 0.5 * mp.h_reach;
-    let gcell = reach.max(1e-9 * scale);
-    let gk = |x: f64| (x / gcell).floor() as i64;
     let lcell = (0.6 * h_fine_min).max(1e-9 * scale);
-    let lk = |x: f64| (x / lcell).floor() as i64;
-    type Segment = ([f64; 2], [f64; 2]);
-    let mut seg_grid: HashMap<(i64, i64), Vec<Segment>> = HashMap::new();
-    for ch in chains {
-        for w in ch.pts.windows(2) {
-            let (x0, x1) = (w[0][0].min(w[1][0]) - reach, w[0][0].max(w[1][0]) + reach);
-            let (y0, y1) = (w[0][1].min(w[1][1]) - reach, w[0][1].max(w[1][1]) + reach);
-            for cx in gk(x0)..=gk(x1) {
-                for cy in gk(y0)..=gk(y1) {
-                    seg_grid.entry((cx, cy)).or_default().push((w[0], w[1]));
-                }
-            }
-        }
-    }
-    let mut lattice_pts: HashMap<(i64, i64), Vec<[f64; 2]>> = HashMap::new();
-    for fill in fills {
-        let (h, blo, bhi) = (fill.h, fill.lo, fill.hi);
-        let dy = h * 3f64.sqrt() / 2.0;
-        let mut row = 0;
-        let mut y = blo[1] + dy;
-        while y < bhi[1] {
-            let mut x = blo[0] + if row % 2 == 0 { 0.5 * h } else { h };
-            while x < bhi[0] {
-                if (fill.owner)([x, y]) {
-                    let (kx, ky) = (gk(x), gk(y));
-                    let (lx, ly) = (lk(x), lk(y));
-                    let span = (0.6 * h / lcell).ceil() as i64 + 1;
-                    let near_boundary = seg_grid.get(&(kx, ky)).is_some_and(|l| l.iter().any(|s| dist_point_segment([x, y], s.0, s.1) < 0.4 * h));
-                    let mut near_point = false;
-                    'o: for dx in -span..=span {
-                        for dyy in -span..=span {
-                            if let Some(l) = lattice_pts.get(&(lx + dx, ly + dyy)) {
-                                if l.iter().any(|q| (q[0] - x).hypot(q[1] - y) < 0.6 * h) {
-                                    near_point = true;
-                                    break 'o;
-                                }
-                            }
+    let seg_bvh = SegBvh2::build(chains);
+    if !fills.is_empty() {
+        let mut octave_grid = OctaveFillGrid::new(lcell, h_fine_min, fills);
+        for fill in fills {
+            let (h, blo, bhi) = (fill.h, fill.lo, fill.hi);
+            let dy = h * 3f64.sqrt() / 2.0;
+            let mut row = 0;
+            let mut y = blo[1] + dy;
+            while y < bhi[1] {
+                let mut x = blo[0] + if row % 2 == 0 { 0.5 * h } else { h };
+                while x < bhi[0] {
+                    if (fill.owner)([x, y]) {
+                        let near_boundary = seg_bvh.any_within([x, y], 0.4 * h);
+                        if !near_boundary && !octave_grid.near_any([x, y], 0.6 * h, h) {
+                            let pn = nrm([x, y]);
+                            let _ = cdt.insert(Point2::new(pn[0], pn[1]));
+                            octave_grid.insert([x, y], h);
                         }
                     }
-                    if !near_boundary && !near_point {
-                        let pn = nrm([x, y]);
-                        let _ = cdt.insert(Point2::new(pn[0], pn[1]));
-                        lattice_pts.entry((lx, ly)).or_default().push([x, y]);
-                    }
+                    x += h;
                 }
-                x += h;
+                y += dy;
+                row += 1;
             }
-            y += dy;
-            row += 1;
         }
     }
+    let n_init = cdt.num_vertices();
+    let max_add = match mp.max_steiner_multiplier {
+        Some(mult) => n_init.saturating_mul(mult),
+        None => n_init.saturating_mul(20).max(100_000),
+    };
+    let max_add = match mp.max_cells {
+        Some(mc) => max_add.min(mc),
+        None => max_add,
+    };
     let params = RefinementParameters::<f64>::new()
         // no exclude_outer_faces: it decides inside/outside by constraint parity, which nested or
         // overlapping shapes break; unwanted cells are dropped by the shape test below instead
         .keep_constraint_edges()
         .with_angle_limit(AngleLimit::from_deg(mp.min_angle_deg.clamp(0.0, 33.0)))
         .with_max_allowed_area(0.5 * (h_global / scale) * (h_global / scale))
-        .with_min_required_area(1e-14);
-    cdt.refine(params);
+        .with_min_required_area(1e-14)
+        .with_max_additional_vertices(max_add);
+    let ref_res = cdt.refine(params);
+    let added_vertices = cdt.num_vertices().saturating_sub(n_init);
 
     // cells: faces whose centroid is inside some shape (the last containing shape wins)
     let nvert = cdt.num_vertices();
@@ -231,7 +515,10 @@ pub(crate) fn mesh_chains(
             cell_labels.push(domain);
         }
     }
+    let mut healed_caps = 0usize;
+    let mut dropped_slivers = 0usize;
     if !caps.is_empty() {
+        let mut cap_healed = vec![false; caps.len()];
         // An interior collinear cap `(u, v, m)` (stopped by `min_required_area`) leaves `(u, m)`, `(m, v)` and `(u, v)`
         // mismatched across `u-v`; split the single kept triangle across `(u, v)` at `m` so no interior crack remains.
         for _pass in 0..2 {
@@ -242,7 +529,10 @@ pub(crate) fn mesh_chains(
                 }
             }
             let mut any = false;
-            for &(u, v, m) in &caps {
+            for (ci_cap, &(u, v, m)) in caps.iter().enumerate() {
+                if cap_healed[ci_cap] {
+                    continue;
+                }
                 let e_uv = (u.min(v), u.max(v));
                 let e_um = (u.min(m), u.max(m));
                 let e_mv = (m.min(v), m.max(v));
@@ -269,6 +559,8 @@ pub(crate) fn mesh_chains(
                         *e_cnt.entry(e_um).or_insert(0) += 1;
                         *e_cnt.entry(e_mv).or_insert(0) += 1;
                         *e_cnt.entry((d.min(m), d.max(m))).or_insert(0) += 2;
+                        cap_healed[ci_cap] = true;
+                        healed_caps += 1;
                         any = true;
                     }
                 }
@@ -277,6 +569,63 @@ pub(crate) fn mesh_chains(
                 break;
             }
         }
+        if cap_healed.iter().any(|&h| !h) {
+            let mut post_e_cnt: HashMap<(u32, u32), u32> = HashMap::new();
+            for t in cells.chunks(3) {
+                for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                    *post_e_cnt.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+                }
+            }
+            for (ci_cap, &(u, v, m)) in caps.iter().enumerate() {
+                if cap_healed[ci_cap] {
+                    continue;
+                }
+                let e_uv = (u.min(v), u.max(v));
+                let e_um = (u.min(m), u.max(m));
+                let e_mv = (m.min(v), m.max(v));
+                let c_uv = post_e_cnt.get(&e_uv).copied().unwrap_or(0);
+                let c_um = post_e_cnt.get(&e_um).copied().unwrap_or(0);
+                let c_mv = post_e_cnt.get(&e_mv).copied().unwrap_or(0);
+                if c_uv > 0 {
+                    dropped_slivers += 1;
+                } else if (c_um > 0 || c_mv > 0) && (c_um < 2 || c_mv < 2) {
+                    let (pu, pv) = (den(vpos[u as usize]), den(vpos[v as usize]));
+                    let (dx, dy) = (pv[0] - pu[0], pv[1] - pu[1]);
+                    let len = dx.hypot(dy);
+                    if len > 0.0 {
+                        let (nx, ny) = (-dy / len, dx / len);
+                        let eps = 1e-5 * len;
+                        let (mx, my) = (0.5 * (pu[0] + pv[0]), 0.5 * (pu[1] + pv[1]));
+                        if domain_at([mx + eps * nx, my + eps * ny]).is_some()
+                            && domain_at([mx - eps * nx, my - eps * ny]).is_some()
+                        {
+                            dropped_slivers += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    crate::progress::note(format!(
+        "2D Ruppert refinement: n_init={n_init}, added_vertices={added_vertices}, complete={}, healed_caps={healed_caps}, dropped_slivers={dropped_slivers}",
+        ref_res.refinement_complete
+    ));
+    let mut warnings = Vec::new();
+    if !ref_res.refinement_complete {
+        warnings.push(format!(
+            "2D Ruppert refinement stopped before completion after adding {added_vertices} Steiner vertices (n_init={n_init}, max_additional_vertices={max_add}); increase max_steiner_multiplier, lower min_angle_deg, or increase h"
+        ));
+    }
+    if dropped_slivers > 0 {
+        warnings.push(format!(
+            "2D triangulation dropped {dropped_slivers} unhealed collinear sliver triangle(s) (healed_caps={healed_caps})"
+        ));
+    }
+    if mp.strict_mesh && (!ref_res.refinement_complete || dropped_slivers > 0) {
+        return Err(format!(
+            "strict_mesh check failed: refinement_complete={}, dropped_slivers={dropped_slivers} (n_init={n_init}, added_vertices={added_vertices}, max_additional_vertices={max_add})",
+            ref_res.refinement_complete
+        ));
     }
     if cells.is_empty() {
         return Err("the geometry encloses no area".into());
@@ -304,18 +653,20 @@ pub(crate) fn mesh_chains(
     boundary.sort_unstable();
     let (mut facets, mut facet_labels) = (vec![], vec![]);
     let tol = 1e-6 * scale;
+    let search_r = tol * 10.0 + 1e-12;
+    let mut cand_idxs: Vec<usize> = Vec::new();
     for (a, b) in boundary {
         let pa = [points[2 * a as usize], points[2 * a as usize + 1]];
         let pb = [points[2 * b as usize], points[2 * b as usize + 1]];
         let mid = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0];
         // the chain segment closest to the midpoint; the last shape wins ties
+        seg_bvh.candidates_within(mid, search_r, &mut cand_idxs);
         let mut best: Option<(f64, usize, i32)> = None;
-        for ch in chains {
-            for s in ch.pts.windows(2) {
-                let d = dist_point_segment(mid, s[0], s[1]);
-                if d < tol * 10.0 + 1e-12 && best.is_none_or(|(bd, bp, _)| d < bd - tol || (d <= bd + tol && ch.part >= bp)) {
-                    best = Some((d, ch.part, ch.label));
-                }
+        for &si in &cand_idxs {
+            let s = &seg_bvh.segs[si];
+            let d = dist_point_segment(mid, s.a, s.b);
+            if d < search_r && best.is_none_or(|(bd, bp, _)| d < bd - tol || (d <= bd + tol && s.part >= bp)) {
+                best = Some((d, s.part, s.label));
             }
         }
         let lab = best.map(|b| b.2).ok_or_else(|| format!("a boundary edge near ({:.4e}, {:.4e}) belongs to no shape edge", mid[0], mid[1]))?;
@@ -324,7 +675,15 @@ pub(crate) fn mesh_chains(
     }
     let nc = cell_labels.len();
     debug_assert_eq!(nc * 3, cells.len());
-    Ok(SimplexMesh::new(2, points, cells, cell_labels, facets, facet_labels))
+    let report = MeshChainsReport {
+        n_init,
+        added_vertices,
+        refinement_complete: ref_res.refinement_complete,
+        healed_caps,
+        dropped_slivers,
+        warnings,
+    };
+    Ok((SimplexMesh::new(2, points, cells, cell_labels, facets, facet_labels), report))
 }
 
 /// A sweep [`Layer`] paired with an optional domain-label remap `(source_domain -> target_domain)` for that layer.
@@ -541,16 +900,19 @@ pub fn sweep_model_3d(
             &MeshParams {
                 h: h_global,
                 h_fine_min,
-                h_reach: h_global,
                 min_angle_deg,
                 lo: [ov_bb.lo[0], ov_bb.lo[1]],
                 hi: [ov_bb.hi[0], ov_bb.hi[1]],
+                max_steiner_multiplier: None,
+                strict_mesh: false,
+                max_cells: None,
             },
             &|cen| {
                 let c = ov.locate(cen)?;
                 cell_active[c as usize].then_some(c as i32 + 1)
             },
         )?
+        .0
     } else {
         let cx = ev.complex();
         let mut xs = Vec::new();
@@ -704,13 +1066,16 @@ pub fn sweep_model_3d(
             &MeshParams {
                 h: h_global,
                 h_fine_min: h_fine_min.max(1e-12 * h_global),
-                h_reach: h_global,
                 min_angle_deg,
                 lo: [xs[0], zs[0]],
                 hi: [*xs.last().unwrap(), *zs.last().unwrap()],
+                max_steiner_multiplier: None,
+                strict_mesh: false,
+                max_cells: None,
             },
             &locate_grid,
         )?
+        .0
     };
 
     let m2 = sort_nodes(&m2_raw);
@@ -871,4 +1236,116 @@ pub fn sweep_model_3d(
     }
 
     Ok(SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn octave_fill_grid_1000_to_1_size_ratio_under_250ms_and_deterministic() {
+        let h_global = 0.25;
+        let h_fine = 0.00025; // exact 1000:1 size ratio
+        let h_mid = 0.01;
+
+        let subdiv = |a: [f64; 2], b: [f64; 2], n: usize| -> Vec<[f64; 2]> {
+            (0..=n)
+                .map(|i| {
+                    let t = i as f64 / n as f64;
+                    [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]
+                })
+                .collect()
+        };
+        let mut chains = Vec::new();
+        // Outer 1.0 x 1.0 box subdivided into 2,000 boundary segments (500 per side)
+        for (i, (a, b)) in [
+            ([0.0, 0.0], [1.0, 0.0]),
+            ([1.0, 0.0], [1.0, 1.0]),
+            ([1.0, 1.0], [0.0, 1.0]),
+            ([0.0, 1.0], [0.0, 0.0]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            chains.push(Chain { pts: subdiv(a, b, 500), label: (i + 1) as i32, part: i });
+        }
+        // Fine inner box [0.499, 0.501]^2
+        let (f0, f1) = (0.499, 0.501);
+        for (i, (a, b)) in [
+            ([f0, f0], [f1, f0]),
+            ([f1, f0], [f1, f1]),
+            ([f1, f1], [f0, f1]),
+            ([f0, f1], [f0, f0]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            chains.push(Chain { pts: subdiv(a, b, 8), label: 10, part: 10 + i });
+        }
+
+        let make = || {
+            let fills = vec![
+                Fill {
+                    lo: [f0, f0],
+                    hi: [f1, f1],
+                    h: h_fine,
+                    owner: Box::new(move |p| p[0] > f0 && p[0] < f1 && p[1] > f0 && p[1] < f1),
+                },
+                Fill {
+                    lo: [0.45, 0.45],
+                    hi: [0.55, 0.55],
+                    h: h_mid,
+                    owner: Box::new(move |p| {
+                        p[0] > 0.45
+                            && p[0] < 0.55
+                            && p[1] > 0.45
+                            && p[1] < 0.55
+                            && !(p[0] >= f0 && p[0] <= f1 && p[1] >= f0 && p[1] <= f1)
+                    }),
+                },
+            ];
+            let mp = MeshParams {
+                h: h_global,
+                h_fine_min: h_fine,
+                min_angle_deg: 25.0,
+                lo: [0.0, 0.0],
+                hi: [1.0, 1.0],
+                max_steiner_multiplier: None,
+                strict_mesh: true,
+                max_cells: None,
+            };
+            mesh_chains(&chains, &fills, &mp, &|p| {
+                if p[0] < 0.0 || p[0] > 1.0 || p[1] < 0.0 || p[1] > 1.0 {
+                    None
+                } else if p[0] > f0 && p[0] < f1 && p[1] > f0 && p[1] < f1 {
+                    Some(2)
+                } else {
+                    Some(1)
+                }
+            })
+            .unwrap()
+        };
+
+        let t0 = std::time::Instant::now();
+        let (m1, rep1) = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(make);
+        let dt_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        assert!(
+            dt_ms < 250.0,
+            "1000:1 octave fill grid + 2000-segment boundary took {dt_ms:.2} ms (limit 250 ms)"
+        );
+        assert!(rep1.n_init > 2000 && rep1.added_vertices > 0);
+        assert!(rep1.refinement_complete, "Ruppert must complete on 1000:1 fill grid");
+        assert_eq!(rep1.dropped_slivers, 0, "healed_caps={}, dropped={}", rep1.healed_caps, rep1.dropped_slivers);
+        assert!(rep1.warnings.is_empty());
+
+        let (m8, _) = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap().install(make);
+        assert_eq!(
+            m1.points.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+            m8.points.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+        );
+        assert_eq!(m1.cells, m8.cells);
+        assert_eq!(m1.cell_labels, m8.cell_labels);
+        assert_eq!(m1.facets, m8.facets);
+        assert_eq!(m1.facet_labels, m8.facet_labels);
+    }
 }

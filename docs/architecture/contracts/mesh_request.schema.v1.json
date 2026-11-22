@@ -8,6 +8,14 @@
       "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface",
       "type": "boolean"
     },
+    "dz_min": {
+      "description": "3D sheet mesher: floor on initial vertical z-slab thickness near sheet planes (m)",
+      "exclusiveMinimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "gap_cells": {
       "description": "3D sheet mesher: target number of cells across narrow coplanar gaps",
       "exclusiveMinimum": 0,
@@ -21,11 +29,35 @@
       "exclusiveMinimum": 0,
       "type": "number"
     },
+    "max_cells": {
+      "description": "maximum number of cells allowed before aborting meshing",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "max_dev": {
       "description": "largest distance of a chord from a curved edge or face (m); default h / 50",
       "exclusiveMinimum": 0,
       "type": [
         "number",
+        "null"
+      ]
+    },
+    "max_steiner_multiplier": {
+      "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_z_slabs": {
+      "description": "3D sheet mesher: maximum total number of horizontal z-slabs across active stack layers",
+      "minimum": 1,
+      "type": [
+        "integer",
         "null"
       ]
     },
@@ -73,6 +105,11 @@
           "type": "object"
         }
       ]
+    },
+    "strict_mesh": {
+      "default": false,
+      "description": "fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles",
+      "type": "boolean"
     },
     "structured_pml": {
       "default": false,
@@ -137,6 +174,14 @@
       "default": false,
       "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes",
       "type": "boolean"
+    },
+    "z_growth_ratio": {
+      "description": "3D sheet mesher: geometric growth ratio for z-slab thickness away from sheet planes (default 1.35)",
+      "exclusiveMinimum": 1.0,
+      "type": [
+        "number",
+        "null"
+      ]
     }
   },
   "required": [

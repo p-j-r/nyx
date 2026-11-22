@@ -112,6 +112,7 @@ impl Engine {
         e.base_library = self.base_library.clone();
         e.project = self.project.clone();
         e.owner = self.owner.clone();
+        e.memory_wait_timeout = self.memory_wait_timeout;
         e
     }
 
@@ -186,6 +187,8 @@ impl Engine {
                 _ => return Err(Error::invalid("`priority` is 1, 2 or 3 (3, the default, is for sweeps)")),
             },
         };
+        let memory_wait_timeout_s = crate::queue::memory_wait_timeout_of(args)?;
+        let _ = crate::estimate::resolve_memory_wait_timeout(memory_wait_timeout_s, self.memory_wait_timeout)?;
         let opts = QueueOpts {
             priority: Some(priority),
             supersede: false,
@@ -194,6 +197,9 @@ impl Engine {
             force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
             shared: args.get("shared").and_then(Value::as_bool),
             warm: None,
+            save_fields: crate::queue::save_fields_of(args)?,
+            post_analyses: crate::queue::post_analyses_of(args)?,
+            memory_wait_timeout_s,
         };
         let warm = match args.get("reuse").and_then(Value::as_str) {
             None | Some("none") => false,
@@ -342,9 +348,13 @@ impl Engine {
         // records the point itself (the window, which has no workspace link in the engine) records the same numbers a Compute would
         let mut metrics = Map::new();
         let mut reuse: Option<Value> = None;
+        let mut pt_fields_saved = true;
+        let mut pt_post_analyses: Vec<Value> = Vec::new();
         let (state, error, run, numbers, dofs, cells) = match outcome {
-            Ok(JobOutput::Solved { model, results, failed, worker, reuse: reuse_of }) => {
+            Ok(JobOutput::Solved { model, results, failed, worker, reuse: reuse_of, fields_saved, post_analyses }) => {
                 reuse = reuse_of;
+                pt_fields_saved = fields_saved;
+                pt_post_analyses = post_analyses;
                 let mesh = model.solver_mesh();
                 for r in &results {
                     log.extend(r.log.iter().map(|l| format!("{}: {l}", r.physics)));
@@ -373,6 +383,8 @@ impl Engine {
                             &log,
                             Some(mesh),
                             reuse.as_ref(),
+                            fields_saved,
+                            &[],
                         );
                         ("failed", Some(e.to_string()), run, numbers, dofs, Some(cells))
                     }
@@ -385,6 +397,8 @@ impl Engine {
                             &log,
                             Some(mesh),
                             reuse.as_ref(),
+                            fields_saved,
+                            &pt_post_analyses,
                         );
                         ("done", None, run, numbers, dofs, Some(cells))
                     }
@@ -404,7 +418,7 @@ impl Engine {
                 let run = if never_ran {
                     Value::Null
                 } else {
-                    self.record_point(&project, RunOutcome::Failed(&e), seconds, &log, None, None)
+                    self.record_point(&project, RunOutcome::Failed(&e), seconds, &log, None, None, true, &[])
                 };
                 let state = if matches!(e, Error::Cancelled) { "cancelled" } else { "failed" };
                 (state, Some(e.to_string()), run, Map::new(), Map::new(), None)
@@ -422,12 +436,19 @@ impl Engine {
         if let Some(r) = reuse {
             row["reuse"] = r;
         }
+        if !pt_fields_saved {
+            row["fields_saved"] = json!(false);
+        }
+        if !pt_post_analyses.is_empty() {
+            row["post_analyses"] = json!(pt_post_analyses);
+        }
         if let Some(p) = self.sweeps.get_mut(&sweep).and_then(|s| s.points.get_mut(index)) {
             p.row = Some(row.clone());
         }
         Ok(row)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_point(
         &mut self,
         project: &crate::project::Project,
@@ -436,13 +457,24 @@ impl Engine {
         log: &[String],
         mesh: Option<std::sync::Arc<femcore::mesh::SimplexMesh>>,
         reuse: Option<&Value>,
+        fields_saved: bool,
+        post_analyses: &[Value],
     ) -> Value {
         let script = self.script.clone();
         match self.link.as_mut() {
             None => Value::Null,
             Some(l) => {
                 l.script = script;
-                match l.record_point(project, outcome, seconds, log, mesh.as_deref(), reuse) {
+                match l.record_point_with_options(
+                    project,
+                    outcome,
+                    seconds,
+                    log,
+                    mesh.as_deref(),
+                    reuse,
+                    fields_saved,
+                    post_analyses,
+                ) {
                     Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
                     Err(e) => json!({ "error": e.to_string() }),
                 }

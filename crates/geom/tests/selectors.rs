@@ -282,3 +282,69 @@ fn the_format_key_is_written_and_a_foreign_format_is_refused() {
     assert!(e.contains("format 2") && e.contains("reads format 1"), "{e}");
     assert!(l.validate().is_ok());
 }
+
+#[test]
+fn polymorphic_in_box_filters_3d_edges_regions_and_faces_in_any_operand_order() {
+    let mut m = Model::new_3d();
+    let sub = m.box_("sub", (-500e-6, -500e-6, -200e-6), (500e-6, 500e-6, 0.0));
+    let vac = m.box_("vac", (-500e-6, -500e-6, 0.0), (500e-6, 500e-6, 200e-6));
+    // Build a segmented CPW sheet at z = 0 spanning x in [-300e-6, 300e-6] with inner segment in [-60e-6, 60e-6]
+    let seg_left = m.rect("seg_left", (-300e-6, -5e-6), (-60e-6, 5e-6));
+    let seg_mid = m.rect("seg_mid", (-60e-6, -12e-6), (60e-6, 12e-6));
+    let seg_right = m.rect("seg_right", (60e-6, -5e-6), (300e-6, 5e-6));
+    let cpw_u = m.union("cpw_u", &[seg_left, seg_mid, seg_right]);
+    m.sheet("cpw", cpw_u, 0.0);
+    m.overlay(&[("substrate", sub), ("vacuum", vac)]);
+
+    let ev = m.eval(Tier::Complex).unwrap();
+    let all_edges = ev.resolve(&Selector::parse("cpw:edge").unwrap()).unwrap().set;
+    assert_eq!(all_edges.kind, EntityKind::Edges);
+    assert!(all_edges.ids.len() >= 8);
+
+    let lhs = ev
+        .resolve(&Selector::parse("in_box([-100e-6, -100e-6, -1e-6], [100e-6, 100e-6, 1e-6]) & cpw:edge").unwrap())
+        .unwrap()
+        .set;
+    let rhs = ev
+        .resolve(&Selector::parse("cpw:edge & in_box([-100e-6, -100e-6, -1e-6], [100e-6, 100e-6, 1e-6])").unwrap())
+        .unwrap()
+        .set;
+    let diff = ev
+        .resolve(&Selector::parse("cpw:edge - in_box([-100e-6, -100e-6, -1e-6], [100e-6, 100e-6, 1e-6])").unwrap())
+        .unwrap()
+        .set;
+    let neg_lhs = ev
+        .resolve(&Selector::parse("!in_box([-100e-6, -100e-6, -1e-6], [100e-6, 100e-6, 1e-6]) & cpw:edge").unwrap())
+        .unwrap()
+        .set;
+
+    assert_eq!(lhs.kind, EntityKind::Edges);
+    assert_eq!(lhs, rhs, "in_box & cpw:edge must match cpw:edge & in_box");
+    assert_eq!(diff.kind, EntityKind::Edges);
+    assert_eq!(diff, neg_lhs, "cpw:edge - in_box must match !in_box & cpw:edge");
+    assert!(!lhs.ids.is_empty() && !diff.ids.is_empty());
+    assert_eq!(lhs.ids.len() + diff.ids.len(), all_edges.ids.len());
+    for &ei in &lhs.ids {
+        let b = ev.edges3()[ei as usize].bbox;
+        assert!(b.lo[0] >= -100.1e-6 && b.hi[0] <= 100.1e-6 && b.lo[2].abs() <= 1e-6);
+    }
+
+    // Polymorphic in_box with Region selector (both orders)
+    let reg_lhs = ev
+        .resolve(
+            &Selector::parse("in_box([-600e-6, -600e-6, -300e-6], [600e-6, 600e-6, 10e-6]) & region(substrate)")
+                .unwrap(),
+        )
+        .unwrap()
+        .set;
+    let reg_rhs = ev
+        .resolve(
+            &Selector::parse("region(substrate) & in_box([-600e-6, -600e-6, -300e-6], [600e-6, 600e-6, 10e-6])")
+                .unwrap(),
+        )
+        .unwrap()
+        .set;
+    assert_eq!(reg_lhs.kind, EntityKind::Regions);
+    assert_eq!(reg_lhs, reg_rhs);
+    assert_eq!(reg_lhs.ids.len(), 1);
+}

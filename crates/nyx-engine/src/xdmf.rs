@@ -32,6 +32,9 @@ pub fn write_xdmf(
     mesh: &SimplexMesh,
     results: &[(String, &SolveResult)],
 ) -> Result<std::path::PathBuf, String> {
+    if mesh.n_cells() == 0 || mesh.points.is_empty() {
+        return Err("cannot write XDMF index for a results file with no saved mesh/fields".into());
+    }
     use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
     use quick_xml::Writer;
     let h5name = h5_path.file_name().and_then(|n| n.to_str()).ok_or("bad file name")?.to_string();

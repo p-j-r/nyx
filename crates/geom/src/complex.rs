@@ -185,6 +185,8 @@ pub struct Complex {
     /// parametrised in `(x, z)`.
     pub axis: usize,
     pub stack: Option<Box<crate::stack::LayerStack>>,
+    /// Flat 2D AABB BVH over regions, loops, and edges in the 2D curve `(u, v)` frame.
+    pub bvh: crate::bvh::ComplexBvh,
 }
 
 pub fn curve_kind(c: &Curve) -> &'static str {
@@ -307,6 +309,64 @@ impl Complex {
         self.edges3.iter_mut().for_each(|e| e.bbox = conv(&me, e.bbox));
         self.edges.iter_mut().for_each(|e| e.bbox = conv(&me, e.bbox));
         self.vertices.iter_mut().for_each(|v| v.p = me.wv(v.p));
+        self.rebuild_bvh();
+    }
+
+    /// Builds or rebuilds the 2D curve-frame `(u, v)` AABB BVH over `edges`, `loops`, and `regions`.
+    pub fn rebuild_bvh(&mut self) {
+        if self.edges.is_empty() && self.regions.is_empty() {
+            self.bvh = crate::bvh::ComplexBvh::default();
+            return;
+        }
+        let to_uv = |c: &Complex, b: Aabb| -> crate::bvh::Bbox2 {
+            if b.is_empty() {
+                crate::bvh::Bbox2::EMPTY
+            } else {
+                let (lo, hi) = (c.iv(b.lo), c.iv(b.hi));
+                crate::bvh::Bbox2::new([lo[0], lo[1]], [hi[0], hi[1]])
+            }
+        };
+        let edge_boxes: Vec<crate::bvh::Bbox2> = self.edges.iter().map(|e| to_uv(self, e.bbox)).collect();
+        let mut loop_boxes: Vec<crate::bvh::Bbox2> = Vec::with_capacity(self.loops.len());
+        let mut loop_edge_bvhs: Vec<Option<crate::bvh::AabbBvh2>> = Vec::with_capacity(self.loops.len());
+        for l in &self.loops {
+            let mut lb = crate::bvh::Bbox2::EMPTY;
+            for &(e, _) in &l.edges {
+                lb = lb.union(&edge_boxes[e as usize]);
+            }
+            loop_boxes.push(lb);
+            if l.edges.len() >= 32 {
+                let local_boxes: Vec<crate::bvh::Bbox2> =
+                    l.edges.iter().map(|&(e, _)| edge_boxes[e as usize]).collect();
+                loop_edge_bvhs.push(Some(crate::bvh::AabbBvh2::build(local_boxes)));
+            } else {
+                loop_edge_bvhs.push(None);
+            }
+        }
+        let region_boxes: Vec<crate::bvh::Bbox2> = self
+            .regions
+            .iter()
+            .map(|r| {
+                if !self.loops.is_empty() {
+                    let mut rb = crate::bvh::Bbox2::EMPTY;
+                    for &l in &r.loops {
+                        if self.loops[l as usize].area > 0.0 {
+                            rb = rb.union(&loop_boxes[l as usize]);
+                        }
+                    }
+                    if !rb.is_empty() {
+                        return rb;
+                    }
+                }
+                to_uv(self, r.bbox)
+            })
+            .collect();
+        self.bvh = crate::bvh::ComplexBvh {
+            regions: crate::bvh::AabbBvh2::build(region_boxes),
+            loops: crate::bvh::AabbBvh2::build(loop_boxes),
+            edges: crate::bvh::AabbBvh2::build(edge_boxes),
+            loop_edge_bvhs,
+        };
     }
 
     // ---- uniform "facet" access (the codimension-1 entities: edges of a 2D complex, faces of a 3D one), used by selectors ----
@@ -612,16 +672,52 @@ impl Complex {
         self.check_topology3()
     }
 
+    pub(crate) fn point_in_loop_idx(&self, l_idx: usize, p: V2) -> bool {
+        let l = &self.loops[l_idx];
+        let pad = self.tol.max(1e-15);
+        if self.bvh.loops.item_boxes.len() == self.loops.len() {
+            if !self.bvh.loops.item_boxes[l_idx].contains_point(p, pad) {
+                return false;
+            }
+            if let Some(Some(lbvh)) = self.bvh.loop_edge_bvhs.get(l_idx) {
+                let mut inside = false;
+                lbvh.query_ray_x(p, pad, |k| {
+                    let (e, fwd) = l.edges[k as usize];
+                    if crate::arrange::edge_crosses_ray_x(&self.edges[e as usize], &self.curves, fwd, p) {
+                        inside = !inside;
+                    }
+                });
+                return inside;
+            }
+            if self.bvh.edges.item_boxes.len() == self.edges.len() {
+                let mut inside = false;
+                for &(e, fwd) in &l.edges {
+                    if self.bvh.edges.item_boxes[e as usize].overlaps_ray_x(p, pad)
+                        && crate::arrange::edge_crosses_ray_x(&self.edges[e as usize], &self.curves, fwd, p)
+                    {
+                        inside = !inside;
+                    }
+                }
+                return inside;
+            }
+        }
+        crate::arrange::point_in_loop(l, &self.edges, &self.curves, p)
+    }
+
     /// Region containing `p` by testing the boundary loops (chord-flattened); agrees with `Evaluated::classify` away from the boundary.
     pub fn locate(&self, p: V2) -> Option<u32> {
+        let pad = self.tol.max(1e-15);
+        if self.bvh.regions.item_boxes.len() == self.regions.len() && !self.bvh.regions.is_empty() {
+            let mut cands = Vec::new();
+            self.bvh.regions.query_point(p, pad, |r| cands.push(r));
+            cands.sort_unstable();
+            return cands.into_iter().find(|&r| {
+                self.regions[r as usize].loops.iter().filter(|&&l| self.point_in_loop_idx(l as usize, p)).count() % 2
+                    == 1
+            });
+        }
         (0..self.regions.len() as u32).find(|&r| {
-            self.regions[r as usize]
-                .loops
-                .iter()
-                .filter(|&&l| crate::arrange::point_in_loop(&self.loops[l as usize], &self.edges, &self.curves, p))
-                .count()
-                % 2
-                == 1
+            self.regions[r as usize].loops.iter().filter(|&&l| self.point_in_loop_idx(l as usize, p)).count() % 2 == 1
         })
     }
 

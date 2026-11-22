@@ -277,6 +277,26 @@ impl Mesher for FemcoreMesher {
                 return Err(Error::invalid("`gap_cells` must be a positive finite number"));
             }
         }
+        if let Some(mc) = s.max_cells {
+            if mc < 1 {
+                return Err(Error::invalid("`max_cells` must be an integer >= 1"));
+            }
+        }
+        if let Some(dz) = s.dz_min {
+            if !(dz > 0.0 && dz.is_finite()) {
+                return Err(Error::invalid("`dz_min` must be a positive finite number"));
+            }
+        }
+        if let Some(ms) = s.max_z_slabs {
+            if ms < 1 {
+                return Err(Error::invalid("`max_z_slabs` must be an integer >= 1"));
+            }
+        }
+        if let Some(zr) = s.z_growth_ratio {
+            if !(zr > 1.0 && zr.is_finite()) {
+                return Err(Error::invalid("`z_growth_ratio` must be a finite number strictly greater than 1.0"));
+            }
+        }
         if let Some(layers) = &s.sweep {
             if geometry.dim == 3 {
                 let _stage = femcore::progress::stage(format!("sweeping 3D geometry along y (element size {} m)", s.h));
@@ -328,9 +348,10 @@ impl Mesher for FemcoreMesher {
             _ => None,
         };
         // wave sizing adapts the mesh to the waves; an explicit `adapt_scale` sets the factor on every size
+        let adapt_max_cells = s.max_cells.or(Some(2_000_000));
         let mesher = match (s.adapt_scale, waves.is_some()) {
-            (Some(scale), _) => MesherRequest::Adaptive { scale, grade: 0.4, max_cells: Some(2_000_000) },
-            (None, true) => MesherRequest::Adaptive { scale: 1.0, grade: 0.4, max_cells: Some(2_000_000) },
+            (Some(scale), _) => MesherRequest::Adaptive { scale, grade: 0.4, max_cells: adapt_max_cells },
+            (None, true) => MesherRequest::Adaptive { scale: 1.0, grade: 0.4, max_cells: adapt_max_cells },
             (None, false) => MesherRequest::Simple,
         };
         let req = MeshRequest {
@@ -342,6 +363,12 @@ impl Mesher for FemcoreMesher {
             curved: s.curved,
             gap_cells: s.gap_cells,
             z_coarsen: s.z_coarsen,
+            max_cells: s.max_cells,
+            dz_min: s.dz_min,
+            max_z_slabs: s.max_z_slabs,
+            z_growth_ratio: s.z_growth_ratio,
+            max_steiner_multiplier: s.max_steiner_multiplier,
+            strict_mesh: s.strict_mesh,
         };
         // the stage a job reports while it meshes (its log gets the mesher's laps below it)
         let _stage = femcore::progress::stage(format!("meshing the geometry (element size {} m)", s.h));

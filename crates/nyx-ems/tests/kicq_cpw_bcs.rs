@@ -10,8 +10,10 @@ use femcore::meshing::geomdrive::MeshedGeom;
 use femcore::meshing::{mesh_model, MeshPlan};
 use geom::model::Model;
 use nyx_ems::ibc::MU0;
-use nyx_ems::{rom_eigenfrequencies, Ems};
-use nyx_physics::{BcSpec, CircuitRom, Ctx, Error, LabelResolver, MaterialAssign, Mesh, Physics, ProblemSpec, TlsMeta};
+use nyx_ems::{rom_complex_eigenfrequencies, rom_eigenfrequencies, Ems};
+use nyx_physics::{
+    BcSpec, CircuitRom, Ctx, DrivenPortData, Error, LabelResolver, MaterialAssign, Mesh, Physics, ProblemSpec, TlsMeta,
+};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -400,4 +402,421 @@ fn lumped_jj_rank1_equipartition_physical_fields_and_circuit_rom() {
             rom_freqs
         );
     }
+}
+
+#[test]
+fn fr12_cavity_lumped_port_qep_vs_rayleigh_vs_driven_and_f_search_invariance() {
+    // 3D coupled feedline + transmon/resonator chip with lumped_jj + 50-Ohm lumped_port(s)
+    let mut m = Model::new_3d();
+    let (w_box, l_box, h_sub, h_air) = (1.4e-3, 1.4e-3, 300e-6, 300e-6);
+    let si = m.box_("si_box", (-w_box / 2.0, -l_box / 2.0, -h_sub), (w_box / 2.0, l_box / 2.0, 0.0));
+    let air = m.box_("air_box", (-w_box / 2.0, -l_box / 2.0, 0.0), (w_box / 2.0, l_box / 2.0, h_air));
+    let p1_2d = m.rect("p1_2d", (-520e-6, -700e-6), (-340e-6, -460e-6));
+    m.sheet("port1_sheet", p1_2d, 0.0);
+    let feed_2d = m.rect("feed_2d", (-520e-6, -460e-6), (-340e-6, 460e-6));
+    m.sheet("feed_trace", feed_2d, 0.0);
+    let p2_2d = m.rect("p2_2d", (-520e-6, 460e-6), (-340e-6, 700e-6));
+    m.sheet("port2_sheet", p2_2d, 0.0);
+    let pad1_2d = m.rect("pad1_2d", (-140e-6, -500e-6), (420e-6, -60e-6));
+    m.sheet("res_pad1", pad1_2d, 0.0);
+    let pad2_2d = m.rect("pad2_2d", (-140e-6, 60e-6), (420e-6, 500e-6));
+    m.sheet("res_pad2", pad2_2d, 0.0);
+    let jj_2d = m.rect("jj_2d", (40e-6, -60e-6), (240e-6, 60e-6));
+    m.sheet("jj_sheet", jj_2d, 0.0);
+    m.overlay(&[("si", si), ("air", air)]);
+    let g = mesh_model(&m.list, &MeshPlan::simple(240e-6)).expect("coupled resonator mesh");
+    let exchange = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let resolver = GeomResolver(&g);
+
+    let e_j_hz = 20.0e9;
+    let c_j_f = 35.0e-15;
+
+    let build_cav_spec = |f_search: f64, complex_damping: bool| -> ProblemSpec {
+        let mut s = ProblemSpec::new("ems", 1, "cavity");
+        s.study.params = json!({ "n_modes": 1, "f_search": f_search });
+        s.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        for sheet in ["feed_trace", "res_pad1", "res_pad2"] {
+            s.bcs.push(BcSpec { on: sheet.into(), kind: "pec".into(), params: json!({}) });
+        }
+        s.bcs.push(BcSpec {
+            on: "jj_sheet".into(),
+            kind: "lumped_jj".into(),
+            params: json!({
+                "name": "Q1_JJ",
+                "E_j_Hz": e_j_hz,
+                "C_j": c_j_f,
+                "direction": [0.0, 1.0, 0.0],
+                "formulation": "rank1"
+            }),
+        });
+        s.bcs.push(BcSpec {
+            on: "port1_sheet".into(),
+            kind: "lumped_port".into(),
+            params: json!({
+                "name": "port1",
+                "Z_0": 50.0,
+                "direction": [0.0, 1.0, 0.0],
+                "complex_damping": complex_damping
+            }),
+        });
+        s.bcs.push(BcSpec {
+            on: "port2_sheet".into(),
+            kind: "lumped_port".into(),
+            params: json!({
+                "name": "port2",
+                "Z_0": 50.0,
+                "direction": [0.0, -1.0, 0.0],
+                "complex_damping": complex_damping
+            }),
+        });
+        s
+    };
+
+    // 1. Real cavity path (`complex_damping: false`) + CircuitRom complex QEP (including f_search +/- 25% invariance)
+    let res_real = Ems.solve(&exchange, &build_cav_spec(3.2e9, false), &mut Ctx::new(&resolver)).unwrap();
+    let rom_real = CircuitRom::of(&res_real).expect("CircuitRom emitted");
+    let ev_real = res_real.solutions[0].eigenvalue.unwrap();
+    assert_eq!(ev_real[1], 0.0, "complex_damping: false must take the purely real eigensolve path");
+    assert_eq!(rom_real.ports.len(), 3);
+    assert_eq!(rom_real.ports[0].kind, "lumped_jj");
+    assert_eq!(rom_real.ports[0].z0_ohm, None);
+    assert_eq!(rom_real.ports[1].kind, "lumped_port");
+    assert_eq!(rom_real.ports[1].z0_ohm, Some(50.0));
+    assert_eq!(rom_real.ports[2].kind, "lumped_port");
+    assert_eq!(rom_real.ports[2].z0_ohm, Some(50.0));
+    assert_eq!(rom_real.c_port_f.len(), 3);
+    assert!(!rom_real.c_r.is_empty(), "CircuitRom::c_r must contain lumped_port damping");
+
+    let qep_freqs = rom_complex_eigenfrequencies(&rom_real).expect("rom_complex_eigenfrequencies");
+    let f_qep = *qep_freqs
+        .iter()
+        .min_by(|a, b| (a.re - ev_real[0]).abs().total_cmp(&(b.re - ev_real[0]).abs()))
+        .expect("QEP mode near cavity resonance");
+    let q_qep = f_qep.re / (2.0 * f_qep.im.abs());
+
+    // 2. Complex Rayleigh path (`complex_damping: true`) at f0
+    let f0 = ev_real[0];
+    let res_ray_0 = Ems.solve(&exchange, &build_cav_spec(f0, true), &mut Ctx::new(&resolver)).unwrap();
+    let ev_ray_0 = res_ray_0.solutions[0].eigenvalue.unwrap();
+    let q_ray_0 = ev_ray_0[0] / (2.0 * ev_ray_0[1].abs());
+
+    // Verify equipartition_error < 1e-12 on damped complex cavity (FR-22)
+    let eq_damped = res_ray_0.scalar("equipartition_error").unwrap();
+    assert!(eq_damped < 1e-12, "complex damped cavity equipartition_error = {eq_damped:e}");
+
+    // 3. Driven S21 complex-circle Lorentzian linewidth comparison (exact Fano-free |S21(f) - S21_bg|^2)
+    let half_bw = 25.0 * (f0 / q_qep);
+    let mut s_drv = ProblemSpec::new("ems", 1, "driven");
+    s_drv.study.params = json!({
+        "f_min": f0 - half_bw,
+        "f_max": f0 + half_bw,
+        "n_points": 1001,
+        "prom_tol": 1e-6,
+        "strict_prom_tol": true
+    });
+    s_drv.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    s_drv.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    for sheet in ["feed_trace", "res_pad1", "res_pad2"] {
+        s_drv.bcs.push(BcSpec { on: sheet.into(), kind: "pec".into(), params: json!({}) });
+    }
+    s_drv.bcs.push(BcSpec {
+        on: "jj_sheet".into(),
+        kind: "lumped_jj".into(),
+        params: json!({
+            "name": "Q1_JJ",
+            "E_j_Hz": e_j_hz,
+            "C_j": c_j_f,
+            "direction": [0.0, 1.0, 0.0],
+            "formulation": "rank1"
+        }),
+    });
+    s_drv.bcs.push(BcSpec {
+        on: "port1_sheet".into(),
+        kind: "lumped_port".into(),
+        params: json!({ "name": "port1", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+    });
+    s_drv.bcs.push(BcSpec {
+        on: "port2_sheet".into(),
+        kind: "lumped_port".into(),
+        params: json!({ "name": "port2", "Z_0": 50.0, "direction": [0.0, -1.0, 0.0] }),
+    });
+    let res_drv = Ems.solve(&exchange, &s_drv, &mut Ctx::new(&resolver)).unwrap();
+    let d_drv = DrivenPortData::of(&res_drv).unwrap();
+    // |S21(f) - S21_bg|^2 is an exact symmetric Lorentzian regardless of Fano phase rotation
+    let n_pts = d_drv.s_matrix.len();
+    let s21_bg = [
+        0.5 * (d_drv.s_matrix[0][1][0][0] + d_drv.s_matrix[n_pts - 1][1][0][0]),
+        0.5 * (d_drv.s_matrix[0][1][0][1] + d_drv.s_matrix[n_pts - 1][1][0][1]),
+    ];
+    let lor: Vec<f64> = d_drv
+        .s_matrix
+        .iter()
+        .map(|s| {
+            let dr = s[1][0][0] - s21_bg[0];
+            let di = s[1][0][1] - s21_bg[1];
+            dr * dr + di * di
+        })
+        .collect();
+    let (k_pk, &lor_max) = lor.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap();
+    let half = 0.5 * lor_max;
+    let mut f_lo_hm = None;
+    for k in (0..k_pk).rev() {
+        if lor[k] <= half && lor[k + 1] >= half {
+            let t = (half - lor[k]) / (lor[k + 1] - lor[k]);
+            f_lo_hm = Some(d_drv.freqs_hz[k] + t * (d_drv.freqs_hz[k + 1] - d_drv.freqs_hz[k]));
+            break;
+        }
+    }
+    let mut f_hi_hm = None;
+    for k in k_pk..(lor.len() - 1) {
+        if lor[k] >= half && lor[k + 1] <= half {
+            let t = (lor[k] - half) / (lor[k] - lor[k + 1]);
+            f_hi_hm = Some(d_drv.freqs_hz[k] + t * (d_drv.freqs_hz[k + 1] - d_drv.freqs_hz[k]));
+            break;
+        }
+    }
+    let q_driven = d_drv.freqs_hz[k_pk] / (f_hi_hm.unwrap() - f_lo_hm.unwrap());
+
+    eprintln!(
+        "FR-12 coupled feedline+transmon: f_QEP = {:.6} GHz (Q={:.1}), f_Ray = {:.6} GHz (Q={:.1}), f_drv = {:.6} GHz (Q={:.1})",
+        f_qep.re / 1e9,
+        q_qep,
+        ev_ray_0[0] / 1e9,
+        q_ray_0,
+        d_drv.freqs_hz[k_pk] / 1e9,
+        q_driven
+    );
+
+    assert!((ev_ray_0[0] - f_qep.re).abs() / f_qep.re < 1e-2, "Rayleigh vs QEP freq > 1%");
+    assert!((q_ray_0 - q_qep).abs() / q_qep < 1e-2, "Rayleigh vs QEP Q > 1%");
+    assert!((d_drv.freqs_hz[k_pk] - f_qep.re).abs() / f_qep.re < 1e-2, "Driven vs QEP freq > 1%");
+    assert!((q_driven - q_qep).abs() / q_qep < 1e-2, "Driven vs QEP Q > 1%: {q_driven:.1} vs {q_qep:.1}");
+
+    // 4. f_search +/- 25% invariance of mode-exact Rayleigh damping quotient (`ruiz_unscale_and_rayleigh_damped`)
+    // on both (a) resistive surface_impedance CPW cavity and (b) direct-shunt lumped_port(complex_damping: true) cavity
+    let g_cpw = build_cpw_3d_mesh(49.3e-6, 28.95e-6, 297.0e-6, 8.080e-3, 500e-6, 500e-6, 1.2e-3);
+    let ex_cpw = Mesh::from_solver_mesh(&g_cpw.mesh).unwrap();
+    let resv_cpw = GeomResolver(&g_cpw);
+    let solve_cpw_ray = |f_s: f64| -> (f64, f64) {
+        let mut s = ProblemSpec::new("ems", 1, "cavity");
+        s.study.params = json!({ "n_modes": 1, "f_search": f_s });
+        s.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        for sheet in ["cpw_trace", "cpw_gnd_l", "cpw_gnd_r"] {
+            s.bcs.push(BcSpec {
+                on: sheet.into(),
+                kind: "surface_impedance".into(),
+                params: json!({ "L_k_sq": 1.0e-13, "R_s": 5.0e-4, "f_ref": 7.0e9 }),
+            });
+        }
+        let r = Ems.solve(&ex_cpw, &s, &mut Ctx::new(&resv_cpw)).unwrap();
+        let ev = r.solutions[0].eigenvalue.unwrap();
+        (ev[0], ev[0] / (2.0 * ev[1].abs()))
+    };
+    let (f_cpw_0, q_cpw_0) = solve_cpw_ray(6.9e9);
+    let (_, q_cpw_lo) = solve_cpw_ray(0.75 * f_cpw_0);
+    let (_, q_cpw_hi) = solve_cpw_ray(1.25 * f_cpw_0);
+    eprintln!(
+        "FR-12 Rayleigh f_search +/-25% invariance (IBC CPW): Q(f0)={:.2}, Q(0.75*f0)={:.2}, Q(1.25*f0)={:.2}",
+        q_cpw_0, q_cpw_lo, q_cpw_hi
+    );
+    assert!((q_cpw_lo - q_cpw_0).abs() / q_cpw_0 < 1e-3, "IBC Q(0.75*f0) drifted: {q_cpw_lo} vs {q_cpw_0}");
+    assert!((q_cpw_hi - q_cpw_0).abs() / q_cpw_0 < 1e-3, "IBC Q(1.25*f0) drifted: {q_cpw_hi} vs {q_cpw_0}");
+
+    // Direct-shunt lumped_port on box cavity face `y0` (high Z_0 = 50 kOhm -> Q ~ 150) at f_search +/- 25%
+    let box_mesh = femcore::testkit::block(20e-3, 20e-3, 10e-3, 4, 4, 2);
+    let box_ex = Mesh::from_solver_mesh(&box_mesh).unwrap();
+    struct BoxResv;
+    impl LabelResolver for BoxResv {
+        fn domains(&self, region: &str) -> Result<Vec<i32>, Error> {
+            match region {
+                "air" => Ok(vec![1]),
+                _ => Err(Error::invalid(region)),
+            }
+        }
+        fn boundaries(&self, selector: &str) -> Result<Vec<i32>, Error> {
+            match selector {
+                "y0" => Ok(vec![2]),
+                _ => Err(Error::invalid(selector)),
+            }
+        }
+    }
+    let solve_box_lp = |f_s: f64| -> (f64, f64) {
+        let mut s = ProblemSpec::new("ems", 2, "cavity");
+        s.study.params = json!({ "n_modes": 1, "f_search": f_s });
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        s.bcs.push(BcSpec {
+            on: "y0".into(),
+            kind: "lumped_port".into(),
+            params: json!({
+                "name": "shunt_p",
+                "Z_0": 50_000.0,
+                "direction": [0.0, 0.0, 1.0],
+                "complex_damping": true
+            }),
+        });
+        let r = Ems.solve(&box_ex, &s, &mut Ctx::new(&BoxResv)).unwrap();
+        let ev = r.solutions[0].eigenvalue.unwrap();
+        (ev[0], ev[0] / (2.0 * ev[1].abs()))
+    };
+    let (f_box_0, q_box_0) = solve_box_lp(8.38e9);
+    let (_, q_box_lo) = solve_box_lp(0.75 * f_box_0);
+    let (_, q_box_hi) = solve_box_lp(1.25 * f_box_0);
+    eprintln!(
+        "FR-12 Rayleigh f_search +/-25% invariance (lumped_port box): Q(f0)={:.2}, Q(0.75*f0)={:.2}, Q(1.25*f0)={:.2}",
+        q_box_0, q_box_lo, q_box_hi
+    );
+    assert!((q_box_lo - q_box_0).abs() / q_box_0 < 1e-3, "LP box Q(0.75*f0) drifted: {q_box_lo} vs {q_box_0}");
+    assert!((q_box_hi - q_box_0).abs() / q_box_0 < 1e-3, "LP box Q(1.25*f0) drifted: {q_box_hi} vs {q_box_0}");
+
+    // 4. FR-12 Pt 3: CircuitRom PML exclusion (add a PML cap above air and verify ROM builds cleanly from physical cells)
+    let mut m_pml = Model::new_3d();
+    let si_p = m_pml.box_("si_box", (-400e-6, -500e-6, -200e-6), (400e-6, 500e-6, 0.0));
+    let air_p = m_pml.box_("air_box", (-400e-6, -500e-6, 0.0), (400e-6, 500e-6, 200e-6));
+    let pml_p = m_pml.box_("pml_box", (-400e-6, -500e-6, 200e-6), (400e-6, 500e-6, 350e-6));
+    let pad1_p = m_pml.rect("pad1_p", (-120e-6, -350e-6), (120e-6, -40e-6));
+    m_pml.sheet("pad1", pad1_p, 0.0);
+    let pad2_p = m_pml.rect("pad2_p", (-120e-6, 40e-6), (120e-6, 350e-6));
+    m_pml.sheet("pad2", pad2_p, 0.0);
+    let jj_p = m_pml.rect("jj_p", (-40e-6, -40e-6), (40e-6, 40e-6));
+    m_pml.sheet("jj_sheet", jj_p, 0.0);
+    m_pml.overlay(&[("si", si_p), ("air", air_p), ("pml_cap", pml_p)]);
+    let g_pml = mesh_model(&m_pml.list, &MeshPlan::simple(220e-6)).expect("PML ROM mesh");
+    let ex_pml = Mesh::from_solver_mesh(&g_pml.mesh).unwrap();
+    let resv_pml = GeomResolver(&g_pml);
+
+    let mut s_pml = ProblemSpec::new("ems", 1, "cavity");
+    s_pml.study.params = json!({ "n_modes": 1, "f_search": 5.5e9 });
+    s_pml.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    s_pml.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    s_pml.materials.insert("pml_cap".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    s_pml.bcs.push(BcSpec { on: "pml_cap".into(), kind: "pml".into(), params: json!({ "z": "plus" }) });
+    s_pml.bcs.push(BcSpec { on: "pad1".into(), kind: "pec".into(), params: json!({}) });
+    s_pml.bcs.push(BcSpec { on: "pad2".into(), kind: "pec".into(), params: json!({}) });
+    s_pml.bcs.push(BcSpec {
+        on: "jj_sheet".into(),
+        kind: "lumped_jj".into(),
+        params: json!({ "name": "Q1", "E_j_Hz": 18.0e9, "C_j": 35.0e-15, "direction": [0.0, 1.0, 0.0] }),
+    });
+    let res_pml = Ems.solve(&ex_pml, &s_pml, &mut Ctx::new(&resv_pml)).unwrap();
+    let rom_pml = CircuitRom::of(&res_pml).expect("CircuitRom built with PML present");
+    let pml_rom_freqs = rom_eigenfrequencies(&rom_pml).expect("ROM eigenfrequencies with PML excluded");
+    assert!(!pml_rom_freqs.is_empty());
+    let f_pml_fem = res_pml.solutions[0].value.unwrap();
+    let nearest_pml = pml_rom_freqs.iter().map(|&rf| (rf - f_pml_fem).abs() / f_pml_fem).fold(f64::INFINITY, f64::min);
+    assert!(nearest_pml < 0.02, "PML-excluded ROM eigenvalue differs from FEM by {nearest_pml:e}");
+}
+
+#[test]
+fn fr18_fr21_fr22_fr23_lossless_al_sc_squid_asymmetry_q50_and_tls_meta() {
+    // Load the real material library from the workspace root (`../../materials`)
+    let mat_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../materials");
+    let lib = Arc::new(Library::load_dir(&mat_dir).expect("load workspace materials library"));
+
+    // Build 3D transmon mesh (`pad1`, `pad2`, `jj_sheet`)
+    let mut m = Model::new_3d();
+    let (w_box, l_box, h_sub, h_air) = (1.2e-3, 1.6e-3, 300e-6, 300e-6);
+    let si = m.box_("si_box", (-w_box / 2.0, -l_box / 2.0, -h_sub), (w_box / 2.0, l_box / 2.0, 0.0));
+    let air = m.box_("air_box", (-w_box / 2.0, -l_box / 2.0, 0.0), (w_box / 2.0, l_box / 2.0, h_air));
+    let pad1_2d = m.rect("pad1_2d", (-160e-6, -500e-6), (160e-6, -40e-6));
+    m.sheet("pad1", pad1_2d, 0.0);
+    let pad2_2d = m.rect("pad2_2d", (-160e-6, 40e-6), (160e-6, 500e-6));
+    m.sheet("pad2", pad2_2d, 0.0);
+    let jj_2d = m.rect("jj_2d", (-40e-6, -40e-6), (40e-6, 40e-6));
+    m.sheet("jj_sheet", jj_2d, 0.0);
+    m.overlay(&[("si", si), ("air", air)]);
+    let g = mesh_model(&m.list, &MeshPlan::simple(220e-6)).expect("3D transmon mesh");
+    let exchange = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let resolver = GeomResolver(&g);
+
+    // 1. FR-21 (lossless: true on aluminium_sc_emft omitting thickness & film_model) + FR-18 (squid_asymmetry) + FR-23 (TlsMeta)
+    let mut spec = ProblemSpec::new("ems", 1, "cavity");
+    spec.study.params = json!({ "n_modes": 1, "f_search": 5.5e9 });
+    spec.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    spec.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    for pad in ["pad1", "pad2"] {
+        spec.bcs.push(BcSpec {
+            on: pad.into(),
+            kind: "surface_impedance".into(),
+            // Deliberately omit `thickness` and `film_model` to test fallback to nominal_thickness (150 nm) and film_model ("kerr")
+            params: json!({
+                "material": "aluminium_sc_emft",
+                "temperature": 0.01,
+                "lossless": true
+            }),
+        });
+    }
+    spec.bcs.push(BcSpec {
+        on: "jj_sheet".into(),
+        kind: "lumped_jj".into(),
+        params: json!({
+            "name": "Q1_SQUID",
+            "E_j_Hz": 18.0e9,
+            "C_j": 35.0e-15,
+            "phi_ext_rad": 0.4,
+            "squid_asymmetry": 0.25,
+            "direction": [0.0, 1.0, 0.0]
+        }),
+    });
+
+    let mut ctx = Ctx::new(&resolver);
+    ctx.library = Some(lib.clone());
+    let res_ll = Ems.solve(&exchange, &spec, &mut ctx).unwrap();
+    let ev_ll = res_ll.solutions[0].eigenvalue.unwrap();
+    assert_eq!(ev_ll[1], 0.0, "lossless: true must take the real eigensolve path (Im f == 0)");
+    let eq_ll = res_ll.scalar("equipartition_error").unwrap();
+    assert!(eq_ll < 1e-11, "lossless aluminium_sc_emft equipartition_error = {eq_ll:e}");
+
+    let rom = CircuitRom::of(&res_ll).expect("CircuitRom emitted");
+    assert!(rom.modes[0].u_kin_ibc_j > 0.0, "kinetic inductance from aluminium_sc_emft must be active");
+    assert_eq!(rom.ports[0].squid_asymmetry, Some(0.25), "FR-18 squid_asymmetry copied into RomPort");
+
+    // FR-23 checks: jj_labels excluded from sheet_labels, sheet_thickness_m populated (150 nm), interfaces.ma populated
+    let tls = TlsMeta::of(&res_ll).expect("TlsMeta emitted");
+    let jj_lbls = g.boundary("jj_sheet");
+    for &jl in &jj_lbls {
+        assert!(!tls.sheet_labels.contains(&jl), "FR-23: jj_sheet label {jl} must NOT be in TlsMeta::sheet_labels");
+    }
+    let pad1_lbls = g.boundary("pad1");
+    for &pl in &pad1_lbls {
+        assert!(tls.sheet_labels.contains(&pl), "pad1 label {pl} must be in TlsMeta::sheet_labels");
+        let thick = tls.sheet_thickness_m.get(&pl).copied().expect("nominal_thickness populated in sheet_thickness_m");
+        assert!((thick - 150e-9).abs() < 1e-12, "expected 150 nm thickness, got {thick:e}");
+    }
+    let ifaces = tls.interfaces.as_ref().expect("FR-23: TlsMeta::interfaces populated from aluminium_sc_emft");
+    let ma = ifaces.ma.as_ref().expect("aluminium_sc_emft defines [interfaces.ma]");
+    assert!((ma.thickness_m - 3.0e-9).abs() < 1e-15);
+    assert!((ma.eps_r - 9.8).abs() < 1e-12);
+
+    // FR-18 validation: squid_asymmetry = 1.0 must be rejected with Error::Invalid
+    let mut spec_bad_d = spec.clone();
+    spec_bad_d.bcs.last_mut().unwrap().params["squid_asymmetry"] = json!(1.0);
+    let mut ctx_bad = Ctx::new(&resolver);
+    ctx_bad.library = Some(lib.clone());
+    let err_d = Ems.solve(&exchange, &spec_bad_d, &mut ctx_bad).unwrap_err();
+    assert!(matches!(err_d, Error::Invalid(_)), "squid_asymmetry=1.0 must return Error::Invalid, got {err_d:?}");
+
+    // 2. FR-22: strong damping (Q ~ 50) via parallel lumped_port damping or lossy CPW still achieves equipartition_error < 1e-12 with Re(k0^2)
+    let g_cpw = build_cpw_3d_mesh(49.3e-6, 28.95e-6, 297.0e-6, 8.080e-3, 500e-6, 500e-6, 1.2e-3);
+    let ex_cpw = Mesh::from_solver_mesh(&g_cpw.mesh).unwrap();
+    let resv_cpw = GeomResolver(&g_cpw);
+    let mut spec_q50 = ProblemSpec::new("ems", 1, "cavity");
+    spec_q50.study.params = json!({ "n_modes": 1, "f_search": 6.9e9 });
+    spec_q50.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    spec_q50.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    for sheet in ["cpw_trace", "cpw_gnd_l", "cpw_gnd_r"] {
+        spec_q50.bcs.push(BcSpec {
+            on: sheet.into(),
+            kind: "surface_impedance".into(),
+            // Large R_s on the CPW resonator tuned to give Q ~ 50
+            params: json!({ "L_k_sq": 1.0e-13, "R_s": 2.0e-3 }),
+        });
+    }
+    let res_q50 = Ems.solve(&ex_cpw, &spec_q50, &mut Ctx::new(&resv_cpw)).unwrap();
+    let q_val = res_q50.scalar("Q1").expect("lossy mode has finite Q1");
+    let eq_q50 = res_q50.scalar("equipartition_error").expect("equipartition_error emitted");
+    eprintln!("FR-22 strongly damped CPW cavity: Q = {:.2}, equipartition_error = {:.3e}", q_val, eq_q50);
+    assert!(q_val > 10.0 && q_val < 150.0, "expected low-Q (~50) regime, got Q = {q_val:.2}");
+    assert!(eq_q50 < 1e-12, "FR-22 equipartition_error at Q={q_val:.1} was {eq_q50:e} (>= 1e-12)");
 }

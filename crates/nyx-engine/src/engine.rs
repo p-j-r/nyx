@@ -111,6 +111,8 @@ pub struct Engine {
     /// what solves of this machine have cost, learned from the workers (`estimate.rs`), and how the engine asks the machine about its memory
     pub(crate) history: Arc<crate::estimate::History>,
     pub(crate) memory_probe: crate::estimate::MemoryProbe,
+    /// default timeout in seconds when waiting for free memory during admission (`None` waits indefinitely unless `NYX_MEMORY_WAIT_TIMEOUT_S` is set)
+    pub(crate) memory_wait_timeout: Option<f64>,
     /// what the mesh-convergence checks of this session found, by the problem key they were made for (`validated.rs`)
     pub(crate) checks: BTreeMap<String, crate::validated::Check>,
     /// when set, every file or folder argument of a command must lie inside this folder (`path_guard.rs`); a script host turns it on
@@ -173,6 +175,7 @@ impl Engine {
             isolable: false,
             history: Arc::new(crate::estimate::History::default()),
             memory_probe: Arc::new(crate::process::system_memory),
+            memory_wait_timeout: None,
             checks: BTreeMap::new(),
             path_root: None,
             script: None,
@@ -215,6 +218,17 @@ impl Engine {
     /// Replaces how the engine asks the machine for `(total, available)` memory in bytes (a test that plays a machine that is full).
     pub fn set_memory_probe(&mut self, probe: crate::estimate::MemoryProbe) {
         self.memory_probe = probe;
+    }
+
+    /// Sets the engine's caller-level default `memory_wait_timeout_s` (`None` waits indefinitely unless `NYX_MEMORY_WAIT_TIMEOUT_S` or an
+    /// explicit request `memory_wait_timeout_s` overrides it).
+    pub fn set_memory_wait_timeout(&mut self, timeout_s: Option<f64>) {
+        self.memory_wait_timeout = timeout_s;
+    }
+
+    /// Returns the engine's caller-level default `memory_wait_timeout_s`.
+    pub fn memory_wait_timeout(&self) -> Option<f64> {
+        self.memory_wait_timeout
     }
 
     /// Names the worker program (`nyx-worker`, built from this crate) that solves run in when they are isolated: a solve in a child process
@@ -466,8 +480,12 @@ impl Engine {
                 return Err(Error::invalid(format!("the project has no problem for '{t}'")));
             }
         }
+        crate::queue::validate_post_analyses(&opts.post_analyses)?;
+        let wait_timeout =
+            crate::estimate::resolve_memory_wait_timeout(opts.memory_wait_timeout_s, self.memory_wait_timeout)?;
         let (key, keys) = (s.mesh_key(), s.problem_keys());
         let (registry, mesher, project, sizing) = (s.registry.clone(), s.mesher.clone(), s.project.clone(), s.sizing());
+        let base_library = s.base_library.clone();
         let library = s.library()?;
         // a point of a sweep has its own geometry and mesh settings: it never takes the mesh this engine holds
         let cached = if matches!(purpose, Purpose::Current) { s.model().cloned() } else { None };
@@ -495,6 +513,8 @@ impl Engine {
             submit.hold = false;
         }
         let chain = targets.clone();
+        let save_fields = opts.save_fields;
+        let post_analyses = opts.post_analyses.clone();
         // in a worker process (P4)? the library the worker is given is the one this job would have used
         // asked for in the request, it must be possible or the request fails with the reason; only by the engine's default, a solve that cannot
         // be isolated (no worker, another registry or mesher, no HDF5) runs in this process as before
@@ -516,6 +536,8 @@ impl Engine {
                     materials: crate::worker::material_texts(&library),
                     targets: targets.clone(),
                     warm: None,
+                    save_fields,
+                    post_analyses: post_analyses.clone(),
                 }),
                 (Some(why), _) if explicit => return Err(Error::invalid(format!("`isolate` is not possible: {why}"))),
                 _ => None,
@@ -577,7 +599,7 @@ impl Engine {
                     *slot.lock().expect("estimate") = Some(est.clone());
                     // a solve handed to the queue is admitted there, when it is its turn and the memory is free then
                     if shared.is_none() {
-                        crate::estimate::admit(est, force, &probe, &progress)?;
+                        crate::estimate::admit(est, force, &probe, &progress, wait_timeout)?;
                     }
                 }
                 // what a warm sweep hands from one point to the next: the cell is filled when this job ends, however it ends
@@ -587,9 +609,9 @@ impl Engine {
                     None => None,
                 };
                 let mut warm_done: Option<crate::reuse::WarmDone> = None;
-                let (results, failed, worker) = match (&shared, &remote) {
+                let (results, failed, worker, fields_saved, post_out) = match (&shared, &remote) {
                     (_, None) => {
-                        let (r, f) = match &resolved {
+                        let (mut r, f) = match &resolved {
                             Some(rs) => {
                                 let (out, wd) = crate::reuse::with_context(rs, || {
                                     crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress)
@@ -599,7 +621,52 @@ impl Engine {
                             }
                             None => crate::solve::run_chain_partial(&registry, &project, &model, &chain, &library, progress),
                         };
-                        (r, f, None)
+                        let mut pa_out = Vec::new();
+                        if f.is_none() && !post_analyses.is_empty() {
+                            let mut tmp = Engine::with(registry.clone(), mesher.clone());
+                            tmp.base_library = base_library.clone();
+                            tmp.project = project.clone();
+                            tmp.model = Some((mesh_key.clone(), model.clone()));
+                            let at_now = Instant::now();
+                            for res in std::mem::take(&mut r) {
+                                let p_code = res.physics.clone();
+                                let k_code = solve_keys.get(&p_code).cloned().unwrap_or_default();
+                                tmp.results.insert(
+                                    p_code,
+                                    Stored {
+                                        result: Arc::new(res),
+                                        key: k_code,
+                                        job: 0,
+                                        at: at_now,
+                                        model: model.clone(),
+                                        run: None,
+                                    },
+                                );
+                            }
+                            let pa_res = tmp.run_post_analyses(&post_analyses, &chain);
+                            let mut restored: Vec<SolveResult> = tmp
+                                .results
+                                .into_values()
+                                .map(|st| Arc::try_unwrap(st.result).unwrap_or_else(|a| (*a).clone()))
+                                .collect();
+                            let order: Vec<String> = registry
+                                .solve_order(&chain.iter().map(String::as_str).collect::<Vec<_>>())
+                                .unwrap_or_else(|_| chain.clone());
+                            restored.sort_by_key(|res| order.iter().position(|o| o == &res.physics).unwrap_or(usize::MAX));
+                            r = restored;
+                            pa_out = pa_res?;
+                        }
+                        if !save_fields {
+                            for res in &mut r {
+                                for sol in &mut res.solutions {
+                                    sol.fields.clear();
+                                    sol.fields.shrink_to_fit();
+                                    sol.cell_fields.clear();
+                                    sol.cell_fields.shrink_to_fit();
+                                }
+                            }
+                        }
+                        (r, f, None, save_fields, pa_out)
                     }
                     (shared, Some(spec)) => {
                         let mut spec_w = spec.clone();
@@ -616,6 +683,9 @@ impl Engine {
                                     hold: hold_item,
                                     force,
                                     estimate: est.clone(),
+                                    save_fields,
+                                    post_analyses: post_analyses.clone(),
+                                    memory_wait_timeout_s: wait_timeout,
                                 };
                                 crate::shared_queue::run_shared(q, program, &item, &spec_w, &progress, &slot_id, &own_items)?
                             }
@@ -632,11 +702,13 @@ impl Engine {
                             let _installed = femcore::progress::install(&progress);
                             femcore::progress::note(format!("worker process: {}", worker_words(&done.run)));
                         }
-                        if let Some(m) = &done.mesh {
-                            if !crate::worker::same_mesh(m, &model.solver_mesh()) {
-                                return Err(Error::Solver(
-                                    "the worker meshed the project to something else than this process did, so its results cannot be shown on this mesh (a worker of another version of nyx?)".into(),
-                                ));
+                        if done.fields_saved {
+                            if let Some(m) = &done.mesh {
+                                if !crate::worker::same_mesh(m, &model.solver_mesh()) {
+                                    return Err(Error::Solver(
+                                        "the worker meshed the project to something else than this process did, so its results cannot be shown on this mesh (a worker of another version of nyx?)".into(),
+                                    ));
+                                }
                             }
                         }
                         // in the order they were solved, which the file does not keep
@@ -645,7 +717,13 @@ impl Engine {
                             .unwrap_or_else(|_| chain.clone());
                         let mut stored = done.results;
                         stored.sort_by_key(|(code, _)| order.iter().position(|o| o == code).unwrap_or(usize::MAX));
-                        (stored.into_iter().map(|(_, r)| r).collect(), done.failed, Some(done.run))
+                        (
+                            stored.into_iter().map(|(_, r)| r).collect(),
+                            done.failed,
+                            Some(done.run),
+                            done.fields_saved,
+                            done.post_analyses,
+                        )
                     }
                 };
                 match failed {
@@ -676,7 +754,7 @@ impl Engine {
                         l.mine.set(d);
                     }
                 }
-                Ok(JobOutput::Solved { model, results, failed, worker, reuse })
+                Ok(JobOutput::Solved { model, results, failed, worker, reuse, fields_saved, post_analyses: post_out })
             }
         });
         match purpose {
@@ -723,6 +801,9 @@ impl Engine {
                 return Err(Error::invalid(format!("the project has no problem for '{t}'")));
             }
         }
+        crate::queue::validate_post_analyses(&opts.post_analyses)?;
+        let wait_timeout =
+            crate::estimate::resolve_memory_wait_timeout(opts.memory_wait_timeout_s, self.memory_wait_timeout)?;
         let library = self.library()?;
         let spec = crate::worker::RemoteSpec {
             worker: worker.clone(),
@@ -730,6 +811,8 @@ impl Engine {
             materials: crate::worker::material_texts(&library),
             targets: targets.clone(),
             warm: None,
+            save_fields: opts.save_fields,
+            post_analyses: opts.post_analyses.clone(),
         };
         let item = crate::shared_queue::NewItem {
             owner: self.owner.clone(),
@@ -739,6 +822,9 @@ impl Engine {
             hold: opts.hold,
             force: opts.force,
             estimate: None,
+            save_fields: opts.save_fields,
+            post_analyses: opts.post_analyses.clone(),
+            memory_wait_timeout_s: wait_timeout,
         };
         let id = q.submit(&item, &spec)?;
         q.ensure_runner(&worker)?;
@@ -935,7 +1021,7 @@ impl Engine {
             }
             (
                 Pending::Solve { key, keys, project, .. },
-                Ok(JobOutput::Solved { model, results, failed, worker, .. }),
+                Ok(JobOutput::Solved { model, results, failed, worker, fields_saved, post_analyses, .. }),
             ) => {
                 let (cells, dim) = (model.mesh().n_cells() as u64, model.mesh().dim() as u8);
                 let mesh = model.solver_mesh();
@@ -970,16 +1056,38 @@ impl Engine {
                     // a physics of the chain failed after others had been solved: what was solved stays (it is a valid result of its own
                     // problem), the run is recorded as failed and the caller gets the error
                     log.push(format!("stopped: {e}"));
-                    let _ = self.record(&project, RunOutcome::Failed(&e), seconds, &log, Some(mesh));
+                    let _ = self.record_with_options(
+                        &project,
+                        RunOutcome::Failed(&e),
+                        seconds,
+                        &log,
+                        Some(mesh),
+                        fields_saved,
+                        &[],
+                    );
                     self.store_results(results, keep, id, &solved_on, None);
                     return Err(e);
                 }
                 self.learn(&results, cells, dim, &worker);
-                let run = self.record(&project, RunOutcome::Solved(&results), seconds, &log, Some(mesh));
+                let run = self.record_with_options(
+                    &project,
+                    RunOutcome::Solved(&results),
+                    seconds,
+                    &log,
+                    Some(mesh),
+                    fields_saved,
+                    &post_analyses,
+                );
                 let run_id = run["id"].as_str().map(str::to_string);
                 self.store_results(results, keep, id, &solved_on, run_id);
                 let mut answer =
                     json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds });
+                if !fields_saved {
+                    answer["fields_saved"] = json!(false);
+                }
+                if !post_analyses.is_empty() {
+                    answer["post_analyses"] = json!(post_analyses);
+                }
                 if let Some(w) = worker {
                     answer["worker"] = json!(w);
                 }
@@ -1112,12 +1220,34 @@ impl Engine {
         log: &[String],
         mesh: Option<Arc<femcore::mesh::SimplexMesh>>,
     ) -> Value {
+        self.record_with_options(project, outcome, seconds, log, mesh, true, &[])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_with_options(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<Arc<femcore::mesh::SimplexMesh>>,
+        fields_saved: bool,
+        post_analyses: &[Value],
+    ) -> Value {
         let script = self.script.clone();
         match self.link.as_mut() {
             None => Value::Null,
             Some(l) => {
                 l.script = script;
-                match l.record(project, outcome, seconds, log, mesh.as_deref()) {
+                match l.record_with_options(
+                    project,
+                    outcome,
+                    seconds,
+                    log,
+                    mesh.as_deref(),
+                    fields_saved,
+                    post_analyses,
+                ) {
                     Ok(r) => json!({ "id": r.id, "version": r.version, "status": r.status }),
                     Err(e) => json!({ "error": e.to_string() }),
                 }

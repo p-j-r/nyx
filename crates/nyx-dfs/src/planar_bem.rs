@@ -971,6 +971,7 @@ fn build_tls_meta(mesh: &Discretisation, spec: &Problem) -> TlsMeta {
         sheet_labels: sheet_set.into_iter().collect(),
         sheet_thickness_m: BTreeMap::new(),
         pec_labels: pec_set.into_iter().collect(),
+        interfaces: spec.tls_interfaces.clone(),
     }
 }
 

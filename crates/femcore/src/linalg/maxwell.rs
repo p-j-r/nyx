@@ -312,6 +312,243 @@ pub fn raviart_thomas_cube(n: usize) -> FaceElementCube {
     FaceElementCube { div_stiffness, mass, curl, pi, n }
 }
 
+/// Hierarchical second-order ($P_2$) Nédélec first-kind edge-element cube problem (`H(curl)` with
+/// PEC walls), matching the 20-DOF tetrahedral basis used by `nyx`:
+/// - per interior edge `(a, b)` (`a < b`): Whitney `N_ab` at `2*e`, edge gradient `∇(λ_a λ_b)` at `2*e + 1`;
+/// - per interior face `(a, b, c)` (`a < b < c`): `λ_c N_ab` at `2*ne + 2*f`, `λ_a N_bc` at `2*ne + 2*f + 1`.
+#[derive(Debug, Clone)]
+pub struct EdgeElementP2Cube {
+    /// `∫ curl w_i · curl w_j` (`ndofs × ndofs`).
+    pub stiffness: Csr<f64>,
+    /// `∫ w_i · w_j` (`ndofs × ndofs`).
+    pub mass: Csr<f64>,
+    /// Prolongation `P_{1→2}` (`ndofs × n_edges`) embedding the lowest-order $P_1$ space into $P_2$.
+    pub p1_to_p2: Csr<f64>,
+    /// Lowest-order discrete gradient `G_{P1}` (`n_edges × n_nodes`).
+    pub gradient_p1: Csr<f64>,
+    /// Full $P_2$ discrete gradient `G_{P2}` (`ndofs × (n_nodes + n_edges)`), satisfying `K G_{P2} = 0`.
+    pub gradient_p2: Csr<f64>,
+    /// Coordinates of the interior vertices (`n_nodes`).
+    pub coords: Vec<[f64; 3]>,
+    /// Edge vectors `x_b − x_a` for every interior edge (`n_edges`).
+    pub edge_vectors: Vec<[f64; 3]>,
+    /// Local 2-DOF blocks (one pair per interior edge, one pair per interior face) for block smoothers.
+    pub blocks: Vec<Vec<usize>>,
+    /// Cells per side.
+    pub n: usize,
+    /// Number of tetrahedra (`6 * n^3`).
+    pub n_tets: usize,
+}
+
+/// Generates the hierarchical $P_2$ Nédélec cube problem on an `n × n × n` Kuhn tetrahedral mesh (`n ≥ 2`).
+pub fn nedelec_p2_cube(n: usize) -> EdgeElementP2Cube {
+    assert!(n >= 2, "need at least 2 cells per side for interior unknowns");
+    let CubeMesh { tets, edge_id, edges, node_id, coords } = cube_mesh(n);
+    let coord = |g: usize| cube_coord(n, g);
+    let ne = edges.len();
+    let nn = coords.len();
+
+    // Identify interior faces (shared by two tetrahedra) in deterministic order.
+    let mut face_count: HashMap<[usize; 3], u8> = HashMap::new();
+    for t in &tets {
+        for drop in 0..4 {
+            let mut f = [0usize; 3];
+            let mut idx = 0;
+            for q in 0..4 {
+                if q != drop {
+                    f[idx] = t[q];
+                    idx += 1;
+                }
+            }
+            *face_count.entry(f).or_insert(0) += 1; // `t` is strictly increasing, so `f` is sorted
+        }
+    }
+    let mut face_id: HashMap<[usize; 3], usize> = HashMap::new();
+    let mut faces: Vec<[usize; 3]> = Vec::new();
+    for t in &tets {
+        for drop in 0..4 {
+            let mut f = [0usize; 3];
+            let mut idx = 0;
+            for q in 0..4 {
+                if q != drop {
+                    f[idx] = t[q];
+                    idx += 1;
+                }
+            }
+            if face_count[&f] == 2 && !face_id.contains_key(&f) {
+                face_id.insert(f, faces.len());
+                faces.push(f);
+            }
+        }
+    }
+    let nf = faces.len();
+    let ndofs = 2 * ne + 2 * nf;
+
+    const LOCAL_EDGES: [(usize, usize); 6] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+    const LOCAL_FACES: [[usize; 3]; 4] = [[1, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]];
+    let quad = crate::fem::quad_rule(3, 4);
+
+    let mut kt: Vec<(usize, usize, f64)> = Vec::with_capacity(tets.len() * 120);
+    let mut mt: Vec<(usize, usize, f64)> = Vec::with_capacity(tets.len() * 120);
+    let mut w = [[0.0f64; 3]; 20];
+    let mut cu = [[0.0f64; 3]; 20];
+    let mut ke = [0.0f64; 20 * 20];
+    let mut me = [0.0f64; 20 * 20];
+    let mut gdofs = [None::<usize>; 20];
+
+    for t in &tets {
+        let p = [coord(t[0]), coord(t[1]), coord(t[2]), coord(t[3])];
+        let (g, vol) = barycentric_gradients(&p);
+
+        for (le, &(a, b)) in LOCAL_EDGES.iter().enumerate() {
+            if let Some(&e) = edge_id.get(&(t[a], t[b])) {
+                gdofs[2 * le] = Some(2 * e);
+                gdofs[2 * le + 1] = Some(2 * e + 1);
+            } else {
+                gdofs[2 * le] = None;
+                gdofs[2 * le + 1] = None;
+            }
+        }
+        for (lf, &[a, b, c]) in LOCAL_FACES.iter().enumerate() {
+            if let Some(&f) = face_id.get(&[t[a], t[b], t[c]]) {
+                gdofs[12 + 2 * lf] = Some(2 * ne + 2 * f);
+                gdofs[12 + 2 * lf + 1] = Some(2 * ne + 2 * f + 1);
+            } else {
+                gdofs[12 + 2 * lf] = None;
+                gdofs[12 + 2 * lf + 1] = None;
+            }
+        }
+
+        ke.fill(0.0);
+        me.fill(0.0);
+
+        // Precompute constant 2*(g_a x g_b) for the 6 local edges.
+        let mut edge_curl = [[0.0f64; 3]; 6];
+        for (le, &(a, b)) in LOCAL_EDGES.iter().enumerate() {
+            let cr = cross(g[a], g[b]);
+            edge_curl[le] = [2.0 * cr[0], 2.0 * cr[1], 2.0 * cr[2]];
+        }
+
+        for (q_idx, lam) in quad.lam.iter().enumerate() {
+            let wq = vol * quad.w[q_idx];
+            for (le, &(a, b)) in LOCAL_EDGES.iter().enumerate() {
+                let (la, lb) = (lam[a], lam[b]);
+                let (ga, gb) = (g[a], g[b]);
+                w[2 * le] = [la * gb[0] - lb * ga[0], la * gb[1] - lb * ga[1], la * gb[2] - lb * ga[2]];
+                cu[2 * le] = edge_curl[le];
+                w[2 * le + 1] = [la * gb[0] + lb * ga[0], la * gb[1] + lb * ga[1], la * gb[2] + lb * ga[2]];
+                cu[2 * le + 1] = [0.0; 3];
+            }
+            for (lf, &[a, b, c]) in LOCAL_FACES.iter().enumerate() {
+                let (la, lb, lc) = (lam[a], lam[b], lam[c]);
+                let (ga, gb, gc) = (g[a], g[b], g[c]);
+                let nab = [la * gb[0] - lb * ga[0], la * gb[1] - lb * ga[1], la * gb[2] - lb * ga[2]];
+                let cab_raw = cross(ga, gb);
+                let cab = [2.0 * cab_raw[0], 2.0 * cab_raw[1], 2.0 * cab_raw[2]];
+                let gc_x_nab = cross(gc, nab);
+                w[12 + 2 * lf] = [lc * nab[0], lc * nab[1], lc * nab[2]];
+                cu[12 + 2 * lf] = [lc * cab[0] + gc_x_nab[0], lc * cab[1] + gc_x_nab[1], lc * cab[2] + gc_x_nab[2]];
+
+                let nbc = [lb * gc[0] - lc * gb[0], lb * gc[1] - lc * gb[1], lb * gc[2] - lc * gb[2]];
+                let cbc_raw = cross(gb, gc);
+                let cbc = [2.0 * cbc_raw[0], 2.0 * cbc_raw[1], 2.0 * cbc_raw[2]];
+                let ga_x_nbc = cross(ga, nbc);
+                w[12 + 2 * lf + 1] = [la * nbc[0], la * nbc[1], la * nbc[2]];
+                cu[12 + 2 * lf + 1] = [la * cbc[0] + ga_x_nbc[0], la * cbc[1] + ga_x_nbc[1], la * cbc[2] + ga_x_nbc[2]];
+            }
+
+            for i in 0..20 {
+                if gdofs[i].is_none() {
+                    continue;
+                }
+                let (wi, cui) = (w[i], cu[i]);
+                for j in i..20 {
+                    if gdofs[j].is_none() {
+                        continue;
+                    }
+                    ke[i * 20 + j] += wq * dot(cui, cu[j]);
+                    me[i * 20 + j] += wq * dot(wi, w[j]);
+                }
+            }
+        }
+
+        for i in 0..20 {
+            let Some(gi) = gdofs[i] else { continue };
+            for j in i..20 {
+                let Some(gj) = gdofs[j] else { continue };
+                let kv = ke[i * 20 + j];
+                let mv = me[i * 20 + j];
+                if kv != 0.0 {
+                    kt.push((gi, gj, kv));
+                    if i != j {
+                        kt.push((gj, gi, kv));
+                    }
+                }
+                if mv != 0.0 {
+                    mt.push((gi, gj, mv));
+                    if i != j {
+                        mt.push((gj, gi, mv));
+                    }
+                }
+            }
+        }
+    }
+
+    let stiffness = Csr::from_triplets(ndofs, ndofs, &kt).unwrap();
+    let mass = Csr::from_triplets(ndofs, ndofs, &mt).unwrap();
+
+    // P1 -> P2 prolongation: Whitney edge `e` maps to `2*e`.
+    let p_trip: Vec<(usize, usize, f64)> = (0..ne).map(|e| (2 * e, e, 1.0)).collect();
+    let p1_to_p2 = Csr::from_triplets(ndofs, ne, &p_trip).unwrap();
+
+    // P1 discrete gradient (`ne × nn`) and full P2 discrete gradient (`ndofs × (nn + ne)`).
+    let mut g1t = Vec::with_capacity(2 * ne);
+    let mut g2t = Vec::with_capacity(3 * ne);
+    for (e, &(a, b)) in edges.iter().enumerate() {
+        if let Some(&j) = node_id.get(&a) {
+            g1t.push((e, j, -1.0));
+            g2t.push((2 * e, j, -1.0));
+        }
+        if let Some(&j) = node_id.get(&b) {
+            g1t.push((e, j, 1.0));
+            g2t.push((2 * e, j, 1.0));
+        }
+        // Quadratic edge bubble `φ_e = λ_a λ_b` has gradient `∇(λ_a λ_b)` = DOF `2*e + 1`.
+        g2t.push((2 * e + 1, nn + e, 1.0));
+    }
+    let gradient_p1 = Csr::from_triplets(ne, nn, &g1t).unwrap();
+    let gradient_p2 = Csr::from_triplets(ndofs, nn + ne, &g2t).unwrap();
+
+    let edge_vectors = edges
+        .iter()
+        .map(|&(a, b)| {
+            let (pa, pb) = (coord(a), coord(b));
+            [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]]
+        })
+        .collect();
+
+    let mut blocks = Vec::with_capacity(ne + nf);
+    for e in 0..ne {
+        blocks.push(vec![2 * e, 2 * e + 1]);
+    }
+    for f in 0..nf {
+        blocks.push(vec![2 * ne + 2 * f, 2 * ne + 2 * f + 1]);
+    }
+
+    EdgeElementP2Cube {
+        stiffness,
+        mass,
+        p1_to_p2,
+        gradient_p1,
+        gradient_p2,
+        coords,
+        edge_vectors,
+        blocks,
+        n,
+        n_tets: tets.len(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,6 +575,26 @@ mod tests {
             let p = nedelec_cube(n);
             let kg = p.stiffness.matmul(&p.gradient);
             assert!(max_abs(&kg) < 1e-11 * max_abs(&p.stiffness), "n={n}: |K G| = {}", max_abs(&kg));
+        }
+    }
+
+    #[test]
+    fn p2_cube_matches_p1_restriction_and_has_exact_p2_gradient_kernel() {
+        for n in [2, 3] {
+            let p1 = nedelec_cube(n);
+            let p2 = nedelec_p2_cube(n);
+            assert_eq!(p2.n_tets, 6 * n * n * n);
+            assert!(p2.stiffness.is_symmetric(1e-12) && p2.mass.is_symmetric(1e-12));
+            let kg = p2.stiffness.matmul(&p2.gradient_p2);
+            assert!(max_abs(&kg) < 1e-11 * max_abs(&p2.stiffness), "n={n}: |K_p2 G_p2| = {}", max_abs(&kg));
+            // P1 restriction of P2 stiffness and mass must match P1 matrices identically
+            let pt = p2.p1_to_p2.transpose();
+            let k1_from_p2 = pt.matmul(&p2.stiffness.matmul(&p2.p1_to_p2));
+            let m1_from_p2 = pt.matmul(&p2.mass.matmul(&p2.p1_to_p2));
+            let dk = Csr::axpby(1.0, &k1_from_p2, -1.0, &p1.stiffness);
+            let dm = Csr::axpby(1.0, &m1_from_p2, -1.0, &p1.mass);
+            assert!(max_abs(&dk) < 1e-11 * max_abs(&p1.stiffness), "n={n}: |dK| = {}", max_abs(&dk));
+            assert!(max_abs(&dm) < 1e-11 * max_abs(&p1.mass), "n={n}: |dM| = {}", max_abs(&dm));
         }
     }
 

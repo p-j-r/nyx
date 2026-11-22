@@ -6,8 +6,9 @@
 //! * `polarization`: Stokes parameters, Poincare sphere, mode classes and the drawings of them (was `femcore::polarization`)
 //! * `modes`: the polarization of a set of modes, the table, the CSV and the degenerate groups (was `femcore::analysis`)
 //! * `samples`: the modes of a `SolveResult` as weighted samples of the field (what a mode study of `ems` states in its result)
-//! * `capacitance`: multi-terminal Maxwell/mutual capacitance matrix and charging energy matrix (`capacitance_matrix`) and magnetostatic
-//!   inductance matrix (`inductance_matrix`) from `dfs` results
+//! * `capacitance`: multi-terminal Maxwell/mutual capacitance matrix, 3D matched-asymptotic finite-thickness correction, and charging
+//!   energy matrix (`capacitance_matrix`) and magnetostatic inductance matrix (`inductance_matrix`) from `dfs` results
+//! * `network`: unified multi-port microwave network, QEP, Schur Black-Box Quantization (BBQ), Taubin `S_21` circle-fit, and Touchstone (`.sNp`)
 //!
 //! `polarization(mesh, result)` is the typed entry point (the window draws from it); `PolarizationAnalysis` is the same through the
 //! `Analysis` trait, which returns plain JSON, so that the engine, the window and the MCP server can list and run analyses uniformly. Group
@@ -20,6 +21,7 @@ pub mod figure;
 pub mod hamiltonian;
 pub mod modes;
 pub mod modeview;
+pub mod network;
 pub mod polarization;
 pub mod raster;
 pub mod samples;
@@ -28,14 +30,19 @@ pub mod tls;
 pub mod view3d;
 
 pub use capacitance::{
-    capacitance_matrix, capacitance_matrix_applies, inductance_matrix, inductance_matrix_applies,
-    CapacitanceMatrixAnalysis, InductanceMatrixAnalysis,
+    capacitance_matrix, capacitance_matrix_applies, capacitance_matrix_with_mesh_and_params,
+    capacitance_matrix_with_params, inductance_matrix, inductance_matrix_applies, CapacitanceMatrixAnalysis,
+    InductanceMatrixAnalysis,
 };
-pub use epr::{epr, epr_applies, epr_with_params, EprAnalysis, EprReport};
+pub use epr::{epr, epr_applies, epr_with_params, is_nonlinear_port, squid_effective_ej, EprAnalysis, EprReport};
 pub use hamiltonian::{
-    hamiltonian, hamiltonian_applies, hamiltonian_with_params, FluxSweepPoint, HamiltonianAnalysis, HamiltonianReport,
+    hamiltonian, hamiltonian_applies, hamiltonian_with_params, resolve_sweep_port, FluxSweepPoint, HamiltonianAnalysis,
+    HamiltonianReport,
 };
 pub use modes::{analyze_modes, AnalysisOptions, GroupReport, ModeAnalysis, ModeInput, ModeRow, ResolveAxis, Resolved};
+pub use network::{
+    network, network_applies, network_with_params, BbqMode, NetworkAnalysis, NetworkReport, QepMode, S21CircleFit,
+};
 pub use samples::{polarization_input, PolarizationInput};
 pub use tls::{
     tls_participation, tls_participation_applies, tls_participation_with_params, TlsParticipationAnalysis, TlsReport,

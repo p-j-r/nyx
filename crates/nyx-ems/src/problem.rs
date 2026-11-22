@@ -13,8 +13,10 @@ use crate::ibc::resolve_jj_l_and_ej;
 use crate::Ems;
 use femcore::material::{bcs_surface_impedance, FilmModel};
 use femcore::props::{Materials, Periodic, Pml, PmlDir, TensorKind};
-use nyx_physics::decode::{domain_names_by_label, materials_by_label, resolve_conditions, Params};
-use nyx_physics::{Ctx, Discretisation, Error, MaterialAssign, Physics, ProblemSpec};
+use nyx_physics::decode::{
+    domain_names_by_label, materials_by_label, resolve_conditions, tls_interfaces_from_spec, Params,
+};
+use nyx_physics::{Ctx, Discretisation, Error, MaterialAssign, Physics, ProblemSpec, TlsInterfaces};
 use std::collections::BTreeMap;
 
 /// Allowed values for the midplane `symmetry` parameter on `modes`, `cavity`, and `bloch`.
@@ -192,9 +194,19 @@ pub enum Study {
     Cavity { n_modes: usize, f_search: f64 },
     /// Fixed-frequency 3D Floquet-Bloch modes at `freq` (Hz) near the Bloch index `n_target` in Brillouin zone `brillouin_zone`.
     Bloch { freq: f64, n_target: f64, n_modes: usize, brillouin_zone: i64 },
-    /// Driven frequency-domain multi-port S/Z/Y sweep over `[f_min, f_max]` (`n_points`), solved with Hermite/Galerkin PROM
-    /// (`prom_tol = Some(tol)`) or direct point-by-point HDM (`prom_tol = None`).
-    Driven { f_min: f64, f_max: f64, n_points: usize, prom_tol: Option<f64> },
+    /// Driven frequency-domain multi-port S/Z/Y sweep over `[f_min, f_max]` (`n_points`) or an explicit ascending
+    /// frequency grid `freqs_hz`, solved with Hermite/Galerkin PROM (`prom_tol = Some(tol)`) or direct point-by-point
+    /// HDM (`prom_tol = None`).
+    Driven {
+        f_min: f64,
+        f_max: f64,
+        n_points: usize,
+        freqs_hz: Option<Vec<f64>>,
+        prom_tol: Option<f64>,
+        max_hdm_solves: usize,
+        strict_prom_tol: bool,
+        seed_freqs_hz: Vec<f64>,
+    },
 }
 
 impl Study {
@@ -214,7 +226,13 @@ impl Study {
         match *self {
             Study::Modes { freq, .. } | Study::Bloch { freq, .. } => freq,
             Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => f_search,
-            Study::Driven { f_min, f_max, .. } => 0.5 * (f_min + f_max),
+            Study::Driven { f_min, f_max, ref freqs_hz, .. } => {
+                if let Some(fs) = freqs_hz.as_ref().filter(|v| !v.is_empty()) {
+                    0.5 * (fs[0] + fs[fs.len() - 1])
+                } else {
+                    0.5 * (f_min + f_max)
+                }
+            }
         }
     }
 }
@@ -230,6 +248,7 @@ pub struct SurfaceImpedanceBc {
     pub temperature: f64,
     pub f_ref: f64,
     pub film_model: String,
+    pub lossless: bool,
 }
 
 /// Lumped Josephson junction / nonlinear port boundary condition (`cavity` and `driven` studies).
@@ -243,17 +262,20 @@ pub struct LumpedJjBc {
     pub e_l_hz: f64,
     pub phi_ext_rad: f64,
     pub n_g: f64,
+    pub squid_asymmetry: Option<f64>,
     pub direction: [f64; 3],
     pub formulation: String,
 }
 
-/// Lumped sheet port boundary condition (`driven` study).
+/// Lumped sheet port boundary condition (`cavity` and `driven` studies).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LumpedPortBc {
     pub labels: Vec<i32>,
     pub name: String,
     pub z0: f64,
     pub direction: [f64; 3],
+    pub complex_damping: bool,
+    pub mode: String,
 }
 
 /// 2D boundary-mode waveguide port boundary condition (`driven` study).
@@ -262,6 +284,8 @@ pub struct WavePortBc {
     pub labels: Vec<i32>,
     pub name: String,
     pub mode: usize,
+    pub n_eff_guess: Option<f64>,
+    pub z0_ohm: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -283,7 +307,7 @@ pub struct Problem {
     pub surface_impedance: Vec<SurfaceImpedanceBc>,
     /// lumped Josephson junction boundary conditions (cavity / driven study)
     pub lumped_jj: Vec<LumpedJjBc>,
-    /// lumped port boundary conditions (driven study)
+    /// lumped port boundary conditions (cavity / driven study)
     pub lumped_ports: Vec<LumpedPortBc>,
     /// waveguide port boundary conditions (driven study)
     pub waveports: Vec<WavePortBc>,
@@ -294,6 +318,8 @@ pub struct Problem {
     /// global-frame real dispersive permittivity derivative `Re(d(omega * eps_r) / d(omega))` per domain label
     /// when evaluated from a material's `[optical]` dispersion model; domains absent here fall back to static `Re(eps_r)`
     pub d_omega_eps: BTreeMap<i32, [[f64; 3]; 3]>,
+    /// optional `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters resolved from the material library
+    pub tls_interfaces: Option<TlsInterfaces>,
 }
 
 impl Problem {
@@ -312,6 +338,7 @@ impl Problem {
             domain_names: BTreeMap::new(),
             symmetry: Symmetry::None,
             d_omega_eps: BTreeMap::new(),
+            tls_interfaces: None,
         }
     }
 
@@ -356,10 +383,12 @@ impl Problem {
             Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => {
                 (!f_search.is_finite()).then_some("search frequency")
             }
-            Study::Driven { f_min, f_max, prom_tol, .. } => (!f_min.is_finite())
+            Study::Driven { f_min, f_max, freqs_hz, prom_tol, seed_freqs_hz, .. } => (!f_min.is_finite())
                 .then_some("minimum frequency")
                 .or((!f_max.is_finite()).then_some("maximum frequency"))
-                .or(prom_tol.is_some_and(|t| !t.is_finite()).then_some("PROM tolerance")),
+                .or(prom_tol.is_some_and(|t| !t.is_finite()).then_some("PROM tolerance"))
+                .or(freqs_hz.as_ref().is_some_and(|v| v.iter().any(|f| !f.is_finite())).then_some("freqs_hz"))
+                .or(seed_freqs_hz.iter().any(|f| !f.is_finite()).then_some("seed_freqs_hz")),
         };
         if let Some(what) = study_bad {
             return Err(format!("the study's {what} is NaN or infinite"));
@@ -393,6 +422,14 @@ impl Problem {
                     return Err(format!("lumped_jj '{}' parameter '{k}' is {v}: it must be a finite number", jj.name));
                 }
             }
+            if let Some(d) = jj.squid_asymmetry {
+                if !d.is_finite() {
+                    return Err(format!(
+                        "lumped_jj '{}' parameter 'squid_asymmetry' is {d}: it must be a finite number",
+                        jj.name
+                    ));
+                }
+            }
         }
         for lp in &self.lumped_ports {
             for (k, v) in [
@@ -405,6 +442,24 @@ impl Problem {
                     return Err(format!(
                         "lumped_port '{}' parameter '{k}' is {v}: it must be a finite number",
                         lp.name
+                    ));
+                }
+            }
+        }
+        for wp in &self.waveports {
+            if let Some(ng) = wp.n_eff_guess {
+                if !ng.is_finite() {
+                    return Err(format!(
+                        "waveport '{}' parameter 'n_eff_guess' is {ng}: it must be a finite number",
+                        wp.name
+                    ));
+                }
+            }
+            if let Some(z0) = wp.z0_ohm {
+                if !z0.is_finite() {
+                    return Err(format!(
+                        "waveport '{}' parameter 'z0_ohm' is {z0}: it must be a finite number",
+                        wp.name
                     ));
                 }
             }
@@ -470,16 +525,53 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             }
         }
         "driven" => {
-            let f_min = sp.number("f_min");
-            let f_max = sp.number("f_max");
-            if !(f_min > 0.0 && f_max >= f_min) {
+            let freqs_hz = sp.optional_numbers("freqs_hz");
+            let (f_min, f_max, n_points) = if let Some(ref fs) = freqs_hz {
+                for &f in fs {
+                    if !(f > 0.0 && f.is_finite()) {
+                        return Err(Error::invalid(format!(
+                            "driven study requires all entries of 'freqs_hz' to be positive finite numbers (got {f})"
+                        )));
+                    }
+                }
+                if fs.windows(2).any(|w| w[1] < w[0]) {
+                    return Err(Error::invalid("driven study requires 'freqs_hz' to be monotonically ascending"));
+                }
+                (fs[0], fs[fs.len() - 1], fs.len())
+            } else {
+                if !sp.has("f_min") || !sp.has("f_max") {
+                    return Err(Error::invalid(
+                        "driven study requires either non-empty 'freqs_hz' or both 'f_min' and 'f_max'",
+                    ));
+                }
+                let f_min = sp.number("f_min");
+                let f_max = sp.number("f_max");
+                if !(f_min > 0.0 && f_max >= f_min) {
+                    return Err(Error::invalid(format!(
+                        "driven study requires 0 < f_min <= f_max (got f_min = {f_min}, f_max = {f_max})"
+                    )));
+                }
+                let n_points = sp.integer("n_points").max(1) as usize;
+                (f_min, f_max, n_points)
+            };
+            let prom_tol = sp.optional_number("prom_tol").filter(|&t| t > 0.0);
+            let max_hdm_raw = sp.integer("max_hdm_solves");
+            if !(1..=64).contains(&max_hdm_raw) {
                 return Err(Error::invalid(format!(
-                    "driven study requires 0 < f_min <= f_max (got f_min = {f_min}, f_max = {f_max})"
+                    "driven study requires 1 <= max_hdm_solves <= 64 (got {max_hdm_raw})"
                 )));
             }
-            let n_points = sp.integer("n_points").max(1) as usize;
-            let prom_tol = sp.optional_number("prom_tol").filter(|&t| t > 0.0);
-            Study::Driven { f_min, f_max, n_points, prom_tol }
+            let max_hdm_solves = max_hdm_raw as usize;
+            let strict_prom_tol = sp.boolean("strict_prom_tol");
+            let seed_freqs_hz = sp.numbers("seed_freqs_hz");
+            for &sf in &seed_freqs_hz {
+                if !(sf > 0.0 && sf.is_finite()) {
+                    return Err(Error::invalid(format!(
+                        "driven study requires all entries of 'seed_freqs_hz' to be positive finite numbers (got {sf})"
+                    )));
+                }
+            }
+            Study::Driven { f_min, f_max, n_points, freqs_hz, prom_tol, max_hdm_solves, strict_prom_tol, seed_freqs_hz }
         }
         other => return Err(Error::Unsupported(format!("ems has no study '{other}'"))),
     };
@@ -583,12 +675,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 let mut l_k_sq = p.number("L_k_sq");
                 let mut r_s = p.number("R_s");
                 let material = p.text("material");
-                let thickness = p.number("thickness");
+                let mut thickness = p.number("thickness");
                 let temperature = p.number("temperature");
                 let f_ref_given = p.optional_number("f_ref").unwrap_or(0.0);
                 let f_ref = if f_ref_given > 0.0 { f_ref_given } else { study.reference_freq() };
+                let lossless = p.boolean("lossless");
                 let film_model = p.text("film_model");
-                let fm = FilmModel::parse(&film_model).ok_or_else(|| {
+                let mut fm = FilmModel::parse(&film_model).ok_or_else(|| {
                     Error::invalid(format!(
                         "surface_impedance: unknown film_model '{film_model}' (expected 'two_sided', 'kerr' or 'thin_limit')"
                     ))
@@ -607,6 +700,12 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                             material.trim()
                         ))
                     })?;
+                    if thickness <= 0.0 {
+                        thickness = sc.nominal_thickness.unwrap_or(0.0);
+                    }
+                    if !p.has("film_model") {
+                        fm = sc.film_model.unwrap_or(fm);
+                    }
                     if f_ref <= 0.0 {
                         return Err(Error::invalid(
                             "surface_impedance with a superconducting material requires a positive f_ref or study search frequency",
@@ -616,6 +715,9 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         .map_err(|e| Error::invalid(format!("surface_impedance ('{}'): {e}", material.trim())))?;
                     l_k_sq = eval.l_k_sq;
                     r_s = eval.r_s;
+                }
+                if lossless {
+                    r_s = 0.0;
                 }
                 if l_k_sq < 0.0 || r_s < 0.0 {
                     return Err(Error::invalid("surface_impedance requires non-negative L_k_sq and R_s"));
@@ -629,6 +731,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     temperature,
                     f_ref,
                     film_model: fm.as_str().to_string(),
+                    lossless,
                 });
             }
             "lumped_jj" => {
@@ -642,8 +745,11 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 if name.trim().is_empty() {
                     return Err(Error::invalid("lumped_jj requires a non-empty 'name'"));
                 }
-                if lumped_jj.iter().any(|j| j.name == name) {
-                    return Err(Error::invalid(format!("duplicate lumped_jj name '{name}'")));
+                if lumped_jj.iter().any(|j| j.name == name)
+                    || lumped_ports.iter().any(|lp| lp.name == name)
+                    || waveports.iter().any(|wp| wp.name == name)
+                {
+                    return Err(Error::invalid(format!("duplicate port name '{name}'")));
                 }
                 let l_j_in = p.number("L_j");
                 let e_j_in = p.number("E_j_Hz");
@@ -651,6 +757,14 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 let e_l_hz = p.number("E_l_Hz");
                 let phi_ext_rad = p.number("phi_ext_rad");
                 let n_g = p.number("n_g");
+                let squid_asymmetry = p.has("squid_asymmetry").then(|| p.number("squid_asymmetry"));
+                if let Some(d) = squid_asymmetry {
+                    if !d.is_finite() || !(0.0..1.0).contains(&d) {
+                        return Err(Error::invalid(format!(
+                            "lumped_jj '{name}': squid_asymmetry must satisfy 0.0 <= d < 1.0 (got {d})"
+                        )));
+                    }
+                }
                 let (l_j, e_j_hz) = resolve_jj_l_and_ej(l_j_in, e_j_in);
                 if l_j <= 0.0 && e_l_hz <= 0.0 && c_j <= 0.0 {
                     return Err(Error::invalid(format!(
@@ -681,14 +795,15 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     e_l_hz,
                     phi_ext_rad,
                     n_g,
+                    squid_asymmetry,
                     direction,
                     formulation,
                 });
             }
             "lumped_port" => {
-                if !matches!(study, Study::Driven { .. }) {
+                if !matches!(study, Study::Cavity { .. } | Study::Driven { .. }) {
                     return Err(Error::invalid(format!(
-                        "a lumped_port condition belongs to the driven study, not to '{}'",
+                        "a lumped_port condition belongs to the cavity or driven study, not to '{}'",
                         study.kind()
                     )));
                 }
@@ -696,7 +811,10 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 if name.trim().is_empty() {
                     return Err(Error::invalid("lumped_port requires a non-empty 'name'"));
                 }
-                if lumped_ports.iter().any(|lp| lp.name == name) || waveports.iter().any(|wp| wp.name == name) {
+                if lumped_ports.iter().any(|lp| lp.name == name)
+                    || waveports.iter().any(|wp| wp.name == name)
+                    || lumped_jj.iter().any(|j| j.name == name)
+                {
                     return Err(Error::invalid(format!("duplicate port name '{name}'")));
                 }
                 let z0 = p.number("Z_0");
@@ -712,7 +830,14 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     return Err(Error::invalid(format!("lumped_port '{name}': direction vector must be non-zero")));
                 }
                 let direction = [dir_vec[0] / dnorm, dir_vec[1] / dnorm, dir_vec[2] / dnorm];
-                lumped_ports.push(LumpedPortBc { labels: r.labels, name, z0, direction });
+                let complex_damping = p.boolean("complex_damping");
+                let mode = p.text("mode");
+                if mode != "single" && mode != "cpw_even" {
+                    return Err(Error::invalid(format!(
+                        "lumped_port '{name}': unknown mode '{mode}' (expected 'single' or 'cpw_even')"
+                    )));
+                }
+                lumped_ports.push(LumpedPortBc { labels: r.labels, name, z0, direction, complex_damping, mode });
             }
             "waveport" => {
                 if !matches!(study, Study::Driven { .. }) {
@@ -725,15 +850,40 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 if name.trim().is_empty() {
                     return Err(Error::invalid("waveport requires a non-empty 'name'"));
                 }
-                if lumped_ports.iter().any(|lp| lp.name == name) || waveports.iter().any(|wp| wp.name == name) {
+                if lumped_ports.iter().any(|lp| lp.name == name)
+                    || waveports.iter().any(|wp| wp.name == name)
+                    || lumped_jj.iter().any(|j| j.name == name)
+                {
                     return Err(Error::invalid(format!("duplicate port name '{name}'")));
                 }
                 let mode = p.integer("mode").max(1) as usize;
-                waveports.push(WavePortBc { labels: r.labels, name, mode });
+                let n_eff_guess = if p.has("n_eff_guess") {
+                    let v = p.number("n_eff_guess");
+                    if !(v > 0.0 && v.is_finite()) {
+                        return Err(Error::invalid(format!(
+                            "waveport '{name}': n_eff_guess must be positive (got {v})"
+                        )));
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+                let z0_ohm = if p.has("z0_ohm") {
+                    let v = p.number("z0_ohm");
+                    if !(v > 0.0 && v.is_finite()) {
+                        return Err(Error::invalid(format!("waveport '{name}': z0_ohm must be positive (got {v})")));
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+                waveports.push(WavePortBc { labels: r.labels, name, mode, n_eff_guess, z0_ohm });
             }
             other => return Err(Error::Unsupported(format!("ems has no condition '{other}'"))),
         }
     }
+    let ifaces = tls_interfaces_from_spec(spec, &ctx_eff);
+    let tls_interfaces = (!ifaces.is_empty()).then_some(ifaces);
     pmc.sort_unstable();
     pmc.dedup();
     pec.sort_unstable();
@@ -752,5 +902,6 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         domain_names,
         symmetry,
         d_omega_eps,
+        tls_interfaces,
     })
 }

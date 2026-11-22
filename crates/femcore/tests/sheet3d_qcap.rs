@@ -368,6 +368,12 @@ fn repro_concentric_mesh_fail_p2_fast_meshes_cleanly() {
         curved: false,
         gap_cells: None,
         z_coarsen: true,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: false,
     };
     let (g_zc, _) = mesh_request(&m.list, &req_coarse).expect("concentric model with z_coarsen=true must mesh cleanly");
     verify_watertight_pure_tet_mesh(&g_zc, expected_vol, &["c0", "c1", "c2", "Si|VacTop", "Si|VacBot"]);
@@ -416,6 +422,12 @@ fn gap_cells_refines_coplanar_gaps_symmetrically_on_both_sides() {
         curved: false,
         gap_cells: None,
         z_coarsen: false,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: false,
     };
     let req_gap = MeshRequest { gap_cells: Some(2.5), ..req_base.clone() };
 
@@ -533,6 +545,12 @@ fn z_coarsen_pure_tet_watertight_3x_dof_reduction_and_sub_0_2_pct_capacitance() 
         curved: false,
         gap_cells: Some(1.5),
         z_coarsen: false,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: false,
     };
     let req_coarse = MeshRequest { z_coarsen: true, ..req_full.clone() };
 
@@ -609,4 +627,121 @@ fn z_coarsen_pure_tet_watertight_3x_dof_reduction_and_sub_0_2_pct_capacitance() 
     assert_eq!(m1.cell_labels, m4.cell_labels);
     assert_eq!(m1.facets, m4.facets);
     assert_eq!(m1.facet_labels, m4.facet_labels);
+}
+
+#[test]
+fn squadds_hfss_v1_z_slab_controls_preserve_interfaces_within_15_slabs_and_abort_max_cells_under_50ms() {
+    let mut m = Model::new_3d();
+    // SQuADDS HFSS-style 3-layer stack: [-750..-350] um VacBot, [-350..0] um Si, [0..750] um VacTop
+    let vac_bot = m.box_("vac_bot", (-300e-6, -300e-6, -750e-6), (300e-6, 300e-6, -350e-6));
+    let si_sub = m.box_("si_sub", (-300e-6, -300e-6, -350e-6), (300e-6, 300e-6, 0.0));
+    let vac_top = m.box_("vac_top", (-300e-6, -300e-6, 0.0), (300e-6, 300e-6, 750e-6));
+
+    // Ground plane with [-110..110] x [-130..130] um pocket
+    let gnd_outer = vec![pt(-300e-6, -300e-6), pt(300e-6, -300e-6), pt(300e-6, 300e-6), pt(-300e-6, 300e-6)];
+    let gnd_hole = vec![pt(-110e-6, -130e-6), pt(110e-6, -130e-6), pt(110e-6, 130e-6), pt(-110e-6, 130e-6)];
+    let poly_gnd = m.polygons("poly_gnd", vec![gnd_outer], vec![gnd_hole]);
+
+    // Two shunt pads + readout claw + sub-micron 200 nm JJ strap at z = 0
+    let pad_a = m.polygons("poly_pa", vec![vec![pt(-65e-6, -68e-6), pt(65e-6, -68e-6), pt(65e-6, -12e-6), pt(-65e-6, -12e-6)]], vec![]);
+    let pad_b = m.polygons("poly_pb", vec![vec![pt(-65e-6, 12e-6), pt(65e-6, 12e-6), pt(65e-6, 68e-6), pt(-65e-6, 68e-6)]], vec![]);
+    let jj = m.polygons("poly_jj", vec![vec![pt(-0.1e-6, -12e-6), pt(0.1e-6, -12e-6), pt(0.1e-6, 12e-6), pt(-0.1e-6, 12e-6)]], vec![]);
+    let claw = m.polygons("poly_claw", vec![vec![pt(-55e-6, 86e-6), pt(55e-6, 86e-6), pt(55e-6, 98e-6), pt(-55e-6, 98e-6)]], vec![]);
+
+    m.sheet("gnd", poly_gnd, 0.0);
+    m.sheet("pad_a", pad_a, 0.0);
+    m.sheet("pad_b", pad_b, 0.0);
+    m.sheet("jj", jj, 0.0);
+    m.sheet("claw", claw, 0.0);
+    m.overlay(&[("VacBot", vac_bot), ("Si", si_sub), ("VacTop", vac_top)]);
+    // Sub-micron 200 nm JJ edge size rule that previously forced dz = 200 nm across the entire die
+    m.size("sz_jj", Selector::parse("jj:edge").unwrap(), Some(Expr::Num(0.2e-6)), None, None);
+
+    let count_z_slabs = |g: &MeshedGeom| -> (usize, Vec<f64>) {
+        let mut zs: Vec<f64> = g.mesh.points.as_chunks::<3>().0.iter().map(|p| p[2]).collect();
+        zs.sort_by(|a, b| a.total_cmp(b));
+        zs.dedup_by(|a, b| (*a - *b).abs() <= 1e-12);
+        let n_slabs = zs.len().saturating_sub(1);
+        (n_slabs, zs)
+    };
+
+    let base_req = MeshRequest {
+        h: 100e-6,
+        max_dev: None,
+        mesher: MesherRequest::Simple,
+        structured_pml: false,
+        waves: None,
+        curved: false,
+        gap_cells: None,
+        z_coarsen: false,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: true,
+    };
+
+    // 1. Unconstrained baseline produces > 30 z-slabs due to the 200 nm JJ edge
+    let (g_unconstrained, _) = mesh_request(&m.list, &base_req).unwrap();
+    let (slabs_unconstrained, _) = count_z_slabs(&g_unconstrained);
+    assert!(slabs_unconstrained > 30, "expected > 30 unconstrained z-slabs, got {slabs_unconstrained}");
+
+    // 2. Decoupled Z-slab controls (`dz_min`, `z_growth_ratio`, `max_z_slabs = 15`) cap `N_slabs <= 15`
+    //    while strictly preserving all stack interface elevations (-750, -350, 0, +750 um)
+    let expected_vol = 600e-6 * 600e-6 * 1500e-6;
+    let interiors = ["gnd", "pad_a", "pad_b", "jj", "claw", "Si|VacTop", "Si|VacBot"];
+    for z_coarsen in [false, true] {
+        let controlled_req = MeshRequest {
+            dz_min: Some(6.0e-6),
+            z_growth_ratio: Some(1.65),
+            max_z_slabs: Some(15),
+            z_coarsen,
+            ..base_req.clone()
+        };
+        let (g_ctrl, _) = mesh_request(&m.list, &controlled_req).unwrap();
+        let (n_slabs, zs) = count_z_slabs(&g_ctrl);
+        assert!(n_slabs <= 15, "z_coarsen={z_coarsen}: expected N_slabs <= 15, got {n_slabs} ({zs:?})");
+        for z_iface in [-750e-6, -350e-6, 0.0, 750e-6] {
+            assert!(
+                zs.iter().any(|&z| (z - z_iface).abs() <= 1e-12),
+                "z_coarsen={z_coarsen}: missing stack interface z={z_iface:e} in {zs:?}"
+            );
+        }
+        verify_watertight_pure_tet_mesh(&g_ctrl, expected_vol, &interiors);
+    }
+
+    // 3. `max_cells` pre-allocation guard aborts in `< 50 ms` with diagnostic `(n_tri2, n_slabs, projected_tets, max_cells)`
+    for z_coarsen in [false, true] {
+        let abort_req = MeshRequest {
+            max_cells: Some(2_000),
+            z_coarsen,
+            ..base_req.clone()
+        };
+        let t0 = std::time::Instant::now();
+        let err = mesh_request(&m.list, &abort_req).err().expect("projected_tets > max_cells must abort");
+        let abort_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        assert!(abort_ms < 50.0, "z_coarsen={z_coarsen}: max_cells abort took {abort_ms:.2} ms (limit 50 ms)");
+        assert!(
+            err.contains("n_tri2=") && err.contains("n_slabs=") && err.contains("projected_tets=") && err.contains("max_cells=2000"),
+            "missing diagnostic fields in error: {err}"
+        );
+    }
+
+    // Also verify `Adaptive::max_cells` is honoured by the pre-allocation guard
+    let adapt_abort = MeshRequest {
+        mesher: MesherRequest::Adaptive { scale: 1.0, grade: 0.4, max_cells: Some(1_500) },
+        ..base_req.clone()
+    };
+    let err_adapt = mesh_request(&m.list, &adapt_abort).err().expect("Adaptive::max_cells must abort");
+    assert!(err_adapt.contains("max_cells=1500"), "{err_adapt}");
+
+    // 4. Invalid option values are rejected cleanly
+    assert!(mesh_request(&m.list, &MeshRequest { dz_min: Some(0.0), ..base_req.clone() }).is_err());
+    assert!(mesh_request(&m.list, &MeshRequest { dz_min: Some(-1e-6), ..base_req.clone() }).is_err());
+    assert!(mesh_request(&m.list, &MeshRequest { z_growth_ratio: Some(1.0), ..base_req.clone() }).is_err());
+    assert!(mesh_request(&m.list, &MeshRequest { z_growth_ratio: Some(0.9), ..base_req.clone() }).is_err());
+    assert!(mesh_request(&m.list, &MeshRequest { max_z_slabs: Some(0), ..base_req.clone() }).is_err());
+    assert!(mesh_request(&m.list, &MeshRequest { max_z_slabs: Some(2), ..base_req.clone() }).is_err());
+    assert!(mesh_request(&m.list, &MeshRequest { max_cells: Some(0), ..base_req }).is_err());
 }

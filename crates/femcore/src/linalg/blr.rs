@@ -42,7 +42,7 @@
 //! GMRES with this as the preconditioner).
 
 use crate::linalg::csr::Csr;
-use crate::linalg::direct::{FactorStats, ShiftedSolver, SolverError, Used};
+use crate::linalg::direct::{FactorBackend, FactorStats, ShiftedSolver, SolverError, Used};
 use crate::linalg::faer_glue::{FaerScalar, dense_lu, gemm_sub, solve_unit_lower, solve_upper_right};
 use crate::linalg::linop::Preconditioner;
 use crate::linalg::lowrank::{LowRank, aca_full};
@@ -735,6 +735,7 @@ impl<T: FaerScalar> ShiftedBlrLu<T> {
                 numeric_count: 0,
                 assemble_secs_last: 0.0,
                 used: Used::None,
+                backend: FactorBackend::None,
                 cholesky_fallbacks: 0,
                 solves: 0,
                 factor_nnz: 0,
@@ -768,6 +769,7 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedBlrLu<T> {
         self.stats.numeric_secs_total += self.stats.numeric_secs_last;
         self.stats.numeric_count += 1;
         self.stats.used = Used::Lu;
+        self.stats.backend = FactorBackend::BlrNd;
         self.stats.factor_nnz = f.stats.stored_entries;
         self.factors = Some(f);
         Ok(())

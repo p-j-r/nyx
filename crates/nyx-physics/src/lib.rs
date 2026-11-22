@@ -32,9 +32,10 @@ pub mod testkit;
 pub mod validate;
 
 pub use cqed::{
-    CapacitanceMatrixData, CircuitRom, DrivenPortData, InductanceMatrixData, ModeEnergyRow, RomPort, TlsMeta,
-    CAPACITANCE_KEY, CIRCUIT_ROM_KEY, DRIVEN_PORT_KEY, INDUCTANCE_KEY, TLS_META_KEY,
+    CapacitanceMatrixData, CircuitRom, DrivenPortData, InductanceMatrixData, ModeEnergyRow, RomPort, TlsInterfaceSpec,
+    TlsInterfaces, TlsMeta, CAPACITANCE_KEY, CIRCUIT_ROM_KEY, DRIVEN_PORT_KEY, INDUCTANCE_KEY, TLS_META_KEY,
 };
+pub use decode::{tls_interface_from_material_name, tls_interfaces_from_spec};
 pub use desc::*;
 pub use error::Error;
 /// The mesh a physics is given: the one native cell mesh, 2D or 3D (restructure phase 4, ADR 32 and 41; it was `SimplexMesh`).

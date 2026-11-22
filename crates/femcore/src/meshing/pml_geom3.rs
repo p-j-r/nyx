@@ -16,12 +16,12 @@
 use crate::adapt::work::simplex_to_adapt;
 use crate::mesh::cells::CellMesh;
 use crate::mesh::SimplexMesh;
-use crate::meshing::adapt3d::{interface_facets, FaceTable};
+use crate::meshing::adapt3d::{interface_facets_with_preserved, FaceTable};
 use crate::meshing::geomdrive::MeshedGeom;
 use crate::meshing::pml_box::{build_pml, PmlSpec};
 use crate::meshing::pml_geom::PmlReport;
 use geom::model::RegionKind;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// What `structured_pml_3d_native` returns.
 #[derive(Clone)]
@@ -32,19 +32,27 @@ pub enum Native3 {
     Cells(CellMesh<3>, PmlReport),
 }
 
+type PreservedInteriorFacets = BTreeMap<[u32; 3], ([u32; 3], i32)>;
+
 /// Replaces the absorbing layers of a meshed 3D model by structured ones, cut into tetrahedra for the simplex solvers. A model without a
 /// `Pml` comes back unchanged.
 #[allow(clippy::chunks_exact_to_as_chunks)] // four vertex indices per tetrahedron
 pub fn structured_pml_3d(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String> {
-    let (ev, labels) = (g.eval.clone(), g.labels.clone());
-    match structured_pml_3d_native(g)? {
-        Native3::Unchanged(g, report) => Ok((g, report)),
-        Native3::Cells(cells, report) => {
+    let (ev, labels, warnings) = (g.eval.clone(), g.labels.clone(), g.warnings.clone());
+    match structured_pml_3d_inner(g)? {
+        (Native3::Unchanged(g, report), _) => Ok((g, report)),
+        (Native3::Cells(cells, report), preserved) => {
             let (mesh, _) = SimplexMesh::from_cells_split(&cells)?;
             // the faces between cells of different domains carry the label of the geom face between those two domains, as in the inline
-            // mesh (ADR 40); the native mesh holds boundary facets only
+            // mesh (ADR 40), and surviving interior sheet facets from the physical mesh are preserved even when `la == lb` (FR-08)
             let table = FaceTable::new(&ev, &labels)?;
-            let (extra, extra_labels) = interface_facets(&|v| [mesh.points[3 * v as usize], mesh.points[3 * v as usize + 1], mesh.points[3 * v as usize + 2]], &mesh.cells, &mesh.cell_labels, &table);
+            let (extra, extra_labels) = interface_facets_with_preserved(
+                &|v| [mesh.points[3 * v as usize], mesh.points[3 * v as usize + 1], mesh.points[3 * v as usize + 2]],
+                &mesh.cells,
+                &mesh.cell_labels,
+                &table,
+                &preserved,
+            );
             let (mut facets, mut facet_labels) = (mesh.facets.clone(), mesh.facet_labels.clone());
             for (t, l) in extra.iter().zip(&extra_labels) {
                 facets.extend_from_slice(t);
@@ -61,7 +69,7 @@ pub fn structured_pml_3d(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), Strin
                 }
             }
             let mesh = SimplexMesh::new(3, mesh.points.clone(), cells, mesh.cell_labels.clone(), facets, facet_labels);
-            Ok((MeshedGeom { mesh, labels, eval: ev }, report))
+            Ok((MeshedGeom { mesh, labels, eval: ev, warnings }, report))
         }
     }
 }
@@ -70,11 +78,18 @@ pub fn structured_pml_3d(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), Strin
 /// boundary facets. Cells of the absorbing pieces that the mesh still holds are dropped first (the plan leaves them out of the lattice,
 /// but any mesh of the model is accepted).
 pub fn structured_pml_3d_native(g: MeshedGeom) -> Result<Native3, String> {
+    structured_pml_3d_inner(g).map(|x| x.0)
+}
+
+fn structured_pml_3d_inner(g: MeshedGeom) -> Result<(Native3, PreservedInteriorFacets), String> {
     let ev = g.eval.clone();
     let pieces = ev.pml_regions();
     if pieces.is_empty() {
         let n = g.mesh.n_cells();
-        return Ok(Native3::Unchanged(g, PmlReport { physical_cells: n, layer_quads: 0, dropped_cells: 0, layers: [[0; 2]; 2], layers3: [[0; 2]; 3] }));
+        return Ok((
+            Native3::Unchanged(g, PmlReport { physical_cells: n, layer_quads: 0, dropped_cells: 0, layers: [[0; 2]; 2], layers3: [[0; 2]; 3] }),
+            BTreeMap::new(),
+        ));
     }
     if g.mesh.dim != 3 {
         return Err("3D structured absorbing layers are built for 3D meshes".into());
@@ -131,6 +146,50 @@ pub fn structured_pml_3d_native(g: MeshedGeom) -> Result<Native3, String> {
     if phys.n_cells() == 0 {
         return Err("nothing is left of the model outside its absorbing layers".into());
     }
+    // Capture surviving physical interior facets (using `phys`'s renumbered vertex IDs, which `build_pml` and `from_cells_split`
+    // preserve at `0..n_phys_points`) so `Op::Sheet` airbridges (`la == lb`) and sheet-stack interfaces survive `structured_pml_3d`
+    let preserved = {
+        let cx = ev.complex();
+        let has_sheets = cx.has_sheets();
+        let sheet_labels: HashSet<i32> = cx
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.is_sheet())
+            .filter_map(|(fi, _)| g.labels.label_of_edge(fi as u32))
+            .collect();
+        let mut phys_face_doms: HashMap<[u32; 3], Vec<i32>> = HashMap::new();
+        for c in 0..phys.n_cells() {
+            let v = phys.cell(c);
+            let dom = phys.cell_labels[c];
+            for skip in 0..4 {
+                let mut k = [0u32; 3];
+                let mut m = 0;
+                for (i, &vi) in v.iter().enumerate() {
+                    if i != skip {
+                        k[m] = vi;
+                        m += 1;
+                    }
+                }
+                k.sort_unstable();
+                phys_face_doms.entry(k).or_default().push(dom);
+            }
+        }
+        let mut map: PreservedInteriorFacets = BTreeMap::new();
+        for f in 0..phys.n_facets() {
+            let fv = phys.facet(f);
+            let tri = [fv[0], fv[1], fv[2]];
+            let mut k = tri;
+            k.sort_unstable();
+            let lab = phys.facet_labels[f];
+            if let Some(doms) = phys_face_doms.get(&k) {
+                if doms.len() == 2 && (has_sheets || sheet_labels.contains(&lab) || doms[0] == doms[1]) {
+                    map.insert(k, (tri, lab));
+                }
+            }
+        }
+        map
+    };
     let dropped_cells = g.mesh.n_cells() - phys.n_cells();
     let work = simplex_to_adapt::<3>(&phys)?;
     let mut built = build_pml(&work, &spec).map_err(|e| format!("structured absorbing layers: {e}"))?;
@@ -201,7 +260,7 @@ pub fn structured_pml_3d_native(g: MeshedGeom) -> Result<Native3, String> {
         layers: [spec.layers[0], spec.layers[2]],
         layers3: spec.layers,
     };
-    Ok(Native3::Cells(built.mesh, report))
+    Ok((Native3::Cells(built.mesh, report), preserved))
 }
 
 /// The label of the geom face, among the outer faces of the region `domain`, that is closest to `p`.

@@ -55,6 +55,11 @@ fn param_schema(d: &ParamDesc) -> Value {
             s.insert("items".into(), json!({ "type": "string" }));
             s.insert("default".into(), json!(default));
         }
+        ParamKind::Numbers { default } => {
+            s.insert("type".into(), json!("array"));
+            s.insert("items".into(), json!({ "type": "number" }));
+            s.insert("default".into(), json!(default));
+        }
     }
     let mut desc = d.label.clone();
     if !d.unit.is_empty() {

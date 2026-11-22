@@ -14,6 +14,7 @@
 
 use crate::progress;
 use crate::linalg::csr::Csr;
+pub use crate::linalg::direct::{FactorBackend, FactorStats};
 use crate::linalg::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
 use crate::linalg::eps::{EpsOptions, EpsReason, Kind, Which, krylov_schur};
 use crate::linalg::faer_glue::FaerScalar;
@@ -52,6 +53,26 @@ impl<T: FaerScalar> DirectSolver<T> {
 
     pub fn n(&self) -> usize {
         self.n
+    }
+
+    /// Replaces the numeric values of `a` while reusing the cached symbolic analysis
+    /// (requiring an identical sparsity pattern), and re-runs numeric factorisation on the factorisation pool.
+    pub fn update_matrix(&mut self, a: &Csr<T>) -> Result<(), String> {
+        if a.nrows() != self.n || a.ncols() != self.n {
+            return Err("updated matrix dimension does not match the solver dimension".into());
+        }
+        progress::check()?;
+        self.fac
+            .replace_matrices(a, None)
+            .map_err(|e| format!("sparse matrix update failed: {e}"))?;
+        crate::par::on_factor_pool(|| self.fac.set_shift(T::ZERO))
+            .map_err(|e| format!("sparse factorisation failed (singular matrix?): {e}"))?;
+        Ok(())
+    }
+
+    /// Factorisation statistics (including `symbolic_count` and `numeric_count`).
+    pub fn stats(&self) -> FactorStats {
+        self.fac.stats()
     }
 
     pub fn solve(&self, b: &[T]) -> Vec<T> {
@@ -178,6 +199,7 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
     progress::check()?;
     let _stage = progress::stage(format!("shift-and-invert Krylov-Schur eigensolver ({nev} modes, {n} unknowns)"));
     let mut fac = ShiftedFactorization::new(a, Some(b), definiteness).map_err(|e| format!("sparse factorisation failed: {e}"))?;
+    fac.ordering = fill_ordering(n);
     {
         let kind = if T::IS_COMPLEX { "complex " } else { "" };
         let _f = progress::stage(format!("factorising the {kind}shifted matrix ({n} unknowns); this cannot be interrupted"));
@@ -315,6 +337,44 @@ pub fn dense_gen_eigh(k: &[f64], m: &[f64], n: usize) -> Result<(Vec<f64>, Vec<V
     faer::linalg::triangular_solve::solve_upper_triangular_in_place(l.transpose(), y.as_mut(), faer::get_global_parallelism());
     let vecs: Vec<Vec<f64>> = (0..n).map(|j| (0..n).map(|i| y[(i, j)]).collect()).collect();
     Ok((vals, vecs))
+}
+
+/// Thin SVD of a complex matrix given by its columns (`cols[j]` has length `n`):
+/// returns `(singular_values, left_singular_vectors)` in decreasing singular-value order.
+pub fn thin_svd_c64(cols: &[Vec<C64>]) -> Result<(Vec<f64>, Vec<Vec<C64>>), String> {
+    if cols.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let n = cols[0].len();
+    if cols.iter().any(|c| c.len() != n) {
+        return Err("thin_svd_c64: all columns must have the same length".into());
+    }
+    if n == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let k = cols.len();
+    if n >= k {
+        let mut data = Vec::with_capacity(n * k);
+        for col in cols {
+            data.extend_from_slice(col);
+        }
+        let (s, u_flat) =
+            crate::linalg::faer_glue::thin_svd_c64(&data, n, k).map_err(|e| format!("thin SVD failed: {e}"))?;
+        let u_cols = (0..k).map(|j| u_flat[j * n..(j + 1) * n].to_vec()).collect();
+        Ok((s, u_cols))
+    } else {
+        if cols.iter().flatten().any(|v| !v.is_finite()) {
+            return Err("thin SVD failed: matrix contains NaN or infinity".into());
+        }
+        let m = faer::Mat::<faer::c64>::from_fn(n, k, |i, j| cols[j][i]);
+        let svd = m.thin_svd().map_err(|_| "thin SVD failed to converge".to_string());
+        crate::linalg::faer_glue::clear_upper_vector_state();
+        let svd = svd?;
+        let s: Vec<f64> = (0..n).map(|i| svd.S().column_vector()[i].re).collect();
+        let u = svd.U();
+        let u_cols: Vec<Vec<C64>> = (0..n).map(|j| (0..n).map(|i| u[(i, j)]).collect()).collect();
+        Ok((s, u_cols))
+    }
 }
 
 // ------------------------------------------------------------------------------------------------------------ cancel helpers
@@ -637,17 +697,337 @@ impl LinearOperator<C64> for QepShiftInvert<'_> {
     }
 }
 
-/// Fill-reducing ordering of the Cholesky path: AMD, as the old stack. The library's `Auto` (also tries nested dissection, keeps the one with
-/// fewer factor non-zeros) was measured in phase 3 and lost: the 205 479-unknown 3D direct solve took 13.5 and 17.8 s with `Auto` against 4.7
-/// and 10.9 s with AMD (two runs each, loaded machine), and the small 2D solves 60 to 80 % longer (the second symbolic analysis). The
-/// library's 30 % less fill for 3D Laplacians does not carry over to P2 elasticity with the parallel factorisation.
-/// `NYX_ORDERING=amd|auto|nd` overrides the choice (experiments).
+// ------------------------------------------------------------------------------------------------------------ P2 Nédélec iterative curl-curl solvers (FR-16 Pt 2)
+
+pub use crate::linalg::ams::{AmsP2, AmsP2Options, AmsP2Topology};
+
+/// Options for [`solve_curl_curl_p2_iterative`] (FGMRES/GMRES preconditioned by [`AmsP2`]).
+#[derive(Clone, Debug)]
+pub struct IterativeCurlCurlOptions {
+    /// Target relative residual `‖A x − b‖₂ / ‖b‖₂`.
+    pub rtol: f64,
+    /// Absolute residual stopping tolerance.
+    pub atol: f64,
+    /// Maximum Krylov iterations.
+    pub max_it: usize,
+    /// Restart dimension `m` of FGMRES/GMRES(m).
+    pub restart: usize,
+    /// Use Flexible GMRES (`true`, default) instead of standard right-preconditioned GMRES.
+    pub flexible: bool,
+    /// Options of the $P_2$ Hiptmair–Xu auxiliary-space preconditioner.
+    pub ams: AmsP2Options,
+}
+
+impl Default for IterativeCurlCurlOptions {
+    fn default() -> Self {
+        Self {
+            rtol: 1e-9,
+            atol: 1e-14,
+            max_it: 400,
+            restart: 40,
+            flexible: true,
+            ams: AmsP2Options::default(),
+        }
+    }
+}
+
+/// Output of [`solve_curl_curl_p2_iterative`].
+#[derive(Clone, Debug)]
+pub struct IterativeSolveReport<T: Scalar> {
+    pub x: Vec<T>,
+    pub iterations: usize,
+    /// Independently recomputed true relative residual `‖A x − b‖₂ / ‖b‖₂`.
+    pub relative_residual: f64,
+    pub converged: bool,
+    /// Total sparse non-zeros stored by the `AmsP2` preconditioner hierarchy.
+    pub preconditioner_nnz: usize,
+}
+
+struct CancelPc<'a, T: Scalar, P: crate::linalg::linop::Preconditioner<T>>(&'a P, std::marker::PhantomData<T>);
+
+impl<T: Scalar, P: crate::linalg::linop::Preconditioner<T>> crate::linalg::linop::Preconditioner<T>
+    for CancelPc<'_, T, P>
+{
+    fn apply(&self, r: &[T], z: &mut [T]) {
+        cancel_point();
+        self.0.apply(r, z);
+    }
+}
+
+/// Solves a 3D $P_2$ Nédélec curl-curl linear system `A x = b` (driven frequency-domain or
+/// shifted Helmholtz/Maxwell) iteratively with FGMRES/GMRES preconditioned by [`AmsP2`].
+///
+/// When `A = K − σ M` is indefinite, pass a positive-definite or complex-shifted auxiliary
+/// matrix as `pc_matrix` (e.g. `Some(&(K + |σ| M))` or `Some(&(K − (σ + iγ) M))`); when `A` is
+/// already SPD or complex-damped, pass `pc_matrix = None` to build `AmsP2` directly on `A`.
+pub fn solve_curl_curl_p2_iterative<T: FaerScalar>(
+    a: &Csr<T>,
+    pc_matrix: Option<&Csr<T>>,
+    topo: &AmsP2Topology,
+    rhs: &[T],
+    opts: &IterativeCurlCurlOptions,
+) -> Result<IterativeSolveReport<T>, String> {
+    use crate::linalg::ksp::{Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances};
+    let n = a.nrows();
+    if n == 0 || a.ncols() != n || rhs.len() != n {
+        return Err("solve_curl_curl_p2_iterative: matrix must be square and match rhs length".into());
+    }
+    progress::check()?;
+    let _stage = progress::stage(format!("iterative P2 curl-curl FGMRES+AMS ({n} unknowns)"));
+    let pc_mat = pc_matrix.unwrap_or(a);
+    let ams = AmsP2::new(pc_mat, topo, &opts.ams).map_err(|e| format!("AmsP2 setup failed: {e}"))?;
+    let preconditioner_nnz = ams.nnz_storage();
+    let gmres_opts = GmresOptions {
+        tol: Tolerances { rtol: opts.rtol, atol: opts.atol, max_it: opts.max_it, ..Default::default() },
+        restart: opts.restart.max(2),
+        side: PcSide::Right,
+        orthog: Orthogonalization::ClassicalGramSchmidtIfNeeded,
+        flexible: opts.flexible,
+        ..Default::default()
+    };
+    let mut solver = Gmres::<T>::new(gmres_opts);
+    let mut x = vec![T::ZERO; n];
+    let pc = CancelPc(&ams, std::marker::PhantomData);
+    let info = catching_cancel(|| solver.solve(a, &pc, rhs, &mut x))?;
+    let mut ax = vec![T::ZERO; n];
+    a.spmv(&x, &mut ax);
+    let b_norm = norm2(rhs).max(1e-300);
+    let r_norm = ax.iter().zip(rhs).map(|(p, q)| (*p - *q).modulus_sq()).sum::<f64>().sqrt();
+    let relative_residual = r_norm / b_norm;
+    Ok(IterativeSolveReport {
+        x,
+        iterations: info.iterations,
+        relative_residual,
+        converged: info.reason.is_converged() && relative_residual <= (opts.rtol * 10.0).max(opts.atol),
+        preconditioner_nnz,
+    })
+}
+
+/// Finds `nev` interior eigenpairs of a 3D $P_2$ Nédélec curl-curl pencil `K x = λ M x` near
+/// `target` via Jacobi–Davidson preconditioned by [`AmsP2`] on `K + |target| M` (no sparse LU).
+pub fn eigs_curl_curl_p2_jd(
+    k: &Csr<C64>,
+    m: &Csr<C64>,
+    topo: &AmsP2Topology,
+    target: C64,
+    nev: usize,
+    tol: f64,
+    max_it: usize,
+) -> Result<CEigPairs, String> {
+    use crate::linalg::jd::{JdOptions, jacobi_davidson};
+    let n = k.nrows();
+    if n == 0 || k.ncols() != n || m.nrows() != n || m.ncols() != n {
+        return Err("eigs_curl_curl_p2_jd: K and M must be square of identical dimension".into());
+    }
+    if nev == 0 || nev >= n {
+        return Err("eigs_curl_curl_p2_jd: nev must be between 1 and n-1".into());
+    }
+    progress::check()?;
+    let _stage = progress::stage(format!("P2 curl-curl Jacobi–Davidson + AMS ({nev} modes, {n} unknowns)"));
+    let beta = target.norm().max(1.0);
+    let spd = Csr::axpby(C64::ONE, k, C64::new(beta, 0.0), m);
+    let ams = AmsP2::new(&spd, topo, &AmsP2Options::default()).map_err(|e| format!("AmsP2 setup failed: {e}"))?;
+    let mut opts = JdOptions::new(nev, target, true);
+    opts.tol = tol;
+    opts.max_it = max_it;
+    opts.harmonic = false;
+    opts.inner_its = 25;
+    opts.m_min = (nev + 6).max(8);
+    opts.m_max = (opts.m_min + 16).min(n.saturating_sub(2));
+    let pc = CancelPc(&ams, std::marker::PhantomData);
+    let res = catching_cancel(|| jacobi_davidson(k, Some(m), &pc, None, &opts))?
+        .map_err(|e| format!("Jacobi–Davidson failed: {e}"))?;
+    let vectors = (0..res.values.len()).map(|j| res.vectors.col(j).to_vec()).collect();
+    Ok(CEigPairs {
+        values: res.values,
+        vectors,
+        residuals: res.residuals,
+        dim: opts.m_max,
+        converged: res.converged,
+    })
+}
+
+/// Matrix-free / low-memory [`ShiftedSolver`] for 3D $P_2$ Nédélec shifted curl-curl systems
+/// `(K − σ M)⁻¹` solved iteratively via [`AmsP2`] + FGMRES (usable inside `ShiftInvertOperator`
+/// and `krylov_schur` without allocating sparse LU factors).
+pub struct IterativeShiftInvertP2<T: FaerScalar> {
+    k: Csr<T>,
+    m: Csr<T>,
+    topo: AmsP2Topology,
+    opts: IterativeCurlCurlOptions,
+    shifted: Option<Csr<T>>,
+    ams: Option<AmsP2<T>>,
+    stats: FactorStats,
+    solves: std::cell::Cell<usize>,
+}
+
+impl<T: FaerScalar> IterativeShiftInvertP2<T> {
+    pub fn new(k: &Csr<T>, m: &Csr<T>, topo: AmsP2Topology, opts: IterativeCurlCurlOptions) -> Self {
+        Self {
+            k: k.clone(),
+            m: m.clone(),
+            topo,
+            opts,
+            shifted: None,
+            ams: None,
+            stats: FactorStats {
+                analyse_secs: 0.0,
+                symbolic_count: 0,
+                numeric_secs_total: 0.0,
+                numeric_secs_last: 0.0,
+                numeric_count: 0,
+                assemble_secs_last: 0.0,
+                used: crate::linalg::direct::Used::None,
+                backend: FactorBackend::None,
+                cholesky_fallbacks: 0,
+                solves: 0,
+                factor_nnz: 0,
+                solve_secs_total: 0.0,
+            },
+            solves: std::cell::Cell::new(0),
+        }
+    }
+}
+
+impl<T: FaerScalar> ShiftedSolver<T> for IterativeShiftInvertP2<T> {
+    fn dim(&self) -> usize {
+        self.k.nrows()
+    }
+
+    fn set_shift(&mut self, sigma: T) -> Result<(), crate::linalg::direct::SolverError> {
+        let t0 = std::time::Instant::now();
+        let shifted = Csr::axpby(T::ONE, &self.k, -sigma, &self.m);
+        let beta = T::from_f64(sigma.modulus().max(1.0));
+        let pc_mat = Csr::axpby(T::ONE, &self.k, beta, &self.m);
+        let ams = AmsP2::new(&pc_mat, &self.topo, &self.opts.ams)?;
+        let secs = t0.elapsed().as_secs_f64();
+        self.stats.factor_nnz = ams.nnz_storage();
+        self.stats.numeric_secs_last = secs;
+        self.stats.numeric_secs_total += secs;
+        self.stats.numeric_count += 1;
+        self.shifted = Some(shifted);
+        self.ams = Some(ams);
+        Ok(())
+    }
+
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
+        use crate::linalg::ksp::{Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances};
+        let a = self.shifted.as_ref().expect("set_shift must succeed before solving");
+        let ams = self.ams.as_ref().expect("set_shift must succeed before solving");
+        let n = self.dim();
+        let mut gmres = Gmres::<T>::new(GmresOptions {
+            tol: Tolerances { rtol: self.opts.rtol, atol: self.opts.atol, max_it: self.opts.max_it, ..Default::default() },
+            restart: self.opts.restart.max(2),
+            side: PcSide::Right,
+            orthog: Orthogonalization::ClassicalGramSchmidtIfNeeded,
+            flexible: self.opts.flexible,
+            ..Default::default()
+        });
+        let mut x = vec![T::ZERO; n];
+        for c in 0..nrhs {
+            let col = &mut rhs[c * n..(c + 1) * n];
+            let b = col.to_vec();
+            let _ = gmres.solve(a, ams, &b, &mut x);
+            col.copy_from_slice(&x);
+        }
+        self.solves.set(self.solves.get() + nrhs);
+    }
+
+    fn stats(&self) -> FactorStats {
+        FactorStats { solves: self.solves.get(), ..self.stats }
+    }
+}
+
+/// Fill-reducing ordering of the Cholesky, LBL^H, and custom-ordered LU paths.
+/// `NYX_ORDERING=amd|auto|nd` overrides the choice.
 fn fill_ordering(_n: usize) -> crate::linalg::ordering::FillOrdering {
     use crate::linalg::ordering::FillOrdering;
     match std::env::var("NYX_ORDERING").ok().as_deref() {
         Some("amd") => FillOrdering::Amd,
         Some("auto") => FillOrdering::Auto,
         Some("nd") => FillOrdering::NestedDissection,
-        _ => FillOrdering::Amd,
+        _ => FillOrdering::Auto,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tridiag_c64(n: usize, diag_val: C64, off_val: C64) -> CCsr {
+        let mut triplets = Vec::new();
+        for i in 0..n {
+            triplets.push((i, i, diag_val + C64::new(i as f64 * 0.1, 0.0)));
+            if i + 1 < n {
+                triplets.push((i, i + 1, off_val));
+                triplets.push((i + 1, i, off_val));
+            }
+        }
+        CCsr::from_triplets(n, n, &triplets).unwrap()
+    }
+
+    #[test]
+    fn direct_solver_update_matrix_reuses_symbolic_factorization() {
+        let n = 6;
+        let a1 = tridiag_c64(n, C64::new(4.0, 0.2), C64::new(-1.0, 0.05));
+        let mut solver = DirectSolver::new(&a1, false).expect("initial factorisation");
+        assert_eq!(solver.stats().symbolic_count, 1);
+        assert_eq!(solver.stats().numeric_count, 1);
+
+        let b: Vec<C64> = (0..n).map(|i| C64::new(1.0 + i as f64, -0.5 * i as f64)).collect();
+        let x1 = solver.solve(&b);
+        let r1 = a1.matvec(&x1);
+        for i in 0..n {
+            assert!((r1[i] - b[i]).norm() < 1e-12, "step 1 residual at {i}");
+        }
+
+        let a2 = tridiag_c64(n, C64::new(7.5, -0.4), C64::new(-1.2, 0.1));
+        solver.update_matrix(&a2).expect("first update_matrix");
+        assert_eq!(solver.stats().symbolic_count, 1, "symbolic analysis must be reused");
+        assert_eq!(solver.stats().numeric_count, 2);
+        let x2 = solver.solve(&b);
+        let r2 = a2.matvec(&x2);
+        for i in 0..n {
+            assert!((r2[i] - b[i]).norm() < 1e-12, "step 2 residual at {i}");
+        }
+
+        let a3 = tridiag_c64(n, C64::new(11.0, 0.9), C64::new(-0.8, -0.2));
+        solver.update_matrix(&a3).expect("second update_matrix");
+        assert_eq!(solver.stats().symbolic_count, 1, "symbolic analysis must still be 1");
+        assert_eq!(solver.stats().numeric_count, 3);
+        let x3 = solver.solve(&b);
+        let r3 = a3.matvec(&x3);
+        for i in 0..n {
+            assert!((r3[i] - b[i]).norm() < 1e-12, "step 3 residual at {i}");
+        }
+    }
+
+    #[test]
+    fn thin_svd_c64_produces_orthonormal_left_singular_vectors() {
+        let col0 = vec![
+            C64::new(3.0, 0.0),
+            C64::new(0.0, 4.0),
+            C64::new(0.0, 0.0),
+            C64::new(0.0, 0.0),
+        ];
+        let col1 = vec![
+            C64::new(0.0, 0.0),
+            C64::new(0.0, 0.0),
+            C64::new(0.0, 2.0),
+            C64::new(0.0, 0.0),
+        ];
+        let (s, u) = thin_svd_c64(&[col0, col1]).expect("thin_svd_c64");
+        assert_eq!(s.len(), 2);
+        assert_eq!(u.len(), 2);
+        assert!((s[0] - 5.0).abs() < 1e-12, "s[0] = {}", s[0]);
+        assert!((s[1] - 2.0).abs() < 1e-12, "s[1] = {}", s[1]);
+
+        for a in 0..2 {
+            for b in 0..2 {
+                let dot: C64 = u[a].iter().zip(&u[b]).map(|(x, y)| x.conj() * y).sum();
+                let target = if a == b { 1.0 } else { 0.0 };
+                assert!((dot - C64::new(target, 0.0)).norm() < 1e-12, "u_{a}^H u_{b} = {dot}");
+            }
+        }
     }
 }

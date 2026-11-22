@@ -306,6 +306,7 @@ pub fn cap_role(axis: usize, top: bool) -> String {
 }
 
 type MemoKey = (FeatureId, [u64; 8], String, u64, u64, u8);
+type PinInstanceKey = (FeatureId, [u64; 8], String);
 
 struct Builder<'a> {
     perm: [usize; 3],
@@ -320,8 +321,8 @@ struct Builder<'a> {
     extrude: Option<(f64, f64)>,
     /// z coordinate while instantiating the 2D profile/boolean input of a `Sheet`
     sheet_z: Option<f64>,
-    /// raw 2D polygon/rect corners per feature id, used to pin shared vertices across sibling `Polygons` features
-    polygon_pins: Vec<(FeatureId, Vec<V2>)>,
+    /// transformed 2D profile-frame corners per instance `(feature_id, xf.key(), suffix)`, used to pin shared vertices across sibling instances
+    polygon_pins: Vec<(PinInstanceKey, Vec<V2>)>,
 }
 
 const MAX_INSTANCES: f64 = 100_000.0;
@@ -609,14 +610,24 @@ impl Builder<'_> {
                     let pts: Vec<V2> = ring.iter().map(|q| self.ev2(q, f, "hole point")).collect::<GeomResult<_>>()?;
                     raw_holes.push(pts);
                 }
+                let my_key: PinInstanceKey = (f.id, xf.key(), suffix.to_string());
+                let inv_xy = xf.xy.inverse();
+                let scale = xf.xy.scale().max(1e-30);
+                let local_tol = tol / scale;
+                let local_min_hole = min_hole / (scale * scale);
                 let external_pins: Vec<V2> = self
                     .polygon_pins
                     .iter()
-                    .filter(|(id, _)| *id != f.id)
-                    .flat_map(|(_, pts)| pts.iter().copied())
+                    .filter(|(k, _)| *k != my_key)
+                    .flat_map(|(_, pts)| pts.iter().map(|&p| inv_xy.apply(p)))
                     .collect();
-                let (outers, surviving_holes) =
-                    crate::poly_batch::simplify_rings_with_pins(&raw_polys, &raw_holes, &external_pins, tol, min_hole)?;
+                let (outers, surviving_holes) = crate::poly_batch::simplify_rings_with_pins(
+                    &raw_polys,
+                    &raw_holes,
+                    &external_pins,
+                    local_tol,
+                    local_min_hole,
+                )?;
                 let mut outer_nodes = Vec::with_capacity(outers.len());
                 for (pi, p) in outers.iter().enumerate() {
                     let nm: Vec<String> = (0..p.len()).map(|i| format!("e{i}")).collect();
@@ -841,6 +852,140 @@ impl Builder<'_> {
             op => Err(GeomError(format!("feature '{}' ({}) cannot be used as a shape", f.name, op.kind()))),
         }
     }
+
+    fn record_pins(&mut self, key: PinInstanceKey, local_pts: &[V2], xy: &Xf2) {
+        if local_pts.is_empty() || self.polygon_pins.iter().any(|(k, _)| *k == key) {
+            return;
+        }
+        let world_pts: Vec<V2> = local_pts.iter().map(|&p| xy.apply(p)).collect();
+        self.polygon_pins.push((key, world_pts));
+    }
+
+    /// Recursive DAG pre-pass collecting transformed 2D profile-frame vertices across all active features and pattern/transform instances.
+    fn collect_pins(&mut self, id: FeatureId, xf: Xf3, suffix: &str, depth: usize) {
+        if depth > 256 {
+            return;
+        }
+        let Some(&fi) = self.index.get(&id) else { return };
+        let f = &self.list.features[fi];
+        if f.suppressed {
+            return;
+        }
+        let key: PinInstanceKey = (f.id, xf.key(), suffix.to_string());
+        match &f.op {
+            Op::Rect { min, max } => {
+                if let (Ok(a), Ok(b)) = (self.ev2(min, f, ""), self.ev2(max, f, "")) {
+                    let (lo, hi) = ([a[0].min(b[0]), a[1].min(b[1])], [a[0].max(b[0]), a[1].max(b[1])]);
+                    let pts = [lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]];
+                    self.record_pins(key, &pts, &xf.xy);
+                }
+            }
+            Op::RoundedRect { min, max, r } => {
+                if let (Ok(a), Ok(b), Ok(rv)) = (self.ev2(min, f, ""), self.ev2(max, f, ""), self.ev(r, f, "")) {
+                    let (lo, hi) = ([a[0].min(b[0]), a[1].min(b[1])], [a[0].max(b[0]), a[1].max(b[1])]);
+                    let mut pts = vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]];
+                    if rv > 0.0 {
+                        pts.extend([
+                            [lo[0] + rv, lo[1]],
+                            [hi[0] - rv, lo[1]],
+                            [hi[0], lo[1] + rv],
+                            [hi[0], hi[1] - rv],
+                            [hi[0] - rv, hi[1]],
+                            [lo[0] + rv, hi[1]],
+                            [lo[0], hi[1] - rv],
+                            [lo[0], lo[1] + rv],
+                        ]);
+                    }
+                    self.record_pins(key, &pts, &xf.xy);
+                }
+            }
+            Op::Polygon { pts: ring, .. } => {
+                let mut pts = Vec::with_capacity(ring.len());
+                for q in ring {
+                    if let Ok(p) = self.ev2(q, f, "") {
+                        pts.push(p);
+                    }
+                }
+                self.record_pins(key, &pts, &xf.xy);
+            }
+            Op::Polygons { polygons, holes, .. } => {
+                let mut pts = Vec::new();
+                for ring in polygons.iter().chain(holes.iter()) {
+                    for q in ring {
+                        if let Ok(p) = self.ev2(q, f, "") {
+                            pts.push(p);
+                        }
+                    }
+                }
+                self.record_pins(key, &pts, &xf.xy);
+            }
+            Op::Box { min, max } => {
+                if let (Ok(a), Ok(b)) = (self.ev3(min, f, ""), self.ev3(max, f, "")) {
+                    let (lo, hi) = ([a[0].min(b[0]), a[1].min(b[1])], [a[0].max(b[0]), a[1].max(b[1])]);
+                    let pts = [lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]];
+                    self.record_pins(key, &pts, &xf.xy);
+                }
+            }
+            Op::Extrude { profile, taper_deg: None, .. } => {
+                self.collect_pins(*profile, xf, suffix, depth + 1);
+            }
+            Op::Transform { input, steps } => {
+                let mut t = Xf3::ID;
+                for s in steps {
+                    let Ok(st) = self.step_xf(s, f) else { return };
+                    t = st.after(&t);
+                }
+                self.collect_pins(*input, xf.after(&t), suffix, depth + 1);
+            }
+            Op::Pattern { input, kind, n } => {
+                let Ok(nn) = self.ev(n, f, "") else { return };
+                if nn.fract() != 0.0 || !(1.0..=MAX_INSTANCES).contains(&nn) {
+                    return;
+                }
+                let nn = nn as usize;
+                for i in 0..nn {
+                    let t = match kind {
+                        PatternKind::Linear { step } => {
+                            let Ok(s) = self.ev3(step, f, "") else { return };
+                            Xf3 { xy: Xf2::translate([s[0] * i as f64, s[1] * i as f64]), zs: 1.0, zt: s[2] * i as f64 }
+                        }
+                        PatternKind::Polar { axis, center, total_deg } => {
+                            if axis.index() != self.perm[2] {
+                                return;
+                            }
+                            let (Ok(c), Ok(tot_deg)) = (self.ev3(center, f, ""), self.ev(total_deg, f, "")) else {
+                                return;
+                            };
+                            let tot = axis_handedness(self.perm[2]) * tot_deg;
+                            let c = [c[0], c[1]];
+                            Xf3 {
+                                xy: Xf2::translate(c)
+                                    .after(&Xf2::rotate((tot * i as f64 / nn as f64).to_radians()))
+                                    .after(&Xf2::translate(mul2(c, -1.0))),
+                                zs: 1.0,
+                                zt: 0.0,
+                            }
+                        }
+                    };
+                    self.collect_pins(*input, xf.after(&t), &format!("{suffix}[{i}]"), depth + 1);
+                }
+            }
+            Op::Union { ids } | Op::Intersect { ids } => {
+                let ids = ids.clone();
+                for child in ids {
+                    self.collect_pins(child, xf, suffix, depth + 1);
+                }
+            }
+            Op::Difference { a, b } => {
+                let (a, b) = (*a, b.clone());
+                self.collect_pins(a, xf, suffix, depth + 1);
+                for child in b {
+                    self.collect_pins(child, xf, suffix, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Builds the scene of a feature list (validates it first).
@@ -860,39 +1005,6 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
     let Op::Overlay { regions, pins, naming } = &overlay.op else { unreachable!() };
     let index = list.features.iter().enumerate().map(|(i, f)| (f.id, i)).collect();
     let axis = if list.dim == 3 { stack_axis(list)? } else { 1 };
-    let mut polygon_pins: Vec<(FeatureId, Vec<V2>)> = Vec::new();
-    for f in list.features.iter().filter(|f| !f.suppressed) {
-        let mut pts = Vec::new();
-        match &f.op {
-            Op::Rect { min, max } | Op::RoundedRect { min, max, .. } => {
-                if let (Ok(x0), Ok(y0), Ok(x1), Ok(y1)) =
-                    (env.eval(&min[0], ""), env.eval(&min[1], ""), env.eval(&max[0], ""), env.eval(&max[1], ""))
-                {
-                    pts.extend([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
-                }
-            }
-            Op::Polygon { pts: ring, .. } => {
-                for q in ring {
-                    if let (Ok(x), Ok(y)) = (env.eval(&q[0], ""), env.eval(&q[1], "")) {
-                        pts.push([x, y]);
-                    }
-                }
-            }
-            Op::Polygons { polygons, holes, .. } => {
-                for ring in polygons.iter().chain(holes.iter()) {
-                    for q in ring {
-                        if let (Ok(x), Ok(y)) = (env.eval(&q[0], ""), env.eval(&q[1], "")) {
-                            pts.push([x, y]);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-        if !pts.is_empty() {
-            polygon_pins.push((f.id, pts));
-        }
-    }
     let mut b = Builder {
         perm: axis_perm(axis),
         list,
@@ -904,8 +1016,20 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         depth: 0,
         extrude: None,
         sheet_z: None,
-        polygon_pins,
+        polygon_pins: Vec::new(),
     };
+    for r in regions {
+        b.collect_pins(r.input, Xf3::ID, "", 0);
+    }
+    for f in list.features.iter().filter(|f| !f.suppressed) {
+        if let Op::Sheet { input, z } = &f.op {
+            if let Ok(z0) = b.ev(z, f, "z") {
+                b.sheet_z = Some(z0);
+                b.collect_pins(*input, Xf3::ID, "", 0);
+                b.sheet_z = None;
+            }
+        }
+    }
     let mut rx: Vec<RegionX> = vec![];
     let mut sheets: Vec<SheetX> = vec![];
     let mut warnings = vec![];

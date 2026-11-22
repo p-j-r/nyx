@@ -43,6 +43,10 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// What was asked, written once by the front-end.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Request {
@@ -62,6 +66,12 @@ pub struct Request {
     pub estimate: Option<Estimate>,
     /// the process that submitted it, for the list ("from window, pid 1234"); not trusted for anything
     pub from_pid: u32,
+    #[serde(default = "default_true")]
+    pub save_fields: bool,
+    #[serde(default)]
+    pub post_analyses: Vec<Value>,
+    #[serde(default)]
+    pub memory_wait_timeout_s: Option<f64>,
 }
 
 /// What a front-end puts in an item besides the frozen project.
@@ -74,6 +84,9 @@ pub(crate) struct NewItem {
     pub hold: bool,
     pub force: bool,
     pub estimate: Option<Estimate>,
+    pub save_fields: bool,
+    pub post_analyses: Vec<Value>,
+    pub memory_wait_timeout_s: Option<f64>,
 }
 
 /// What the queue worker says of an item. An item with no `state.json` is queued.
@@ -275,6 +288,9 @@ impl SharedQueue {
             force: n.force,
             estimate: n.estimate.clone(),
             from_pid: std::process::id(),
+            save_fields: n.save_fields,
+            post_analyses: n.post_analyses.clone(),
+            memory_wait_timeout_s: n.memory_wait_timeout_s,
         };
         let r = (|| -> Result<(), Error> {
             crate::worker::write_job_files(&tmp, spec)?;
@@ -648,7 +664,7 @@ fn run_item(q: &SharedQueue, item: &Item, o: &RunnerOptions, lease: &Lease) {
     };
     let outcome: Result<Value, Error> = (|| {
         if let Some(est) = &item.request.estimate {
-            crate::estimate::admit(est, item.request.force, &o.probe, &progress)?;
+            crate::estimate::admit(est, item.request.force, &o.probe, &progress, item.request.memory_wait_timeout_s)?;
         }
         let base = progress.log();
         let end = crate::worker::run_child(

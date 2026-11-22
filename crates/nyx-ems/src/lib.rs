@@ -43,12 +43,14 @@ pub use modes_complex::{
     solve_mode_pairs_complex, solve_modes_complex, solve_waveguide_complex, ModeAssemblyC, ModesC,
 };
 pub use optical::{solve_optical, solve_optical_wafer};
-pub use ports::{assemble_lumped_ports_3d, assemble_waveports_3d, AssembledLumpedPort, AssembledWavePort};
+pub use ports::{
+    assemble_lumped_ports_3d, assemble_waveports_3d, validate_port_contacts_3d, AssembledLumpedPort, AssembledWavePort,
+};
 pub use problem::{
     decode, symmetry_facet_flags, LumpedJjBc, LumpedPortBc, Problem, Study, SurfaceImpedanceBc, Symmetry, WavePortBc,
     SYMMETRY_CHOICES,
 };
-pub use rom::rom_eigenfrequencies;
+pub use rom::{rom_complex_eigenfrequencies, rom_eigenfrequencies};
 
 use femcore::progress::{self, Progress};
 use nyx_physics::Mesh;
@@ -141,10 +143,14 @@ impl Physics for Ems {
                 doc: "Driven frequency-domain multi-port S/Z/Y sweep on a 3D mesh with lumped and waveguide ports, accelerated by greedy Hermite/Galerkin reduced-order modeling.".into(),
                 dims: Dims::Three,
                 params: vec![
-                    ParamDesc::number("f_min", "Start frequency", "Hz", 4.0e9, "minimum sweep frequency").required().range(Some(f64::MIN_POSITIVE), None),
-                    ParamDesc::number("f_max", "Stop frequency", "Hz", 8.0e9, "maximum sweep frequency (>= f_min)").required().range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::number("f_min", "Start frequency", "Hz", 4.0e9, "minimum sweep frequency (required unless freqs_hz is given)").range(Some(f64::MIN_POSITIVE), None),
+                    ParamDesc::number("f_max", "Stop frequency", "Hz", 8.0e9, "maximum sweep frequency (>= f_min, required unless freqs_hz is given)").range(Some(f64::MIN_POSITIVE), None),
                     ParamDesc::integer("n_points", "Frequency points", 201, 1, "number of uniformly spaced frequencies in [f_min, f_max]"),
+                    ParamDesc::numbers("freqs_hz", "Explicit frequencies", "Hz", "optional explicit ascending frequency grid in Hz; overrides f_min, f_max, and n_points when non-empty"),
                     ParamDesc::number("prom_tol", "PROM residual tolerance", "", 1e-3, "relative residual tolerance for Hermite/Galerkin PROM fast sweep (0 or null disables PROM and solves point-by-point HDM)").range(Some(0.0), None),
+                    ParamDesc::integer("max_hdm_solves", "Maximum HDM solves", 16, 1, "maximum number of greedy full-order HDM anchor factorizations during PROM sweep").range(Some(1.0), Some(64.0)),
+                    ParamDesc::boolean("strict_prom_tol", "Strict PROM tolerance", false, "return an error if max_prom_residual still exceeds prom_tol after max_hdm_solves"),
+                    ParamDesc::numbers("seed_freqs_hz", "Seed anchor frequencies", "Hz", "optional initial PROM anchor frequencies merged with [f_min, f_mid, f_max]"),
                 ],
             },
         ]
@@ -209,6 +215,7 @@ impl Physics for Ems {
                     ParamDesc::number("temperature", "Temperature", "K", 0.01, "operating temperature for BCS surface impedance").range(Some(0.0), None),
                     ParamDesc::number("f_ref", "Reference frequency", "Hz", 0.0, "reference frequency for Z_s evaluation (0 or null uses the study frequency)").range(Some(0.0), None),
                     ParamDesc::choice("film_model", "Thin-film model", &["two_sided", "kerr", "thin_limit"], "two_sided", "thin-film current distribution model"),
+                    ParamDesc::boolean("lossless", "Lossless kinetic inductance", false, "zero surface resistance R_s after BCS evaluation so 3D cavity solves use the fast real symmetric eigensolver while retaining L_k_sq"),
                 ],
             },
             BcDesc {
@@ -224,6 +231,7 @@ impl Physics for Ems {
                     ParamDesc::number("E_l_Hz", "Parallel inductive energy E_L / h", "Hz", 0.0, "parallel superinductance energy in Hz").range(Some(0.0), None),
                     ParamDesc::number("phi_ext_rad", "External flux bias", "rad", 0.0, "external reduced flux bias phi_ext = 2 pi Phi_ext / Phi_0"),
                     ParamDesc::number("n_g", "Offset charge", "2e", 0.0, "gate offset charge in Cooper-pair units"),
+                    ParamDesc::number("squid_asymmetry", "SQUID junction asymmetry", "", 0.0, "optional DC-SQUID junction asymmetry d in [0, 1)").range(Some(0.0), Some(1.0)),
                     ParamDesc::vector("direction", "Direction", "", 3, "unit vector along junction current flow").default_vector(vec![1.0, 0.0, 0.0]),
                     ParamDesc::choice("formulation", "Formulation", &["rank1", "distributed_sheet"], "rank1", "lumped terminal operator formulation"),
                 ],
@@ -231,12 +239,14 @@ impl Physics for Ems {
             BcDesc {
                 kind: "lumped_port".into(),
                 name: "Lumped sheet port".into(),
-                doc: "Lumped voltage/current sheet port with reference impedance Z_0 across two conductors in a 3D driven frequency sweep.".into(),
+                doc: "Lumped voltage/current sheet port with reference impedance Z_0 across two conductors in a 3D cavity or driven study.".into(),
                 applies: Applies::Boundary,
                 params: vec![
                     ParamDesc::text("name", "Port name", "", "unique port identifier").required(),
                     ParamDesc::number("Z_0", "Reference impedance", "Ohm", 50.0, "reference port impedance").range(Some(f64::MIN_POSITIVE), None),
                     ParamDesc::vector("direction", "Direction", "", 3, "unit vector along port current flow").default_vector(vec![1.0, 0.0, 0.0]),
+                    ParamDesc::boolean("complex_damping", "Complex port damping", false, "include resistive port damping directly in 3D cavity eigensolve (when false, cavity stays real and exports port damping in CircuitRom)"),
+                    ParamDesc::choice("mode", "Port mode", &["single", "cpw_even"], "single", "single-gap port ('single') or balanced two-slot CPW even mode ('cpw_even')"),
                 ],
             },
             BcDesc {
@@ -247,6 +257,8 @@ impl Physics for Ems {
                 params: vec![
                     ParamDesc::text("name", "Port name", "", "unique port identifier").required(),
                     ParamDesc::integer("mode", "Mode index", 1, 1, "1-based index of the guided/TEM boundary mode"),
+                    ParamDesc::number("n_eff_guess", "Effective index guess", "", 0.0, "optional target effective index for 2D boundary-mode selection (sorts propagating modes by |n_eff - n_eff_guess|)").range(Some(0.0), None),
+                    ParamDesc::number("z0_ohm", "Reference circuit impedance", "Ohm", 0.0, "optional circuit reference impedance Z_0 for DrivenPortData and S->Z/Y conversion (0 or null uses modal wave impedance)").range(Some(0.0), None),
                 ],
             },
         ]
@@ -257,6 +269,8 @@ impl Physics for Ems {
         vec![
             // phase 6 turns the optical properties into dispersion models evaluated at the study wavelength
             PropDesc::new("eps_r", "Relative permittivity", "", Tensor, &[], Some(1.0)),
+            PropDesc::new("eps_r_im", "Imaginary permittivity", "", Tensor, &[], Some(0.0)),
+            PropDesc::new("loss_tangent", "Dielectric loss tangent", "", Tensor, &[], Some(0.0)),
             PropDesc::new("mu_r", "Relative permeability", "", Scalar, &[], Some(1.0)),
         ]
     }
@@ -341,7 +355,13 @@ impl Physics for Ems {
         let (freq, headroom) = match spec.study.kind.as_str() {
             "modes" | "bloch" => (sp.number("freq"), 1.0),
             "cavity" | "axisymmetric_modes" => (sp.number("f_search"), 1.5),
-            "driven" => (sp.number("f_max"), 1.0),
+            "driven" => {
+                let f_hi = sp
+                    .optional_numbers("freqs_hz")
+                    .and_then(|fs| fs.into_iter().filter(|f| f.is_finite() && *f > 0.0).reduce(f64::max))
+                    .unwrap_or_else(|| sp.number("f_max"));
+                (f_hi, 1.0)
+            }
             _ => return empty,
         };
         if !(freq > 0.0 && freq.is_finite()) {
@@ -404,6 +424,9 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             if let Some((dom, _)) = problem.materials.pml.iter().find(|(_, p)| p.y != femcore::props::PmlDir::Off) {
                 return Err(Error::invalid(format!("the perfectly matched layer of domain {dom} absorbs along y, which is out of the plane of a 2D cross-section (x-z): use z for the direction of the surface normal")));
             }
+        }
+        if d.dim == 3 && matches!(problem.study, Study::Cavity { .. } | Study::Driven { .. }) {
+            validate_port_contacts_3d(&d, problem).map_err(Error::invalid)?;
         }
         match problem.study {
             Study::Modes { .. } => solve_waveguide(&d, problem),

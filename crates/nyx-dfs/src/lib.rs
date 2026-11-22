@@ -143,6 +143,18 @@ impl Physics for Dfs {
                 vec![ParamDesc::text("name", "Terminal name", "", "unique terminal identifier").required()],
             ),
             b(
+                "open",
+                "Open boundary",
+                "Spherical 1/r asymptotic Robin open boundary (3D electrostatics).",
+                vec![ParamDesc::vector(
+                    "origin",
+                    "Far-field origin",
+                    "m",
+                    3,
+                    "Origin r0 for spherical 1/r open-boundary Robin condition; defaults to mesh bounding-box centroid",
+                )],
+            ),
+            b(
                 "temperature",
                 "Temperature",
                 "Fixed temperature (heat transfer).",

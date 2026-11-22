@@ -29,7 +29,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::linalg::csr::Csr;
-use crate::linalg::direct::{FactorStats, ShiftedSolver, SolverError, Used, assemble};
+use crate::linalg::direct::{FactorBackend, FactorStats, ShiftedSolver, SolverError, Used, assemble};
 use crate::linalg::linop::Preconditioner;
 use crate::linalg::ordering::nested_dissection;
 use crate::linalg::scalar::Scalar;
@@ -415,6 +415,7 @@ impl<T: Scalar> ShiftedSparseLu<T> {
                 numeric_count: 0,
                 assemble_secs_last: 0.0,
                 used: Used::None,
+                backend: FactorBackend::None,
                 cholesky_fallbacks: 0,
                 solves: 0,
                 factor_nnz: 0,
@@ -454,6 +455,7 @@ impl<T: Scalar> ShiftedSolver<T> for ShiftedSparseLu<T> {
         self.stats.numeric_secs_total += self.stats.numeric_secs_last;
         self.stats.numeric_count += 1;
         self.stats.used = Used::Lu;
+        self.stats.backend = FactorBackend::LuAmd;
         self.stats.factor_nnz = lu.factor_nnz();
         self.lu = Some(lu);
         Ok(())

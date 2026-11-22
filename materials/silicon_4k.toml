@@ -48,6 +48,14 @@ tan_delta_tls_0 = 1.5e-3
 e_crit = "15 V/m"
 source = { cite = "APPROXIMATE native SiO2 substrate-air surface oxide thickness and cryogenic TLS loss parameters" }
 
+[interfaces.ms]
+oxide = "Si/AlOx"
+thickness = "2.0 nm"
+eps_r = 9.8
+tan_delta_tls_0 = 1.5e-3
+e_crit = "10.0 V/m"
+source = { cite = "APPROXIMATE metal-substrate (Si/AlOx) interface dielectric thickness and cryogenic TLS loss parameters; see Woods et al., Phys. Rev. Applied 12, 014012 (2019) & Melville et al., Appl. Phys. Lett. 117, 124004 (2020)", doi = "10.1103/PhysRevApplied.12.014012" }
+
 [optical]
 wavelength_unit = "um"
 range = [1.00071, 10.0071]

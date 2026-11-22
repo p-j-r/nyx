@@ -315,7 +315,11 @@ impl App {
             let m = &self.mesh_edit;
             let args = json!({
                 "h": m.h, "adapt_scale": m.adapt_scale, "physics_sizing": m.physics_sizing, "points_per_wavelength": m.points_per_wavelength,
-                "structured_pml": m.structured_pml, "max_dev": m.max_dev, "curved": m.curved, "sweep": m.sweep,
+                "structured_pml": m.structured_pml, "max_dev": m.max_dev, "curved": m.curved,
+                "gap_cells": m.gap_cells, "z_coarsen": m.z_coarsen, "max_cells": m.max_cells,
+                "dz_min": m.dz_min, "max_z_slabs": m.max_z_slabs, "z_growth_ratio": m.z_growth_ratio,
+                "max_steiner_multiplier": m.max_steiner_multiplier, "strict_mesh": m.strict_mesh,
+                "sweep": m.sweep,
             });
             if self.cmd("set_mesh", args).is_none() {
                 return false;

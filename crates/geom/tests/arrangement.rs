@@ -209,3 +209,87 @@ fn cut_and_pml_are_data_and_geometry() {
     let tagged = ev.resolve(&geom::select::Selector::Tag("symmetry".into())).unwrap();
     assert_eq!(tagged.set.ids.len(), 1);
 }
+
+#[test]
+fn route_meander_6000_segments_arranges_and_locates_under_350ms_deterministically() {
+    let pitch = 20e-6;
+    let r_c = 0.5 * pitch;
+    let y_span = 200e-6;
+    let n_turns = 150usize;
+    let pts_per_turn = 20usize;
+    let mut centerline: Vec<V2> = Vec::with_capacity(n_turns * pts_per_turn);
+    for k in 0..n_turns {
+        let cx = (k as f64 + 0.5) * pitch;
+        let cy = if k % 2 == 0 { y_span } else { -y_span };
+        for j in 0..pts_per_turn {
+            let frac = j as f64 / (pts_per_turn - 1) as f64;
+            let phi = if k % 2 == 0 { PI * (1.0 - frac) } else { -PI * (1.0 - frac) };
+            centerline.push([cx + r_c * phi.cos(), cy + r_c * phi.sin()]);
+        }
+    }
+    assert_eq!(centerline.len(), 3000);
+    let expanded = geom::gds::expand_path_polygons(&centerline, 4e-6, 0, 0.0, 0.0);
+    assert_eq!(expanded.len(), 1);
+    let ring = &expanded[0];
+    assert_eq!(ring.len(), 6000);
+
+    let pts: Vec<(f64, f64)> = ring.iter().map(|p| (p[0], p[1])).collect();
+    let mut m = Model::new_2d();
+    let die = m.rect("die", (-50e-6, -260e-6), (3050e-6, 260e-6));
+    let meander = m.polygon("meander", &pts);
+    m.overlay(&[("die", die), ("meander", meander)]);
+
+    let run_once = || {
+        let t0 = std::time::Instant::now();
+        let mut cache = geom::scene::Cache::new();
+        let scene = geom::scene::build_scene(&m.list, &mut cache).unwrap();
+        let cx = geom::arrange::arrange(&scene, &mut cache).unwrap();
+        // Perform 200 locate queries across the meander legs and surrounding die
+        let mut hits = Vec::with_capacity(200);
+        for i in 0..200 {
+            let x = (i as f64 / 200.0) * 3000e-6;
+            let z = ((i % 20) as f64 - 10.0) * 18e-6;
+            hits.push(cx.locate([x, z]));
+        }
+        let elapsed = t0.elapsed();
+        (cx, hits, elapsed)
+    };
+
+    std::env::set_var("NYX_THREADS", "1");
+    let (cx1, hits1, elapsed1) = run_once();
+    std::env::set_var("NYX_THREADS", "8");
+    let (cx8, hits8, elapsed8) = run_once();
+    std::env::remove_var("NYX_THREADS");
+
+    cx1.check().unwrap();
+    assert_eq!(cx1.regions.len(), 2);
+    assert_eq!(cx1.edges.len(), 6004);
+    assert!(
+        elapsed1.as_millis() < 350 && elapsed8.as_millis() < 350,
+        "6000-segment RouteMeander arrange + 200 locate calls took {:?} (1T) / {:?} (8T), budget < 350 ms",
+        elapsed1,
+        elapsed8
+    );
+
+    // Bit-identical determinism between NYX_THREADS=1 and NYX_THREADS=8
+    assert_eq!(hits1, hits8);
+    assert_eq!(cx1.regions.len(), cx8.regions.len());
+    for (r1, r8) in cx1.regions.iter().zip(&cx8.regions) {
+        assert_eq!(r1.measure.to_bits(), r8.measure.to_bits());
+        assert_eq!(r1.bbox, r8.bbox);
+    }
+    assert_eq!(cx1.edges.len(), cx8.edges.len());
+    for (e1, e8) in cx1.edges.iter().zip(&cx8.edges) {
+        assert_eq!(e1.length.to_bits(), e8.length.to_bits());
+        assert_eq!((e1.v0, e1.v1, e1.left, e1.right), (e8.v0, e8.v1, e8.left, e8.right));
+    }
+    for (v1, v8) in cx1.vertices.iter().zip(&cx8.vertices) {
+        assert_eq!(v1.p[0].to_bits(), v8.p[0].to_bits());
+        assert_eq!(v1.p[1].to_bits(), v8.p[1].to_bits());
+        assert_eq!(v1.p[2].to_bits(), v8.p[2].to_bits());
+    }
+    // Verify locate on the vertical legs (x = 20e-6, y = 0 is inside meander region 1; x = 10e-6, y = 0 is in die region 0)
+    assert_eq!(cx1.locate([20e-6, 0.0]), Some(1));
+    assert_eq!(cx1.locate([10e-6, 0.0]), Some(0));
+    assert_eq!(cx1.locate([-100e-6, 0.0]), None);
+}

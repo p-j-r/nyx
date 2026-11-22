@@ -2035,12 +2035,12 @@ fn gate5_ec11_untrusted_fuzz_and_ec12_sos_brillouin_physics_invariant() -> Resul
         fb.finish()?
     };
     // Explicit budget enforcement check: valid 1024-byte dataset rejected under a 256-byte ReadBudgetConfig
-    let small_budget = ReadBudgetConfig { max_dataset_bytes: 256, max_group_depth: 8 };
+    let small_budget = ReadBudgetConfig { max_dataset_bytes: 256, max_group_depth: 8, ..ReadBudgetConfig::default() };
     let budget_res = fuzz_walk_untrusted(&seed1, small_budget);
     assert!(budget_res.is_err(), "ReadBudgetConfig must reject dataset exceeding max_dataset_bytes");
 
     let mutations = generate_10k_mutations(&[seed1, seed2]);
-    let fuzz_budget = ReadBudgetConfig { max_dataset_bytes: 16 * 1024 * 1024, max_group_depth: 24 };
+    let fuzz_budget = ReadBudgetConfig { max_dataset_bytes: 16 * 1024 * 1024, max_group_depth: 24, ..ReadBudgetConfig::default() };
     let panics: Vec<usize> = mutations
         .par_iter()
         .enumerate()

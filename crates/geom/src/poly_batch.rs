@@ -173,16 +173,26 @@ pub fn simplify_rings_with_pins(
     let all_rings: Vec<&[V2]> =
         clean_outers.iter().map(Vec::as_slice).chain(clean_holes.iter().map(Vec::as_slice)).collect();
 
-    let is_pinned = |ring_idx: usize, p: V2| -> bool {
-        if external_pins.iter().any(|&q| dist2(p, q) <= pin_tol) {
-            return true;
+    let cell_of = |p: V2| -> (i64, i64) { ((p[0] / pin_tol).floor() as i64, (p[1] / pin_tol).floor() as i64) };
+    let mut pin_grid: std::collections::HashMap<(i64, i64), Vec<(usize, V2)>> = std::collections::HashMap::new();
+    for &q in external_pins {
+        pin_grid.entry(cell_of(q)).or_default().push((usize::MAX, q));
+    }
+    for (ring_idx, ring) in all_rings.iter().enumerate() {
+        for &q in *ring {
+            pin_grid.entry(cell_of(q)).or_default().push((ring_idx, q));
         }
-        for (other_idx, other) in all_rings.iter().enumerate() {
-            if other_idx == ring_idx {
-                continue;
-            }
-            if other.iter().any(|&q| dist2(p, q) <= pin_tol) {
-                return true;
+    }
+
+    let is_pinned = |ring_idx: usize, p: V2| -> bool {
+        let (cx, cy) = cell_of(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(bucket) = pin_grid.get(&(cx + dx, cy + dy)) {
+                    if bucket.iter().any(|&(other_idx, q)| other_idx != ring_idx && dist2(p, q) <= pin_tol) {
+                        return true;
+                    }
+                }
             }
         }
         false

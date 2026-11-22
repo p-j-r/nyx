@@ -120,6 +120,209 @@ fn seg_seg_closest(a0: V2, a1: V2, b0: V2, b1: V2) -> (f64, V2, V2) {
     best
 }
 
+#[derive(Clone, Copy)]
+struct BvhItem2 {
+    id: usize,
+    bbox: Aabb,
+    min_h: f64,
+}
+
+enum BvhKind2 {
+    Leaf { start: usize, end: usize },
+    Branch { left: usize, right: usize },
+}
+
+struct BvhNode2 {
+    bbox: Aabb,
+    min_h: f64,
+    kind: BvhKind2,
+}
+
+/// Flat `Vec`-backed 2D AABB BVH with subtree `min_h` augmentation for $O(\log N)$ rim pairing,
+/// graded sizing (`local_h_2d`), and nearest-overlay-edge queries (`bnd_edges2`).
+struct Bvh2 {
+    items: Vec<BvhItem2>,
+    nodes: Vec<BvhNode2>,
+}
+
+impl Bvh2 {
+    fn build(mut items: Vec<BvhItem2>) -> Self {
+        let mut nodes = Vec::with_capacity(items.len().saturating_mul(2));
+        if !items.is_empty() {
+            let n = items.len();
+            Self::build_rec(&mut items, 0, n, &mut nodes);
+        }
+        Self { items, nodes }
+    }
+
+    fn build_rec(items: &mut [BvhItem2], start: usize, end: usize, nodes: &mut Vec<BvhNode2>) -> usize {
+        let mut bbox = Aabb::EMPTY;
+        let mut min_h = f64::INFINITY;
+        let mut c_lo = [f64::INFINITY; 2];
+        let mut c_hi = [f64::NEG_INFINITY; 2];
+        for it in &items[start..end] {
+            bbox = bbox.union(&it.bbox);
+            min_h = min_h.min(it.min_h);
+            let cx = 0.5 * (it.bbox.lo[0] + it.bbox.hi[0]);
+            let cy = 0.5 * (it.bbox.lo[1] + it.bbox.hi[1]);
+            c_lo[0] = c_lo[0].min(cx);
+            c_lo[1] = c_lo[1].min(cy);
+            c_hi[0] = c_hi[0].max(cx);
+            c_hi[1] = c_hi[1].max(cy);
+        }
+        let idx = nodes.len();
+        nodes.push(BvhNode2 { bbox, min_h, kind: BvhKind2::Leaf { start, end } });
+        if end - start <= 8 {
+            return idx;
+        }
+        let axis = usize::from(c_hi[1] - c_lo[1] > c_hi[0] - c_lo[0]);
+        let mid = start + (end - start) / 2;
+        items[start..end].select_nth_unstable_by(mid - start, |a, b| {
+            let ca = 0.5 * (a.bbox.lo[axis] + a.bbox.hi[axis]);
+            let cb = 0.5 * (b.bbox.lo[axis] + b.bbox.hi[axis]);
+            ca.total_cmp(&cb).then_with(|| a.id.cmp(&b.id))
+        });
+        let left = Self::build_rec(items, start, mid, nodes);
+        let right = Self::build_rec(items, mid, end, nodes);
+        nodes[idx].kind = BvhKind2::Branch { left, right };
+        idx
+    }
+
+    fn for_each_within_box(&self, query: &Aabb, margin: f64, mut visit: impl FnMut(usize)) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let mut stack = [0usize; 64];
+        let mut sp = 1usize;
+        while sp > 0 {
+            sp -= 1;
+            let node = &self.nodes[stack[sp]];
+            if aabb_dist2(&node.bbox, query) >= margin {
+                continue;
+            }
+            match node.kind {
+                BvhKind2::Leaf { start, end } => {
+                    for it in &self.items[start..end] {
+                        if aabb_dist2(&it.bbox, query) < margin {
+                            visit(it.id);
+                        }
+                    }
+                }
+                BvhKind2::Branch { left, right } => {
+                    stack[sp] = right;
+                    stack[sp + 1] = left;
+                    sp += 2;
+                }
+            }
+        }
+    }
+
+    fn min_graded(&self, p: V2, grade: f64, mut best_h: f64, mut eval_leaf: impl FnMut(usize, f64, f64) -> f64) -> f64 {
+        if self.nodes.is_empty() {
+            return best_h;
+        }
+        let mut stack = [0usize; 64];
+        let mut sp = 1usize;
+        while sp > 0 {
+            sp -= 1;
+            let node = &self.nodes[stack[sp]];
+            if node.min_h + grade * box_dist2(&node.bbox, p) >= best_h {
+                continue;
+            }
+            match node.kind {
+                BvhKind2::Leaf { start, end } => {
+                    for it in &self.items[start..end] {
+                        let db = box_dist2(&it.bbox, p);
+                        if it.min_h + grade * db < best_h {
+                            best_h = best_h.min(eval_leaf(it.id, it.min_h, db));
+                        }
+                    }
+                }
+                BvhKind2::Branch { left, right } => {
+                    let lb_l = self.nodes[left].min_h + grade * box_dist2(&self.nodes[left].bbox, p);
+                    let lb_r = self.nodes[right].min_h + grade * box_dist2(&self.nodes[right].bbox, p);
+                    if lb_l <= lb_r {
+                        if lb_r < best_h {
+                            stack[sp] = right;
+                            sp += 1;
+                        }
+                        if lb_l < best_h {
+                            stack[sp] = left;
+                            sp += 1;
+                        }
+                    } else {
+                        if lb_l < best_h {
+                            stack[sp] = left;
+                            sp += 1;
+                        }
+                        if lb_r < best_h {
+                            stack[sp] = right;
+                            sp += 1;
+                        }
+                    }
+                }
+            }
+        }
+        best_h
+    }
+
+    fn nearest_id(&self, p: V2, mut eval_dist: impl FnMut(usize) -> Option<f64>) -> Option<(f64, u32)> {
+        if self.nodes.is_empty() {
+            return None;
+        }
+        let mut best: Option<(f64, u32)> = None;
+        let mut stack = [0usize; 64];
+        let mut sp = 1usize;
+        while sp > 0 {
+            sp -= 1;
+            let node = &self.nodes[stack[sp]];
+            if best.is_some_and(|(bd, _)| box_dist2(&node.bbox, p) > bd) {
+                continue;
+            }
+            match node.kind {
+                BvhKind2::Leaf { start, end } => {
+                    for it in &self.items[start..end] {
+                        if best.is_some_and(|(bd, _)| box_dist2(&it.bbox, p) > bd) {
+                            continue;
+                        }
+                        if let Some(d) = eval_dist(it.id) {
+                            let id32 = it.id as u32;
+                            if best.is_none_or(|(bd, bid)| d < bd || (d == bd && id32 < bid)) {
+                                best = Some((d, id32));
+                            }
+                        }
+                    }
+                }
+                BvhKind2::Branch { left, right } => {
+                    let dl = box_dist2(&self.nodes[left].bbox, p);
+                    let dr = box_dist2(&self.nodes[right].bbox, p);
+                    let keep = |d: f64, best: Option<(f64, u32)>| best.is_none_or(|(bd, _)| d <= bd);
+                    if dl <= dr {
+                        if keep(dr, best) {
+                            stack[sp] = right;
+                            sp += 1;
+                        }
+                        if keep(dl, best) {
+                            stack[sp] = left;
+                            sp += 1;
+                        }
+                    } else {
+                        if keep(dl, best) {
+                            stack[sp] = left;
+                            sp += 1;
+                        }
+                        if keep(dr, best) {
+                            stack[sp] = right;
+                            sp += 1;
+                        }
+                    }
+                }
+            }
+        }
+        best
+    }
+}
+
 /// Subdivides `[z0, z1]` into graded z-levels starting at step `dz0` near `z0` and `dz1` near `z1`,
 /// growing by `ratio` (typically `1.35`) per slab up to `h_max`.
 pub fn subdivide_z_interval(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64, ratio: f64) -> Vec<f64> {
@@ -165,10 +368,10 @@ pub fn subdivide_z_interval(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64, ra
         .collect()
 }
 
-/// Subdivides `[z0, z1]` for `z_coarsen = true`: uses the exact `1.35x` geometric progression inside
+/// Subdivides `[z0, z1]` for `z_coarsen = true`: uses `ratio` (default `1.35x`) geometric progression inside
 /// `|z - z_sheet| <= 16 * h_sheet` (preserving near- and mid-field vertical resolution identically to
-/// `subdivide_z_interval`), then accelerates to `1.52x` in the far dielectric/vacuum bulk up to `h_max`.
-fn subdivide_z_interval_far(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64) -> Vec<f64> {
+/// `subdivide_z_interval`), then accelerates to `ratio.max(1.52)` in the far dielectric/vacuum bulk up to `h_max`.
+fn subdivide_z_interval_far(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64, ratio: f64) -> Vec<f64> {
     let span = z1 - z0;
     if span <= 0.0 {
         return vec![z0];
@@ -182,18 +385,19 @@ fn subdivide_z_interval_far(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64) ->
         return vec![z0, z1];
     }
 
+    let r_far = 1.52_f64.max(ratio);
     let mut lo = vec![0.0];
     let mut hi = vec![span];
     while hi.last().unwrap() - lo.last().unwrap() > s0 + s1 {
         if s0 <= s1 {
             let cur = *lo.last().unwrap();
             lo.push(cur + s0);
-            let r = if cur + s0 > 16.0 * d0_init { 1.52 } else { 1.35 };
+            let r = if cur + s0 > 16.0 * d0_init { r_far } else { ratio };
             s0 = (s0 * r).min(h_max);
         } else {
             let cur = *hi.last().unwrap();
             hi.push(cur - s1);
-            let r = if span - (cur - s1) > 16.0 * d1_init { 1.52 } else { 1.35 };
+            let r = if span - (cur - s1) > 16.0 * d1_init { r_far } else { ratio };
             s1 = (s1 * r).min(h_max);
         }
     }
@@ -509,6 +713,49 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
     (Level2D { tris: next_tris }, SlabTransition { map_v, rank, tri_collapse })
 }
 
+fn curve_sheet_mesh_edges(
+    mesh: &mut SimplexMesh,
+    cx: &geom::complex::Complex,
+    pt2: impl Fn(u32) -> V2,
+    bnd_edges2: &[(u32, u32, u32)],
+    z_planes: &[f64],
+    used_v: &[u32],
+    n2: usize,
+) {
+    let Some(st) = cx.stack.as_ref() else { return };
+    let ov = &st.overlay;
+    let mut cand: crate::meshing::curve3::EdgeNodes = Vec::new();
+    for &(a, b, oe) in bnd_edges2 {
+        let ed = &ov.edges[oe as usize];
+        if matches!(ov.curves[ed.curve as usize], Curve::Line { .. }) {
+            continue;
+        }
+        let (pa2, pb2) = (pt2(a), pt2(b));
+        let len2 = dist2(pa2, pb2);
+        if !(len2 > 0.0) {
+            continue;
+        }
+        let mid2 = [0.5 * (pa2[0] + pb2[0]), 0.5 * (pa2[1] + pb2[1])];
+        let q2 = ov.project_edge(oe, mid2);
+        let off2 = dist2(q2, mid2);
+        if !(off2 > 1e-9 * len2 && off2 < 0.25 * len2 && q2[0].is_finite() && q2[1].is_finite()) {
+            continue;
+        }
+        for (zp, &z) in z_planes.iter().enumerate() {
+            let va = used_v[zp * n2 + a as usize];
+            let vb = used_v[zp * n2 + b as usize];
+            if va != u32::MAX && vb != u32::MAX && va != vb {
+                let pr = [va.min(vb), va.max(vb)];
+                let qw = cx.wv([q2[0], q2[1], z]);
+                cand.push((pr, qw));
+            }
+        }
+    }
+    if !cand.is_empty() {
+        crate::meshing::curve3::apply_edge_nodes_validated(mesh, cand);
+    }
+}
+
 /// Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a conformal tetrahedral `MeshedGeom`.
 pub fn mesh_sheet_stack_3d(
     ev: Evaluated,
@@ -526,14 +773,45 @@ pub fn mesh_sheet_stack_3d(
             return Err("gap_cells must be positive".into());
         }
     }
-    let scale_factor = match plan.mesher {
-        Mesher::Simple => 1.0,
+    if let Some(dz_min) = plan.opts.dz_min {
+        if !(dz_min > 0.0 && dz_min.is_finite()) {
+            return Err("dz_min must be finite and positive".into());
+        }
+    }
+    if let Some(z_ratio) = plan.opts.z_growth_ratio {
+        if !(z_ratio > 1.0 && z_ratio.is_finite()) {
+            return Err("z_growth_ratio must be finite and strictly greater than 1.0".into());
+        }
+    }
+    if let Some(max_slabs) = plan.opts.max_z_slabs {
+        if max_slabs < 1 {
+            return Err("max_z_slabs must be at least 1".into());
+        }
+    }
+    if let Some(mc) = plan.opts.max_cells {
+        if mc < 1 {
+            return Err("max_cells must be at least 1".into());
+        }
+    }
+    let (scale_factor, adapt_max_cells) = match plan.mesher {
+        Mesher::Simple => (1.0, None),
         Mesher::Adaptive(a) => {
             if !(a.scale > 0.0 && a.scale.is_finite()) {
                 return Err("the adaptation scale must be positive".into());
             }
-            a.scale
+            if let Some(mc) = a.max_cells {
+                if mc < 1 {
+                    return Err("max_cells must be at least 1".into());
+                }
+            }
+            (a.scale, a.max_cells)
         }
+    };
+    let eff_max_cells = match (plan.opts.max_cells, adapt_max_cells) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
     };
     let h_global = plan.opts.h * scale_factor;
     let max_dev = plan.opts.max_dev.unwrap_or(h_global / 50.0);
@@ -626,22 +904,23 @@ pub fn mesh_sheet_stack_3d(
 
     let mut ov_edge_h = vec![h_global; nedge];
     for (e, ed) in ov.edges.iter().enumerate() {
-        let mut eh = [ed.left, ed.right].into_iter().flatten().map(|c| cell_h[c as usize]).fold(h_global, f64::min);
-        for (fi, f) in cx.faces.iter().enumerate() {
-            if let FaceGeom::Lateral { edge, .. } = f.geom {
-                if edge == e as u32 {
-                    eh = eh.min(face_h[fi]);
-                }
+        ov_edge_h[e] = [ed.left, ed.right].into_iter().flatten().map(|c| cell_h[c as usize]).fold(h_global, f64::min);
+    }
+    for (fi, f) in cx.faces.iter().enumerate() {
+        if let FaceGeom::Lateral { edge, .. } = f.geom {
+            let e = edge as usize;
+            if e < nedge {
+                ov_edge_h[e] = ov_edge_h[e].min(face_h[fi]);
             }
         }
-        for (ei, e3) in cx.edges3.iter().enumerate() {
-            if let EdgeGeom::Horizontal { edge, .. } = e3.geom {
-                if edge == e as u32 {
-                    eh = eh.min(edge3_h[ei]);
-                }
+    }
+    for (ei, e3) in cx.edges3.iter().enumerate() {
+        if let EdgeGeom::Horizontal { edge, .. } = e3.geom {
+            let e = edge as usize;
+            if e < nedge {
+                ov_edge_h[e] = ov_edge_h[e].min(edge3_h[ei]);
             }
         }
-        ov_edge_h[e] = eh;
     }
 
     let grade = 0.35;
@@ -717,15 +996,18 @@ pub fn mesh_sheet_stack_3d(
                 rims.push(RimEdge { e, v0: ed.v0, v1: ed.v1, bbox: ed.bbox, segs });
             }
 
+            let rim_bvh = Bvh2::build(
+                rims.iter().enumerate().map(|(i, r)| BvhItem2 { id: i, bbox: r.bbox, min_h: 0.0 }).collect(),
+            );
             let mut gap_clamps: Vec<(usize, f64)> = Vec::new();
-            for i in 0..rims.len() {
-                for j in (i + 1)..rims.len() {
-                    let (ra, rb) = (&rims[i], &rims[j]);
-                    if ra.v0 == rb.v0 || ra.v0 == rb.v1 || ra.v1 == rb.v0 || ra.v1 == rb.v1 {
-                        continue;
+            for (i, ra) in rims.iter().enumerate() {
+                rim_bvh.for_each_within_box(&ra.bbox, h_global, |j| {
+                    if j <= i {
+                        return;
                     }
-                    if aabb_dist2(&ra.bbox, &rb.bbox) >= h_global {
-                        continue;
+                    let rb = &rims[j];
+                    if ra.v0 == rb.v0 || ra.v0 == rb.v1 || ra.v1 == rb.v0 || ra.v1 == rb.v1 {
+                        return;
                     }
                     let mut best: Option<(f64, V2, V2, V2, V2)> = None;
                     for &(a0, a1, na) in &ra.segs {
@@ -736,16 +1018,16 @@ pub fn mesh_sheet_stack_3d(
                             }
                         }
                     }
-                    let Some((d, pa, pb, na, nb)) = best else { continue };
+                    let Some((d, pa, pb, na, nb)) = best else { return };
                     if !(d > 1e-15 * h_global && d < h_global) {
-                        continue;
+                        return;
                     }
                     let dp = [pb[0] - pa[0], pb[1] - pa[1]];
                     let dot_a = dp[0] * na[0] + dp[1] * na[1];
                     let dot_b = -dp[0] * nb[0] - dp[1] * nb[1];
                     let dot_nn = na[0] * nb[0] + na[1] * nb[1];
                     if !(dot_a > 0.15 * d && dot_b > 0.15 * d && dot_nn < 0.25) {
-                        continue;
+                        return;
                     }
                     if let Some(gc) = plan.opts.gap_cells {
                         let h_gap = d / gc;
@@ -758,7 +1040,7 @@ pub fn mesh_sheet_stack_3d(
                         gap_clamps.push((ra.e, h_cap));
                         gap_clamps.push((rb.e, h_cap));
                     }
-                }
+                });
             }
             for (ei, hc) in gap_clamps {
                 ov_edge_h[ei] = ov_edge_h[ei].min(hc);
@@ -771,22 +1053,24 @@ pub fn mesh_sheet_stack_3d(
     fine_edges.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
     let fine_cells: Vec<(usize, f64)> =
         (0..ncell).filter(|&c| cell_h[c] < h_global * 0.999).map(|c| (c, cell_h[c])).collect();
+    let fine_edge_bvh = Bvh2::build(
+        fine_edges
+            .iter()
+            .map(|&(e, eh)| BvhItem2 { id: e, bbox: ov.edges[e].bbox, min_h: eh })
+            .collect(),
+    );
+    let fine_cell_bvh = Bvh2::build(
+        fine_cells
+            .iter()
+            .map(|&(c, ch)| BvhItem2 { id: c, bbox: ov.regions[c].bbox, min_h: ch })
+            .collect(),
+    );
     let local_h_2d = |p: V2| -> f64 {
-        let mut h = h_global;
-        for &(e, eh) in &fine_edges {
-            let db = box_dist2(&ov.edges[e].bbox, p);
-            if eh + grade * db < h {
-                let d = dist2(ov.project_edge(e as u32, p), p);
-                h = h.min(eh + grade * d);
-            }
-        }
-        for &(c, ch) in &fine_cells {
-            let db = box_dist2(&ov.regions[c].bbox, p);
-            if ch + grade * db < h {
-                h = h.min(ch + grade * db);
-            }
-        }
-        h
+        let h = fine_edge_bvh.min_graded(p, grade, h_global, |e, eh, _db| {
+            let d = dist2(ov.project_edge(e as u32, p), p);
+            eh + grade * d
+        });
+        fine_cell_bvh.min_graded(p, grade, h, |_c, ch, db| ch + grade * db)
     };
 
     // Discretize every 1D PSLG edge of stack.overlay once (graded along the curve)
@@ -867,20 +1151,23 @@ pub fn mesh_sheet_stack_3d(
             None
         }
     };
-    let m2 = mesh_chains(
+    let (m2, mc_rep) = mesh_chains(
         &chains,
         &fills,
         &MeshParams {
             h: h_global,
             h_fine_min,
-            h_reach: h_global,
             min_angle_deg: plan.opts.min_angle_deg,
             lo: [ov_bb.lo[0], ov_bb.lo[1]],
             hi: [ov_bb.hi[0], ov_bb.hi[1]],
+            max_steiner_multiplier: plan.opts.max_steiner_multiplier,
+            strict_mesh: plan.opts.strict_mesh,
+            max_cells: None,
         },
         &domain_at,
     )?;
     drop(fills);
+    let warnings = mc_rep.warnings;
 
     // Map every 2D mesh edge separating distinct overlay cells (or the outer boundary) to its overlay edge id
     let ntri2 = m2.n_cells();
@@ -893,6 +1180,26 @@ pub fn mesh_sheet_stack_3d(
         }
     }
     let pt2 = |v: u32| -> V2 { [m2.points[2 * v as usize], m2.points[2 * v as usize + 1]] };
+    let canon_sides = |a: Option<u32>, b: Option<u32>| -> (Option<u32>, Option<u32>) {
+        if a <= b { (a, b) } else { (b, a) }
+    };
+    let mut ov_edges_by_pair: HashMap<(Option<u32>, Option<u32>), Vec<usize>> = HashMap::new();
+    for (ei, ed) in ov.edges.iter().enumerate() {
+        ov_edges_by_pair.entry(canon_sides(ed.left, ed.right)).or_default().push(ei);
+    }
+    let mut ov_pair_bvh: HashMap<(Option<u32>, Option<u32>), Bvh2> = HashMap::new();
+    for (&pair_k, list) in &ov_edges_by_pair {
+        if list.len() > 16 {
+            let bvh = Bvh2::build(
+                list.iter().map(|&ei| BvhItem2 { id: ei, bbox: ov.edges[ei].bbox, min_h: 0.0 }).collect(),
+            );
+            ov_pair_bvh.insert(pair_k, bvh);
+        }
+    }
+    let all_ov_edge_bvh = Bvh2::build(
+        ov.edges.iter().enumerate().map(|(ei, ed)| BvhItem2 { id: ei, bbox: ed.bbox, min_h: 0.0 }).collect(),
+    );
+
     let mut bnd_edges2: Vec<(u32, u32, u32)> = Vec::new();
     let mut edge_list: Vec<((u32, u32), Vec<usize>)> = edge2_sides.into_iter().collect();
     edge_list.sort_by_key(|x| x.0);
@@ -904,21 +1211,22 @@ pub fn mesh_sheet_stack_3d(
         };
         let (pa, pb) = (pt2(a), pt2(b));
         let mid = [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1])];
-        let mut best: Option<(f64, u32)> = None;
-        for pass in 0..2 {
-            for (ei, ed) in ov.edges.iter().enumerate() {
-                if pass == 0 && !((ed.left == c0 && ed.right == c1) || (ed.left == c1 && ed.right == c0)) {
-                    continue;
-                }
+        let pair_k = canon_sides(c0, c1);
+        let best = if let Some(bvh) = ov_pair_bvh.get(&pair_k) {
+            bvh.nearest_id(mid, |ei| Some(dist2(ov.project_edge(ei as u32, mid), mid)))
+        } else if let Some(list) = ov_edges_by_pair.get(&pair_k) {
+            let mut b0: Option<(f64, u32)> = None;
+            for &ei in list {
                 let d = dist2(ov.project_edge(ei as u32, mid), mid);
-                if best.is_none_or(|(bd, _)| d < bd) {
-                    best = Some((d, ei as u32));
+                if b0.is_none_or(|(bd, _)| d < bd) {
+                    b0 = Some((d, ei as u32));
                 }
             }
-            if best.is_some() {
-                break;
-            }
+            b0
+        } else {
+            None
         }
+        .or_else(|| all_ov_edge_bvh.nearest_id(mid, |ei| Some(dist2(ov.project_edge(ei as u32, mid), mid))));
         if let Some((_, oe)) = best {
             bnd_edges2.push((a, b, oe));
         }
@@ -944,12 +1252,18 @@ pub fn mesh_sheet_stack_3d(
                 }
             }
         }
-        has_sheet.then_some(dz)
+        if has_sheet {
+            if let Some(dz_min) = plan.opts.dz_min {
+                dz = dz.max(dz_min).min(default_h);
+            }
+            Some(dz)
+        } else {
+            None
+        }
     };
 
-    let mut z_planes: Vec<f64> = Vec::new();
-    // For each slab interval [z_planes[s], z_planes[s+1]], the 3D layer index `Some(k)` (or `None` across a void gap)
-    let mut slab_layer: Vec<Option<usize>> = Vec::new();
+    let z_ratio = plan.opts.z_growth_ratio.unwrap_or(1.35);
+    let mut active_layers: Vec<(usize, f64, f64, f64, f64, f64)> = Vec::new();
     for (k, l) in st.layers.iter().enumerate() {
         let active_in_layer = l.region_of.iter().flatten().any(|&r| meshable[r as usize]);
         if !active_in_layer {
@@ -964,14 +1278,87 @@ pub fn mesh_sheet_stack_3d(
             .fold(h_global, f64::min);
         let dz0 = sheet_dz_at(l.z0, h_layer).unwrap_or(h_layer);
         let dz1 = sheet_dz_at(l.z1, h_layer).unwrap_or(h_layer);
-        let zs = if plan.opts.z_coarsen {
-            subdivide_z_interval_far(l.z0, l.z1, dz0, dz1, h_layer)
-        } else {
-            subdivide_z_interval(l.z0, l.z1, dz0, dz1, h_layer, 1.35)
-        };
+        active_layers.push((k, l.z0, l.z1, dz0, dz1, h_layer));
+    }
+    if active_layers.is_empty() {
+        return Err("the 3D model has no active layers to mesh".into());
+    }
+    if let Some(max_slabs) = plan.opts.max_z_slabs {
+        if max_slabs < active_layers.len() {
+            return Err(format!(
+                "max_z_slabs ({max_slabs}) is less than the number of active stack layers ({}) required to preserve layer interfaces",
+                active_layers.len()
+            ));
+        }
+    }
+    let build_layer_zs = |alpha: f64| -> Vec<(usize, Vec<f64>)> {
+        active_layers
+            .iter()
+            .map(|&(k, z0, z1, dz0, dz1, h_layer)| {
+                let (d0, d1, hl, rt) = if alpha <= 1.0 {
+                    (dz0, dz1, h_layer, z_ratio)
+                } else {
+                    let span = (z1 - z0).max(0.0);
+                    ((dz0 * alpha).min(span), (dz1 * alpha).min(span), (h_layer * alpha).min(span), z_ratio + 0.15 * (alpha - 1.0))
+                };
+                let zs = if plan.opts.z_coarsen {
+                    subdivide_z_interval_far(z0, z1, d0, d1, hl, rt)
+                } else {
+                    subdivide_z_interval(z0, z1, d0, d1, hl, rt)
+                };
+                (k, zs)
+            })
+            .collect()
+    };
+    let mut per_layer_zs = build_layer_zs(1.0);
+    if let Some(max_slabs) = plan.opts.max_z_slabs {
+        let count_slabs = |v: &[(usize, Vec<f64>)]| -> usize { v.iter().map(|(_, zs)| zs.len().saturating_sub(1)).sum() };
+        if count_slabs(&per_layer_zs) > max_slabs {
+            let mut lo_a = 1.0_f64;
+            let mut hi_a = 2.0_f64;
+            while count_slabs(&build_layer_zs(hi_a)) > max_slabs && hi_a < 1e12 {
+                lo_a = hi_a;
+                hi_a *= 2.0;
+            }
+            let mut best_zs = build_layer_zs(hi_a);
+            for _ in 0..48 {
+                let mid_a = 0.5 * (lo_a + hi_a);
+                let cand = build_layer_zs(mid_a);
+                if count_slabs(&cand) <= max_slabs {
+                    hi_a = mid_a;
+                    best_zs = cand;
+                } else {
+                    lo_a = mid_a;
+                }
+            }
+            per_layer_zs = best_zs;
+            while count_slabs(&per_layer_zs) > max_slabs {
+                let mut best_drop: Option<(f64, usize, usize)> = None;
+                for (li, (_, zs)) in per_layer_zs.iter().enumerate() {
+                    if zs.len() <= 2 {
+                        continue;
+                    }
+                    for zi in 1..(zs.len() - 1) {
+                        let merged_step = zs[zi + 1] - zs[zi - 1];
+                        if best_drop.is_none_or(|b| merged_step < b.0) {
+                            best_drop = Some((merged_step, li, zi));
+                        }
+                    }
+                }
+                let Some((_, li, zi)) = best_drop else { break };
+                per_layer_zs[li].1.remove(zi);
+            }
+        }
+    }
+
+    let mut z_planes: Vec<f64> = Vec::new();
+    // For each slab interval [z_planes[s], z_planes[s+1]], the 3D layer index `Some(k)` (or `None` across a void gap)
+    let mut slab_layer: Vec<Option<usize>> = Vec::new();
+    for (k, zs) in per_layer_zs {
+        let z0 = st.layers[k].z0;
         if let Some(&last_z) = z_planes.last() {
-            if (l.z0 - last_z).abs() > tol {
-                z_planes.push(l.z0);
+            if (z0 - last_z).abs() > tol {
+                z_planes.push(z0);
                 slab_layer.push(None);
             }
         } else {
@@ -987,6 +1374,7 @@ pub fn mesh_sheet_stack_3d(
     }
     let nz = z_planes.len();
     let nslab = nz - 1;
+    let n_active_slabs = slab_layer.iter().filter(|x| x.is_some()).count();
     let n2 = m2.n_points();
 
     // Build lookup tables for horizontal cap faces (including 2D sheets) and vertical lateral faces
@@ -1021,7 +1409,29 @@ pub fn mesh_sheet_stack_3d(
         }
     }
 
+    let active_tris_per_layer: Vec<usize> = (0..st.layers.len())
+        .map(|k| {
+            tri_ov_cell
+                .iter()
+                .filter(|&&ov_c| st.layers[k].region_of[ov_c].is_some_and(|r| meshable[r as usize]))
+                .count()
+        })
+        .collect();
+
     if !plan.opts.z_coarsen {
+        if let Some(max_cells) = eff_max_cells {
+            let mut projected_tets = 0usize;
+            for &layer_opt in &slab_layer {
+                if let Some(k) = layer_opt {
+                    projected_tets = projected_tets.saturating_add(3usize.saturating_mul(active_tris_per_layer[k]));
+                }
+            }
+            if projected_tets > max_cells {
+                return Err(format!(
+                    "3D sheet mesh exceeds max_cells limit: n_tri2={ntri2}, n_slabs={n_active_slabs}, projected_tets={projected_tets} > max_cells={max_cells}; increase h / dz_min / z_growth_ratio, lower max_z_slabs, enable z_coarsen, or raise max_cells"
+                ));
+            }
+        }
         // Default exact prismatic Dompierre path (bit-identical to baseline)
         let mut used_v = vec![u32::MAX; nz * n2];
         for (s, &layer_opt) in slab_layer.iter().enumerate() {
@@ -1125,9 +1535,13 @@ pub fn mesh_sheet_stack_3d(
         }
 
         let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
-        let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) };
+        let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
         if matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty() {
             g = crate::meshing::pml_geom3::structured_pml_3d(g)?.0;
+        }
+        if plan.opts.curved {
+            let gcx = g.eval.complex();
+            curve_sheet_mesh_edges(&mut g.mesh, gcx, pt2, &bnd_edges2, &z_planes, &used_v, n2);
         }
         return Ok((g, None));
     }
@@ -1212,6 +1626,22 @@ pub fn mesh_sheet_stack_3d(
         lvl
     };
 
+    if let Some(max_cells) = eff_max_cells {
+        let mut min_uncoarsened_tets = 0usize;
+        for (s, &layer_opt) in slab_layer.iter().enumerate() {
+            if let Some(k) = layer_opt {
+                if level_of_zp[s] == 0 && level_of_zp[s + 1] == 0 {
+                    min_uncoarsened_tets = min_uncoarsened_tets.saturating_add(3usize.saturating_mul(active_tris_per_layer[k]));
+                }
+            }
+        }
+        if min_uncoarsened_tets > max_cells {
+            return Err(format!(
+                "3D sheet mesh exceeds max_cells limit: n_tri2={ntri2}, n_slabs={n_active_slabs}, projected_tets={min_uncoarsened_tets} > max_cells={max_cells}; increase h / dz_min / z_growth_ratio, lower max_z_slabs, or raise max_cells"
+            ));
+        }
+    }
+
     let max_lvl = *level_of_zp.iter().max().unwrap_or(&0);
 
     // Level 0: fine 2D triangulation `M_0` oriented strictly CCW
@@ -1269,6 +1699,35 @@ pub fn mesh_sheet_stack_3d(
     for v in &mut level_of_zp {
         if *v > effective_max {
             *v = effective_max;
+        }
+    }
+
+    if let Some(max_cells) = eff_max_cells {
+        let mut projected_tets = 0usize;
+        for (s, &layer_opt) in slab_layer.iter().enumerate() {
+            let Some(k) = layer_opt else { continue };
+            let l = &st.layers[k];
+            let (ls, lt) = (level_of_zp[s], level_of_zp[s + 1]);
+            if ls == lt {
+                for &(_, ov_c) in &levels_2d[ls].tris {
+                    if l.region_of[ov_c].is_some_and(|r| meshable[r as usize]) {
+                        projected_tets = projected_tets.saturating_add(3);
+                    }
+                }
+            } else {
+                let m = ls.min(lt);
+                let tr = &transitions[m];
+                for (ti, &(_, ov_c)) in levels_2d[m].tris.iter().enumerate() {
+                    if l.region_of[ov_c].is_some_and(|r| meshable[r as usize]) {
+                        projected_tets = projected_tets.saturating_add(if tr.tri_collapse[ti].is_some() { 2 } else { 3 });
+                    }
+                }
+            }
+        }
+        if projected_tets > max_cells {
+            return Err(format!(
+                "3D sheet mesh exceeds max_cells limit: n_tri2={ntri2}, n_slabs={n_active_slabs}, projected_tets={projected_tets} > max_cells={max_cells}; increase h / dz_min / z_growth_ratio, lower max_z_slabs, or raise max_cells"
+            ));
         }
     }
 
@@ -1436,9 +1895,13 @@ pub fn mesh_sheet_stack_3d(
     }
 
     let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
-    let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) };
+    let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
     if matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty() {
         g = crate::meshing::pml_geom3::structured_pml_3d(g)?.0;
+    }
+    if plan.opts.curved {
+        let gcx = g.eval.complex();
+        curve_sheet_mesh_edges(&mut g.mesh, gcx, pt2, &bnd_edges2, &z_planes, &used_v, n2);
     }
     Ok((g, None))
 }

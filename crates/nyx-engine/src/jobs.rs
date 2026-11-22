@@ -35,6 +35,10 @@ pub enum JobOutput {
         worker: Option<WorkerRun>,
         /// how the solve was started when it was a point of a warm sweep (`reuse.rs`)
         reuse: Option<Value>,
+        /// whether mesh and field arrays were kept (`false` when `save_fields: false`)
+        fields_saved: bool,
+        /// outputs of any read-only `post_analyses` run on full in-memory fields before dropping
+        post_analyses: Vec<Value>,
     },
     /// the answer of a mesh convergence check
     Convergence(Value),

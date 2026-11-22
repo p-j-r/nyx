@@ -21,15 +21,16 @@
 use crate::cavity::{assemble_maxwell, basis3, Ned3};
 use crate::ibc::{assemble_ibc_and_jj_3d, reduce_real_csr, reduce_real_vec, AssembledJjPort, SheetCellKind, MU0};
 use crate::modes::C0;
-use crate::ports::{assemble_lumped_ports_3d, assemble_waveports_3d, AssembledLumpedPort, AssembledWavePort};
+use crate::ports::{
+    assemble_lumped_ports_3d, assemble_waveports_3d, validate_port_contacts_3d, AssembledLumpedPort, AssembledWavePort,
+};
 use crate::problem::{Problem, Study};
 use crate::rom::build_tls_meta;
 use femcore::fem::{geometry, CurvedTet};
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::{c, CCsr, RCsr, C};
-use femcore::linalg::driver::DirectSolver;
+use femcore::linalg::driver::{thin_svd_c64, DirectSolver};
 use femcore::pml::cell_stretches;
-use femcore::props::TensorKind;
 use nyx_physics::{cell_fields_of, Discretisation, DrivenPortData, Field, FieldFrame, Scalar, Solution, SolveResult};
 use std::collections::BTreeSet;
 use std::f64::consts::PI;
@@ -144,6 +145,16 @@ impl DrivenPortEntry {
             }
         }
     }
+    /// Returns the circuit reference impedance `Z_0` used for `DrivenPortData::z0_ohm` and `S -> Z/Y` conversion.
+    /// For a `waveport` with an explicit `z0_ohm`, returns that circuit impedance while power-wave `excitation_coeffs`
+    /// and `s_k` continue to use the modal wave impedance `z_wave = omega mu_0 / beta`.
+    #[inline]
+    pub fn circuit_z0(&self, z_wave: f64, waveports: &[AssembledWavePort]) -> f64 {
+        match self.kind {
+            DrivenPortKind::Lumped { z0 } => z0,
+            DrivenPortKind::Wave { wave_index } => waveports[wave_index].bc.z0_ohm.unwrap_or(z_wave),
+        }
+    }
 }
 
 /// Stage 1 of the 3D driven frequency-domain solver: Nedelec numbering, PEC/periodic reduction,
@@ -158,7 +169,11 @@ pub struct DrivenAssembly {
     pub f_min: f64,
     pub f_max: f64,
     pub n_points: usize,
+    pub freqs_hz: Option<Vec<f64>>,
     pub prom_tol: Option<f64>,
+    pub max_hdm_solves: usize,
+    pub strict_prom_tol: bool,
+    pub seed_freqs_hz: Vec<f64>,
     pub d_ruiz: Vec<f64>,
     /// Affine operator terms $\hat{\mathbf{A}}_m = \mathbf{D} \mathbf{A}_m \mathbf{D}$ ($m = 0 \dots 3 + P_{\text{wave}} - 1$):
     /// `[K_tot, C_tot, M_tot, W_0, ..., W_{P_wave - 1}]`.
@@ -192,12 +207,14 @@ impl DrivenAssembly {
         out
     }
 
-    /// Assembles the full equilibrated matrix $\hat{\mathbf{A}}(\omega) = \sum_m \alpha_m(\omega) \hat{\mathbf{A}}_m$.
+    /// Assembles the full equilibrated matrix $\hat{\mathbf{A}}(\omega) = \sum_m \alpha_m(\omega) \hat{\mathbf{A}}_m$
+    /// on the fixed union CSR sparsity pattern of all non-empty affine terms (preserving explicit zeros so
+    /// `DirectSolver::update_matrix` can reuse its symbolic LU factorization across every anchor frequency).
     pub fn assemble_matrix_at(&self, omega: f64) -> CCsr {
         let coeffs = self.term_coeffs(omega);
-        let mut mat = self.terms_hat[0].clone();
+        let mut mat = self.terms_hat[0].scaled(coeffs[0].0);
         for (m, &(alpha, _, _)) in coeffs.iter().enumerate().skip(1) {
-            if (alpha.re != 0.0 || alpha.im != 0.0) && self.terms_hat[m].nnz() > 0 {
+            if self.terms_hat[m].nnz() > 0 {
                 mat = mat.add_scaled(&self.terms_hat[m], alpha);
             }
         }
@@ -227,14 +244,31 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     if mesh.dim != 3 {
         return Err("the driven study of EM waves needs a 3D mesh".into());
     }
-    let Study::Driven { f_min, f_max, n_points, prom_tol } = problem.study.clone() else {
+    let Study::Driven {
+        f_min: study_f_min,
+        f_max: study_f_max,
+        n_points: study_n_points,
+        freqs_hz,
+        prom_tol,
+        max_hdm_solves,
+        strict_prom_tol,
+        seed_freqs_hz,
+    } = problem.study.clone()
+    else {
         return Err("assemble_emw_driven requires a Driven study".into());
+    };
+    let (f_min, f_max, n_points) = if let Some(fs) = freqs_hz.as_ref().filter(|v| !v.is_empty()) {
+        (fs[0], fs[fs.len() - 1], fs.len())
+    } else {
+        (study_f_min, study_f_max, study_n_points)
     };
     if problem.lumped_ports.is_empty() && problem.waveports.is_empty() {
         return Err("driven study requires at least one 'lumped_port' or 'waveport' boundary condition".into());
     }
+    validate_port_contacts_3d(mesh, problem)?;
     let order = if problem.order == 1 { 1 } else { 2 };
-    let tens = problem.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?;
+    let tens = problem.materials.cell_complex_permittivity(mesh, Some(1.0))?;
+    let eps_phys_re: Vec<[[f64; 3]; 3]> = tens.iter().map(|(re, _)| *re).collect();
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     let has_pml = problem.materials.has_pml();
     let stretch = if has_pml { Some(cell_stretches(mesh, &problem.materials.pml)) } else { None };
@@ -246,12 +280,13 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         let lam = [sy * sz / sx, sx * sz / sy, sx * sy / sz];
         let pml_here = stretch.is_some()
             && (sx.re != 1.0 || sx.im != 0.0 || sy.re != 1.0 || sy.im != 0.0 || sz.re != 1.0 || sz.im != 0.0);
-        let t = tens[ci];
+        let (t_re, t_im) = tens[ci];
         let (sv, det) = ([sx, sy, sz], sx * sy * sz);
         let mut e = [[c(0.0, 0.0); 3]; 3];
         for a in 0..3 {
             for b in 0..3 {
-                e[a][b] = if pml_here { det * t[a][b] / (sv[a] * sv[b]) } else { c(t[a][b], 0.0) };
+                let ec = c(t_re[a][b], -t_im[a][b]);
+                e[a][b] = if pml_here { det * ec / (sv[a] * sv[b]) } else { ec };
             }
         }
         eps.push(e);
@@ -289,7 +324,7 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         &problem.pmc,
         &problem.surface_impedance,
         &problem.waveports,
-        &tens,
+        &eps_phys_re,
         &mur,
         f_min,
         f_max,
@@ -475,7 +510,11 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         f_min,
         f_max,
         n_points,
+        freqs_hz,
         prom_tol,
+        max_hdm_solves,
+        strict_prom_tol,
+        seed_freqs_hz,
         d_ruiz,
         terms_hat,
         ports,
@@ -641,6 +680,8 @@ fn s_to_z_and_y(s_mat: &[Vec<C>], z0_ports: &[f64]) -> (Vec<Vec<[f64; 2]>>, Vec<
 /// microsecond full-space residual certification across all sweep frequencies.
 struct DrivenProm<'a> {
     asm: &'a DrivenAssembly,
+    /// Persistent sparse LU solver reusing its cached symbolic factorization across all anchor frequencies.
+    solver: Option<DirectSolver<C>>,
     /// Orthonormal real basis columns $\mathbf{q}_i \in \mathbb{R}^{n_{\text{red}}}$ (`r` columns).
     q_cols: Vec<Vec<f64>>,
     /// Reduced operator matrices $\mathbf{A}_{m,r} = \mathbf{Q}^T \hat{\mathbf{A}}_m \mathbf{Q}$ (`M` matrices, each `r x r` row-major).
@@ -676,6 +717,7 @@ impl<'a> DrivenProm<'a> {
         }
         Self {
             asm,
+            solver: None,
             q_cols: Vec::new(),
             a_r: vec![Vec::new(); m_terms],
             b_r: Vec::new(),
@@ -688,6 +730,10 @@ impl<'a> DrivenProm<'a> {
 
     fn dim(&self) -> usize {
         self.q_cols.len()
+    }
+
+    fn symbolic_count(&self) -> usize {
+        self.solver.as_ref().map_or(0, |s| s.stats().symbolic_count)
     }
 
     /// Appends a real candidate vector to $\mathbf{Q}$ (if not already in the span) and updates
@@ -781,12 +827,16 @@ impl<'a> DrivenProm<'a> {
         self.add_real_vector(&im_v);
     }
 
-    /// Performs one full HDM factorization at angular frequency `omega_a` (rad/s) and adds the Hermite
-    /// value snapshots $\mathbf{Y}(\omega_a)$, 1st-derivative snapshots $\Delta\omega\,\mathbf{Y}'(\omega_a)$,
-    /// and 2nd-derivative snapshots $\frac{1}{2}\Delta\omega^2\,\mathbf{Y}''(\omega_a)$ across all $P$ ports.
-    fn add_hermite_anchor(&mut self, omega_a: f64, delta_omega: f64) -> Result<(), String> {
+    /// Performs one full HDM numeric factorization at angular frequency `omega_a` (rad/s), reusing the
+    /// cached symbolic LU analysis, normalizes each of the `3P` Hermite snapshots (`Y`, `Y'`, `Y''`) directly
+    /// to unit $L_2$ norm, compresses the anchor block via complex thin SVD (`s_k >= 1e-6 * s_0`), and adds
+    /// the surviving left singular vectors to $\mathbf{Q}$.
+    fn add_hermite_anchor(&mut self, omega_a: f64) -> Result<(), String> {
         let a_mat = self.asm.assemble_matrix_at(omega_a);
-        let solver = DirectSolver::new(&a_mat, false)?;
+        match self.solver.as_mut() {
+            Some(solver) => solver.update_matrix(&a_mat)?,
+            None => self.solver = Some(DirectSolver::new(&a_mat, false)?),
+        }
         let p_ports = self.asm.ports.len();
         let nred = self.asm.nred;
 
@@ -799,29 +849,19 @@ impl<'a> DrivenProm<'a> {
         }
 
         // 1. Value solve: A(omega_a) Y = RHS(omega_a)
-        let y0_cols = solver.solve_many(&rhs_0);
-        for y0 in &y0_cols {
-            self.add_complex_snapshot(y0);
-        }
+        let y0_cols = self.solver.as_ref().unwrap().solve_many(&rhs_0);
 
         // 2. First derivative solve on the SAME LU factorization:
         //    A(omega_a) Y' = RHS'(omega_a) - A'(omega_a) Y
         let mut rhs_1 = Vec::with_capacity(p_ports);
-        let mut a1_y0_cols = Vec::with_capacity(p_ports);
         for q in 0..p_ports {
             let a1_y0 = self.asm.apply_matrix_deriv(omega_a, 1, &y0_cols[q]);
             let g1 = gammas[q].1;
             let b_hat = &self.asm.ports[q].b_hat;
             let col: Vec<C> = (0..nred).map(|i| g1 * b_hat[i] - a1_y0[i]).collect();
             rhs_1.push(col);
-            a1_y0_cols.push(a1_y0);
         }
-        let y1_cols = solver.solve_many(&rhs_1);
-        let dw = delta_omega.max(1.0);
-        for y1 in &y1_cols {
-            let scaled: Vec<C> = y1.iter().map(|&v| v * dw).collect();
-            self.add_complex_snapshot(&scaled);
-        }
+        let y1_cols = self.solver.as_ref().unwrap().solve_many(&rhs_1);
 
         // 3. Second derivative solve on the SAME LU factorization:
         //    A(omega_a) Y'' = RHS''(omega_a) - 2 A'(omega_a) Y' - A''(omega_a) Y
@@ -834,11 +874,30 @@ impl<'a> DrivenProm<'a> {
             let col: Vec<C> = (0..nred).map(|i| g2 * b_hat[i] - c(2.0, 0.0) * a1_y1[i] - a2_y0[i]).collect();
             rhs_2.push(col);
         }
-        let y2_cols = solver.solve_many(&rhs_2);
-        let dw2 = 0.5 * dw * dw;
-        for y2 in &y2_cols {
-            let scaled: Vec<C> = y2.iter().map(|&v| v * dw2).collect();
-            self.add_complex_snapshot(&scaled);
+        let y2_cols = self.solver.as_ref().unwrap().solve_many(&rhs_2);
+
+        // Normalize every Y, Y', Y'' snapshot directly to unit L2 norm (bandwidth-independent),
+        // then compress the 3P complex block via thin SVD keeping s_k >= 1e-6 * s_0.
+        let mut anchor_cols: Vec<Vec<C>> = Vec::with_capacity(3 * p_ports);
+        for col in y0_cols.iter().chain(y1_cols.iter()).chain(y2_cols.iter()) {
+            let nrm = col.iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt();
+            if nrm > 0.0 && nrm.is_finite() {
+                let inv = 1.0 / nrm;
+                anchor_cols.push(col.iter().map(|&v| v * inv).collect());
+            }
+        }
+        if !anchor_cols.is_empty() {
+            let (s_vals, u_cols) = thin_svd_c64(&anchor_cols)?;
+            if let Some(&s0) = s_vals.first() {
+                if s0 > 0.0 {
+                    let cutoff = 1e-6 * s0;
+                    for (&sk, uk) in s_vals.iter().zip(&u_cols) {
+                        if sk >= cutoff {
+                            self.add_complex_snapshot(uk);
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -1024,12 +1083,17 @@ fn build_driven_solution(
 pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let asm = assemble_emw_driven(mesh, problem)?;
-    let n_points = asm.n_points.max(1);
-    let freqs_hz: Vec<f64> = if n_points == 1 {
-        vec![asm.f_min]
+    let freqs_hz: Vec<f64> = if let Some(fs) = asm.freqs_hz.as_ref().filter(|v| !v.is_empty()) {
+        fs.to_vec()
     } else {
-        (0..n_points).map(|k| asm.f_min + (asm.f_max - asm.f_min) * (k as f64) / ((n_points - 1) as f64)).collect()
+        let n_pts = asm.n_points.max(1);
+        if n_pts == 1 {
+            vec![asm.f_min]
+        } else {
+            (0..n_pts).map(|k| asm.f_min + (asm.f_max - asm.f_min) * (k as f64) / ((n_pts - 1) as f64)).collect()
+        }
     };
+    let n_points = freqs_hz.len();
     let omegas: Vec<f64> = freqs_hz.iter().map(|&f| 2.0 * PI * f).collect();
     let p_ports = asm.ports.len();
 
@@ -1039,6 +1103,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
     let mut y_matrix = Vec::with_capacity(n_points);
 
     let mut hdm_solves = 0usize;
+    let symbolic_count;
     let mut rom_dim = 0usize;
     let mut anchor_freqs_hz = Vec::new();
     let mut max_residual = 0.0_f64;
@@ -1048,42 +1113,72 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
 
     if let Some(tol) = asm.prom_tol {
         let mut prom = DrivenProm::new(&asm);
-        let delta_omega = (PI * (asm.f_max - asm.f_min) / 2.0).max(2.0 * PI * 0.05 * asm.f_min);
+        let max_solves = asm.max_hdm_solves.max(1);
 
-        // Initial greedy anchors: [f_min, f_mid, f_max]
-        let mut anchor_indices: Vec<usize> = if n_points == 1 || (asm.f_max - asm.f_min).abs() <= 1e-12 * asm.f_min {
+        // Initial greedy anchors: [f_min, f_mid, f_max] merged with optional seed_freqs_hz
+        let mut base_indices: Vec<usize> = if n_points == 1 || (asm.f_max - asm.f_min).abs() <= 1e-12 * asm.f_min {
             vec![0]
         } else if n_points == 2 {
             vec![0, 1]
         } else {
             vec![0, (n_points - 1) / 2, n_points - 1]
         };
-        anchor_indices.dedup();
+        base_indices.dedup();
 
-        for &idx in &anchor_indices {
-            femcore::progress::check()?;
-            prom.add_hermite_anchor(omegas[idx], delta_omega)?;
-            hdm_solves += 1;
-            anchor_freqs_hz.push(freqs_hz[idx]);
+        let mut initial_anchors: Vec<(Option<usize>, f64)> =
+            base_indices.iter().map(|&idx| (Some(idx), freqs_hz[idx])).collect();
+        for &sf in &asm.seed_freqs_hz {
+            let mut best_k = 0usize;
+            let mut best_diff = f64::INFINITY;
+            for (k, &fk) in freqs_hz.iter().enumerate() {
+                let diff = (fk - sf).abs();
+                if diff < best_diff {
+                    best_diff = diff;
+                    best_k = k;
+                }
+            }
+            if best_diff <= 1e-9 * sf.max(1.0) {
+                if !initial_anchors.iter().any(|&(oi, _)| oi == Some(best_k)) {
+                    initial_anchors.push((Some(best_k), freqs_hz[best_k]));
+                }
+            } else if !initial_anchors.iter().any(|&(_, f)| (f - sf).abs() <= 1e-9 * sf.max(1.0)) {
+                initial_anchors.push((None, sf));
+            }
         }
 
-        let max_solves = 12usize.max(anchor_indices.len());
-        let mut xr_all: Vec<Vec<Vec<C>>> = Vec::new();
+        let mut anchor_indices: Vec<usize> = Vec::new();
+        for (opt_idx, f_anchor) in initial_anchors.into_iter().take(max_solves) {
+            femcore::progress::check()?;
+            prom.add_hermite_anchor(2.0 * PI * f_anchor)?;
+            hdm_solves += 1;
+            anchor_freqs_hz.push(f_anchor);
+            if let Some(idx) = opt_idx {
+                anchor_indices.push(idx);
+            }
+        }
+
+        const SWEEP_CHUNK: usize = 32;
+        let mut xr_all: Vec<Vec<Vec<C>>>;
 
         loop {
             femcore::progress::check()?;
             let t_sweep = Instant::now();
-            xr_all.clear();
-            xr_all.reserve(n_points);
+            let dim_now = prom.dim();
+            let prom_ref = &prom;
+            let sweep_chunks = femcore::par::map_chunks(&omegas, SWEEP_CHUNK, |chunk| {
+                chunk
+                    .iter()
+                    .map(|&w| match prom_ref.solve_reduced_and_residual(w) {
+                        Some(pair) => pair,
+                        None => (vec![vec![c(0.0, 0.0); dim_now]; p_ports], f64::INFINITY),
+                    })
+                    .collect::<Vec<_>>()
+            });
+            xr_all = Vec::with_capacity(n_points);
             let mut worst_res = 0.0_f64;
             let mut worst_cand_res = -1.0_f64;
             let mut worst_cand_idx = None;
-
-            for (k, &w) in omegas.iter().enumerate() {
-                let (xr_k, res_k) = match prom.solve_reduced_and_residual(w) {
-                    Some(pair) => pair,
-                    None => (vec![vec![c(0.0, 0.0); prom.dim()]; p_ports], f64::INFINITY),
-                };
+            for (k, (xr_k, res_k)) in sweep_chunks.into_iter().flatten().enumerate() {
                 if res_k > worst_res {
                     worst_res = res_k;
                 }
@@ -1103,45 +1198,69 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
                 break;
             };
             anchor_indices.push(next_idx);
-            prom.add_hermite_anchor(omegas[next_idx], delta_omega)?;
+            prom.add_hermite_anchor(omegas[next_idx])?;
             hdm_solves += 1;
             anchor_freqs_hz.push(freqs_hz[next_idx]);
         }
 
+        if asm.strict_prom_tol && max_residual > tol {
+            return Err(format!(
+                "PROM did not converge to prom_tol = {tol:.3e} within max_hdm_solves = {max_solves} (max_prom_residual = {max_residual:.3e})"
+            ));
+        }
+
         rom_dim = prom.dim();
+        symbolic_count = prom.symbolic_count();
 
-        // Extract S, Z, Y across all n_points from reduced coordinates X_r(omega_k)
+        // Extract S, Z, Y across all n_points from reduced coordinates X_r(omega_k) using deterministic fixed-chunk Rayon
         let t_post = Instant::now();
-        let mut min_s_metric = f64::INFINITY;
-        for (k, &w) in omegas.iter().enumerate() {
-            let xr_k = &xr_all[k];
-            let mut z0_k = Vec::with_capacity(p_ports);
-            let mut z0_pairs_k = Vec::with_capacity(p_ports);
-            for port in &asm.ports {
-                let (z0_p, _, _, _) = port.excitation_coeffs(w, &asm.waveports);
-                z0_k.push(z0_p);
-                z0_pairs_k.push([z0_p, 0.0]);
-            }
-            z0_ohm.push(z0_pairs_k);
-
-            let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
-            for p in 0..p_ports {
-                let inv_sqrt_z0_p = 1.0 / z0_k[p].max(1e-30).sqrt();
-                for q in 0..p_ports {
-                    let mut v_pq = c(0.0, 0.0);
-                    for i in 0..rom_dim {
-                        v_pq += xr_k[q][i] * prom.b_r[i][p];
+        let indices: Vec<usize> = (0..n_points).collect();
+        let asm_ref = &asm;
+        let prom_ref = &prom;
+        let xr_ref = &xr_all;
+        let omegas_ref = &omegas;
+        let post_chunks = femcore::par::map_chunks(&indices, SWEEP_CHUNK, |chunk| {
+            chunk
+                .iter()
+                .map(|&k| {
+                    let w = omegas_ref[k];
+                    let xr_k = &xr_ref[k];
+                    let mut z_wave_k = Vec::with_capacity(p_ports);
+                    let mut z_circ_k = Vec::with_capacity(p_ports);
+                    let mut z0_pairs_k = Vec::with_capacity(p_ports);
+                    for port in &asm_ref.ports {
+                        let (z_wave_p, _, _, _) = port.excitation_coeffs(w, &asm_ref.waveports);
+                        let z_circ_p = port.circuit_z0(z_wave_p, &asm_ref.waveports);
+                        z_wave_k.push(z_wave_p);
+                        z_circ_k.push(z_circ_p);
+                        z0_pairs_k.push([z_circ_p, 0.0]);
                     }
-                    let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
-                    s_k[p][q] = v_pq * inv_sqrt_z0_p - delta;
-                }
-            }
-            let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
+
+                    let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
+                    for p in 0..p_ports {
+                        let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
+                        for q in 0..p_ports {
+                            let mut v_pq = c(0.0, 0.0);
+                            for i in 0..rom_dim {
+                                v_pq += xr_k[q][i] * prom_ref.b_r[i][p];
+                            }
+                            let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
+                            s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
+                        }
+                    }
+                    let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
+                    let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
+                    (z0_pairs_k, s_out, z_out, y_out, metric)
+                })
+                .collect::<Vec<_>>()
+        });
+        let mut min_s_metric = f64::INFINITY;
+        for (k, (z0_pairs_k, s_out, z_out, y_out, metric)) in post_chunks.into_iter().flatten().enumerate() {
             if metric < min_s_metric {
                 min_s_metric = metric;
                 rep_freq_idx = k;
             }
-            let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z0_k);
+            z0_ohm.push(z0_pairs_k);
             s_matrix.push(s_out);
             z_matrix.push(z_out);
             y_matrix.push(y_out);
@@ -1149,30 +1268,38 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         rom_sweep_seconds += t_post.elapsed().as_secs_f64();
         rep_x_red = prom.reconstruct_unscaled(&xr_all[rep_freq_idx][0]);
     } else {
-        // Direct point-by-point HDM solve (prom_tol = None)
+        // Direct point-by-point HDM solve (prom_tol = None), reusing symbolic LU factorization across all frequencies
+        let mut solver: Option<DirectSolver<C>> = None;
         let mut min_s_metric = f64::INFINITY;
         for (k, &w) in omegas.iter().enumerate() {
             femcore::progress::check()?;
             let a_mat = asm.assemble_matrix_at(w);
-            let solver = DirectSolver::new(&a_mat, false)?;
+            match solver.as_mut() {
+                Some(s) => s.update_matrix(&a_mat)?,
+                None => solver = Some(DirectSolver::new(&a_mat, false)?),
+            }
+            let s_ref = solver.as_ref().unwrap();
             hdm_solves += 1;
             anchor_freqs_hz.push(freqs_hz[k]);
 
-            let mut z0_k = Vec::with_capacity(p_ports);
+            let mut z_wave_k = Vec::with_capacity(p_ports);
+            let mut z_circ_k = Vec::with_capacity(p_ports);
             let mut z0_pairs_k = Vec::with_capacity(p_ports);
             let mut rhs_cols = Vec::with_capacity(p_ports);
             for port in &asm.ports {
-                let (z0_p, g0, _, _) = port.excitation_coeffs(w, &asm.waveports);
-                z0_k.push(z0_p);
-                z0_pairs_k.push([z0_p, 0.0]);
+                let (z_wave_p, g0, _, _) = port.excitation_coeffs(w, &asm.waveports);
+                let z_circ_p = port.circuit_z0(z_wave_p, &asm.waveports);
+                z_wave_k.push(z_wave_p);
+                z_circ_k.push(z_circ_p);
+                z0_pairs_k.push([z_circ_p, 0.0]);
                 rhs_cols.push(port.b_hat.iter().map(|&b| g0 * b).collect::<Vec<C>>());
             }
             z0_ohm.push(z0_pairs_k);
 
-            let y_cols = solver.solve_many(&rhs_cols);
+            let y_cols = s_ref.solve_many(&rhs_cols);
             let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
             for p in 0..p_ports {
-                let inv_sqrt_z0_p = 1.0 / z0_k[p].max(1e-30).sqrt();
+                let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
                 let b_hat_p = &asm.ports[p].b_hat;
                 for q in 0..p_ports {
                     let mut v_pq = c(0.0, 0.0);
@@ -1180,7 +1307,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
                         v_pq += yq * bp;
                     }
                     let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
-                    s_k[p][q] = v_pq * inv_sqrt_z0_p - delta;
+                    s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
                 }
             }
             let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
@@ -1189,11 +1316,12 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
                 rep_freq_idx = k;
                 rep_x_red = y_cols[0].iter().zip(&asm.d_ruiz).map(|(&yi, &di)| yi * di).collect();
             }
-            let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z0_k);
+            let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
             s_matrix.push(s_out);
             z_matrix.push(z_out);
             y_matrix.push(y_out);
         }
+        symbolic_count = solver.as_ref().map_or(0, |s| s.stats().symbolic_count);
     }
 
     let f_res_hz = freqs_hz[rep_freq_idx];
@@ -1232,6 +1360,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
     let mut scalars = vec![
         driven_data.scalar(),
         ("hdm_solves".into(), Scalar::Num(hdm_solves as f64)),
+        ("symbolic_count".into(), Scalar::Num(symbolic_count as f64)),
         ("rom_dim".into(), Scalar::Num(rom_dim as f64)),
         ("max_prom_residual".into(), Scalar::Num(max_residual)),
         ("rom_sweep_seconds".into(), Scalar::Num(rom_sweep_seconds)),

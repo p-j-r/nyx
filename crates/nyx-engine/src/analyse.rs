@@ -6,7 +6,7 @@
 use crate::engine::Engine;
 use nyx_analysis::{
     Analysis, CapacitanceMatrixAnalysis, EprAnalysis, HamiltonianAnalysis, InductanceMatrixAnalysis, ModeAnalysis,
-    PolarizationAnalysis, TlsParticipationAnalysis,
+    NetworkAnalysis, PolarizationAnalysis, TlsParticipationAnalysis,
 };
 use nyx_physics::Error;
 use serde_json::{json, Value};
@@ -20,6 +20,7 @@ pub fn analyses() -> Vec<Box<dyn Analysis>> {
         Box::new(EprAnalysis),
         Box::new(HamiltonianAnalysis),
         Box::new(TlsParticipationAnalysis),
+        Box::new(NetworkAnalysis),
     ]
 }
 

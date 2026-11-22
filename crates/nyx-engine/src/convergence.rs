@@ -30,22 +30,28 @@ fn check_factor(factor: f64) -> Result<(), Error> {
     Ok(())
 }
 
-/// The project with its element size multiplied by `factor` (`< 1` refines, `> 1` coarsens), along with the adaptive size factor, chord limit,
-/// wavelength rules, and sweep layer counts. When `scale_sizes` is true (the default), non-suppressed `add_size` (`Op::Size`) features on the
-/// scratch copy also scale `h` and `max_deviation` by `factor` and `min_layers` by `1 / factor`.
-fn refined(p: &Project, factor: f64, scale_sizes: bool) -> Project {
+/// The project with its element size multiplied by `factor` (`< 1` refines, `> 1` coarsens), along with the chord limit,
+/// wavelength rules, and sweep layer counts. Note `adapt_scale` is intentionally NOT multiplied by `factor` because the adaptive mesher
+/// already applies `adapt_scale` onto `h`, `Op::Size`, and `wave_size` (multiplying `adapt_scale` too would refine by `factor^2`).
+/// When `scale_sizes` is true (the default), non-suppressed `add_size` (`Op::Size`) features on the scratch copy also scale `h` and
+/// `max_deviation` by `factor` and `min_layers` by `1 / factor`.
+fn refined(p: &Project, factor: f64, scale_sizes: bool, sizing_order: Option<u8>) -> Project {
     use geom::expr::Expr;
     use geom::model::Op;
 
     let mut q = p.clone();
     q.mesh.h *= factor;
-    if let Some(s) = q.mesh.adapt_scale.as_mut() {
-        *s *= factor;
-    }
     if let Some(d) = q.mesh.max_dev.as_mut() {
         *d *= factor;
     }
-    if let Some(ppw) = q.mesh.points_per_wavelength.as_mut() {
+    if q.mesh.physics_sizing {
+        if let Some(ppw) = q.mesh.points_per_wavelength.as_mut() {
+            *ppw /= factor;
+        } else if let Some(ord) = sizing_order {
+            let base_ppw = if ord >= 2 { 6.0 } else { 12.0 };
+            q.mesh.points_per_wavelength = Some(base_ppw / factor);
+        }
+    } else if let Some(ppw) = q.mesh.points_per_wavelength.as_mut() {
         *ppw /= factor;
     }
     if let Some(gc) = q.mesh.gap_cells.as_mut() {
@@ -57,6 +63,9 @@ fn refined(p: &Project, factor: f64, scale_sizes: bool) -> Project {
         }
     }
     if scale_sizes {
+        if let Some(dz) = q.mesh.dz_min.as_mut() {
+            *dz *= factor;
+        }
         for feat in &mut q.geometry.features {
             if feat.suppressed {
                 continue;
@@ -575,7 +584,7 @@ pub struct ConvergenceJob {
 /// What a convergence check may cost and how it refines and extrapolates: it is refused, before any solve, when the comparison mesh has more cells
 /// than `max_cells` or when its solve is estimated to take longer than `max_seconds`. `scale_sizes` (default `true`) scales non-suppressed `add_size`
 /// features proportionally on the scratch copy; `extrapolate` optionally runs two-grid Richardson extrapolation (`"richardson_log_spd"` or
-/// `"richardson_linear"`).
+/// `"richardson_linear"`); `quantities` optionally restricts the verdict to matching row names.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Limits {
     pub max_cells: Option<u64>,
@@ -584,6 +593,7 @@ pub struct Limits {
     pub extrapolate: Option<String>,
     pub extrapolate_order: Option<f64>,
     pub apply_extrapolated: bool,
+    pub quantities: Option<Vec<String>>,
 }
 
 impl Default for Limits {
@@ -595,6 +605,7 @@ impl Default for Limits {
             extrapolate: None,
             extrapolate_order: None,
             apply_extrapolated: false,
+            quantities: None,
         }
     }
 }
@@ -622,10 +633,18 @@ impl Limits {
                 return Err(Error::invalid("`extrapolate_order` must be a finite number above zero"));
             }
         }
+        if let Some(qs) = &self.quantities {
+            if qs.is_empty() {
+                return Err(Error::invalid("`quantities` must be a non-empty list of quantity names"));
+            }
+            if qs.iter().any(|q| q.trim().is_empty()) {
+                return Err(Error::invalid("every entry in `quantities` must be non-empty text"));
+            }
+        }
         Ok(())
     }
 
-    /// `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order` and `apply_extrapolated` of the command arguments.
+    /// `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated` and `quantities` of the command arguments.
     pub fn from_args(args: &Value) -> Result<Limits, Error> {
         let max_cells = match args.get("max_cells").filter(|v| !v.is_null()) {
             None => None,
@@ -673,7 +692,36 @@ impl Limits {
             None => false,
             Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`apply_extrapolated` is true or false"))?,
         };
-        let limits = Limits { max_cells, max_seconds, scale_sizes, extrapolate, extrapolate_order, apply_extrapolated };
+        let quantities = match args.get("quantities").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => {
+                let arr = v
+                    .as_array()
+                    .ok_or_else(|| Error::invalid("`quantities` must be a non-empty list of quantity names"))?;
+                if arr.is_empty() {
+                    return Err(Error::invalid("`quantities` must be a non-empty list of quantity names"));
+                }
+                let mut out = Vec::with_capacity(arr.len());
+                for item in arr {
+                    let s = item
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .ok_or_else(|| Error::invalid("every entry in `quantities` must be non-empty text"))?;
+                    out.push(s.to_string());
+                }
+                Some(out)
+            }
+        };
+        let limits = Limits {
+            max_cells,
+            max_seconds,
+            scale_sizes,
+            extrapolate,
+            extrapolate_order,
+            apply_extrapolated,
+            quantities,
+        };
         limits.validate()?;
         Ok(limits)
     }
@@ -1010,8 +1058,9 @@ impl ConvergenceJob {
             .spec(physics)
             .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
         let targets = vec![physics.to_string()];
+        let sizing_order = self.scratch(self.project.clone()).sizing().map(|s| s.order);
         let present = self.mesh_inline(&self.project)?;
-        let other = self.mesh_inline(&refined(&self.project, factor, scale_sizes))?;
+        let other = self.mesh_inline(&refined(&self.project, factor, scale_sizes, sizing_order))?;
         let (coarse_m, fine_m) = if factor < 1.0 { (&present, &other) } else { (&other, &present) };
         let (c, f) = (coarse_m.mesh().n_cells() as u64, fine_m.mesh().n_cells() as u64);
         let (dc, df) = (coarse_m.mesh().dim() as u8, fine_m.mesh().dim() as u8);
@@ -1050,8 +1099,8 @@ impl Engine {
 
     /// Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread
     /// and outside the queue (the `convergence_check` command goes through `start_convergence`). `tolerance`,
-    /// when given, is the largest relative difference accepted (the difference of a quantity over the larger of the two values, or over 1 for
-    /// a value near zero); every row then says whether it passed and `converged` is true when all did.
+    /// when given, is the largest relative difference accepted (the difference of a quantity over the larger of the two values, or the absolute
+    /// difference for unit-fraction mode shares); every row then says whether it passed and `converged` is true when all did.
     pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {
         self.convergence_job().run(physics, factor, tolerance)
     }
@@ -1068,6 +1117,31 @@ impl Engine {
     ) -> Result<Value, Error> {
         self.convergence_job().run_matched(physics, factor, tolerance, matching)
     }
+}
+
+fn wildcard_match(text: &str, pat: &str) -> bool {
+    if !pat.contains('*') {
+        return text == pat;
+    }
+    let parts: Vec<&str> = pat.split('*').collect();
+    let mut rest = text;
+    for (idx, part) in parts.iter().enumerate() {
+        if idx == 0 {
+            let Some(after) = rest.strip_prefix(part) else { return false };
+            rest = after;
+        } else if idx == parts.len() - 1 {
+            return rest.ends_with(part);
+        } else {
+            let Some(pos) = rest.find(part) else { return false };
+            rest = &rest[pos + part.len()..];
+        }
+    }
+    true
+}
+
+fn quantity_matches(row_name: &str, filter: &str) -> bool {
+    let f = filter.trim();
+    wildcard_match(row_name, f) || row_name.strip_prefix("scalar ").is_some_and(|raw| wildcard_match(raw, f))
 }
 
 fn check(
@@ -1090,8 +1164,9 @@ fn check(
         // L3: the comparison mesh is built first (milliseconds against a solve), so a check larger than the caller accepts is refused before
         // any solve, and the answer to a refusal says what the check would have cost
         let scale_sizes = this.limits.scale_sizes;
+        let sizing_order = this.scratch(this.project.clone()).sizing().map(|s| s.order);
         let other_label = if factor < 1.0 { "finer" } else { "coarser" };
-        let other_project = refined(&this.project, factor, scale_sizes);
+        let other_project = refined(&this.project, factor, scale_sizes, sizing_order);
         let other_model = {
             let _stage = femcore::progress::stage(format!(
                 "convergence check: the {other_label} mesh (element size times {factor})"
@@ -1205,11 +1280,27 @@ fn check(
         // failure of the mesh: its `im` and its quality factors are listed but not counted. The floor is what the eigensolver resolves: an `im`
         // below it times the real part on both meshes (a Q above 5e7) is not told from rounding.
         let noise = noise_modes(&compared);
+        let active_compared: Vec<&(String, f64, f64)> = match &this.limits.quantities {
+            None => compared.iter().collect(),
+            Some(qs) => {
+                let matched_rows: Vec<&(String, f64, f64)> =
+                    compared.iter().filter(|(name, _, _)| qs.iter().any(|q| quantity_matches(name, q))).collect();
+                if matched_rows.is_empty() {
+                    let available: Vec<&str> = compared.iter().map(|(n, _, _)| n.as_str()).collect();
+                    return Err(Error::invalid(format!(
+                        "no quantity matched `quantities` {:?} (available quantities: {})",
+                        qs,
+                        if available.is_empty() { "none".to_string() } else { available.join(", ") }
+                    )));
+                }
+                matched_rows
+            }
+        };
         let mut rows = vec![];
         let mut worst = 0.0f64;
         let mut worst_name = String::new();
         let mut all = true;
-        for (name, x, y) in &compared {
+        for &(ref name, x, y) in &active_compared {
             let is_unit_fraction = name
                 .strip_prefix("scalar ")
                 .and_then(|rest| mode_scalar(rest, usize::MAX))
@@ -1217,8 +1308,14 @@ fn check(
                     let h = head.trim();
                     h.ends_with("share") || h.starts_with("share in ") || h == "layer fraction"
                 });
-            let scale = x.abs().max(y.abs()).max(1e-300);
-            let rel = (x - y).abs() / if is_unit_fraction || scale < 1e-12 { 1.0 } else { scale };
+            let scale = x.abs().max(y.abs());
+            let rel = if is_unit_fraction {
+                (x - y).abs()
+            } else if scale <= 1e-30 {
+                0.0
+            } else {
+                (x - y).abs() / scale
+            };
             if is_noise(name, &noise) {
                 let mut row = json!({ "quantity": name, "coarse": x, "refined": y, "difference": y - x, "relative": rel, "converged": tolerance.map(|_| true), "noise": true });
                 row["why"] = json!("imaginary part at the rounding level of this mode: not counted");
@@ -1261,6 +1358,9 @@ fn check(
             "rows": rows,
             "note": "the project was not changed; compare with a smaller factor if the difference is still falling",
         });
+        if let Some(qs) = &this.limits.quantities {
+            out["quantities_filter"] = json!(qs);
+        }
         if let Some((pairs, lone_coarse, lone_fine)) = matched {
             let mode = if matches!(matching, Matching::Track(_)) { "track" } else { "nearest" };
             out["matching"] = json!(mode);

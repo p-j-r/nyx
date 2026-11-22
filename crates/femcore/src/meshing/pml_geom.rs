@@ -54,11 +54,12 @@ pub fn structured_pml(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String> 
     }
     let ev = g.eval.clone();
     let labels = g.labels.clone();
+    let warnings = g.warnings.clone();
     match structured_pml_native(g)? {
         Native::Unchanged(g, report) => Ok((g, report)),
         Native::Cells(cells, report) => {
             let (mesh, _) = SimplexMesh::from_cells_split(&cells)?;
-            Ok((MeshedGeom { mesh, labels, eval: ev }, report))
+            Ok((MeshedGeom { mesh, labels, eval: ev, warnings }, report))
         }
     }
 }

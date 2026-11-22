@@ -84,6 +84,24 @@ pub struct MeshRequest {
     /// 3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub z_coarsen: bool,
+    /// maximum number of cells allowed before aborting meshing; absent: disabled (or `Adaptive::max_cells`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cells: Option<usize>,
+    /// 3D sheet mesher: floor on initial vertical z-slab thickness near sheet planes (m)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dz_min: Option<f64>,
+    /// 3D sheet mesher: maximum total number of horizontal z-slabs across active stack layers
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_z_slabs: Option<usize>,
+    /// 3D sheet mesher: geometric growth ratio for z-slab thickness away from sheet planes (default 1.35)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_growth_ratio: Option<f64>,
+    /// 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_steiner_multiplier: Option<usize>,
+    /// fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strict_mesh: bool,
 }
 
 impl MeshRequest {
@@ -94,6 +112,12 @@ impl MeshRequest {
         opts.curved = self.curved;
         opts.gap_cells = self.gap_cells;
         opts.z_coarsen = self.z_coarsen;
+        opts.max_cells = self.max_cells;
+        opts.dz_min = self.dz_min;
+        opts.max_z_slabs = self.max_z_slabs;
+        opts.z_growth_ratio = self.z_growth_ratio;
+        opts.max_steiner_multiplier = self.max_steiner_multiplier;
+        opts.strict_mesh = self.strict_mesh;
         MeshPlan {
             opts,
             mesher: match self.mesher {
@@ -189,8 +213,8 @@ fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, si
     } else {
         None
     };
-    // size rules that a 3D mesh cannot honour are named, not dropped in silence (ADR 83)
-    let mut warnings = vec![];
+    // diagnostics from the mesher (Ruppert vertex cap / sliver audit) and size rules a 3D mesh cannot honour (ADR 83)
+    let mut warnings = g.warnings.clone();
     if m.dim == 3 {
         let has_sheets = g.eval.complex().has_sheets();
         for rule in g.eval.size_rules() {
@@ -268,6 +292,12 @@ pub fn request_schema() -> Value {
             "curved": { "type": "boolean", "default": false, "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface" },
             "gap_cells": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: target number of cells across narrow coplanar gaps" },
             "z_coarsen": { "type": "boolean", "default": false, "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes" },
+            "max_cells": { "type": ["integer", "null"], "minimum": 1, "description": "maximum number of cells allowed before aborting meshing" },
+            "dz_min": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: floor on initial vertical z-slab thickness near sheet planes (m)" },
+            "max_z_slabs": { "type": ["integer", "null"], "minimum": 1, "description": "3D sheet mesher: maximum total number of horizontal z-slabs across active stack layers" },
+            "z_growth_ratio": { "type": ["number", "null"], "exclusiveMinimum": 1.0, "description": "3D sheet mesher: geometric growth ratio for z-slab thickness away from sheet planes (default 1.35)" },
+            "max_steiner_multiplier": { "type": ["integer", "null"], "minimum": 0, "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices" },
+            "strict_mesh": { "type": "boolean", "default": false, "description": "fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles" },
             "waves": {
                 "type": ["object", "null"],
                 "required": ["sizing"],

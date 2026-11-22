@@ -900,4 +900,94 @@ impl Model {
     pub fn tag(&mut self, name: &str, sel: Selector, tag: &str) -> FeatureId {
         self.push(name, Op::Tag { sel, name: tag.to_string() })
     }
+
+    /// Lowers a trapezoidal/arched airbridge spanning between inner landing edges `p0` and `p1`
+    /// into two axis-aligned `Op::Box` landing pads (`[z_base, z_base + h_bridge]`, unioned into
+    /// `pads` for `RegionKind::Hole`) plus a horizontal `Op::Sheet` bridge deck at
+    /// `z = z_base + h_bridge`, keeping `planar::needs_planar(&self.list) == false`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stepped_airbridge(
+        &mut self,
+        name: &str,
+        p0: (f64, f64),
+        p1: (f64, f64),
+        width: f64,
+        pad_len: f64,
+        z_base: f64,
+        h_bridge: f64,
+    ) -> SteppedAirbridge {
+        let dx = (p1.0 - p0.0).abs();
+        let dy = (p1.1 - p0.1).abs();
+        let hw = 0.5 * width;
+        let z_top = z_base + h_bridge;
+        let ((b0_min, b0_max), (b1_min, b1_max), (d_min, d_max)) = if dx >= dy {
+            let x_lo = p0.0.min(p1.0);
+            let x_hi = p0.0.max(p1.0);
+            let yc = 0.5 * (p0.1 + p1.1);
+            (
+                ((x_lo - pad_len, yc - hw, z_base), (x_lo, yc + hw, z_top)),
+                ((x_hi, yc - hw, z_base), (x_hi + pad_len, yc + hw, z_top)),
+                ((x_lo, yc - hw), (x_hi, yc + hw)),
+            )
+        } else {
+            let y_lo = p0.1.min(p1.1);
+            let y_hi = p0.1.max(p1.1);
+            let xc = 0.5 * (p0.0 + p1.0);
+            (
+                ((xc - hw, y_lo - pad_len, z_base), (xc + hw, y_lo, z_top)),
+                ((xc - hw, y_hi, z_base), (xc + hw, y_hi + pad_len, z_top)),
+                ((xc - hw, y_lo), (xc + hw, y_hi)),
+            )
+        };
+
+        let ov_pos = self.list.features.iter().position(|f| matches!(f.op, Op::Overlay { .. }));
+        let saved_tail = ov_pos.map(|pos| self.list.features.split_off(pos));
+
+        let pad0 = self.box_(&format!("{name}_pad0"), b0_min, b0_max);
+        let pad1 = self.box_(&format!("{name}_pad1"), b1_min, b1_max);
+        let pads = self.union(&format!("{name}_pads"), &[pad0, pad1]);
+        let deck_profile = self.rect(&format!("{name}_deck"), d_min, d_max);
+        let sheet = self.sheet(name, deck_profile, z_top);
+
+        if let Some(mut tail) = saved_tail {
+            if let Some(ov_feat) = tail.first_mut() {
+                if let Op::Overlay { regions, .. } = &mut ov_feat.op {
+                    let hole_name = format!("{name}_pads");
+                    if !regions.iter().any(|r| r.name == hole_name || r.input == pads) {
+                        regions.push(RegionDef {
+                            name: hole_name,
+                            input: pads,
+                            kind: RegionKind::Hole,
+                            pinned_id: None,
+                        });
+                    }
+                }
+            }
+            self.list.features.extend(tail);
+        }
+
+        SteppedAirbridge { pad0, pad1, pads, deck_profile, sheet }
+    }
+}
+
+/// Feature handles created by [`Model::stepped_airbridge`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SteppedAirbridge {
+    /// First axis-aligned landing pad (`Op::Box`).
+    pub pad0: FeatureId,
+    /// Second axis-aligned landing pad (`Op::Box`).
+    pub pad1: FeatureId,
+    /// Boolean union of both landing pads (`Op::Union`), suitable for a `RegionKind::Hole` overlay region.
+    pub pads: FeatureId,
+    /// 2D horizontal bridge deck profile (`Op::Rect`).
+    pub deck_profile: FeatureId,
+    /// 2D conductive sheet (`Op::Sheet`) at `z = z_base + h_bridge`.
+    pub sheet: FeatureId,
+}
+
+impl SteppedAirbridge {
+    /// Returns a `RegionDef` marking the landing pad pillars as `RegionKind::Hole` (PEC cutout).
+    pub fn hole_region(&self, name: &str) -> RegionDef {
+        RegionDef { name: name.to_string(), input: self.pads, kind: RegionKind::Hole, pinned_id: None }
+    }
 }

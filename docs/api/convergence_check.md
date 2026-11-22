@@ -17,6 +17,7 @@ Solves the physics on a second mesh with element sizes multiplied by `factor` (`
 | `max_cells` | number | no |  | refuse, before any solve, a check whose comparison mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6) |
 | `max_seconds` | number | no |  | refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the comparison mesh |
 | `physics` | text: `dfs`, `ems`, `sms` | yes |  | the three-letter code of the physics |
+| `quantities` | list of text | no |  | non-empty list of quantity names to check; only matching rows count toward converged, worst_relative, and worst_quantity. each item: quantity name or scalar name to include in the verdict (e.g. "eigenvalue[0].re", "scalar C_0_0 (F)", or "C_0_0 (F)") |
 | `scale_sizes` | true or false | no |  | scale non-suppressed add_size features (h, max_deviation, min_layers) proportionally with factor on the comparison copy, default true |
 | `tolerance` | number | no |  | largest accepted relative difference, e.g. 1e-3; omit to only report |
 | `track` | object | no |  | follow mode(s) matching a target eigenvalue (f, n_b or n_eff) and/or physical mode-signature filters across both meshes |

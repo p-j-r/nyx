@@ -505,16 +505,31 @@ fn driven_study_and_port_condition_validation_checks() {
     let mesh = femcore::testkit::block(0.02, 0.01, 0.01, 3, 2, 2);
     let exchange = Mesh::from_solver_mesh(&mesh).unwrap();
 
-    // 1. lumped_port outside Study::Driven is rejected
-    let mut bad_cav = ProblemSpec::new("ems", 1, "cavity");
-    bad_cav.study.params = json!({ "f_search": 10e9, "n_modes": 1 });
-    bad_cav.bcs.push(BcSpec {
+    // 1. lumped_port outside Study::Cavity | Study::Driven (e.g. 2D modes) is rejected, and succeeds in cavity
+    let mesh2 = femcore::testkit::rect_split_x(0.02, 0.01, 0.01, 0.005);
+    let exchange2 = Mesh::from_solver_mesh(&mesh2).unwrap();
+    let mut bad_modes = ProblemSpec::new("ems", 1, "modes");
+    bad_modes.study.params = json!({ "freq": 10e9, "n_target": 1.0, "n_modes": 1 });
+    bad_modes.bcs.push(BcSpec {
         on: "y0".into(),
         kind: "lumped_port".into(),
         params: json!({ "name": "p1", "Z_0": 50.0 }),
     });
-    let err = Ems.solve(&exchange, &bad_cav, &mut Ctx::new(&BlockResolver)).unwrap_err();
-    assert!(err.to_string().contains("belongs to the driven study"), "{err}");
+    let err = Ems.solve(&exchange2, &bad_modes, &mut Ctx::new(&BlockResolver)).unwrap_err();
+    assert!(err.to_string().contains("belongs to the cavity or driven study"), "{err}");
+
+    let mut ok_cav = ProblemSpec::new("ems", 1, "cavity");
+    ok_cav.study.params = json!({ "f_search": 10e9, "n_modes": 1 });
+    ok_cav.bcs.push(BcSpec {
+        on: "y0".into(),
+        kind: "lumped_port".into(),
+        params: json!({ "name": "p1", "Z_0": 50.0 }),
+    });
+    let cav_res = Ems.solve(&exchange, &ok_cav, &mut Ctx::new(&BlockResolver)).unwrap();
+    let cav_rom = CircuitRom::of(&cav_res).expect("CircuitRom emitted for cavity with lumped_port");
+    assert_eq!(cav_rom.ports.len(), 1);
+    assert_eq!(cav_rom.ports[0].kind, "lumped_port");
+    assert_eq!(cav_rom.ports[0].z0_ohm, Some(50.0));
 
     // 2. waveport outside Study::Driven is rejected
     let mut bad_wp = ProblemSpec::new("ems", 1, "cavity");
@@ -538,7 +553,7 @@ fn driven_study_and_port_condition_validation_checks() {
     let err = Ems.solve(&exchange, &bad_freq, &mut Ctx::new(&BlockResolver)).unwrap_err();
     assert!(err.to_string().contains("f_min <= f_max"), "{err}");
 
-    // 5. Sizing for "driven" uses f_max and headroom 1.0
+    // 5. Sizing for "driven" uses f_max and headroom 1.0 (and derives f_max from freqs_hz when given)
     let mut s = ProblemSpec::new("ems", 2, "driven");
     s.study.params = json!({ "f_min": 4e9, "f_max": 10e9, "n_points": 21 });
     s.materials.insert("guide".into(), MaterialAssign::Props([("eps_r".to_string(), 4.0)].into()));
@@ -547,4 +562,516 @@ fn driven_study_and_port_condition_validation_checks() {
     assert_eq!(sz.headroom, 1.0);
     let expected_lam = C0 / (10e9 * 2.0);
     assert!((sz.wavelengths["guide"] - expected_lam).abs() / expected_lam < 1e-12);
+
+    let mut s_list = ProblemSpec::new("ems", 2, "driven");
+    s_list.study.params = json!({ "freqs_hz": [4e9, 6e9, 12e9] });
+    s_list.materials.insert("guide".into(), MaterialAssign::Props([("eps_r".to_string(), 4.0)].into()));
+    let sz_list = Ems.sizing(&s_list, None);
+    let expected_lam_list = C0 / (12e9 * 2.0);
+    assert!((sz_list.wavelengths["guide"] - expected_lam_list).abs() / expected_lam_list < 1e-12);
+
+    // 6. Non-ascending freqs_hz is rejected with Error::Invalid
+    let mut bad_list = ProblemSpec::new("ems", 1, "driven");
+    bad_list.study.params = json!({ "freqs_hz": [6e9, 5e9, 7e9] });
+    bad_list.bcs.push(BcSpec { on: "y0".into(), kind: "waveport".into(), params: json!({ "name": "p1" }) });
+    let err = Ems.solve(&exchange, &bad_list, &mut Ctx::new(&BlockResolver)).unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "expected Error::Invalid, got {err:?}");
+}
+
+#[test]
+fn fr02_and_fr20_prom_budget_strict_tol_zoom_symbolic_lu_and_freqs_hz() {
+    let g = build_coupled_feedline_resonator_mesh();
+    let exchange = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let resolver = GeomResolver(&g);
+
+    let e_j_hz = 20.0e9;
+    let c_j_f = 35.0e-15;
+
+    // Reference cavity frequency
+    let mut spec_cav = ProblemSpec::new("ems", 1, "cavity");
+    spec_cav.study.params = json!({ "n_modes": 2, "f_search": 5.5e9 });
+    spec_cav.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    spec_cav.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    for sheet in ["feed_trace", "res_pad1", "res_pad2"] {
+        spec_cav.bcs.push(BcSpec { on: sheet.into(), kind: "pec".into(), params: json!({}) });
+    }
+    spec_cav.bcs.push(BcSpec {
+        on: "jj_sheet".into(),
+        kind: "lumped_jj".into(),
+        params: json!({
+            "name": "Q1_JJ",
+            "E_j_Hz": e_j_hz,
+            "C_j": c_j_f,
+            "direction": [0.0, 1.0, 0.0],
+            "formulation": "rank1"
+        }),
+    });
+    let res_cav = Ems.solve(&exchange, &spec_cav, &mut Ctx::new(&resolver)).unwrap();
+    let rom_cav = CircuitRom::of(&res_cav).unwrap();
+    let f_cav =
+        rom_cav.modes.iter().max_by(|a, b| a.u_ind_jj_j[0].partial_cmp(&b.u_ind_jj_j[0]).unwrap()).unwrap().freq_hz;
+
+    let make_3port = |study_params: serde_json::Value| -> ProblemSpec {
+        let mut s = ProblemSpec::new("ems", 1, "driven");
+        s.study.params = study_params;
+        s.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        for sheet in ["feed_trace", "res_pad1", "res_pad2"] {
+            s.bcs.push(BcSpec { on: sheet.into(), kind: "pec".into(), params: json!({}) });
+        }
+        s.bcs.push(BcSpec {
+            on: "port1_sheet".into(),
+            kind: "lumped_port".into(),
+            params: json!({ "name": "port1", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+        });
+        s.bcs.push(BcSpec {
+            on: "port2_sheet".into(),
+            kind: "lumped_port".into(),
+            params: json!({ "name": "port2", "Z_0": 50.0, "direction": [0.0, -1.0, 0.0] }),
+        });
+        s.bcs.push(BcSpec {
+            on: "jj_sheet".into(),
+            kind: "lumped_port".into(),
+            params: json!({ "name": "JJ_port", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+        });
+        s
+    };
+
+    // 1. 3-port PROM with max_hdm_solves = 24, strict_prom_tol = true, seed_freqs_hz = [f_cav]
+    let res_seeded = Ems
+        .solve(
+            &exchange,
+            &make_3port(json!({
+                "f_min": 0.78 * f_cav,
+                "f_max": 1.22 * f_cav,
+                "n_points": 101,
+                "prom_tol": 1e-4,
+                "max_hdm_solves": 24,
+                "strict_prom_tol": true,
+                "seed_freqs_hz": [f_cav]
+            })),
+            &mut Ctx::new(&resolver),
+        )
+        .unwrap();
+    let d_seeded = DrivenPortData::of(&res_seeded).unwrap();
+    assert!(d_seeded.max_residual <= 1e-4, "residual {}", d_seeded.max_residual);
+    assert!(d_seeded.hdm_solves <= 24);
+    assert_eq!(res_seeded.scalar("symbolic_count"), Some(1.0), "symbolic LU must be reused across all anchors");
+    assert!(
+        d_seeded.anchor_freqs_hz.iter().any(|&f| (f - f_cav).abs() < 1e-3 * f_cav),
+        "seed frequency should appear in anchors: {:?}",
+        d_seeded.anchor_freqs_hz
+    );
+
+    // 2. strict_prom_tol = true fails cleanly when budget is exhausted before reaching tol
+    let err_strict = Ems
+        .solve(
+            &exchange,
+            &make_3port(json!({
+                "f_min": 0.78 * f_cav,
+                "f_max": 1.22 * f_cav,
+                "n_points": 51,
+                "prom_tol": 1e-12,
+                "max_hdm_solves": 1,
+                "strict_prom_tol": true
+            })),
+            &mut Ctx::new(&resolver),
+        )
+        .unwrap_err();
+    let msg = err_strict.to_string();
+    assert!(msg.contains("max_prom_residual") && msg.contains("prom_tol"), "unexpected error: {msg}");
+
+    // 3. 2 MHz narrowband zoom sweep (verifies unit-L2 y1/y2 normalization + symbolic LU reuse on both PROM & HDM)
+    let f_zoom_lo = f_cav - 1.0e6;
+    let f_zoom_hi = f_cav + 1.0e6;
+    let res_zoom_prom = Ems
+        .solve(
+            &exchange,
+            &make_3port(json!({
+                "f_min": f_zoom_lo,
+                "f_max": f_zoom_hi,
+                "n_points": 5,
+                "prom_tol": 1e-5,
+                "strict_prom_tol": true
+            })),
+            &mut Ctx::new(&resolver),
+        )
+        .unwrap();
+    let res_zoom_hdm = Ems
+        .solve(
+            &exchange,
+            &make_3port(json!({
+                "f_min": f_zoom_lo,
+                "f_max": f_zoom_hi,
+                "n_points": 5,
+                "prom_tol": null
+            })),
+            &mut Ctx::new(&resolver),
+        )
+        .unwrap();
+    assert_eq!(res_zoom_prom.scalar("symbolic_count"), Some(1.0));
+    assert_eq!(res_zoom_hdm.scalar("symbolic_count"), Some(1.0), "direct HDM loop must reuse symbolic LU");
+    let dz_p = DrivenPortData::of(&res_zoom_prom).unwrap();
+    let dz_h = DrivenPortData::of(&res_zoom_hdm).unwrap();
+    for k in 0..5 {
+        let s21_p = c(dz_p.s_matrix[k][1][0][0], dz_p.s_matrix[k][1][0][1]);
+        let s21_h = c(dz_h.s_matrix[k][1][0][0], dz_h.s_matrix[k][1][0][1]);
+        let err = (s21_p - s21_h).norm() / s21_h.norm().max(1e-12);
+        assert!(err < 1e-4, "2 MHz zoom PROM vs HDM error at k={k}: {err:e}");
+    }
+
+    // 4. Explicit non-uniform freqs_hz without f_min/f_max
+    let custom_freqs =
+        vec![0.80 * f_cav, 0.95 * f_cav, 0.995 * f_cav, f_cav, 1.005 * f_cav, 1.05 * f_cav, 1.20 * f_cav];
+    let res_custom_prom = Ems
+        .solve(
+            &exchange,
+            &make_3port(json!({
+                "freqs_hz": custom_freqs,
+                "prom_tol": 1e-4,
+                "strict_prom_tol": true
+            })),
+            &mut Ctx::new(&resolver),
+        )
+        .unwrap();
+    let res_custom_hdm = Ems
+        .solve(
+            &exchange,
+            &make_3port(json!({
+                "freqs_hz": custom_freqs,
+                "prom_tol": null
+            })),
+            &mut Ctx::new(&resolver),
+        )
+        .unwrap();
+    let dc_p = DrivenPortData::of(&res_custom_prom).unwrap();
+    let dc_h = DrivenPortData::of(&res_custom_hdm).unwrap();
+    assert_eq!(dc_p.freqs_hz, custom_freqs);
+    assert_eq!(res_custom_prom.scalar("symbolic_count"), Some(1.0));
+    assert_eq!(res_custom_hdm.scalar("symbolic_count"), Some(1.0));
+    for k in 0..custom_freqs.len() {
+        let s21_p = c(dc_p.s_matrix[k][1][0][0], dc_p.s_matrix[k][1][0][1]);
+        let s21_h = c(dc_h.s_matrix[k][1][0][0], dc_h.s_matrix[k][1][0][1]);
+        let err = (s21_p - s21_h).norm() / s21_h.norm().max(1e-12);
+        assert!(err < 1e-3, "non-uniform freqs_hz PROM vs HDM error at k={k}: {err:e}");
+    }
+}
+
+#[test]
+fn fr13_driven_dielectric_loss_tangent_matches_qi_10000() {
+    // 3D PEC box cavity (20 mm x 20 mm x 10 mm) with uniform inline loss_tangent = 1e-4 -> exact Q_i = 10000
+    let (a, l, b) = (20e-3, 20e-3, 10e-3);
+    let mesh = femcore::testkit::block(a, l, b, 4, 4, 2);
+    let exchange = Mesh::from_solver_mesh(&mesh).unwrap();
+    let f_analytic = (C0 / 2.0) * (1.0 / (a * a) + 1.0 / (l * l)).sqrt();
+
+    // Cavity eigenmode with PMC on y0 (matching high-Z_0 lumped_port open boundary) and loss_tangent = 1e-4 -> exact Q_i = 10000
+    let f_pmc_analytic = (C0 / 2.0) * (1.0 / (a * a) + 1.0 / (4.0 * l * l)).sqrt();
+    let mut spec_cav = ProblemSpec::new("ems", 2, "cavity");
+    spec_cav.study.params = json!({ "n_modes": 1, "f_search": f_pmc_analytic });
+    spec_cav.materials.insert(
+        "air".into(),
+        MaterialAssign::Props([("eps_r".to_string(), 1.0), ("loss_tangent".to_string(), 1.0e-4)].into()),
+    );
+    spec_cav.bcs.push(BcSpec { on: "y0".into(), kind: "pmc".into(), params: json!({}) });
+    let res_cav = Ems.solve(&exchange, &spec_cav, &mut Ctx::new(&BlockResolver)).unwrap();
+    let f_cav = res_cav.solutions[0].value.unwrap();
+    let q_cav = res_cav.scalar("Q1").unwrap();
+    assert!((q_cav - 10_000.0).abs() / 10_000.0 < 1e-3, "cavity Q_i = {q_cav:.2} != 10000");
+    let _ = f_analytic;
+
+    // Weakly-coupled driven sweep (Z_0 = 1e9 Ohm on y0 so Q_ext >> Q_i) around f_cav
+    let df_span = 0.001 * f_cav; // +/- 0.1% spans ~20 linewidths for Q = 10000
+    let mut spec_drv = ProblemSpec::new("ems", 2, "driven");
+    spec_drv.study.params = json!({
+        "f_min": f_cav - df_span,
+        "f_max": f_cav + df_span,
+        "n_points": 401,
+        "prom_tol": 1e-5,
+        "strict_prom_tol": true
+    });
+    spec_drv.materials.insert(
+        "air".into(),
+        MaterialAssign::Props([("eps_r".to_string(), 1.0), ("loss_tangent".to_string(), 1.0e-4)].into()),
+    );
+    spec_drv.bcs.push(BcSpec {
+        on: "y0".into(),
+        kind: "lumped_port".into(),
+        params: json!({ "name": "probe", "Z_0": 1.0e9, "direction": [0.0, 0.0, 1.0] }),
+    });
+    let res_drv = Ems.solve(&exchange, &spec_drv, &mut Ctx::new(&BlockResolver)).unwrap();
+    let data = DrivenPortData::of(&res_drv).unwrap();
+
+    // Find peak of Re[Z11(f)] and extract Q_i = f_peak / FWHM (half-maximum of Lorentzian Re[Z11])
+    let re_z: Vec<f64> = data.z_matrix.iter().map(|z| z[0][0][0]).collect();
+    let (k_pk, &z_max) = re_z.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).expect("non-empty sweep");
+    assert!(z_max > 0.0, "Re[Z11] must be positive for passive lossy cavity");
+    let half = 0.5 * z_max;
+    let mut f_lo_hm = None;
+    for k in (0..k_pk).rev() {
+        if re_z[k] <= half && re_z[k + 1] >= half {
+            let t = (half - re_z[k]) / (re_z[k + 1] - re_z[k]);
+            f_lo_hm = Some(data.freqs_hz[k] + t * (data.freqs_hz[k + 1] - data.freqs_hz[k]));
+            break;
+        }
+    }
+    let mut f_hi_hm = None;
+    for k in k_pk..(re_z.len() - 1) {
+        if re_z[k] >= half && re_z[k + 1] <= half {
+            let t = (re_z[k] - half) / (re_z[k] - re_z[k + 1]);
+            f_hi_hm = Some(data.freqs_hz[k] + t * (data.freqs_hz[k + 1] - data.freqs_hz[k]));
+            break;
+        }
+    }
+    let f_lo_hm = f_lo_hm.expect("lower half-max found");
+    let f_hi_hm = f_hi_hm.expect("upper half-max found");
+    let q_driven = data.freqs_hz[k_pk] / (f_hi_hm - f_lo_hm);
+    eprintln!(
+        "FR-13 driven loss_tangent=1e-4: f_cav = {:.6} GHz, Q_cav = {:.1}, Q_driven = {:.1}",
+        f_cav / 1e9,
+        q_cav,
+        q_driven
+    );
+    assert!((q_driven - 10_000.0).abs() / 10_000.0 < 0.02, "driven Q_i = {q_driven:.1} differs from 10000 by > 2%");
+    // Passive: |S11| < 1 at resonance
+    let s11_pk = c(data.s_matrix[k_pk][0][0][0], data.s_matrix[k_pk][0][0][1]).norm();
+    assert!(s11_pk < 1.0 - 1e-6, "lossy cavity |S11| at resonance must be < 1, got {s11_pk}");
+}
+
+#[test]
+fn fr14_cpw_waveport_n_eff_guess_and_z0_ohm() {
+    // 3D CPW through-line on Si (eps_r = 11.45) + air (eps_r = 1.0): quasi-TEM n_eff ~ 2.5
+    let mut m = Model::new_3d();
+    let (w_box, l_line, h_sub, h_air) = (600e-6, 1.2e-3, 250e-6, 250e-6);
+    let (w_trace, s_gap) = (80e-6, 50e-6);
+    let si = m.box_("si_box", (-w_box / 2.0, 0.0, -h_sub), (w_box / 2.0, l_line, 0.0));
+    let air = m.box_("air_box", (-w_box / 2.0, 0.0, 0.0), (w_box / 2.0, l_line, h_air));
+    let tr = m.rect("tr", (-w_trace / 2.0, 0.0), (w_trace / 2.0, l_line));
+    m.sheet("cpw_trace", tr, 0.0);
+    let gl = m.rect("gl", (-w_box / 2.0, 0.0), (-w_trace / 2.0 - s_gap, l_line));
+    m.sheet("cpw_gnd_l", gl, 0.0);
+    let gr = m.rect("gr", (w_trace / 2.0 + s_gap, 0.0), (w_box / 2.0, l_line));
+    m.sheet("cpw_gnd_r", gr, 0.0);
+    m.overlay(&[("si", si), ("air", air)]);
+    let g = mesh_model(&m.list, &MeshPlan::simple(180e-6)).expect("CPW waveport mesh");
+    let exchange = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let resolver = GeomResolver(&g);
+
+    let mut spec = ProblemSpec::new("ems", 1, "driven");
+    spec.study.params = json!({ "f_min": 5.0e9, "f_max": 7.0e9, "n_points": 21, "prom_tol": 1e-3 });
+    spec.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    spec.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    for sheet in ["cpw_trace", "cpw_gnd_l", "cpw_gnd_r"] {
+        spec.bcs.push(BcSpec { on: sheet.into(), kind: "pec".into(), params: json!({}) });
+    }
+    spec.bcs.push(BcSpec {
+        on: "plane(y = 0)".into(),
+        kind: "waveport".into(),
+        params: json!({ "name": "wp_in", "mode": 1, "n_eff_guess": 2.5, "z0_ohm": 50.0 }),
+    });
+    spec.bcs.push(BcSpec {
+        on: format!("plane(y = {l_line:e})"),
+        kind: "waveport".into(),
+        params: json!({ "name": "wp_out", "mode": 1, "n_eff_guess": 2.5, "z0_ohm": 50.0 }),
+    });
+
+    let res = Ems.solve(&exchange, &spec, &mut Ctx::new(&resolver)).unwrap();
+    let data = DrivenPortData::of(&res).unwrap();
+    for k in 0..data.freqs_hz.len() {
+        assert!((data.z0_ohm[k][0][0] - 50.0).abs() < 1e-12);
+        assert!((data.z0_ohm[k][1][0] - 50.0).abs() < 1e-12);
+        let s11 = c(data.s_matrix[k][0][0][0], data.s_matrix[k][0][0][1]);
+        let s21 = c(data.s_matrix[k][1][0][0], data.s_matrix[k][1][0][1]);
+        let s12 = c(data.s_matrix[k][0][1][0], data.s_matrix[k][0][1][1]);
+        let s22 = c(data.s_matrix[k][1][1][0], data.s_matrix[k][1][1][1]);
+        assert!(s21.norm() > 0.98, "CPW waveport |S21| = {} at k={k}", s21.norm());
+        let p_tot = s11.norm_sqr() + s21.norm_sqr();
+        assert!(p_tot <= 1.0 + 1e-8 && p_tot > 0.98, "waveport passivity/match |S11|^2+|S21|^2 = {p_tot} at k={k}");
+        assert!((s21 - s12).norm() < 1e-10, "reciprocity");
+        // Verify Z matrix uses z0_ohm = 50.0: Z (I - S) = 50 (I + S)
+        let z11 = c(data.z_matrix[k][0][0][0], data.z_matrix[k][0][0][1]);
+        let z12 = c(data.z_matrix[k][0][1][0], data.z_matrix[k][0][1][1]);
+        let lhs = z11 * (c(1.0, 0.0) - s11) - z12 * s21;
+        let rhs = c(50.0, 0.0) * (c(1.0, 0.0) + s11);
+        let rel = (lhs - rhs).norm() / rhs.norm().max(1.0);
+        assert!(rel < 1e-10, "Z matrix must reference z0_ohm = 50 Ohm: rel err {rel:e}");
+        let _ = s22;
+    }
+}
+
+#[test]
+fn fr24_cpw_even_lumped_port_matches_endcap_and_validates_contact() {
+    // 1. Compare balanced `cpw_even` (two lateral slot sheets) vs single end-cap lumped port on a 3D CPW through-line
+    let (w_box, l_tot, h_sub, h_air) = (640e-6, 1.4e-3, 250e-6, 250e-6);
+    let (w_trace, s_gap, l_port) = (100e-6, 60e-6, 120e-6);
+
+    // Model A: single-gap end-cap ports at y in [0, l_port] and [l_tot - l_port, l_tot]
+    let mut m_end = Model::new_3d();
+    let si_a = m_end.box_("si_box", (-w_box / 2.0, 0.0, -h_sub), (w_box / 2.0, l_tot, 0.0));
+    let air_a = m_end.box_("air_box", (-w_box / 2.0, 0.0, 0.0), (w_box / 2.0, l_tot, h_air));
+    let tr_a = m_end.rect("tr", (-w_trace / 2.0, l_port), (w_trace / 2.0, l_tot - l_port));
+    m_end.sheet("cpw_trace", tr_a, 0.0);
+    let p1_a = m_end.rect("p1", (-w_trace / 2.0, 0.0), (w_trace / 2.0, l_port));
+    m_end.sheet("port1", p1_a, 0.0);
+    let p2_a = m_end.rect("p2", (-w_trace / 2.0, l_tot - l_port), (w_trace / 2.0, l_tot));
+    m_end.sheet("port2", p2_a, 0.0);
+    let gl_a = m_end.rect("gl", (-w_box / 2.0, 0.0), (-w_trace / 2.0 - s_gap, l_tot));
+    m_end.sheet("cpw_gnd_l", gl_a, 0.0);
+    let gr_a = m_end.rect("gr", (w_trace / 2.0 + s_gap, 0.0), (w_box / 2.0, l_tot));
+    m_end.sheet("cpw_gnd_r", gr_a, 0.0);
+    m_end.overlay(&[("si", si_a), ("air", air_a)]);
+    let g_end = mesh_model(&m_end.list, &MeshPlan::simple(160e-6)).expect("CPW end-cap mesh");
+
+    // Model B: balanced cpw_even ports across left and right lateral slots near y=0 and y=l_tot
+    let mut m_even = Model::new_3d();
+    let si_b = m_even.box_("si_box", (-w_box / 2.0, 0.0, -h_sub), (w_box / 2.0, l_tot, 0.0));
+    let air_b = m_even.box_("air_box", (-w_box / 2.0, 0.0, 0.0), (w_box / 2.0, l_tot, h_air));
+    let tr_b = m_even.rect("tr", (-w_trace / 2.0, l_port), (w_trace / 2.0, l_tot - l_port));
+    m_even.sheet("cpw_trace", tr_b, 0.0);
+    let gl_b = m_even.rect("gl", (-w_box / 2.0, 0.0), (-w_trace / 2.0 - s_gap, l_tot));
+    m_even.sheet("cpw_gnd_l", gl_b, 0.0);
+    let gr_b = m_even.rect("gr", (w_trace / 2.0 + s_gap, 0.0), (w_box / 2.0, l_tot));
+    m_even.sheet("cpw_gnd_r", gr_b, 0.0);
+    // Two disjoint lateral slots for port 1 (y in [l_port, 2*l_port]) and port 2 (y in [l_tot - 2*l_port, l_tot - l_port])
+    let p1_l = m_even.rect("p1_l", (-w_trace / 2.0 - s_gap, l_port), (-w_trace / 2.0, 2.0 * l_port));
+    let p1_r = m_even.rect("p1_r", (w_trace / 2.0, l_port), (w_trace / 2.0 + s_gap, 2.0 * l_port));
+    let p1_both = m_even.union("p1_both", &[p1_l, p1_r]);
+    m_even.sheet("port1_even", p1_both, 0.0);
+    let p2_l = m_even.rect("p2_l", (-w_trace / 2.0 - s_gap, l_tot - 2.0 * l_port), (-w_trace / 2.0, l_tot - l_port));
+    let p2_r = m_even.rect("p2_r", (w_trace / 2.0, l_tot - 2.0 * l_port), (w_trace / 2.0 + s_gap, l_tot - l_port));
+    let p2_both = m_even.union("p2_both", &[p2_l, p2_r]);
+    m_even.sheet("port2_even", p2_both, 0.0);
+    m_even.overlay(&[("si", si_b), ("air", air_b)]);
+    let g_even = mesh_model(&m_even.list, &MeshPlan::simple(160e-6)).expect("CPW cpw_even mesh");
+
+    let run_cpw = |g: &MeshedGeom, even: bool| -> DrivenPortData {
+        let ex = Mesh::from_solver_mesh(&g.mesh).unwrap();
+        let resv = GeomResolver(g);
+        let mut s = ProblemSpec::new("ems", 1, "driven");
+        s.study.params = json!({ "f_min": 4.0e9, "f_max": 8.0e9, "n_points": 21, "prom_tol": 1e-3 });
+        s.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        for sheet in ["cpw_trace", "cpw_gnd_l", "cpw_gnd_r"] {
+            s.bcs.push(BcSpec { on: sheet.into(), kind: "pec".into(), params: json!({}) });
+        }
+        if even {
+            s.bcs.push(BcSpec {
+                on: "port1_even".into(),
+                kind: "lumped_port".into(),
+                params: json!({ "name": "p1", "Z_0": 50.0, "direction": [1.0, 0.0, 0.0], "mode": "cpw_even" }),
+            });
+            s.bcs.push(BcSpec {
+                on: "port2_even".into(),
+                kind: "lumped_port".into(),
+                params: json!({ "name": "p2", "Z_0": 50.0, "direction": [1.0, 0.0, 0.0], "mode": "cpw_even" }),
+            });
+        } else {
+            s.bcs.push(BcSpec {
+                on: "port1".into(),
+                kind: "lumped_port".into(),
+                params: json!({ "name": "p1", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0], "mode": "single" }),
+            });
+            s.bcs.push(BcSpec {
+                on: "port2".into(),
+                kind: "lumped_port".into(),
+                params: json!({ "name": "p2", "Z_0": 50.0, "direction": [0.0, -1.0, 0.0], "mode": "single" }),
+            });
+        }
+        let r = Ems.solve(&ex, &s, &mut Ctx::new(&resv)).unwrap();
+        DrivenPortData::of(&r).unwrap()
+    };
+
+    let d_end = run_cpw(&g_end, false);
+    let d_even = run_cpw(&g_even, true);
+    let mut max_db_diff = 0.0_f64;
+    for k in 0..d_end.freqs_hz.len() {
+        let s21_a = c(d_end.s_matrix[k][1][0][0], d_end.s_matrix[k][1][0][1]);
+        let s21_b = c(d_even.s_matrix[k][1][0][0], d_even.s_matrix[k][1][0][1]);
+        let s12_b = c(d_even.s_matrix[k][0][1][0], d_even.s_matrix[k][0][1][1]);
+        let s11_b = c(d_even.s_matrix[k][0][0][0], d_even.s_matrix[k][0][0][1]);
+        let db_a = 20.0 * s21_a.norm().max(1e-30).log10();
+        let db_b = 20.0 * s21_b.norm().max(1e-30).log10();
+        max_db_diff = max_db_diff.max((db_a - db_b).abs());
+        assert!((s21_b - s12_b).norm() < 1e-12, "cpw_even reciprocity");
+        assert!((s11_b.norm_sqr() + s21_b.norm_sqr() - 1.0).abs() < 1e-10, "cpw_even lossless unitarity");
+    }
+    eprintln!("FR-24 cpw_even vs end-cap max |S21| dB diff = {:.4} dB (< 0.2 dB)", max_db_diff);
+    assert!(max_db_diff < 0.2, "cpw_even vs end-cap differed by {max_db_diff:.4} dB (>= 0.2 dB)");
+
+    // 2. Disconnected lumped_port with a 10 nm gap from conductor pad -> Error::Invalid (NOT Error::Solver!)
+    let mut m_gap = Model::new_3d();
+    let si_g = m_gap.box_("si_box", (-500e-6, -500e-6, -200e-6), (500e-6, 500e-6, 0.0));
+    let air_g = m_gap.box_("air_box", (-500e-6, -500e-6, 0.0), (500e-6, 500e-6, 200e-6));
+    let p_a = m_gap.rect("pad1_r", (-150e-6, -300e-6), (150e-6, -50e-6));
+    m_gap.sheet("pad1", p_a, 0.0);
+    let p_b = m_gap.rect("pad2_r", (-150e-6, 50e-6 + 10e-9), (150e-6, 300e-6));
+    m_gap.sheet("pad2", p_b, 0.0);
+    // Sheet touches pad1 at y = -50 um, stops 10 nm short of pad2 at y = +50 um
+    let br = m_gap.rect("bridge_r", (-40e-6, -50e-6), (40e-6, 50e-6));
+    m_gap.sheet("bridge", br, 0.0);
+    m_gap.overlay(&[("si", si_g), ("air", air_g)]);
+    let g_gap = mesh_model(&m_gap.list, &MeshPlan::simple(180e-6)).expect("disconnected gap mesh");
+    let ex_gap = Mesh::from_solver_mesh(&g_gap.mesh).unwrap();
+    let resv_gap = GeomResolver(&g_gap);
+
+    let mut s_gap_drv = ProblemSpec::new("ems", 1, "driven");
+    s_gap_drv.study.params = json!({ "f_min": 4e9, "f_max": 6e9, "n_points": 5 });
+    s_gap_drv.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    s_gap_drv.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    s_gap_drv.bcs.push(BcSpec { on: "pad1".into(), kind: "pec".into(), params: json!({}) });
+    s_gap_drv.bcs.push(BcSpec { on: "pad2".into(), kind: "pec".into(), params: json!({}) });
+    s_gap_drv.bcs.push(BcSpec {
+        on: "bridge".into(),
+        kind: "lumped_port".into(),
+        params: json!({ "name": "bad_p", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+    });
+    let err_drv = Ems.solve(&ex_gap, &s_gap_drv, &mut Ctx::new(&resv_gap)).unwrap_err();
+    assert!(
+        matches!(err_drv, Error::Invalid(_)),
+        "disconnected lumped_port must return Error::Invalid, got {err_drv:?}"
+    );
+
+    let mut s_gap_cav = ProblemSpec::new("ems", 1, "cavity");
+    s_gap_cav.study.params = json!({ "n_modes": 1, "f_search": 5e9 });
+    s_gap_cav.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    s_gap_cav.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    s_gap_cav.bcs.push(BcSpec { on: "pad1".into(), kind: "pec".into(), params: json!({}) });
+    s_gap_cav.bcs.push(BcSpec { on: "pad2".into(), kind: "pec".into(), params: json!({}) });
+    s_gap_cav.bcs.push(BcSpec {
+        on: "bridge".into(),
+        kind: "lumped_jj".into(),
+        params: json!({ "name": "bad_jj", "E_j_Hz": 20e9, "direction": [0.0, 1.0, 0.0] }),
+    });
+    let err_cav = Ems.solve(&ex_gap, &s_gap_cav, &mut Ctx::new(&resv_gap)).unwrap_err();
+    assert!(matches!(err_cav, Error::Invalid(_)), "disconnected lumped_jj must return Error::Invalid, got {err_cav:?}");
+
+    // 3. Port stamped inside a single continuous PEC sheet (shorted) -> Error::Invalid
+    let mut m_short = Model::new_3d();
+    let si_s = m_short.box_("si_box", (-500e-6, -500e-6, -200e-6), (500e-6, 500e-6, 0.0));
+    let air_s = m_short.box_("air_box", (-500e-6, -500e-6, 0.0), (500e-6, 500e-6, 200e-6));
+    let outer = m_short.rect("outer", (-300e-6, -300e-6), (300e-6, 300e-6));
+    let inner = m_short.rect("inner", (-60e-6, -60e-6), (60e-6, 60e-6));
+    let frame = m_short.difference("frame", outer, &[inner]);
+    m_short.sheet("pec_frame", frame, 0.0);
+    m_short.sheet("shorted_port", inner, 0.0);
+    m_short.overlay(&[("si", si_s), ("air", air_s)]);
+    let g_short = mesh_model(&m_short.list, &MeshPlan::simple(180e-6)).expect("shorted port mesh");
+    let ex_short = Mesh::from_solver_mesh(&g_short.mesh).unwrap();
+    let resv_short = GeomResolver(&g_short);
+
+    let mut s_short = ProblemSpec::new("ems", 1, "driven");
+    s_short.study.params = json!({ "f_min": 4e9, "f_max": 6e9, "n_points": 5 });
+    s_short.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    s_short.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    s_short.bcs.push(BcSpec { on: "pec_frame".into(), kind: "pec".into(), params: json!({}) });
+    s_short.bcs.push(BcSpec {
+        on: "shorted_port".into(),
+        kind: "lumped_port".into(),
+        params: json!({ "name": "short_p", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+    });
+    let err_short = Ems.solve(&ex_short, &s_short, &mut Ctx::new(&resv_short)).unwrap_err();
+    assert!(
+        matches!(err_short, Error::Invalid(_)),
+        "shorted lumped_port must return Error::Invalid, got {err_short:?}"
+    );
 }

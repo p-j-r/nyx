@@ -252,7 +252,8 @@ fn sphere_loop(order: usize, h0: f64, cycles: usize) -> Vec<(usize, f64)> {
     let mut st = LoopSettings3::new(h0);
     st.max_cycles = cycles;
     st.rel_tol = 1e-9;
-    let wrap = |m: &SimplexMesh| MeshedGeom { mesh: m.clone(), labels: labels.clone(), eval: eval.clone() };
+    let wrap =
+        |m: &SimplexMesh| MeshedGeom { mesh: m.clone(), labels: labels.clone(), eval: eval.clone(), warnings: vec![] };
     let mut solve = |m: &SimplexMesh| -> Result<((SimplexMesh, femcore::adapt::maxwell::Indicators), f64), String> {
         let (f, ind) = solve_and_estimate(m, &s)?;
         Ok(((m.clone(), ind), f))

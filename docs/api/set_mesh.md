@@ -2,7 +2,7 @@
 
 **Set the mesh settings** · access `edit`: changes the project
 
-Give only what changes. `adapt_scale`, `gap_cells` or `sweep` set to null return to the simple mesher / explicit-only sheet sizing / an unswept mesh. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.
+Give only what changes. `adapt_scale`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, or `sweep` set to null return to the default setting. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.
 
 ## Arguments
 
@@ -10,11 +10,16 @@ Give only what changes. `adapt_scale`, `gap_cells` or `sweep` set to null return
 |---|---|---|---|---|
 | `adapt_scale` | number or null | no |  | adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher |
 | `curved` | true or false | no |  | 3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity and bloch studies, default false |
+| `dz_min` | number or null | no |  | 3D sheet stack: floor on initial vertical z-slab thickness near sheet planes in metres; null disables the floor |
 | `gap_cells` | number or null | no |  | 3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping |
 | `h` | number | no |  | global element size in metres |
+| `max_cells` | integer or null | no |  | maximum number of mesh cells allowed before aborting meshing (overrides the default 2,000,000 cap on adaptive meshing and enforces pre-allocation guard on 3D sheet stacks); null restores default |
 | `max_dev` | number or null | no |  | largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher |
+| `max_steiner_multiplier` | integer or null | no |  | 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial PSLG vertices; null uses default max(20 * n_init, 100000) |
+| `max_z_slabs` | integer or null | no |  | 3D sheet stack: maximum total number of horizontal z-slabs across active stack layers (must be >= active stack layers); null disables the cap |
 | `physics_sizing` | true or false | no |  | size the elements from the waves of the physics (points per wavelength) |
 | `points_per_wavelength` | number or null | no |  | points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2 |
+| `strict_mesh` | true or false | no |  | fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default false |
 | `structured_pml` | true or false | no |  | rebuild the absorbing layers as structured layers |
 | `sweep` | list of object or null | no |  | layers to sweep a 2D cross-section or 3D geometry model along y |
 | `sweep[].domain_offset` | integer | no |  | added to the domain numbers of the layer's cells |
@@ -23,6 +28,7 @@ Give only what changes. `adapt_scale`, `gap_cells` or `sweep` set to null return
 | `sweep[].regions` | object | no |  | optional per-layer region remap { source_region: target_region } in this layer |
 | `sweep[].thickness` | number | yes |  | thickness of the layer along y, metres |
 | `z_coarsen` | true or false | no |  | 3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false |
+| `z_growth_ratio` | number or null | no |  | 3D sheet stack: geometric growth ratio (> 1.0) for vertical z-slab thickness away from sheet planes; null uses default 1.35 |
 
 Lengths are in metres and every unit is SI unless the argument says otherwise.
 

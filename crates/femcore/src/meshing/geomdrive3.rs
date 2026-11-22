@@ -363,7 +363,7 @@ pub fn mesh_geom_3d_with(ev: Evaluated, opts: &GeomMeshOpts, sizes: &Sizes3) -> 
         (cells, report)
     };
     let mesh = SimplexMesh::from_cells(&cells)?;
-    Ok((MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) }, report, cells))
+    Ok((MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings: vec![] }, report, cells))
 }
 
 /// A spherical cavity of radius `r` centred at the origin, meshed at element size `h`: one domain (`cavity`) and one boundary, the surface of

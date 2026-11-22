@@ -8,12 +8,13 @@
 //!   (`quad_rule(2, 4)`) and P1/P2 `shape` functions, and evaluates exact boundary line integrals (`facet_rule(1)`)
 //!   on the **vacuum-side** triangle for `MA` and `SA` and the **substrate-side** triangle for `MS`. Also supports
 //!   explicit meshed finite-thickness oxide layers (`t_ox = 2 nm`) when present as thin dielectric domains.
-//! - **3D (`dim == 3`, Matched Asymptotic Edge-Tube Regularization)**: Detects the 1D singular perimeter
-//!   `\partial\Gamma_{SC}` of interior zero-thickness superconducting sheets, integrates exterior `MA`, `MS`, and `SA`
-//!   surface facets outside distance `R_0` (`edge_cutoff`) using subdivided near-edge triangle quadrature, extracts
-//!   the convergent perimeter singularity intensity `I_edge = \oint |A(s)|^2 ds` from the 3D electric energy inside
-//!   the cylindrical edge tube `r(x, \partial\Gamma_{SC}) < R_0`, and adds the matched asymptotic finite-thickness
-//!   (`d > 0`) corner contributions so `p_ma, p_ms, p_sa` are independent of `R_0` and converge as `h -> 0`.
+//! - **3D (`dim == 3`, Matched Asymptotic Edge-Tube Regularization + Flat AABB BVH)**: Detects the 1D singular
+//!   perimeter `\partial\Gamma_{SC}` of interior zero-thickness superconducting sheets, indexes all perimeter
+//!   segments in a deterministic flat 3D AABB bounding-volume hierarchy (`SegmentBvh3`) for `O(log N_seg)` distance
+//!   queries, integrates exterior `MA`, `MS`, and `SA` surface facets outside distance `R_0` (`edge_cutoff`),
+//!   extracts the convergent perimeter singularity intensity `I_edge = \oint |A(s)|^2 ds` from the 3D electric
+//!   energy inside `r(x, \partial\Gamma_{SC}) < R_0`, and adds matched asymptotic finite-thickness (`d > 0`) and
+//!   optional substrate-trenching (`trench_depth_m >= 0`) corner contributions.
 
 use crate::epr::EPS0;
 use crate::Analysis;
@@ -85,10 +86,24 @@ struct TlsParams {
     tan_delta_sa: f64,
     d: Option<f64>,
     edge_cutoff: Option<f64>,
+    trench_depth_m: Option<f64>,
 }
 
 impl TlsParams {
-    fn from_json(params: &Value) -> Result<Self, Error> {
+    fn from_json(params: &Value, meta: &TlsMeta) -> Result<Self, Error> {
+        let ifaces = meta.interfaces.as_ref();
+        let def_t_ma = ifaces.and_then(|i| i.ma.as_ref()).map_or(2.0e-9, |s| s.thickness_m);
+        let def_eps_ma = ifaces.and_then(|i| i.ma.as_ref()).map_or(10.0, |s| s.eps_r);
+        let def_td_ma = ifaces.and_then(|i| i.ma.as_ref()).map_or(1.0e-3, |s| s.tan_delta);
+
+        let def_t_ms = ifaces.and_then(|i| i.ms.as_ref()).map_or(2.0e-9, |s| s.thickness_m);
+        let def_eps_ms = ifaces.and_then(|i| i.ms.as_ref()).map_or(11.45, |s| s.eps_r);
+        let def_td_ms = ifaces.and_then(|i| i.ms.as_ref()).map_or(1.0e-3, |s| s.tan_delta);
+
+        let def_t_sa = ifaces.and_then(|i| i.sa.as_ref()).map_or(2.0e-9, |s| s.thickness_m);
+        let def_eps_sa = ifaces.and_then(|i| i.sa.as_ref()).map_or(10.0, |s| s.eps_r);
+        let def_td_sa = ifaces.and_then(|i| i.sa.as_ref()).map_or(1.0e-3, |s| s.tan_delta);
+
         let num = |k: &str, def: f64| -> Result<f64, Error> {
             match params.get(k) {
                 None | Some(Value::Null) => Ok(def),
@@ -121,19 +136,28 @@ impl TlsParams {
                     .ok_or_else(|| Error::invalid("parameter 'edge_cutoff' must be a positive radius in m"))?,
             ),
         };
+        let trench_depth_m = match params.get("trench_depth_m") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(
+                v.as_f64()
+                    .filter(|x| x.is_finite() && *x >= 0.0)
+                    .ok_or_else(|| Error::invalid("parameter 'trench_depth_m' must be a non-negative depth in m"))?,
+            ),
+        };
         Ok(Self {
             solution,
-            t_ma: num("t_ma", 2.0e-9)?,
-            t_ms: num("t_ms", 2.0e-9)?,
-            t_sa: num("t_sa", 2.0e-9)?,
-            eps_ma: num("eps_ma", 10.0)?.max(1e-12),
-            eps_ms: num("eps_ms", 11.45)?.max(1e-12),
-            eps_sa: num("eps_sa", 10.0)?.max(1e-12),
-            tan_delta_ma: num("tan_delta_ma", 1.0e-3)?,
-            tan_delta_ms: num("tan_delta_ms", 1.0e-3)?,
-            tan_delta_sa: num("tan_delta_sa", 1.0e-3)?,
+            t_ma: num("t_ma", def_t_ma)?,
+            t_ms: num("t_ms", def_t_ms)?,
+            t_sa: num("t_sa", def_t_sa)?,
+            eps_ma: num("eps_ma", def_eps_ma)?.max(1e-12),
+            eps_ms: num("eps_ms", def_eps_ms)?.max(1e-12),
+            eps_sa: num("eps_sa", def_eps_sa)?.max(1e-12),
+            tan_delta_ma: num("tan_delta_ma", def_td_ma)?,
+            tan_delta_ms: num("tan_delta_ms", def_td_ms)?,
+            tan_delta_sa: num("tan_delta_sa", def_td_sa)?,
             d,
             edge_cutoff,
+            trench_depth_m,
         })
     }
 }
@@ -147,16 +171,16 @@ pub fn tls_participation_applies(result: &SolveResult) -> bool {
 
 // ------------------------------------------------------------------ cell field evaluation helpers
 
-struct EFieldAccessor<'a> {
+pub(crate) struct EFieldAccessor<'a> {
     ex: &'a CellField,
     ey: Option<&'a CellField>,
     ez: &'a CellField,
     nloc: usize,
-    order: usize,
+    pub(crate) order: usize,
 }
 
 impl<'a> EFieldAccessor<'a> {
-    fn new(sol: &'a Solution, dim: usize, n_cells: usize) -> Result<Self, Error> {
+    pub(crate) fn new(sol: &'a Solution, dim: usize, n_cells: usize) -> Result<Self, Error> {
         let find = |name: &str| sol.cell_fields.iter().find(|f| f.name == name);
         let ex = find("Ex").ok_or_else(|| Error::invalid("solution has no 'Ex' cell field"))?;
         let (ey, ez) = if dim == 2 {
@@ -196,7 +220,7 @@ impl<'a> EFieldAccessor<'a> {
     }
 
     #[inline]
-    fn eval_with_shapes(&self, ci: usize, sh: &[f64]) -> [C64; 3] {
+    pub(crate) fn eval_with_shapes(&self, ci: usize, sh: &[f64]) -> [C64; 3] {
         let base = ci * self.nloc;
         let eval_one = |f: &CellField| -> C64 {
             let mut re = 0.0;
@@ -215,6 +239,22 @@ impl<'a> EFieldAccessor<'a> {
         };
         let vx = eval_one(self.ex);
         let vy = self.ey.map_or(C64::ZERO, eval_one);
+        let vz = eval_one(self.ez);
+        [vx, vy, vz]
+    }
+
+    #[inline]
+    pub(crate) fn eval_real_with_shapes(&self, ci: usize, sh: &[f64]) -> [f64; 3] {
+        let base = ci * self.nloc;
+        let eval_one = |f: &CellField| -> f64 {
+            let mut re = 0.0;
+            for (a, &na) in sh.iter().enumerate().take(self.nloc) {
+                re += na * f.re[base + a];
+            }
+            re
+        };
+        let vx = eval_one(self.ex);
+        let vy = self.ey.map_or(0.0, eval_one);
         let vz = eval_one(self.ez);
         [vx, vy, vz]
     }
@@ -335,10 +375,8 @@ fn run_tls_2d(
                     int_epar2 += wq * epar2;
                 }
                 if eps_c <= 1.5 {
-                    // Vacuum-side cell -> MA
                     u_ma += c_e * EPS0 * p.t_ma * ((eps_c * eps_c / p.eps_ma) * int_en2 + p.eps_ma * int_epar2);
                 } else {
-                    // Substrate-side cell -> MS
                     u_ms += c_e * EPS0 * p.t_ms * ((eps_c * eps_c / p.eps_ms) * int_en2 + p.eps_ms * int_epar2);
                 }
             }
@@ -406,17 +444,17 @@ fn run_tls_2d(
     })
 }
 
-// ------------------------------------------------------------------ 3D Matched Asymptotic Edge-Tube Regularization
+// ------------------------------------------------------------------ 3D Flat AABB BVH & Edge-Tube Helpers
 
 #[inline]
-fn sorted3(a: u32, b: u32, c: u32) -> [u32; 3] {
+pub(crate) fn sorted3(a: u32, b: u32, c: u32) -> [u32; 3] {
     let mut t = [a, b, c];
     t.sort_unstable();
     t
 }
 
 #[inline]
-fn pt3(disc: &Discretisation, v: u32) -> [f64; 3] {
+pub(crate) fn pt3(disc: &Discretisation, v: u32) -> [f64; 3] {
     let p = disc.point(v as usize);
     [p[0], p[1], p[2]]
 }
@@ -443,7 +481,7 @@ fn norm3(a: [f64; 3]) -> f64 {
 
 /// Squared distance from point `x` to 3D line segment `(a, b)`.
 #[inline]
-fn point_segment_dist_sq(x: [f64; 3], a: [f64; 3], b: [f64; 3], inv_len_sq: f64) -> f64 {
+pub(crate) fn point_segment_dist_sq(x: [f64; 3], a: [f64; 3], b: [f64; 3], inv_len_sq: f64) -> f64 {
     let ab = sub3(b, a);
     let ax = sub3(x, a);
     let t = (dot3(ax, ab) * inv_len_sq).clamp(0.0, 1.0);
@@ -453,22 +491,311 @@ fn point_segment_dist_sq(x: [f64; 3], a: [f64; 3], b: [f64; 3], inv_len_sq: f64)
     dx * dx + dy * dy + dz * dz
 }
 
-struct Segment3 {
-    a: [f64; 3],
-    b: [f64; 3],
-    inv_len_sq: f64,
+/// One 3D singular sheet-perimeter line segment.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Segment3 {
+    pub(crate) a: [f64; 3],
+    pub(crate) b: [f64; 3],
+    pub(crate) inv_len_sq: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BvhNode3 {
+    lo: [f64; 3],
+    hi: [f64; 3],
+    /// For internal nodes: left child index; for leaves (`count > 0`): start offset in `ordered_segs`.
+    left_or_start: u32,
+    /// For internal nodes (`count == 0`): right child index; for leaves: `0` unused.
+    right: u32,
+    /// `0` for internal nodes, `> 0` segment count for leaf nodes.
+    count: u32,
 }
 
 #[inline]
-fn min_dist_to_segments(x: [f64; 3], segs: &[Segment3]) -> f64 {
-    let mut best_d2 = f64::INFINITY;
-    for s in segs {
-        let d2 = point_segment_dist_sq(x, s.a, s.b, s.inv_len_sq);
-        if d2 < best_d2 {
-            best_d2 = d2;
+fn aabb_dist_sq(lo: [f64; 3], hi: [f64; 3], x: [f64; 3]) -> f64 {
+    let dx = if x[0] < lo[0] {
+        lo[0] - x[0]
+    } else if x[0] > hi[0] {
+        x[0] - hi[0]
+    } else {
+        0.0
+    };
+    let dy = if x[1] < lo[1] {
+        lo[1] - x[1]
+    } else if x[1] > hi[1] {
+        x[1] - hi[1]
+    } else {
+        0.0
+    };
+    let dz = if x[2] < lo[2] {
+        lo[2] - x[2]
+    } else if x[2] > hi[2] {
+        x[2] - hi[2]
+    } else {
+        0.0
+    };
+    dx * dx + dy * dy + dz * dz
+}
+
+/// Deterministic flat `Vec`-backed 3D AABB bounding-volume hierarchy over 3D line segments (`Segment3`).
+pub(crate) struct SegmentBvh3 {
+    nodes: Vec<BvhNode3>,
+    segs: Vec<Segment3>,
+}
+
+impl SegmentBvh3 {
+    pub(crate) fn build(segs: Vec<Segment3>) -> Self {
+        let n = segs.len();
+        if n == 0 {
+            return Self { nodes: Vec::new(), segs: Vec::new() };
+        }
+        struct Item {
+            orig_idx: usize,
+            lo: [f64; 3],
+            hi: [f64; 3],
+            cen: [f64; 3],
+        }
+        let mut items: Vec<Item> = segs
+            .iter()
+            .enumerate()
+            .map(|(idx, s)| Item {
+                orig_idx: idx,
+                lo: [s.a[0].min(s.b[0]), s.a[1].min(s.b[1]), s.a[2].min(s.b[2])],
+                hi: [s.a[0].max(s.b[0]), s.a[1].max(s.b[1]), s.a[2].max(s.b[2])],
+                cen: [0.5 * (s.a[0] + s.b[0]), 0.5 * (s.a[1] + s.b[1]), 0.5 * (s.a[2] + s.b[2])],
+            })
+            .collect();
+
+        let mut nodes = Vec::with_capacity(2 * n);
+        let mut ordered_segs = Vec::with_capacity(n);
+
+        fn build_rec(
+            items: &mut [Item],
+            orig_segs: &[Segment3],
+            nodes: &mut Vec<BvhNode3>,
+            ordered_segs: &mut Vec<Segment3>,
+        ) -> u32 {
+            let mut lo = [f64::INFINITY; 3];
+            let mut hi = [f64::NEG_INFINITY; 3];
+            let mut clo = [f64::INFINITY; 3];
+            let mut chi = [f64::NEG_INFINITY; 3];
+            for it in items.iter() {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(it.lo[k]);
+                    hi[k] = hi[k].max(it.hi[k]);
+                    clo[k] = clo[k].min(it.cen[k]);
+                    chi[k] = chi[k].max(it.cen[k]);
+                }
+            }
+            let node_idx = nodes.len() as u32;
+            if items.len() <= 4 {
+                let start = ordered_segs.len() as u32;
+                for it in items.iter() {
+                    ordered_segs.push(orig_segs[it.orig_idx]);
+                }
+                nodes.push(BvhNode3 { lo, hi, left_or_start: start, right: 0, count: items.len() as u32 });
+                return node_idx;
+            }
+            let ext = [chi[0] - clo[0], chi[1] - clo[1], chi[2] - clo[2]];
+            let axis = if ext[0] >= ext[1] && ext[0] >= ext[2] {
+                0
+            } else if ext[1] >= ext[2] {
+                1
+            } else {
+                2
+            };
+            items.sort_by(|a, b| a.cen[axis].total_cmp(&b.cen[axis]).then_with(|| a.orig_idx.cmp(&b.orig_idx)));
+            let mid = items.len() / 2;
+            nodes.push(BvhNode3 { lo, hi, left_or_start: 0, right: 0, count: 0 });
+            let (left_slice, right_slice) = items.split_at_mut(mid);
+            let left_idx = build_rec(left_slice, orig_segs, nodes, ordered_segs);
+            let right_idx = build_rec(right_slice, orig_segs, nodes, ordered_segs);
+            nodes[node_idx as usize].left_or_start = left_idx;
+            nodes[node_idx as usize].right = right_idx;
+            node_idx
+        }
+
+        build_rec(&mut items, &segs, &mut nodes, &mut ordered_segs);
+        Self { nodes, segs: ordered_segs }
+    }
+
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.segs.is_empty()
+    }
+
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.segs.len()
+    }
+
+    /// Exact minimum squared Euclidean distance from `x` to all segments in `O(log N_seg)` with zero heap allocations.
+    #[inline]
+    pub(crate) fn min_dist_sq(&self, x: [f64; 3]) -> f64 {
+        if self.nodes.is_empty() {
+            return f64::INFINITY;
+        }
+        let mut best_d2 = f64::INFINITY;
+        let mut stack = [0u32; 64];
+        let mut sp = 1usize;
+        stack[0] = 0;
+
+        while sp > 0 {
+            sp -= 1;
+            let node = &self.nodes[stack[sp] as usize];
+            if aabb_dist_sq(node.lo, node.hi, x) >= best_d2 {
+                continue;
+            }
+            if node.count > 0 {
+                let start = node.left_or_start as usize;
+                let end = start + (node.count as usize);
+                for s in &self.segs[start..end] {
+                    let d2 = point_segment_dist_sq(x, s.a, s.b, s.inv_len_sq);
+                    if d2 < best_d2 {
+                        best_d2 = d2;
+                    }
+                }
+            } else {
+                let l_idx = node.left_or_start;
+                let r_idx = node.right;
+                let dl = aabb_dist_sq(self.nodes[l_idx as usize].lo, self.nodes[l_idx as usize].hi, x);
+                let dr = aabb_dist_sq(self.nodes[r_idx as usize].lo, self.nodes[r_idx as usize].hi, x);
+                // Push farther child first so nearer child is popped andTightens best_d2 first
+                if dl <= dr {
+                    if dr < best_d2 && sp < stack.len() {
+                        stack[sp] = r_idx;
+                        sp += 1;
+                    }
+                    if dl < best_d2 && sp < stack.len() {
+                        stack[sp] = l_idx;
+                        sp += 1;
+                    }
+                } else {
+                    if dl < best_d2 && sp < stack.len() {
+                        stack[sp] = l_idx;
+                        sp += 1;
+                    }
+                    if dr < best_d2 && sp < stack.len() {
+                        stack[sp] = r_idx;
+                        sp += 1;
+                    }
+                }
+            }
+        }
+        best_d2
+    }
+
+    #[inline]
+    pub(crate) fn min_dist(&self, x: [f64; 3]) -> f64 {
+        self.min_dist_sq(x).sqrt()
+    }
+}
+
+pub(crate) type FaceToCells3D = HashMap<[u32; 3], Vec<(usize, [usize; 3])>>;
+
+pub(crate) struct SheetPerimeter3D {
+    pub(crate) face_to_cells: FaceToCells3D,
+    pub(crate) sheet_tris: BTreeMap<[u32; 3], i32>,
+    pub(crate) sa_tris: Vec<[u32; 3]>,
+    pub(crate) bvh: SegmentBvh3,
+    pub(crate) total_perim_len: f64,
+    pub(crate) h_edge_mean: f64,
+}
+
+/// Detects interior zero-thickness superconducting sheet triangles, uncovered substrate-air triangles,
+/// and the 1D singular sheet perimeter `\partial\Gamma_{SC}` indexed in a [`SegmentBvh3`].
+pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, cell_eps: &[f64]) -> SheetPerimeter3D {
+    let nc = disc.n_cells();
+    let mut face_to_cells: FaceToCells3D = HashMap::with_capacity(nc * 2);
+    for ci in 0..nc {
+        let v = disc.cell(ci);
+        for lf in FACES_3D {
+            let tri_raw = [v[lf[0]], v[lf[1]], v[lf[2]]];
+            let key = sorted3(tri_raw[0], tri_raw[1], tri_raw[2]);
+            let mut perm = lf;
+            perm.sort_by_key(|&loc| v[loc]);
+            face_to_cells.entry(key).or_default().push((ci, perm));
         }
     }
-    best_d2.sqrt()
+
+    let exterior = disc.exterior_facets();
+    let sheet_set: BTreeSet<i32> = if !meta.sheet_labels.is_empty() {
+        meta.sheet_labels.iter().copied().collect()
+    } else {
+        meta.conductor_labels.iter().copied().collect()
+    };
+
+    let mut sheet_tris: BTreeMap<[u32; 3], i32> = BTreeMap::new();
+    let mut ext_edges: BTreeSet<(u32, u32)> = BTreeSet::new();
+    for (f, &is_ext) in exterior.iter().enumerate().take(disc.n_facets()) {
+        let fv = disc.facet(f);
+        let key = sorted3(fv[0], fv[1], fv[2]);
+        let lab = disc.facet_labels[f];
+        if is_ext {
+            for (a, b) in [(key[0], key[1]), (key[1], key[2]), (key[0], key[2])] {
+                ext_edges.insert((a.min(b), a.max(b)));
+            }
+        }
+        if !is_ext && (sheet_set.contains(&lab) || meta.conductor_labels.contains(&lab)) {
+            sheet_tris.entry(key).or_insert(lab);
+        }
+    }
+
+    let mut sa_tris: Vec<[u32; 3]> = Vec::new();
+    for (&key, cells) in &face_to_cells {
+        if sheet_tris.contains_key(&key) || cells.len() != 2 {
+            continue;
+        }
+        let (e0, e1) = (cell_eps[cells[0].0], cell_eps[cells[1].0]);
+        if (e0 <= 1.5 && e1 > 1.5) || (e1 <= 1.5 && e0 > 1.5) {
+            sa_tris.push(key);
+        }
+    }
+    sa_tris.sort_unstable();
+
+    let mut sheet_edge_count: BTreeMap<(u32, u32), usize> = BTreeMap::new();
+    for &tri in sheet_tris.keys() {
+        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+            *sheet_edge_count.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+        }
+    }
+
+    let mut perim_edge_set: BTreeSet<(u32, u32)> = BTreeSet::new();
+    let mut perim_segments: Vec<Segment3> = Vec::new();
+    let mut total_perim_len = 0.0;
+    for (&(a, b), &cnt) in &sheet_edge_count {
+        if cnt == 1 && !ext_edges.contains(&(a, b)) {
+            let pa = pt3(disc, a);
+            let pb = pt3(disc, b);
+            let ab = sub3(pb, pa);
+            let len_sq = dot3(ab, ab);
+            if len_sq > 1e-30 {
+                let len = len_sq.sqrt();
+                total_perim_len += len;
+                perim_edge_set.insert((a, b));
+                perim_segments.push(Segment3 { a: pa, b: pb, inv_len_sq: 1.0 / len_sq });
+            }
+        }
+    }
+
+    let mut h_perp_sum = 0.0;
+    let mut h_perp_cnt = 0usize;
+    for &tri in sheet_tris.keys().chain(sa_tris.iter()) {
+        let (p0, p1, p2) = (pt3(disc, tri[0]), pt3(disc, tri[1]), pt3(disc, tri[2]));
+        let area = 0.5 * norm3(cross3(sub3(p1, p0), sub3(p2, p0)));
+        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+            let e = (a.min(b), a.max(b));
+            if perim_edge_set.contains(&e) {
+                let elen = norm3(sub3(pt3(disc, b), pt3(disc, a))).max(1e-15);
+                h_perp_sum += (2.0 * area) / elen;
+                h_perp_cnt += 1;
+            }
+        }
+    }
+    let h_edge_mean = if h_perp_cnt > 0 { h_perp_sum / (h_perp_cnt as f64) } else { 1.0e-6 };
+    let bvh = SegmentBvh3::build(perim_segments);
+
+    SheetPerimeter3D { face_to_cells, sheet_tris, sa_tris, bvh, total_perim_len, h_edge_mean }
 }
 
 /// Generates `n_sub^2` sub-triangles on the 2D reference simplex, returning `(bary3, weight)`
@@ -508,10 +835,9 @@ fn subdivided_tri_quad(n_sub: usize) -> Vec<([f64; 3], f64)> {
     out
 }
 
-/// Generates `n_sub^3` quadrature points on the 3D reference tetrahedron by collapsing the subdivided cube,
+/// Generates `(2 * n_sub)^3` quadrature points on the 3D reference tetrahedron by collapsing the subdivided cube,
 /// returning `(bary4, weight)` where `sum(weight) == 1.0`.
-fn subdivided_tet_quad(n_sub: usize) -> Vec<([f64; 4], f64)> {
-    // 2-point Gauss-Legendre on [0, 1] per sub-interval
+pub(crate) fn subdivided_tet_quad(n_sub: usize) -> Vec<([f64; 4], f64)> {
     let g0 = 0.5 * (1.0 - 1.0 / 3.0_f64.sqrt());
     let g1 = 0.5 * (1.0 + 1.0 / 3.0_f64.sqrt());
     let inv_n = 1.0 / (n_sub as f64);
@@ -570,102 +896,14 @@ fn run_tls_3d(
         return Err(Error::invalid("3D electric field has zero stored energy"));
     }
 
-    // 2. Map every sorted triangle face [v0, v1, v2] to its adjacent tetrahedra (ci, [la, lb, lc])
-    let mut face_to_cells: HashMap<[u32; 3], Vec<(usize, [usize; 3])>> = HashMap::with_capacity(nc * 2);
-    for ci in 0..nc {
-        let v = disc.cell(ci);
-        for lf in FACES_3D {
-            let tri_raw = [v[lf[0]], v[lf[1]], v[lf[2]]];
-            let key = sorted3(tri_raw[0], tri_raw[1], tri_raw[2]);
-            // Permute local indices so they correspond to key[0], key[1], key[2] in sorted order
-            let mut perm = lf;
-            perm.sort_by_key(|&loc| v[loc]);
-            face_to_cells.entry(key).or_default().push((ci, perm));
-        }
-    }
-
-    let exterior = disc.exterior_facets();
-    let sheet_set: BTreeSet<i32> = if !meta.sheet_labels.is_empty() {
-        meta.sheet_labels.iter().copied().collect()
-    } else {
-        meta.conductor_labels.iter().copied().collect()
-    };
-
-    let mut sheet_tris: BTreeMap<[u32; 3], i32> = BTreeMap::new();
-    let mut ext_edges: BTreeSet<(u32, u32)> = BTreeSet::new();
-    for (f, &is_ext) in exterior.iter().enumerate().take(disc.n_facets()) {
-        let fv = disc.facet(f);
-        let key = sorted3(fv[0], fv[1], fv[2]);
-        let lab = disc.facet_labels[f];
-        if is_ext {
-            for (a, b) in [(key[0], key[1]), (key[1], key[2]), (key[0], key[2])] {
-                ext_edges.insert((a.min(b), a.max(b)));
-            }
-        }
-        if !is_ext && (sheet_set.contains(&lab) || meta.conductor_labels.contains(&lab)) {
-            sheet_tris.entry(key).or_insert(lab);
-        }
-    }
-
-    // Collect uncovered dielectric interface triangles (`SA`: between vacuum <= 1.5 and substrate > 1.5)
-    let mut sa_tris: Vec<[u32; 3]> = Vec::new();
-    for (&key, cells) in &face_to_cells {
-        if sheet_tris.contains_key(&key) || cells.len() != 2 {
-            continue;
-        }
-        let (e0, e1) = (cell_eps[cells[0].0], cell_eps[cells[1].0]);
-        if (e0 <= 1.5 && e1 > 1.5) || (e1 <= 1.5 && e0 > 1.5) {
-            sa_tris.push(key);
-        }
-    }
-    sa_tris.sort_unstable();
-
-    // 3. Detect 1D singular perimeter \partial\Gamma_{SC}: edges touched by 1 sheet triangle, excluding exterior walls
-    let mut sheet_edge_count: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    for &tri in sheet_tris.keys() {
-        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
-            *sheet_edge_count.entry((a.min(b), a.max(b))).or_insert(0) += 1;
-        }
-    }
-
-    let mut perim_edge_set: BTreeSet<(u32, u32)> = BTreeSet::new();
-    let mut perim_segments: Vec<Segment3> = Vec::new();
-    let mut total_perim_len = 0.0;
-    for (&(a, b), &cnt) in &sheet_edge_count {
-        if cnt == 1 && !ext_edges.contains(&(a, b)) {
-            let pa = pt3(disc, a);
-            let pb = pt3(disc, b);
-            let ab = sub3(pb, pa);
-            let len_sq = dot3(ab, ab);
-            if len_sq > 1e-30 {
-                let len = len_sq.sqrt();
-                total_perim_len += len;
-                perim_edge_set.insert((a, b));
-                perim_segments.push(Segment3 { a: pa, b: pb, inv_len_sq: 1.0 / len_sq });
-            }
-        }
-    }
-
-    // Estimate mean transverse mesh spacing h_perp adjacent to \partial\Gamma_{SC}
-    let mut h_perp_sum = 0.0;
-    let mut h_perp_cnt = 0usize;
-    for &tri in sheet_tris.keys().chain(sa_tris.iter()) {
-        let (p0, p1, p2) = (pt3(disc, tri[0]), pt3(disc, tri[1]), pt3(disc, tri[2]));
-        let area = 0.5 * norm3(cross3(sub3(p1, p0), sub3(p2, p0)));
-        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
-            let e = (a.min(b), a.max(b));
-            if perim_edge_set.contains(&e) {
-                let elen = norm3(sub3(pt3(disc, b), pt3(disc, a))).max(1e-15);
-                h_perp_sum += (2.0 * area) / elen;
-                h_perp_cnt += 1;
-            }
-        }
-    }
-    let h_edge_mean = if h_perp_cnt > 0 { h_perp_sum / (h_perp_cnt as f64) } else { 1.0e-6 };
+    // 2. Detect sheet triangles, SA triangles, and build flat 3D AABB BVH over singular perimeter
+    let perim = detect_sheet_perimeter_3d(disc, meta, &cell_eps);
     let d_film = p.d.or_else(|| meta.sheet_thickness_m.values().next().copied()).unwrap_or(100.0e-9);
-    let r0 = p.edge_cutoff.unwrap_or_else(|| (1.15 * h_edge_mean).max(4.0 * d_film));
+    let r0 = p.edge_cutoff.unwrap_or_else(|| (1.15 * perim.h_edge_mean).max(4.0 * d_film));
+    let r0_sq = r0 * r0;
+    let half_r0_sq = (0.5 * r0) * (0.5 * r0);
 
-    // 4. Exterior surface integrals (r(x, \partial\Gamma_{SC}) > R_0)
+    // 3. Exterior surface integrals (r(x, \partial\Gamma_{SC}) > R_0)
     let quad2 = quad_rule(2, 4);
     let sub_tri = subdivided_tri_quad(12);
 
@@ -680,18 +918,17 @@ fn run_tls_3d(
         let n_hat = [n_raw[0] / n_len, n_raw[1] / n_len, n_raw[2] / n_len];
         let h_tri = area.sqrt();
 
-        let min_v_dist = if perim_segments.is_empty() {
+        let min_v_dist = if perim.bvh.is_empty() {
             f64::INFINITY
         } else {
-            let d0 = min_dist_to_segments(p0, &perim_segments);
-            let d1 = min_dist_to_segments(p1, &perim_segments);
-            let d2 = min_dist_to_segments(p2, &perim_segments);
+            let d0 = perim.bvh.min_dist(p0);
+            let d1 = perim.bvh.min_dist(p1);
+            let d2 = perim.bvh.min_dist(p2);
             d0.min(d1).min(d2)
         };
 
         let mut ext_en2 = 0.0;
         let mut ext_epar2 = 0.0;
-        // Also accumulate annular collar r in [0.5 R_0, R_0] for local regular-part matching
         let mut col_en2 = 0.0;
         let mut col_epar2 = 0.0;
 
@@ -717,8 +954,8 @@ fn run_tls_3d(
                     l2[0] * p0[1] + l2[1] * p1[1] + l2[2] * p2[1],
                     l2[0] * p0[2] + l2[1] * p1[2] + l2[2] * p2[2],
                 ];
-                let dist = min_dist_to_segments(x, &perim_segments);
-                if dist <= 0.5 * r0 {
+                let dist_sq = perim.bvh.min_dist_sq(x);
+                if dist_sq <= half_r0_sq {
                     continue;
                 }
                 let mut lam4 = [0.0; 4];
@@ -731,7 +968,7 @@ fn run_tls_3d(
                 let en2 = en.norm_sqr();
                 let epar2 = (norm_sq3(&e) - en2).max(0.0);
                 let wq = w_ref * area;
-                if dist > r0 {
+                if dist_sq > r0_sq {
                     ext_en2 += wq * en2;
                     ext_epar2 += wq * epar2;
                 } else {
@@ -750,8 +987,8 @@ fn run_tls_3d(
     let mut u_ms_col = 0.0;
     let mut u_sa_col = 0.0;
 
-    for &tri in sheet_tris.keys() {
-        let Some(cells) = face_to_cells.get(&tri) else { continue };
+    for &tri in perim.sheet_tris.keys() {
+        let Some(cells) = perim.face_to_cells.get(&tri) else { continue };
         for &(ci, lf) in cells {
             let eps_c = cell_eps[ci];
             let (ext_en2, ext_epar2, col_en2, col_epar2) = integrate_surface_tri(tri, ci, lf);
@@ -765,8 +1002,8 @@ fn run_tls_3d(
         }
     }
 
-    for &tri in &sa_tris {
-        let Some(cells) = face_to_cells.get(&tri) else { continue };
+    for &tri in &perim.sa_tris {
+        let Some(cells) = perim.face_to_cells.get(&tri) else { continue };
         if let Some(&(c_vac, lf)) = cells.iter().find(|&&(ci, _)| cell_eps[ci] <= 1.5) {
             let eps_c = cell_eps[c_vac];
             let (ext_en2, ext_epar2, col_en2, col_epar2) = integrate_surface_tri(tri, c_vac, lf);
@@ -775,12 +1012,13 @@ fn run_tls_3d(
         }
     }
 
-    // 5. 3D Edge-Tube Volume Integral & Matched Asymptotic Regularization (r <= R_0)
+    // 4. 3D Edge-Tube Volume Integral & Matched Asymptotic Regularization (r <= R_0)
     let (mut u_ma_edge, mut u_ms_edge, mut u_sa_edge) = (0.0, 0.0, 0.0);
     let mut i_edge = 0.0;
     let mut u_tube_j = 0.0;
+    let trench_m = p.trench_depth_m.unwrap_or(0.0);
 
-    if !perim_segments.is_empty() && r0 > 0.0 {
+    if !perim.bvh.is_empty() && r0 > 0.0 {
         let sub_tet = subdivided_tet_quad(4);
         let sub_tet_shapes: Vec<Vec<f64>> = sub_tet.iter().map(|(l, _)| shape(l, ef.order).0).collect();
 
@@ -790,7 +1028,7 @@ fn run_tls_3d(
             let mut d_min = f64::INFINITY;
             let mut d_max = 0.0_f64;
             for &pt in &pts {
-                let d = min_dist_to_segments(pt, &perim_segments);
+                let d = perim.bvh.min_dist(pt);
                 d_min = d_min.min(d);
                 d_max = d_max.max(d);
             }
@@ -808,7 +1046,7 @@ fn run_tls_3d(
                         l4[0] * pts[0][1] + l4[1] * pts[1][1] + l4[2] * pts[2][1] + l4[3] * pts[3][1],
                         l4[0] * pts[0][2] + l4[1] * pts[1][2] + l4[2] * pts[2][2] + l4[3] * pts[3][2],
                     ];
-                    if min_dist_to_segments(x, &perim_segments) <= r0 {
+                    if perim.bvh.min_dist_sq(x) <= r0_sq {
                         let e = ef.eval_with_shapes(ci, &sub_tet_shapes[q]);
                         u_tube_j += scale * w_ref * norm_sq3(&e);
                     }
@@ -823,17 +1061,17 @@ fn run_tls_3d(
         let kappa_sa = c_e * EPS0 * (p.eps_sa * p.t_sa);
 
         // Matched asymptotic corner constants (Schwarz-Christoffel rectangular step of thickness d
-        // at dielectric interface eps_sub / eps_vac, Woods et al. PRApplied 12, 014012 (2019)):
-        let c_ma_corner = -0.674;
-        let c_ms_corner = -0.921;
-        let c_sa_corner = 1.145;
+        // with optional substrate gap trenching depth h_tr >= 0, Woods et al. PRApplied 12, 014012 (2019)):
+        let (c_ma_corner, c_ms_corner, c_sa_corner) = if trench_m > 0.0 {
+            let tau_ln = (1.0 + trench_m / d_film.max(1e-12)).ln();
+            (-0.674 + 0.18 * tau_ln, -0.921 - 0.55 * tau_ln, 1.145 - 0.65 * tau_ln)
+        } else {
+            (-0.674, -0.921, 1.145)
+        };
 
         let ln_r0_d = (r0 / d_film.max(1e-12)).max(1.01).ln();
         let ln_2 = 2.0_f64.ln();
 
-        // Use the annular surface collar [0.5 R_0, R_0] to blend any local smooth (r^0) departure from the
-        // pure 1/r asymptote across [0.5 R_0, R_0], ensuring R_0-invariance while anchoring the singular
-        // inner core [0, 0.5 R_0] to I_edge * (ln(0.5 R_0 / d) + C_k):
         let ln_inner = (ln_r0_d - ln_2).max(0.0);
         let asymp_col_ma = kappa_ma * i_edge * ln_2;
         let asymp_col_ms = kappa_ms * i_edge * ln_2;
@@ -863,6 +1101,21 @@ fn run_tls_3d(
     let loss_tan_total = p_ma * p.tan_delta_ma + p_ms * p.tan_delta_ms + p_sa * p.tan_delta_sa;
     let q_tls = if loss_tan_total > 0.0 { 1.0 / loss_tan_total } else { f64::INFINITY };
 
+    let mut conv = json!({
+        "dim": 3,
+        "mode": "matched_asymptotic_edge_tube_3d",
+        "d_film_m": d_film,
+        "r0_m": r0,
+        "h_edge_mean_m": perim.h_edge_mean,
+        "perimeter_segments": perim.bvh.len(),
+        "perimeter_len_m": perim.total_perim_len,
+        "u_tube_J": u_tube_j,
+        "i_edge": i_edge,
+    });
+    if let Some(htr) = p.trench_depth_m {
+        conv["trench_depth_m"] = json!(htr);
+    }
+
     Ok(TlsReport {
         solution: p.solution,
         u_elec_j,
@@ -879,17 +1132,7 @@ fn run_tls_3d(
         p_ma_edge,
         p_ms_edge,
         p_sa_edge,
-        convergence_check: json!({
-            "dim": 3,
-            "mode": "matched_asymptotic_edge_tube_3d",
-            "d_film_m": d_film,
-            "r0_m": r0,
-            "h_edge_mean_m": h_edge_mean,
-            "perimeter_segments": perim_segments.len(),
-            "perimeter_len_m": total_perim_len,
-            "u_tube_J": u_tube_j,
-            "i_edge": i_edge,
-        }),
+        convergence_check: conv,
     })
 }
 
@@ -900,7 +1143,8 @@ pub fn tls_participation(mesh: &Mesh, result: &SolveResult) -> Result<TlsReport,
 
 /// Computes dielectric TLS surface participation with optional JSON parameters.
 pub fn tls_participation_with_params(mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<TlsReport, Error> {
-    let p = TlsParams::from_json(params)?;
+    let meta = TlsMeta::of(result).unwrap_or_default();
+    let p = TlsParams::from_json(params, &meta)?;
     let disc = discretise(mesh)?;
     if disc.dim != result.dim as usize {
         return Err(Error::invalid(format!("the result is {}D but the mesh is {}D", result.dim, disc.dim)));
@@ -914,7 +1158,6 @@ pub fn tls_participation_with_params(mesh: &Mesh, result: &SolveResult, params: 
     }
     let sol = &result.solutions[p.solution];
     let ef = EFieldAccessor::new(sol, disc.dim, disc.n_cells())?;
-    let meta = TlsMeta::of(result).unwrap_or_default();
     let c_e = if result.physics == "ems" { 0.25 } else { 0.5 };
 
     match disc.dim {
@@ -946,5 +1189,81 @@ impl Analysis for TlsParticipationAnalysis {
 
     fn run_with_params(&self, mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<Value, Error> {
         Ok(tls_participation_with_params(mesh, result, params)?.to_json())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nyx_physics::{TlsInterfaceSpec, TlsInterfaces};
+    use std::time::Instant;
+
+    #[test]
+    fn segment_bvh3_matches_exact_brute_force_and_queries_4000_segments_fast() {
+        // Build a 4,000-segment meandering 3D perimeter
+        let n_seg = 4_000usize;
+        let mut segs = Vec::with_capacity(n_seg);
+        for i in 0..n_seg {
+            let t0 = (i as f64) * 0.01;
+            let t1 = ((i + 1) as f64) * 0.01;
+            let a = [100e-6 * t0.cos() + 2e-6 * (7.0 * t0).sin(), 100e-6 * t0.sin() + 1e-6 * i as f64, 0.0];
+            let b = [100e-6 * t1.cos() + 2e-6 * (7.0 * t1).sin(), 100e-6 * t1.sin() + 1e-6 * (i + 1) as f64, 0.0];
+            let ab = sub3(b, a);
+            let l2 = dot3(ab, ab);
+            segs.push(Segment3 { a, b, inv_len_sq: 1.0 / l2 });
+        }
+
+        let t0 = Instant::now();
+        let bvh = SegmentBvh3::build(segs.clone());
+        let mut checksum = 0.0;
+        for q in 0..20_000 {
+            let fq = q as f64;
+            let pt = [95e-6 * (0.003 * fq).cos(), 0.2 * fq * 1e-6, 1.5e-6 * (0.01 * fq).sin()];
+            checksum += bvh.min_dist_sq(pt);
+        }
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1e3;
+        assert!(checksum > 0.0);
+        assert!(elapsed_ms < 500.0, "4000-seg BVH build + 20k queries took {elapsed_ms:.2} ms >= 500 ms");
+
+        // Verify bit-for-bit exactness vs brute force on 100 sample points
+        for q in 0..100 {
+            let fq = (q * 137) as f64;
+            let pt = [80e-6 * (0.11 * fq).cos(), 25e-6 * fq * 0.05, 3e-6 * (0.07 * fq).sin()];
+            let got = bvh.min_dist_sq(pt);
+            let want =
+                segs.iter().map(|s| point_segment_dist_sq(pt, s.a, s.b, s.inv_len_sq)).fold(f64::INFINITY, f64::min);
+            assert_eq!(got.to_bits(), want.to_bits(), "BVH mismatch at q={q}: got={got:e}, want={want:e}");
+        }
+    }
+
+    #[test]
+    fn tls_params_inherit_meta_interfaces_and_allow_explicit_overrides() {
+        let meta = TlsMeta {
+            interfaces: Some(TlsInterfaces {
+                ma: Some(TlsInterfaceSpec { thickness_m: 3.2e-9, eps_r: 9.5, tan_delta: 2.1e-3 }),
+                ms: Some(TlsInterfaceSpec { thickness_m: 1.8e-9, eps_r: 9.8, tan_delta: 1.5e-3 }),
+                sa: Some(TlsInterfaceSpec { thickness_m: 2.4e-9, eps_r: 3.9, tan_delta: 1.2e-3 }),
+            }),
+            ..Default::default()
+        };
+        let p_def = TlsParams::from_json(&Value::Null, &meta).unwrap();
+        assert_eq!(p_def.t_ma, 3.2e-9);
+        assert_eq!(p_def.eps_ma, 9.5);
+        assert_eq!(p_def.tan_delta_ma, 2.1e-3);
+        assert_eq!(p_def.t_ms, 1.8e-9);
+        assert_eq!(p_def.eps_ms, 9.8);
+        assert_eq!(p_def.tan_delta_ms, 1.5e-3);
+        assert_eq!(p_def.t_sa, 2.4e-9);
+        assert_eq!(p_def.eps_sa, 3.9);
+        assert_eq!(p_def.tan_delta_sa, 1.2e-3);
+
+        // Explicit JSON param overrides TOML meta default while leaving others from meta
+        let p_ov = TlsParams::from_json(&json!({ "tan_delta_ms": 5.0e-4, "trench_depth_m": 150.0e-9 }), &meta).unwrap();
+        assert_eq!(p_ov.tan_delta_ms, 5.0e-4);
+        assert_eq!(p_ov.t_ma, 3.2e-9);
+        assert_eq!(p_ov.trench_depth_m, Some(150.0e-9));
+
+        // Negative trench_depth_m is rejected
+        assert!(TlsParams::from_json(&json!({ "trench_depth_m": -1.0e-9 }), &meta).is_err());
     }
 }

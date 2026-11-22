@@ -348,6 +348,12 @@ impl PB<'_> {
 pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
     let _ = cache;
     list.validate()?;
+    if let Some(f) = list.features.iter().find(|f| !f.suppressed && matches!(f.op, Op::Sheet { .. })) {
+        return Err(GeomError(format!(
+            "Sheet '{}' cannot be combined with rotated, tapered or slanted polyhedral geometry; use prismatic solids and stepped_airbridge for 3D models with 2D sheets",
+            f.name
+        )));
+    }
     let mut env = Env::default();
     for p in &list.params {
         let v = env.eval(&p.value, &format!("parameter '{}'", p.name))?;
@@ -1038,6 +1044,7 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         stack: None,
         planar: plane_data,
         axis: 2,
+        bvh: crate::bvh::ComplexBvh::default(),
     })
 }
 
@@ -1057,5 +1064,6 @@ fn empty_complex(tol: f64) -> Complex {
         stack: None,
         planar: vec![],
         axis: 2,
+        bvh: crate::bvh::ComplexBvh::default(),
     }
 }

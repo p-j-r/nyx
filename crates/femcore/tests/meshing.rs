@@ -447,3 +447,140 @@ fn native_structured_layers_keep_their_quadrilaterals_and_split_to_the_simplex_m
         assert!(split.mesh.cell_labels.contains(&cells.label[q]));
     }
 }
+
+fn build_10_finger_idc_2d() -> Model {
+    let mut m = Model::new_2d();
+    let host = m.rect("die", (-120e-6, -90e-6), (120e-6, 90e-6));
+    let mut overlays: Vec<(&str, geom::model::FeatureId)> = vec![("die", host)];
+    let mut names: Vec<String> = Vec::new();
+    let finger_w = 6e-6;
+    let gap = 4e-6;
+    let pitch = finger_w + gap; // 10 um pitch -> 10 fingers span [-48..48] um
+    let finger_len = 90e-6;
+    for i in 0..10 {
+        names.push(format!("finger_{i}"));
+    }
+    let bus_bot = m.rect("bus_bot", (-55e-6, -68e-6), (55e-6, -56e-6));
+    let bus_top = m.rect("bus_top", (-55e-6, 56e-6), (55e-6, 68e-6));
+    overlays.push(("bus_bot", bus_bot));
+    overlays.push(("bus_top", bus_top));
+    for (i, fname) in names.iter().enumerate() {
+        let x0 = -48e-6 + (i as f64) * pitch;
+        let x1 = x0 + finger_w;
+        let (z0, z1) = if i % 2 == 0 {
+            (-56e-6, -56e-6 + finger_len)
+        } else {
+            (56e-6 - finger_len, 56e-6)
+        };
+        let fid = m.rect(fname, (x0, z0), (x1, z1));
+        overlays.push((fname.as_str(), fid));
+    }
+    m.overlay(&overlays);
+    m
+}
+
+#[test]
+fn ruppert_10_finger_idc_completes_cleanly_and_reports_steiner_cap_warning_or_strict_err() {
+    use femcore::meshing::request::{mesh_request, MeshRequest, MesherRequest};
+
+    let idc = build_10_finger_idc_2d();
+    let base_req = MeshRequest {
+        h: 4.0e-6,
+        max_dev: None,
+        mesher: MesherRequest::Simple,
+        structured_pml: false,
+        waves: None,
+        curved: false,
+        gap_cells: None,
+        z_coarsen: false,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: true,
+    };
+
+    // 1. Default Steiner budget on 10-finger IDC completes cleanly with 0 dropped slivers & logs via Progress
+    let prog = femcore::progress::Progress::new();
+    let (g_ok, rep_ok) = {
+        let _guard = femcore::progress::install(&prog);
+        mesh_request(&idc.list, &base_req).expect("10-finger IDC with default Steiner budget must pass strict_mesh")
+    };
+    assert!(g_ok.warnings.is_empty(), "unexpected MeshedGeom warnings: {:?}", g_ok.warnings);
+    assert!(rep_ok.warnings.is_empty(), "unexpected MeshReport warnings: {:?}", rep_ok.warnings);
+    let logs = prog.log();
+    assert!(
+        logs.iter().any(|l| l.contains("complete=true") && l.contains("dropped_slivers=0")),
+        "expected Ruppert completion note in progress log, got {logs:?}"
+    );
+    let total_area = area(&g_ok.mesh, None);
+    let expected_area = 240e-6 * 180e-6;
+    assert!((total_area - expected_area).abs() < 1e-12 * expected_area);
+
+    // 2. Setting `max_steiner_multiplier = Some(1)` (strict_mesh = false) triggers `!refinement_complete` warning
+    let capped_req = MeshRequest {
+        max_steiner_multiplier: Some(1),
+        strict_mesh: false,
+        ..base_req.clone()
+    };
+    let (g_cap, rep_cap) = mesh_request(&idc.list, &capped_req).expect("non-strict capped IDC should return warning");
+    assert!(!g_cap.warnings.is_empty(), "expected warning on MeshedGeom when max_steiner_multiplier=1");
+    assert!(!rep_cap.warnings.is_empty(), "expected warning on MeshReport when max_steiner_multiplier=1");
+    assert!(rep_cap.warnings.iter().any(|w| w.contains("Ruppert refinement stopped before completion")));
+
+    // 3. Setting `max_steiner_multiplier = Some(1)` with `strict_mesh = true` returns Err
+    let strict_cap_req = MeshRequest {
+        max_steiner_multiplier: Some(1),
+        strict_mesh: true,
+        ..base_req
+    };
+    let err = mesh_request(&idc.list, &strict_cap_req).err().expect("strict_mesh=true must fail on incomplete Ruppert");
+    assert!(err.contains("strict_mesh") && err.contains("refinement_complete=false"), "err = {err}");
+}
+
+#[test]
+fn fill_grid_1000_to_1_ratio_via_geom_completes_under_250ms_and_matches_across_threads() {
+    use femcore::meshing::request::{mesh_request, MeshRequest, MesherRequest};
+    use geom::expr::Expr;
+    use geom::select::Selector;
+
+    let mut m = Model::new_2d();
+    let outer = m.rect("outer_die", (-500e-6, -500e-6), (500e-6, 500e-6));
+    let inner = m.rect("fine_island", (-1.0e-6, -1.0e-6), (1.0e-6, 1.0e-6));
+    m.overlay(&[("outer_die", outer), ("fine_island", inner)]);
+    // 1000:1 ratio: h_global = 250 um, fine_island size rule = 0.25 um
+    m.size("fine_inner", Selector::parse("name(fine_island)").unwrap(), Some(Expr::Num(0.25e-6)), None, None);
+
+    let req = MeshRequest {
+        h: 250e-6,
+        max_dev: None,
+        mesher: MesherRequest::Simple,
+        structured_pml: false,
+        waves: None,
+        curved: false,
+        gap_cells: None,
+        z_coarsen: false,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: true,
+    };
+
+    let t0 = std::time::Instant::now();
+    let (g1, rep1) = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(|| {
+        mesh_request(&m.list, &req).unwrap()
+    });
+    let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    assert!(elapsed_ms < 250.0, "1000:1 geom 2D mesh took {elapsed_ms:.2} ms (expected < 250 ms)");
+    assert!(rep1.warnings.is_empty(), "{:?}", rep1.warnings);
+
+    let (g8, _) = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap().install(|| {
+        mesh_request(&m.list, &req).unwrap()
+    });
+    assert_eq!(g1.mesh.points, g8.mesh.points);
+    assert_eq!(g1.mesh.cells, g8.mesh.cells);
+    assert_eq!(g1.mesh.facets, g8.mesh.facets);
+}

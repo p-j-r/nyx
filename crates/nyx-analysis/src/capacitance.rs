@@ -6,8 +6,14 @@
 //! study of `dfs` with one or more `terminal` boundary conditions) and returns the Maxwell capacitance matrix (F), the
 //! mutual/SPICE capacitance matrix (F), and the charging energy matrix `E_C / h = (e^2 / 2h) C_M^(-1)` (Hz).
 //!
-//! When optional `params` are supplied to [`capacitance_matrix_with_params`] (or `Analysis::run_with_params`), it also
-//! performs:
+//! When optional `params` are supplied to [`capacitance_matrix_with_mesh_and_params`] (or `Analysis::run_with_params`),
+//! it also performs:
+//! - **3D Matched-Asymptotic Finite-Thickness Correction (`metal_thickness_m`, FR-11 Pt 1)**: Integrates the exact
+//!   multi-terminal singular edge-tube Gram matrix `\tilde{I}_{edge,ij} = (1 / R_0) \int_{r <= R_0} \eps E^(i) . E^(j) dV`
+//!   around the 1D perimeter `\partial\Gamma_{SC}` of 3D zero-thickness `Op::Sheet` conductors (indexed via `SegmentBvh3`),
+//!   evaluates the intrinsic gap scale `s_eff = tr(C^M) / tr(\tilde{I}_{edge})`, and applies the Schwarz–Christoffel
+//!   matched-asymptotic capacitance shift `\Delta C^M(t) = t [c_0 + c_1 ln(s_eff / t)] \tilde{I}_{edge}` (asserting SPD)
+//!   prior to Schur/qubit reduction;
 //! - Ground-terminal projection (`"eliminate": "drop"`) or floating-reference Schur elimination
 //!   (`"eliminate": "floating_schur"`, `C_ss - C_sg C_gg^-1 C_gs`), reporting `reduced_terminals`,
 //!   `maxwell_reduced_F`, `mutual_reduced_F`, `ec_reduced_Hz`, `condition_number`, `null_modes`, and `has_null_mode`;
@@ -20,11 +26,14 @@
 //! `InductanceMatrixAnalysis` reads `InductanceMatrixData` from `SolveResult::scalars` (produced by a magnetostatic
 //! study of `dfs`) and returns the multi-terminal inductance matrix `L` (H, or H/m for 2D `cross_section` models) and
 //! the active magnetostatic formulation (`"cross_section"`, `"planar_stream"`, or `"mixed_3d"`).
+#![allow(clippy::needless_range_loop)]
 
-use crate::epr::{E_CHARGE, PLANCK_H};
+use crate::epr::{EPS0, E_CHARGE, PLANCK_H};
+use crate::tls::{detect_sheet_perimeter_3d, pt3, subdivided_tet_quad, EFieldAccessor};
 use crate::Analysis;
+use femcore::fem::{geometry, quad_rule, shape};
 use femcore::linalg::driver::dense_eigh;
-use nyx_physics::{CapacitanceMatrixData, Error, InductanceMatrixData, Mesh, SolveResult};
+use nyx_physics::{discretise, CapacitanceMatrixData, Error, InductanceMatrixData, Mesh, SolveResult, TlsMeta};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::PI;
@@ -144,6 +153,302 @@ fn spectral_ec_and_cond(maxwell: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, f64, usi
         }
     }
     Ok((ec, condition_number, null_modes))
+}
+
+/// Asserts that `maxwell` (`n x n`) is strictly symmetric positive definite (SPD), returning its `ec_matrix_Hz`.
+fn assert_spd_and_ec(maxwell: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, Error> {
+    let n = maxwell.len();
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let mut flat = Vec::with_capacity(n * n);
+    for row in maxwell {
+        flat.extend_from_slice(row);
+    }
+    let (eigs, vecs) = dense_eigh(&flat, n).map_err(Error::from_kernel)?;
+    let lam_max = eigs.iter().copied().fold(0.0_f64, f64::max);
+    let lam_min = eigs.iter().copied().fold(f64::INFINITY, f64::min);
+    if !(lam_max > 0.0 && lam_min > 1.0e-12 * lam_max) {
+        return Err(Error::invalid(format!(
+            "thickness-corrected Maxwell capacitance matrix is not strictly SPD (lambda_min={lam_min:e}, lambda_max={lam_max:e})"
+        )));
+    }
+    let scale = (E_CHARGE * E_CHARGE) / (2.0 * PLANCK_H);
+    let mut ec = vec![vec![0.0; n]; n];
+    for (k, &lam) in eigs.iter().enumerate() {
+        let inv_l = scale / lam;
+        let vk = &vecs[k];
+        for i in 0..n {
+            for j in 0..n {
+                ec[i][j] += inv_l * vk[i] * vk[j];
+            }
+        }
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let sym = 0.5 * (ec[i][j] + ec[j][i]);
+            ec[i][j] = sym;
+            ec[j][i] = sym;
+        }
+    }
+    Ok(ec)
+}
+
+/// Default calibrated 2D Schwarz–Christoffel matched-asymptotic coefficients `(c0, c1)` for a planar
+/// rectangular step of thickness `t > 0` in medium `eps_vac` atop substrate `eps_sub`.
+///
+/// In homogeneous space (`eps_sub == eps_vac`), exact Schwarz–Christoffel mapping of a semi-infinite plate
+/// of thickness `t` combined with Eshelby's crack-tip J-integral gives `c1 = 1 / (2 pi)` and
+/// `c0 = (1 + ln(4 pi * alpha_s)) / (2 pi)`. On a dielectric substrate (`eps_sub > eps_vac`) where the
+/// metal film protrudes into the upper `eps_vac` half-space while `\tilde{I}_{edge}` integrates across
+/// both `eps_vac` and `eps_sub`, the outer singularity intensity scales as `(eps_vac + eps_sub) / 2` while
+/// the sidewall capacitance enhancement in `eps_vac` refracts into the substrate with interface enhancement
+/// `eta(eps_sub / eps_vac)`.
+fn default_sc_thickness_coeffs(eps_vac: f64, eps_sub: f64) -> (f64, f64) {
+    let ev = eps_vac.max(1.0);
+    let es = eps_sub.max(ev);
+    // Exact dielectric-step scaling relative to `(ev + es) / 2` outer edge-tube normalization:
+    // For a metal film of thickness `t` protruding into the upper `ev` half-space (`z in [0, t]`) above a flat
+    // substrate (`z < 0`, permittivity `es`), `\tilde{I}_{edge}` scales with `(ev + es) / 2` while the vertical
+    // step sidewall sits in `ev` enhanced by positive substrate image refraction `1 + 0.146 * (es - ev)/(es + ev)`.
+    let contrast = (es - ev) / (es + ev);
+    let r_dielec = (2.0 * ev / (ev + es)) * (1.0 + 0.146 * contrast);
+    let c1 = (1.0 / (2.0 * PI)) * r_dielec;
+    let c0 = 0.450 * r_dielec;
+    (c0, c1)
+}
+
+struct ThicknessCorrectionOut {
+    maxwell_f: Vec<Vec<f64>>,
+    mutual_f: Vec<Vec<f64>>,
+    ec_hz: Vec<Vec<f64>>,
+    info_json: Value,
+}
+
+/// Computes the 3D matched-asymptotic edge-tube Gram-matrix capacitance thickness correction (FR-11 Pt 1).
+fn compute_3d_thickness_correction(
+    mesh: &Mesh,
+    result: &SolveResult,
+    cap: &CapacitanceMatrixData,
+    params_map: &Map<String, Value>,
+    t_metal: f64,
+) -> Result<ThicknessCorrectionOut, Error> {
+    if !(t_metal.is_finite() && t_metal > 0.0) {
+        return Err(Error::invalid("parameter 'metal_thickness_m' must be a positive finite thickness in m"));
+    }
+    if result.dim != 3 {
+        return Err(Error::invalid(format!(
+            "metal_thickness_m requires a 3D volumetric electrostatic result, got {}D",
+            result.dim
+        )));
+    }
+    if result.log.iter().any(|line| line.contains("planar_bem")) {
+        return Err(Error::invalid(
+            "metal_thickness_m requires 3D volumetric_fem electric fields; planar_bem stores boundary-only dummy fields",
+        ));
+    }
+
+    let edge_cutoff_opt = match params_map.get("edge_cutoff_m") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_f64()
+                .filter(|&x| x.is_finite() && x > 0.0)
+                .ok_or_else(|| Error::invalid("parameter 'edge_cutoff_m' must be a positive finite radius in m"))?,
+        ),
+    };
+    let c0_override = match params_map.get("c0") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_f64()
+                .filter(|x| x.is_finite())
+                .ok_or_else(|| Error::invalid("parameter 'c0' must be a finite number"))?,
+        ),
+    };
+    let c1_override = match params_map.get("c1") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_f64()
+                .filter(|x| x.is_finite())
+                .ok_or_else(|| Error::invalid("parameter 'c1' must be a finite number"))?,
+        ),
+    };
+
+    let disc = discretise(mesh)?;
+    if disc.dim != 3 {
+        return Err(Error::invalid(format!("metal_thickness_m requires a 3D mesh, got {}D", disc.dim)));
+    }
+    let nc = disc.n_cells();
+    let n_term = cap.terminals.len();
+    if result.solutions.len() < n_term {
+        return Err(Error::invalid(format!(
+            "metal_thickness_m requires {} terminal electric-field solution(s) (found {}; ensure save_fields=true and volumetric_fem)",
+            n_term,
+            result.solutions.len()
+        )));
+    }
+
+    let mut accessors = Vec::with_capacity(n_term);
+    for i in 0..n_term {
+        accessors.push(EFieldAccessor::new(&result.solutions[i], 3, nc)?);
+    }
+    let order = accessors[0].order;
+
+    let meta = TlsMeta::of(result).unwrap_or_default();
+    let cell_eps: Vec<f64> =
+        (0..nc).map(|ci| meta.domain_eps_r.get(&disc.cell_labels[ci]).copied().unwrap_or(1.0)).collect();
+    let geo = geometry(&disc);
+    let quad3 = quad_rule(3, 4);
+    let shapes3: Vec<Vec<f64>> = quad3.lam.iter().map(|l| shape(l, order).0).collect();
+
+    // Guard against dummy boundary-only fields (e.g. stripped-log planar_bem):
+    // In planar_bem, V is 1 on terminal boundary vertices and 0 on all free interior vertices, so every cell
+    // disjoint from terminal vertices has identically zero electric field AND volumetric energy != C_{00}.
+    let mut c00_vol = 0.0;
+    let mut non_zero_cells = 0usize;
+    for ci in 0..nc {
+        let mut cell_e2 = 0.0;
+        for (q, sh) in shapes3.iter().enumerate() {
+            let e = accessors[0].eval_real_with_shapes(ci, sh);
+            cell_e2 += quad3.w[q] * (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        }
+        if cell_e2 > 0.0 {
+            non_zero_cells += 1;
+        }
+        c00_vol += EPS0 * cell_eps[ci] * geo.vol[ci] * cell_e2;
+    }
+    if c00_vol <= 0.0 || (nc > 16 && non_zero_cells * 4 < nc) {
+        return Err(Error::invalid(
+            "metal_thickness_m rejected dummy/incomplete electric fields (expected full 3D volumetric_fem solution)",
+        ));
+    }
+
+    let perim = detect_sheet_perimeter_3d(&disc, &meta, &cell_eps);
+    if perim.bvh.is_empty() {
+        return Err(Error::invalid(
+            "metal_thickness_m found no interior zero-thickness sheet perimeter edges on the 3D mesh",
+        ));
+    }
+
+    let r0 = edge_cutoff_opt.unwrap_or_else(|| (1.15 * perim.h_edge_mean).max(4.0 * t_metal));
+    let r0_sq = r0 * r0;
+    let sub_tet = subdivided_tet_quad(4);
+    let sub_tet_shapes: Vec<Vec<f64>> = sub_tet.iter().map(|(l, _)| shape(l, order).0).collect();
+
+    // Integrate n_term x n_term edge-tube Gram matrix:
+    // I_tilde_{ij} = (1 / R_0) * int_{r <= R_0} eps_0 * eps_r(x) * E^(i)(x) . E^(j)(x) dV
+    let mut i_edge = vec![vec![0.0; n_term]; n_term];
+    let mut e_at_q = vec![[0.0; 3]; n_term];
+
+    for ci in 0..nc {
+        let v = disc.cell(ci);
+        let pts = [pt3(&disc, v[0]), pt3(&disc, v[1]), pt3(&disc, v[2]), pt3(&disc, v[3])];
+        let mut d_min = f64::INFINITY;
+        let mut d_max = 0.0_f64;
+        for &pt in &pts {
+            let d = perim.bvh.min_dist(pt);
+            d_min = d_min.min(d);
+            d_max = d_max.max(d);
+        }
+        let h_tet = (6.0 * geo.vol[ci]).cbrt();
+        if d_min > r0 + h_tet {
+            continue;
+        }
+        let vol_scale = (EPS0 * cell_eps[ci] * geo.vol[ci]) / r0;
+        if d_max <= r0 {
+            for (q, sh) in shapes3.iter().enumerate() {
+                let w = vol_scale * quad3.w[q];
+                for t_idx in 0..n_term {
+                    e_at_q[t_idx] = accessors[t_idx].eval_real_with_shapes(ci, sh);
+                }
+                for ia in 0..n_term {
+                    let ea = e_at_q[ia];
+                    for ib in ia..n_term {
+                        let eb = e_at_q[ib];
+                        i_edge[ia][ib] += w * (ea[0] * eb[0] + ea[1] * eb[1] + ea[2] * eb[2]);
+                    }
+                }
+            }
+        } else {
+            for (q, &(l4, w_ref)) in sub_tet.iter().enumerate() {
+                let x = [
+                    l4[0] * pts[0][0] + l4[1] * pts[1][0] + l4[2] * pts[2][0] + l4[3] * pts[3][0],
+                    l4[0] * pts[0][1] + l4[1] * pts[1][1] + l4[2] * pts[2][1] + l4[3] * pts[3][1],
+                    l4[0] * pts[0][2] + l4[1] * pts[1][2] + l4[2] * pts[2][2] + l4[3] * pts[3][2],
+                ];
+                if perim.bvh.min_dist_sq(x) <= r0_sq {
+                    let w = vol_scale * w_ref;
+                    let sh = &sub_tet_shapes[q];
+                    for t_idx in 0..n_term {
+                        e_at_q[t_idx] = accessors[t_idx].eval_real_with_shapes(ci, sh);
+                    }
+                    for ia in 0..n_term {
+                        let ea = e_at_q[ia];
+                        for ib in ia..n_term {
+                            let eb = e_at_q[ib];
+                            i_edge[ia][ib] += w * (ea[0] * eb[0] + ea[1] * eb[1] + ea[2] * eb[2]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for ia in 0..n_term {
+        for ib in (ia + 1)..n_term {
+            i_edge[ib][ia] = i_edge[ia][ib];
+        }
+    }
+
+    let tr_cm: f64 = (0..n_term).map(|i| cap.maxwell_matrix_f[i][i]).sum();
+    let tr_iedge: f64 = (0..n_term).map(|i| i_edge[i][i]).sum();
+    if !(tr_iedge > 0.0 && tr_cm > 0.0) {
+        return Err(Error::invalid("edge-tube Gram matrix trace is zero; cannot evaluate s_eff"));
+    }
+    let s_eff = tr_cm / tr_iedge;
+    if s_eff <= t_metal {
+        return Err(Error::invalid(format!(
+            "metal_thickness_m ({t_metal:e} m) exceeds effective gap scale s_eff ({s_eff:e} m); asymptotic thin-film regime violated"
+        )));
+    }
+
+    let eps_vac = cell_eps.iter().copied().fold(f64::INFINITY, f64::min).max(1.0);
+    let eps_sub = cell_eps.iter().copied().fold(eps_vac, f64::max);
+    let (def_c0, def_c1) = default_sc_thickness_coeffs(eps_vac, eps_sub);
+    let c0 = c0_override.unwrap_or(def_c0);
+    let c1 = c1_override.unwrap_or(def_c1);
+
+    let factor = t_metal * (c0 + c1 * (s_eff / t_metal).ln());
+    let mut delta_c = vec![vec![0.0; n_term]; n_term];
+    let mut maxwell_corr = vec![vec![0.0; n_term]; n_term];
+    for ia in 0..n_term {
+        for ib in ia..n_term {
+            let base_sym = 0.5 * (cap.maxwell_matrix_f[ia][ib] + cap.maxwell_matrix_f[ib][ia]);
+            let d_ij = factor * i_edge[ia][ib];
+            delta_c[ia][ib] = d_ij;
+            delta_c[ib][ia] = d_ij;
+            maxwell_corr[ia][ib] = base_sym + d_ij;
+            maxwell_corr[ib][ia] = base_sym + d_ij;
+        }
+    }
+
+    let ec_corr = assert_spd_and_ec(&maxwell_corr)?;
+    let mutual_corr = mutual_from_maxwell(&maxwell_corr);
+
+    let info_json = json!({
+        "metal_thickness_m": t_metal,
+        "edge_cutoff_m": r0,
+        "s_eff_m": s_eff,
+        "c0": c0,
+        "c1": c1,
+        "eps_vac": eps_vac,
+        "eps_sub": eps_sub,
+        "perimeter_segments": perim.bvh.len(),
+        "perimeter_len_m": perim.total_perim_len,
+        "i_edge_F_per_m": i_edge,
+        "delta_maxwell_F": delta_c,
+        "maxwell_uncorrected_F": cap.maxwell_matrix_f,
+    });
+
+    Ok(ThicknessCorrectionOut { maxwell_f: maxwell_corr, mutual_f: mutual_corr, ec_hz: ec_corr, info_json })
 }
 
 fn parse_ground_names(params_map: &Map<String, Value>) -> Result<Vec<String>, Error> {
@@ -289,7 +594,6 @@ fn parse_qubits(
                 }
                 det / denom
             } else if denom >= -1.0e-12 * sum_diag && c_sb < 0.0 {
-                // Pure isolated two-pad floating dipole limit (C_ss = C_bb = -C_sb, zero shunt to ground)
                 -c_sb
             } else {
                 return Err(Error::invalid(format!(
@@ -465,12 +769,7 @@ fn parse_resonators(
     Ok(out)
 }
 
-/// Runs the multi-terminal capacitance analysis with optional ground elimination, qubit reduction, and resonator
-/// dispersive coupling parameters (`params`).
-///
-/// When `params` is `Value::Null` or an empty object `{}`, returns the exact 4-field base JSON
-/// (`terminals`, `maxwell_matrix_F`, `mutual_matrix_F`, `ec_matrix_Hz`) unchanged.
-pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> Result<Value, Error> {
+fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params: &Value) -> Result<Value, Error> {
     let cap = capacitance_matrix(result)?;
     let params_map = match params {
         Value::Null => {
@@ -494,9 +793,12 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
     };
 
     for k in params_map.keys() {
-        if !matches!(k.as_str(), "ground" | "eliminate" | "qubits" | "resonators") {
+        if !matches!(
+            k.as_str(),
+            "ground" | "eliminate" | "qubits" | "resonators" | "metal_thickness_m" | "edge_cutoff_m" | "c0" | "c1"
+        ) {
             return Err(Error::invalid(format!(
-                "unknown capacitance_matrix parameter '{k}' (expected: ground, eliminate, qubits, resonators)"
+                "unknown capacitance_matrix parameter '{k}' (expected: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m, c0, c1)"
             )));
         }
     }
@@ -508,6 +810,36 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
     if cap.maxwell_matrix_f.iter().flatten().any(|x| !x.is_finite()) {
         return Err(Error::NonFinite("Maxwell capacitance matrix contains non-finite entries".into()));
     }
+
+    // Optional FR-11 Pt 1 3D matched-asymptotic finite-thickness correction BEFORE Schur/qubit reduction
+    let thickness_corr = match params_map.get("metal_thickness_m") {
+        None | Some(Value::Null) => {
+            if params_map.get("edge_cutoff_m").is_some_and(|v| !v.is_null())
+                || params_map.get("c0").is_some_and(|v| !v.is_null())
+                || params_map.get("c1").is_some_and(|v| !v.is_null())
+            {
+                return Err(Error::invalid(
+                    "parameters 'edge_cutoff_m', 'c0', and 'c1' require 'metal_thickness_m' to be specified",
+                ));
+            }
+            None
+        }
+        Some(v) => {
+            let t = v
+                .as_f64()
+                .ok_or_else(|| Error::invalid("parameter 'metal_thickness_m' must be a positive finite number (m)"))?;
+            let m_ref = mesh.ok_or_else(|| {
+                Error::invalid(
+                    "metal_thickness_m requires the 3D Mesh; call capacitance_matrix_with_mesh_and_params or CapacitanceMatrixAnalysis::run_with_params",
+                )
+            })?;
+            Some(compute_3d_thickness_correction(m_ref, result, &cap, params_map, t)?)
+        }
+    };
+
+    let active_maxwell = thickness_corr.as_ref().map_or(&cap.maxwell_matrix_f, |tc| &tc.maxwell_f);
+    let active_mutual = thickness_corr.as_ref().map_or(&cap.mutual_matrix_f, |tc| &tc.mutual_f);
+    let active_ec = thickness_corr.as_ref().map_or(&cap.ec_matrix_hz, |tc| &tc.ec_hz);
 
     let ground_raw = parse_ground_names(params_map)?;
     let eliminate = parse_eliminate_mode(params_map)?;
@@ -533,7 +865,7 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
     for a in 0..m {
         for b in a..m {
             let (ia, ib) = (sig_indices[a], sig_indices[b]);
-            let sym = 0.5 * (cap.maxwell_matrix_f[ia][ib] + cap.maxwell_matrix_f[ib][ia]);
+            let sym = 0.5 * (active_maxwell[ia][ib] + active_maxwell[ib][ia]);
             maxwell_reduced_f[a][b] = sym;
             maxwell_reduced_f[b][a] = sym;
         }
@@ -544,7 +876,7 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
         let mut flat_gg = Vec::with_capacity(kg * kg);
         for &ig in &ground_indices {
             for &jg in &ground_indices {
-                flat_gg.push(0.5 * (cap.maxwell_matrix_f[ig][jg] + cap.maxwell_matrix_f[jg][ig]));
+                flat_gg.push(0.5 * (active_maxwell[ig][jg] + active_maxwell[jg][ig]));
             }
         }
         let (eigs_gg, vecs_gg) = dense_eigh(&flat_gg, kg).map_err(Error::from_kernel)?;
@@ -557,7 +889,7 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
         let mut c_sg = vec![vec![0.0; kg]; m];
         for (a, &ia) in sig_indices.iter().enumerate() {
             for (p, &ig) in ground_indices.iter().enumerate() {
-                c_sg[a][p] = 0.5 * (cap.maxwell_matrix_f[ia][ig] + cap.maxwell_matrix_f[ig][ia]);
+                c_sg[a][p] = 0.5 * (active_maxwell[ia][ig] + active_maxwell[ig][ia]);
             }
         }
         for (k, &lam) in eigs_gg.iter().enumerate().take(kg) {
@@ -603,9 +935,9 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
 
     let mut out = Map::new();
     out.insert("terminals".into(), json!(cap.terminals));
-    out.insert("maxwell_matrix_F".into(), json!(cap.maxwell_matrix_f));
-    out.insert("mutual_matrix_F".into(), json!(cap.mutual_matrix_f));
-    out.insert("ec_matrix_Hz".into(), json!(cap.ec_matrix_hz));
+    out.insert("maxwell_matrix_F".into(), json!(active_maxwell));
+    out.insert("mutual_matrix_F".into(), json!(active_mutual));
+    out.insert("ec_matrix_Hz".into(), json!(active_ec));
     out.insert("eliminate".into(), json!(eliminate.as_str()));
     out.insert("ground_terminals".into(), json!(ground_terminals));
     out.insert("reduced_terminals".into(), json!(reduced_terminals));
@@ -615,6 +947,10 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
     out.insert("condition_number".into(), json!(condition_number));
     out.insert("null_modes".into(), json!(null_modes));
     out.insert("has_null_mode".into(), json!(has_null_mode));
+
+    if let Some(tc) = thickness_corr {
+        out.insert("thickness_correction".into(), tc.info_json);
+    }
 
     if let (Some(qubits), Some(resonators)) = (&qubits_opt, &resonators_opt) {
         let mut couplings = Vec::with_capacity(qubits.len() * resonators.len());
@@ -672,6 +1008,25 @@ pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> R
     Ok(Value::Object(out))
 }
 
+/// Runs the multi-terminal capacitance analysis without a mesh (`params` for ground elimination, qubit
+/// reduction, and resonator dispersive coupling).
+///
+/// When `params` is `Value::Null` or an empty object `{}`, returns the exact 4-field base JSON
+/// (`terminals`, `maxwell_matrix_F`, `mutual_matrix_F`, `ec_matrix_Hz`) unchanged.
+pub fn capacitance_matrix_with_params(result: &SolveResult, params: &Value) -> Result<Value, Error> {
+    run_capacitance_matrix_impl(None, result, params)
+}
+
+/// Runs the multi-terminal capacitance analysis with the 3D [`Mesh`] (enabling `metal_thickness_m`
+/// matched-asymptotic `I_edge` Gram-matrix thickness correction prior to Schur/qubit reduction).
+pub fn capacitance_matrix_with_mesh_and_params(
+    mesh: &Mesh,
+    result: &SolveResult,
+    params: &Value,
+) -> Result<Value, Error> {
+    run_capacitance_matrix_impl(Some(mesh), result, params)
+}
+
 /// Multi-terminal Maxwell, mutual, and charging-energy capacitance matrix analysis behind the [`Analysis`] trait.
 pub struct CapacitanceMatrixAnalysis;
 
@@ -692,8 +1047,8 @@ impl Analysis for CapacitanceMatrixAnalysis {
         capacitance_matrix_with_params(result, &Value::Null)
     }
 
-    fn run_with_params(&self, _mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<Value, Error> {
-        capacitance_matrix_with_params(result, params)
+    fn run_with_params(&self, mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<Value, Error> {
+        capacitance_matrix_with_mesh_and_params(mesh, result, params)
     }
 }
 

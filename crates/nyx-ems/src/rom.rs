@@ -12,7 +12,9 @@ use crate::problem::Problem;
 use femcore::fem::solve_dirichlet;
 use femcore::linalg::amg_elastic::spmm;
 use femcore::linalg::csr::{c, RCsr, C};
+use femcore::linalg::dense::Dense;
 use femcore::linalg::driver::{dense_gen_eigh, DirectSolver};
+use femcore::linalg::faer_glue::generalized_eig_c64;
 use femcore::periodic::Reduction;
 use nyx_physics::{CircuitRom, Discretisation, ModeEnergyRow, RomPort, TlsMeta};
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,9 +56,9 @@ pub fn compute_mode_energy_and_scale(f: C, x_red: &[C], rot: C, asm: &EmwAssembl
     let x_phys: Vec<C> = x_red.iter().map(|&z| z * scale).collect();
 
     let u_elec_j = 0.25 * EPS0 * quad_form_real_mat_complex_vec(&m_tot_phys, &x_phys);
-    let k0_m = (2.0 * PI * f.re / C0).max(1e-300);
     let omega_m = (2.0 * PI * f.re).max(1e-300);
-    let mag_factor = EPS0 / (4.0 * k0_m * k0_m);
+    let re_k0_sq = ((2.0 * PI / C0).powi(2) * (f.re * f.re - f.im * f.im)).max(1e-300);
+    let mag_factor = EPS0 / (4.0 * re_k0_sq);
 
     let u_mag_vol_j = mag_factor * quad_form_real_mat_complex_vec(&asm.k_phys_red, &x_phys);
     let u_kin_ibc_j = if asm.k_ibc_red.nnz() > 0 {
@@ -65,7 +67,7 @@ pub fn compute_mode_energy_and_scale(f: C, x_red: &[C], rot: C, asm: &EmwAssembl
         0.0
     };
 
-    let n_ports = asm.jj_ports.len();
+    let n_ports = asm.jj_ports.len() + asm.lumped_ports.len();
     let mut u_ind_jj_j = Vec::with_capacity(n_ports);
     let mut v_mj = Vec::with_capacity(n_ports);
     let mut i_mj = Vec::with_capacity(n_ports);
@@ -87,6 +89,18 @@ pub fn compute_mode_energy_and_scale(f: C, x_red: &[C], rot: C, asm: &EmwAssembl
         v_mj.push([v_port.re, v_port.im]);
         i_mj.push([i_port.re, i_port.im]);
         u_ind_jj_j.push(u_ind);
+    }
+    for lp in &asm.lumped_ports {
+        let mut v_port = c(0.0, 0.0);
+        for (&b_a, &x_a) in lp.b_red.iter().zip(&x_phys) {
+            if b_a != 0.0 {
+                v_port += x_a * b_a;
+            }
+        }
+        let i_port = v_port / lp.bc.z0.max(1e-30);
+        v_mj.push([v_port.re, v_port.im]);
+        i_mj.push([i_port.re, i_port.im]);
+        u_ind_jj_j.push(0.0);
     }
 
     let u_mag_tot = u_mag_vol_j + u_kin_ibc_j + u_ind_jj_j.iter().sum::<f64>();
@@ -124,13 +138,13 @@ impl VertexDsu {
 
 /// Computes the 3D passive port capacitance matrix `C_port` (`J x J`, in F) on the island-tied `H^1` nodal
 /// subspace and returns `(c_port_f, q_cap_red)` where `q_cap_red[j]` is the reduced Nedelec electrostatic
-/// potential field `(G v_j)_red` across JJ port `j`.
+/// potential field `(G v_j)_red` across JJ / lumped port `j`.
 fn compute_port_capacitance_and_static_cap(
     mesh: &Discretisation,
     problem: &Problem,
     asm: &EmwAssembly,
 ) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), String> {
-    let n_ports = asm.jj_ports.len();
+    let n_ports = asm.jj_ports.len() + asm.lumped_ports.len();
     if n_ports == 0 {
         return Ok((Vec::new(), Vec::new()));
     }
@@ -139,50 +153,90 @@ fn compute_port_capacitance_and_static_cap(
     let order = asm.order;
     let n_nodes = if order == 2 { nv + ne } else { nv };
 
-    // Identify Terminal - and Terminal + vertices for each JJ port
+    // Identify Terminal - and Terminal + vertices for each JJ and lumped_port
     let mut term_minus: Vec<Vec<usize>> = Vec::with_capacity(n_ports);
     let mut term_plus: Vec<Vec<usize>> = Vec::with_capacity(n_ports);
+    let mut port_b_reds: Vec<&[f64]> = Vec::with_capacity(n_ports);
     let mut jj_cross_edges: BTreeSet<(u32, u32)> = BTreeSet::new();
 
-    for port in &asm.jj_ports {
-        let mut verts = BTreeSet::new();
-        for &tri in &port.triangles {
-            for v in tri {
-                verts.insert(v);
-            }
-            for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
-                let pa = mesh.point(a as usize);
-                let pb = mesh.point(b as usize);
-                let ua = pa[0] * port.d_hat[0] + pa[1] * port.d_hat[1] + pa[2] * port.d_hat[2];
-                let ub = pb[0] * port.d_hat[0] + pb[1] * port.d_hat[1] + pb[2] * port.d_hat[2];
-                if (ua - ub).abs() > 0.2 * port.length_m {
-                    jj_cross_edges.insert((a.min(b), a.max(b)));
+    let mut collect_single_terminals =
+        |triangles: &[[u32; 3]], d_hat: [f64; 3], u_min: f64, u_max: f64, length_m: f64| -> (Vec<usize>, Vec<usize>) {
+            let mut verts = BTreeSet::new();
+            for &tri in triangles {
+                for v in tri {
+                    verts.insert(v);
+                }
+                for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+                    let pa = mesh.point(a as usize);
+                    let pb = mesh.point(b as usize);
+                    let ua = pa[0] * d_hat[0] + pa[1] * d_hat[1] + pa[2] * d_hat[2];
+                    let ub = pb[0] * d_hat[0] + pb[1] * d_hat[1] + pb[2] * d_hat[2];
+                    if (ua - ub).abs() > 0.2 * length_m {
+                        jj_cross_edges.insert((a.min(b), a.max(b)));
+                    }
                 }
             }
-        }
-        let mut tm = Vec::new();
-        let mut tp = Vec::new();
-        for &v in &verts {
-            let p = mesh.point(v as usize);
-            let u = p[0] * port.d_hat[0] + p[1] * port.d_hat[1] + p[2] * port.d_hat[2];
-            if u <= port.u_min + 0.15 * port.length_m {
-                tm.push(v as usize);
-            } else if u >= port.u_max - 0.15 * port.length_m {
-                tp.push(v as usize);
+            let mut tm = Vec::new();
+            let mut tp = Vec::new();
+            for &v in &verts {
+                let p = mesh.point(v as usize);
+                let u = p[0] * d_hat[0] + p[1] * d_hat[1] + p[2] * d_hat[2];
+                if u <= u_min + 0.15 * length_m {
+                    tm.push(v as usize);
+                } else if u >= u_max - 0.15 * length_m {
+                    tp.push(v as usize);
+                }
             }
-        }
-        if tm.is_empty() {
-            if let Some(&v) = verts.first() {
-                tm.push(v as usize);
+            if tm.is_empty() {
+                if let Some(&v) = verts.first() {
+                    tm.push(v as usize);
+                }
             }
-        }
-        if tp.is_empty() {
-            if let Some(&v) = verts.last() {
-                tp.push(v as usize);
+            if tp.is_empty() {
+                if let Some(&v) = verts.last() {
+                    tp.push(v as usize);
+                }
             }
-        }
+            (tm, tp)
+        };
+
+    for port in &asm.jj_ports {
+        let (tm, tp) = collect_single_terminals(&port.triangles, port.d_hat, port.u_min, port.u_max, port.length_m);
         term_minus.push(tm);
         term_plus.push(tp);
+        port_b_reds.push(&port.b_red);
+    }
+    for lp in &asm.lumped_ports {
+        if let Some((ref comp_l, ref comp_r)) = lp.cpw_slots {
+            // Balanced CPW even mode: center trace (inner edges u_L_max, u_R_min) is +, ground planes (outer edges) are -
+            let span_of = |tris: &[[u32; 3]]| -> (f64, f64) {
+                let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                for &tri in tris {
+                    for v in tri {
+                        let p = mesh.point(v as usize);
+                        let u = p[0] * lp.d_hat[0] + p[1] * lp.d_hat[1] + p[2] * lp.d_hat[2];
+                        lo = lo.min(u);
+                        hi = hi.max(u);
+                    }
+                }
+                (lo, hi)
+            };
+            let (ul0, ul1) = span_of(comp_l);
+            let (ur0, ur1) = span_of(comp_r);
+            let (tm_l, tp_l) = collect_single_terminals(comp_l, lp.d_hat, ul0, ul1, (ul1 - ul0).max(1e-15));
+            let (tp_r, tm_r) = collect_single_terminals(comp_r, lp.d_hat, ur0, ur1, (ur1 - ur0).max(1e-15));
+            let mut tm = tm_l;
+            tm.extend(tm_r);
+            let mut tp = tp_l;
+            tp.extend(tp_r);
+            term_minus.push(tm);
+            term_plus.push(tp);
+        } else {
+            let (tm, tp) = collect_single_terminals(&lp.triangles, lp.d_hat, lp.u_min, lp.u_max, lp.length_m);
+            term_minus.push(tm);
+            term_plus.push(tp);
+        }
+        port_b_reds.push(&lp.b_red);
     }
 
     let mut dsu = VertexDsu::new(nv);
@@ -217,6 +271,7 @@ fn compute_port_capacitance_and_static_cap(
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
     let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
     let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
 
     let mut sheet_cond_edges = Vec::new();
     let mut ext_pec_edges = Vec::new();
@@ -230,7 +285,8 @@ fn compute_port_capacitance_and_static_cap(
             && !periodic_labels.contains(&l)
             && !problem.pmc.contains(&l)
             && !ibc_labels.contains(&l)
-            && !jj_labels.contains(&l);
+            && !jj_labels.contains(&l)
+            && !lp_labels.contains(&l);
         if !is_sheet_cond && !is_ext_pec {
             continue;
         }
@@ -394,7 +450,7 @@ fn compute_port_capacitance_and_static_cap(
 
         let e_full = g_island.matvec(&phi_j);
         let mut e_red: Vec<f64> = asm.red.roots.iter().map(|&r| e_full[r]).collect();
-        let vj = dot_real(&asm.jj_ports[j].b_red, &e_red);
+        let vj = dot_real(port_b_reds[j], &e_red);
         if vj.abs() > 1e-12 {
             for x in &mut e_red {
                 *x /= vj;
@@ -477,7 +533,7 @@ pub fn build_circuit_rom(
     freq_indices: &[(C, usize)],
     modes: Vec<ModeEnergyRow>,
 ) -> Result<CircuitRom, String> {
-    let ports: Vec<RomPort> = asm
+    let mut ports: Vec<RomPort> = asm
         .jj_ports
         .iter()
         .map(|p| RomPort {
@@ -489,15 +545,33 @@ pub fn build_circuit_rom(
             e_l_hz: (p.bc.e_l_hz > 0.0).then_some(p.bc.e_l_hz),
             phi_ext_rad: p.bc.phi_ext_rad,
             n_g: p.bc.n_g,
+            squid_asymmetry: p.bc.squid_asymmetry,
             z0_ohm: None,
             direction: p.bc.direction,
             formulation: p.bc.formulation.clone(),
         })
         .collect();
+    for lp in &asm.lumped_ports {
+        ports.push(RomPort {
+            name: lp.bc.name.clone(),
+            kind: "lumped_port".into(),
+            l_j_h: None,
+            e_j_hz: None,
+            c_j_f: 0.0,
+            e_l_hz: None,
+            phi_ext_rad: 0.0,
+            n_g: 0.0,
+            squid_asymmetry: None,
+            z0_ohm: Some(lp.bc.z0),
+            direction: lp.bc.direction,
+            formulation: if lp.bc.mode == "cpw_even" { "cpw_even".into() } else { "rank1".into() },
+        });
+    }
 
     let (c_port_f, mut q_cap_list) = compute_port_capacitance_and_static_cap(mesh, problem, asm)?;
 
-    let k_passive =
+    // Regularized full-domain (including PML) matrices for non-singular gradient projection & static lifts
+    let k_passive_reg =
         if asm.k_ibc_red.nnz() > 0 { asm.k0_red.add_scaled(&asm.k_ibc_red, 1.0) } else { asm.k0_red.clone() };
     let m0_red = &asm.m0_red;
     let g_red_r = asm.g_red.real_part();
@@ -507,13 +581,18 @@ pub fn build_circuit_rom(
 
     // Compute static inductive lifts u_j = (K_passive + eps_reg M_0)^-1 b_j projected off gradients
     let mut q_ind_list: Vec<Vec<f64>> = Vec::new();
-    if !asm.jj_ports.is_empty() {
+    if !asm.jj_ports.is_empty() || !asm.lumped_ports.is_empty() {
         let eps_reg = (1e-4 * asm.sigma).max(1e-6);
-        let a_reg = k_passive.add_scaled(m0_red, eps_reg);
+        let a_reg = k_passive_reg.add_scaled(m0_red, eps_reg);
         if let Ok(reg_solver) = DirectSolver::new(&a_reg, true) {
             for port in &asm.jj_ports {
                 if port.b_red.iter().any(|&v| v.abs() > 0.0) {
                     q_ind_list.push(reg_solver.solve(&port.b_red));
+                }
+            }
+            for lp in &asm.lumped_ports {
+                if lp.b_red.iter().any(|&v| v.abs() > 0.0) {
+                    q_ind_list.push(reg_solver.solve(&lp.b_red));
                 }
             }
             let _ = project_off_gradients(m0_red, &g_red_r, &mut q_ind_list);
@@ -544,13 +623,17 @@ pub fn build_circuit_rom(
     let r_tot = q_cols.len();
     let r_dyn = r_tot - r_static;
 
-    let kq_cols: Vec<Vec<f64>> = q_cols.iter().map(|q| k_passive.matvec(q)).collect();
+    // Project K_r and M_r strictly from physical (non-PML) cells (`k_phys_red` + `k_ibc_red`, `m_phys_red`)
+    let k_passive_phys =
+        if asm.k_ibc_red.nnz() > 0 { asm.k_phys_red.add_scaled(&asm.k_ibc_red, 1.0) } else { asm.k_phys_red.clone() };
+    let kq_cols: Vec<Vec<f64>> = q_cols.iter().map(|q| k_passive_phys.matvec(q)).collect();
+    let mq_cols: Vec<Vec<f64>> = q_cols.iter().map(|q| asm.m_phys_red.matvec(q)).collect();
     let mut k_r = vec![vec![0.0; r_tot]; r_tot];
     let mut m_r = vec![vec![0.0; r_tot]; r_tot];
     for a in 0..r_tot {
         for b in a..r_tot {
             let kab = 0.5 * (dot_real(&q_cols[a], &kq_cols[b]) + dot_real(&q_cols[b], &kq_cols[a]));
-            let mab = 0.5 * (dot_real(&q_cols[a], &m0_q_cols[b]) + dot_real(&q_cols[b], &m0_q_cols[a]));
+            let mab = 0.5 * (dot_real(&q_cols[a], &mq_cols[b]) + dot_real(&q_cols[b], &mq_cols[a]));
             k_r[a][b] = kab;
             k_r[b][a] = kab;
             m_r[a][b] = mab;
@@ -558,8 +641,15 @@ pub fn build_circuit_rom(
         }
     }
 
-    let c_r = if asm.c_ibc_red.nnz() > 0 {
-        let cq_cols: Vec<Vec<f64>> = q_cols.iter().map(|q| asm.c_ibc_red.matvec(q)).collect();
+    let c_tot_rom = if asm.c_ibc_red.nnz() > 0 && asm.c_port_red.nnz() > 0 {
+        asm.c_ibc_red.add_scaled(&asm.c_port_red, 1.0)
+    } else if asm.c_ibc_red.nnz() > 0 {
+        asm.c_ibc_red.clone()
+    } else {
+        asm.c_port_red.clone()
+    };
+    let c_r = if c_tot_rom.nnz() > 0 {
+        let cq_cols: Vec<Vec<f64>> = q_cols.iter().map(|q| c_tot_rom.matvec(q)).collect();
         let mut cr = vec![vec![0.0; r_tot]; r_tot];
         for a in 0..r_tot {
             for b in a..r_tot {
@@ -573,11 +663,15 @@ pub fn build_circuit_rom(
         Vec::new()
     };
 
-    let n_ports = asm.jj_ports.len();
+    let n_jj = asm.jj_ports.len();
+    let n_ports = n_jj + asm.lumped_ports.len();
     let mut b_r = vec![vec![0.0; n_ports]; r_tot];
     for (a, qa) in q_cols.iter().enumerate() {
         for (j, port) in asm.jj_ports.iter().enumerate() {
             b_r[a][j] = dot_real(qa, &port.b_red);
+        }
+        for (j, lp) in asm.lumped_ports.iter().enumerate() {
+            b_r[a][n_jj + j] = dot_real(qa, &lp.b_red);
         }
     }
 
@@ -622,6 +716,79 @@ pub fn rom_eigenfrequencies(rom: &CircuitRom) -> Result<Vec<f64>, String> {
     Ok(freqs)
 }
 
+/// Evaluates the complex damped resonant eigenfrequencies (Hz, positive real part, ascending by `Re(f)`)
+/// of a `CircuitRom` by solving the exact `2r x 2r` quadratic eigenvalue problem
+/// `(K_tot + i k_0 C_tot - k_0^2 M_tot) z = 0`.
+pub fn rom_complex_eigenfrequencies(rom: &CircuitRom) -> Result<Vec<C>, String> {
+    let r = rom.k_r.len();
+    if r == 0 {
+        return Ok(Vec::new());
+    }
+    let mut k_tot = vec![0.0; r * r];
+    let mut m_tot = vec![0.0; r * r];
+    let mut c_tot = vec![0.0; r * r];
+    let has_c_r = rom.c_r.len() == r && rom.c_r.iter().all(|row| row.len() == r);
+    for i in 0..r {
+        for j in 0..r {
+            k_tot[i * r + j] = rom.k_r[i][j];
+            m_tot[i * r + j] = rom.m_r[i][j];
+            if has_c_r {
+                c_tot[i * r + j] = rom.c_r[i][j];
+            }
+        }
+    }
+    for (p, port) in rom.ports.iter().enumerate() {
+        let l_j = port.l_j_h.unwrap_or(0.0);
+        let e_l = port.e_l_hz.unwrap_or(0.0);
+        let inv_l_tot = jj_inv_l_tot(l_j, e_l);
+        let alpha_k = MU0 * inv_l_tot;
+        let alpha_m = port.c_j_f / EPS0;
+        let alpha_c = if !has_c_r { port.z0_ohm.filter(|&z| z > 0.0).map_or(0.0, |z0| MU0 * C0 / z0) } else { 0.0 };
+        if alpha_k == 0.0 && alpha_m == 0.0 && alpha_c == 0.0 {
+            continue;
+        }
+        for i in 0..r {
+            let bi = rom.b_r[i][p];
+            for j in 0..r {
+                let bj = rom.b_r[j][p];
+                k_tot[i * r + j] += alpha_k * bi * bj;
+                m_tot[i * r + j] += alpha_m * bi * bj;
+                c_tot[i * r + j] += alpha_c * bi * bj;
+            }
+        }
+    }
+
+    let fro_k = k_tot.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let fro_m = m_tot.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-300);
+    let s_k = (fro_k / fro_m).sqrt().max(1.0);
+    let inv_sk = 1.0 / s_k;
+    let inv_sk2 = inv_sk * inv_sk;
+
+    let n2 = 2 * r;
+    let mut a = Dense::<C>::zeros(n2, n2);
+    let mut b = Dense::<C>::zeros(n2, n2);
+    for i in 0..r {
+        a[(i, r + i)] = c(1.0, 0.0);
+        b[(i, i)] = c(1.0, 0.0);
+        for j in 0..r {
+            a[(r + i, j)] = c(k_tot[i * r + j] * inv_sk2, 0.0);
+            a[(r + i, r + j)] = c(0.0, c_tot[i * r + j] * inv_sk);
+            b[(r + i, r + j)] = c(m_tot[i * r + j], 0.0);
+        }
+    }
+
+    let (eigs, _) =
+        generalized_eig_c64(&a, &b).map_err(|e| format!("CircuitRom complex QEP eigensolve failed: {e}"))?;
+    let scale_hz = s_k * (C0 / (2.0 * PI));
+    let mut freqs: Vec<C> = eigs
+        .into_iter()
+        .filter(|z| z.re.is_finite() && z.im.is_finite() && z.re > 0.0)
+        .map(|mu| mu * scale_hz)
+        .collect();
+    freqs.sort_by(|a, b| a.re.total_cmp(&b.re));
+    Ok(freqs)
+}
+
 /// Builds `TlsMeta` for dielectric TLS surface participation analysis on a 3D `ems` result.
 pub fn build_tls_meta(mesh: &Discretisation, problem: &Problem) -> TlsMeta {
     let mut domain_eps_r = BTreeMap::new();
@@ -646,6 +813,8 @@ pub fn build_tls_meta(mesh: &Discretisation, problem: &Problem) -> TlsMeta {
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
     let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
     let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let wp_labels: Vec<i32> = problem.waveports.iter().flat_map(|b| b.labels.iter().copied()).collect();
 
     let mut pec_set = BTreeSet::new();
     let mut cond_set = BTreeSet::new();
@@ -667,6 +836,8 @@ pub fn build_tls_meta(mesh: &Discretisation, problem: &Problem) -> TlsMeta {
                 && !problem.pmc.contains(&l)
                 && !ibc_labels.contains(&l)
                 && !jj_labels.contains(&l)
+                && !lp_labels.contains(&l)
+                && !wp_labels.contains(&l)
             {
                 pec_set.insert(l);
                 cond_set.insert(l);
@@ -674,9 +845,7 @@ pub fn build_tls_meta(mesh: &Discretisation, problem: &Problem) -> TlsMeta {
         } else {
             let fv = mesh.facet(f);
             let key = sorted3(fv[0], fv[1], fv[2]);
-            if seen_interior_tris.insert(key)
-                && (problem.pec.contains(&l) || ibc_labels.contains(&l) || jj_labels.contains(&l))
-            {
+            if seen_interior_tris.insert(key) && (problem.pec.contains(&l) || ibc_labels.contains(&l)) {
                 sheet_set.insert(l);
             }
         }
@@ -698,5 +867,6 @@ pub fn build_tls_meta(mesh: &Discretisation, problem: &Problem) -> TlsMeta {
         sheet_labels: sheet_set.into_iter().collect(),
         sheet_thickness_m,
         pec_labels: pec_set.into_iter().collect(),
+        interfaces: problem.tls_interfaces.clone(),
     }
 }

@@ -8,8 +8,10 @@
 use crate::Dfs;
 use femcore::material::{bcs_surface_impedance, FilmModel};
 use femcore::props::{LinearSolver, Materials};
-use nyx_physics::decode::{domain_names_by_label, materials_by_label, resolve_conditions, Params};
-use nyx_physics::{Ctx, Error, Physics, ProblemSpec};
+use nyx_physics::decode::{
+    domain_names_by_label, materials_by_label, resolve_conditions, tls_interfaces_from_spec, Params,
+};
+use nyx_physics::{Ctx, Error, Physics, ProblemSpec, TlsInterfaces};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -20,6 +22,10 @@ pub enum BcKind {
     SurfaceCharge(f64),
     /// named conductor terminal for multi-RHS capacitance matrix extraction
     Terminal(String),
+    /// spherical 1/r asymptotic Robin open boundary (3D electrostatics)
+    Open {
+        origin: Option<[f64; 3]>,
+    },
     Temperature(f64),
     /// inward heat flux, W/m^2
     Flux(f64),
@@ -51,6 +57,7 @@ impl BcKind {
             BcKind::Ground => "Ground",
             BcKind::SurfaceCharge(_) => "Surface charge",
             BcKind::Terminal(_) => "Terminal",
+            BcKind::Open { .. } => "Open boundary",
             BcKind::Temperature(_) => "Temperature",
             BcKind::Flux(_) => "Heat flux",
             BcKind::Convection { .. } => "Convective cooling",
@@ -61,7 +68,14 @@ impl BcKind {
     }
 
     pub fn is_electrostatic(&self) -> bool {
-        matches!(self, BcKind::Potential(_) | BcKind::Ground | BcKind::SurfaceCharge(_) | BcKind::Terminal(_))
+        matches!(
+            self,
+            BcKind::Potential(_)
+                | BcKind::Ground
+                | BcKind::SurfaceCharge(_)
+                | BcKind::Terminal(_)
+                | BcKind::Open { .. }
+        )
     }
 
     pub fn is_heat(&self) -> bool {
@@ -130,6 +144,8 @@ pub struct Problem {
     pub singular_edges: String,
     /// 1->4 panel subdivision + log-space SPD Richardson extrapolation in `planar_bem` (default `false`)
     pub richardson: bool,
+    /// optional `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters resolved from `ctx.library`
+    pub tls_interfaces: Option<TlsInterfaces>,
 }
 
 impl Problem {
@@ -146,7 +162,13 @@ impl Problem {
             formulation: "volumetric_fem".into(),
             singular_edges: "none".into(),
             richardson: false,
+            tls_interfaces: None,
         }
+    }
+
+    pub fn with_tls_interfaces(mut self, tls_interfaces: Option<TlsInterfaces>) -> Self {
+        self.tls_interfaces = tls_interfaces;
+        self
     }
 
     pub fn with_formulation(mut self, formulation: impl Into<String>) -> Self {
@@ -202,6 +224,7 @@ impl Problem {
                     vec![*current, direction[0], direction[1], direction[2]]
                 }
                 BcKind::FluxLoop { flux_wb, .. } => vec![*flux_wb],
+                BcKind::Open { origin } => origin.map_or_else(Vec::new, |o| vec![o[0], o[1], o[2]]),
                 BcKind::Ground | BcKind::Terminal(_) => vec![],
             };
             if vals.iter().any(|v| !v.is_finite()) {
@@ -271,6 +294,18 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     return Err(Error::invalid("terminal condition requires a non-empty 'name'"));
                 }
                 BcKind::Terminal(name)
+            }
+            "open" => {
+                let origin = if p.has("origin") {
+                    let v = p.vector("origin");
+                    if v.len() != 3 || v.iter().any(|x| !x.is_finite()) {
+                        return Err(Error::invalid("open boundary 'origin' must be 3 finite numbers [x, y, z]"));
+                    }
+                    Some([v[0], v[1], v[2]])
+                } else {
+                    None
+                };
+                BcKind::Open { origin }
             }
             "temperature" => BcKind::Temperature(p.number("value")),
             "flux" => BcKind::Flux(p.number("value")),
@@ -352,6 +387,8 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     };
     let tol = pp.number("tol");
     let amg_line_smooth = pp.boolean("amg_line_smooth");
+    let tls_ifaces = tls_interfaces_from_spec(spec, ctx);
+    let tls_interfaces = (!tls_ifaces.is_empty()).then_some(tls_ifaces);
     Ok(Problem {
         order: spec.order as usize,
         study,
@@ -364,5 +401,6 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         formulation,
         singular_edges,
         richardson,
+        tls_interfaces,
     })
 }

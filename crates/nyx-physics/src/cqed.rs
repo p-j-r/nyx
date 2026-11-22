@@ -71,6 +71,31 @@ impl InductanceMatrixData {
     }
 }
 
+/// Native surface-oxide TLS loss layer parameters (`thickness_m`, `eps_r`, `tan_delta`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TlsInterfaceSpec {
+    pub thickness_m: f64,
+    pub eps_r: f64,
+    pub tan_delta: f64,
+}
+
+/// Material-resolved `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TlsInterfaces {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ma: Option<TlsInterfaceSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ms: Option<TlsInterfaceSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sa: Option<TlsInterfaceSpec>,
+}
+
+impl TlsInterfaces {
+    pub fn is_empty(&self) -> bool {
+        self.ma.is_none() && self.ms.is_none() && self.sa.is_none()
+    }
+}
+
 /// Domain permittivities and metallized boundary/sheet annotations used by `tls_participation`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TlsMeta {
@@ -91,6 +116,9 @@ pub struct TlsMeta {
     /// 1-based boundary label -> exterior wall flag (if known).
     #[serde(default)]
     pub pec_labels: Vec<i32>,
+    /// Optional `[interfaces.{ma,ms,sa}]` parameters resolved from the problem's material library.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interfaces: Option<TlsInterfaces>,
 }
 
 impl TlsMeta {
@@ -114,6 +142,8 @@ pub struct RomPort {
     pub e_l_hz: Option<f64>,
     pub phi_ext_rad: f64,
     pub n_g: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub squid_asymmetry: Option<f64>,
     pub z0_ohm: Option<f64>,
     pub direction: [f64; 3],
     pub formulation: String,
@@ -212,6 +242,11 @@ mod tests {
             sheet_labels: vec![4],
             sheet_thickness_m: [(4, 100e-9)].into(),
             pec_labels: vec![3],
+            interfaces: Some(TlsInterfaces {
+                ma: Some(TlsInterfaceSpec { thickness_m: 3.0e-9, eps_r: 9.8, tan_delta: 1.5e-3 }),
+                ms: Some(TlsInterfaceSpec { thickness_m: 2.0e-9, eps_r: 9.8, tan_delta: 1.5e-3 }),
+                sa: Some(TlsInterfaceSpec { thickness_m: 2.0e-9, eps_r: 3.9, tan_delta: 1.5e-3 }),
+            }),
         };
         let rom = CircuitRom {
             ports: vec![RomPort {
@@ -223,6 +258,7 @@ mod tests {
                 e_l_hz: Some(1.0e9),
                 phi_ext_rad: std::f64::consts::PI,
                 n_g: 0.0,
+                squid_asymmetry: Some(0.1),
                 z0_ohm: None,
                 direction: [1.0, 0.0, 0.0],
                 formulation: "rank1".into(),

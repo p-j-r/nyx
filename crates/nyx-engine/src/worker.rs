@@ -37,6 +37,10 @@ pub(crate) struct RemoteSpec {
     pub targets: Vec<String>,
     /// a point of a warm sweep (P5b): the worker leaves its modes behind, and starts from `input` when there are some
     pub warm: Option<WarmIo>,
+    /// whether to write mesh and field arrays into `results.h5` (default `true`)
+    pub save_fields: bool,
+    /// read-only post-solve analyses to run in-memory before fields are dropped
+    pub post_analyses: Vec<Value>,
 }
 
 /// The modes handed to a worker for a warm start (none for the first point, which only records).
@@ -58,6 +62,8 @@ pub(crate) struct RemoteDone {
     /// the modes the worker left for the next point of a warm sweep, and what its eigensolves did
     pub warm_out: Option<Vec<u8>>,
     pub warm_calls: Vec<Value>,
+    pub fields_saved: bool,
+    pub post_analyses: Vec<Value>,
 }
 
 /// The materials of a library as TOML by name, what a worker rebuilds the library from.
@@ -172,13 +178,15 @@ fn serve_job(dir: &Path) -> Result<(), String> {
     }
     // a point of a warm sweep (P5b): start from the modes in `warm_in.bin` when there are some, and leave this solve's in `warm_out.bin`
     let warm_on = job["warm"].as_bool() == Some(true);
+    let save_fields = job.get("save_fields").and_then(Value::as_bool).unwrap_or(true);
+    let post_analyses: Vec<Value> = job.get("post_analyses").and_then(Value::as_array).cloned().unwrap_or_default();
     let warm_cell = crate::reuse::WarmCell::new();
     let mut opts = crate::queue::QueueOpts::default();
     if warm_on {
         let input = std::fs::read(dir.join("warm_in.bin")).ok().map(Arc::new);
         opts.warm = Some(crate::reuse::WarmLink::for_worker(input, warm_cell.clone()));
     }
-    let id = e.start_solve_with(Some(targets), &opts).map_err(|e| e.to_string())?;
+    let id = e.start_solve_with(Some(targets.clone()), &opts).map_err(|e| e.to_string())?;
     let mut sent_log = 0usize;
     let mut sent_last = String::new();
     let outcome = loop {
@@ -201,11 +209,30 @@ fn serve_job(dir: &Path) -> Result<(), String> {
             other => break other,
         }
     };
-    let error = outcome.err();
+    let mut error = outcome.err();
+    if error.is_none() && !post_analyses.is_empty() {
+        match e.run_post_analyses(&post_analyses, &targets) {
+            Ok(pa_out) => {
+                let text = serde_json::to_string(&pa_out).map_err(|x| x.to_string())?;
+                std::fs::write(dir.join("post_analyses.json"), text)
+                    .map_err(|err| format!("post_analyses.json: {err}"))?;
+            }
+            Err(pa_err) => {
+                error = Some(pa_err);
+            }
+        }
+    }
     let has_results = match e.results_snapshot() {
         Ok(s) => {
             let refs: Vec<(String, &SolveResult)> = s.results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
-            crate::h5io::write_results(&dir.join("results.h5"), &s.project, &s.model.solver_mesh(), &refs)?;
+            crate::h5io::write_results_with_options(
+                &dir.join("results.h5"),
+                &s.project,
+                &s.model.solver_mesh(),
+                &refs,
+                crate::h5io::FieldStorageLayout::L2ShuffleLzfPacked,
+                save_fields,
+            )?;
             true
         }
         Err(_) => false,
@@ -233,6 +260,7 @@ fn serve_job(dir: &Path) -> Result<(), String> {
         "ok": error.is_none(),
         "error": error.as_ref().map(|e| json!({ "code": e.code(), "message": e.to_string() })),
         "has_results": has_results,
+        "fields_saved": save_fields,
         "peak_working_set": ws, "peak_commit": commit,
         "size": size,
     } }));
@@ -295,7 +323,14 @@ pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error
     std::fs::write(dir.join("project.nyx.json"), &spec.project_json).map_err(|e| io("writing the job's project", e))?;
     std::fs::write(
         dir.join("job.json"),
-        json!({ "targets": spec.targets, "materials": spec.materials, "warm": spec.warm.is_some() }).to_string(),
+        json!({
+            "targets": spec.targets,
+            "materials": spec.materials,
+            "warm": spec.warm.is_some(),
+            "save_fields": spec.save_fields,
+            "post_analyses": spec.post_analyses,
+        })
+        .to_string(),
     )
     .map_err(|e| io("writing the job's description", e))?;
     if let Some(input) = spec.warm.as_ref().and_then(|w| w.input.as_ref()) {
@@ -390,13 +425,14 @@ pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>)
             e.get("message").and_then(Value::as_str).unwrap_or("the worker failed").to_string(),
         )
     });
-    let (results, mesh) = if d.get("has_results").and_then(Value::as_bool) == Some(true) {
+    let (results, mesh, fields_saved) = if d.get("has_results").and_then(Value::as_bool) == Some(true) {
         let _stage = progress.map(femcore::progress::install);
         let _s = femcore::progress::stage("reading the results of the worker");
         let stored = crate::h5io::read_results(&dir.join("results.h5")).map_err(Error::Solver)?;
-        (stored.results, Some(stored.mesh))
+        let fs = d.get("fields_saved").and_then(Value::as_bool).unwrap_or(stored.fields_saved);
+        (stored.results, fs.then_some(stored.mesh), fs)
     } else {
-        (vec![], None)
+        (vec![], None, d.get("fields_saved").and_then(Value::as_bool).unwrap_or(true))
     };
     let run = WorkerRun {
         peak_working_set: d.get("peak_working_set").and_then(Value::as_u64),
@@ -408,7 +444,11 @@ pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>)
         .ok()
         .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
         .unwrap_or_default();
-    Ok(RemoteDone { results, mesh, failed, run, warm_out, warm_calls })
+    let post_analyses = std::fs::read_to_string(dir.join("post_analyses.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
+        .unwrap_or_default();
+    Ok(RemoteDone { results, mesh, failed, run, warm_out, warm_calls, fields_saved, post_analyses })
 }
 
 /// Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once.

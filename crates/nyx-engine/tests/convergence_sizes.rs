@@ -16,9 +16,11 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 struct RecordedMesh {
+    settings: MeshSettings,
     rules: Vec<SizeRule>,
     total_cells: usize,
     core_cells: usize,
+    wave_size_si: Option<f64>,
 }
 
 struct RecordingMesher {
@@ -50,10 +52,14 @@ impl Mesher for RecordingMesher {
             Some(id) => sm.cell_labels.iter().filter(|&&l| l == id).count(),
             None => 0,
         };
+        let wave_size_si =
+            m.report().and_then(|rep| rep.domains.iter().find(|d| d.name == "Si").and_then(|d| d.wave_size));
         self.seen.lock().unwrap().push(RecordedMesh {
+            settings: settings.clone(),
             rules: m.evaluated().size_rules().to_vec(),
             total_cells: m.mesh().n_cells(),
             core_cells,
+            wave_size_si,
         });
         Ok(m)
     }
@@ -598,4 +604,204 @@ fn track_filters_both_meshes_supports_nb_neff_targetless_pairing_and_validates_i
         }
         assert!(e.call("convergence_check", &a).is_err(), "expected validation failure for {a}");
     }
+}
+
+/// Mock electrostatic physics emitting sub-pF (femtofarad) qubit capacitance scalars with a 3% shift on `C_0_0 (F)`
+/// and a 0.2% shift on `C_1_1 (F)` when refined.
+struct MockFemtofaradPhysics;
+
+impl Physics for MockFemtofaradPhysics {
+    fn id(&self) -> &'static str {
+        "qcp"
+    }
+    fn name(&self) -> &'static str {
+        "Mock Femtofarad Capacitance"
+    }
+    fn studies(&self) -> Vec<StudyDesc> {
+        vec![StudyDesc {
+            kind: "electrostatic".into(),
+            name: "Electrostatic".into(),
+            doc: "".into(),
+            dims: Dims::Both,
+            params: vec![],
+        }]
+    }
+    fn properties(&self) -> Vec<PropDesc> {
+        vec![]
+    }
+    fn bc_kinds(&self) -> Vec<BcDesc> {
+        vec![]
+    }
+    fn params(&self) -> Vec<ParamDesc> {
+        vec![]
+    }
+    fn fields(&self, _: &str) -> Vec<FieldDesc> {
+        vec![]
+    }
+    fn exports(&self) -> Vec<FieldLink> {
+        vec![]
+    }
+    fn imports(&self) -> Vec<FieldLink> {
+        vec![]
+    }
+    fn validate(&self, _: &ProblemSpec, _: &Mesh) -> Result<(), Error> {
+        Ok(())
+    }
+    fn sizing(&self, spec: &ProblemSpec, _: Option<&Arc<femcore::material::Library>>) -> Sizing {
+        Sizing { order: spec.order, headroom: 1.0, wavelengths: Default::default() }
+    }
+    fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, _ctx: &mut Ctx) -> Result<SolveResult, Error> {
+        let fine = mesh.n_cells() >= 50;
+        // Coarse: C_0_0 = 48.5 fF, Fine: C_0_0 = 50.0 fF -> exact 3.0% shift (`1.5e-15 / 50.0e-15 = 0.03`)!
+        // Coarse: C_1_1 = 79.84 fF, Fine: C_1_1 = 80.0 fF -> exact 0.2% shift (`0.16e-15 / 80.0e-15 = 0.002`)!
+        let c00 = if fine { 50.0e-15 } else { 48.5e-15 };
+        let c11 = if fine { 80.0e-15 } else { 79.84e-15 };
+        Ok(SolveResult {
+            physics: "qcp".into(),
+            study: "electrostatic".into(),
+            order: spec.order,
+            dim: mesh.dim() as u8,
+            solutions: vec![
+                Solution { label: "pad0".into(), value: Some(c00), ..Default::default() },
+                Solution { label: "pad1".into(), value: Some(c11), ..Default::default() },
+            ],
+            scalars: vec![("C_0_0 (F)".into(), Scalar::Num(c00)), ("C_1_1 (F)".into(), Scalar::Num(c11))],
+            log: vec![],
+            seconds: 0.001,
+            dofs: mesh.n_cells(),
+        })
+    }
+}
+
+#[test]
+fn sub_picofarad_femtofarad_three_percent_shift_fails_one_percent_tolerance_and_quantities_filter_works() {
+    let mut reg = Registry::new();
+    reg.register(Arc::new(MockFemtofaradPhysics)).unwrap();
+    let mut e = Engine::with(reg, Arc::new(FemcoreMesher));
+    c(&mut e, "project_new", json!({ "title": "fF_qcap", "dim": 2, "h": 0.35 }));
+    c(&mut e, "add_rect", json!({ "name": "box", "min": [0.0, 0.0], "max": [1.0, 1.0] }));
+    c(&mut e, "add_overlay", json!({ "name": "regions", "regions": [{ "name": "Si", "input": "box" }] }));
+    c(&mut e, "add_physics", json!({ "physics": "qcp", "study": "electrostatic", "order": 1 }));
+    c(&mut e, "solve_run", json!({}));
+
+    // 1. 3% shift on 50 fF (< 1 pF) MUST FAIL `tolerance = 0.01` with `worst_relative ≈ 0.03`!
+    let fail = c(&mut e, "convergence_check", json!({ "physics": "qcp", "factor": 0.5, "tolerance": 0.01 }));
+    assert_eq!(fail["converged"], json!(false), "3% fF capacitance shift must fail tol = 0.01: {fail}");
+    let worst_rel = fail["worst_relative"].as_f64().unwrap();
+    assert!((worst_rel - 0.03).abs() < 1e-12, "expected worst_relative = 0.03, got {worst_rel}");
+    assert_eq!(fail["validated"]["state"], json!("exploratory"), "{fail}");
+
+    // 2. Filtering `quantities` to `["C_1_1 (F)"]` (0.2% shift) PASSES `tolerance = 0.01` and promotes `validated` to `checked`!
+    let pass_filtered = c(
+        &mut e,
+        "convergence_check",
+        json!({ "physics": "qcp", "factor": 0.5, "tolerance": 0.01, "quantities": ["C_1_1 (F)"] }),
+    );
+    assert_eq!(pass_filtered["converged"], json!(true), "{pass_filtered}");
+    assert_eq!(pass_filtered["quantities"], json!(1));
+    assert_eq!(pass_filtered["worst_quantity"], json!("scalar C_1_1 (F)"));
+    assert!((pass_filtered["worst_relative"].as_f64().unwrap() - 0.002).abs() < 1e-12);
+    assert_eq!(pass_filtered["validated"]["state"], json!("checked"), "{pass_filtered}");
+
+    // Exact row name `"scalar C_0_0 (F)"` also works and fails `tolerance = 0.01`
+    let fail_filtered = c(
+        &mut e,
+        "convergence_check",
+        json!({ "physics": "qcp", "factor": 0.5, "tolerance": 0.01, "quantities": ["scalar C_0_0 (F)"] }),
+    );
+    assert_eq!(fail_filtered["converged"], json!(false), "{fail_filtered}");
+    assert_eq!(fail_filtered["quantities"], json!(1));
+    assert_eq!(fail_filtered["worst_quantity"], json!("scalar C_0_0 (F)"));
+
+    // 3. Zero matching rows and invalid `quantities` arguments fail cleanly (both runtime and `nyx check` static/plan check)
+    let no_match = e
+        .call("convergence_check", &json!({ "physics": "qcp", "factor": 0.5, "quantities": ["C_9_9 (F)"] }))
+        .unwrap_err()
+        .to_string();
+    assert!(no_match.contains("no quantity matched") && no_match.contains("C_0_0 (F)"), "{no_match}");
+
+    for bad_q in [json!([]), json!([""]), json!([123]), json!("C_0_0 (F)")] {
+        assert!(
+            e.call("convergence_check", &json!({ "physics": "qcp", "factor": 0.5, "quantities": bad_q })).is_err(),
+            "expected validation failure for quantities={bad_q}"
+        );
+        let list_txt = [
+            json!({ "cmd": "project_new", "args": { "dim": 2, "h": 0.35 } }),
+            json!({ "cmd": "add_rect", "args": { "name": "box", "min": [0.0, 0.0], "max": [1.0, 1.0] } }),
+            json!({ "cmd": "add_overlay", "args": { "name": "ov", "regions": [{ "name": "Si", "input": "box" }] } }),
+            json!({ "cmd": "add_physics", "args": { "physics": "qcp", "study": "electrostatic" } }),
+            json!({ "cmd": "convergence_check", "args": { "physics": "qcp", "quantities": bad_q } }),
+        ]
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+        assert!(!e.check_list(&list_txt).ok(), "check_list (`nyx check`) must reject quantities={bad_q}");
+    }
+}
+
+#[test]
+fn adapt_scale_scales_by_factor_power_one_not_factor_squared_and_refines_wave_sizing() {
+    // 1. `adapt_scale = Some(1.0)` without physics_sizing: `h` and `Op::Size` scale by `factor^1`, `adapt_scale` stays `1.0`!
+    let probe = RecordingMesher::new();
+    let mut e = Engine::new();
+    e.set_mesher(probe.clone());
+    c(&mut e, "project_new", json!({ "title": "adapt_linear_scale", "dim": 2, "h": 0.12 }));
+    c(&mut e, "add_rect", json!({ "name": "box", "min": [0.0, 0.0], "max": [1.0, 1.0] }));
+    c(&mut e, "add_overlay", json!({ "name": "regions", "regions": [{ "name": "Si", "input": "box" }] }));
+    c(&mut e, "add_size", json!({ "name": "sz", "sel": "region(Si)", "h": 0.08 }));
+    c(&mut e, "set_mesh", json!({ "adapt_scale": 1.0, "physics_sizing": false }));
+    c(&mut e, "add_physics", json!({ "physics": "dfs", "study": "electrostatic", "order": 1 }));
+    c(&mut e, "set_material", json!({ "physics": "dfs", "region": "Si", "material": "silicon" }));
+
+    let plan = e.convergence_job().plan("dfs", 0.5).unwrap();
+    let seen = probe.take();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].settings.adapt_scale, Some(1.0));
+    assert_eq!(seen[1].settings.adapt_scale, Some(1.0), "adapt_scale must NOT be multiplied by factor");
+    assert!((seen[1].settings.h - 0.12 * 0.5).abs() < 1e-15);
+    assert!((seen[1].rules[0].h.unwrap() - 0.08 * 0.5).abs() < 1e-15);
+    // In 2D, refining linear size by `factor = 0.5` increases cell count by ~4x (`(1/0.5)^2 = 4`), NOT `16x` (`(1/0.5^2)^2 = 16`)!
+    let ratio = plan["refined_over_present"].as_f64().unwrap();
+    assert!(
+        (2.2..=7.0).contains(&ratio),
+        "expected ~4x cell growth for 2D factor=0.5 (factor^1 sizing), got {ratio:.2}x ({} -> {} cells)",
+        seen[0].total_cells,
+        seen[1].total_cells
+    );
+
+    // 2. `adapt_scale = Some(1.0)` WITH `physics_sizing = true` and `points_per_wavelength = None`:
+    // `points_per_wavelength` scales by `/= factor` (`6.0 -> 12.0` for order 2) so `wave_size` refines by `factor^1`!
+    let probe_w = RecordingMesher::new();
+    let mut ew = Engine::new();
+    ew.set_mesher(probe_w.clone());
+    c(&mut ew, "project_new", json!({ "title": "adapt_wave_scale", "dim": 2, "h": 2.0e-6 }));
+    c(&mut ew, "add_rect", json!({ "name": "box", "min": [0.0, 0.0], "max": [2.0e-6, 2.0e-6] }));
+    c(&mut ew, "add_overlay", json!({ "name": "regions", "regions": [{ "name": "Si", "input": "box" }] }));
+    c(&mut ew, "set_mesh", json!({ "adapt_scale": 1.0, "physics_sizing": true }));
+    c(
+        &mut ew,
+        "add_physics",
+        json!({
+            "physics": "ems",
+            "study": "modes",
+            "order": 2,
+            "study_params": { "freq": 299792458.0 / 1.55e-6, "n_target": 3.4, "n_modes": 1 }
+        }),
+    );
+    c(&mut ew, "set_material", json!({ "physics": "ems", "region": "Si", "material": "silicon" }));
+
+    let _ = ew.convergence_job().plan("ems", 0.5).unwrap();
+    let seen_w = probe_w.take();
+    assert_eq!(seen_w.len(), 2);
+    assert_eq!(seen_w[0].settings.adapt_scale, Some(1.0));
+    assert_eq!(seen_w[0].settings.points_per_wavelength, None);
+    assert_eq!(seen_w[1].settings.adapt_scale, Some(1.0));
+    assert_eq!(
+        seen_w[1].settings.points_per_wavelength,
+        Some(12.0),
+        "order-2 default ppw=6.0 scaled by /= 0.5 -> 12.0"
+    );
+    let (ws_c, ws_f) = (seen_w[0].wave_size_si.unwrap(), seen_w[1].wave_size_si.unwrap());
+    assert!(((ws_f / ws_c) - 0.5).abs() < 1e-12, "wave_size must scale by factor^1 = 0.5, got {ws_f:e} / {ws_c:e}");
 }

@@ -216,3 +216,18 @@ fn pml_around_a_window_in_a_polyhedral_model() {
     let b = ev.regions().iter().position(|r| r.name == "block").unwrap() as u32;
     assert!(close(ev.volume(b), 0.6f64.powi(3)));
 }
+
+#[test]
+fn polyhedral_path_refuses_sheets_with_clear_error_instead_of_dropping_them() {
+    let mut m = Model::new_3d();
+    let blk = m.box_("blk", (-50e-6, -50e-6, -20e-6), (50e-6, 50e-6, 20e-6));
+    let ramp = m.box_("ramp", (-10e-6, -5e-6, 0.0), (10e-6, 5e-6, 3e-6));
+    let slanted = m.transform("slanted_ramp", ramp, vec![rot(Axis::Y, 25.0, [0.0, 0.0, 0.0])]);
+    let pad = m.rect("pad_rect", (-20e-6, -20e-6), (20e-6, 20e-6));
+    m.sheet("cpw_pad", pad, 0.0);
+    m.overlay(&[("blk", blk), ("ramp", slanted)]);
+
+    assert!(geom::planar::needs_planar(&m.list));
+    let err = m.eval(Tier::Complex).err().expect("slanted solid + Op::Sheet must error").0;
+    assert!(err.contains("Sheet 'cpw_pad'") && err.contains("stepped_airbridge"), "unexpected error message: {err}");
+}

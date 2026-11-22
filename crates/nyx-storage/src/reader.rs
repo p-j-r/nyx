@@ -752,10 +752,24 @@ fn walk_group_checked(reader: &NyxReader, grp: &Group, depth: usize) -> Result<u
         let _ = ds.attrs()?;
         let raw = reader.read_raw_checked(&ds)?;
         total_bytes = total_bytes.saturating_add(raw.len());
+        if (total_bytes as u64) > reader.budget.max_total_result_bytes {
+            bail!(
+                "cumulative result size {} B exceeds configured total read budget {} B",
+                total_bytes,
+                reader.budget.max_total_result_bytes
+            );
+        }
     }
     for sub_name in grp.groups()? {
         let sub = grp.group(&sub_name)?;
         total_bytes = total_bytes.saturating_add(walk_group_checked(reader, &sub, depth + 1)?);
+        if (total_bytes as u64) > reader.budget.max_total_result_bytes {
+            bail!(
+                "cumulative result size {} B exceeds configured total read budget {} B",
+                total_bytes,
+                reader.budget.max_total_result_bytes
+            );
+        }
     }
     Ok(total_bytes)
 }

@@ -31,6 +31,8 @@ pub struct ElectroAssembly {
     pub vals: Vec<f64>,
     /// fixed potential per boundary label
     pub volt: BTreeMap<i32, f64>,
+    /// whether at least one spherical 1/r asymptotic Robin open boundary condition is active
+    pub has_open: bool,
 }
 
 fn assemble_laplace_curved_3d(mesh: &Discretisation, order: usize, coeff: &[f64]) -> Csr {
@@ -280,6 +282,158 @@ pub fn enrich_quarter_point_mesh(mesh: &Discretisation, spec: &Problem) -> Optio
     Some((enriched, n_rim_verts, qp_edges.len()))
 }
 
+/// Assembles the 3D spherical `1/r` asymptotic Robin surface stiffness matrix on boundary triangles
+/// matching `open_origins` (`label -> origin r0`):
+/// `K_open,ab = int_{Gamma_open} eps0 (n^T eps_r n) * max((x - r0) . n, 0) / |x - r0|^2 * phi_a(x) phi_b(x) dS`.
+fn assemble_open_robin(
+    mesh: &Discretisation,
+    order: usize,
+    open_origins: &BTreeMap<i32, [f64; 3]>,
+    tensor_perm: Option<&[M3]>,
+    scalar_perm: &[f64],
+) -> Result<Csr, String> {
+    if mesh.dim != 3 {
+        return Err("open boundary condition (spherical 1/r asymptotic Robin) requires a 3D mesh".into());
+    }
+    let nv = mesh.n_points();
+    let mut on_open_v = vec![false; nv];
+    for f in 0..mesh.n_facets() {
+        if open_origins.contains_key(&mesh.facet_labels[f]) {
+            for &v in mesh.facet(f) {
+                on_open_v[v as usize] = true;
+            }
+        }
+    }
+    let mut face_to_cell: std::collections::HashMap<[u32; 3], (usize, u32)> = std::collections::HashMap::new();
+    for c in 0..mesh.n_cells() {
+        let cv = mesh.cell(c);
+        let cnt = cv.iter().filter(|&&v| on_open_v[v as usize]).count();
+        if cnt < 3 {
+            continue;
+        }
+        for skip in 0..4 {
+            let [i0, i1, i2] = match skip {
+                0 => [1, 2, 3],
+                1 => [0, 2, 3],
+                2 => [0, 1, 3],
+                _ => [0, 1, 2],
+            };
+            let (u0, u1, u2) = (cv[i0], cv[i1], cv[i2]);
+            if on_open_v[u0 as usize] && on_open_v[u1 as usize] && on_open_v[u2 as usize] {
+                let mut key = [u0, u1, u2];
+                key.sort_unstable();
+                face_to_cell.entry(key).or_insert((c, cv[skip]));
+            }
+        }
+    }
+
+    let rule = facet_rule(2);
+    let nloc = if order == 1 { 3 } else { 6 };
+    let shapes: Vec<Vec<f64>> = rule.lam.iter().map(|lam| shape(lam, order).0).collect();
+    let n = mesh.n_dofs(order);
+    let mut coo = femcore::linalg::csr::Coo::new(n, n);
+    let mut dofs = Vec::new();
+    let mut ke = vec![0.0; nloc * nloc];
+    let mut positive_facets = 0usize;
+
+    for f in 0..mesh.n_facets() {
+        let Some(&r0) = open_origins.get(&mesh.facet_labels[f]) else {
+            continue;
+        };
+        let fv = mesh.facet(f);
+        let mut key = [fv[0], fv[1], fv[2]];
+        key.sort_unstable();
+        let &(c, opp) =
+            face_to_cell.get(&key).ok_or_else(|| format!("open boundary facet {f} is not attached to any 3D cell"))?;
+        let p0 = mesh.point(fv[0] as usize);
+        let p1 = mesh.point(fv[1] as usize);
+        let p2 = mesh.point(fv[2] as usize);
+        let p_opp = mesh.point(opp as usize);
+        let a = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+        let b = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+        let cx = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        let norm_cx = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+        if norm_cx <= 1e-30 {
+            continue;
+        }
+        let area = 0.5 * norm_cx;
+        let cx_hat = [cx[0] / norm_cx, cx[1] / norm_cx, cx[2] / norm_cx];
+        let mut n_hat = cx_hat;
+        let out_dot = (p0[0] - p_opp[0]) * n_hat[0] + (p0[1] - p_opp[1]) * n_hat[1] + (p0[2] - p_opp[2]) * n_hat[2];
+        if out_dot < 0.0 {
+            n_hat = [-n_hat[0], -n_hat[1], -n_hat[2]];
+        }
+
+        // Reject origin lying directly on the triangle facet
+        let h_plane = (r0[0] - p0[0]) * n_hat[0] + (r0[1] - p0[1]) * n_hat[1] + (r0[2] - p0[2]) * n_hat[2];
+        let h_tol = 1e-12 * area.sqrt().max(1e-15);
+        if h_plane.abs() <= h_tol {
+            let w = [
+                r0[0] - h_plane * n_hat[0] - p0[0],
+                r0[1] - h_plane * n_hat[1] - p0[1],
+                r0[2] - h_plane * n_hat[2] - p0[2],
+            ];
+            let wxb = [w[1] * b[2] - w[2] * b[1], w[2] * b[0] - w[0] * b[2], w[0] * b[1] - w[1] * b[0]];
+            let axw = [a[1] * w[2] - a[2] * w[1], a[2] * w[0] - a[0] * w[2], a[0] * w[1] - a[1] * w[0]];
+            let lam1 = (wxb[0] * cx_hat[0] + wxb[1] * cx_hat[1] + wxb[2] * cx_hat[2]) / norm_cx;
+            let lam2 = (axw[0] * cx_hat[0] + axw[1] * cx_hat[1] + axw[2] * cx_hat[2]) / norm_cx;
+            let lam0 = 1.0 - lam1 - lam2;
+            if lam0 >= -1e-9 && lam1 >= -1e-9 && lam2 >= -1e-9 {
+                return Err("open boundary origin coincides with an open boundary facet".into());
+            }
+        }
+
+        let eps_nn = match tensor_perm {
+            Some(t) => {
+                let mut s = 0.0;
+                for i in 0..3 {
+                    for j in 0..3 {
+                        s += n_hat[i] * t[c][i][j] * n_hat[j];
+                    }
+                }
+                s
+            }
+            None => scalar_perm[c],
+        };
+
+        ke.fill(0.0);
+        let r2_min = 1e-24 * area.max(1e-30);
+        let mut facet_pos = false;
+        for (q, lam) in rule.lam.iter().enumerate() {
+            let xq = [
+                lam[0] * p0[0] + lam[1] * p1[0] + lam[2] * p2[0],
+                lam[0] * p0[1] + lam[1] * p1[1] + lam[2] * p2[1],
+                lam[0] * p0[2] + lam[1] * p1[2] + lam[2] * p2[2],
+            ];
+            let dx = [xq[0] - r0[0], xq[1] - r0[1], xq[2] - r0[2]];
+            let r2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+            if r2 <= r2_min {
+                return Err("open boundary origin coincides with an open boundary facet".into());
+            }
+            let r_dot_n = (dx[0] * n_hat[0] + dx[1] * n_hat[1] + dx[2] * n_hat[2]).max(0.0);
+            let w_alpha = area * rule.w[q] * eps_nn * (r_dot_n / r2);
+            if w_alpha > 0.0 {
+                facet_pos = true;
+                let nv = &shapes[q];
+                for ia in 0..nloc {
+                    for ib in 0..nloc {
+                        ke[ia * nloc + ib] += w_alpha * nv[ia] * nv[ib];
+                    }
+                }
+            }
+        }
+        if facet_pos {
+            positive_facets += 1;
+            mesh.facet_dofs(f, order, &mut dofs);
+            coo.push_block(&dofs, &dofs, &ke);
+        }
+    }
+    if !open_origins.is_empty() && positive_facets == 0 {
+        return Err("open boundary origin produced zero outward Robin weight on all open boundary facets".into());
+    }
+    Ok(coo.to_csr())
+}
+
 pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
     let order = spec.order;
     check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
@@ -287,25 +441,31 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
     let m_work = qp_mesh.as_ref().map_or(mesh, |(m, _, _)| m);
     let eps = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
     let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
-    let k = if spec.materials.has_tensor(TensorKind::Permittivity) {
+    let coeff: Vec<f64> = eps.iter().map(|e| EPS0 * e).collect();
+    let tensor_perm = if spec.materials.has_tensor(TensorKind::Permittivity) {
         let mut t = plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?);
         t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
-        if m_work.dim == 3 && m_work.has_curved() {
-            assemble_laplace_tensor_curved_3d(m_work, order, &t)
-        } else {
-            assemble_laplace_tensor(m_work, order, &t)
-        }
+        Some(t)
     } else {
-        let coeff: Vec<f64> = eps.iter().map(|e| EPS0 * e).collect();
+        None
+    };
+    let mut k = if let Some(t) = &tensor_perm {
         if m_work.dim == 3 && m_work.has_curved() {
-            assemble_laplace_curved_3d(m_work, order, &coeff)
+            assemble_laplace_tensor_curved_3d(m_work, order, t)
         } else {
-            assemble_laplace(m_work, order, &coeff)
+            assemble_laplace_tensor(m_work, order, t)
         }
+    } else if m_work.dim == 3 && m_work.has_curved() {
+        assemble_laplace_curved_3d(m_work, order, &coeff)
+    } else {
+        assemble_laplace(m_work, order, &coeff)
     };
     let n = k.nrows();
     let mut f = if rho.iter().any(|&r| r != 0.0) { assemble_source(m_work, order, &rho) } else { vec![0.0; n] };
     let mut volt: BTreeMap<i32, f64> = BTreeMap::new();
+    let (lo, hi) = m_work.bbox();
+    let default_origin = [0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1]), 0.5 * (lo[2] + hi[2])];
+    let mut open_origins: BTreeMap<i32, [f64; 3]> = BTreeMap::new();
     for bc in &spec.bcs {
         for &lab in &bc.labels {
             match &bc.kind {
@@ -321,6 +481,18 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
                     }
                     volt.entry(lab).or_insert(0.0);
                 }
+                BcKind::Open { origin } => {
+                    if m_work.dim != 3 {
+                        return Err(
+                            "open boundary condition (spherical 1/r asymptotic Robin) requires a 3D mesh".into()
+                        );
+                    }
+                    let r0 = origin.unwrap_or(default_origin);
+                    if r0.iter().any(|x| !x.is_finite()) {
+                        return Err("open boundary 'origin' must be finite".into());
+                    }
+                    open_origins.insert(lab, r0);
+                }
                 BcKind::SurfaceCharge(s) => {
                     if *s != 0.0 {
                         let l = assemble_boundary_load(m_work, &[lab], *s, order);
@@ -331,11 +503,16 @@ pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<
             }
         }
     }
-    if volt.is_empty() {
+    let has_open = !open_origins.is_empty();
+    if has_open {
+        let k_open = assemble_open_robin(m_work, order, &open_origins, tensor_perm.as_deref(), &coeff)?;
+        k = k.add_scaled(&k_open, 1.0);
+    }
+    if volt.is_empty() && !has_open {
         return Err("electrostatics needs at least one potential, ground or terminal boundary".into());
     }
     let (fixed, vals) = dirichlet_constraints(m_work, &volt, order);
-    Ok(ElectroAssembly { k, f, fixed, vals, volt })
+    Ok(ElectroAssembly { k, f, fixed, vals, volt, has_open })
 }
 
 /// Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one
@@ -402,6 +579,7 @@ fn build_tls_meta(mesh: &Discretisation, spec: &Problem) -> TlsMeta {
         sheet_labels: sheet_set.into_iter().collect(),
         sheet_thickness_m: BTreeMap::new(),
         pec_labels: pec_set.into_iter().collect(),
+        interfaces: spec.tls_interfaces.clone(),
     }
 }
 
@@ -500,6 +678,11 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
                 "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
                 Scalar::Num(2.0 * w / (dv[1] - dv[0]).powi(2)),
             ));
+        } else if dv.len() == 1 && asm.has_open && dv[0].abs() > 1e-12 {
+            scalars.push((
+                "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
+                Scalar::Num(2.0 * w / dv[0].powi(2)),
+            ));
         }
         scalars.push(tls.scalar());
         return Ok(SolveResult {
@@ -536,7 +719,7 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         }
     }
     let bg_dofs: BTreeSet<usize> = boundary_dofs(mesh, &bg_labels, order).into_iter().collect();
-    if n_term == 1 && bg_dofs.is_empty() {
+    if n_term == 1 && bg_dofs.is_empty() && !asm.has_open {
         return Err(
             "electrostatics with a single terminal needs at least one ground or potential reference boundary".into()
         );
@@ -653,12 +836,34 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
     }
 
     let kv_all: Vec<Vec<f64>> = v_all.iter().map(|v| asm.k.matvec(v)).collect();
+    let mut c_raw = vec![vec![0.0; n_term]; n_term];
+    for i in 0..n_term {
+        for j in 0..n_term {
+            c_raw[i][j] = femcore::linalg::vecops::dotu(&v_all[i], &kv_all[j]);
+        }
+    }
+    let raw_asym = if n_term <= 1 {
+        0.0
+    } else {
+        let mut diff_sq = 0.0;
+        let mut norm_sq = 0.0;
+        for i in 0..n_term {
+            for j in 0..n_term {
+                let d = c_raw[i][j] - c_raw[j][i];
+                diff_sq += d * d;
+                norm_sq += c_raw[i][j] * c_raw[i][j];
+            }
+        }
+        if norm_sq > 0.0 {
+            (diff_sq / norm_sq).sqrt()
+        } else {
+            0.0
+        }
+    };
     let mut maxwell_matrix_f = vec![vec![0.0; n_term]; n_term];
     for i in 0..n_term {
         for j in i..n_term {
-            let cij = femcore::linalg::vecops::dotu(&v_all[i], &kv_all[j]);
-            let cji = if i == j { cij } else { femcore::linalg::vecops::dotu(&v_all[j], &kv_all[i]) };
-            let sym = 0.5 * (cij + cji);
+            let sym = 0.5 * (c_raw[i][j] + c_raw[j][i]);
             maxwell_matrix_f[i][j] = sym;
             maxwell_matrix_f[j][i] = sym;
         }
@@ -726,6 +931,8 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
             }
         }
     }
+
+    scalars.push(("maxwell_raw_asymmetry_rel".into(), Scalar::Num(raw_asym)));
 
     let cap_data = CapacitanceMatrixData {
         terminals: terminals.into_iter().map(|(n, _)| n).collect(),

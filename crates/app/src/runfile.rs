@@ -122,6 +122,7 @@ fn check_script(o: &Opts, text: &str, args: &[String]) -> Result<(), Exit> {
 
 fn run_script(o: &Opts, text: &str, args: &[String]) -> Result<(), Exit> {
     let mut engine = Engine::new();
+    engine.set_memory_wait_timeout(Some(30.0));
     for n in &engine.library_notes {
         eprintln!("library: {n}");
     }
@@ -185,6 +186,7 @@ pub fn run(args: &[String]) -> Result<(), Exit> {
         return run_script(&o, &text, args);
     }
     let mut engine = Engine::new();
+    engine.set_memory_wait_timeout(Some(30.0));
     if !o.no_check {
         let r = engine.check_list(&text);
         if !r.ok() {

@@ -13,7 +13,8 @@
 
 use crate::linalg::csr::Csr;
 use crate::linalg::direct::{
-    Definiteness, FactorStats, ShiftedFactorization, ShiftedSolver, SolverError, ThreadPolicy, Used, assemble,
+    Definiteness, FactorBackend, FactorStats, ShiftedFactorization, ShiftedSolver, SolverError, ThreadPolicy, Used,
+    assemble,
 };
 use crate::linalg::faer_glue::{FaerScalar, clear_upper_vector_state};
 use crate::linalg::scalar::C64;
@@ -119,6 +120,7 @@ impl<T: LowPrecision> MixedPrecisionLu<T> {
                 numeric_count: 0,
                 assemble_secs_last: 0.0,
                 used: Used::None,
+                backend: FactorBackend::None,
                 cholesky_fallbacks: 0,
                 solves: 0,
                 factor_nnz: 0,
@@ -260,6 +262,7 @@ impl<T: LowPrecision> ShiftedSolver<T> for MixedPrecisionLu<T> {
         self.base.numeric_secs_total += secs;
         self.base.numeric_count += 1;
         self.base.used = Used::Lu;
+        self.base.backend = FactorBackend::LuColamd;
         Ok(())
     }
 

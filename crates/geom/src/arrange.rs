@@ -71,46 +71,172 @@ struct KEdge {
     owners: Vec<Owner>,
 }
 
+const LINE_THETA_STEP: f64 = 1e-4;
+
 struct Curves {
     list: Vec<Curve>,
     tol: f64,
+    center: V2,
+    line_ids: Vec<u32>,
+    line_grid: HashMap<(i64, i64), Vec<u32>>,
+    circle_grid: HashMap<(i64, i64, i64), Vec<u32>>,
+    ellipse_grid: HashMap<(i64, i64, i64), Vec<u32>>,
 }
 
 impl Curves {
+    fn new(tol: f64, center: V2) -> Self {
+        Self {
+            list: Vec::new(),
+            tol,
+            center,
+            line_ids: Vec::new(),
+            line_grid: HashMap::new(),
+            circle_grid: HashMap::new(),
+            ellipse_grid: HashMap::new(),
+        }
+    }
+
     fn add(&mut self, c: Curve) -> u32 {
         let tol = self.tol;
-        let found = self.list.iter().position(|o| match (o, &c) {
-            (Curve::Circle { c: c1, r: r1 }, Curve::Circle { c: c2, r: r2 }) => {
-                dist2(*c1, *c2) <= tol && (r1 - r2).abs() <= tol
+        let step = (4.0 * tol).max(1e-30);
+        match &c {
+            Curve::Circle { c: c2, r: r2 } => {
+                let (kx, ky, kr) =
+                    ((c2[0] / step).floor() as i64, (c2[1] / step).floor() as i64, (*r2 / step).floor() as i64);
+                let mut best: Option<u32> = None;
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        for dr in -1..=1 {
+                            if let Some(bucket) = self.circle_grid.get(&(kx + dx, ky + dy, kr + dr)) {
+                                for &id in bucket {
+                                    if best.is_some_and(|b| id >= b) {
+                                        continue;
+                                    }
+                                    if let Curve::Circle { c: c1, r: r1 } = &self.list[id as usize] {
+                                        if dist2(*c1, *c2) <= tol && (r1 - r2).abs() <= tol {
+                                            best = Some(id);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(id) = best {
+                    return id;
+                }
+                self.list.push(c);
+                let id = (self.list.len() - 1) as u32;
+                self.circle_grid.entry((kx, ky, kr)).or_default().push(id);
+                id
             }
-            (Curve::Ellipse { c: c1, a: a1, b: b1, phi: p1 }, Curve::Ellipse { c: c2, a: a2, b: b2, phi: p2 }) => {
-                dist2(*c1, *c2) <= tol
-                    && (a1 - a2).abs() <= tol
-                    && (b1 - b2).abs() <= tol
-                    && (a1 - b1) * (p1 - p2).sin().abs() <= tol
+            Curve::Ellipse { c: c2, a: a2, b: b2, phi: p2 } => {
+                let (kx, ky, ka) =
+                    ((c2[0] / step).floor() as i64, (c2[1] / step).floor() as i64, (*a2 / step).floor() as i64);
+                let mut best: Option<u32> = None;
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        for da in -1..=1 {
+                            if let Some(bucket) = self.ellipse_grid.get(&(kx + dx, ky + dy, ka + da)) {
+                                for &id in bucket {
+                                    if best.is_some_and(|b| id >= b) {
+                                        continue;
+                                    }
+                                    if let Curve::Ellipse { c: c1, a: a1, b: b1, phi: p1 } = &self.list[id as usize] {
+                                        if dist2(*c1, *c2) <= tol
+                                            && (a1 - a2).abs() <= tol
+                                            && (b1 - b2).abs() <= tol
+                                            && (a1 - b1) * (p1 - p2).sin().abs() <= tol
+                                        {
+                                            best = Some(id);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(id) = best {
+                    return id;
+                }
+                self.list.push(c);
+                let id = (self.list.len() - 1) as u32;
+                self.ellipse_grid.entry((kx, ky, ka)).or_default().push(id);
+                id
             }
-            _ => false,
-        });
-        match found {
-            Some(i) => i as u32,
-            None => {
+            Curve::Line { .. } => {
                 self.list.push(c);
                 (self.list.len() - 1) as u32
             }
         }
     }
+
     /// Interned line through `p`, `q`; the flag says that `p -> q` runs against the canonical direction.
     fn line(&mut self, p: V2, q: V2) -> (u32, bool) {
-        for (i, c) in self.list.iter().enumerate() {
-            if let Curve::Line { o, d } = c {
-                if cross2(*d, sub2(p, *o)).abs() <= self.tol && cross2(*d, sub2(q, *o)).abs() <= self.tol {
-                    return (i as u32, dot2(sub2(q, p), *d) < 0.0);
+        let (c_cand, rev) = canonical_line(p, sub2(q, p));
+        let Curve::Line { o: o_cand, d: d_cand } = c_cand else { unreachable!() };
+        let len = dist2(p, q).max(self.tol);
+        let r_p = dist2(p, self.center).max(dist2(q, self.center));
+        let delta_theta = (2.01 * self.tol / len) + 1e-11;
+        let delta_s = delta_theta * r_p + 1.01 * self.tol;
+        let s_step = (16.0 * self.tol).max(1e-30);
+        let theta = d_cand[1].atan2(d_cand[0]);
+        let s_cand = cross2(d_cand, sub2(o_cand, self.center));
+        let kt0 = ((theta - delta_theta) / LINE_THETA_STEP).floor() as i64;
+        let kt1 = ((theta + delta_theta) / LINE_THETA_STEP).floor() as i64;
+        let ks0 = ((s_cand - delta_s) / s_step).floor() as i64;
+        let ks1 = ((s_cand + delta_s) / s_step).floor() as i64;
+
+        let mut best: Option<u32> = None;
+        if (kt1 - kt0 + 1).saturating_mul(ks1 - ks0 + 1) <= 64 {
+            for kt in kt0..=kt1 {
+                for ks in ks0..=ks1 {
+                    if let Some(bucket) = self.line_grid.get(&(kt, ks)) {
+                        for &id in bucket {
+                            if best.is_some_and(|b| id >= b) {
+                                continue;
+                            }
+                            if let Curve::Line { o, d } = &self.list[id as usize] {
+                                if cross2(*d, sub2(p, *o)).abs() <= self.tol
+                                    && cross2(*d, sub2(q, *o)).abs() <= self.tol
+                                {
+                                    best = Some(id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            for &id in &self.line_ids {
+                if let Curve::Line { o, d } = &self.list[id as usize] {
+                    if cross2(*d, sub2(p, *o)).abs() <= self.tol && cross2(*d, sub2(q, *o)).abs() <= self.tol {
+                        best = Some(id);
+                        break;
+                    }
                 }
             }
         }
-        let (c, rev) = canonical_line(p, sub2(q, p));
-        self.list.push(c);
-        ((self.list.len() - 1) as u32, rev)
+        if let Some(id) = best {
+            let Curve::Line { d, .. } = &self.list[id as usize] else { unreachable!() };
+            return (id, dot2(sub2(q, p), *d) < 0.0);
+        }
+        self.list.push(c_cand);
+        let id = (self.list.len() - 1) as u32;
+        self.line_ids.push(id);
+        let kt = (theta / LINE_THETA_STEP).floor() as i64;
+        let ks = (s_cand / s_step).floor() as i64;
+        self.line_grid.entry((kt, ks)).or_default().push(id);
+        if d_cand[0].abs() <= 0.1 {
+            let theta_opp = (-d_cand[1]).atan2(-d_cand[0]);
+            let s_opp = -s_cand;
+            let kt_opp = (theta_opp / LINE_THETA_STEP).floor() as i64;
+            let ks_opp = (s_opp / s_step).floor() as i64;
+            if (kt_opp, ks_opp) != (kt, ks) {
+                self.line_grid.entry((kt_opp, ks_opp)).or_default().push(id);
+            }
+        }
+        (id, rev)
     }
 }
 
@@ -203,7 +329,11 @@ pub fn arrange_with(
     }
     let (tol, band) = (1e-9 * diag, GRAZE_K * 1e-9 * diag);
     let prims = &scene.prims;
-    let mut curves = Curves { list: vec![], tol };
+    let scene_center = {
+        let c = scene.bounds.center();
+        [c[0], c[1]]
+    };
+    let mut curves = Curves::new(tol, scene_center);
     let mut verts = Verts { p: vec![], who: vec![], grid: HashMap::new(), tol, band };
     let pname =
         |pi: u32, role: u32| format!("{}.{}", prims[pi as usize].name, prims[pi as usize].segs[role as usize].role);
@@ -299,11 +429,13 @@ pub fn arrange_with(
     // 3. raw intersections, cached by content hash; misses computed (in parallel) and stored in pair order
     let key = |i: usize, j: usize| (segs[i].h.min(segs[j].h), segs[i].h.max(segs[j].h));
     let mut missing: Vec<(usize, usize)> = vec![];
+    let mut missing_keys: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
     for &(i, j) in &pairs {
         if segs[i].cid != segs[j].cid {
-            if cache.pairs.contains_key(&key(i, j)) {
+            let k = key(i, j);
+            if cache.pairs.contains_key(&k) {
                 cache.stats.pairs_cached += 1;
-            } else if !missing.iter().any(|&(a, b)| key(a, b) == key(i, j)) {
+            } else if missing_keys.insert(k) {
                 missing.push((i, j));
             }
         }
@@ -522,14 +654,33 @@ pub fn arrange_with(
         merged.push(s);
     }
 
-    // 7. classify both sides
+    // 7. classify both sides (accelerated via 2D AABB BVH over planar primitives)
     let np = prims.len();
+    let prim_boxes: Vec<crate::bvh::Bbox2> = prims
+        .iter()
+        .map(|p| {
+            if p.is_curved_solid() || p.poly.is_some() {
+                crate::bvh::Bbox2::EMPTY
+            } else {
+                crate::bvh::Bbox2::from_aabb_xy(&p.bbox)
+            }
+        })
+        .collect();
+    let prim_bvh = crate::bvh::AabbBvh2::build(prim_boxes);
     let (mut bl, mut br) = (vec![false; np], vec![false; np]);
+    let mut cands: Vec<usize> = Vec::new();
     let mut kept: Vec<KEdge> = vec![];
     for s in merged {
         let c = &curves.list[s.cid as usize];
         let mid = c.eval(0.5 * (s.t0 + s.t1));
-        for p in 0..np {
+        cands.clear();
+        prim_bvh.query_point(mid, band, |p| cands.push(p as usize));
+        for o in &s.owners {
+            cands.push(o.prim as usize);
+        }
+        cands.sort_unstable();
+        cands.dedup();
+        for &p in &cands {
             let own = s.owners.iter().find(|o| o.prim as usize == p);
             if let Some(o) = own {
                 bl[p] = o.in_left;
@@ -549,6 +700,10 @@ pub fn arrange_with(
         }
         let left = classify(&|i| bl[i]);
         let right = classify(&|i| br[i]);
+        for &p in &cands {
+            bl[p] = false;
+            br[p] = false;
+        }
         if left != right {
             kept.push(KEdge { cid: s.cid, t0: s.t0, t1: s.t1, v0: s.v0, v1: s.v1, left, right, owners: s.owners });
         }
@@ -561,52 +716,60 @@ pub fn arrange_with(
         v.dedup();
         v
     };
-    loop {
-        let mut inc: HashMap<u32, Vec<usize>> = HashMap::new();
-        for (e, k) in kept.iter().enumerate() {
-            inc.entry(k.v0).or_default().push(e);
-            inc.entry(k.v1).or_default().push(e);
-        }
-        let mut vs: Vec<u32> = inc.keys().copied().collect();
-        vs.sort_unstable();
-        let mut did = None;
-        for v in vs {
-            let l = &inc[&v];
-            if l.len() != 2 || l[0] == l[1] {
-                continue;
-            }
-            let (x, y) = if kept[l[0]].v1 == v && kept[l[1]].v0 == v {
-                (l[0], l[1])
-            } else if kept[l[1]].v1 == v && kept[l[0]].v0 == v {
-                (l[1], l[0])
-            } else {
-                continue;
-            };
-            let (a, b) = (&kept[x], &kept[y]);
-            let pt = 4.0 * tol / speed(&curves.list[a.cid as usize]);
-            let c = &curves.list[a.cid as usize];
-            let consecutive = if c.periodic() {
-                (wrap_from(b.t0, a.t1) - a.t1).min(TAU - (wrap_from(b.t0, a.t1) - a.t1)) <= pt
-            } else {
-                (b.t0 - a.t1).abs() <= pt
-            };
-            if a.cid == b.cid
-                && a.left == b.left
-                && a.right == b.right
-                && consecutive
-                && owner_key(&a.owners) == owner_key(&b.owners)
-            {
-                did = Some((x, y));
-                break;
-            }
-        }
-        let Some((x, y)) = did else { break };
-        let b = kept.remove(y);
-        let a = &mut kept[if y < x { x - 1 } else { x }];
-        let sweep = (a.t1 - a.t0) + (b.t1 - b.t0);
-        a.t1 = a.t0 + sweep;
-        a.v1 = b.v1;
+    let okeys: Vec<Vec<(u32, u32)>> = kept.iter().map(|k| owner_key(&k.owners)).collect();
+    let mut alive = vec![true; kept.len()];
+    let mut inc: Vec<Vec<usize>> = vec![Vec::new(); verts.p.len()];
+    for (e, k) in kept.iter().enumerate() {
+        inc[k.v0 as usize].push(e);
+        inc[k.v1 as usize].push(e);
     }
+    let mut worklist: std::collections::BTreeSet<u32> = (0..verts.p.len() as u32)
+        .filter(|&v| inc[v as usize].len() == 2 && inc[v as usize][0] != inc[v as usize][1])
+        .collect();
+    while let Some(v) = worklist.pop_first() {
+        let l = &inc[v as usize];
+        if l.len() != 2 || l[0] == l[1] {
+            continue;
+        }
+        let (l0, l1) = (l[0], l[1]);
+        if !alive[l0] || !alive[l1] {
+            continue;
+        }
+        let (x, y) = if kept[l0].v1 == v && kept[l1].v0 == v {
+            (l0, l1)
+        } else if kept[l1].v1 == v && kept[l0].v0 == v {
+            (l1, l0)
+        } else {
+            continue;
+        };
+        let (a, b) = (&kept[x], &kept[y]);
+        let pt = 4.0 * tol / speed(&curves.list[a.cid as usize]);
+        let c = &curves.list[a.cid as usize];
+        let consecutive = if c.periodic() {
+            (wrap_from(b.t0, a.t1) - a.t1).min(TAU - (wrap_from(b.t0, a.t1) - a.t1)) <= pt
+        } else {
+            (b.t0 - a.t1).abs() <= pt
+        };
+        if a.cid == b.cid && a.left == b.left && a.right == b.right && consecutive && okeys[x] == okeys[y] {
+            alive[y] = false;
+            let b_span = b.t1 - b.t0;
+            let b_v1 = b.v1;
+            let ax = &mut kept[x];
+            ax.t1 = ax.t0 + (ax.t1 - ax.t0) + b_span;
+            ax.v1 = b_v1;
+            inc[v as usize].clear();
+            for slot in &mut inc[b_v1 as usize] {
+                if *slot == y {
+                    *slot = x;
+                    break;
+                }
+            }
+            if inc[b_v1 as usize].len() == 2 && inc[b_v1 as usize][0] != inc[b_v1 as usize][1] {
+                worklist.insert(b_v1);
+            }
+        }
+    }
+    let kept: Vec<KEdge> = kept.into_iter().enumerate().filter_map(|(i, k)| alive[i].then_some(k)).collect();
     finish(scene, &regions(), curves, verts, kept, tol, prims)
 }
 
@@ -897,38 +1060,6 @@ fn finish(
             regions[loops[li].region as usize].bbox = rb.union(&boxes[li]);
         }
     }
-    for li in 0..loops.len() {
-        if loops[li].area >= 0.0 {
-            continue;
-        }
-        let r = loops[li].region;
-        let cands: Vec<usize> = regions[r as usize]
-            .loops
-            .iter()
-            .map(|&x| x as usize)
-            .filter(|&o| {
-                loops[o].area > 0.0
-                    && boxes[o].overlaps(&boxes[li])
-                    && boxes[o].lo[0] <= boxes[li].lo[0] + tol
-                    && boxes[o].lo[1] <= boxes[li].lo[1] + tol
-                    && boxes[o].hi[0] >= boxes[li].hi[0] - tol
-                    && boxes[o].hi[1] >= boxes[li].hi[1] - tol
-            })
-            .collect();
-        let pick = if cands.len() == 1 {
-            Some(cands[0])
-        } else {
-            let (e, f) = loops[li].edges[0];
-            let ed = &edges[e as usize];
-            let m = curves[ed.curve as usize].eval(0.5 * (ed.t0 + ed.t1));
-            let _ = f;
-            let mut inside: Vec<usize> =
-                cands.into_iter().filter(|&o| point_in_loop(&loops[o], &edges, &curves, m)).collect();
-            inside.sort_by(|&a, &b| loops[a].area.total_cmp(&loops[b].area));
-            inside.first().copied()
-        };
-        loops[li].outer = pick.map(|p| p as u32);
-    }
     let vertices: Vec<Vertex> = (0..nv)
         .map(|v| {
             let mut names: Vec<&str> = vedges[v].iter().map(|&e| edges[e as usize].name.as_str()).collect();
@@ -938,7 +1069,7 @@ fn finish(
         })
         .collect();
     let _ = warnings_region;
-    Ok(Complex {
+    let mut cx = Complex {
         dim: 2,
         tol,
         origin: area_origin,
@@ -953,27 +1084,86 @@ fn finish(
         planar: vec![],
         axis: 2,
         stack: None,
-    })
+        bvh: crate::bvh::ComplexBvh::default(),
+    };
+    cx.rebuild_bvh();
+    for li in 0..cx.loops.len() {
+        if cx.loops[li].area >= 0.0 {
+            continue;
+        }
+        let r = cx.loops[li].region;
+        let hole_box = cx.bvh.loops.item_boxes[li];
+        let mut cands: Vec<usize> = Vec::new();
+        if cx.regions[r as usize].loops.len() >= 32 {
+            cx.bvh.loops.query_box(&hole_box, tol, |o| {
+                let o = o as usize;
+                if cx.loops[o].region == r
+                    && cx.loops[o].area > 0.0
+                    && boxes[o].overlaps(&boxes[li])
+                    && boxes[o].lo[0] <= boxes[li].lo[0] + tol
+                    && boxes[o].lo[1] <= boxes[li].lo[1] + tol
+                    && boxes[o].hi[0] >= boxes[li].hi[0] - tol
+                    && boxes[o].hi[1] >= boxes[li].hi[1] - tol
+                {
+                    cands.push(o);
+                }
+            });
+            cands.sort_unstable();
+        } else {
+            for &x in &cx.regions[r as usize].loops {
+                let o = x as usize;
+                if cx.loops[o].area > 0.0
+                    && boxes[o].overlaps(&boxes[li])
+                    && boxes[o].lo[0] <= boxes[li].lo[0] + tol
+                    && boxes[o].lo[1] <= boxes[li].lo[1] + tol
+                    && boxes[o].hi[0] >= boxes[li].hi[0] - tol
+                    && boxes[o].hi[1] >= boxes[li].hi[1] - tol
+                {
+                    cands.push(o);
+                }
+            }
+        }
+        let pick = if cands.len() == 1 {
+            Some(cands[0])
+        } else {
+            let (e, f) = cx.loops[li].edges[0];
+            let ed = &cx.edges[e as usize];
+            let m = cx.curves[ed.curve as usize].eval(0.5 * (ed.t0 + ed.t1));
+            let _ = f;
+            let mut inside: Vec<usize> = cands.into_iter().filter(|&o| cx.point_in_loop_idx(o, m)).collect();
+            inside.sort_by(|&a, &b| cx.loops[a].area.total_cmp(&cx.loops[b].area));
+            inside.first().copied()
+        };
+        cx.loops[li].outer = pick.map(|p| p as u32);
+    }
+    Ok(cx)
+}
+
+/// Parity of crossings of one directed edge against the horizontal ray `[p[0], +inf) x {p[1]}`.
+pub(crate) fn edge_crosses_ray_x(ed: &Edge, curves: &[Curve], fwd: bool, p: V2) -> bool {
+    let mut inside = false;
+    let c = &curves[ed.curve as usize];
+    let n = if matches!(c, Curve::Line { .. }) { 1 } else { 256 };
+    let mut prev = c.eval(if fwd { ed.t0 } else { ed.t1 });
+    for k in 1..=n {
+        let u = k as f64 / n as f64;
+        let t = if fwd { ed.t0 + (ed.t1 - ed.t0) * u } else { ed.t1 - (ed.t1 - ed.t0) * u };
+        let q = c.eval(t);
+        if (prev[1] > p[1]) != (q[1] > p[1]) && p[0] < (q[0] - prev[0]) * (p[1] - prev[1]) / (q[1] - prev[1]) + prev[0]
+        {
+            inside = !inside;
+        }
+        prev = q;
+    }
+    inside
 }
 
 /// Even-odd test of `p` against a loop flattened to chords (used only to decide which outer loop a hole belongs to).
 pub(crate) fn point_in_loop(l: &Loop, edges: &[Edge], curves: &[Curve], p: V2) -> bool {
     let mut inside = false;
     for &(e, fwd) in &l.edges {
-        let ed = &edges[e as usize];
-        let c = &curves[ed.curve as usize];
-        let n = if matches!(c, Curve::Line { .. }) { 1 } else { 256 };
-        let mut prev = c.eval(if fwd { ed.t0 } else { ed.t1 });
-        for k in 1..=n {
-            let u = k as f64 / n as f64;
-            let t = if fwd { ed.t0 + (ed.t1 - ed.t0) * u } else { ed.t1 - (ed.t1 - ed.t0) * u };
-            let q = c.eval(t);
-            if (prev[1] > p[1]) != (q[1] > p[1])
-                && p[0] < (q[0] - prev[0]) * (p[1] - prev[1]) / (q[1] - prev[1]) + prev[0]
-            {
-                inside = !inside;
-            }
-            prev = q;
+        if edge_crosses_ray_x(&edges[e as usize], curves, fwd, p) {
+            inside = !inside;
         }
     }
     inside

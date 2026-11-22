@@ -742,7 +742,7 @@
   },
   {
     "access": "edit",
-    "description": "Give only what changes. `adapt_scale`, `gap_cells` or `sweep` set to null return to the simple mesher / explicit-only sheet sizing / an unswept mesh. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
+    "description": "Give only what changes. `adapt_scale`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, or `sweep` set to null return to the default setting. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
     "name": "set_mesh",
     "schema": {
       "additionalProperties": false,
@@ -758,6 +758,14 @@
           "description": "3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity and bloch studies, default false",
           "type": "boolean"
         },
+        "dz_min": {
+          "description": "3D sheet stack: floor on initial vertical z-slab thickness near sheet planes in metres; null disables the floor",
+          "exclusiveMinimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "gap_cells": {
           "description": "3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping",
           "type": [
@@ -769,10 +777,34 @@
           "description": "global element size in metres",
           "type": "number"
         },
+        "max_cells": {
+          "description": "maximum number of mesh cells allowed before aborting meshing (overrides the default 2,000,000 cap on adaptive meshing and enforces pre-allocation guard on 3D sheet stacks); null restores default",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "max_dev": {
           "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "max_steiner_multiplier": {
+          "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial PSLG vertices; null uses default max(20 * n_init, 100000)",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_z_slabs": {
+          "description": "3D sheet stack: maximum total number of horizontal z-slabs across active stack layers (must be >= active stack layers); null disables the cap",
+          "minimum": 1,
+          "type": [
+            "integer",
             "null"
           ]
         },
@@ -786,6 +818,10 @@
             "number",
             "null"
           ]
+        },
+        "strict_mesh": {
+          "description": "fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default false",
+          "type": "boolean"
         },
         "structured_pml": {
           "description": "rebuild the absorbing layers as structured layers",
@@ -830,6 +866,14 @@
         "z_coarsen": {
           "description": "3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false",
           "type": "boolean"
+        },
+        "z_growth_ratio": {
+          "description": "3D sheet stack: geometric growth ratio (> 1.0) for vertical z-slab thickness away from sheet planes; null uses default 1.35",
+          "exclusiveMinimum": 1.0,
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "required": [],
@@ -869,6 +913,10 @@
           "description": "run the solve in a worker process: running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do",
           "type": "boolean"
         },
+        "memory_wait_timeout_s": {
+          "description": "maximum seconds (>= 0) to wait when free RAM is below the solve estimate (overrides NYX_MEMORY_WAIT_TIMEOUT_S and engine default)",
+          "type": "number"
+        },
         "physics": {
           "description": "physics code(s); default the active one",
           "oneOf": [
@@ -882,6 +930,45 @@
               "type": "array"
             }
           ]
+        },
+        "post_analyses": {
+          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+          "items": {
+            "additionalProperties": false,
+            "description": "one read-only post-solve analysis or field-reduction request",
+            "properties": {
+              "analysis": {
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation)",
+                "type": "string"
+              },
+              "args": {
+                "description": "arguments object passed to `cmd`",
+                "type": "object"
+              },
+              "cmd": {
+                "description": "explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
+                "type": "string"
+              },
+              "label": {
+                "description": "optional label attached to this post-analysis entry in the reply",
+                "type": "string"
+              },
+              "params": {
+                "description": "optional parameters object for shorthand `analysis`",
+                "type": "object"
+              },
+              "physics": {
+                "description": "three-letter physics code for shorthand `analysis`; defaults to the solved physics that supports the analysis",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "save_fields": {
+          "description": "when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results after running any post_analyses, keeping scalars and eigenvalues; default true",
+          "type": "boolean"
         },
         "shared": {
           "description": "hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process",
@@ -1006,6 +1093,10 @@
           ],
           "type": "string"
         },
+        "memory_wait_timeout_s": {
+          "description": "solve only: maximum seconds (>= 0) to wait when free RAM is below the solve estimate (overrides NYX_MEMORY_WAIT_TIMEOUT_S and engine default)",
+          "type": "number"
+        },
         "physics": {
           "description": "physics code(s); default the active one",
           "oneOf": [
@@ -1020,9 +1111,48 @@
             }
           ]
         },
+        "post_analyses": {
+          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+          "items": {
+            "additionalProperties": false,
+            "description": "one read-only post-solve analysis or field-reduction request",
+            "properties": {
+              "analysis": {
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation)",
+                "type": "string"
+              },
+              "args": {
+                "description": "arguments object passed to `cmd`",
+                "type": "object"
+              },
+              "cmd": {
+                "description": "explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
+                "type": "string"
+              },
+              "label": {
+                "description": "optional label attached to this post-analysis entry in the reply",
+                "type": "string"
+              },
+              "params": {
+                "description": "optional parameters object for shorthand `analysis`",
+                "type": "object"
+              },
+              "physics": {
+                "description": "three-letter physics code for shorthand `analysis`; defaults to the solved physics that supports the analysis",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
         "priority": {
           "description": "1, 2 or 3; lower runs first",
           "type": "integer"
+        },
+        "save_fields": {
+          "description": "solve only: when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results after running any post_analyses; default true",
+          "type": "boolean"
         },
         "shared": {
           "description": "hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process",
@@ -1241,6 +1371,10 @@
           "description": "solve every point in a worker process, as for solve_run",
           "type": "boolean"
         },
+        "memory_wait_timeout_s": {
+          "description": "maximum seconds (>= 0) to wait per sweep point when free RAM is below the solve estimate (overrides NYX_MEMORY_WAIT_TIMEOUT_S and engine default)",
+          "type": "number"
+        },
         "name": {
           "description": "a name for the table",
           "type": "string"
@@ -1295,6 +1429,41 @@
           },
           "type": "array"
         },
+        "post_analyses": {
+          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+          "items": {
+            "additionalProperties": false,
+            "description": "one read-only post-solve analysis or field-reduction request",
+            "properties": {
+              "analysis": {
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation)",
+                "type": "string"
+              },
+              "args": {
+                "description": "arguments object passed to `cmd`",
+                "type": "object"
+              },
+              "cmd": {
+                "description": "explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
+                "type": "string"
+              },
+              "label": {
+                "description": "optional label attached to this post-analysis entry in the reply",
+                "type": "string"
+              },
+              "params": {
+                "description": "optional parameters object for shorthand `analysis`",
+                "type": "object"
+              },
+              "physics": {
+                "description": "three-letter physics code for shorthand `analysis`; defaults to the solved physics that supports the analysis",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
         "priority": {
           "description": "1, 2 or 3; default 3",
           "type": "integer"
@@ -1306,6 +1475,10 @@
             "warm"
           ],
           "type": "string"
+        },
+        "save_fields": {
+          "description": "when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results at every sweep point after running any post_analyses; default true",
+          "type": "boolean"
         },
         "series": {
           "description": "one command repeated with `field` set to each value",
@@ -2429,6 +2602,15 @@
           ],
           "type": "string"
         },
+        "quantities": {
+          "description": "non-empty list of quantity names to check; only matching rows count toward converged, worst_relative, and worst_quantity",
+          "items": {
+            "description": "quantity name or scalar name to include in the verdict (e.g. \"eigenvalue[0].re\", \"scalar C_0_0 (F)\", or \"C_0_0 (F)\")",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
         "scale_sizes": {
           "description": "scale non-suppressed add_size features (h, max_deviation, min_layers) proportionally with factor on the comparison copy, default true",
           "type": "boolean"
@@ -2559,7 +2741,7 @@
   },
   {
     "access": "read",
-    "description": "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation), which solved physics each applies to and, per physics, whether its result is `stale`.",
+    "description": "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network), which solved physics each applies to and, per physics, whether its result is `stale`.",
     "name": "list_analyses",
     "schema": {
       "additionalProperties": false,
@@ -2571,7 +2753,7 @@
   },
   {
     "access": "read",
-    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, or tls_participation. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), and resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`). The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
+    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, or network. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]` and `params` accept `trench_depth_m` (substrate over-etch depth in metres). For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
     "name": "analyse",
     "schema": {
       "additionalProperties": false,
@@ -2581,7 +2763,7 @@
           "type": "string"
         },
         "params": {
-          "description": "optional analysis parameters (for capacitance_matrix: ground, eliminate, qubits, resonators; also epr, hamiltonian, tls_participation options)",
+          "description": "optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, etc.; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; epr options)",
           "type": "object"
         },
         "physics": {

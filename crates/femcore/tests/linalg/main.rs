@@ -12,6 +12,7 @@ mod determinism;
 mod eps;
 mod expm;
 mod fieldsplit;
+mod fr16;
 mod gcrodr;
 mod ilu;
 mod jd;

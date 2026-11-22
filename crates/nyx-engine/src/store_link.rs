@@ -185,8 +185,23 @@ impl StoreLink {
         log: &[String],
         mesh: Option<&femcore::mesh::SimplexMesh>,
     ) -> Result<RunRecord, Error> {
+        self.record_with_options(project, outcome, seconds, log, mesh, true, &[])
+    }
+
+    /// `record` with explicit `fields_saved` and optional `post_analyses` results.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_with_options(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<&femcore::mesh::SimplexMesh>,
+        fields_saved: bool,
+        post_analyses: &[serde_json::Value],
+    ) -> Result<RunRecord, Error> {
         self.commit(project)?;
-        self.record_frozen(project, outcome, seconds, log, mesh, None)
+        self.record_frozen(project, outcome, seconds, log, mesh, None, fields_saved, post_analyses)
     }
 
     /// Adds a run for a project that is not the experiment's own (a point of a sweep): the run freezes the project it solved, and the
@@ -200,9 +215,26 @@ impl StoreLink {
         mesh: Option<&femcore::mesh::SimplexMesh>,
         reuse: Option<&serde_json::Value>,
     ) -> Result<RunRecord, Error> {
-        self.record_frozen(project, outcome, seconds, log, mesh, reuse)
+        self.record_frozen(project, outcome, seconds, log, mesh, reuse, true, &[])
     }
 
+    /// `record_point` with explicit `fields_saved` and optional `post_analyses` results.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_point_with_options(
+        &mut self,
+        project: &Project,
+        outcome: RunOutcome,
+        seconds: f64,
+        log: &[String],
+        mesh: Option<&femcore::mesh::SimplexMesh>,
+        reuse: Option<&serde_json::Value>,
+        fields_saved: bool,
+        post_analyses: &[serde_json::Value],
+    ) -> Result<RunRecord, Error> {
+        self.record_frozen(project, outcome, seconds, log, mesh, reuse, fields_saved, post_analyses)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn record_frozen(
         &mut self,
         project: &Project,
@@ -211,6 +243,8 @@ impl StoreLink {
         log: &[String],
         mesh: Option<&femcore::mesh::SimplexMesh>,
         reuse: Option<&serde_json::Value>,
+        fields_saved: bool,
+        post_analyses: &[serde_json::Value],
     ) -> Result<RunRecord, Error> {
         let (existing, _) = self.dir.runs(&self.experiment);
         let id = runs::next_id(&existing);
@@ -269,13 +303,23 @@ impl StoreLink {
                         .map_err(|e| Error::invalid(format!("{}: {e}", run_dir.display())))?;
                     let path = run_dir.join("results.h5");
                     let refs: Vec<(String, &SolveResult)> = results.iter().map(|r| (r.physics.clone(), r)).collect();
-                    crate::h5io::write_results(&path, project, mesh, &refs).map_err(Error::invalid)?;
-                    let x = crate::xdmf::write_xdmf(&path, mesh, &refs).map_err(Error::invalid)?;
-                    extra.push(Artifact {
-                        kind: "result".into(),
-                        path: format!("runs/{id}/results.xdmf"),
-                        bytes: std::fs::metadata(&x).map(|m| m.len()).unwrap_or(0),
-                    });
+                    crate::h5io::write_results_with_options(
+                        &path,
+                        project,
+                        mesh,
+                        &refs,
+                        crate::h5io::FieldStorageLayout::L2ShuffleLzfPacked,
+                        fields_saved,
+                    )
+                    .map_err(Error::invalid)?;
+                    if fields_saved {
+                        let x = crate::xdmf::write_xdmf(&path, mesh, &refs).map_err(Error::invalid)?;
+                        extra.push(Artifact {
+                            kind: "result".into(),
+                            path: format!("runs/{id}/results.xdmf"),
+                            bytes: std::fs::metadata(&x).map(|m| m.len()).unwrap_or(0),
+                        });
+                    }
                     extra.push(Artifact {
                         kind: "result".into(),
                         path: format!("runs/{id}/results.h5"),
@@ -283,7 +327,11 @@ impl StoreLink {
                     });
                 }
                 #[cfg(not(feature = "hdf5"))]
-                let _ = mesh;
+                let _ = (mesh, fields_saved);
+                if !post_analyses.is_empty() {
+                    let bytes = serde_json::to_vec(post_analyses).map_err(|e| Error::invalid(e.to_string()))?;
+                    write("post_analyses.json", "analysis", bytes)?;
+                }
             }
             RunOutcome::Failed(e) => {
                 rec.status = if matches!(e, Error::Cancelled) { RunStatus::Cancelled } else { RunStatus::Failed };

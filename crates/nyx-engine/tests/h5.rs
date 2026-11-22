@@ -367,7 +367,8 @@ fn layouts_l2_l3_and_l1_round_trip_at_zero_ulp_for_real_and_complex_solvers() {
             }
 
             // ReadBudgetConfig enforcement check: a 64-byte budget rejects whole-dataset reads cleanly
-            let tiny_budget = ReadBudgetConfig { max_dataset_bytes: 64, max_group_depth: 24 };
+            let tiny_budget =
+                ReadBudgetConfig { max_dataset_bytes: 64, max_group_depth: 24, ..ReadBudgetConfig::default() };
             let err = nyx_engine::h5io::read_results_with_budget(&path, tiny_budget).err().expect("budget enforced");
             assert!(err.contains("exceeds read budget"), "{err}");
 
@@ -681,4 +682,199 @@ fn nyx_worker_has_zero_hdf5_dll_dependency_and_runs_without_anaconda_in_path() {
     }
 
     let _ = std::fs::remove_dir_all(&job_dir);
+}
+
+fn write_synthetic_packed_h5(path: &Path, n_modes: usize, n_cells: usize, nloc: usize) {
+    let mut fb = FileBuilder::new();
+    fb.set_attr("writer", AttrValue::VarLenString("serial".into()));
+    fb.set_attr("processes", AttrValue::I64(1));
+    fb.set_attr("format", AttrValue::VarLenString("nyx-results".into()));
+    fb.set_attr("version", AttrValue::I32(4));
+    let proj = nyx_engine::Project::new("synthetic_budget", 3).to_json();
+    fb.create_dataset("project").with_u8_data(proj.as_bytes()).with_shape(&[proj.len() as u64]);
+    fb.set_attr("fields_saved", AttrValue::I64(1));
+
+    let mut m = fb.create_group("mesh");
+    m.create_dataset("points")
+        .with_f64_data(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+        .with_shape(&[4, 3]);
+    m.create_dataset("cells").with_u32_data(&[0, 1, 2, 3]).with_shape(&[1, 4]);
+    m.create_dataset("cell_labels").with_i32_data(&[1]).with_shape(&[1]);
+    m.create_dataset("facets").with_u32_data(&[0, 1, 2]).with_shape(&[1, 3]);
+    m.create_dataset("facet_labels").with_i32_data(&[1]).with_shape(&[1]);
+    fb.add_group(m.finish());
+
+    let mut root = fb.create_group("results");
+    let mut g = root.create_group("ems");
+    g.set_attr("physics", AttrValue::VarLenString("ems".into()));
+    g.set_attr("study", AttrValue::VarLenString("cavity".into()));
+    g.set_attr("order", AttrValue::I64(2));
+    g.set_attr("dim", AttrValue::I64(3));
+    g.set_attr("dofs", AttrValue::I64(10));
+    g.set_attr("seconds", AttrValue::F64(0.1));
+    g.set_attr("n_solutions", AttrValue::I64(n_modes as i64));
+    g.set_attr("field_layout", AttrValue::VarLenString("L2ShuffleLzfPacked".into()));
+    g.create_dataset("scalars").with_u8_data(b"[]").with_shape(&[2]);
+    g.create_dataset("log").with_u8_data(b"[]").with_shape(&[2]);
+    g.create_dataset("eigenvalues").with_f64_data(&vec![1.0; n_modes * 2]).with_shape(&[n_modes as u64, 2]);
+
+    let meta = vec![nyx_storage::PackedComponentMeta { name: "Ex".into(), unit: "V/m".into(), nloc, has_im: false }];
+    let meta_bytes = serde_json::to_vec(&meta).unwrap();
+    g.create_dataset("cell_fields_meta").with_u8_data(&meta_bytes).with_shape(&[meta_bytes.len() as u64]);
+
+    let slice_elems = n_cells * nloc;
+    let mut packed = vec![0.0_f64; n_modes * slice_elems];
+    for k in 0..n_modes {
+        packed[k * slice_elems] = (k + 1) as f64;
+        packed[(k + 1) * slice_elems - 1] = -((k + 1) as f64);
+    }
+    g.create_dataset("cell_fields_packed")
+        .with_f64_data(&packed)
+        .with_shape(&[n_modes as u64, 1, n_cells as u64, nloc as u64, 1])
+        .with_chunks(&[1, 1, n_cells as u64, nloc as u64, 1])
+        .with_shuffle()
+        .with_lzf();
+
+    for k in 0..n_modes {
+        let mut sg = g.create_group(&format!("solution_{k}"));
+        sg.set_attr("label", AttrValue::VarLenString(format!("mode {k}")));
+        sg.set_attr("eig_re", AttrValue::F64((k + 1) as f64));
+        sg.set_attr("eig_im", AttrValue::F64(0.0));
+        let mut fg = sg.create_group("fields");
+        fg.set_attr("order", AttrValue::VarLenString("[]".into()));
+        sg.add_group(fg.finish());
+        g.add_group(sg.finish());
+    }
+    root.add_group(g.finish());
+    fb.add_group(root.finish());
+    fb.write(path).unwrap();
+}
+
+#[test]
+fn nyx_h5_max_bytes_child_probe() {
+    let Ok(target) = std::env::var("NYX_TEST_H5_BUDGET_PROBE_PATH") else {
+        return;
+    };
+    let expect_ok = std::env::var("NYX_TEST_H5_BUDGET_EXPECT_OK").as_deref() == Ok("1");
+    let res = nyx_engine::h5io::read_results(Path::new(&target));
+    if expect_ok {
+        let stored = res.expect("expected read_results to succeed under NYX_H5_MAX_BYTES");
+        assert_eq!(stored.results[0].1.solutions.len(), 4);
+    } else {
+        let err = res.err().expect("expected read_results to fail under NYX_H5_MAX_BYTES");
+        assert!(err.contains("exceeds read budget"), "unexpected error: {err}");
+    }
+}
+
+#[test]
+fn per_mode_packed_budget_allows_multi_mode_above_512_mib_rejects_oversized_slice_and_honors_env_limit() {
+    // 1. 4 modes x 140 MB = 560 MB (> 512 MiB = 536,870,912 B total), with per-mode slice = 140 MB (<= 512 MiB): MUST PASS!
+    let path_ok = tmp("packed-560mb-4modes.h5");
+    write_synthetic_packed_h5(&path_ok, 4, 1_750_000, 10);
+    let stored = nyx_engine::h5io::read_results(&path_ok)
+        .expect("560 MB total packed result with 140 MB per-mode slices must pass 512 MiB slice / 8 GiB total budget");
+    assert_eq!(stored.results.len(), 1);
+    let sols = &stored.results[0].1.solutions;
+    assert_eq!(sols.len(), 4);
+    for (k, sol) in sols.iter().enumerate() {
+        assert_eq!(sol.cell_fields[0].re.len(), 17_500_000);
+        assert_eq!(sol.cell_fields[0].re[0], (k + 1) as f64);
+        assert_eq!(*sol.cell_fields[0].re.last().unwrap(), -((k + 1) as f64));
+    }
+    drop(stored);
+
+    // 2. NYX_H5_MAX_BYTES environment variable overrides max_total_result_bytes in `read_results`
+    let cur_exe = std::env::current_exe().unwrap();
+    let out_reject = std::process::Command::new(&cur_exe)
+        .args(["--exact", "nyx_h5_max_bytes_child_probe", "--nocapture"])
+        .env("NYX_TEST_H5_BUDGET_PROBE_PATH", &path_ok)
+        .env("NYX_TEST_H5_BUDGET_EXPECT_OK", "0")
+        .env("NYX_H5_MAX_BYTES", "200000000") // 200 MB: slice (140 MB) fits, total (560 MB) exceeds!
+        .output()
+        .unwrap();
+    assert!(
+        out_reject.status.success(),
+        "child probe reject failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out_reject.stdout),
+        String::from_utf8_lossy(&out_reject.stderr)
+    );
+
+    let out_allow = std::process::Command::new(&cur_exe)
+        .args(["--exact", "nyx_h5_max_bytes_child_probe", "--nocapture"])
+        .env("NYX_TEST_H5_BUDGET_PROBE_PATH", &path_ok)
+        .env("NYX_TEST_H5_BUDGET_EXPECT_OK", "1")
+        .env("NYX_H5_MAX_BYTES", "700000000") // 700 MB > 560 MB total: allowed!
+        .output()
+        .unwrap();
+    assert!(
+        out_allow.status.success(),
+        "child probe allow failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out_allow.stdout),
+        String::from_utf8_lossy(&out_allow.stderr)
+    );
+    let _ = std::fs::remove_file(&path_ok);
+
+    // 3. Corrupted / oversized single-mode slice > 512 MiB (1 mode x 544 MB > 536,870,912 B): MUST FAIL!
+    let path_bad_slice = tmp("packed-544mb-1mode.h5");
+    write_synthetic_packed_h5(&path_bad_slice, 1, 6_800_000, 10);
+    let err =
+        nyx_engine::h5io::read_results(&path_bad_slice).err().expect("single-mode slice > 512 MiB must be rejected");
+    assert!(err.contains("exceeds read budget"), "expected 'exceeds read budget', got: {err}");
+    let _ = std::fs::remove_file(&path_bad_slice);
+}
+
+#[test]
+fn write_results_with_save_fields_false_omits_mesh_and_fields_and_reads_cleanly() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": example("15_soi_wire") })).unwrap();
+    e.call("solve_run", &json!({})).unwrap();
+    let mesh = e.model().unwrap().solver_mesh();
+    let (orig, _) = e.result("ems").unwrap();
+    let refs = vec![("ems".to_string(), orig.as_ref())];
+
+    let path = tmp("save-fields-false.h5");
+    nyx_engine::h5io::write_results_with_options(
+        &path,
+        e.project(),
+        &mesh,
+        &refs,
+        FieldStorageLayout::L2ShuffleLzfPacked,
+        false,
+    )
+    .unwrap();
+
+    let bytes = nyx_engine::h5io::file_bytes(&path);
+    assert!(bytes < 64 * 1024, "field-less results.h5 must be tiny, got {bytes} B");
+
+    let raw = File::open_streaming(&path).unwrap();
+    assert!(raw.group("mesh").is_err(), "/mesh group omitted when save_fields == false");
+    let g = raw.group("results/ems").unwrap();
+    assert!(g.dataset("points").is_err() && g.dataset("cells").is_err());
+    assert!(g.dataset("cell_fields_packed").is_err());
+    let sg = g.group("solution_0").unwrap();
+    assert!(sg.group("fields").is_err() && sg.group("cell_fields").is_err());
+
+    let stored = nyx_engine::h5io::read_results(&path).unwrap();
+    assert!(!stored.fields_saved);
+    assert_eq!(stored.mesh.n_cells(), 0);
+    assert_eq!(stored.project, e.project().to_json());
+    assert_eq!(stored.results.len(), 1);
+    let r = &stored.results[0].1;
+    assert_eq!(r.scalars, orig.scalars);
+    assert_eq!(r.dofs, orig.dofs);
+    assert_eq!(r.solutions.len(), orig.solutions.len());
+    for (sa, sb) in r.solutions.iter().zip(&orig.solutions) {
+        assert_eq!(sa.label, sb.label);
+        assert_eq!(sa.value, sb.value);
+        assert_eq!(sa.eigenvalue, sb.eigenvalue);
+        assert!(sa.fields.is_empty() && sa.cell_fields.is_empty());
+    }
+
+    let summary = nyx_engine::h5io::read_results_summary(&path).unwrap();
+    assert_eq!(summary.dim, mesh.dim);
+    assert_eq!(summary.points, mesh.n_points());
+    assert_eq!(summary.cells, mesh.n_cells());
+    assert_eq!(summary.results[0].1.scalars, orig.scalars);
+
+    let _ = std::fs::remove_file(&path);
 }

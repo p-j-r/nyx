@@ -524,3 +524,206 @@ fn test_qfr4_planar_bem_agrees_with_3d_volumetric_fem_on_coplanar_strip_on_si() 
     let c_env = CapacitanceMatrixData::of(&res_env).unwrap().maxwell_matrix_f[0][0];
     assert_eq!(c_env.to_bits(), c_bem.to_bits());
 }
+
+#[test]
+fn test_fr19_3d_isolated_disk_open_robin_bc_vs_analytic() {
+    // 3D isolated conducting circular disk of radius a = 100 um at z = 0 in free space (eps_r = 1.0)
+    // inside a compact box [-R_box, R_box]^3 with half-width R_box = 3*a = 300 um.
+    // Exact free-space capacitance: C_exact = 8 * eps_0 * a = 7.08335025 fF.
+    let a = 100.0e-6;
+    let r_box = 3.0 * a;
+    let c_exact = 8.0 * EPS0 * a;
+
+    let mut m = Model::new_3d();
+    let lower = m.box_("lower", (-r_box, -r_box, -r_box), (r_box, r_box, 0.0));
+    let upper = m.box_("upper", (-r_box, -r_box, 0.0), (r_box, r_box, r_box));
+    let disk_c = m.circle("disk_c", (0.0, 0.0), a);
+    m.sheet("disk", disk_c, 0.0);
+    m.overlay(&[("lower", lower), ("upper", upper)]);
+    m.size("sz_disk_edge", Selector::parse("disk:edge").unwrap(), Some(Expr::Num(9.0e-6)), None, None);
+    m.size("sz_disk_face", Selector::Name("disk".into()), Some(Expr::Num(16.0e-6)), None, None);
+
+    let g = mesh_model(&m.list, &MeshPlan::simple(55.0e-6)).unwrap();
+    let disk_labs = g.boundary("disk");
+    assert!(!disk_labs.is_empty());
+    let disk_set: BTreeSet<i32> = disk_labs.iter().copied().collect();
+    let ext = g.mesh.exterior_facets();
+    let mut outer_labs = Vec::new();
+    for (f, &is_ext) in ext.iter().enumerate() {
+        let lab = g.mesh.facet_labels[f];
+        if is_ext && !disk_set.contains(&lab) && !outer_labs.contains(&lab) {
+            outer_labs.push(lab);
+        }
+    }
+    assert!(!outer_labs.is_empty());
+
+    // 1. Solve with spherical 1/r asymptotic Robin open boundary (and NO ground reference BC!)
+    let mut prob_open = Problem::new(Study::Electrostatic, 2).with_singular_edges("quarter_point");
+    prob_open.materials.default.insert("eps_r".into(), 1.0);
+    prob_open.bcs = vec![
+        Bc { labels: disk_labs.clone(), kind: BcKind::Terminal("disk".into()) },
+        Bc { labels: outer_labs.clone(), kind: BcKind::Open { origin: None } },
+    ];
+    let res_open = solve_electrostatics(&g.mesh, &prob_open).unwrap();
+    let cap_open = CapacitanceMatrixData::of(&res_open).unwrap();
+    let c_open = cap_open.maxwell_matrix_f[0][0];
+    let rel_err_open = (c_open - c_exact).abs() / c_exact;
+    eprintln!(
+        "FR-19 3D isolated disk (a=100 um, R_box=3a) with open Robin BC: C_open = {c_open:.6e} F, C_exact = {c_exact:.6e} F, rel_err = {:.4}%",
+        rel_err_open * 100.0
+    );
+    assert!(
+        rel_err_open < 0.008,
+        "FR-19 3D isolated disk open-boundary capacitance relative error {:.4}% exceeds 0.8% threshold (C_open={c_open:e}, C_exact={c_exact:e})",
+        rel_err_open * 100.0
+    );
+    assert_eq!(res_open.scalar("maxwell_raw_asymmetry_rel"), Some(0.0));
+
+    // Compare against grounded outer box walls at R_box = 3a (which suffers ~23% artificial wall capacitance):
+    let mut prob_gnd = prob_open.clone();
+    prob_gnd.bcs = vec![
+        Bc { labels: disk_labs.clone(), kind: BcKind::Terminal("disk".into()) },
+        Bc { labels: outer_labs.clone(), kind: BcKind::Ground },
+    ];
+    let res_gnd = solve_electrostatics(&g.mesh, &prob_gnd).unwrap();
+    let c_gnd = CapacitanceMatrixData::of(&res_gnd).unwrap().maxwell_matrix_f[0][0];
+    let rel_err_gnd = (c_gnd - c_exact).abs() / c_exact;
+    assert!(rel_err_gnd > 0.15, "grounded box at R_box=3a should overestimate C by >15%, got {rel_err_gnd}");
+
+    // 2. Verify envelope decoding of `kind: "open"` with default origin and explicit origin [0, 0, 0]:
+    struct DiskResolver {
+        lower_dom: i32,
+        upper_dom: i32,
+        disk_labs: Vec<i32>,
+        outer_labs: Vec<i32>,
+    }
+    impl LabelResolver for DiskResolver {
+        fn domains(&self, r: &str) -> Result<Vec<i32>, nyx_physics::Error> {
+            match r {
+                "lower" => Ok(vec![self.lower_dom]),
+                "upper" => Ok(vec![self.upper_dom]),
+                _ => Err(nyx_physics::Error::invalid(format!("unknown domain {r}"))),
+            }
+        }
+        fn boundaries(&self, s: &str) -> Result<Vec<i32>, nyx_physics::Error> {
+            match s {
+                "disk" => Ok(self.disk_labs.clone()),
+                "outer" => Ok(self.outer_labs.clone()),
+                _ => Err(nyx_physics::Error::invalid(format!("unknown boundary {s}"))),
+            }
+        }
+    }
+    let resolver = DiskResolver {
+        lower_dom: g.domain("lower").unwrap(),
+        upper_dom: g.domain("upper").unwrap(),
+        disk_labs: disk_labs.clone(),
+        outer_labs: outer_labs.clone(),
+    };
+    let ex_mesh = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let mut spec = ProblemSpec::new("dfs", 2, "electrostatic");
+    spec.study.params = json!({ "singular_edges": "quarter_point" });
+    spec.materials.insert("lower".into(), MaterialAssign::Props([("eps_r".into(), 1.0)].into()));
+    spec.materials.insert("upper".into(), MaterialAssign::Props([("eps_r".into(), 1.0)].into()));
+    spec.bcs.push(nyx_physics::BcSpec {
+        on: "disk".into(),
+        kind: "terminal".into(),
+        params: json!({ "name": "disk" }),
+    });
+    spec.bcs.push(nyx_physics::BcSpec {
+        on: "outer".into(),
+        kind: "open".into(),
+        params: json!({ "origin": [0.0, 0.0, 0.0] }),
+    });
+    let res_env = Dfs.solve(&ex_mesh, &spec, &mut Ctx::new(&resolver)).unwrap();
+    let c_env = CapacitanceMatrixData::of(&res_env).unwrap().maxwell_matrix_f[0][0];
+    assert!((c_env - c_open).abs() <= 1e-14 * c_open);
+
+    // 3. Reject coincident origin on an open boundary face and reject 2D open boundary:
+    let mut prob_bad_origin = prob_open.clone();
+    prob_bad_origin.bcs[1].kind = BcKind::Open { origin: Some([r_box, 0.0, 0.0]) };
+    let err_origin = solve_electrostatics(&g.mesh, &prob_bad_origin).unwrap_err();
+    assert!(err_origin.contains("origin coincides"), "unexpected error for coincident origin: {err_origin}");
+
+    let mesh2d = femcore::testkit::rect(1.0, 1.0, 2, 2);
+    let mut prob_2d = Problem::new(Study::Electrostatic, 1);
+    prob_2d.bcs = vec![
+        Bc { labels: vec![1], kind: BcKind::Terminal("t".into()) },
+        Bc { labels: vec![4], kind: BcKind::Open { origin: None } },
+    ];
+    let err_2d = solve_electrostatics(&mesh2d, &prob_2d).unwrap_err();
+    assert!(err_2d.contains("3D"), "expected 2D rejection error mentioning 3D, got: {err_2d}");
+}
+
+#[test]
+fn test_fr19_and_fr23_raw_asymmetry_scalar_and_silicon_4k_tls_interfaces() {
+    // 1. Multi-terminal P2 AMG-PCG solve emits "maxwell_raw_asymmetry_rel" < 1e-7
+    let (g, mut prob_amg) = build_transmon_3port_model(85e-6, 20e-6, 120e-6);
+    prob_amg.solver = LinearSolver::Iterative;
+    prob_amg.tol = 1e-10;
+    prob_amg.amg_line_smooth = true;
+    let res_amg = solve_electrostatics(&g.mesh, &prob_amg).unwrap();
+    let raw_asym = res_amg
+        .scalar("maxwell_raw_asymmetry_rel")
+        .expect("multi-terminal electrostatic solve must emit maxwell_raw_asymmetry_rel");
+    eprintln!("FR-19 3-terminal P2 AMG-PCG maxwell_raw_asymmetry_rel = {raw_asym:.3e}");
+    assert!((0.0..1.0e-7).contains(&raw_asym), "expected maxwell_raw_asymmetry_rel in [0, 1e-7), got {raw_asym:e}");
+
+    // 2. FR-23: Solving through Dfs::solve with named material "silicon_4k" populates TlsMeta::interfaces (ms and sa)
+    struct TransmonResolver<'a> {
+        g: &'a MeshedGeom,
+        outer_labs: Vec<i32>,
+    }
+    impl LabelResolver for TransmonResolver<'_> {
+        fn domains(&self, r: &str) -> Result<Vec<i32>, nyx_physics::Error> {
+            self.g.domain(r).map(|d| vec![d]).ok_or_else(|| nyx_physics::Error::invalid(r))
+        }
+        fn boundaries(&self, s: &str) -> Result<Vec<i32>, nyx_physics::Error> {
+            if s == "outer" {
+                return Ok(self.outer_labs.clone());
+            }
+            let v = self.g.boundary(s);
+            if v.is_empty() {
+                Err(nyx_physics::Error::invalid(s))
+            } else {
+                Ok(v)
+            }
+        }
+    }
+    let outer_labs = prob_amg.bcs[3].labels.clone();
+
+    let mut spec = ProblemSpec::new("dfs", 2, "electrostatic");
+    spec.materials.insert("substrate".into(), MaterialAssign::Named("silicon_4k".into()));
+    spec.materials.insert("vacuum".into(), MaterialAssign::Props([("eps_r".into(), 1.0)].into()));
+    for name in ["pad_1", "pad_2", "coupler"] {
+        spec.bcs.push(nyx_physics::BcSpec {
+            on: name.into(),
+            kind: "terminal".into(),
+            params: json!({ "name": name }),
+        });
+    }
+    spec.bcs.push(nyx_physics::BcSpec { on: "outer".into(), kind: "open".into(), params: serde_json::Value::Null });
+    let resolver = TransmonResolver { g: &g, outer_labs };
+    let mut ctx = Ctx::new(&resolver);
+    let mat_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../materials");
+    ctx.library = Some(std::sync::Arc::new(femcore::material::Library::load_dir(&mat_dir).unwrap()));
+
+    let ex_mesh = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let res = Dfs.solve(&ex_mesh, &spec, &mut ctx).unwrap();
+    let tls = TlsMeta::of(&res).expect("TlsMeta must be attached to SolveResult::scalars");
+    let ifaces = tls.interfaces.expect("TlsMeta::interfaces must be auto-populated from silicon_4k.toml");
+    let ms = ifaces.ms.expect("silicon_4k must populate [interfaces.ms]");
+    let sa = ifaces.sa.expect("silicon_4k must populate [interfaces.sa]");
+    assert!((ms.thickness_m - 2.0e-9).abs() < 1e-18);
+    assert!((ms.eps_r - 9.8).abs() < 1e-12);
+    assert!((ms.tan_delta - 1.5e-3).abs() < 1e-12);
+    assert!((sa.thickness_m - 2.0e-9).abs() < 1e-18);
+    assert!((sa.eps_r - 3.9).abs() < 1e-12);
+    assert!((sa.tan_delta - 1.5e-3).abs() < 1e-12);
+
+    // Also verify planar_bem populates TlsMeta::interfaces with BcKind::Open present:
+    spec.study.params = json!({ "formulation": "planar_bem" });
+    let res_bem = Dfs.solve(&ex_mesh, &spec, &mut ctx).unwrap();
+    let tls_bem = TlsMeta::of(&res_bem).expect("planar_bem TlsMeta must be attached");
+    assert_eq!(tls_bem.interfaces.as_ref().and_then(|i| i.ms.clone()), Some(ms));
+    assert_eq!(tls_bem.interfaces.as_ref().and_then(|i| i.sa.clone()), Some(sa));
+}

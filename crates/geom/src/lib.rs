@@ -1,5 +1,6 @@
 //! `geom`: a lean CSG-over-B-rep geometry kernel for the nyx FEM stack.
 pub mod arrange;
+pub mod bvh;
 pub mod complex;
 pub mod curve;
 pub mod diff;
@@ -22,3 +23,4 @@ pub mod stack;
 pub mod tess;
 pub mod topo3;
 pub use error::{GeomError, GeomResult};
+pub use model::SteppedAirbridge;

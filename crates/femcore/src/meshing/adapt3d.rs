@@ -157,6 +157,18 @@ impl Geometry3 for GeomOracle3<'_> {
 
 /// Faces between cells of different domains, labelled, oriented out of the lower-numbered domain.
 pub fn interface_facets(point: &dyn Fn(u32) -> [f64; 3], cells: &[u32], cell_label: &[i32], table: &FaceTable) -> (Vec<[u32; 3]>, Vec<i32>) {
+    interface_facets_with_preserved(point, cells, cell_label, table, &BTreeMap::new())
+}
+
+/// Like [`interface_facets`], while also emitting surviving physical interior facets recorded in `preserved`
+/// (such as `Op::Sheet` airbridges where `la == lb`, keeping their exact vertex orientation and `LabelMap` boundary id).
+pub fn interface_facets_with_preserved(
+    point: &dyn Fn(u32) -> [f64; 3],
+    cells: &[u32],
+    cell_label: &[i32],
+    table: &FaceTable,
+    preserved: &BTreeMap<[u32; 3], ([u32; 3], i32)>,
+) -> (Vec<[u32; 3]>, Vec<i32>) {
     let mut faces: BTreeMap<[u32; 3], Vec<(usize, u32)>> = BTreeMap::new();
     for c in 0..cell_label.len() {
         let v = &cells[4 * c..4 * c + 4];
@@ -170,6 +182,11 @@ pub fn interface_facets(point: &dyn Fn(u32) -> [f64; 3], cells: &[u32], cell_lab
     let (mut out, mut labels) = (vec![], vec![]);
     for (k, cs) in faces {
         if cs.len() != 2 {
+            continue;
+        }
+        if let Some(&(tri, lab)) = preserved.get(&k) {
+            out.push(tri);
+            labels.push(lab);
             continue;
         }
         let (la, lb) = (cell_label[cs[0].0], cell_label[cs[1].0]);
@@ -226,7 +243,7 @@ pub fn adapt_to_metrics3(g: MeshedGeom, metrics: &[Sym<3>], a: &Adaptive) -> Res
     }
     let points = wm.points.iter().flat_map(|p| p.iter().copied()).collect();
     let mesh = SimplexMesh::new(3, points, wm.cells.clone(), wm.cell_label.clone(), facets, facet_labels);
-    Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval }, result.report))
+    Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval, warnings: g.warnings }, result.report))
 }
 
 /// The element size every vertex of a meshed 3D model is asked for by the model itself: the size of the regions it belongs to (the

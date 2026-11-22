@@ -59,6 +59,25 @@ fn expr_schema(doc: &str) -> Value {
 fn object(doc: &str) -> Value {
     json!({ "type": "object", "description": doc })
 }
+fn post_analyses_schema() -> Value {
+    json!({
+        "type": "array",
+        "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+        "items": {
+            "type": "object",
+            "description": "one read-only post-solve analysis or field-reduction request",
+            "properties": {
+                "analysis": text("shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation)"),
+                "physics": text("three-letter physics code for shorthand `analysis`; defaults to the solved physics that supports the analysis"),
+                "params": object("optional parameters object for shorthand `analysis`"),
+                "cmd": text("explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)"),
+                "args": object("arguments object passed to `cmd`"),
+                "label": text("optional label attached to this post-analysis entry in the reply")
+            },
+            "additionalProperties": false
+        }
+    })
+}
 fn schema(props: Vec<(&str, Value)>, required: &[&str]) -> Value {
     let p: Map<String, Value> = props.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     json!({ "type": "object", "properties": Value::Object(p), "required": required, "additionalProperties": false })
@@ -168,14 +187,20 @@ impl Engine {
                     ("cell", text("top structure cell name to flatten; omit to auto-select the unreferenced root cell")),
                     ("layer_bbox", boolean("when true (default), return bbox over imported layers only; when false, return full top-cell bbox")),
                 ], &["path", "layers"])),
-            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `gap_cells` or `sweep` set to null return to the simple mesher / explicit-only sheet sizing / an unswept mesh. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.", Edit,
+            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, or `sweep` set to null return to the default setting. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.", Edit,
                 schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"], "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher" })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"], "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2" })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) geometry for the cells on a curved surface; used by the ems cavity and bloch studies, default false")),
                     ("gap_cells", json!({ "type": ["number", "null"], "description": "3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping" })),
                     ("z_coarsen", boolean("3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false")),
+                    ("max_cells", json!({ "type": ["integer", "null"], "minimum": 1, "description": "maximum number of mesh cells allowed before aborting meshing (overrides the default 2,000,000 cap on adaptive meshing and enforces pre-allocation guard on 3D sheet stacks); null restores default" })),
+                    ("dz_min", json!({ "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet stack: floor on initial vertical z-slab thickness near sheet planes in metres; null disables the floor" })),
+                    ("max_z_slabs", json!({ "type": ["integer", "null"], "minimum": 1, "description": "3D sheet stack: maximum total number of horizontal z-slabs across active stack layers (must be >= active stack layers); null disables the cap" })),
+                    ("z_growth_ratio", json!({ "type": ["number", "null"], "exclusiveMinimum": 1.0, "description": "3D sheet stack: geometric growth ratio (> 1.0) for vertical z-slab thickness away from sheet planes; null uses default 1.35" })),
+                    ("max_steiner_multiplier", json!({ "type": ["integer", "null"], "minimum": 0, "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial PSLG vertices; null uses default max(20 * n_init, 100000)" })),
+                    ("strict_mesh", boolean("fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default false")),
                     ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number", "description": "thickness of the layer along y, metres" }, "n": { "type": "integer", "description": "cells across the thickness" }, "domain_offset": { "type": "integer", "description": "added to the domain numbers of the layer's cells" }, "fill": { "type": "string", "description": "region name: every cell of the layer belongs to it" }, "regions": { "type": "object", "description": "optional per-layer region remap { source_region: target_region } in this layer" } }, "required": ["thickness", "n"] }, "description": "layers to sweep a 2D cross-section or 3D geometry model along y" }))], &[])),
             cmd("mesh_build", "Mesh the geometry", "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.", Expensive, schema(vec![("wait", boolean("wait for the mesh, default true"))], &[])),
             cmd("solve_run", "Solve", "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.", Expensive,
-                schema(vec![("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("wait", boolean("wait for the result, default true")), ("isolate", boolean("run the solve in a worker process: running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
+                schema(vec![("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("wait", boolean("wait for the result, default true")), ("isolate", boolean("run the solve in a worker process: running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits")), ("save_fields", boolean("when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results after running any post_analyses, keeping scalars and eigenvalues; default true")), ("post_analyses", post_analyses_schema()), ("memory_wait_timeout_s", number("maximum seconds (>= 0) to wait when free RAM is below the solve estimate (overrides NYX_MEMORY_WAIT_TIMEOUT_S and engine default)"))], &[])),
             cmd("job_status", "Status of a job", "State, current stage, fraction done and elapsed time.", Read, schema(vec![("id", int("job id"))], &["id"])),
             cmd("job_list", "List the jobs", "", Read, schema(vec![], &[])),
             cmd("job_cancel", "Cancel a job", "The solver notices at its next check; a factorisation in progress finishes first.", Expensive, schema(vec![("id", int("job id"))], &["id"])),
@@ -185,7 +210,8 @@ impl Engine {
                 schema(vec![("kind", json!({ "type": "string", "enum": ["solve", "mesh", "convergence"], "description": "default solve" })), ("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "physics code(s); default the active one" })), ("factor", number("convergence: finer/present element size, default 0.6")), ("tolerance", number("convergence: largest accepted relative difference")),
                     ("priority", int("1, 2 or 3; lower runs first")), ("supersede", boolean("replace a queued request of the same kind and targets")), ("hold", boolean("start held")),
                     ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("detached", boolean("solve only, with `shared`: write the item into the queue and return at once, with nothing of this session waiting for it; the answer is the item (`shared_id`, and `results`, the file that `open_results` reads once its state is `done`). Closing the program leaves it running")),
-                    ("isolate", boolean("solve in a worker process (only for kind solve): running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
+                    ("isolate", boolean("solve in a worker process (only for kind solve): running out of memory or crashing fails this job and not the program, and a cancel stops it at once; the cost is a results round trip. Default: what the program was set up to do")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits")),
+                    ("save_fields", boolean("solve only: when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results after running any post_analyses; default true")), ("post_analyses", post_analyses_schema()), ("memory_wait_timeout_s", number("solve only: maximum seconds (>= 0) to wait when free RAM is below the solve estimate (overrides NYX_MEMORY_WAIT_TIMEOUT_S and engine default)"))], &[])),
             cmd("queue_list", "List the queue", "Every job of this session and every item that another program wrote into the workspace queue (`foreign`, with a `shared_id`), oldest first, with its state (`queued`, `running`, `done`, `cancelled`, `failed`), lane, owner, priority, position in the queue, the time it waited and ran, its stage, what it was asked (`kind`, `targets`), `project_changed` and `applied`.", Read,
                 schema(vec![("owner", text("only this owner: gui, ai or cli")), ("state", text("only this state"))], &[])),
             cmd("queue_get", "One job of the queue", "The entry of `queue_list` for one job and the last lines of its stage log. Give `id` (a job of this session) or `shared_id` (an item of the workspace queue).", Read, schema(vec![("id", int("job id")), ("shared_id", text("an item of the workspace queue (from queue_list), instead of `id`: the queue is shared, so it can be an item another program wrote"))], &[])),
@@ -201,7 +227,7 @@ impl Engine {
                 schema(vec![("name", text("a name for the table")), ("physics", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "code or list of codes to solve at every point" })),
                     ("points", json!({ "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string", "description": "a name for the point in the table; default `point N`" }, "edits": { "type": "array", "description": "the edits that make this point, applied in order to a copy of the project", "items": { "type": "object", "properties": { "cmd": { "type": "string", "description": "a command that changes the project" }, "args": { "type": "object", "description": "its arguments" } }, "required": ["cmd"] } } }, "required": ["edits"] }, "description": "the points, each a list of edits" })),
                     ("series", json!({ "type": "object", "properties": { "cmd": { "type": "string", "description": "the edit command repeated at every point" }, "args": { "type": "object", "description": "its arguments that stay the same" }, "field": { "type": "string", "description": "the argument that takes each value" }, "values": { "type": "array", "description": "the values, one point each" } }, "required": ["cmd", "field", "values"], "description": "one command repeated with `field` set to each value" })),
-                    ("priority", int("1, 2 or 3; default 3")), ("hold", boolean("queue the points held; release each with queue_release")), ("reuse", json!({ "type": "string", "enum": ["none", "warm"], "description": "`warm`: each point starts its eigensolves from the modes of the previous point instead of a random block (the first point only records them), which shortens the iterations of a sweep that keeps its mesh (a material, a study value, a boundary condition, a frequency with the mesh not sized by the physics; a point whose mesh or number of unknowns differs starts cold). The numbers agree to the solver's tolerance but not bit for bit with a cold solve, so a warm point is marked `exploratory` in its row and run (`reuse`) until it is solved cold. Default `none`: every point is a cold solve" })), ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("isolate", boolean("solve every point in a worker process, as for solve_run")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits"))], &[])),
+                    ("priority", int("1, 2 or 3; default 3")), ("hold", boolean("queue the points held; release each with queue_release")), ("reuse", json!({ "type": "string", "enum": ["none", "warm"], "description": "`warm`: each point starts its eigensolves from the modes of the previous point instead of a random block (the first point only records them), which shortens the iterations of a sweep that keeps its mesh (a material, a study value, a boundary condition, a frequency with the mesh not sized by the physics; a point whose mesh or number of unknowns differs starts cold). The numbers agree to the solver's tolerance but not bit for bit with a cold solve, so a warm point is marked `exploratory` in its row and run (`reuse`) until it is solved cold. Default `none`: every point is a cold solve" })), ("shared", boolean("hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process")), ("isolate", boolean("solve every point in a worker process, as for solve_run")), ("force", boolean("start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits")), ("save_fields", boolean("when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results at every sweep point after running any post_analyses; default true")), ("post_analyses", post_analyses_schema()), ("memory_wait_timeout_s", number("maximum seconds (>= 0) to wait per sweep point when free RAM is below the solve estimate (overrides NYX_MEMORY_WAIT_TIMEOUT_S and engine default)"))], &[])),
             cmd("sweep_table", "The table of a sweep", "Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.", Read,
                 schema(vec![("sweep", int("the sweep's number")), ("wait_s", number("longest wait in seconds, default 0"))], &[])),
             cmd("sweep_cancel", "Cancel the points of a sweep that have not finished", "Queued points never run; a running one stops at its next check.", Expensive, schema(vec![("sweep", int("the sweep's number"))], &["sweep"])),
@@ -315,6 +341,15 @@ impl Engine {
                     ("extrapolate", json!({ "type": "string", "enum": ["richardson_log_spd", "richardson_linear"], "description": "optional two-grid Richardson extrapolation mode: richardson_log_spd (SPD-preserving log-space Maxwell capacitance extrapolation) or richardson_linear" })),
                     ("extrapolate_order", number("asymptotic convergence order p > 0 for Richardson extrapolation; default 1.0 for 3D/sheet capacitance matrices, else 2 * order")),
                     ("apply_extrapolated", boolean("when true, promote the extrapolated capacitance matrix onto the stored latest result of physics, default false")),
+                    ("quantities", json!({
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "quantity name or scalar name to include in the verdict (e.g. \"eigenvalue[0].re\", \"scalar C_0_0 (F)\", or \"C_0_0 (F)\")"
+                        },
+                        "minItems": 1,
+                        "description": "non-empty list of quantity names to check; only matching rows count toward converged, worst_relative, and worst_quantity"
+                    })),
                     ("max_cells", number("refuse, before any solve, a check whose comparison mesh has more cells than this (an adaptive 2D mesh has 6 to 8 times as many cells at factor 0.6)")),
                     ("max_seconds", number("refuse, before any solve, a check estimated (from the solves this machine has run; no refusal without an estimate) to take longer than this for the comparison mesh")),
                     ("dry_run", boolean("only build both meshes and answer their cells and what a solve of each is expected to cost; nothing is solved")),
@@ -322,9 +357,9 @@ impl Engine {
             cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF index of the stored datasets next to it, for nyx and its tools only (not for ParaView or VisIt). Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)")), ("wait", boolean("wait for the file, default true; false starts a job that writes what the engine holds now, under its name only when complete"))], &["path"])),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
             cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support. With `wait` false it starts a job (reading and meshing happen on it; the project is replaced when job_wait or poll_jobs applies it).", Edit, schema(vec![("path", text("file path, .h5")), ("wait", boolean("wait for it, default true"))], &["path"])),
-            cmd("list_analyses", "List the analyses", "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
-            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, or tls_participation. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), and resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`). The reply carries `stale`, `age_s`, and `validated` of the result it was run on.", Read,
-                schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys()), ("params", object("optional analysis parameters (for capacitance_matrix: ground, eliminate, qubits, resonators; also epr, hamiltonian, tls_participation options)"))], &["analysis", "physics"])),
+            cmd("list_analyses", "List the analyses", "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
+            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, or network. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]` and `params` accept `trench_depth_m` (substrate over-etch depth in metres). For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.", Read,
+                schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys()), ("params", object("optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, etc.; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; epr options)"))], &["analysis", "physics"])),
             cmd("figure", "Draw the modes or 3D fields of a result", "Writes a 2D or 3D figure of the latest result of a physics as SVG or PNG (the extension of `path` decides). 2D kinds (`gallery`, `components`) align each mode's phase and draw on the mesh section with region outlines and in-plane arrows. 3D kinds (`slice3d`, `cutaway3d`, `isosurface3d`, `mesh3d`) evaluate `expr` (e.g. `re(Ex)`, `abs2(E)`) directly on un-averaged 8-subtet P2 `CellFields` so normal-field discontinuities across material interfaces stay sharp, render with Z-buffered/translucent orthographic projection (`camera`, `show_edges`), and support zero-copy Bloch unit-cell tiling (`repeat_periodic` with `exp(-i m periodic_phase)` applied before `expr`).", Read,
                 schema(vec![("physics", phys()), ("path", text("file to write, .svg or .png")),
                     ("kind", json!({ "type": "string", "enum": ["gallery", "components", "slice3d", "cutaway3d", "isosurface3d", "mesh3d"], "description": "figure layout: gallery (default), components, slice3d (3D planar slice), cutaway3d (3D clipped cutaway), isosurface3d (3D translucent marching-tets isosurfaces) or mesh3d (3D region/element surface view)" })),
@@ -571,6 +606,9 @@ impl Engine {
                     isolate: args.get("isolate").and_then(Value::as_bool),
                     force: opt_bool(args, "force", false),
                     shared: args.get("shared").and_then(Value::as_bool),
+                    save_fields: crate::queue::save_fields_of(args)?,
+                    post_analyses: crate::queue::post_analyses_of(args)?,
+                    memory_wait_timeout_s: crate::queue::memory_wait_timeout_of(args)?,
                     ..Default::default()
                 };
                 let id = self.start_solve_with(targets, &opts)?;
@@ -862,6 +900,64 @@ impl Engine {
                 "z_coarsen" => {
                     s.z_coarsen = v.as_bool().ok_or_else(|| Error::invalid("`z_coarsen` is true or false"))?
                 }
+                "max_cells" => {
+                    s.max_cells = if v.is_null() {
+                        None
+                    } else {
+                        let mc = v.as_u64().ok_or_else(|| Error::invalid("`max_cells` is an integer >= 1 or null"))?;
+                        let mc = usize::try_from(mc).map_err(|_| Error::invalid("`max_cells` is too large"))?;
+                        if mc < 1 {
+                            return Err(Error::invalid("`max_cells` must be an integer >= 1"));
+                        }
+                        Some(mc)
+                    }
+                }
+                "dz_min" => {
+                    s.dz_min = if v.is_null() {
+                        None
+                    } else {
+                        let dz = v.as_f64().ok_or_else(|| Error::invalid("`dz_min` is a positive number in metres or null"))?;
+                        if !(dz > 0.0 && dz.is_finite()) {
+                            return Err(Error::invalid("`dz_min` must be a positive finite number"));
+                        }
+                        Some(dz)
+                    }
+                }
+                "max_z_slabs" => {
+                    s.max_z_slabs = if v.is_null() {
+                        None
+                    } else {
+                        let ms = v.as_u64().ok_or_else(|| Error::invalid("`max_z_slabs` is an integer >= 1 or null"))?;
+                        let ms = usize::try_from(ms).map_err(|_| Error::invalid("`max_z_slabs` is too large"))?;
+                        if ms < 1 {
+                            return Err(Error::invalid("`max_z_slabs` must be an integer >= 1"));
+                        }
+                        Some(ms)
+                    }
+                }
+                "z_growth_ratio" => {
+                    s.z_growth_ratio = if v.is_null() {
+                        None
+                    } else {
+                        let zr = v.as_f64().ok_or_else(|| Error::invalid("`z_growth_ratio` is a number > 1.0 or null"))?;
+                        if !(zr > 1.0 && zr.is_finite()) {
+                            return Err(Error::invalid("`z_growth_ratio` must be a finite number strictly greater than 1.0"));
+                        }
+                        Some(zr)
+                    }
+                }
+                "max_steiner_multiplier" => {
+                    s.max_steiner_multiplier = if v.is_null() {
+                        None
+                    } else {
+                        let mm = v.as_u64().ok_or_else(|| Error::invalid("`max_steiner_multiplier` is a non-negative integer or null"))?;
+                        let mm = usize::try_from(mm).map_err(|_| Error::invalid("`max_steiner_multiplier` is too large"))?;
+                        Some(mm)
+                    }
+                }
+                "strict_mesh" => {
+                    s.strict_mesh = v.as_bool().ok_or_else(|| Error::invalid("`strict_mesh` is true or false"))?
+                }
                 "sweep" => {
                     s.sweep = if v.is_null() {
                         None
@@ -871,7 +967,7 @@ impl Engine {
                 }
                 other => {
                     return Err(Error::invalid(format!(
-                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, points_per_wavelength, structured_pml, max_dev, curved, gap_cells, z_coarsen, sweep)"
+                        "set_mesh has no field '{other}' (h, adapt_scale, physics_sizing, points_per_wavelength, structured_pml, max_dev, curved, gap_cells, z_coarsen, max_cells, dz_min, max_z_slabs, z_growth_ratio, max_steiner_multiplier, strict_mesh, sweep)"
                     )))
                 }
             }

@@ -2,7 +2,7 @@
 
 **List the analyses** · access `read`: reads the project or the results
 
-The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation), which solved physics each applies to and, per physics, whether its result is `stale`.
+The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network), which solved physics each applies to and, per physics, whether its result is `stale`.
 
 ## Arguments
 

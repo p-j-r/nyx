@@ -201,3 +201,39 @@ fn the_curved_edges_do_not_depend_on_the_number_of_threads() {
     assert_eq!(a.edge_node_list(), b.edge_node_list());
     assert_eq!(a.points, b.points);
 }
+
+#[test]
+fn sheet3d_circular_disk_curved_mid_edge_nodes_converge_area_and_stay_positive_jacobian() {
+    use femcore::meshing::request::{mesh_request, MeshRequest, MesherRequest};
+    use geom::model::Model;
+
+    let r = 100e-6;
+    let mut m = Model::new_3d();
+    let sub = m.box_("sub", (-220e-6, -220e-6, -80e-6), (220e-6, 220e-6, 0.0));
+    let vac = m.box_("vac", (-220e-6, -220e-6, 0.0), (220e-6, 220e-6, 80e-6));
+    let disk_2d = m.circle("disk_2d", (0.0, 0.0), r);
+    m.sheet("disk", disk_2d, 0.0);
+    m.overlay(&[("substrate", sub), ("vacuum", vac)]);
+
+    let req = MeshRequest {
+        h: 55e-6,
+        max_dev: Some(2.5e-6),
+        mesher: MesherRequest::Simple,
+        structured_pml: false,
+        waves: None,
+        curved: true,
+        gap_cells: None,
+        z_coarsen: false,
+        max_cells: None,
+        dz_min: None,
+        max_z_slabs: None,
+        z_growth_ratio: None,
+        max_steiner_multiplier: None,
+        strict_mesh: true,
+    };
+    let (g, rep) = mesh_request(&m.list, &req).unwrap();
+    assert!(g.mesh.has_curved());
+    let cs = rep.curved.unwrap();
+    assert!(cs.edges > 0 && cs.cells > 0);
+    assert!(cs.min_scaled_jacobian > 0.1, "min_scaled_jacobian = {}", cs.min_scaled_jacobian);
+}

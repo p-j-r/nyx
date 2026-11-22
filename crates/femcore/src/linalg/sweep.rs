@@ -330,8 +330,12 @@ pub fn rom_sweep(
     let mut expansion: Vec<f64> = Vec::new();
     let add = |w: f64, rom: &mut Rom, full: &mut FullSolver, expansion: &mut Vec<f64>| -> Result<bool, NepError> {
         let x = full.solve(w, b)?;
-        expansion.push(w);
-        Ok(rom.extend(&x))
+        if rom.extend(&x) {
+            expansion.push(w);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     };
     // initial expansion frequencies spread over the grid
     let m = opts.initial_points.clamp(2, omegas.len().max(2));
@@ -375,6 +379,11 @@ pub fn rom_sweep(
             continue;
         }
         if expansion.contains(&w) || !add(w, &mut rom, &mut full, &mut expansion)? {
+            if !exact {
+                // the indicator has reached its noise floor: certify / continue with exact residuals
+                exact = true;
+                continue;
+            }
             break; // the worst frequency is already an expansion point (or adds nothing): stagnation
         }
     }

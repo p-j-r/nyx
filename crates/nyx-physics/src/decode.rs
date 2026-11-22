@@ -4,6 +4,7 @@
 //! domain numbers (`materials_by_label`), condition selectors resolved to boundary or domain numbers (`resolve_conditions`). Every physics
 //! crate uses these, so that the envelope is read the same way in all of them (ADR 41).
 
+use crate::cqed::{TlsInterfaceSpec, TlsInterfaces};
 use crate::desc::{Applies, BcDesc, ParamDesc, ParamKind, PropDesc, PropKind};
 use crate::error::Error;
 use crate::physics::Ctx;
@@ -103,6 +104,24 @@ impl<'a> Params<'a> {
             _ => panic!("parameter '{name}' is not a list of names"),
         }
     }
+
+    pub fn numbers(&self, name: &str) -> Vec<f64> {
+        match (self.given(name).and_then(Value::as_array), &self.desc(name).kind) {
+            (Some(a), _) => a.iter().filter_map(Value::as_f64).collect(),
+            (None, ParamKind::Numbers { default }) | (None, ParamKind::Vector { default, .. }) => default.clone(),
+            _ => panic!("parameter '{name}' is not a list of numbers"),
+        }
+    }
+
+    /// Optional number-list parameter: returns `None` when explicitly passed as `null` or when the resolved list is empty.
+    pub fn optional_numbers(&self, name: &str) -> Option<Vec<f64>> {
+        if self.is_null(name) {
+            None
+        } else {
+            let v = self.numbers(name);
+            (!v.is_empty()).then_some(v)
+        }
+    }
 }
 
 /// The material properties of every region as numbers per domain label: a region name or pattern (`sapphire*`) can match several
@@ -129,17 +148,52 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
         match assign {
             MaterialAssign::Props(map) => {
                 for (name, v) in map {
-                    if !props.iter().any(|d| &d.name == name) {
+                    let allowed = props.iter().any(|d| &d.name == name)
+                        || (name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r"));
+                    if !allowed {
                         return Err(Error::invalid(format!("region '{region}': unknown property '{name}'")));
+                    }
+                    if !v.is_finite() {
+                        return Err(Error::invalid(format!(
+                            "region '{region}': property '{name}' is not a finite number"
+                        )));
+                    }
+                    if name == "loss_tangent" && *v < 0.0 {
+                        return Err(Error::invalid(format!(
+                            "region '{region}': property 'loss_tangent' must be non-negative, got {v}"
+                        )));
                     }
                     for &l in &labels {
                         m.set(l, name, *v);
                     }
                 }
+                if let Some(&td) = map.get("loss_tangent") {
+                    if td > 0.0 && !map.contains_key("eps_r_im") {
+                        let eps_re = map
+                            .get("eps_r")
+                            .copied()
+                            .or_else(|| props.iter().find(|d| d.name == "eps_r").and_then(|d| d.default))
+                            .unwrap_or(1.0);
+                        let eps_im = eps_re * td;
+                        if eps_im > 0.0 {
+                            for &l in &labels {
+                                m.set(l, "eps_r_im", eps_im);
+                            }
+                        }
+                    }
+                }
             }
             MaterialAssign::PropsTensor(map) => {
                 for (name, v) in map {
-                    let Some(desc) = props.iter().find(|d| &d.name == name) else {
+                    let desc_kind = if let Some(desc) = props.iter().find(|d| &d.name == name) {
+                        if name == "loss_tangent" {
+                            PropKind::Tensor
+                        } else {
+                            desc.kind
+                        }
+                    } else if name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r") {
+                        PropKind::Tensor
+                    } else {
                         return Err(Error::invalid(format!("region '{region}': unknown property '{name}'")));
                     };
                     match v {
@@ -149,12 +203,17 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                     "region '{region}': property '{name}' is not a finite number"
                                 )));
                             }
+                            if name == "loss_tangent" && *s < 0.0 {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property 'loss_tangent' must be non-negative, got {s}"
+                                )));
+                            }
                             for &l in &labels {
                                 m.set(l, name, *s);
                             }
                         }
                         PropValue::Diag([x, y, z]) => {
-                            if desc.kind != PropKind::Tensor {
+                            if desc_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -164,18 +223,23 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                     "region '{region}': property '{name}' has a non-finite tensor component"
                                 )));
                             }
+                            if name == "loss_tangent" && (*x < 0.0 || *y < 0.0 || *z < 0.0) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property 'loss_tangent' must be non-negative in every direction"
+                                )));
+                            }
                             let diag_m3 = [[*x, 0.0, 0.0], [0.0, *y, 0.0], [0.0, 0.0, *z]];
                             if is_isotropic_m3(&diag_m3) {
                                 for &l in &labels {
                                     m.set(l, name, *x);
                                 }
-                            } else {
+                            } else if name != "loss_tangent" {
                                 let tensor = femcore::material::Tensor::Diagonal { x: *x, y: *y, z: *z };
                                 set_inline_tensor(&mut m, region, &labels, name, tensor)?;
                             }
                         }
                         PropValue::Sym6([xx, yy, zz, xy, xz, yz]) => {
-                            if desc.kind != PropKind::Tensor {
+                            if desc_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -186,11 +250,16 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                 )));
                             }
                             let sym_m3 = [[*xx, *xy, *xz], [*xy, *yy, *yz], [*xz, *yz, *zz]];
+                            if name == "loss_tangent" {
+                                femcore::material::tensor::TensorProp::Symmetric([*xx, *yy, *zz, *yz, *xz, *xy])
+                                    .check(femcore::material::tensor::Requirement::NonNegative, "loss_tangent")
+                                    .map_err(|msg| Error::invalid(format!("region '{region}': {msg}")))?;
+                            }
                             if is_isotropic_m3(&sym_m3) {
                                 for &l in &labels {
                                     m.set(l, name, *xx);
                                 }
-                            } else {
+                            } else if name != "loss_tangent" {
                                 let tensor = femcore::material::Tensor::Symmetric {
                                     xx: *xx,
                                     yy: *yy,
@@ -203,7 +272,7 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                             }
                         }
                         PropValue::Matrix(mat) => {
-                            if desc.kind != PropKind::Tensor {
+                            if desc_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -223,11 +292,23 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                     "region '{region}': tensor property '{name}' must be symmetric"
                                 )));
                             }
+                            if name == "loss_tangent" {
+                                femcore::material::tensor::TensorProp::Symmetric([
+                                    mat[0][0],
+                                    mat[1][1],
+                                    mat[2][2],
+                                    0.5 * (mat[1][2] + mat[2][1]),
+                                    0.5 * (mat[0][2] + mat[2][0]),
+                                    0.5 * (mat[0][1] + mat[1][0]),
+                                ])
+                                .check(femcore::material::tensor::Requirement::NonNegative, "loss_tangent")
+                                .map_err(|msg| Error::invalid(format!("region '{region}': {msg}")))?;
+                            }
                             if is_isotropic_m3(mat) {
                                 for &l in &labels {
                                     m.set(l, name, mat[0][0]);
                                 }
-                            } else {
+                            } else if name != "loss_tangent" {
                                 let tensor = femcore::material::Tensor::Symmetric {
                                     xx: mat[0][0],
                                     yy: mat[1][1],
@@ -237,6 +318,33 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                     xz: 0.5 * (mat[0][2] + mat[2][0]),
                                 };
                                 set_inline_tensor(&mut m, region, &labels, name, tensor)?;
+                            }
+                        }
+                    }
+                }
+                if let Some(td_val) = map.get("loss_tangent") {
+                    if !map.contains_key("eps_r_im") {
+                        let eps_re_m3 = match map.get("eps_r") {
+                            Some(ev) => prop_value_to_m3(ev),
+                            None => {
+                                let d = props.iter().find(|d| d.name == "eps_r").and_then(|d| d.default).unwrap_or(1.0);
+                                femcore::material::iso_tensor(d)
+                            }
+                        };
+                        let td_m3 = prop_value_to_m3(td_val);
+                        let eps_im_m3 = symmetrize_m3(&mul_m3(&eps_re_m3, &td_m3));
+                        let has_im = eps_im_m3.iter().flatten().any(|&v| v.abs() > 0.0);
+                        if has_im {
+                            if is_isotropic_m3(&eps_im_m3) {
+                                for &l in &labels {
+                                    m.set(l, "eps_r_im", eps_im_m3[0][0]);
+                                    if m.aniso.get(&l).is_some_and(|a| a.permittivity.is_some()) {
+                                        m.aniso.entry(l).or_default().permittivity_im =
+                                            Some(m3_to_sym_tensor(&eps_im_m3));
+                                    }
+                                }
+                            } else {
+                                set_inline_tensor(&mut m, region, &labels, "eps_r_im", m3_to_sym_tensor(&eps_im_m3))?;
                             }
                         }
                     }
@@ -260,6 +368,97 @@ pub fn domain_names_by_label(spec: &ProblemSpec, ctx: &Ctx) -> Result<std::colle
         }
     }
     Ok(out)
+}
+
+fn map_interface_layer(layer: &femcore::material::InterfaceLayer) -> TlsInterfaceSpec {
+    TlsInterfaceSpec { thickness_m: layer.thickness, eps_r: layer.eps_r, tan_delta: layer.tan_delta_tls_0 }
+}
+
+/// Resolves `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters for a named material from `ctx.library`.
+pub fn tls_interface_from_material_name(name: &str, ctx: &Ctx) -> Option<TlsInterfaces> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lib = ctx.library.as_ref()?;
+    let mat = lib.get(trimmed)?;
+    let out = TlsInterfaces {
+        ma: mat.interfaces.ma.as_ref().map(map_interface_layer),
+        ms: mat.interfaces.ms.as_ref().map(map_interface_layer),
+        sa: mat.interfaces.sa.as_ref().map(map_interface_layer),
+    };
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// Resolves `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters from named/oriented domain materials in
+/// `spec.materials` (and any BC carrying a `"material"` parameter, such as `surface_impedance` or `london_sheet`)
+/// via `ctx.library`.
+pub fn tls_interfaces_from_spec(spec: &ProblemSpec, ctx: &Ctx) -> TlsInterfaces {
+    let mut out = TlsInterfaces::default();
+    let mut merge = |ifaces: TlsInterfaces| {
+        if out.ma.is_none() {
+            out.ma = ifaces.ma;
+        }
+        if out.ms.is_none() {
+            out.ms = ifaces.ms;
+        }
+        if out.sa.is_none() {
+            out.sa = ifaces.sa;
+        }
+    };
+    for assign in spec.materials.values() {
+        let mat_name = match assign {
+            MaterialAssign::Named(n) => Some(n.as_str()),
+            MaterialAssign::Oriented { material, .. } => Some(material.as_str()),
+            MaterialAssign::Props(_) | MaterialAssign::PropsTensor(_) => None,
+        };
+        if let Some(ifaces) = mat_name.and_then(|n| tls_interface_from_material_name(n, ctx)) {
+            merge(ifaces);
+        }
+    }
+    for bc in &spec.bcs {
+        if let Some(ifaces) =
+            bc.params.get("material").and_then(Value::as_str).and_then(|n| tls_interface_from_material_name(n, ctx))
+        {
+            merge(ifaces);
+        }
+    }
+    out
+}
+
+fn prop_value_to_m3(v: &PropValue) -> femcore::material::M3 {
+    match v {
+        PropValue::Scalar(s) => femcore::material::iso_tensor(*s),
+        PropValue::Diag([x, y, z]) => [[*x, 0.0, 0.0], [0.0, *y, 0.0], [0.0, 0.0, *z]],
+        PropValue::Sym6([xx, yy, zz, xy, xz, yz]) => [[*xx, *xy, *xz], [*xy, *yy, *yz], [*xz, *yz, *zz]],
+        PropValue::Matrix(mat) => symmetrize_m3(mat),
+    }
+}
+
+fn mul_m3(a: &femcore::material::M3, b: &femcore::material::M3) -> femcore::material::M3 {
+    let mut out = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            for k in 0..3 {
+                out[i][j] += a[i][k] * b[k][j];
+            }
+        }
+    }
+    out
+}
+
+fn symmetrize_m3(a: &femcore::material::M3) -> femcore::material::M3 {
+    let mut out = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            out[i][j] = 0.5 * (a[i][j] + a[j][i]);
+        }
+    }
+    out
 }
 
 fn set_inline_tensor(
@@ -528,4 +727,125 @@ pub fn materials_by_region(
     ctx.wavelength = wavelength;
     let m = materials_by_label(spec, &ctx, props)?;
     Ok((names, m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::physics::LabelResolver;
+    use crate::schema::params_schema;
+    use crate::validate::check_params;
+    use serde_json::json;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    struct DummyResolver;
+    impl LabelResolver for DummyResolver {
+        fn domains(&self, region: &str) -> Result<Vec<i32>, Error> {
+            match region {
+                "sub" => Ok(vec![1]),
+                "vac" => Ok(vec![2]),
+                other => Err(Error::invalid(format!("unknown region {other}"))),
+            }
+        }
+        fn boundaries(&self, selector: &str) -> Result<Vec<i32>, Error> {
+            match selector {
+                "metal" => Ok(vec![10]),
+                other => Err(Error::invalid(format!("unknown boundary {other}"))),
+            }
+        }
+    }
+
+    #[test]
+    fn param_kind_numbers_validates_decodes_and_generates_schema() {
+        let descs = vec![ParamDesc::numbers("freqs", "Frequencies", "Hz", "explicit frequency list")];
+        let schema = params_schema(&descs);
+        assert_eq!(schema["properties"]["freqs"]["type"], json!("array"));
+        assert_eq!(schema["properties"]["freqs"]["items"], json!({ "type": "number" }));
+
+        let val_ok = json!({ "freqs": [5.0e9, 6.0e9, 7.5e9] });
+        check_params(&val_ok, &descs, "driven").expect("valid numbers array");
+        let p = Params::new(&val_ok, &descs);
+        assert!(p.has("freqs"));
+        assert_eq!(p.numbers("freqs"), vec![5.0e9, 6.0e9, 7.5e9]);
+        assert_eq!(p.optional_numbers("freqs"), Some(vec![5.0e9, 6.0e9, 7.5e9]));
+
+        let val_empty = json!({});
+        check_params(&val_empty, &descs, "driven").expect("omitted numbers array uses default");
+        let p_empty = Params::new(&val_empty, &descs);
+        assert!(!p_empty.has("freqs"));
+        assert!(p_empty.numbers("freqs").is_empty());
+        assert_eq!(p_empty.optional_numbers("freqs"), None);
+
+        let val_bad = json!({ "freqs": [5.0e9, "oops"] });
+        assert!(check_params(&val_bad, &descs, "driven").is_err());
+    }
+
+    #[test]
+    fn inline_loss_tangent_populates_complex_permittivity_and_rejects_negative() {
+        let props = vec![PropDesc::new("eps_r", "Permittivity", "", PropKind::Tensor, &[], Some(1.0))];
+        let mut spec = ProblemSpec::new("ems", 2, "cavity");
+        spec.materials.insert(
+            "sub".into(),
+            MaterialAssign::Props([("eps_r".into(), 11.45), ("loss_tangent".into(), 1.0e-4)].into()),
+        );
+        let ctx = Ctx::new(&DummyResolver);
+        let m = materials_by_label(&spec, &ctx, &props).expect("valid inline loss_tangent");
+        assert!(m.has_complex_permittivity());
+        let eps_im = m.get(1, "eps_r_im").expect("eps_r_im populated");
+        assert!((eps_im - 11.45 * 1.0e-4).abs() < 1e-15);
+
+        // Anisotropic tensor eps_r + tensor loss_tangent
+        let mut spec_t = ProblemSpec::new("ems", 2, "cavity");
+        spec_t.materials.insert(
+            "sub".into(),
+            MaterialAssign::PropsTensor(
+                [
+                    ("eps_r".into(), PropValue::Diag([9.4, 9.4, 11.6])),
+                    ("loss_tangent".into(), PropValue::Diag([1e-5, 1e-5, 2e-5])),
+                ]
+                .into(),
+            ),
+        );
+        let mt = materials_by_label(&spec_t, &ctx, &props).expect("valid tensor loss_tangent");
+        assert!(mt.has_complex_permittivity());
+        assert!(mt.aniso.get(&1).and_then(|a| a.permittivity_im.as_ref()).is_some());
+
+        // Negative loss_tangent is rejected cleanly
+        let mut spec_neg = ProblemSpec::new("ems", 2, "cavity");
+        spec_neg.materials.insert(
+            "sub".into(),
+            MaterialAssign::Props([("eps_r".into(), 11.45), ("loss_tangent".into(), -1.0e-6)].into()),
+        );
+        assert!(materials_by_label(&spec_neg, &ctx, &props).is_err());
+    }
+
+    #[test]
+    fn tls_interfaces_resolve_from_material_library() {
+        let lib_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../materials");
+        let lib = Arc::new(femcore::material::Library::load_dir(&lib_dir).expect("load material library"));
+        let mut ctx = Ctx::new(&DummyResolver);
+        ctx.library = Some(lib);
+
+        let si_ifaces = tls_interface_from_material_name("silicon_4k", &ctx).expect("silicon_4k has interfaces");
+        assert!(si_ifaces.sa.is_some(), "silicon_4k [interfaces.sa]");
+        assert!(si_ifaces.ms.is_some(), "silicon_4k [interfaces.ms]");
+        assert_eq!(si_ifaces.ms.as_ref().unwrap().eps_r, 9.8);
+
+        let al_ifaces =
+            tls_interface_from_material_name("aluminium_sc_emft", &ctx).expect("aluminium_sc_emft has interfaces");
+        assert!(al_ifaces.ma.is_some(), "aluminium_sc_emft [interfaces.ma]");
+
+        let mut spec = ProblemSpec::new("ems", 2, "cavity");
+        spec.materials.insert("sub".into(), MaterialAssign::Named("silicon_4k".into()));
+        spec.bcs.push(BcSpec {
+            on: "metal".into(),
+            kind: "surface_impedance".into(),
+            params: json!({ "material": "aluminium_sc_emft" }),
+        });
+        let combined = tls_interfaces_from_spec(&spec, &ctx);
+        assert!(combined.ma.is_some());
+        assert!(combined.ms.is_some());
+        assert!(combined.sa.is_some());
+    }
 }

@@ -70,6 +70,30 @@
     },
     {
       "applies": "boundary",
+      "doc": "Spherical 1/r asymptotic Robin open boundary (3D electrostatics).",
+      "kind": "open",
+      "name": "Open boundary",
+      "params": [
+        {
+          "doc": "Origin r0 for spherical 1/r open-boundary Robin condition; defaults to mesh bounding-box centroid",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Far-field origin",
+          "name": "origin",
+          "required": false,
+          "unit": "m"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
       "doc": "Fixed temperature (heat transfer).",
       "kind": "temperature",
       "name": "Temperature",
@@ -624,6 +648,45 @@
                   "required": [
                     "name"
                   ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Spherical 1/r asymptotic Robin open boundary (3D electrostatics).",
+              "properties": {
+                "kind": {
+                  "const": "open"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "origin": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Far-field origin [m]. Origin r0 for spherical 1/r open-boundary Robin condition; defaults to mesh bounding-box centroid",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": [],
                   "type": "object"
                 }
               },

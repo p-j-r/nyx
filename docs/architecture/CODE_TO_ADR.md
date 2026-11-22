@@ -65,9 +65,10 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/src/query.rs` | 3, 18 | exact queries, closest point |
 | `crates/geom/src/curve.rs` | 3, 18 | |
 | `crates/geom/src/tess.rs` | 3 | display only |
-| `crates/geom/src/poly_batch.rs` | 102, 2 | batch polygon cleanup and shared-corner-pinned RDP simplification |
+| `crates/geom/src/bvh.rs` | 116, 3 | flat 2D AABB BVH (`AabbBvh2`, `ComplexBvh`) accelerating arrangement, `Complex::locate`, and stack face lookup |
+| `crates/geom/src/poly_batch.rs` | 102, 2, 116 | batch polygon cleanup and spatial-hash shared-corner-pinned RDP simplification |
 | `crates/geom/src/gds.rs` | 114, 3 | pure-Rust binary GDSII stream parser, IBM float codec, hierarchy flattener, and unioned island/pin extractor |
-| `crates/geom/src/*` | 3 | arrangement, complex, planar, prim, scene, synth, math, lib |
+| `crates/geom/src/*` | 3, 116 | arrangement, complex, planar, prim, scene, synth, math, lib |
 | `crates/geom/tests/contracts.rs` | 19, 3 | |
 | `crates/geom/tests/goldens.rs` | 10, 2 | |
 | `crates/geom/tests/wafer.rs` | 1 | |
@@ -148,7 +149,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/golden_frames*` | 10, 1 | |
 | `crates/femcore/tests/frame*.rs` | 1 | |
 | `crates/femcore/tests/ring_frame.rs` | 1 | |
-| `crates/femcore/tests/linalg/*` | 8, 11 | |
+| `crates/femcore/tests/linalg/fr16.rs` | 117, 33 | supernodal `LBL^H`/`Sym LBL^T` direct solver benchmarks/tests and $P_2$ Nédélec `AmsP2` FGMRES/JD tests |
+| `crates/femcore/tests/linalg/*` | 8, 11, 117 | |
 | `crates/femcore/tests/linalg/main.rs` | 8 | |
 | `crates/femcore/tests/meshers.rs` | 7, 5 | |
 | `crates/femcore/tests/adapt3d.rs` | 7 | |
@@ -210,7 +212,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106, 109, 110 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, Bloch, and driven kernels |
 | `crates/nyx-analysis/src/capacitance.rs` | 103, 115 | `capacitance_matrix` (with Schur elimination, `Xmon`/`TransmonPocket` qubit reduction, resonator `g`/`chi`) and `inductance_matrix` |
 | `crates/nyx-analysis/src/view3d.rs` | 111, 99 | un-averaged 8-subtet P2 3D slices, cutaways, marching-tets isosurfaces, mesh views, and Bloch phase tiling |
-| `crates/nyx-analysis/src/{epr,hamiltonian,tls}.rs` | 105 | `epr` KICQ analysis, `hamiltonian` (`normal_fock` / `craig_bampton`), and `tls_participation` |
+| `crates/nyx-analysis/src/network.rs` | 118, 105, 106 | unified `NetworkAnalysis` (`id: "network"`): companion QEP, ROM `Z/Y/S`, Schur BBQ, Taubin $S_{21}$ circle fit, Touchstone v1.1 |
+| `crates/nyx-analysis/src/{epr,hamiltonian,tls}.rs` | 105, 118 | `epr` KICQ analysis, `hamiltonian` (`normal_fock` / `craig_bampton`, `f_cav_Hz`/`g_matrix_Hz`/`kappa_cav_Hz`/`t1_purcell_s`, `sweep_port`, DC-SQUID), and BVH/TOML `tls_participation` |
+| `crates/nyx-analysis/tests/wave1_cqed_analyses.rs` | 118, 105 | verification suite for `NetworkAnalysis`, `hamiltonian` SQUID/Purcell/CB, 3D `I_edge` thickness capacitance, and BVH/TOML TLS |
 | `crates/nyx-analysis/tests/cqed_capacitance_reduction.rs` | 115, 103 | analytical verification of Schur elimination, Eqs. 17-18 transmon reduction, and resonator `g_Hz` / `chi_Hz` |
 | `crates/nyx-analysis/tests/figure3d.rs` | 111, 99 | 3D figure kinds, dielectric jump preservation, Bloch tiling, latency, and `NYX_THREADS` bit-exact PNG tests |
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
@@ -249,6 +253,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/import_gds.rs` | 114, 102 | synthetic GDSII transmon `Engine::import_gds`, `sheet3d` area conservation, `<sheet>:edge`, and `path_guard` tests |
 | `crates/nyx-engine/tests/periodic_photonics_e2e.rs` | 110, 111, 112, 113 | end-to-end periodic photonics (`PFR-1..PFR-7`) integration tests through `Engine::call` |
 | `crates/nyx-engine/tests/cqed_qcap_e2e.rs` | 112, 113, 114, 115 | end-to-end superconducting qubit capacitance (`QFR-1..QFR-7`) integration tests through `Engine::call` |
+| `crates/nyx-engine/tests/squadds_fr_e2e.rs` | 116, 117, 118, 119 | end-to-end SQuADDS (`FR-01..FR-24`) integration tests through `Engine::call` |
 | `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |

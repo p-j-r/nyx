@@ -60,7 +60,9 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
         match m {
             MaterialAssign::Props(map) => {
                 for (name, v) in map {
-                    if !props.iter().any(|d| &d.name == name) {
+                    let allowed = props.iter().any(|d| &d.name == name)
+                        || (name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r"));
+                    if !allowed {
                         return Err(Error::invalid(format!(
                             "region '{region}': {} does not read a property '{name}' (it reads: {})",
                             p.name(),
@@ -72,11 +74,24 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                             "region '{region}': property '{name}' is not a finite number"
                         )));
                     }
+                    if name == "loss_tangent" && *v < 0.0 {
+                        return Err(Error::invalid(format!(
+                            "region '{region}': property 'loss_tangent' must be non-negative, got {v}"
+                        )));
+                    }
                 }
             }
             MaterialAssign::PropsTensor(map) => {
                 for (name, v) in map {
-                    let Some(desc) = props.iter().find(|d| &d.name == name) else {
+                    let desc_kind = if let Some(desc) = props.iter().find(|d| &d.name == name) {
+                        if name == "loss_tangent" {
+                            PropKind::Tensor
+                        } else {
+                            desc.kind
+                        }
+                    } else if name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r") {
+                        PropKind::Tensor
+                    } else {
                         return Err(Error::invalid(format!(
                             "region '{region}': {} does not read a property '{name}' (it reads: {})",
                             p.name(),
@@ -90,9 +105,14 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                                     "region '{region}': property '{name}' is not a finite number"
                                 )));
                             }
+                            if name == "loss_tangent" && *x < 0.0 {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property 'loss_tangent' must be non-negative, got {x}"
+                                )));
+                            }
                         }
                         PropValue::Diag(d) => {
-                            if desc.kind != PropKind::Tensor {
+                            if desc_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -102,9 +122,14 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                                     "region '{region}': property '{name}' has a non-finite tensor component"
                                 )));
                             }
+                            if name == "loss_tangent" && d.iter().any(|&x| x < 0.0) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property 'loss_tangent' must be non-negative in every direction"
+                                )));
+                            }
                         }
                         PropValue::Sym6(s6) => {
-                            if desc.kind != PropKind::Tensor {
+                            if desc_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -114,9 +139,16 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                                     "region '{region}': property '{name}' has a non-finite tensor component"
                                 )));
                             }
+                            if name == "loss_tangent" {
+                                femcore::material::tensor::TensorProp::Symmetric([
+                                    s6[0], s6[1], s6[2], s6[5], s6[4], s6[3],
+                                ])
+                                .check(femcore::material::tensor::Requirement::NonNegative, "loss_tangent")
+                                .map_err(|msg| Error::invalid(format!("region '{region}': {msg}")))?;
+                            }
                         }
                         PropValue::Matrix(mat) => {
-                            if desc.kind != PropKind::Tensor {
+                            if desc_kind != PropKind::Tensor {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' must be a scalar number, not a tensor"
                                 )));
@@ -135,6 +167,18 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': tensor property '{name}' must be symmetric"
                                 )));
+                            }
+                            if name == "loss_tangent" {
+                                femcore::material::tensor::TensorProp::Symmetric([
+                                    mat[0][0],
+                                    mat[1][1],
+                                    mat[2][2],
+                                    0.5 * (mat[1][2] + mat[2][1]),
+                                    0.5 * (mat[0][2] + mat[2][0]),
+                                    0.5 * (mat[0][1] + mat[1][0]),
+                                ])
+                                .check(femcore::material::tensor::Requirement::NonNegative, "loss_tangent")
+                                .map_err(|msg| Error::invalid(format!("region '{region}': {msg}")))?;
                             }
                         }
                     }
@@ -220,6 +264,12 @@ fn check_value(v: &Value, d: &ParamDesc) -> Result<(), String> {
             let a = v.as_array().ok_or("must be a list of region names")?;
             if a.iter().any(|x| !x.is_string()) {
                 return Err("must be a list of region names".into());
+            }
+        }
+        ParamKind::Numbers { .. } => {
+            let a = v.as_array().ok_or("must be a list of numbers")?;
+            if a.iter().any(|x| !x.as_f64().is_some_and(f64::is_finite)) {
+                return Err("must be a list of finite numbers".into());
             }
         }
     }

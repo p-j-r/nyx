@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// How a request is queued. The default is the engine's owner at its usual priority, with nothing superseded.
-#[derive(Clone, Debug, Default)]
+/// How a request is queued. The default is the engine's owner at its usual priority, with nothing superseded and `save_fields: true`.
+#[derive(Clone, Debug)]
 pub struct QueueOpts {
     /// 1 a person's request now, 2 an agent's single request, 3 sweeps and batches; default by owner (`gui` 1, others 2)
     pub priority: Option<u8>,
@@ -33,6 +33,177 @@ pub struct QueueOpts {
     pub shared: Option<bool>,
     /// this solve is a point of a warm sweep (`reuse: "warm"`, P5b): where its start block comes from and where it leaves its own modes
     pub warm: Option<crate::reuse::WarmLink>,
+    /// keep mesh and nodal/cell field arrays in `results.h5` and stored results (`true` by default; `false` strips fields after `post_analyses`)
+    pub save_fields: bool,
+    /// read-only post-solve analyses or reductions executed on full in-memory fields before fields are stripped
+    pub post_analyses: Vec<Value>,
+    /// maximum seconds to wait for free RAM during admission (`None` defers to `NYX_MEMORY_WAIT_TIMEOUT_S` and `Engine::memory_wait_timeout`)
+    pub memory_wait_timeout_s: Option<f64>,
+}
+
+impl Default for QueueOpts {
+    fn default() -> Self {
+        Self {
+            priority: None,
+            supersede: false,
+            hold: false,
+            isolate: None,
+            force: false,
+            shared: None,
+            warm: None,
+            save_fields: true,
+            post_analyses: Vec::new(),
+            memory_wait_timeout_s: None,
+        }
+    }
+}
+
+/// Read-only post-solve commands allowed inside `post_analyses`.
+pub const POST_ANALYSIS_CMDS: &[&str] = &[
+    "analyse",
+    "confinement",
+    "integrate",
+    "extremum",
+    "probe",
+    "line_cut",
+    "overlap",
+    "result_info",
+    "result_field",
+    "list_analyses",
+    "field",
+    "field_op",
+];
+
+/// Validates `post_analyses` entries upfront before any meshing or solving starts.
+pub(crate) fn validate_post_analyses(entries: &[Value]) -> Result<(), Error> {
+    let known_analyses: Vec<&'static str> = crate::analyse::analyses().iter().map(|a| a.id()).collect();
+    const KEYS: &[&str] = &["analysis", "physics", "params", "cmd", "args", "label"];
+    for (i, item) in entries.iter().enumerate() {
+        let at = |msg: String| Error::invalid(format!("post_analyses[{i}]: {msg}"));
+        let Some(obj) = item.as_object() else {
+            return Err(at(
+                "must be an object ({ \"analysis\": \"...\", \"params\"?: {...} } or { \"cmd\": \"...\", \"args\"?: {...} })"
+                    .into(),
+            ));
+        };
+        for k in obj.keys() {
+            if !KEYS.contains(&k.as_str()) {
+                return Err(at(format!(
+                    "unknown key '{k}' (expected `analysis`/`physics`/`params` shorthand or `cmd`/`args`, plus optional `label`)"
+                )));
+            }
+        }
+        if let Some(lbl) = obj.get("label").filter(|v| !v.is_null()) {
+            if !lbl.is_string() {
+                return Err(at("`label` must be text".into()));
+            }
+        }
+        let has_analysis = obj.get("analysis").is_some_and(|v| !v.is_null());
+        let has_cmd = obj.get("cmd").is_some_and(|v| !v.is_null());
+        match (has_analysis, has_cmd) {
+            (true, true) => {
+                return Err(at("specify either `analysis` shorthand or `cmd`, not both".into()));
+            }
+            (false, false) => {
+                return Err(at(
+                    "missing `analysis` (shorthand for `analyse`) or `cmd` (read-only post-solve command)".into()
+                ));
+            }
+            (true, false) => {
+                if obj.contains_key("args") {
+                    return Err(at("shorthand `analysis` uses `params`, not `args`".into()));
+                }
+                let id = obj
+                    .get("analysis")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| at("`analysis` must be a non-empty analysis id".into()))?;
+                if !known_analyses.contains(&id) {
+                    return Err(at(format!(
+                        "unknown analysis '{id}' (available analyses: {})",
+                        known_analyses.join(", ")
+                    )));
+                }
+                if let Some(p) = obj.get("physics").filter(|v| !v.is_null()) {
+                    if p.as_str().map(str::trim).filter(|s| !s.is_empty()).is_none() {
+                        return Err(at("`physics` must be a non-empty physics code".into()));
+                    }
+                }
+                if let Some(params) = obj.get("params").filter(|v| !v.is_null()) {
+                    if !params.is_object() {
+                        return Err(at("`params` must be an object".into()));
+                    }
+                }
+            }
+            (false, true) => {
+                if obj.contains_key("physics") || obj.contains_key("params") {
+                    return Err(at("with `cmd`, pass command arguments inside `args: { ... }`".into()));
+                }
+                let cmd = obj
+                    .get("cmd")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| at("`cmd` must be a non-empty command name".into()))?;
+                if !POST_ANALYSIS_CMDS.contains(&cmd) {
+                    return Err(at(format!(
+                        "'{cmd}' is not an allowed read-only post-solve analysis command (allowed: {})",
+                        POST_ANALYSIS_CMDS.join(", ")
+                    )));
+                }
+                let args_val = match obj.get("args").filter(|v| !v.is_null()) {
+                    None => None,
+                    Some(v) => Some(v.as_object().ok_or_else(|| at("`args` must be an object".into()))?),
+                };
+                if cmd == "analyse" {
+                    let aid = args_val
+                        .and_then(|a| a.get("analysis"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .ok_or_else(|| at("`cmd: \"analyse\"` requires `args.analysis`".into()))?;
+                    if !known_analyses.contains(&aid) {
+                        return Err(at(format!(
+                            "unknown analysis '{aid}' (available analyses: {})",
+                            known_analyses.join(", ")
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn save_fields_of(args: &Value) -> Result<bool, Error> {
+    match args.get("save_fields") {
+        None | Some(Value::Null) => Ok(true),
+        Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`save_fields` must be true or false")),
+    }
+}
+
+pub(crate) fn post_analyses_of(args: &Value) -> Result<Vec<Value>, Error> {
+    match args.get("post_analyses") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(v) => {
+            let arr = v.as_array().ok_or_else(|| Error::invalid("`post_analyses` must be a list"))?;
+            validate_post_analyses(arr)?;
+            Ok(arr.clone())
+        }
+    }
+}
+
+pub(crate) fn memory_wait_timeout_of(args: &Value) -> Result<Option<f64>, Error> {
+    match args.get("memory_wait_timeout_s") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            let t = v
+                .as_f64()
+                .ok_or_else(|| Error::invalid("`memory_wait_timeout_s` must be a finite number of seconds >= 0"))?;
+            crate::estimate::validate_memory_wait_timeout(t, "`memory_wait_timeout_s`").map(Some)
+        }
+    }
 }
 
 /// What the engine remembers of a job beyond the runner's own record.
@@ -273,6 +444,9 @@ impl Engine {
                     force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
                     shared: args.get("shared").and_then(Value::as_bool),
                     warm: None,
+                    save_fields: save_fields_of(args)?,
+                    post_analyses: post_analyses_of(args)?,
+                    memory_wait_timeout_s: memory_wait_timeout_of(args)?,
                 };
                 let physics = args.get("physics").and_then(Value::as_str);
                 let job = match args.get("kind").and_then(Value::as_str).unwrap_or("solve") {
@@ -415,5 +589,88 @@ impl Engine {
     ) {
         let stamp = self.stamp();
         self.meta.insert(id, JobMeta { kind, targets, stamp, estimate, shared_id: None });
+    }
+
+    /// Resolves the default physics code for an analysis `analysis_id` across `targets`.
+    fn resolve_analysis_physics(&self, analysis_id: &str, targets: &[String]) -> String {
+        let all = crate::analyse::analyses();
+        if let Some(a) = all.iter().find(|a| a.id() == analysis_id) {
+            for t in targets {
+                if let Some(s) = self.results.get(t) {
+                    if a.applies_to(&s.result) {
+                        return t.clone();
+                    }
+                }
+            }
+            for (code, s) in &self.results {
+                if a.applies_to(&s.result) {
+                    return code.clone();
+                }
+            }
+        }
+        targets
+            .first()
+            .cloned()
+            .or_else(|| self.project.active.clone())
+            .or_else(|| self.results.keys().next().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Runs validated read-only `post_analyses` on `self` (which holds the full in-memory mesh and results).
+    pub(crate) fn run_post_analyses(&mut self, entries: &[Value], targets: &[String]) -> Result<Vec<Value>, Error> {
+        validate_post_analyses(entries)?;
+        let mut out = Vec::with_capacity(entries.len());
+        for (i, item) in entries.iter().enumerate() {
+            let at = |err: Error| Error::invalid(format!("post_analyses[{i}]: {err}"));
+            let obj = item.as_object().expect("validated object");
+            let label = obj.get("label").and_then(Value::as_str).map(String::from);
+            let mut val = if let Some(aid) = obj.get("analysis").and_then(Value::as_str).map(str::trim) {
+                let physics = obj
+                    .get("physics")
+                    .and_then(Value::as_str)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| self.resolve_analysis_physics(aid, targets));
+                let params = obj.get("params").unwrap_or(&Value::Null);
+                self.analyse_with(aid, &physics, params).map_err(at)?
+            } else {
+                let cmd = obj.get("cmd").and_then(Value::as_str).map(str::trim).expect("validated cmd");
+                let mut call_args = obj.get("args").and_then(Value::as_object).cloned().unwrap_or_default();
+                if cmd == "analyse" && !call_args.get("physics").is_some_and(|v| !v.is_null()) {
+                    let aid = call_args.get("analysis").and_then(Value::as_str).unwrap_or_default();
+                    call_args.insert("physics".into(), json!(self.resolve_analysis_physics(aid, targets)));
+                } else if targets.len() == 1
+                    && !call_args.get("physics").is_some_and(|v| !v.is_null())
+                    && matches!(
+                        cmd,
+                        "integrate"
+                            | "confinement"
+                            | "extremum"
+                            | "probe"
+                            | "line_cut"
+                            | "overlap"
+                            | "field"
+                            | "field_op"
+                            | "result_field"
+                    )
+                {
+                    call_args.insert("physics".into(), json!(targets[0]));
+                }
+                let mut r = self.call(cmd, &Value::Object(call_args)).map_err(at)?;
+                if let Some(m) = r.as_object_mut() {
+                    if !m.contains_key("analysis") {
+                        m.entry("cmd").or_insert_with(|| json!(cmd));
+                    }
+                } else {
+                    r = json!({ "cmd": cmd, "result": r });
+                }
+                r
+            };
+            if let (Some(lbl), Some(m)) = (label, val.as_object_mut()) {
+                m.insert("label".into(), json!(lbl));
+            }
+            out.push(val);
+        }
+        Ok(out)
     }
 }

@@ -364,30 +364,51 @@ pub fn write_results_with_layout(
     results: &[(String, &SolveResult)],
     layout: FieldStorageLayout,
 ) -> Result<(), String> {
+    write_results_with_options(path, project, mesh, results, layout, true)
+}
+
+/// Writes `results` solved on `mesh` for `project` into `path` using `layout`, optionally omitting all mesh and field arrays when
+/// `save_fields` is `false` (preserving `project`, `scalars`, `log`, `eigenvalues`, and per-solution metadata with `@fields_saved = 0`).
+pub fn write_results_with_options(
+    path: &Path,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+    layout: FieldStorageLayout,
+    save_fields: bool,
+) -> Result<(), String> {
     let mut fb = FileBuilder::new();
     fb.set_attr("writer", text_attr("serial")?);
     fb.set_attr("processes", AttrValue::I64(1));
     fb.set_attr("format", text_attr("nyx-results")?);
     fb.set_attr("version", AttrValue::I32(4));
+    if !save_fields {
+        fb.set_attr("fields_saved", AttrValue::I64(0));
+        fb.set_attr("mesh_dim", AttrValue::I64(mesh.dim as i64));
+        fb.set_attr("mesh_points", AttrValue::I64(mesh.n_points() as i64));
+        fb.set_attr("mesh_cells", AttrValue::I64(mesh.n_cells() as i64));
+    }
     let proj_json = project.to_json();
     fill_u8(fb.create_dataset("project"), proj_json.as_bytes(), layout);
 
     let d = mesh.dim;
-    let mut m = fb.create_group("mesh");
-    fill_f64(m.create_dataset("points"), &mesh.points, d, layout);
-    fill_u32(m.create_dataset("cells"), &mesh.cells, d + 1, layout);
-    fill_i32(m.create_dataset("cell_labels"), mesh.cell_labels.as_slice(), 0, layout);
-    fill_u32(m.create_dataset("facets"), &mesh.facets, d, layout);
-    fill_i32(m.create_dataset("facet_labels"), mesh.facet_labels.as_slice(), 0, layout);
-    // curved edges (ADR 82): written only when there are some, so a straight mesh gives the file it always gave
-    let curved = mesh.edge_node_list();
-    if !curved.is_empty() {
-        let pairs: Vec<u32> = curved.iter().flat_map(|e| e.0).collect();
-        let pos: Vec<f64> = curved.iter().flat_map(|e| e.1).collect();
-        fill_u32(m.create_dataset("edge_node_pairs"), &pairs, 2, layout);
-        fill_f64(m.create_dataset("edge_node_points"), &pos, 3, layout);
+    if save_fields {
+        let mut m = fb.create_group("mesh");
+        fill_f64(m.create_dataset("points"), &mesh.points, d, layout);
+        fill_u32(m.create_dataset("cells"), &mesh.cells, d + 1, layout);
+        fill_i32(m.create_dataset("cell_labels"), mesh.cell_labels.as_slice(), 0, layout);
+        fill_u32(m.create_dataset("facets"), &mesh.facets, d, layout);
+        fill_i32(m.create_dataset("facet_labels"), mesh.facet_labels.as_slice(), 0, layout);
+        // curved edges (ADR 82): written only when there are some, so a straight mesh gives the file it always gave
+        let curved = mesh.edge_node_list();
+        if !curved.is_empty() {
+            let pairs: Vec<u32> = curved.iter().flat_map(|e| e.0).collect();
+            let pos: Vec<f64> = curved.iter().flat_map(|e| e.1).collect();
+            fill_u32(m.create_dataset("edge_node_pairs"), &pairs, 2, layout);
+            fill_f64(m.create_dataset("edge_node_points"), &pos, 3, layout);
+        }
+        fb.add_group(m.finish());
     }
-    fb.add_group(m.finish());
 
     let mut root = fb.create_group("results");
     let n_cells = mesh.n_cells();
@@ -400,19 +421,24 @@ pub fn write_results_with_layout(
         g.set_attr("dofs", AttrValue::I64(r.dofs as i64));
         g.set_attr("seconds", AttrValue::F64(r.seconds));
         g.set_attr("n_solutions", AttrValue::I64(r.solutions.len() as i64));
+        if !save_fields {
+            g.set_attr("fields_saved", AttrValue::I64(0));
+        }
 
         // the nodes of this physics and the node of every cell node, in nyx's own cell node order (the order of every cell field)
         let ord = if r.order == 2 { 2 } else { 1 };
-        let nloc_mesh = mesh.nloc(ord);
-        let mut conn: Vec<u32> = Vec::with_capacity(n_cells * nloc_mesh);
-        let mut dofs = Vec::new();
-        for c in 0..n_cells {
-            mesh.cell_dofs(c, ord, &mut dofs);
-            conn.extend(dofs.iter().take(nloc_mesh).map(|&idx| idx as u32));
+        if save_fields {
+            let nloc_mesh = mesh.nloc(ord);
+            let mut conn: Vec<u32> = Vec::with_capacity(n_cells * nloc_mesh);
+            let mut dofs = Vec::new();
+            for c in 0..n_cells {
+                mesh.cell_dofs(c, ord, &mut dofs);
+                conn.extend(dofs.iter().take(nloc_mesh).map(|&idx| idx as u32));
+            }
+            let dof_pts = mesh.dof_coordinates(ord);
+            fill_f64(g.create_dataset("points"), &dof_pts, mesh.dim, layout);
+            fill_u32(g.create_dataset("cells"), &conn, nloc_mesh, layout);
         }
-        let dof_pts = mesh.dof_coordinates(ord);
-        fill_f64(g.create_dataset("points"), &dof_pts, mesh.dim, layout);
-        fill_u32(g.create_dataset("cells"), &conn, nloc_mesh, layout);
         g.set_attr("cell_order", text_attr(cell_order_text(mesh.dim, ord))?);
 
         let scalars_text = serialize_scalars(&r.scalars);
@@ -433,32 +459,41 @@ pub fn write_results_with_layout(
             fill_f64(g.create_dataset("eigenvalues"), &eig_flat, 2, layout);
         }
 
-        let packed_info =
-            if layout != FieldStorageLayout::L1LegacyGzip3 { packable_cell_fields(r, n_cells) } else { None };
-        let effective_layout = if packed_info.is_some() || r.solutions.iter().all(|s| s.cell_fields.is_empty()) {
-            layout
+        let packed_info = if save_fields && layout != FieldStorageLayout::L1LegacyGzip3 {
+            packable_cell_fields(r, n_cells)
         } else {
-            FieldStorageLayout::L1LegacyGzip3
+            None
         };
+        let effective_layout =
+            if !save_fields || packed_info.is_some() || r.solutions.iter().all(|s| s.cell_fields.is_empty()) {
+                layout
+            } else {
+                FieldStorageLayout::L1LegacyGzip3
+            };
         g.set_attr("field_layout", text_attr(effective_layout.as_str())?);
 
-        if let Some((nloc_cf, ref meta)) = packed_info {
-            let field_len = n_cells * nloc_cf;
-            let (ri, packed) = build_packed_cell_fields(r, meta, field_len);
-            let c_comp = meta.len() as u64;
-            let ri_u64 = ri as u64;
-            let ds_packed = g.create_dataset("cell_fields_packed").with_f64_data(&packed).with_shape(&[
-                m_sol as u64,
-                c_comp,
-                n_cells as u64,
-                nloc_cf as u64,
-                ri_u64,
-            ]);
-            if layout == FieldStorageLayout::L2ShuffleLzfPacked {
-                ds_packed.with_chunks(&[1, c_comp, n_cells as u64, nloc_cf as u64, ri_u64]).with_shuffle().with_lzf();
+        if save_fields {
+            if let Some((nloc_cf, ref meta)) = packed_info {
+                let field_len = n_cells * nloc_cf;
+                let (ri, packed) = build_packed_cell_fields(r, meta, field_len);
+                let c_comp = meta.len() as u64;
+                let ri_u64 = ri as u64;
+                let ds_packed = g.create_dataset("cell_fields_packed").with_f64_data(&packed).with_shape(&[
+                    m_sol as u64,
+                    c_comp,
+                    n_cells as u64,
+                    nloc_cf as u64,
+                    ri_u64,
+                ]);
+                if layout == FieldStorageLayout::L2ShuffleLzfPacked {
+                    ds_packed
+                        .with_chunks(&[1, c_comp, n_cells as u64, nloc_cf as u64, ri_u64])
+                        .with_shuffle()
+                        .with_lzf();
+                }
+                let meta_bytes = serde_json::to_vec(meta).map_err(|x| x.to_string())?;
+                fill_u8(g.create_dataset("cell_fields_meta"), &meta_bytes, layout);
             }
-            let meta_bytes = serde_json::to_vec(meta).map_err(|x| x.to_string())?;
-            fill_u8(g.create_dataset("cell_fields_meta"), &meta_bytes, layout);
         }
 
         for (k, s) in r.solutions.iter().enumerate() {
@@ -472,32 +507,35 @@ pub fn write_results_with_layout(
                 sg.set_attr("eig_im", AttrValue::F64(im));
             }
 
-            let mut fg = sg.create_group("fields");
-            let order: Vec<&str> = s.fields.iter().map(|f| f.name.as_str()).collect();
-            fg.set_attr("order", text_attr(&serde_json::to_string(&order).map_err(|x| x.to_string())?)?);
-            for (i, f) in s.fields.iter().enumerate() {
-                let comp_json = serde_json::to_string(&f.components).map_err(|x| x.to_string())?;
-                let ds = fill_f64(fg.create_dataset(&format!("{i:02}_{}", link_name(&f.name))), &f.values, 0, layout);
-                ds.set_attr("name", text_attr(&f.name)?)
-                    .set_attr("unit", text_attr(&f.unit)?)
-                    .set_attr("components", text_attr(&comp_json)?);
-            }
-            sg.add_group(fg.finish());
-
-            if packed_info.is_none() && !s.cell_fields.is_empty() {
-                let mut cg = sg.create_group("cell_fields");
-                for (i, f) in s.cell_fields.iter().enumerate() {
-                    let mut fgp = cg.create_group(&format!("{i:02}_{}", link_name(&f.name)));
-                    fgp.set_attr("name", text_attr(&f.name)?);
-                    fgp.set_attr("unit", text_attr(&f.unit)?);
-                    fgp.set_attr("nloc", AttrValue::I64(f.nloc as i64));
-                    fill_f64(fgp.create_dataset("re"), &f.re, 0, FieldStorageLayout::L1LegacyGzip3);
-                    if !f.im.is_empty() {
-                        fill_f64(fgp.create_dataset("im"), &f.im, 0, FieldStorageLayout::L1LegacyGzip3);
-                    }
-                    cg.add_group(fgp.finish());
+            if save_fields {
+                let mut fg = sg.create_group("fields");
+                let order: Vec<&str> = s.fields.iter().map(|f| f.name.as_str()).collect();
+                fg.set_attr("order", text_attr(&serde_json::to_string(&order).map_err(|x| x.to_string())?)?);
+                for (i, f) in s.fields.iter().enumerate() {
+                    let comp_json = serde_json::to_string(&f.components).map_err(|x| x.to_string())?;
+                    let ds =
+                        fill_f64(fg.create_dataset(&format!("{i:02}_{}", link_name(&f.name))), &f.values, 0, layout);
+                    ds.set_attr("name", text_attr(&f.name)?)
+                        .set_attr("unit", text_attr(&f.unit)?)
+                        .set_attr("components", text_attr(&comp_json)?);
                 }
-                sg.add_group(cg.finish());
+                sg.add_group(fg.finish());
+
+                if packed_info.is_none() && !s.cell_fields.is_empty() {
+                    let mut cg = sg.create_group("cell_fields");
+                    for (i, f) in s.cell_fields.iter().enumerate() {
+                        let mut fgp = cg.create_group(&format!("{i:02}_{}", link_name(&f.name)));
+                        fgp.set_attr("name", text_attr(&f.name)?);
+                        fgp.set_attr("unit", text_attr(&f.unit)?);
+                        fgp.set_attr("nloc", AttrValue::I64(f.nloc as i64));
+                        fill_f64(fgp.create_dataset("re"), &f.re, 0, FieldStorageLayout::L1LegacyGzip3);
+                        if !f.im.is_empty() {
+                            fill_f64(fgp.create_dataset("im"), &f.im, 0, FieldStorageLayout::L1LegacyGzip3);
+                        }
+                        cg.add_group(fgp.finish());
+                    }
+                    sg.add_group(cg.finish());
+                }
             }
 
             g.add_group(sg.finish());
@@ -530,6 +568,47 @@ fn check_budget(ds: &Dataset, elem_bytes: u64, budget: &ReadBudgetConfig, name: 
     if bytes > budget.max_dataset_bytes {
         return Err(format!("HDF5 {name}: dataset size {bytes} B exceeds read budget {} B", budget.max_dataset_bytes));
     }
+    if bytes > budget.max_total_result_bytes {
+        return Err(format!(
+            "HDF5 {name}: dataset size {bytes} B exceeds read budget {} B",
+            budget.max_total_result_bytes
+        ));
+    }
+    Ok(shape)
+}
+
+/// Enforces per-mode slice (`shape[1..] <= budget.max_dataset_bytes`) and total dataset
+/// (`shape <= budget.max_total_result_bytes`) bounds on 5D `cell_fields_packed` read row-by-row.
+fn check_packed_budget(
+    ds: &Dataset,
+    elem_bytes: u64,
+    budget: &ReadBudgetConfig,
+    name: &str,
+) -> Result<Vec<u64>, String> {
+    let shape = ds.shape().map_err(e(name))?;
+    if shape.is_empty() {
+        return Err(format!("HDF5 {name}: empty dataset shape"));
+    }
+    let slice_bytes = shape[1..]
+        .iter()
+        .try_fold(elem_bytes, |acc, &d| acc.checked_mul(d))
+        .ok_or_else(|| format!("HDF5 {name}: per-mode slice byte size overflow ({shape:?})"))?;
+    if slice_bytes > budget.max_dataset_bytes {
+        return Err(format!(
+            "HDF5 {name}: per-mode slice size {slice_bytes} B exceeds read budget {} B",
+            budget.max_dataset_bytes
+        ));
+    }
+    let total_bytes = shape
+        .iter()
+        .try_fold(elem_bytes, |acc, &d| acc.checked_mul(d))
+        .ok_or_else(|| format!("HDF5 {name}: dataset byte size overflow ({shape:?})"))?;
+    if total_bytes > budget.max_total_result_bytes {
+        return Err(format!(
+            "HDF5 {name}: total dataset size {total_bytes} B exceeds read budget {} B",
+            budget.max_total_result_bytes
+        ));
+    }
     Ok(shape)
 }
 
@@ -548,6 +627,21 @@ fn attr_i64(attrs: &HashMap<String, AttrValue>, name: &str) -> usize {
     attrs.get(name).and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64))).unwrap_or(0).max(0) as usize
 }
 
+fn attr_bool(attrs: &HashMap<String, AttrValue>, name: &str) -> Option<bool> {
+    let v = attrs.get(name)?;
+    if let Some(i) = v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)) {
+        return Some(i != 0);
+    }
+    if let Some(s) = v.as_str() {
+        return match s.trim().to_ascii_lowercase().as_str() {
+            "false" | "0" | "no" => Some(false),
+            "true" | "1" | "yes" => Some(true),
+            _ => None,
+        };
+    }
+    None
+}
+
 fn attr_str(attrs: &HashMap<String, AttrValue>, name: &str) -> Option<String> {
     let v = attrs.get(name)?;
     if let Some(s) = v.as_str() {
@@ -559,6 +653,14 @@ fn attr_str(attrs: &HashMap<String, AttrValue>, name: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn project_dim(project_json: &str) -> usize {
+    serde_json::from_str::<Value>(project_json)
+        .ok()
+        .and_then(|v| v.get("geometry")?.get("dim")?.as_u64())
+        .filter(|&d| d == 2 || d == 3)
+        .unwrap_or(3) as usize
 }
 
 fn check_nyx_header(file: &File) -> Result<(), String> {
@@ -597,18 +699,29 @@ pub struct ResultsFileInfo {
 
 /// Reads the header summary of a results file via `File::open_streaming` without loading mesh or field arrays.
 pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String> {
-    let budget = ReadBudgetConfig::default();
+    let budget = ReadBudgetConfig::from_env();
     let file = File::open_streaming(path).map_err(e("open file"))?;
     check_nyx_header(&file)?;
     let root_grp = file.root();
+    let root_attrs = root_grp.attrs().map_err(e("root attributes"))?;
+    let fields_saved = attr_bool(&root_attrs, "fields_saved").unwrap_or(true);
     let project = read_text(&root_grp, "project", &budget)?;
 
-    let m = file.group("mesh").map_err(e("mesh group"))?;
-    let pts_shape = m.dataset("points").map_err(e("points"))?.shape().map_err(e("points"))?;
-    let cells_shape = m.dataset("cells").map_err(e("cells"))?.shape().map_err(e("cells"))?;
-    let dim = pts_shape.get(1).copied().ok_or("bad points shape")? as usize;
-    let points = pts_shape.first().copied().unwrap_or(0) as usize;
-    let cells = cells_shape.first().copied().unwrap_or(0) as usize;
+    let (dim, points, cells) = if fields_saved {
+        let m = file.group("mesh").map_err(e("mesh group"))?;
+        let pts_shape = m.dataset("points").map_err(e("points"))?.shape().map_err(e("points"))?;
+        let cells_shape = m.dataset("cells").map_err(e("cells"))?.shape().map_err(e("cells"))?;
+        let dim = pts_shape.get(1).copied().ok_or("bad points shape")? as usize;
+        let points = pts_shape.first().copied().unwrap_or(0) as usize;
+        let cells = cells_shape.first().copied().unwrap_or(0) as usize;
+        (dim, points, cells)
+    } else {
+        let d = match attr_i64(&root_attrs, "mesh_dim") {
+            2 | 3 => attr_i64(&root_attrs, "mesh_dim"),
+            _ => project_dim(&project),
+        };
+        (d, attr_i64(&root_attrs, "mesh_points"), attr_i64(&root_attrs, "mesh_cells"))
+    };
 
     let res_root = file.group("results").map_err(e("results group"))?;
     let mut codes = res_root.groups().map_err(e("results"))?;
@@ -640,11 +753,13 @@ pub struct Stored {
     pub project: String,
     /// physics code and result, in the order they were written
     pub results: Vec<(String, SolveResult)>,
+    /// false when the file was written with `save_fields == false` (mesh and solution field datasets omitted)
+    pub fields_saved: bool,
 }
 
-/// Reads a results file back using `File::open_streaming` and the default [`ReadBudgetConfig`].
+/// Reads a results file back using `File::open_streaming` and [`ReadBudgetConfig::from_env()`].
 pub fn read_results(path: &Path) -> Result<Stored, String> {
-    read_results_with_budget(path, ReadBudgetConfig::default())
+    read_results_with_budget(path, ReadBudgetConfig::from_env())
 }
 
 /// Reads a results file back using `File::open_streaming` and an explicit [`ReadBudgetConfig`].
@@ -652,40 +767,72 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
     let file = File::open_streaming(path).map_err(e("open file"))?;
     check_nyx_header(&file)?;
     let root_grp = file.root();
+    let root_attrs = root_grp.attrs().map_err(e("root attributes"))?;
+    let fields_saved = attr_bool(&root_attrs, "fields_saved").unwrap_or(true);
     let project = read_text(&root_grp, "project", &budget)?;
 
-    let m = file.group("mesh").map_err(e("mesh group"))?;
-    let pts = m.dataset("points").map_err(e("points"))?;
-    let pts_shape = check_budget(&pts, 8, &budget, "points")?;
-    let dim = pts_shape.get(1).copied().ok_or("bad points shape")? as usize;
+    let mut total_read_bytes = project.len() as u64;
+    let mut add_total = |bytes: u64, name: &str| -> Result<(), String> {
+        total_read_bytes = total_read_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| format!("HDF5 {name}: cumulative read byte count overflow"))?;
+        if total_read_bytes > budget.max_total_result_bytes {
+            return Err(format!(
+                "HDF5 {name}: cumulative result size {total_read_bytes} B exceeds read budget {} B",
+                budget.max_total_result_bytes
+            ));
+        }
+        Ok(())
+    };
+    add_total(0, "project")?;
 
-    let ds_cells = m.dataset("cells").map_err(e("cells"))?;
-    check_budget(&ds_cells, 4, &budget, "cells")?;
-    let ds_cl = m.dataset("cell_labels").map_err(e("cell labels"))?;
-    check_budget(&ds_cl, 4, &budget, "cell labels")?;
-    let ds_facets = m.dataset("facets").map_err(e("facets"))?;
-    check_budget(&ds_facets, 4, &budget, "facets")?;
-    let ds_fl = m.dataset("facet_labels").map_err(e("facet labels"))?;
-    check_budget(&ds_fl, 4, &budget, "facet labels")?;
+    let mesh = if fields_saved {
+        let m = file.group("mesh").map_err(e("mesh group"))?;
+        let pts = m.dataset("points").map_err(e("points"))?;
+        let pts_shape = check_budget(&pts, 8, &budget, "points")?;
+        let dim = pts_shape.get(1).copied().ok_or("bad points shape")? as usize;
 
-    let mut mesh = SimplexMesh::new(
-        dim,
-        pts.read_f64().map_err(e("points"))?,
-        ds_cells.read_u32().map_err(e("cells"))?,
-        ds_cl.read_i32().map_err(e("cell labels"))?,
-        ds_facets.read_u32().map_err(e("facets"))?,
-        ds_fl.read_i32().map_err(e("facet labels"))?,
-    );
-    // optional curved edges: a file without them is a straight mesh
-    if let (Ok(p), Ok(q)) = (m.dataset("edge_node_pairs"), m.dataset("edge_node_points")) {
-        check_budget(&p, 4, &budget, "edge node pairs")?;
-        check_budget(&q, 8, &budget, "edge node points")?;
-        let pairs = p.read_u32().map_err(e("edge node pairs"))?;
-        let pos = q.read_f64().map_err(e("edge node points"))?;
-        let nodes: Vec<([u32; 2], [f64; 3])> =
-            pairs.as_chunks::<2>().0.iter().copied().zip(pos.as_chunks::<3>().0.iter().copied()).collect();
-        mesh.set_edge_nodes(&nodes);
-    }
+        let ds_cells = m.dataset("cells").map_err(e("cells"))?;
+        check_budget(&ds_cells, 4, &budget, "cells")?;
+        let ds_cl = m.dataset("cell_labels").map_err(e("cell labels"))?;
+        check_budget(&ds_cl, 4, &budget, "cell labels")?;
+        let ds_facets = m.dataset("facets").map_err(e("facets"))?;
+        check_budget(&ds_facets, 4, &budget, "facets")?;
+        let ds_fl = m.dataset("facet_labels").map_err(e("facet labels"))?;
+        check_budget(&ds_fl, 4, &budget, "facet labels")?;
+
+        let pts_v = pts.read_f64().map_err(e("points"))?;
+        add_total((pts_v.len() as u64) * 8, "points")?;
+        let cells_v = ds_cells.read_u32().map_err(e("cells"))?;
+        add_total((cells_v.len() as u64) * 4, "cells")?;
+        let cl_v = ds_cl.read_i32().map_err(e("cell labels"))?;
+        add_total((cl_v.len() as u64) * 4, "cell labels")?;
+        let facets_v = ds_facets.read_u32().map_err(e("facets"))?;
+        add_total((facets_v.len() as u64) * 4, "facets")?;
+        let fl_v = ds_fl.read_i32().map_err(e("facet labels"))?;
+        add_total((fl_v.len() as u64) * 4, "facet labels")?;
+
+        let mut mesh = SimplexMesh::new(dim, pts_v, cells_v, cl_v, facets_v, fl_v);
+        // optional curved edges: a file without them is a straight mesh
+        if let (Ok(p), Ok(q)) = (m.dataset("edge_node_pairs"), m.dataset("edge_node_points")) {
+            check_budget(&p, 4, &budget, "edge node pairs")?;
+            check_budget(&q, 8, &budget, "edge node points")?;
+            let pairs = p.read_u32().map_err(e("edge node pairs"))?;
+            add_total((pairs.len() as u64) * 4, "edge node pairs")?;
+            let pos = q.read_f64().map_err(e("edge node points"))?;
+            add_total((pos.len() as u64) * 8, "edge node points")?;
+            let nodes: Vec<([u32; 2], [f64; 3])> =
+                pairs.as_chunks::<2>().0.iter().copied().zip(pos.as_chunks::<3>().0.iter().copied()).collect();
+            mesh.set_edge_nodes(&nodes);
+        }
+        mesh
+    } else {
+        let d = match attr_i64(&root_attrs, "mesh_dim") {
+            2 | 3 => attr_i64(&root_attrs, "mesh_dim"),
+            _ => project_dim(&project),
+        };
+        SimplexMesh::new(d, vec![], vec![], vec![], vec![], vec![])
+    };
 
     let root = file.group("results").map_err(e("results group"))?;
     let mut codes = root.groups().map_err(e("results"))?;
@@ -694,6 +841,7 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
     for name in codes {
         let g = root.group(&name).map_err(e("physics group"))?;
         let g_attrs = g.attrs().map_err(e("physics attributes"))?;
+        let g_fields_saved = attr_bool(&g_attrs, "fields_saved").unwrap_or(fields_saved);
         let n_solutions = attr_i64(&g_attrs, "n_solutions");
         let mut r = SolveResult {
             physics: attr_str(&g_attrs, "physics").unwrap_or_else(|| name.clone()),
@@ -707,29 +855,40 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
             solutions: Vec::with_capacity(n_solutions),
         };
 
-        let packed_cf = if let Ok(ds_packed) = g.dataset("cell_fields_packed") {
-            let p_shape = check_budget(&ds_packed, 8, &budget, "cell_fields_packed")?;
-            if p_shape.len() != 5 || (p_shape[4] != 1 && p_shape[4] != 2) || p_shape[0] as usize != n_solutions {
-                return Err(format!("HDF5 cell_fields_packed: bad shape {p_shape:?} for {n_solutions} solutions"));
+        let packed_cf = if g_fields_saved {
+            if let Ok(ds_packed) = g.dataset("cell_fields_packed") {
+                let p_shape = check_packed_budget(&ds_packed, 8, &budget, "cell_fields_packed")?;
+                if p_shape.len() != 5 || (p_shape[4] != 1 && p_shape[4] != 2) || p_shape[0] as usize != n_solutions {
+                    return Err(format!("HDF5 cell_fields_packed: bad shape {p_shape:?} for {n_solutions} solutions"));
+                }
+                let packed_total = p_shape
+                    .iter()
+                    .try_fold(8u64, |acc, &d| acc.checked_mul(d))
+                    .ok_or("HDF5 cell_fields_packed: byte size overflow")?;
+                add_total(packed_total, "cell_fields_packed")?;
+                let ri = p_shape[4] as usize;
+                let meta_json = read_text(&g, "cell_fields_meta", &budget)?;
+                let meta: Vec<PackedComponentMeta> =
+                    serde_json::from_str(&meta_json).map_err(|x| format!("HDF5 cell_fields_meta: {x}"))?;
+                if meta.len() != p_shape[1] as usize {
+                    return Err(format!(
+                        "HDF5 cell_fields_meta: {} components, packed shape has {}",
+                        meta.len(),
+                        p_shape[1]
+                    ));
+                }
+                if ri == 1 && meta.iter().any(|m| m.has_im) {
+                    return Err(
+                        "HDF5 cell_fields_packed: shape has R=1 (real-only) but metadata marks has_im=true".into()
+                    );
+                }
+                let field_len = (p_shape[2] as usize)
+                    .checked_mul(p_shape[3] as usize)
+                    .ok_or("HDF5 cell_fields_packed: field length overflow")?;
+                Some((ds_packed, meta, field_len, ri))
+            } else {
+                None
             }
-            let ri = p_shape[4] as usize;
-            let meta_json = read_text(&g, "cell_fields_meta", &budget)?;
-            let meta: Vec<PackedComponentMeta> =
-                serde_json::from_str(&meta_json).map_err(|x| format!("HDF5 cell_fields_meta: {x}"))?;
-            if meta.len() != p_shape[1] as usize {
-                return Err(format!(
-                    "HDF5 cell_fields_meta: {} components, packed shape has {}",
-                    meta.len(),
-                    p_shape[1]
-                ));
-            }
-            if ri == 1 && meta.iter().any(|m| m.has_im) {
-                return Err("HDF5 cell_fields_packed: shape has R=1 (real-only) but metadata marks has_im=true".into());
-            }
-            let field_len = (p_shape[2] as usize)
-                .checked_mul(p_shape[3] as usize)
-                .ok_or("HDF5 cell_fields_packed: field length overflow")?;
-            Some((ds_packed, meta, field_len, ri))
         } else {
             None
         };
@@ -746,82 +905,90 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
                 s.eigenvalue = Some([re, im]);
             }
 
-            let fg = sg.group("fields").map_err(e("fields"))?;
-            let mut names = fg.datasets().map_err(e("fields"))?;
-            names.sort();
-            for n in names {
-                let ds = fg.dataset(&n).map_err(e(&n))?;
-                check_budget(&ds, 8, &budget, &n)?;
-                let ds_attrs = ds.attrs().map_err(e(&n))?;
-                s.fields.push(Field {
-                    name: attr_str(&ds_attrs, "name").unwrap_or_else(|| n.clone()),
-                    unit: attr_str(&ds_attrs, "unit").unwrap_or_default(),
-                    components: attr_str(&ds_attrs, "components")
-                        .and_then(|t| serde_json::from_str(&t).ok())
-                        .unwrap_or_default(),
-                    values: ds.read_f64().map_err(e(&n))?,
-                });
-            }
-
-            if let Some((ref ds_packed, ref meta, field_len, ri)) = packed_cf {
-                let row = ds_packed.read_f64_rows(k as u64, 1).map_err(e("cell_fields_packed"))?;
-                for (c_idx, cm) in meta.iter().enumerate() {
-                    let (re, im) = if ri == 1 {
-                        let comp = &row[c_idx * field_len..(c_idx + 1) * field_len];
-                        (comp.to_vec(), Vec::new())
-                    } else {
-                        let comp = &row[c_idx * field_len * 2..(c_idx + 1) * field_len * 2];
-                        let mut re = Vec::with_capacity(field_len);
-                        let mut im = if cm.has_im { Vec::with_capacity(field_len) } else { Vec::new() };
-                        if cm.has_im {
-                            for &[re_v, im_v] in comp.as_chunks::<2>().0 {
-                                re.push(re_v);
-                                im.push(im_v);
-                            }
-                        } else {
-                            for &[re_v, _] in comp.as_chunks::<2>().0 {
-                                re.push(re_v);
-                            }
-                        }
-                        (re, im)
-                    };
-                    s.cell_fields.push(CellField {
-                        name: cm.name.clone(),
-                        unit: cm.unit.clone(),
-                        nloc: cm.nloc,
-                        re,
-                        im,
-                    });
-                }
-            } else if let Ok(cg) = sg.group("cell_fields") {
-                let mut names = cg.groups().map_err(e("cell fields"))?;
+            if g_fields_saved {
+                let fg = sg.group("fields").map_err(e("fields"))?;
+                let mut names = fg.datasets().map_err(e("fields"))?;
                 names.sort();
                 for n in names {
-                    let fgp = cg.group(&n).map_err(e(&n))?;
-                    let fgp_attrs = fgp.attrs().map_err(e(&n))?;
-                    let ds_re = fgp.dataset("re").map_err(e("re"))?;
-                    check_budget(&ds_re, 8, &budget, "re")?;
-                    let im = match fgp.dataset("im") {
-                        Ok(ds_im) => {
-                            check_budget(&ds_im, 8, &budget, "im")?;
-                            ds_im.read_f64().map_err(e("im"))?
-                        }
-                        Err(_) => vec![],
-                    };
-                    s.cell_fields.push(CellField {
-                        name: attr_str(&fgp_attrs, "name").unwrap_or_else(|| n.clone()),
-                        unit: attr_str(&fgp_attrs, "unit").unwrap_or_default(),
-                        nloc: attr_i64(&fgp_attrs, "nloc"),
-                        re: ds_re.read_f64().map_err(e("re"))?,
-                        im,
+                    let ds = fg.dataset(&n).map_err(e(&n))?;
+                    check_budget(&ds, 8, &budget, &n)?;
+                    let ds_attrs = ds.attrs().map_err(e(&n))?;
+                    let values = ds.read_f64().map_err(e(&n))?;
+                    add_total((values.len() as u64) * 8, &n)?;
+                    s.fields.push(Field {
+                        name: attr_str(&ds_attrs, "name").unwrap_or_else(|| n.clone()),
+                        unit: attr_str(&ds_attrs, "unit").unwrap_or_default(),
+                        components: attr_str(&ds_attrs, "components")
+                            .and_then(|t| serde_json::from_str(&t).ok())
+                            .unwrap_or_default(),
+                        values,
                     });
+                }
+
+                if let Some((ref ds_packed, ref meta, field_len, ri)) = packed_cf {
+                    let row = ds_packed.read_f64_rows(k as u64, 1).map_err(e("cell_fields_packed"))?;
+                    for (c_idx, cm) in meta.iter().enumerate() {
+                        let (re, im) = if ri == 1 {
+                            let comp = &row[c_idx * field_len..(c_idx + 1) * field_len];
+                            (comp.to_vec(), Vec::new())
+                        } else {
+                            let comp = &row[c_idx * field_len * 2..(c_idx + 1) * field_len * 2];
+                            let mut re = Vec::with_capacity(field_len);
+                            let mut im = if cm.has_im { Vec::with_capacity(field_len) } else { Vec::new() };
+                            if cm.has_im {
+                                for &[re_v, im_v] in comp.as_chunks::<2>().0 {
+                                    re.push(re_v);
+                                    im.push(im_v);
+                                }
+                            } else {
+                                for &[re_v, _] in comp.as_chunks::<2>().0 {
+                                    re.push(re_v);
+                                }
+                            }
+                            (re, im)
+                        };
+                        s.cell_fields.push(CellField {
+                            name: cm.name.clone(),
+                            unit: cm.unit.clone(),
+                            nloc: cm.nloc,
+                            re,
+                            im,
+                        });
+                    }
+                } else if let Ok(cg) = sg.group("cell_fields") {
+                    let mut names = cg.groups().map_err(e("cell fields"))?;
+                    names.sort();
+                    for n in names {
+                        let fgp = cg.group(&n).map_err(e(&n))?;
+                        let fgp_attrs = fgp.attrs().map_err(e(&n))?;
+                        let ds_re = fgp.dataset("re").map_err(e("re"))?;
+                        check_budget(&ds_re, 8, &budget, "re")?;
+                        let re = ds_re.read_f64().map_err(e("re"))?;
+                        add_total((re.len() as u64) * 8, "re")?;
+                        let im = match fgp.dataset("im") {
+                            Ok(ds_im) => {
+                                check_budget(&ds_im, 8, &budget, "im")?;
+                                let im_v = ds_im.read_f64().map_err(e("im"))?;
+                                add_total((im_v.len() as u64) * 8, "im")?;
+                                im_v
+                            }
+                            Err(_) => vec![],
+                        };
+                        s.cell_fields.push(CellField {
+                            name: attr_str(&fgp_attrs, "name").unwrap_or_else(|| n.clone()),
+                            unit: attr_str(&fgp_attrs, "unit").unwrap_or_default(),
+                            nloc: attr_i64(&fgp_attrs, "nloc"),
+                            re,
+                            im,
+                        });
+                    }
                 }
             }
             r.solutions.push(s);
         }
         results.push((name, r));
     }
-    Ok(Stored { mesh, project, results })
+    Ok(Stored { mesh, project, results, fields_saved })
 }
 
 /// The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON.

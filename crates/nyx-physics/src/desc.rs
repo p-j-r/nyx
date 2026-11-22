@@ -50,6 +50,10 @@ pub enum ParamKind {
     Names {
         default: Vec<String>,
     },
+    /// a variable-length list of numbers (e.g. an explicit frequency list)
+    Numbers {
+        default: Vec<f64>,
+    },
 }
 
 /// One named parameter of a study, a boundary condition or the physics.
@@ -90,11 +94,17 @@ impl ParamDesc {
     pub fn vector(name: &str, label: &str, unit: &str, len: usize, doc: &str) -> ParamDesc {
         Self::make(name, label, unit, ParamKind::Vector { len, default: vec![0.0; len] }, doc)
     }
-    /// Sets the default vector for a `ParamKind::Vector` descriptor.
+    /// Sets the default vector for a `ParamKind::Vector` or `ParamKind::Numbers` descriptor.
     pub fn default_vector(mut self, vals: Vec<f64>) -> ParamDesc {
-        if let ParamKind::Vector { len, default } = &mut self.kind {
-            assert_eq!(vals.len(), *len, "default vector length mismatch");
-            *default = vals;
+        match &mut self.kind {
+            ParamKind::Vector { len, default } => {
+                assert_eq!(vals.len(), *len, "default vector length mismatch");
+                *default = vals;
+            }
+            ParamKind::Numbers { default } => {
+                *default = vals;
+            }
+            _ => {}
         }
         self
     }
@@ -103,6 +113,9 @@ impl ParamDesc {
     }
     pub fn names(name: &str, label: &str, doc: &str) -> ParamDesc {
         Self::make(name, label, "", ParamKind::Names { default: vec![] }, doc)
+    }
+    pub fn numbers(name: &str, label: &str, unit: &str, doc: &str) -> ParamDesc {
+        Self::make(name, label, unit, ParamKind::Numbers { default: vec![] }, doc)
     }
     /// Marks the parameter as one that must be given.
     pub fn required(mut self) -> ParamDesc {

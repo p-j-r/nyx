@@ -38,11 +38,36 @@ pub struct GeomMeshOpts {
     pub gap_cells: Option<f64>,
     /// 3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes; off by default (`false`).
     pub z_coarsen: bool,
+    /// Maximum number of cells allowed before aborting meshing; off by default (`None`).
+    pub max_cells: Option<usize>,
+    /// 3D sheet mesher: floor on initial vertical z-slab thickness near sheet planes (m); off by default (`None`).
+    pub dz_min: Option<f64>,
+    /// 3D sheet mesher: maximum total number of horizontal z-slabs across active stack layers; off by default (`None`).
+    pub max_z_slabs: Option<usize>,
+    /// 3D sheet mesher: geometric growth ratio for z-slab thickness away from sheet planes (default `1.35` when `None`).
+    pub z_growth_ratio: Option<f64>,
+    /// 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices; off by default (`None`).
+    pub max_steiner_multiplier: Option<usize>,
+    /// Fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles; off by default (`false`).
+    pub strict_mesh: bool,
 }
 
 impl GeomMeshOpts {
     pub fn new(h: f64) -> Self {
-        GeomMeshOpts { h, max_dev: None, min_angle_deg: 25.0, curved: false, gap_cells: None, z_coarsen: false }
+        GeomMeshOpts {
+            h,
+            max_dev: None,
+            min_angle_deg: 25.0,
+            curved: false,
+            gap_cells: None,
+            z_coarsen: false,
+            max_cells: None,
+            dz_min: None,
+            max_z_slabs: None,
+            z_growth_ratio: None,
+            max_steiner_multiplier: None,
+            strict_mesh: false,
+        }
     }
 }
 
@@ -53,6 +78,8 @@ pub struct MeshedGeom {
     pub labels: LabelMap,
     /// shared, so that a cached mesh can be handed out many times without copying the evaluation
     pub eval: std::sync::Arc<Evaluated>,
+    /// diagnostics and non-fatal warnings emitted during meshing (e.g. Ruppert vertex cap or sliver audit)
+    pub warnings: Vec<String>,
 }
 
 impl MeshedGeom {
@@ -162,6 +189,11 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
     if !(opts.h > 0.0 && opts.h.is_finite()) {
         return Err("the element size must be positive".into());
     }
+    if let Some(mc) = opts.max_cells {
+        if mc < 1 {
+            return Err("max_cells must be at least 1".into());
+        }
+    }
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let max_dev = opts.max_dev.unwrap_or(opts.h / 50.0);
 
@@ -209,14 +241,31 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
         .collect();
     let h_fine_min = region_h.iter().copied().fold(opts.h, f64::min);
     let domain_at = |c: [f64; 2]| ev.classify([c[0], 0.0, c[1]]).and_then(|r| domain_of[r as usize]);
-    let mesh = mesh_chains(
+    let (mesh, mc_rep) = mesh_chains(
         &chains,
         &fills,
-        &MeshParams { h: opts.h, h_fine_min, h_reach: opts.h, min_angle_deg: opts.min_angle_deg, lo, hi },
+        &MeshParams {
+            h: opts.h,
+            h_fine_min,
+            min_angle_deg: opts.min_angle_deg,
+            lo,
+            hi,
+            max_steiner_multiplier: opts.max_steiner_multiplier,
+            strict_mesh: opts.strict_mesh,
+            max_cells: opts.max_cells,
+        },
         &domain_at,
     )?;
     drop(fills);
-    Ok(MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev) })
+    if let Some(mc) = opts.max_cells {
+        if mesh.n_cells() > mc {
+            return Err(format!(
+                "2D mesh exceeds max_cells limit: cells={} > max_cells={mc}",
+                mesh.n_cells()
+            ));
+        }
+    }
+    Ok(MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings: mc_rep.warnings })
 }
 
 /// Labels of whatever a selector text picks in an evaluated model: boundary labels for edges, domain labels for regions.

@@ -401,7 +401,7 @@ pub fn adapt_to_field(g: MeshedGeom, field: &dyn MetricField<2>, a: &Adaptive) -
         adapt2_with(&old, field, &opts, |w| GeomOracle2::from_work(ev, labels, w))?
     };
     let mesh = simplex_from_adapt(&result.mesh);
-    Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval }, result.report))
+    Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval, warnings: g.warnings }, result.report))
 }
 
 /// Boundary labels of the edges (2D) or faces (3D) that take part in a periodic pair of the model. Their chains or patches stay
