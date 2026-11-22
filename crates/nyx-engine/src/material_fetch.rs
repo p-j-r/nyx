@@ -42,9 +42,48 @@ pub fn remote_catalog() -> Vec<RemoteEntryInfo> {
         .collect()
 }
 
-/// First writable/discovered `materials/` directory for CLI `--save` or GUI save-to-library toggles.
+fn is_installed_bundle_dir(dir: &Path) -> bool {
+    let in_app_bundle = dir.ancestors().any(|a| {
+        a.file_name().and_then(|n| n.to_str()) == Some("Contents")
+            && a.parent().and_then(|p| p.extension()).and_then(|e| e.to_str()) == Some("app")
+    });
+    if in_app_bundle {
+        return true;
+    }
+    dir.join("install-manifest.json").is_file()
+        || dir.parent().is_some_and(|p| p.join("install-manifest.json").is_file())
+        || dir.parent().and_then(Path::parent).is_some_and(|p| p.join("install-manifest.json").is_file())
+}
+
+fn dir_is_writable(dir: &Path) -> bool {
+    let probe = dir.join(format!(".nyx-write-probe-{}", std::process::id()));
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(f) => {
+            drop(f);
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// First writable `materials/` directory for CLI `--save` or GUI save-to-library toggles.
+/// Falls back to [`crate::materials::user_materials_dir`] (`<workspace>/materials`) when the bundled
+/// library sits inside an installed package/bundle or is read-only.
 pub fn default_materials_folder() -> Option<PathBuf> {
-    crate::materials::default_dirs().into_iter().next()
+    if let Some(p) = std::env::var_os("NYX_MATERIALS") {
+        if let Some(first) = std::env::split_paths(&p).next() {
+            if first.is_dir() && dir_is_writable(&first) {
+                return Some(first);
+            }
+        }
+    }
+    if let Some(first) = crate::materials::default_dirs().into_iter().next() {
+        if !is_installed_bundle_dir(&first) && dir_is_writable(&first) {
+            return Some(first);
+        }
+    }
+    crate::materials::user_materials_dir()
 }
 
 /// Converts raw external database text into validated `format = 1` material TOML text (`rii`, `aflow`, `mp`, `numbat`).

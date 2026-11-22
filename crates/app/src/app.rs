@@ -530,10 +530,34 @@ impl App {
         self.engine.set_shared_queue(&root, true);
     }
 
+    /// Loads a `.nys` script into the built-in script sheet without executing it (safety rule against untrusted files).
+    pub fn open_nys_file(&mut self, path: PathBuf) {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                self.nys.code = text.trim_start_matches('\u{feff}').to_string();
+                self.nys.path = Some(path.clone());
+                self.nys.check_msg = None;
+                self.nys.output = None;
+                self.shell.sheet = crate::shell::Sheet::None;
+                self.nys.open = true;
+                self.status = format!("Loaded script {}", path.display());
+            }
+            Err(e) => self.set_error(format!("Could not read script {}: {e}", path.display())),
+        }
+    }
+
     pub fn open_path(&mut self, path: PathBuf) {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         if ext == "json" {
-            self.load_project(&path);
+            if self.busy.is_some() {
+                self.queued = Some(Queued::Open(path));
+                return;
+            }
+            if self.shell.active() {
+                self.open_received(path);
+            } else {
+                self.load_project(&path);
+            }
             return;
         }
         if ext == "h5" {
@@ -545,7 +569,15 @@ impl App {
             self.new_draft(&title, crate::shell::Start::Results(path));
             return;
         }
-        self.set_error(format!("Don't know how to open '.{ext}' files (nyx projects are .nyx.json)"));
+        if ext == "nyx" {
+            self.open_received(path);
+            return;
+        }
+        if ext == "nys" {
+            self.open_nys_file(path);
+            return;
+        }
+        self.set_error(format!("Don't know how to open '.{ext}' files (supported: .nyx.json, .nyx, .nys, .h5)"));
     }
 
     /// Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed.
@@ -1004,6 +1036,7 @@ impl App {
         std::thread::spawn(move || {
             let started = Instant::now();
             let mut eng = Engine::new();
+            eng.set_self_as_worker(false);
             eng.set_owner("gui");
             let _ = eng.call("project_load", &json!({ "json": spec }));
             let opts = nyx_script::Options::new(root);
@@ -1101,7 +1134,14 @@ impl App {
     }
 
     fn open_dialog(&mut self) {
-        if let Some(p) = rfd::FileDialog::new().add_filter("nyx projects", &["json"]).pick_file() {
+        if let Some(p) = rfd::FileDialog::new()
+            .add_filter("nyx files", &["nyx", "nys", "json", "h5"])
+            .add_filter("nyx projects (JSON)", &["json"])
+            .add_filter("nyx workflow archives", &["nyx"])
+            .add_filter("nyx scripts", &["nys"])
+            .add_filter("nyx results (HDF5)", &["h5"])
+            .pick_file()
+        {
             self.open_path(p);
         }
     }
@@ -1627,7 +1667,7 @@ impl eframe::App for App {
             self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, f64::NAN);
             return;
         }
-        if self.nys.open {
+        if self.nys.open || self.shell.sheet == crate::shell::Sheet::Open {
             self.sheets_ui(ui.ctx());
         }
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
@@ -3235,5 +3275,34 @@ nyx.result_info(physics=\"ems\")
         assert_eq!(crate::fmt::value("parameter_w", 5e-7), "500 nm");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn open_path_opens_nys_and_nyx_files_without_running_scripts() {
+        let dir = std::env::temp_dir().join(format!("nyx-open-ext-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let nys_path = dir.join("demo.nys");
+        std::fs::write(&nys_path, "\u{feff}nyx.project_info()\n").unwrap();
+        let nyx_path = dir.join("demo.nyx");
+        std::fs::write(&nyx_path, b"not-a-zip").unwrap();
+
+        let mut a = app();
+        wait_idle(&mut a, 30);
+
+        a.open_path(nys_path.clone());
+        assert!(a.nys.open, "opening .nys should open ScriptSheet");
+        assert!(!a.nys.running, "opening .nys must NEVER auto-execute the script");
+        assert_eq!(a.nys.path.as_deref(), Some(nys_path.as_path()));
+        assert_eq!(a.nys.code, "nyx.project_info()\n");
+        assert!(a.error.is_none(), "{:?}", a.error);
+
+        a.open_path(nyx_path.clone());
+        assert!(!a.nys.open, "opening .nyx should close ScriptSheet / show Open sheet");
+        assert_eq!(a.shell.sheet, crate::shell::Sheet::Open);
+        assert!(a.shell.open_file.as_ref().is_some_and(|(p, _)| p == &nyx_path));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

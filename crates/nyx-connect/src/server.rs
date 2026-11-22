@@ -49,14 +49,23 @@ pub fn find_server_with(override_path: Option<OsString>, running: Option<&Path>)
         return p.is_file().then(|| p.canonicalize().map(plain_path).unwrap_or(p));
     }
     let mut dirs: Vec<PathBuf> = vec![];
-    if let Some(me) = running {
-        if let Some(own) = me.parent() {
-            dirs.push(own.to_path_buf());
+    let mut push_dir = |d: PathBuf| {
+        if !dirs.contains(&d) {
+            dirs.push(d);
         }
-        if is_cargo_build_tree(me) {
-            for a in me.ancestors().skip(1).take(5) {
-                dirs.push(a.to_path_buf());
-                dirs.push(a.join("target").join("release"));
+    };
+    if let Some(me) = running {
+        let resolved = me.canonicalize().ok().map(plain_path);
+        for cand in [Some(me), resolved.as_deref()] {
+            let Some(p) = cand else { continue };
+            if let Some(own) = p.parent() {
+                push_dir(own.to_path_buf());
+            }
+            if is_cargo_build_tree(p) {
+                for a in p.ancestors().skip(1).take(5) {
+                    push_dir(a.to_path_buf());
+                    push_dir(a.join("target").join("release"));
+                }
             }
         }
     }

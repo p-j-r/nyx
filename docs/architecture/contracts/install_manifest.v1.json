@@ -1,0 +1,124 @@
+{
+  "windows_user": {
+    "format": 1,
+    "schema": "nyx-install.manifest",
+    "nyx_version": "0.1.0",
+    "installer_version": "0.1.0",
+    "install_id": "019a0000001000100",
+    "target_triple": "x86_64-pc-windows-msvc",
+    "os": "windows",
+    "scope": "user",
+    "layout": "split",
+    "install_root": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx",
+    "bin_dir": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx\\bin",
+    "resource_dir": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx",
+    "manifest_path": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx\\install-manifest.json",
+    "installed_at": "2026-11-22T18:00:00Z",
+    "updated_at": "2026-11-22T18:00:00Z",
+    "previous_version": null,
+    "files": [
+      {
+        "rel_path": "nyx.exe",
+        "base": "bin",
+        "role": "binary",
+        "size": 72967680,
+        "blake3": "b3:0000000000000000000000000000000000000000000000000000000000000001",
+        "mode": 493
+      },
+      {
+        "rel_path": "THIRD_PARTY_NOTICES.txt",
+        "base": "resource",
+        "role": "license",
+        "size": 4096,
+        "blake3": "b3:0000000000000000000000000000000000000000000000000000000000000002",
+        "mode": 420
+      }
+    ],
+    "symlinks": [],
+    "path_edits": [
+      {
+        "kind": "windows_registry",
+        "hive": "HKCU",
+        "subkey": "Environment",
+        "value_name": "Path",
+        "entry_added": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx\\bin",
+        "created_value": false,
+        "preserved_expand_sz": true
+      }
+    ],
+    "desktop_entries": [
+      {
+        "kind": "windows_shortcut",
+        "path": "C:\\Users\\alice\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\nyx.lnk"
+      },
+      {
+        "kind": "windows_uninstall_registry",
+        "hive": "HKCU",
+        "subkey": "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\nyx"
+      }
+    ],
+    "file_associations": [
+      {
+        "kind": "windows_registry_key",
+        "hive": "HKCU",
+        "subkey": "Software\\Classes\\nyx.Archive.1"
+      }
+    ],
+    "ai_hosts": [
+      {
+        "host_id": "antigravity",
+        "config_path": "C:\\Users\\alice\\.gemini\\config\\mcp_config.json",
+        "mcp_exe_path": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx\\bin\\nyx-mcp.exe",
+        "connected_by_installer": true,
+        "previous_state": "not_connected",
+        "backup_path": "C:\\Users\\alice\\.gemini\\config\\mcp_config.json.nyx-backup"
+      }
+    ]
+  },
+  "linux_user": {
+    "format": 1,
+    "schema": "nyx-install.manifest",
+    "nyx_version": "0.1.0",
+    "installer_version": "0.1.0",
+    "install_id": "019a0000002000100",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "os": "linux",
+    "scope": "user",
+    "layout": "split",
+    "install_root": "/home/alice/.local/share/nyx",
+    "bin_dir": "/home/alice/.local/share/nyx/bin",
+    "resource_dir": "/home/alice/.local/share/nyx",
+    "manifest_path": "/home/alice/.local/share/nyx/install-manifest.json",
+    "installed_at": "2026-11-22T18:00:00Z",
+    "updated_at": "2026-11-22T18:05:00Z",
+    "previous_version": "0.0.9",
+    "files": [],
+    "symlinks": [
+      {
+        "link_path": "/home/alice/.local/bin/nyx",
+        "target_path": "/home/alice/.local/share/nyx/bin/nyx"
+      }
+    ],
+    "path_edits": [
+      {
+        "kind": "unix_shell_profile",
+        "profile_path": "/home/alice/.bashrc",
+        "marker_block_id": "nyx installer",
+        "created_file": false
+      }
+    ],
+    "desktop_entries": [
+      {
+        "kind": "freedesktop_desktop",
+        "path": "/home/alice/.local/share/applications/nyx.desktop"
+      }
+    ],
+    "file_associations": [
+      {
+        "kind": "freedesktop_mime_file",
+        "path": "/home/alice/.local/share/mime/packages/nyx.xml"
+      }
+    ],
+    "ai_hosts": []
+  }
+}

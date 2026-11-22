@@ -41,6 +41,27 @@ mod wfview;
 fn main() -> eframe::Result {
     nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    args.retain(|a| !a.starts_with("-psn_"));
+    if matches!(args.first().map(String::as_str), Some("--version" | "-V")) {
+        println!("nyx {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
+        println!(
+            "nyx {} — finite-element photonics, phononics & electromagnetics\n\n\
+             Usage:\n\
+               nyx [FILE]                          Open the desktop application (optionally loading .nyx.json, .nyx, .nys, .h5)\n\
+               nyx --batch FILE [--physics LIST]   Mesh and solve without a window\n\
+               nyx check FILE [--json]             Validate a command list or .nys script without running\n\
+               nyx run FILE [OPTIONS]              Execute a command list or .nys script headlessly\n\
+               nyx api <list|show COMMAND>         Print the engine command catalog reference\n\
+               nyx material <SUBCOMMAND>           Inspect, evaluate, or import materials\n\
+               nyx queue <SUBCOMMAND>              Manage the shared workspace solver queue\n\
+               nyx --version | --help              Print version or this help message",
+            env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
     // started by an engine as its worker (`--job FOLDER`, see `nyx_engine::worker`): solve, answer on stdout, never open a window
     if matches!(args.first().map(String::as_str), Some("--job" | "--worker")) {
         std::process::exit(nyx_engine::worker::serve(&args));

@@ -39,6 +39,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
         ],
     ),
     ("nyx-connect", &[]),
+    ("nyx-install", &["nyx-connect"]),
     ("nyx-mcp", &["nyx-engine", "nyx-script"]), // the script tools (S7, ADR 94)
     ("nyx-script", &["nyx-engine"]),            // a third front-end (S4): scripts over Engine::call
     ("nyx", &["nyx-engine", "nyx-connect", "nyx-script"]), // crates/app

@@ -20,7 +20,7 @@ pub mod hosts;
 pub mod report;
 pub mod server;
 
-pub use config::{connect, disconnect, list, status, Done, HostInfo, Status};
+pub use config::{connect, disconnect, disconnect_matching, list, status, Done, HostInfo, Status};
 pub use env::{Env, Os};
 pub use hosts::{hosts, Host};
 pub use server::{agent_instructions, claude_code_command, find_server, is_cargo_build_tree, find_server_with, plain_path, server_exe, snippet, test_server, test_server_with, test_server_within, ServerInfo};

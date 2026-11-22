@@ -15,23 +15,51 @@ pub struct Example {
     pub title: String,
 }
 
-/// The folders searched for examples, first with files wins.
+/// The folders searched for examples, first with files wins: `NYX_EXAMPLES`, split/bundle layouts near `current_exe()`
+/// (including symlinked executable targets via `canonicalize()`), and ancestor `examples` folders of the program or CWD.
 pub fn dirs() -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = vec![];
+    let mut push_unique = |p: PathBuf| {
+        if !v.contains(&p) {
+            v.push(p);
+        }
+    };
     if let Some(p) = std::env::var_os("NYX_EXAMPLES") {
-        v.extend(std::env::split_paths(&p));
+        for dir in std::env::split_paths(&p) {
+            push_unique(dir);
+        }
     }
-    let mut starts: Vec<PathBuf> = vec![];
+    let mut exe_dirs: Vec<PathBuf> = vec![];
     if let Ok(exe) = std::env::current_exe() {
-        starts.extend(exe.parent().map(Path::to_path_buf));
+        for cand in [Some(exe.clone()), exe.canonicalize().ok()] {
+            if let Some(d) = cand.as_deref().and_then(Path::parent) {
+                let dp = d.to_path_buf();
+                if !exe_dirs.contains(&dp) {
+                    exe_dirs.push(dp);
+                }
+            }
+        }
     }
+    for d in &exe_dirs {
+        for rel in [
+            d.join("examples"),
+            d.join("..").join("examples"),
+            d.join("..").join("Resources").join("examples"),
+            d.join("..").join("share").join("nyx").join("examples"),
+        ] {
+            if has_projects(&rel) {
+                push_unique(rel);
+            }
+        }
+    }
+    let mut starts = exe_dirs;
     starts.extend(std::env::current_dir().ok());
     for s in starts {
         let mut d: Option<&Path> = Some(&s);
         while let Some(dir) = d {
             let e = dir.join("examples");
-            if has_projects(&e) && !v.contains(&e) {
-                v.push(e);
+            if has_projects(&e) {
+                push_unique(e);
                 break;
             }
             d = dir.parent();

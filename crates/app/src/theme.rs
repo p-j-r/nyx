@@ -273,18 +273,28 @@ pub fn apply_look(ctx: &egui::Context, look: Look) {
 
 fn first_font(paths: &[&str]) -> Option<Vec<u8>> {
     let mut dirs: Vec<std::path::PathBuf> = vec![];
+    let mut push_unique = |p: std::path::PathBuf| {
+        if !dirs.contains(&p) {
+            dirs.push(p);
+        }
+    };
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            dirs.push(d.join("fonts"));
+        for cand in [Some(exe.clone()), exe.canonicalize().ok()] {
+            if let Some(d) = cand.as_deref().and_then(std::path::Path::parent) {
+                push_unique(d.join("fonts"));
+                push_unique(d.join("..").join("fonts"));
+                push_unique(d.join("..").join("Resources").join("fonts"));
+                push_unique(d.join("..").join("share").join("nyx").join("fonts"));
+            }
         }
     }
-    dirs.push("crates/app/assets/fonts".into());
-    dirs.push("C:/Windows/Fonts".into());
+    push_unique("crates/app/assets/fonts".into());
+    push_unique("C:/Windows/Fonts".into());
     if let Ok(h) = std::env::var("USERPROFILE") {
-        dirs.push(std::path::PathBuf::from(h).join("AppData/Local/Microsoft/Windows/Fonts"));
+        push_unique(std::path::PathBuf::from(h).join("AppData/Local/Microsoft/Windows/Fonts"));
     }
-    dirs.push("/usr/share/fonts/truetype/inter".into());
-    dirs.push("/usr/share/fonts/truetype/dejavu".into());
+    push_unique("/usr/share/fonts/truetype/inter".into());
+    push_unique("/usr/share/fonts/truetype/dejavu".into());
     for p in paths {
         for d in &dirs {
             if let Ok(b) = std::fs::read(d.join(p)) {

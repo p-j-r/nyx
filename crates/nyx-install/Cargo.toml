@@ -1,0 +1,41 @@
+[package]
+name = "nyx-install"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Cross-platform pure-Rust installer, packager, updater, doctor, and uninstaller for nyx (ADR 122)"
+
+[lib]
+name = "nyx_install"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nyx-setup"
+path = "src/bin/nyx-setup.rs"
+
+[[bin]]
+name = "nyx-pack"
+path = "src/bin/nyx-pack.rs"
+
+[features]
+default = []
+gui = ["dep:eframe", "dep:rfd"]
+
+[dependencies]
+nyx-connect = { path = "../nyx-connect" }
+serde = { workspace = true }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+anyhow = { workspace = true }
+blake3 = "1"
+flate2 = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+eframe = { version = "0.37", optional = true, default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+rfd = { version = "0.17", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"

@@ -141,6 +141,17 @@ pub fn disconnect(env: &Env, id: &str) -> Result<Done, String> {
     Ok(Done { host: host.id, config: host.config.clone(), backup, changed: true })
 }
 
+/// Removes the `nyx` entry ONLY when its configured `command` matches `expected_exe` (`Status::Connected`).
+/// Entries that point at a different `nyx-mcp` binary (`Status::Stale`, e.g., another install or developer build) are left untouched.
+pub fn disconnect_matching(env: &Env, id: &str, expected_exe: &Path) -> Result<Done, String> {
+    let hs = hosts(env);
+    let host = find(&hs, id)?;
+    if status(host, expected_exe) != Status::Connected {
+        return Ok(Done { host: host.id, config: host.config.clone(), backup: existing_backup(&host.config), changed: false });
+    }
+    disconnect(env, id)
+}
+
 fn backup_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".nyx-backup");

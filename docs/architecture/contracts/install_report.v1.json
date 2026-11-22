@@ -1,0 +1,64 @@
+{
+  "install_ok": {
+    "schema": "nyx-install.install",
+    "version": 1,
+    "ok": true,
+    "action": "install",
+    "dry_run": false,
+    "scope": "user",
+    "install_root": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx",
+    "manifest_path": "C:\\Users\\alice\\AppData\\Local\\Programs\\nyx\\install-manifest.json",
+    "nyx_version": "0.1.0",
+    "previous_version": null,
+    "files_written": 50,
+    "files_removed": 0,
+    "path_updated": true,
+    "desktop_updated": true,
+    "file_assoc_updated": true,
+    "ai_hosts": [
+      {
+        "id": "cursor",
+        "action": "connected",
+        "status": "connected",
+        "config_path": "C:\\Users\\alice\\.cursor\\mcp.json",
+        "backup_path": "C:\\Users\\alice\\.cursor\\mcp.json.nyx-backup",
+        "detail": "Restart Cursor to use nyx."
+      }
+    ],
+    "doctor_checks": [
+      {
+        "name": "mcp_handshake",
+        "tier": "required",
+        "status": "ok",
+        "detail": "nyx-mcp 0.1.0 (4 tools)"
+      }
+    ],
+    "warnings": [],
+    "errors": [],
+    "next_steps": []
+  },
+  "uninstall_ok": {
+    "schema": "nyx-install.uninstall",
+    "version": 1,
+    "ok": true,
+    "action": "uninstall",
+    "dry_run": false,
+    "scope": "user",
+    "install_root": "/home/alice/.local/share/nyx",
+    "manifest_path": null,
+    "nyx_version": "0.1.0",
+    "previous_version": null,
+    "files_written": 0,
+    "files_removed": 50,
+    "path_updated": true,
+    "desktop_updated": false,
+    "file_assoc_updated": false,
+    "ai_hosts": [],
+    "doctor_checks": [],
+    "warnings": [],
+    "errors": [],
+    "next_steps": [
+      "Your workflows and simulation results in /home/alice/Documents/nyx were preserved."
+    ]
+  }
+}

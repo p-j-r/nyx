@@ -285,6 +285,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/path_guard.rs` | 93 | the path guard: every path-like argument of the catalog is guarded, no command writes or reads outside the root |
 | `docs/scripting-samples/*` | 93 | a sample script (the strip sweep) |
 | `docs/architecture/contracts/script_api.v1.json` | 93, 19 | what a script can rely on (the binding's rules; the commands are `engine_commands`) |
+| `docs/architecture/contracts/install_manifest.v1.*` | 122, 19 | versioned installer receipt (`format = 1`) and JSON Schema |
+| `docs/architecture/contracts/install_report.v1.*` | 122, 19 | machine-readable `nyx-setup --json` report and JSON Schema |
+| `crates/nyx-install/*` | 122, 28, 88, 95, 100, 107 | cross-platform pure-Rust installer (`nyx-setup`, `nyx-uninstall`), `nyx-pack` packager, OS desktop/PATH/file-assoc/ARP/Nyx.app drivers, 7-phase atomic journal, optional `glow` GUI wizard, and contract/hermetic/E2E tests |
 <!-- map:end -->
 
 ## Gaps this index shows

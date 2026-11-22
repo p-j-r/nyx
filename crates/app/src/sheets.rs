@@ -752,7 +752,7 @@ impl App {
         ui.label("Copyright (C) 2026 p-j-r. nyx comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law. You may convey it under the terms of the AGPL; the full text is the file LICENSE that comes with nyx and https://www.gnu.org/licenses/agpl-3.0.html. NOTICE lists the parts that keep their own licences (the geometry kernel and the ported solvers and meshers: BSD-2-Clause).");
         ui.add_space(10.0);
         kit::label_caps(ui, "Fonts and their licences", "");
-        ui.label("Titles: EB Garamond Italic, Copyright 2017 The EB Garamond Project Authors, SIL Open Font License 1.1 (full text below). It is shipped as crates/app/assets/fonts/EBGaramond-Italic[wght].ttf with its licence next to it; when it is not found the window uses Georgia Italic.");
+        ui.label("Titles: EB Garamond Italic, Copyright 2017 The EB Garamond Project Authors, SIL Open Font License 1.1 (full text below). It is shipped in fonts/EBGaramond-Italic[wght].ttf alongside its licence fonts/OFL-EBGaramond.txt; when it is not found the window uses Georgia Italic.");
         ui.label("Text and numbers: Inter and JetBrains Mono when installed (not shipped with nyx), otherwise Segoe UI and Cascadia or Consolas.");
         ui.label("Fallback fonts inside egui (Ubuntu-Light, Hack, NotoEmoji, emoji-icon-font) keep their own licences; see the egui project.");
         ui.add_space(10.0);

@@ -966,12 +966,23 @@ impl App {
 
     /// File dialog for a `.nyx` file; shows what is inside before anything is saved.
     pub fn pick_nyx_file(&mut self) {
-        let Some(p) = rfd::FileDialog::new().add_filter("nyx workflow", &["nyx"]).add_filter("nyx project (JSON)", &["json"]).add_filter("nyx results (HDF5)", &["h5"]).pick_file() else { return };
+        let Some(p) = rfd::FileDialog::new()
+            .add_filter("nyx workflow", &["nyx"])
+            .add_filter("nyx script", &["nys"])
+            .add_filter("nyx project (JSON)", &["json"])
+            .add_filter("nyx results (HDF5)", &["h5"])
+            .pick_file()
+        else {
+            return;
+        };
         self.open_received(p);
     }
 
     pub fn open_received(&mut self, p: PathBuf) {
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if ext != "nys" {
+            self.nys.open = false;
+        }
         if ext == "h5" {
             let title = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Results").to_string();
             self.new_draft(&title, Start::Results(p));
@@ -979,6 +990,8 @@ impl App {
             let ins = nyx_engine::facade::store::archive::inspect(&p, &nyx_engine::facade::store::archive::Limits::default());
             self.shell.open_file = Some((p, ins));
             self.shell.sheet = Sheet::Open;
+        } else if ext == "nys" {
+            self.open_nys_file(p);
         } else {
             let title = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported project").trim_end_matches(".nyx").to_string();
             self.new_draft(&title, Start::Example(p));

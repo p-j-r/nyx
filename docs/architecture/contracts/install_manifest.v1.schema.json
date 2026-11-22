@@ -1,0 +1,522 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nyx.dev/contracts/install_manifest.v1.schema.json",
+  "title": "install_manifest.v1",
+  "description": "Transactional install receipt written by nyx-setup and verified during upgrade, repair, doctor, and uninstall.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schema",
+    "nyx_version",
+    "installer_version",
+    "install_id",
+    "target_triple",
+    "os",
+    "scope",
+    "layout",
+    "install_root",
+    "bin_dir",
+    "resource_dir",
+    "manifest_path",
+    "installed_at",
+    "updated_at",
+    "previous_version",
+    "files",
+    "symlinks",
+    "path_edits",
+    "desktop_entries",
+    "file_associations",
+    "ai_hosts"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "schema": {
+      "const": "nyx-install.manifest"
+    },
+    "nyx_version": {
+      "type": "string"
+    },
+    "installer_version": {
+      "type": "string"
+    },
+    "install_id": {
+      "type": "string"
+    },
+    "target_triple": {
+      "type": "string"
+    },
+    "os": {
+      "enum": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    "scope": {
+      "enum": [
+        "user",
+        "system",
+        "custom"
+      ]
+    },
+    "layout": {
+      "enum": [
+        "split",
+        "fhs",
+        "macos_app"
+      ]
+    },
+    "install_root": {
+      "type": "string"
+    },
+    "bin_dir": {
+      "type": "string"
+    },
+    "resource_dir": {
+      "type": "string"
+    },
+    "manifest_path": {
+      "type": "string"
+    },
+    "installed_at": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "previous_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/manifest_file"
+      }
+    },
+    "symlinks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/manifest_symlink"
+      }
+    },
+    "path_edits": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/path_edit"
+      }
+    },
+    "desktop_entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/desktop_entry"
+      }
+    },
+    "file_associations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file_association"
+      }
+    },
+    "ai_hosts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ai_host"
+      }
+    }
+  },
+  "$defs": {
+    "manifest_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rel_path",
+        "base",
+        "role",
+        "size",
+        "blake3",
+        "mode"
+      ],
+      "properties": {
+        "rel_path": {
+          "type": "string"
+        },
+        "base": {
+          "enum": [
+            "bin",
+            "resource",
+            "share"
+          ]
+        },
+        "role": {
+          "enum": [
+            "binary",
+            "uninstaller",
+            "asset",
+            "license"
+          ]
+        },
+        "size": {
+          "type": "integer"
+        },
+        "blake3": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "integer"
+        }
+      }
+    },
+    "manifest_symlink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "link_path",
+        "target_path"
+      ],
+      "properties": {
+        "link_path": {
+          "type": "string"
+        },
+        "target_path": {
+          "type": "string"
+        }
+      }
+    },
+    "path_edit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "hive",
+            "subkey",
+            "value_name",
+            "entry_added",
+            "created_value",
+            "preserved_expand_sz"
+          ],
+          "properties": {
+            "kind": {
+              "const": "windows_registry"
+            },
+            "hive": {
+              "type": "string"
+            },
+            "subkey": {
+              "type": "string"
+            },
+            "value_name": {
+              "type": "string"
+            },
+            "entry_added": {
+              "type": "string"
+            },
+            "created_value": {
+              "type": "boolean"
+            },
+            "preserved_expand_sz": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "profile_path",
+            "marker_block_id",
+            "created_file"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unix_shell_profile"
+            },
+            "profile_path": {
+              "type": "string"
+            },
+            "marker_block_id": {
+              "type": "string"
+            },
+            "created_file": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "file_path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "macos_paths_d"
+            },
+            "file_path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "file_path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "linux_profile_d"
+            },
+            "file_path": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "desktop_entry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "windows_shortcut"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "hive",
+            "subkey"
+          ],
+          "properties": {
+            "kind": {
+              "const": "windows_uninstall_registry"
+            },
+            "hive": {
+              "type": "string"
+            },
+            "subkey": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "freedesktop_desktop"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "freedesktop_icon"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "freedesktop_mime"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "macos_app_bundle"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "file_association": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "hive",
+            "subkey"
+          ],
+          "properties": {
+            "kind": {
+              "const": "windows_registry_key"
+            },
+            "hive": {
+              "type": "string"
+            },
+            "subkey": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "hive",
+            "subkey",
+            "value_name",
+            "set_value",
+            "previous_value",
+            "created_key"
+          ],
+          "properties": {
+            "kind": {
+              "const": "windows_registry_value"
+            },
+            "hive": {
+              "type": "string"
+            },
+            "subkey": {
+              "type": "string"
+            },
+            "value_name": {
+              "type": "string"
+            },
+            "set_value": {
+              "type": "string"
+            },
+            "previous_value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "created_key": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "freedesktop_mime_file"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "app_path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "macos_launch_services"
+            },
+            "app_path": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "ai_host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id",
+        "config_path",
+        "mcp_exe_path",
+        "connected_by_installer",
+        "previous_state",
+        "backup_path"
+      ],
+      "properties": {
+        "host_id": {
+          "type": "string"
+        },
+        "config_path": {
+          "type": "string"
+        },
+        "mcp_exe_path": {
+          "type": "string"
+        },
+        "connected_by_installer": {
+          "type": "boolean"
+        },
+        "previous_state": {
+          "type": "string"
+        },
+        "backup_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

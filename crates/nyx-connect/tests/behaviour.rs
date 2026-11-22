@@ -151,6 +151,29 @@ fn disconnect_removes_only_nyx() {
 }
 
 #[test]
+fn disconnect_matching_only_removes_entries_pointing_to_expected_exe() {
+    let sb = Sandbox::new("remove_matching");
+    let env = sb.env(Os::Linux);
+    let exe = sb.exe();
+    let other_exe = env.home.join("other/nyx-mcp");
+    fs::create_dir_all(other_exe.parent().unwrap()).unwrap();
+    fs::write(&other_exe, b"other").unwrap();
+
+    // Point cursor at `exe`, and claude-code at `other_exe`.
+    connect(&env, "cursor", &exe).unwrap();
+    connect(&env, "claude-code", &other_exe).unwrap();
+
+    // Disconnecting for `exe` removes cursor cleanly but leaves claude-code (Stale for `exe`) untouched.
+    let d_cursor = disconnect_matching(&env, "cursor", &exe).unwrap();
+    assert!(d_cursor.changed);
+    assert_eq!(status_of(&env, "cursor", &exe), Status::NotConnected);
+
+    let d_claude = disconnect_matching(&env, "claude-code", &exe).unwrap();
+    assert!(!d_claude.changed);
+    assert_eq!(status_of(&env, "claude-code", &other_exe), Status::Connected);
+}
+
+#[test]
 fn disconnect_on_a_missing_file_writes_nothing() {
     let sb = Sandbox::new("noconfig");
     let env = sb.env(Os::Linux);

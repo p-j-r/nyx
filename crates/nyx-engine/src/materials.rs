@@ -11,24 +11,50 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// The folders searched for material files, first match wins: `NYX_MATERIALS` (a path list), `materials` next to the program, and a
-/// `materials` folder of any parent of the program's folder or of the current folder that holds `.toml` files (a build tree).
+/// The folders searched for bundled/configured material files, first valid match wins when loading the base library:
+/// `NYX_MATERIALS` (a path list), split/bundle layouts near `current_exe()` (and its canonical target for symlinks),
+/// and an ancestor `materials` folder of the program or current working directory (a build tree).
 pub fn default_dirs() -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = vec![];
+    let mut push_unique = |p: PathBuf| {
+        if !v.contains(&p) {
+            v.push(p);
+        }
+    };
     if let Some(p) = std::env::var_os("NYX_MATERIALS") {
-        v.extend(std::env::split_paths(&p));
+        for dir in std::env::split_paths(&p) {
+            push_unique(dir);
+        }
     }
     let has_files = |d: &Path| {
         std::fs::read_dir(d)
             .map(|r| r.filter_map(|e| e.ok()).any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("toml")))
             .unwrap_or(false)
     };
-    let mut starts: Vec<PathBuf> = vec![];
+    let mut exe_dirs: Vec<PathBuf> = vec![];
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            starts.push(d.to_path_buf());
+        for cand in [Some(exe.clone()), exe.canonicalize().ok()] {
+            if let Some(d) = cand.as_deref().and_then(Path::parent) {
+                let dp = d.to_path_buf();
+                if !exe_dirs.contains(&dp) {
+                    exe_dirs.push(dp);
+                }
+            }
         }
     }
+    for d in &exe_dirs {
+        for rel in [
+            d.join("materials"),
+            d.join("..").join("materials"),
+            d.join("..").join("Resources").join("materials"),
+            d.join("..").join("share").join("nyx").join("materials"),
+        ] {
+            if has_files(&rel) {
+                push_unique(rel);
+            }
+        }
+    }
+    let mut starts = exe_dirs;
     if let Ok(cwd) = std::env::current_dir() {
         starts.push(cwd);
     }
@@ -36,8 +62,8 @@ pub fn default_dirs() -> Vec<PathBuf> {
         let mut d: Option<&Path> = Some(&s);
         while let Some(dir) = d {
             let m = dir.join("materials");
-            if has_files(&m) && !v.contains(&m) {
-                v.push(m);
+            if has_files(&m) {
+                push_unique(m);
                 break;
             }
             d = dir.parent();
@@ -46,21 +72,88 @@ pub fn default_dirs() -> Vec<PathBuf> {
     v
 }
 
-/// Loads the first folder that has material files; an empty library (and the reason) when none loads.
+/// The user's writable material overlay folder (`<workspace>/materials`, i.e. `$NYX_WORKSPACE/materials` or `Documents/nyx/materials`).
+/// Installed builds write fetched or custom material `.toml` files here instead of mutating read-only or signed install directories.
+pub fn user_materials_dir() -> Option<PathBuf> {
+    Some(crate::shared_queue::default_workspace().join("materials"))
+}
+
+fn read_toml_map(dir: &Path, notes: &mut Vec<String>) -> std::collections::BTreeMap<String, String> {
+    let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
+        Ok(rd) => rd
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("toml"))
+            .collect(),
+        Err(_) => return Default::default(),
+    };
+    files.sort();
+    let mut texts = std::collections::BTreeMap::new();
+    for path in files {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        match std::fs::read_to_string(&path) {
+            Ok(txt) => {
+                texts.insert(stem.to_string(), txt);
+            }
+            Err(e) => notes.push(format!("{}: {e}", path.display())),
+        }
+    }
+    texts
+}
+
+/// Loads the first folder that has material files as the base library, then overlays any user `*.toml` files
+/// from [`user_materials_dir`] via `Library::with_texts` so user materials can `extends` bundled ones without hiding them.
 pub fn load_library(dirs: &[PathBuf]) -> (Library, Vec<String>) {
     let mut notes = vec![];
+    let mut loaded_dir: Option<&Path> = None;
+    let mut base = None;
     for d in dirs {
         match Library::load_dir(d) {
-            Ok(l) => return (l, notes),
+            Ok(l) => {
+                base = Some(l);
+                loaded_dir = Some(d.as_path());
+                break;
+            }
             Err(errs) => notes.extend(errs.iter().map(|e| format!("{}: {e}", d.display()))),
         }
     }
-    if dirs.is_empty() {
-        notes.push(
-            "no material folder found (set NYX_MATERIALS, or keep a `materials` folder next to the program)".into(),
-        );
+    let mut lib = match base {
+        Some(l) => l,
+        None => {
+            if dirs.is_empty() {
+                notes.push(
+                    "no material folder found (set NYX_MATERIALS, or keep a `materials` folder next to the program)"
+                        .into(),
+                );
+            }
+            Library::default()
+        }
+    };
+    if let Some(user_dir) = user_materials_dir().filter(|p| p.is_dir()) {
+        let same = loaded_dir
+            .and_then(|b| b.canonicalize().ok())
+            .zip(user_dir.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
+        if !same {
+            let texts = read_toml_map(&user_dir, &mut notes);
+            if !texts.is_empty() {
+                match lib.with_texts(&texts) {
+                    Ok(merged) => lib = merged,
+                    Err(_) => {
+                        for (name, txt) in texts {
+                            let mut one = std::collections::BTreeMap::new();
+                            one.insert(name, txt);
+                            match lib.with_texts(&one) {
+                                Ok(merged) => lib = merged,
+                                Err(errs) => notes.extend(errs.iter().map(|e| format!("{}: {e}", user_dir.display()))),
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
-    (Library::default(), notes)
+    (lib, notes)
 }
 
 /// The frequency (Hz) of a study, from the first parameter of the study descriptor with the unit Hz (given, else its default),

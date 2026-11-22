@@ -1480,6 +1480,7 @@ dependencies = [
  "egui-winit",
  "egui_glow",
  "egui_system_font_provider",
+ "glow",
  "glutin",
  "glutin-winit",
  "image",
@@ -4237,6 +4238,24 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "nyx-install"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "eframe",
+ "embed-resource",
+ "flate2",
+ "image",
+ "libc",
+ "nyx-connect",
+ "rfd",
+ "serde",
+ "serde_json",
+ "zip 2.6.1",
 ]
 
 [[package]]

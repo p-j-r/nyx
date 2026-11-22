@@ -75,16 +75,27 @@ pub struct Outcome {
     pub calls: u64,
 }
 
-/// The script worker program: named by `NYX_SCRIPT_WORKER`, else `nyx-script-worker` in the folder of the running program or the one above it
-/// (the test programs of cargo sit in `deps/`).
+/// The script worker program: named by `NYX_SCRIPT_WORKER`, else `nyx-script-worker` next to the running program
+/// (following symlinks via `canonicalize()` so installed `~/.local/bin/nyx` finds `Nyx.app/Contents/MacOS/nyx-script-worker`)
+/// or in the folder above it (Cargo test binaries sit in `deps/`).
 pub fn find_worker() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("NYX_SCRIPT_WORKER") {
         return Some(PathBuf::from(p));
     }
     let name = format!("nyx-script-worker{}", std::env::consts::EXE_SUFFIX);
     let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    [dir.to_path_buf(), dir.parent()?.to_path_buf()].into_iter().map(|d| d.join(&name)).find(|p| p.is_file())
+    let mut dirs: Vec<PathBuf> = vec![];
+    for cand in [Some(exe.clone()), exe.canonicalize().ok()] {
+        if let Some(dir) = cand.as_deref().and_then(std::path::Path::parent) {
+            for d in [Some(dir), dir.parent()].into_iter().flatten() {
+                let p = d.to_path_buf();
+                if !dirs.contains(&p) {
+                    dirs.push(p);
+                }
+            }
+        }
+    }
+    dirs.into_iter().map(|d| d.join(&name)).find(|p| p.is_file())
 }
 
 /// The folder the MCP server keeps its workspace in by default: `Documents/nyx_runs/mcp` of the person (the temporary folder when there is no

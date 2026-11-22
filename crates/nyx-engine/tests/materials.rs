@@ -136,3 +136,31 @@ fn remote_catalog_and_offline_import_material_work_and_respect_path_guard() {
     assert!(e.library().unwrap().names().contains(&"si_synth".to_string()));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn user_workspace_materials_overlay_bundled_library_without_hiding_it() {
+    let ws = std::env::temp_dir().join(format!("nyx-engine-mat-overlay-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&ws);
+    let user_mats = ws.join("materials");
+    std::fs::create_dir_all(&user_mats).unwrap();
+    std::fs::write(
+        user_mats.join("custom_si.toml"),
+        "extends = \"silicon\"\nname = \"custom_si\"\ndescription = \"User workspace overlay material\"\n",
+    )
+    .unwrap();
+
+    // Point NYX_WORKSPACE at our scratch workspace and reload default dirs.
+    let prev = std::env::var_os("NYX_WORKSPACE");
+    std::env::set_var("NYX_WORKSPACE", &ws);
+    let (lib, notes) = nyx_engine::materials::load_library(&nyx_engine::materials::default_dirs());
+    match prev {
+        Some(v) => std::env::set_var("NYX_WORKSPACE", v),
+        None => std::env::remove_var("NYX_WORKSPACE"),
+    }
+
+    assert!(lib.get("silicon").is_some(), "bundled silicon must remain visible: {notes:?}");
+    assert!(lib.get("silica").is_some(), "bundled silica must remain visible: {notes:?}");
+    let custom = lib.get("custom_si").expect("user overlay material custom_si should load");
+    assert_eq!(custom.description.as_deref(), Some("User workspace overlay material"));
+    let _ = std::fs::remove_dir_all(&ws);
+}

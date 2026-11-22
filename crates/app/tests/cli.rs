@@ -312,3 +312,19 @@ fn material_cli_lists_shows_and_imports_offline() {
     assert_eq!(nyx(&["material", "show", "silicon_salzbergg"]).status.code(), Some(2));
     assert_eq!(nyx(&["material", "unknown"]).status.code(), Some(2));
 }
+
+#[test]
+fn version_and_help_exit_zero_headlessly() {
+    for flag in ["--version", "-V"] {
+        let o = nyx(&[flag]);
+        assert_eq!(o.status.code(), Some(0), "{flag}: {}", text(&o.stderr));
+        let out = text(&o.stdout);
+        assert!(out.starts_with("nyx "), "{flag}: {out}");
+    }
+    for flag in ["--help", "-h"] {
+        let o = nyx(&[flag]);
+        assert_eq!(o.status.code(), Some(0), "{flag}: {}", text(&o.stderr));
+        let out = text(&o.stdout);
+        assert!(out.contains("Usage:") && out.contains("--batch"), "{flag}: {out}");
+    }
+}
