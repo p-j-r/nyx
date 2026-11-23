@@ -46,6 +46,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/chip_report.md` | 22 | |
 | `docs/photonic_use_cases.md` | 21, 22 | |
 | `docs/SQUADDS_BENCHMARK_REPORT.md` | 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 119, 120, 121 | SQuADDS cQED statistical parity, AF-1..AF-6 ablation, and cryogenic hardware validation report |
+| `docs/SQUADDS_BUG_FEATURE_REQUESTS.md` | 11, 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 120, 121 | Post-SQuADDS benchmark bug-fix and solver/meshing feature requests (FR-25..FR-33) covering Core Bugs 1-5 and Limitations L1-L4 |
 | `docs/brand/*` | 23 | |
 | `docs/mockups/*` | 14, 23 | |
 | `docs/ports/README.md` | 5, 7, 8 | |
