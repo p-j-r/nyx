@@ -45,6 +45,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/figures/example_modes_gallery.png` | 99 | example output of the `figure` command |
 | `docs/chip_report.md` | 22 | |
 | `docs/photonic_use_cases.md` | 21, 22 | |
+| `docs/SQUADDS_BENCHMARK_REPORT.md` | 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 119, 120, 121 | SQuADDS cQED statistical parity, AF-1..AF-6 ablation, and cryogenic hardware validation report |
 | `docs/brand/*` | 23 | |
 | `docs/mockups/*` | 14, 23 | |
 | `docs/ports/README.md` | 5, 7, 8 | |
@@ -235,6 +236,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-analysis/tests/cqed_capacitance_reduction.rs` | 115, 103 | analytical verification of Schur elimination, Eqs. 17-18 transmon reduction, and resonator `g_Hz` / `chi_Hz` |
 | `crates/nyx-analysis/tests/figure3d.rs` | 111, 99 | 3D figure kinds, dielectric jump preservation, Bloch tiling, latency, and `NYX_THREADS` bit-exact PNG tests |
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
+| `crates/nyx-analysis/tests/squadds_smoke.rs` | 103, 105, 118, 120 | PR CI smoke suite for TransmonCross Mode G2 + `far_field` + `I_edge`, DC-SQUID `Dissipator` sweep, and `MUNINN` 3D TLS |
 | `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, 2D/3D mode figures) |
 | `crates/nyx-engine/tests/layering.rs` | 26, 107 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
@@ -273,6 +275,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/cqed_qcap_e2e.rs` | 112, 113, 114, 115 | end-to-end superconducting qubit capacitance (`QFR-1..QFR-7`) integration tests through `Engine::call` |
 | `crates/nyx-engine/tests/squadds_fr_e2e.rs` | 116, 117, 118, 119 | end-to-end SQuADDS (`FR-01..FR-24`) integration tests through `Engine::call` |
 | `crates/nyx-engine/tests/accuracy_features_e2e.rs` | 120, 121 | end-to-end Phase A sub-$0.1\%$ electrostatic accuracy features (`AF-1..AF-6`) and Cross-Feature Compatibility Rules 1–5 tests |
+| `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, and thread determinism |
 | `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |
