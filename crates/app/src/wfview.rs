@@ -260,7 +260,7 @@ impl App {
                 let focused = ctx.memory(|m| m.has_focus(eid));
                 let mut buf = if focused { w.draft_buf.clone() } else { w.title() };
                 let width = buf.chars().count().max(10) as f32 * 14.0;
-                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width.min(460.0)).text_color(theme::accent(&ctx)));
+                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width.min(460.0)).text_color(theme::text(&ctx)));
                 if focused || r.has_focus() {
                     w.draft_buf = buf.clone();
                 }
@@ -474,11 +474,10 @@ impl App {
     /// The viewport with its two view buttons (geometry, mesh preview).
     fn wf_viewport(&mut self, ui: &mut egui::Ui, strip: &str) {
         let ctx = ui.ctx().clone();
-        egui::Panel::bottom("wf_strip").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 10))).show(ui, |ui| {
-            kit::plain_card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new(strip).color(theme::text(&ctx)));
-            });
+        // a status bar of one line, not a card (ADR 123): the facts of the model on show, muted; what it means is in the tooltip
+        egui::Panel::bottom("wf_strip").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 4)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+            ui.add(egui::Label::new(kit::muted(ui, strip).size(12.5)).truncate())
+                .on_hover_text("Compute solves on exactly this mesh; it is rebuilt from the recipe, never stored.");
         });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
             let narrow = ui.available_width() < 480.0;
@@ -585,7 +584,7 @@ impl App {
                 });
             });
         });
-        self.wf_viewport(ui, &format!("WHAT SEARCH WILL SEE    {line}"));
+        self.wf_viewport(ui, &line);
     }
 
     fn wf_build(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
@@ -617,8 +616,8 @@ impl App {
             });
         });
         let strip = match &self.doc.mesh {
-            Some(m) => format!("Mesh    {}D · {} cells · {} boundary facets        Compute solves on exactly this mesh; it is rebuilt from the recipe, never stored.", m.dim, m.n_cells(), m.n_facets()),
-            None => "Mesh    not built yet".into(),
+            Some(m) => format!("Mesh · {}D · {} points · {} cells · {} boundary facets", m.dim, m.n_points(), m.n_cells(), m.n_facets()),
+            None => "Mesh · not built yet".into(),
         };
         self.wf_viewport(ui, &strip);
     }
@@ -999,7 +998,7 @@ impl App {
         let colors = [theme::accent(ui.ctx()), theme::activity(ui.ctx()), Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0x2F, 0x7A, 0x66), Color32::from_rgb(0x9B, 0x3A, 0x3A)];
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(18))).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(kit::title("Compare runs", 30.0).color(theme::accent(&ctx)));
+                ui.label(kit::title("Compare runs", 30.0));
                 ui.label(kit::muted(ui, format!("{} › {}", w.title(), w.exp)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if kit::primary(ui, "Back to runs").clicked() {
@@ -1113,7 +1112,7 @@ impl App {
         });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
             let label = w.focus.clone().filter(|f| !f.is_empty()).map(|f| format!("Field viewer · {}", f.split('_').next().unwrap_or(&f))).unwrap_or_else(|| "Field viewer".into());
-            ui.label(kit::title(label, 26.0).color(theme::accent(&ctx)));
+            ui.label(kit::title(label, 26.0));
             if live {
                 self.show_results = true;
             }

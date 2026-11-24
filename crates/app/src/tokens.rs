@@ -75,6 +75,7 @@ pub const TINT: Pair = pair("#F1E4EC", "#33202F");
 /// running, queued, stale: fill
 pub const ACTIVITY: Pair = pair("#FFBD59", "#F2B35E");
 /// text on an activity fill
+#[allow(dead_code)] // a role of tokens.json (the text on an amber fill); no widget draws an amber fill since the stale band became a chip (ADR 123)
 pub const ON_ACTIVITY: Pair = pair("#1D1224", "#1D1224");
 /// the activity colour used as text (on `ACTIVITY_TINT`)
 pub const ACTIVITY_TEXT: Pair = pair("#6B4300", "#F2B35E");

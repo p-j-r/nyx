@@ -9,13 +9,14 @@ use crate::tokens::{self, Mode, Pair, Rgb};
 use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Theme, Visuals};
 use std::sync::Arc;
 
-/// The serif italic family of page titles.
+/// The family that once held the serif italic of page titles (ADR 123 retired it: nothing is drawn in it, it falls back to the interface face).
 pub fn title_family() -> FontFamily {
     FontFamily::Name("title".into())
 }
 
+/// A heading: the plain interface face, smaller than the size asked for (the sizes were chosen for a display italic; ADR 123).
 pub fn title(size: f32) -> FontId {
-    FontId::new(size, title_family())
+    FontId::proportional((size * 0.62).round())
 }
 
 /// A token colour as an egui colour.
@@ -74,9 +75,6 @@ pub fn tint(ctx: &egui::Context) -> Color32 {
 /// Amber: time and attention (running, queued, stale) and nothing else.
 pub fn activity(ctx: &egui::Context) -> Color32 {
     role(ctx, tokens::ACTIVITY)
-}
-pub fn on_activity(ctx: &egui::Context) -> Color32 {
-    role(ctx, tokens::ON_ACTIVITY)
 }
 /// The activity colour as text (on `warm`).
 pub fn activity_text(ctx: &egui::Context) -> Color32 {
@@ -325,12 +323,7 @@ pub fn install_fonts(ctx: &egui::Context) {
     if let Some(b) = first_font(&["JetBrainsMono-Regular.ttf", "JetBrainsMono.ttf", "CascadiaMono.ttf", "consola.ttf"]) {
         add("mono", b, &[FontFamily::Monospace], true);
     }
-    match first_font(&["EBGaramond-Italic.ttf", "EBGaramond-Italic[wght].ttf", "georgiai.ttf"]) {
-        Some(b) => add("title", b, &[title_family()], true),
-        None => {
-            fonts.families.insert(title_family(), vec![]);
-        }
-    }
+    fonts.families.insert(title_family(), vec![]);
     // a family must also fall back to the default proportional fonts for symbols the file lacks
     let prop = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let t = fonts.families.entry(title_family()).or_default();

@@ -9,7 +9,7 @@ use crate::app::App;
 use crate::fmt;
 use crate::kit::{self, State};
 use crate::theme;
-use eframe::egui::{self, Align2, Color32, RichText, Stroke, Vec2};
+use eframe::egui::{self, Align2, RichText, Stroke, Vec2};
 use serde_json::Value;
 
 /// One job of the queue that has not finished.
@@ -361,11 +361,6 @@ enum Action {
     Cancel,
     Priority(u8),
     Pause,
-}
-
-/// The colours of the band drawn on the plot itself: amber fill, the text of an amber fill.
-pub fn band_colours(ctx: &egui::Context) -> (Color32, Color32) {
-    (theme::activity(ctx), theme::on_activity(ctx))
 }
 
 #[cfg(test)]

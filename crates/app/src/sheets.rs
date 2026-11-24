@@ -59,7 +59,7 @@ impl App {
 
     fn sheet_script(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        ui.label(kit::title("Script (.nys)", 34.0).color(theme::accent(&ctx)));
+        ui.label(kit::title("Script (.nys)", 34.0));
         ui.label(kit::muted(ui, "Python-syntax script run by nyx-script-worker on the open setup. Changes to geometry, materials, mesh and solves update this workflow directly."));
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
@@ -163,7 +163,7 @@ impl App {
         let ctx = ui.ctx().clone();
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(kit::title("Start a workflow", 36.0).color(theme::accent(&ctx)));
+                ui.label(kit::title("Start a workflow", 36.0));
                 ui.label(kit::muted(ui, "Pick a starting point. You can add more experiments to it later, and nothing is saved until you change something."));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -421,7 +421,7 @@ impl App {
         let mut name: Option<(u32, String)> = None;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(kit::title("Versions", 36.0).color(theme::accent(&ctx)));
+                ui.label(kit::title("Versions", 36.0));
                 ui.label(kit::muted(ui, format!("{title} · every change to the setup is kept. Nothing here is ever lost.")));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -544,7 +544,7 @@ impl App {
         self.flush();
         let Some(w) = self.shell.open.get(&id) else { return };
         let Some(d) = &w.dir else {
-            ui.label(kit::title("Share this workflow", 34.0).color(theme::accent(&ctx)));
+            ui.label(kit::title("Share this workflow", 34.0));
             ui.label(kit::muted(ui, "Nothing is saved yet. Change something first, then share."));
             return;
         };
@@ -560,7 +560,7 @@ impl App {
         let strip = self.shell.settings().strip_paths;
         let exclude = self.shell.share_exclude.clone();
         let mut save = None;
-        ui.label(kit::title("Share this workflow", 34.0).color(theme::accent(&ctx)));
+        ui.label(kit::title("Share this workflow", 34.0));
         ui.label(kit::muted(ui, "One small file. The other person opens it in nyx and it rebuilds the setup on their machine."));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -657,7 +657,7 @@ impl App {
             return;
         };
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file.nyx").to_string();
-        ui.label(kit::title("Open a shared workflow", 34.0).color(theme::accent(&ctx)));
+        ui.label(kit::title("Open a shared workflow", 34.0));
         ui.label(kit::mono(format!("{name} · {} · {}", human(ins.file_bytes), ins.level.map(|l| l.name()).unwrap_or("unknown level"))));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -742,8 +742,7 @@ impl App {
 
     /// The version, what the fonts are and under which licence: the OFL asks that the licence text travels with the font and is shown.
     fn sheet_about(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
-        ui.label(kit::title("nyx", 42.0).color(theme::accent(&ctx)));
+        ui.label(kit::title("nyx", 42.0));
         ui.label(RichText::new("creative chaos.").font(theme::title(20.0)));
         ui.label(kit::muted(ui, format!("Version {}. Finite-element photonics and phononics.", env!("CARGO_PKG_VERSION"))));
         ui.add_space(10.0);
@@ -770,7 +769,7 @@ impl App {
         let before = s.clone();
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(40, 24))).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.label(kit::title("Settings", 42.0).color(theme::accent(&ctx)));
+                ui.label(kit::title("Settings", 42.0));
                 ui.label(kit::muted(ui, "Only what you would actually change. Everything else picks a good default."));
                 ui.add_space(10.0);
                 ui.columns(2, |cols| {

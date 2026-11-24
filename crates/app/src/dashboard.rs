@@ -64,7 +64,7 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(kit::title("Workflows", 46.0).color(theme::accent(&ctx)));
+                        ui.label(kit::title("Workflows", 46.0));
                         let days = self.shell.settings().hide_after_days;
                         ui.label(kit::muted(ui, format!("Everything you touched in the last {days} days. Older work is one search away.")));
                     });
