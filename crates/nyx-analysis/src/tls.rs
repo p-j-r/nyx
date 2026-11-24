@@ -50,7 +50,9 @@ pub struct TlsReport {
 
 impl TlsReport {
     pub fn to_json(&self) -> Value {
-        json!({
+        let underresolved =
+            self.convergence_check.get("edge_singularity_underresolved").and_then(Value::as_bool).unwrap_or(false);
+        let mut out = json!({
             "solution": self.solution,
             "u_elec_J": self.u_elec_j,
             "p_ma": self.p_ma,
@@ -66,8 +68,38 @@ impl TlsReport {
             "p_ma_edge": self.p_ma_edge,
             "p_ms_edge": self.p_ms_edge,
             "p_sa_edge": self.p_sa_edge,
+            "edge_singularity_underresolved": underresolved,
             "convergence_check": self.convergence_check,
-        })
+        });
+        if let Some(w) = self.convergence_check.get("warning").and_then(Value::as_str) {
+            out["warning"] = json!(w);
+        }
+        out
+    }
+}
+
+/// Per-mode dielectric TLS surface participation and lifetime evaluated via quasi-electrostatic modal field
+/// superposition (`E_m(x) = \sum_i V_{m,i} E^(i)(x)`) on an electrostatic mesh (`FR-32`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuasiElectrostaticTlsMode {
+    pub mode: usize,
+    pub freq_hz: f64,
+    pub terminal_voltages_v: Vec<f64>,
+    pub report: TlsReport,
+    pub t1_tls_s: f64,
+}
+
+impl QuasiElectrostaticTlsMode {
+    pub fn to_json(&self) -> Value {
+        let mut out = self.report.to_json();
+        if let Some(obj) = out.as_object_mut() {
+            obj.insert("mode".into(), json!(self.mode));
+            obj.insert("freq_Hz".into(), json!(self.freq_hz));
+            obj.insert("terminal_voltages_V".into(), json!(self.terminal_voltages_v));
+            obj.insert("t1_tls_s".into(), json!(self.t1_tls_s));
+            obj.insert("T1_TLS_s".into(), json!(self.t1_tls_s));
+        }
+        out
     }
 }
 
@@ -777,6 +809,45 @@ pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, c
 
     let mut sa_tris: Vec<[u32; 3]> = Vec::new();
     let mut has_vertical_sa_trench = false;
+
+    // Compute substrate slab bounding box (`eps > 1.5`) so outer finite-die chip sidewalls and backside
+    // facets are cleanly distinguished from circuit-plane SA facets and local shallow interior SA trenches (FR-25):
+    let mut sub_lo = [f64::INFINITY; 3];
+    let mut sub_hi = [f64::NEG_INFINITY; 3];
+    let mut has_sub_cells = false;
+    for (ci, &eps) in cell_eps.iter().enumerate().take(nc) {
+        if eps > 1.5 {
+            has_sub_cells = true;
+            for &vi in disc.cell(ci) {
+                let p = pt3(disc, vi);
+                for ax in 0..3 {
+                    sub_lo[ax] = sub_lo[ax].min(p[ax]);
+                    sub_hi[ax] = sub_hi[ax].max(p[ax]);
+                }
+            }
+        }
+    }
+    let sub_span_xy = if has_sub_cells { (sub_hi[0] - sub_lo[0]).max(sub_hi[1] - sub_lo[1]).max(1e-30) } else { span };
+    let sub_z_span = if has_sub_cells { (sub_hi[2] - sub_lo[2]).max(1e-30) } else { span };
+    let sub_tol = 1e-6 * sub_span_xy.max(span);
+    let is_on_sub_xy_outer = |p0: [f64; 3], p1: [f64; 3], p2: [f64; 3]| -> bool {
+        has_sub_cells
+            && (0..2).any(|ax| {
+                ((p0[ax] - sub_lo[ax]).abs() < sub_tol
+                    && (p1[ax] - sub_lo[ax]).abs() < sub_tol
+                    && (p2[ax] - sub_lo[ax]).abs() < sub_tol)
+                    || ((p0[ax] - sub_hi[ax]).abs() < sub_tol
+                        && (p1[ax] - sub_hi[ax]).abs() < sub_tol
+                        && (p2[ax] - sub_hi[ax]).abs() < sub_tol)
+            })
+    };
+    let is_on_sub_zmin = |p0: [f64; 3], p1: [f64; 3], p2: [f64; 3]| -> bool {
+        has_sub_cells
+            && (p0[2] - sub_lo[2]).abs() < sub_tol
+            && (p1[2] - sub_lo[2]).abs() < sub_tol
+            && (p2[2] - sub_lo[2]).abs() < sub_tol
+    };
+
     for (&key, cells) in &face_to_cells {
         if sheet_tris.contains_key(&key) || cells.len() != 2 {
             continue;
@@ -784,24 +855,37 @@ pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, c
         let (e0, e1) = (cell_eps[cells[0].0], cell_eps[cells[1].0]);
         if (e0 <= 1.5 && e1 > 1.5) || (e1 <= 1.5 && e0 > 1.5) {
             let (p0, p1, p2) = (pt3(disc, key[0]), pt3(disc, key[1]), pt3(disc, key[2]));
+            if is_on_sub_xy_outer(p0, p1, p2) || is_on_sub_zmin(p0, p1, p2) {
+                continue;
+            }
             let n_raw = cross3(sub3(p1, p0), sub3(p2, p0));
             let n_len = norm3(n_raw);
             if n_len > 0.0 && (n_raw[2].abs() / n_len) < 0.99 {
-                has_vertical_sa_trench = true;
+                let z_min_tri = p0[2].min(p1[2]).min(p2[2]);
+                let z_max_tri = p0[2].max(p1[2]).max(p2[2]);
+                let dz_facet = z_max_tri - z_min_tri;
+                if !has_sub_cells || (dz_facet < 0.25 * sub_z_span && z_min_tri > sub_lo[2] + 0.5 * sub_z_span) {
+                    has_vertical_sa_trench = true;
+                } else {
+                    continue;
+                }
             }
             sa_tris.push(key);
         }
     }
     sa_tris.sort_unstable();
 
-    let has_resolved_3d_step = !cavity_cond_tris.is_empty() || has_vertical_sa_trench;
+    let mut cavity_cond_edges: BTreeSet<(u32, u32)> = BTreeSet::new();
+    for &tri in cavity_cond_tris.keys() {
+        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+            cavity_cond_edges.insert((a.min(b), a.max(b)));
+        }
+    }
 
     let mut sheet_edge_count: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    if !has_resolved_3d_step {
-        for &tri in &zero_thick_sheet_tris {
-            for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
-                *sheet_edge_count.entry((a.min(b), a.max(b))).or_insert(0) += 1;
-            }
+    for &tri in &zero_thick_sheet_tris {
+        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+            *sheet_edge_count.entry((a.min(b), a.max(b))).or_insert(0) += 1;
         }
     }
 
@@ -809,7 +893,8 @@ pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, c
     let mut perim_segments: Vec<Segment3> = Vec::new();
     let mut total_perim_len = 0.0;
     for (&(a, b), &cnt) in &sheet_edge_count {
-        if cnt == 1 && !ext_edges.contains(&(a, b)) {
+        let e = (a, b);
+        if cnt == 1 && !ext_edges.contains(&e) && !cavity_cond_edges.contains(&e) {
             let pa = pt3(disc, a);
             let pb = pt3(disc, b);
             let ab = sub3(pb, pa);
@@ -817,11 +902,13 @@ pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, c
             if len_sq > 1e-30 {
                 let len = len_sq.sqrt();
                 total_perim_len += len;
-                perim_edge_set.insert((a, b));
+                perim_edge_set.insert(e);
                 perim_segments.push(Segment3 { a: pa, b: pb, inv_len_sq: 1.0 / len_sq });
             }
         }
     }
+
+    let has_resolved_3d_step = perim_segments.is_empty() && (!cavity_cond_tris.is_empty() || has_vertical_sa_trench);
 
     let mut h_perp_sum = 0.0;
     let mut h_perp_cnt = 0usize;
@@ -972,7 +1059,7 @@ fn run_tls_3d(
         p.d.or_else(|| meta.sheet_thickness_m.values().copied().find(|&t| t > 0.0))
             .or(perim.inferred_cavity_thickness)
             .unwrap_or(100.0e-9);
-    let r0 = if perim.has_resolved_3d_step {
+    let r0 = if perim.has_resolved_3d_step || perim.bvh.is_empty() {
         0.0
     } else {
         p.edge_cutoff.unwrap_or_else(|| (1.15 * perim.h_edge_mean).max(4.0 * d_film))
@@ -1178,6 +1265,9 @@ fn run_tls_3d(
     let loss_tan_total = p_ma * p.tan_delta_ma + p_ms * p.tan_delta_ms + p_sa * p.tan_delta_sa;
     let q_tls = if loss_tan_total > 0.0 { 1.0 / loss_tan_total } else { f64::INFINITY };
 
+    let edge_singularity_underresolved =
+        ef.order == 1 && !perim.has_resolved_3d_step && !perim.bvh.is_empty() && perim.h_edge_mean > 5.0 * d_film;
+
     let mut conv = json!({
         "dim": 3,
         "mode": "matched_asymptotic_edge_tube_3d",
@@ -1188,9 +1278,17 @@ fn run_tls_3d(
         "perimeter_len_m": perim.total_perim_len,
         "u_tube_J": u_tube_j,
         "i_edge": i_edge,
+        "edge_singularity_underresolved": edge_singularity_underresolved,
     });
     if let Some(htr) = p.trench_depth_m {
         conv["trench_depth_m"] = json!(htr);
+    }
+    if edge_singularity_underresolved {
+        conv["warning"] = json!(format!(
+            "P1 electric field on coarse sheet perimeter (h_edge_mean = {:.3e} m > 5 * d_film = {:.3e} m) under-resolves the r^(-1/2) edge singularity; use P2 quarter_point (AF-2) or tls_participation_quasi_electrostatic for calibrated absolute Q_TLS / T1_TLS",
+            perim.h_edge_mean,
+            5.0 * d_film
+        ));
     }
 
     Ok(TlsReport {
@@ -1211,6 +1309,136 @@ fn run_tls_3d(
         p_sa_edge,
         convergence_check: conv,
     })
+}
+
+fn synthesize_linear_combination_solution(
+    solutions: &[Solution],
+    weights: &[f64],
+    dim: usize,
+    n_cells: usize,
+) -> Result<Solution, Error> {
+    if weights.is_empty() || weights.len() > solutions.len() {
+        return Err(Error::invalid(format!(
+            "terminal voltage vector length {} must be in 1..={} (number of terminal solutions)",
+            weights.len(),
+            solutions.len()
+        )));
+    }
+    if weights.iter().any(|w| !w.is_finite()) {
+        return Err(Error::NonFinite("terminal voltage weights must be finite numbers".into()));
+    }
+
+    let first_ef = EFieldAccessor::new(&solutions[0], dim, n_cells)?;
+    let nloc = first_ef.nloc;
+    let total_len = n_cells * nloc;
+
+    let mut ex_re = vec![0.0; total_len];
+    let mut ey_re = if first_ef.ey.is_some() { Some(vec![0.0; total_len]) } else { None };
+    let mut ez_re = vec![0.0; total_len];
+
+    for (i, &w) in weights.iter().enumerate() {
+        if w == 0.0 {
+            continue;
+        }
+        let ef_i = EFieldAccessor::new(&solutions[i], dim, n_cells)?;
+        if ef_i.nloc != nloc {
+            return Err(Error::invalid("terminal solutions have mismatched finite-element order / nloc"));
+        }
+        for (dst, &src) in ex_re.iter_mut().zip(ef_i.ex.re.iter()) {
+            *dst += w * src;
+        }
+        if let (Some(ey_dst), Some(ey_src)) = (ey_re.as_mut(), ef_i.ey) {
+            for (dst, &src) in ey_dst.iter_mut().zip(ey_src.re.iter()) {
+                *dst += w * src;
+            }
+        }
+        for (dst, &src) in ez_re.iter_mut().zip(ef_i.ez.re.iter()) {
+            *dst += w * src;
+        }
+    }
+
+    let ez_name = first_ef.ez.name.clone();
+    let unit = first_ef.ex.unit.clone();
+    let mut cell_fields = vec![CellField { name: "Ex".into(), unit: unit.clone(), nloc, re: ex_re, im: Vec::new() }];
+    if let Some(ey) = ey_re {
+        cell_fields.push(CellField { name: "Ey".into(), unit: unit.clone(), nloc, re: ey, im: Vec::new() });
+    }
+    cell_fields.push(CellField { name: ez_name, unit, nloc, re: ez_re, im: Vec::new() });
+
+    Ok(Solution { cell_fields, ..Default::default() })
+}
+
+/// Evaluates per-mode dielectric TLS participation (`p_MA`, `p_MS`, `p_SA`, `Q_TLS`) and TLS-limited relaxation
+/// lifetime (`T1_TLS_s = Q_TLS / (2 pi f_m)`) by forming unit-terminal linear field combinations
+/// `E_m(x) = \sum_i V_{m,i} E^(i)(x)` on a fine electrostatic mesh (`FR-32`).
+pub fn tls_participation_quasi_electrostatic(
+    electro_mesh: &Mesh,
+    electro_result: &SolveResult,
+    modal_voltages: &[Vec<f64>],
+    modal_freqs_hz: &[f64],
+    params: &Value,
+) -> Result<Vec<QuasiElectrostaticTlsMode>, Error> {
+    if modal_voltages.is_empty() {
+        return Err(Error::invalid("modal_voltages must contain at least one mode voltage vector"));
+    }
+    if modal_freqs_hz.len() != modal_voltages.len() {
+        return Err(Error::invalid(format!(
+            "modal_freqs_hz length ({}) must match modal_voltages length ({})",
+            modal_freqs_hz.len(),
+            modal_voltages.len()
+        )));
+    }
+    if electro_result.solutions.is_empty() {
+        return Err(Error::invalid(
+            "electro_result has no electric-field solutions (run dfs electrostatic with save_fields=true)",
+        ));
+    }
+
+    let meta = TlsMeta::of(electro_result).unwrap_or_default();
+    let p = TlsParams::from_json(params, &meta)?;
+    let disc = discretise(electro_mesh)?;
+    if disc.dim != electro_result.dim as usize {
+        return Err(Error::invalid(format!("the result is {}D but the mesh is {}D", electro_result.dim, disc.dim)));
+    }
+
+    let mut out = Vec::with_capacity(modal_voltages.len());
+    for (m_idx, (v_m, &freq_hz)) in modal_voltages.iter().zip(modal_freqs_hz.iter()).enumerate() {
+        if !(freq_hz.is_finite() && freq_hz >= 0.0) {
+            return Err(Error::invalid(format!(
+                "modal_freqs_hz[{m_idx}] must be a non-negative finite frequency in Hz"
+            )));
+        }
+        let synth_sol =
+            synthesize_linear_combination_solution(&electro_result.solutions, v_m, disc.dim, disc.n_cells())?;
+        let ef = EFieldAccessor::new(&synth_sol, disc.dim, disc.n_cells())?;
+        let mut p_mode = p.clone();
+        p_mode.solution = m_idx;
+        let mut rep = match disc.dim {
+            2 => run_tls_2d(&disc, &ef, &meta, &p_mode, 0.5)?,
+            3 => run_tls_3d(&disc, &ef, &meta, &p_mode, 0.5)?,
+            d => {
+                return Err(Error::invalid(format!(
+                    "tls_participation_quasi_electrostatic supports 2D and 3D meshes, not {d}D"
+                )))
+            }
+        };
+        let t1_tls_s = if freq_hz > 0.0 && rep.loss_tan_total > 0.0 && rep.q_tls.is_finite() {
+            rep.q_tls / (2.0 * PI * freq_hz)
+        } else {
+            f64::INFINITY
+        };
+        rep.convergence_check["quasi_electrostatic"] = json!(true);
+        rep.convergence_check["freq_Hz"] = json!(freq_hz);
+        rep.convergence_check["t1_tls_s"] = json!(t1_tls_s);
+        out.push(QuasiElectrostaticTlsMode {
+            mode: m_idx,
+            freq_hz,
+            terminal_voltages_v: v_m.clone(),
+            report: rep,
+            t1_tls_s,
+        });
+    }
+    Ok(out)
 }
 
 /// Computes dielectric TLS surface participation with default parameters.
@@ -1342,5 +1570,127 @@ mod tests {
 
         // Negative trench_depth_m is rejected
         assert!(TlsParams::from_json(&json!({ "trench_depth_m": -1.0e-9 }), &meta).is_err());
+    }
+
+    #[test]
+    fn fr32_quasi_electrostatic_tls_linearity_and_underresolved_p1_diagnostic() {
+        // Build a 3D mesh split at z = 10 um (domain 1 below, domain 2 above) with an interior z = 10 um conductor triangle
+        let mut sm = femcore::testkit::block_split_z(20.0e-6, 20.0e-6, 20.0e-6, 10.0e-6, 10.0e-6, 1);
+        let nc = sm.n_cells();
+        let mut found_mid_tri = None;
+        for ci in 0..nc {
+            let v = sm.cell(ci);
+            for lf in FACES_3D {
+                let tri = [v[lf[0]], v[lf[1]], v[lf[2]]];
+                if tri.iter().all(|&vi| (sm.point(vi as usize)[2] - 10.0e-6).abs() < 1.0e-9) {
+                    found_mid_tri = Some(tri);
+                    break;
+                }
+            }
+            if found_mid_tri.is_some() {
+                break;
+            }
+        }
+        if let Some(tri) = found_mid_tri {
+            sm.facets.extend_from_slice(&tri);
+            sm.facet_labels.push(77);
+        }
+        let mesh = Mesh::from_solver_mesh(&sm).unwrap();
+
+        let meta = TlsMeta {
+            domain_eps_r: [(1, 11.45), (2, 1.0)].into_iter().collect(),
+            conductor_labels: vec![77],
+            sheet_labels: vec![77],
+            ..Default::default()
+        };
+
+        // Order-1 (nloc = 4) and Order-2 (nloc = 10) synthetic terminal solutions
+        let make_sol = |nloc: usize, ex_val: f64, ey_val: f64, ez_val: f64| -> Solution {
+            Solution {
+                cell_fields: vec![
+                    CellField {
+                        name: "Ex".into(),
+                        unit: "V/m".into(),
+                        nloc,
+                        re: vec![ex_val; nc * nloc],
+                        im: Vec::new(),
+                    },
+                    CellField {
+                        name: "Ey".into(),
+                        unit: "V/m".into(),
+                        nloc,
+                        re: vec![ey_val; nc * nloc],
+                        im: Vec::new(),
+                    },
+                    CellField {
+                        name: "Ez".into(),
+                        unit: "V/m".into(),
+                        nloc,
+                        re: vec![ez_val; nc * nloc],
+                        im: Vec::new(),
+                    },
+                ],
+                ..Default::default()
+            }
+        };
+
+        // 1. Check P1 under-resolution diagnostic (`ef.order == 1 && !has_resolved_3d_step && h_edge_mean > 5 * d_film`)
+        let res_p1 = SolveResult {
+            physics: "ems".into(),
+            study: "cavity".into(),
+            dim: 3,
+            order: 1,
+            solutions: vec![make_sol(4, 1.0e5, 0.0, 3.0e5)],
+            scalars: vec![meta.scalar()],
+            ..Default::default()
+        };
+        let rep_p1 = tls_participation_with_params(&mesh, &res_p1, &json!({ "d": 200.0e-9 })).unwrap();
+        let json_p1 = rep_p1.to_json();
+        assert_eq!(json_p1["edge_singularity_underresolved"], json!(true));
+        assert_eq!(rep_p1.convergence_check["edge_singularity_underresolved"], json!(true));
+        assert!(rep_p1.convergence_check["warning"].as_str().is_some());
+
+        // 2. Check P2 quasi-electrostatic modal field superposition (`order == 2` -> `edge_singularity_underresolved == false`)
+        let res_p2 = SolveResult {
+            physics: "dfs".into(),
+            study: "electrostatic".into(),
+            dim: 3,
+            order: 2,
+            solutions: vec![make_sol(10, 1.0e5, 0.5e5, 2.0e5), make_sol(10, -0.4e5, 1.2e5, -1.5e5)],
+            scalars: vec![meta.scalar()],
+            ..Default::default()
+        };
+
+        let f0 = 4.5e9;
+        let f1 = 6.2e9;
+        let modes = tls_participation_quasi_electrostatic(
+            &mesh,
+            &res_p2,
+            &[vec![1.0, 0.0], vec![2.5, 0.0], vec![1.0, -1.0]],
+            &[f0, f0, f1],
+            &json!({ "d": 200.0e-9 }),
+        )
+        .unwrap();
+        assert_eq!(modes.len(), 3);
+        assert_eq!(modes[0].report.convergence_check["edge_singularity_underresolved"], json!(false));
+
+        // Unit terminal [1.0, 0.0] matches direct tls_participation_with_params(solution = 0) bit-for-bit
+        let direct_0 = tls_participation_with_params(&mesh, &res_p2, &json!({ "solution": 0, "d": 200.0e-9 })).unwrap();
+        assert_eq!(modes[0].report.p_ma.to_bits(), direct_0.p_ma.to_bits());
+        assert_eq!(modes[0].report.p_ms.to_bits(), direct_0.p_ms.to_bits());
+        assert_eq!(modes[0].report.p_sa.to_bits(), direct_0.p_sa.to_bits());
+        assert_eq!(modes[0].report.q_tls.to_bits(), direct_0.q_tls.to_bits());
+
+        // Scaling terminal voltages by 2.5x scales u_elec_j by 6.25x while leaving p_ma, p_ms, p_sa, q_tls, t1_tls_s invariant
+        assert!((modes[1].report.u_elec_j / modes[0].report.u_elec_j - 6.25).abs() < 1.0e-13);
+        assert!((modes[1].report.p_total - modes[0].report.p_total).abs() <= 1.0e-13 * modes[0].report.p_total);
+        assert!((modes[1].t1_tls_s - modes[0].t1_tls_s).abs() <= 1.0e-13 * modes[0].t1_tls_s);
+
+        // Differential mode [1.0, -1.0] has distinct field distribution and valid finite T1_TLS_s = Q_TLS / (2 pi f1)
+        let want_t1_2 = modes[2].report.q_tls / (2.0 * PI * f1);
+        assert!((modes[2].t1_tls_s - want_t1_2).abs() <= 1.0e-13 * want_t1_2);
+        let m2_json = modes[2].to_json();
+        assert_eq!(m2_json["mode"], json!(2));
+        assert_eq!(m2_json["T1_TLS_s"].as_f64().unwrap(), modes[2].t1_tls_s);
     }
 }

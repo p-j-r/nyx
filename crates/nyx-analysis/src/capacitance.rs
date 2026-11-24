@@ -109,6 +109,265 @@ fn mutual_from_maxwell(maxwell: &[Vec<f64>]) -> Vec<Vec<f64>> {
     mutual
 }
 
+/// Result of dual-box `1/R` open-boundary Maxwell capacitance matrix extrapolation (`Mode G2`, `FR-31`),
+/// with Dykstra projection onto the nearest Stieltjes cone (symmetric Z-matrix with `C_ij <= 0` for `i != j`,
+/// non-negative row sums `\sum_j C_ij >= 0`, and strictly SPD) when `0 < raw_offdiag_pos_ratio <= 0.05`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpenBoxExtrapolation {
+    pub raw_maxwell_f: Vec<Vec<f64>>,
+    pub projected_stieltjes_f: Vec<Vec<f64>>,
+    pub mutual_matrix_f: Vec<Vec<f64>>,
+    pub raw_min_eig: f64,
+    pub projected_min_eig: f64,
+    pub raw_offdiag_pos_ratio: f64,
+    pub projected_offdiag_pos_ratio: f64,
+    pub used_projection: bool,
+    pub note: String,
+}
+
+impl OpenBoxExtrapolation {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "raw_maxwell_F": self.raw_maxwell_f,
+            "projected_stieltjes_F": self.projected_stieltjes_f,
+            "mutual_matrix_F": self.mutual_matrix_f,
+            "raw_min_eig": self.raw_min_eig,
+            "projected_min_eig": self.projected_min_eig,
+            "raw_offdiag_pos_ratio": self.raw_offdiag_pos_ratio,
+            "projected_offdiag_pos_ratio": self.projected_offdiag_pos_ratio,
+            "used_projection": self.used_projection,
+            "note": self.note,
+        })
+    }
+}
+
+fn maxwell_min_eig_and_offdiag_pos_ratio(mat: &[Vec<f64>]) -> Result<(f64, f64), String> {
+    let n = mat.len();
+    if n == 0 {
+        return Err("capacitance matrix must be non-empty".into());
+    }
+    let mut flat = Vec::with_capacity(n * n);
+    for i in 0..n {
+        for j in 0..n {
+            flat.push(0.5 * (mat[i][j] + mat[j][i]));
+        }
+    }
+    let (eigs, _) = dense_eigh(&flat, n).map_err(|e| format!("dense_eigh failed: {e}"))?;
+    let min_eig = eigs.iter().copied().fold(f64::INFINITY, f64::min);
+    let mut max_pos_ratio = 0.0_f64;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let denom = (mat[i][i].abs() * mat[j][j].abs()).sqrt().max(1.0e-30);
+            let ratio = (0.5 * (mat[i][j] + mat[j][i])) / denom;
+            if ratio > max_pos_ratio {
+                max_pos_ratio = ratio;
+            }
+        }
+    }
+    Ok((min_eig, max_pos_ratio))
+}
+
+fn project_onto_stieltjes_cone(raw: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, String> {
+    let n = raw.len();
+    let max_diag = (0..n).map(|i| raw[i][i].abs()).fold(0.0_f64, f64::max).max(1.0e-30);
+    let eig_floor = 1.0e-12 * max_diag;
+    let diag_floor = 1.0e-12 * max_diag;
+
+    let mut x = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in 0..n {
+            x[i][j] = 0.5 * (raw[i][j] + raw[j][i]);
+        }
+    }
+
+    // Dykstra's cyclic alternating projection onto:
+    //   0: Z-matrix cone { X = X^T : X_ij <= 0 (i != j), X_ii >= diag_floor }
+    //   1..=n: Row-sum half-spaces H_i = { X = X^T : \sum_j X_ij >= 0 }
+    //   n+1: Spectral SPD cone { X = X^T : X >= eig_floor * I }
+    let mut p_z = vec![vec![0.0; n]; n];
+    let mut p_rows = vec![vec![vec![0.0; n]; n]; n];
+    let mut p_spd = vec![vec![0.0; n]; n];
+    let inv_norm_hi_sq = 2.0 / ((n + 1) as f64);
+
+    for _iter in 0..40 {
+        // 1. Project onto Z-matrix cone
+        let mut y = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                y[i][j] = x[i][j] + p_z[i][j];
+            }
+        }
+        let mut x_next = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            x_next[i][i] = y[i][i].max(diag_floor);
+            for j in (i + 1)..n {
+                let sym = 0.5 * (y[i][j] + y[j][i]);
+                let clamped = sym.min(0.0);
+                x_next[i][j] = clamped;
+                x_next[j][i] = clamped;
+            }
+        }
+        for i in 0..n {
+            for j in 0..n {
+                p_z[i][j] = y[i][j] - x_next[i][j];
+            }
+        }
+        x = x_next;
+
+        // 2. Project onto each symmetric row-sum half-space H_i (\sum_j X_ij >= 0)
+        for r in 0..n {
+            let mut yr = vec![vec![0.0; n]; n];
+            for i in 0..n {
+                for j in 0..n {
+                    yr[i][j] = x[i][j] + p_rows[r][i][j];
+                }
+            }
+            let row_sum: f64 = (0..n).map(|j| 0.5 * (yr[r][j] + yr[j][r])).sum();
+            let mut xr = yr.clone();
+            if row_sum < 0.0 {
+                let alpha = -row_sum * inv_norm_hi_sq;
+                xr[r][r] += alpha;
+                for j in 0..n {
+                    if j != r {
+                        xr[r][j] += 0.5 * alpha;
+                        xr[j][r] += 0.5 * alpha;
+                    }
+                }
+            }
+            for i in 0..n {
+                for j in 0..n {
+                    p_rows[r][i][j] = yr[i][j] - xr[i][j];
+                }
+            }
+            x = xr;
+        }
+
+        // 3. Project onto spectral SPD cone via Higham eigendecomposition
+        let mut ys = vec![vec![0.0; n]; n];
+        let mut flat = Vec::with_capacity(n * n);
+        for i in 0..n {
+            for j in 0..n {
+                let v = 0.5 * ((x[i][j] + p_spd[i][j]) + (x[j][i] + p_spd[j][i]));
+                ys[i][j] = v;
+                flat.push(v);
+            }
+        }
+        let (eigs, vecs) = dense_eigh(&flat, n).map_err(|e| format!("dense_eigh failed: {e}"))?;
+        let mut xs = vec![vec![0.0; n]; n];
+        for (k, &lam) in eigs.iter().enumerate() {
+            let lk = lam.max(eig_floor);
+            let vk = &vecs[k];
+            for i in 0..n {
+                for j in i..n {
+                    let prod = lk * vk[i] * vk[j];
+                    xs[i][j] += prod;
+                    if i != j {
+                        xs[j][i] += prod;
+                    }
+                }
+            }
+        }
+        for i in 0..n {
+            for j in 0..n {
+                p_spd[i][j] = ys[i][j] - xs[i][j];
+            }
+        }
+        x = xs;
+    }
+
+    // Final exact boundary polish guaranteeing X_ij <= 0 (i != j) and \sum_j X_ij >= 0 (hence diagonally dominant SPD)
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let sym = (0.5 * (x[i][j] + x[j][i])).min(0.0);
+            x[i][j] = sym;
+            x[j][i] = sym;
+        }
+    }
+    for i in 0..n {
+        let off_sum: f64 = (0..n).filter(|&j| j != i).map(|j| -x[i][j]).sum();
+        if x[i][i] < off_sum + eig_floor {
+            x[i][i] = off_sum + eig_floor;
+        }
+    }
+    Ok(x)
+}
+
+/// Computes dual-box `1/R` open-boundary Maxwell capacitance extrapolation (`Mode G2`, `FR-31`):
+/// `C_inf = (R_2 * C_2 - R_1 * C_1) / (R_2 - R_1)` symmetrized, evaluates `raw_offdiag_pos_ratio`,
+/// and applies Dykstra projection onto the nearest Stieltjes cone when `0 < raw_offdiag_pos_ratio <= 0.05`.
+pub fn extrapolate_open_box_maxwell(
+    c1: &[Vec<f64>],
+    r1: f64,
+    c2: &[Vec<f64>],
+    r2: f64,
+) -> Result<OpenBoxExtrapolation, String> {
+    let n = c1.len();
+    if n == 0 {
+        return Err("extrapolate_open_box_maxwell requires non-empty capacitance matrices".into());
+    }
+    if c2.len() != n || c1.iter().any(|r| r.len() != n) || c2.iter().any(|r| r.len() != n) {
+        return Err(format!("c1 and c2 must both be {n}x{n} square matrices"));
+    }
+    if c1.iter().flatten().any(|x| !x.is_finite()) || c2.iter().flatten().any(|x| !x.is_finite()) {
+        return Err("c1 and c2 must contain only finite capacitance values".into());
+    }
+    if !(r1.is_finite() && r2.is_finite() && r1 > 0.0 && r2 > 0.0) {
+        return Err(format!("box radii r1 ({r1:e}) and r2 ({r2:e}) must be finite and positive"));
+    }
+    let dr = r2 - r1;
+    if dr.abs() <= 1.0e-15 * r1.max(r2) {
+        return Err(format!("box radii r1 ({r1:e}) and r2 ({r2:e}) must be distinct"));
+    }
+
+    let mut raw = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in i..n {
+            let v_ij = (r2 * c2[i][j] - r1 * c1[i][j]) / dr;
+            let v_ji = (r2 * c2[j][i] - r1 * c1[j][i]) / dr;
+            let sym = 0.5 * (v_ij + v_ji);
+            raw[i][j] = sym;
+            raw[j][i] = sym;
+        }
+    }
+
+    let (raw_min_eig, raw_offdiag_pos_ratio) = maxwell_min_eig_and_offdiag_pos_ratio(&raw)?;
+    let has_neg_row_sum = (0..n).any(|i| raw[i].iter().sum::<f64>() < -1.0e-15 * raw[i][i].abs());
+    let needs_stieltjes_proj = (raw_offdiag_pos_ratio > 0.0 && raw_offdiag_pos_ratio <= 0.05)
+        || (raw_offdiag_pos_ratio <= 0.05 && (raw_min_eig <= 0.0 || has_neg_row_sum));
+
+    let (projected_stieltjes_f, used_projection) =
+        if needs_stieltjes_proj { (project_onto_stieltjes_cone(&raw)?, true) } else { (raw.clone(), false) };
+    let (projected_min_eig, projected_offdiag_pos_ratio) =
+        maxwell_min_eig_and_offdiag_pos_ratio(&projected_stieltjes_f)?;
+    let mutual_matrix_f = mutual_from_maxwell(&projected_stieltjes_f);
+
+    let note = if used_projection {
+        format!(
+            "Applied Dykstra Stieltjes cone projection to remove dual-box 1/R discretization overshoot (raw_offdiag_pos_ratio = {:.3e} -> {:.3e}); prefer single-box far_field(order = 2) (AF-3) for single-solve M-matrix preservation.",
+            raw_offdiag_pos_ratio, projected_offdiag_pos_ratio
+        )
+    } else if raw_offdiag_pos_ratio > 0.05 {
+        format!(
+            "Raw dual-box 1/R extrapolation exceeded Stieltjes projection threshold (raw_offdiag_pos_ratio = {:.3e} > 0.05); prefer single-box far_field(order = 2) (AF-3).",
+            raw_offdiag_pos_ratio
+        )
+    } else {
+        "Raw dual-box 1/R extrapolation already satisfies Stieltjes M-matrix invariants; prefer single-box far_field(order = 2) (AF-3) to avoid dual-mesh solve overhead.".to_string()
+    };
+
+    Ok(OpenBoxExtrapolation {
+        raw_maxwell_f: raw,
+        projected_stieltjes_f,
+        mutual_matrix_f,
+        raw_min_eig,
+        projected_min_eig,
+        raw_offdiag_pos_ratio,
+        projected_offdiag_pos_ratio,
+        used_projection,
+        note,
+    })
+}
+
 /// Eigendecomposes symmetric PSD `maxwell` (`m x m`), returning `(ec_matrix_hz, condition_number, null_modes)`.
 #[allow(clippy::needless_range_loop)]
 fn spectral_ec_and_cond(maxwell: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, f64, usize), Error> {
@@ -1254,5 +1513,71 @@ mod tests {
         assert!(!InductanceMatrixAnalysis.applies_to(&empty));
         assert!(CapacitanceMatrixAnalysis.run(&mesh, &empty).is_err());
         assert!(InductanceMatrixAnalysis.run(&mesh, &empty).is_err());
+    }
+
+    #[test]
+    fn fr31_extrapolate_open_box_maxwell_projects_small_overshoot_onto_stieltjes_cone() {
+        let r1 = 550.0e-6;
+        let r2 = 850.0e-6;
+
+        // Case 1: Clean dual-box 1/R matrices already satisfying Stieltjes M-matrix invariants
+        let c1_clean = vec![
+            vec![95.0e-15, -6.2e-15, -72.0e-15],
+            vec![-6.2e-15, 48.0e-15, -34.0e-15],
+            vec![-72.0e-15, -34.0e-15, 290.0e-15],
+        ];
+        let c2_clean = vec![
+            vec![92.0e-15, -6.1e-15, -70.0e-15],
+            vec![-6.1e-15, 46.5e-15, -33.2e-15],
+            vec![-70.0e-15, -33.2e-15, 240.0e-15],
+        ];
+        let clean = extrapolate_open_box_maxwell(&c1_clean, r1, &c2_clean, r2).unwrap();
+        assert!(!clean.used_projection);
+        assert_eq!(clean.raw_offdiag_pos_ratio, 0.0);
+        assert_eq!(clean.projected_offdiag_pos_ratio, 0.0);
+        assert_eq!(clean.raw_maxwell_f, clean.projected_stieltjes_f);
+        assert!(clean.projected_min_eig > 0.0);
+        assert!(clean.note.contains("far_field(order = 2)"));
+
+        // Case 2: Weakly coupled pair (0, 1) where C_01(R1) = -1.20 fF and C_01(R2) = -0.58 fF
+        // so raw 1/R extrapolation C_01,inf = (850 * (-0.58) - 550 * (-1.20)) / 300 = +0.5567 fF > 0
+        // (`raw_offdiag_pos_ratio ~ 8.3e-3` in (0, 0.05], modeling s1_1_p2_00_r0148 Mode G2 overshoot)
+        let mut c1_overshoot = c1_clean.clone();
+        let mut c2_overshoot = c2_clean.clone();
+        c1_overshoot[0][1] = -1.20e-15;
+        c1_overshoot[1][0] = -1.20e-15;
+        c2_overshoot[0][1] = -0.58e-15;
+        c2_overshoot[1][0] = -0.58e-15;
+
+        let proj = extrapolate_open_box_maxwell(&c1_overshoot, r1, &c2_overshoot, r2).unwrap();
+        assert!(proj.used_projection, "expected Stieltjes projection for 0 < raw_offdiag_pos_ratio <= 0.05");
+        assert!(proj.raw_offdiag_pos_ratio > 1.0e-3 && proj.raw_offdiag_pos_ratio <= 0.05);
+        assert_eq!(proj.projected_offdiag_pos_ratio, 0.0);
+        assert!(proj.projected_min_eig > 0.0);
+        for i in 0..3 {
+            let row_sum: f64 = proj.projected_stieltjes_f[i].iter().sum();
+            assert!(row_sum >= 0.0, "row {i} sum must be non-negative: {row_sum:e}");
+            for j in 0..3 {
+                assert!(
+                    (proj.projected_stieltjes_f[i][j] - proj.projected_stieltjes_f[j][i]).abs() <= 1.0e-28,
+                    "projected matrix must be symmetric"
+                );
+                if i != j {
+                    assert!(
+                        proj.projected_stieltjes_f[i][j] <= 0.0,
+                        "off-diagonal C[{i},{j}] must be <= 0, got {:e}",
+                        proj.projected_stieltjes_f[i][j]
+                    );
+                }
+            }
+        }
+        let j_val = proj.to_json();
+        assert_eq!(j_val["used_projection"], json!(true));
+        assert!(j_val["note"].as_str().unwrap().contains("far_field(order = 2)"));
+
+        // Case 3: Validation errors on invalid radii or dimensions
+        assert!(extrapolate_open_box_maxwell(&c1_clean, r1, &c2_clean, r1).is_err());
+        assert!(extrapolate_open_box_maxwell(&c1_clean, -r1, &c2_clean, r2).is_err());
+        assert!(extrapolate_open_box_maxwell(&[], r1, &[], r2).is_err());
     }
 }

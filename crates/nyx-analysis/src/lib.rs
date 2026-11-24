@@ -31,8 +31,8 @@ pub mod view3d;
 
 pub use capacitance::{
     capacitance_matrix, capacitance_matrix_applies, capacitance_matrix_with_mesh_and_params,
-    capacitance_matrix_with_params, inductance_matrix, inductance_matrix_applies, CapacitanceMatrixAnalysis,
-    InductanceMatrixAnalysis,
+    capacitance_matrix_with_params, extrapolate_open_box_maxwell, inductance_matrix, inductance_matrix_applies,
+    CapacitanceMatrixAnalysis, InductanceMatrixAnalysis, OpenBoxExtrapolation,
 };
 pub use epr::{epr, epr_applies, epr_with_params, is_nonlinear_port, squid_effective_ej, EprAnalysis, EprReport};
 pub use hamiltonian::{
@@ -45,7 +45,8 @@ pub use network::{
 };
 pub use samples::{polarization_input, PolarizationInput};
 pub use tls::{
-    tls_participation, tls_participation_applies, tls_participation_with_params, TlsParticipationAnalysis, TlsReport,
+    tls_participation, tls_participation_applies, tls_participation_quasi_electrostatic, tls_participation_with_params,
+    QuasiElectrostaticTlsMode, TlsParticipationAnalysis, TlsReport,
 };
 
 use nyx_physics::{Error, Mesh, SolveResult};
