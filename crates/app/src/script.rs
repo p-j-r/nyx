@@ -201,6 +201,8 @@ impl App {
                 "open" => self.show_queue = true,
                 _ => self.show_queue = false,
             },
+            // `legend all`: opens the list of every legend row (what a click on "N more" does)
+            "legend" => self.vp.legend_all = arg == "all",
             "isolate" => self.vp.isolate = arg.parse::<usize>().ok().and_then(|n| n.checked_sub(1)),
             "motion" => {
                 if let Some(ws) = &mut self.shell.ws {

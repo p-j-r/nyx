@@ -143,6 +143,8 @@ pub struct Viewport {
     /// the legend row (slot) that is isolated: the other regions are dimmed and this one keeps its outline; cleared when the mesh changes
     pub isolate: Option<usize>,
     isolate_view: u64,
+    /// the list of every legend row is open (the card shows 12 and "N more")
+    pub legend_all: bool,
     /// where the number chip of every region sits (2D), valid for `region_anchors_key`
     region_anchors: Vec<(i32, [f32; 3])>,
     region_anchors_key: u64,
@@ -164,6 +166,7 @@ impl Default for Viewport {
             vmap_key: 0,
             isolate: None,
             isolate_view: 0,
+            legend_all: false,
             region_anchors: vec![],
             region_anchors_key: 0,
             outline: vec![],
@@ -297,6 +300,7 @@ impl Viewport {
                 if self.isolate_view != view_key {
                     // another mesh: the isolated row of the legend belongs to the old one
                     self.isolate = None;
+                    self.legend_all = false;
                     self.isolate_view = view_key;
                 }
                 if self.isolate.is_some_and(|s| s >= paint.rows.len()) {
@@ -536,6 +540,59 @@ impl Viewport {
         out
     }
 
+    /// One row of the legend in `r`: swatch (hatch included), material, the region numbers; a click isolates the row (or brings everything back).
+    fn legend_row(&mut self, ui: &mut Ui, painter: &egui::Painter, r: Rect, row: &regions::Row, ink: &Ink, salt: &str) {
+        let id = egui::Id::unique(salt).with(row.slot);
+        let resp = ui.interact(r, id, Sense::click());
+        let on = self.isolate == Some(row.slot);
+        let label = if row.labels.len() == 1 { row.name.clone() } else { format!("{} ({} regions)", row.name, row.labels.len()) };
+        resp.widget_info(|| WidgetInfo::selected(Role::Button, true, on, format!("Show only {label}")));
+        if resp.clicked() {
+            self.isolate = if on { None } else { Some(row.slot) };
+        }
+        if on || resp.hovered() {
+            painter.rect_filled(r, 4.0, with_alpha(ink.text, if on { 40 } else { 20 }));
+        }
+        if on {
+            painter.rect_stroke(r, 4.0, Stroke::new(2.0, ink.line), egui::StrokeKind::Inside);
+        }
+        // the swatch is drawn the way the canvas draws the slot, hatch included
+        let sw = Rect::from_min_size(r.min + Vec2::new(6.0, (r.height() - 14.0) / 2.0), Vec2::splat(14.0));
+        let style = row.style;
+        painter.rect_filled(sw, 2.0, regions::fill(style, ink.mode));
+        if matches!(style, Style::Hatched(_) | Style::Pml(_)) {
+            let p = painter.with_clip_rect(sw);
+            hatch_triangle(&p, [sw.left_top(), sw.right_top(), sw.left_bottom()], 4.0, Stroke::new(1.0, ink.text));
+            hatch_triangle(&p, [sw.right_top(), sw.right_bottom(), sw.left_bottom()], 4.0, Stroke::new(1.0, ink.text));
+        }
+        painter.rect_stroke(sw, 2.0, Stroke::new(1.0, with_alpha(ink.text, 120)), egui::StrokeKind::Inside);
+        let ids = row.labels.iter().take(4).map(|l| l.to_string()).collect::<Vec<_>>().join(", ") + if row.labels.len() > 4 { "…" } else { "" };
+        let name = crate::fmt::ellipsize(&row.name, 16);
+        painter.text(Pos2::new(sw.right() + 8.0, r.center().y), Align2::LEFT_CENTER, name, FontId::proportional(12.5), ink.text);
+        painter.text(Pos2::new(r.right() - 6.0, r.center().y), Align2::RIGHT_CENTER, ids, FontId::monospace(11.0), ink.muted);
+        let _ = resp.on_hover_text(format!("{label}: region {}\nClick to show only this; click again to show all.", row.labels.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(", ")));
+    }
+
+    /// Every row of the legend in a window that scrolls (the card of the canvas shows 12 and "N more"): the same rows, the same click to isolate.
+    fn legend_list(&mut self, ui: &mut Ui, rect: Rect, paint: &Paint, ink: &Ink) {
+        let mut open = true;
+        let max_h = (rect.height() - 90.0).max(120.0);
+        egui::Window::new("All regions").open(&mut open).collapsible(false).resizable(false).default_pos(Pos2::new((rect.right() - 280.0).max(rect.left() + 8.0), rect.top() + 10.0)).show(ui.ctx(), |ui| {
+            ui.set_width(260.0);
+            ui.label(egui::RichText::new(format!("{} colour rows; click one to show only it", paint.rows.len())).weak().size(12.0));
+            egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
+                for row in &paint.rows {
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
+                    let painter = ui.painter().clone();
+                    self.legend_row(ui, &painter, r, row, ink, "nyx-legend-list-row");
+                }
+            });
+        });
+        if !open {
+            self.legend_all = false;
+        }
+    }
+
     /// The legend of the regions at the top right of the canvas (2D): one row per colour slot with the regions that share it. A click on a row
     /// isolates it (the others fade, the row keeps an outline); a click on the same row, or on the empty canvas, brings everything back.
     fn legend(&mut self, ui: &mut Ui, canvas: &egui::Response, rect: Rect, paint: &Paint, ink: &Ink) {
@@ -557,44 +614,25 @@ impl Viewport {
             if r.bottom() > card.bottom() {
                 break;
             }
-            let id = egui::Id::unique("nyx-legend-row").with(row.slot);
-            let resp = ui.interact(r, id, Sense::click());
-            let on = self.isolate == Some(row.slot);
-            let label = if row.labels.len() == 1 { row.name.clone() } else { format!("{} ({} regions)", row.name, row.labels.len()) };
-            resp.widget_info(|| WidgetInfo::selected(Role::Button, true, on, format!("Show only {label}")));
-            if resp.clicked() {
-                self.isolate = if on { None } else { Some(row.slot) };
-            }
-            if on || resp.hovered() {
-                painter.rect_filled(r, 4.0, with_alpha(ink.text, if on { 40 } else { 20 }));
-            }
-            if on {
-                painter.rect_stroke(r, 4.0, Stroke::new(2.0, ink.line), egui::StrokeKind::Inside);
-            }
-            // the swatch is drawn the way the canvas draws the slot, hatch included
-            let sw = Rect::from_min_size(r.min + Vec2::new(6.0, (ROW - 14.0) / 2.0), Vec2::splat(14.0));
-            let style = row.style;
-            painter.rect_filled(sw, 2.0, regions::fill(style, ink.mode));
-            if matches!(style, Style::Hatched(_) | Style::Pml(_)) {
-                let p = painter.with_clip_rect(sw);
-                hatch_triangle(&p, [sw.left_top(), sw.right_top(), sw.left_bottom()], 4.0, Stroke::new(1.0, ink.text));
-                hatch_triangle(&p, [sw.right_top(), sw.right_bottom(), sw.left_bottom()], 4.0, Stroke::new(1.0, ink.text));
-            }
-            painter.rect_stroke(sw, 2.0, Stroke::new(1.0, with_alpha(ink.text, 120)), egui::StrokeKind::Inside);
-            let ids = row.labels.iter().take(4).map(|l| l.to_string()).collect::<Vec<_>>().join(", ") + if row.labels.len() > 4 { "…" } else { "" };
-            let name = crate::fmt::ellipsize(&row.name, 16);
-            painter.text(Pos2::new(sw.right() + 8.0, r.center().y), Align2::LEFT_CENTER, name, FontId::proportional(12.5), ink.text);
-            painter.text(Pos2::new(r.right() - 6.0, r.center().y), Align2::RIGHT_CENTER, ids, FontId::monospace(11.0), ink.muted);
-            let _ = resp.on_hover_text(format!("{label}: region {}\nClick to show only this; click again to show all.", row.labels.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(", ")));
+            self.legend_row(ui, &painter, r, row, ink, "nyx-legend-row");
         }
         if more > 0 {
             let r = Rect::from_min_size(card.min + Vec2::new(4.0, 4.0 + shown as f32 * ROW), Vec2::new(width - 8.0, ROW));
             if r.bottom() <= card.bottom() {
-                let rest: Vec<String> = paint.rows.iter().skip(shown).map(|r| format!("{} ({})", r.name, r.labels.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(", "))).collect();
-                let resp = ui.interact(r, egui::Id::unique("nyx-legend-more"), Sense::hover());
-                painter.text(Pos2::new(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, format!("{more} more"), FontId::proportional(12.5), ink.muted);
-                let _ = resp.on_hover_text(rest.join("\n"));
+                let resp = ui.interact(r, egui::Id::unique("nyx-legend-more"), Sense::click());
+                resp.widget_info(|| WidgetInfo::labeled(Role::Button, true, format!("Show all {} colour rows", paint.rows.len())));
+                if resp.hovered() {
+                    painter.rect_filled(r, 4.0, with_alpha(ink.text, 20));
+                }
+                painter.text(Pos2::new(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, format!("{more} more…"), FontId::proportional(12.5), ink.text);
+                if resp.clicked() {
+                    self.legend_all = true;
+                }
+                let _ = resp.on_hover_text("Click to list every row of the legend.");
             }
+        }
+        if self.legend_all && more > 0 {
+            self.legend_list(ui, rect, paint, ink);
         }
         // a click on the empty canvas (not on a row) clears the isolation
         if canvas.clicked() && self.isolate.is_some() && canvas.interact_pointer_pos().is_some_and(|p| !card.contains(p)) {
@@ -790,7 +828,7 @@ fn draw_triad(painter: &egui::Painter, rect: Rect, cam: &Camera, ink: &Ink) {
     c2.pan = Vec2::ZERO;
     c2.zoom = 1.0;
     c2.base_scale = 30.0;
-    for (axis, col, name) in [([1.0, 0.0, 0.0], Color32::from_rgb(230, 80, 80), "x"), ([0.0, 1.0, 0.0], Color32::from_rgb(90, 200, 90), "y"), ([0.0, 0.0, 1.0], Color32::from_rgb(90, 140, 240), "z")] {
+    for (axis, col, name) in [([1.0, 0.0, 0.0], crate::theme::axis_colour(0), "x"), ([0.0, 1.0, 0.0], crate::theme::axis_colour(1), "y"), ([0.0, 0.0, 1.0], crate::theme::axis_colour(2), "z")] {
         // the axis colours are the convention (x red, y green, z blue); on a light canvas they are darkened to stay readable
         let col = if ink.mode == crate::tokens::Mode::Light { shade(col, 0.4) } else { col };
         let (p, _) = c2.project(axis, Pos2::ZERO);

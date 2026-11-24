@@ -1113,6 +1113,10 @@ impl App {
             theme::apply_look(ctx, want);
         }
         self.shell.dark = dark;
+        #[cfg(windows)]
+        if let Some(m) = &mut self.shell.native_menu {
+            m.set_dark(dark);
+        }
         let z = ctx.zoom_factor();
         if (z - self.shell.last_zoom).abs() > 1e-4 {
             self.shell.last_zoom = z;

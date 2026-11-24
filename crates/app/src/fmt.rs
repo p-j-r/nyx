@@ -17,6 +17,26 @@ pub fn ellipsize(s: &str, max: usize) -> String {
     s.chars().take(max.saturating_sub(1)).collect::<String>().trim_end().to_string() + "…"
 }
 
+/// The text cut with an ellipsis until `measure` (its width in points) says it fits in `max`; text that fits is returned as it is.
+pub fn ellipsize_to_width(s: &str, max: f32, measure: impl Fn(&str) -> f32) -> String {
+    if measure(s) <= max {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    // the longest prefix whose text with the ellipsis fits (width grows with the prefix, so a binary search finds it)
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        let t: String = chars[..mid].iter().collect::<String>().trim_end().to_string() + "…";
+        if measure(&t) <= max {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    chars[..lo].iter().collect::<String>().trim_end().to_string() + "…"
+}
+
 /// A time that has passed: "0.4 s", "12 s", "1:05", "1:02:09" (seconds below ten show a decimal; a minute and more show minutes and seconds).
 pub fn seconds(s: f64) -> String {
     let s = if s.is_finite() { s.max(0.0) } else { 0.0 };
@@ -153,6 +173,18 @@ pub fn value(key: &str, v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_text_is_cut_to_a_width_with_an_ellipsis() {
+        let m = |t: &str| t.chars().count() as f32 * 10.0;
+        assert_eq!(ellipsize_to_width("short", 100.0, m), "short");
+        assert_eq!(ellipsize_to_width("0123456789", 100.0, m), "0123456789");
+        // 8 characters and the ellipsis fit in 90
+        assert_eq!(ellipsize_to_width("0123456789ab", 90.0, m), "01234567…");
+        assert!(m(&ellipsize_to_width("a very long workflow title indeed", 150.0, m)) <= 150.0);
+        // nothing fits: the ellipsis alone
+        assert_eq!(ellipsize_to_width("abc def", 5.0, m), "…");
+    }
 
     #[test]
     fn a_time_that_has_passed_reads_naturally() {

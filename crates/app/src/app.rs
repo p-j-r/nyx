@@ -1744,7 +1744,11 @@ mod tests {
     use std::time::Duration;
 
     fn app() -> App {
-        App::with_context(egui::Context::default())
+        let mut a = App::with_context(egui::Context::default());
+        // a trial mesh is "slow" after 0.1 s of the wall clock; on a busy machine every one would be, so the tests that wait for a Ready size
+        // would depend on the load. `a_slow_trial_mesh_pauses_the_preview` tests the slow branch on purpose.
+        a.feedback.slow_limit = Some(f64::INFINITY);
+        a
     }
 
     /// One headless frame. The texture changes of the frame (the font atlas) are cleared on purpose: egui asserts when a frame's output is
@@ -2443,6 +2447,31 @@ mod tests {
         assert!(a.sweep.is_none(), "the sweep form started a sweep");
         assert_eq!(a.engine.jobs().list().len(), jobs);
         assert_eq!(a.shell.current_mut().unwrap().runs.len(), runs, "no run was recorded");
+    }
+
+    /// A trial mesh that takes longer than the limit is shown as slow, and the preview waits for the person (no new trial mesh from the next edit).
+    #[test]
+    fn a_slow_trial_mesh_pauses_the_preview() {
+        let mut a = app();
+        a.feedback.slow_limit = Some(0.0); // every trial mesh counts as slow
+        a.load_example(example("02_cantilever"));
+        wait_idle(&mut a, 30);
+        a.mesh_edit.h *= 0.6;
+        a.geometry_dirty = true;
+        let ctx = a.ctx.clone();
+        // the trial mesh is asked for directly (an edit would wait for the rest first)
+        a.start_size_preview();
+        let t0 = Instant::now();
+        while matches!(a.feedback.size, crate::feedback::SizeView::Pending) {
+            a.poll();
+            assert!(t0.elapsed() < Duration::from_secs(10), "no answer from the trial mesh");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(matches!(a.feedback.size, crate::feedback::SizeView::Slow(_)), "{:?}", a.feedback.size);
+        // the next edit does not start another trial mesh on its own
+        a.mesh_edit.h *= 0.9;
+        a.edits_changed(&ctx);
+        assert!(a.feedback.due_is_none(), "a paused preview asked for a trial mesh");
     }
 
     /// The trial mesh of an edit comes back to the window, says how many cells the edit would mesh to, and is dropped when the edit moved on.

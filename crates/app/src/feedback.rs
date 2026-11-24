@@ -48,12 +48,19 @@ pub struct Feedback {
     paused: bool,
     /// the edits as they were first seen after a project was adopted have had their first check
     seeded: bool,
+    /// a trial mesh that takes this many seconds is "slow" (`SLOW` when `None`); tests set it so that the answer does not depend on how busy the machine is
+    pub(crate) slow_limit: Option<f64>,
 }
 
 impl Feedback {
+    #[cfg(test)]
+    pub(crate) fn due_is_none(&self) -> bool {
+        self.due.is_none()
+    }
+
     /// A project was adopted (loaded, new, an example): the edits are the project's own, ask again.
     pub fn reset(&mut self) {
-        *self = Feedback { generation: self.generation + 1, ..Default::default() };
+        *self = Feedback { generation: self.generation + 1, slow_limit: self.slow_limit, ..Default::default() };
     }
 }
 
@@ -116,7 +123,7 @@ impl App {
             return; // the edit moved on; its own answer is on the way
         }
         self.feedback.size = match out {
-            Ok(p) if p.mesh_seconds >= SLOW => {
+            Ok(p) if p.mesh_seconds >= self.feedback.slow_limit.unwrap_or(SLOW) => {
                 self.feedback.paused = true;
                 SizeView::Slow(p.mesh_seconds)
             }

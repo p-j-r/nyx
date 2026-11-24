@@ -260,13 +260,27 @@ impl App {
             ui.horizontal(|ui| {
                 let eid = egui::Id::unique(("title_edit", &w.id));
                 let focused = ctx.memory(|m| m.has_focus(eid));
-                let mut buf = if focused { w.draft_buf.clone() } else { w.title() };
-                let width = (buf.chars().count().max(10) as f32 * 11.0).min((ui.available_width() - 340.0).max(200.0));
-                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width).text_color(theme::text(&ctx)));
+                let cap = (ui.available_width() - 340.0).max(200.0);
+                let font = theme::title(30.0);
+                // a title that does not fit is shown with an ellipsis until the field is clicked (then the whole text is edited)
+                let mut buf = if focused {
+                    w.draft_buf.clone()
+                } else {
+                    let painter = ui.painter().clone();
+                    let ink = theme::text(&ctx);
+                    crate::fmt::ellipsize_to_width(&w.title(), cap, |t| painter.layout_no_wrap(t.to_string(), font.clone(), ink).size().x)
+                };
+                let width = (buf.chars().count().max(10) as f32 * 11.0).min(cap);
+                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(font).frame(egui::Frame::NONE).desired_width(width).text_color(theme::text(&ctx)));
                 if focused || r.has_focus() {
                     w.draft_buf = buf.clone();
                 }
-                if r.lost_focus() && buf.trim() != w.title() {
+                if r.gained_focus() {
+                    // the field showed the shortened text a moment ago: edit the real title
+                    w.draft_buf = w.title();
+                    ctx.request_repaint();
+                }
+                if focused && r.lost_focus() && buf.trim() != w.title() {
                     acts.push(Act::Title(buf.clone()));
                 }
                 let mut tags = w.tags.clone();
@@ -961,7 +975,7 @@ impl App {
     fn wf_compare(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
         let ctx = ui.ctx().clone();
         let runs: Vec<RunRecord> = w.runs.iter().filter(|r| w.selected.contains(&r.id)).cloned().collect();
-        let colors = [theme::accent(ui.ctx()), theme::activity(ui.ctx()), Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0x2F, 0x7A, 0x66), Color32::from_rgb(0x9B, 0x3A, 0x3A)];
+        let colors = [theme::accent(ui.ctx()), theme::activity(ui.ctx()), theme::series(0), theme::series(2), theme::series(3)];
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(18))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(kit::title("Compare runs", 30.0));

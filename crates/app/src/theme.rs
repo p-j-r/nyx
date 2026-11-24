@@ -89,6 +89,30 @@ pub fn scrim(alpha: u8) -> Color32 {
     Color32::from_black_alpha(alpha)
 }
 
+// Colours of figures: hues that belong to the picture (a Poincaré sphere, an axis triad, a chart series), not to a role of the shell. They are
+// named here so that a window file holds no colour literal, and so that a change of one is a change of one place.
+
+/// The ink of the Poincaré sphere (its lines and outline): blue-grey, lighter in the dark look.
+pub fn sphere_ink(dark: bool) -> Color32 {
+    if dark { Color32::from_rgb(155, 183, 217) } else { Color32::from_rgb(59, 91, 130) }
+}
+/// The translucent ball of the Poincaré sphere (the caller sets the opacity).
+pub fn sphere_body() -> Color32 {
+    Color32::from_rgb(141, 179, 221)
+}
+/// A mode marker's ring and number: white reads on every marker hue.
+pub fn on_marker() -> Color32 {
+    Color32::WHITE
+}
+/// The x, y and z axes of the 3D triad (red, green, blue, the convention of every 3D tool).
+pub fn axis_colour(i: usize) -> Color32 {
+    [Color32::from_rgb(230, 80, 80), Color32::from_rgb(90, 200, 90), Color32::from_rgb(90, 140, 240)][i % 3]
+}
+/// The series of a small chart after the accent: blue, orange, green, red (readable on the card in both looks).
+pub fn series(i: usize) -> Color32 {
+    [Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0xC9, 0x7F, 0x1F), Color32::from_rgb(0x2F, 0x7A, 0x66), Color32::from_rgb(0x9B, 0x3A, 0x3A)][i % 4]
+}
+
 /// The settings of the look that are not the light or dark colours.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Look {

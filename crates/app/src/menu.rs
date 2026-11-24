@@ -257,10 +257,25 @@ pub struct Native {
     _menu: muda::Menu,
     /// ids (indices into `ACTIONS`) clicked since the last frame
     clicked: std::sync::Arc<std::sync::Mutex<Vec<usize>>>,
+    /// the window the menu is attached to, and the look it was last given (`Auto` follows the system, which is not what Settings may say)
+    hwnd: isize,
+    dark: Option<bool>,
 }
 
 #[cfg(windows)]
 impl Native {
+    /// The menu bar takes the look of the window: dark when the window is dark, also when the system is light (and the other way round).
+    pub fn set_dark(&mut self, dark: bool) {
+        if self.dark == Some(dark) {
+            return;
+        }
+        let theme = if dark { muda::MenuTheme::Dark } else { muda::MenuTheme::Light };
+        // SAFETY: `hwnd` is the window this menu was attached to in `install`; the menu lives as long as `Native`.
+        if unsafe { self._menu.set_theme_for_hwnd(self.hwnd, theme) }.is_ok() {
+            self.dark = Some(dark);
+        }
+    }
+
     /// Builds the menus from `ACTIONS` and attaches them to the window of `cc`. `None` when the window has no Win32 handle or muda refuses.
     pub fn install(cc: &eframe::CreationContext<'_>) -> Option<Native> {
         use muda::{accelerator::Accelerator, Menu, MenuEvent, MenuItem, Submenu};
@@ -287,7 +302,7 @@ impl Native {
         }));
         // SAFETY: the handle comes from the live window of this creation context.
         unsafe { menu.init_for_hwnd_with_theme(h.hwnd.get(), muda::MenuTheme::Auto).ok()? };
-        Some(Native { _menu: menu, clicked })
+        Some(Native { _menu: menu, clicked, hwnd: h.hwnd.get(), dark: None })
     }
 
     /// The actions clicked in the menu since the last call.

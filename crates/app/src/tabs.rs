@@ -7,6 +7,7 @@
 use crate::app::App;
 use crate::colormap::Colormap;
 use crate::forms;
+use crate::theme;
 use crate::state::*;
 use eframe::egui::{self, Color32, DragValue, RichText, Ui};
 use nyx_engine::facade::geom::model::{FeatureList, Model};
@@ -1475,7 +1476,7 @@ impl App {
             let side = ui.available_width().clamp(220.0, 360.0);
             let (resp, painter) = ui.allocate_painter(egui::vec2(side, side), egui::Sense::hover());
             let dark = ui.visuals().dark_mode;
-            let ink = if dark { Color32::from_rgb(155, 183, 217) } else { Color32::from_rgb(59, 91, 130) };
+            let ink = theme::sphere_ink(dark);
             let with_alpha = |c: Color32, o: f64| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (o.clamp(0.0, 1.0) * 255.0) as u8);
             let hex = |s: &str| {
                 let v = u32::from_str_radix(s.trim_start_matches('#'), 16).unwrap_or(0);
@@ -1504,8 +1505,8 @@ impl App {
                         }
                     }
                     let big = selected == Some(*row);
-                    painter.circle(tip, side * if big { 0.040 } else { 0.030 }, col, egui::Stroke::new(if big { 2.0 } else { 0.8 }, Color32::WHITE));
-                    painter.text(tip, egui::Align2::CENTER_CENTER, &m.label, egui::FontId::proportional(side * 0.036), Color32::WHITE);
+                    painter.circle(tip, side * if big { 0.040 } else { 0.030 }, col, egui::Stroke::new(if big { 2.0 } else { 0.8 }, theme::on_marker()));
+                    painter.text(tip, egui::Align2::CENTER_CENTER, &m.label, egui::FontId::proportional(side * 0.036), theme::on_marker());
                 }
             };
             let line = |l: &nyx_engine::analysis::polarization::WireLine| -> Vec<egui::Shape> {
@@ -1521,7 +1522,7 @@ impl App {
                 painter.extend(line(l));
             }
             draw_markers(false);
-            painter.circle(centre, d.radius as f32, with_alpha(Color32::from_rgb(141, 179, 221), if dark { 0.10 } else { 0.22 }), egui::Stroke::new(1.0, with_alpha(ink, 0.6)));
+            painter.circle(centre, d.radius as f32, with_alpha(theme::sphere_body(), if dark { 0.10 } else { 0.22 }), egui::Stroke::new(1.0, with_alpha(ink, 0.6)));
             for l in d.lines.iter().filter(|l| l.front) {
                 painter.extend(line(l));
             }
@@ -1533,7 +1534,7 @@ impl App {
             ui.add_space(4.0);
             let mut pick = None;
             for (i, r) in a.rows.iter().enumerate() {
-                let colour = states.iter().position(|(k, _)| *k == i).map(|p| hex(MODE_COLOURS[p % MODE_COLOURS.len()])).unwrap_or(Color32::GRAY);
+                let colour = states.iter().position(|(k, _)| *k == i).map(|p| hex(MODE_COLOURS[p % MODE_COLOURS.len()])).unwrap_or_else(|| ui.visuals().weak_text_color());
                 let text = match &r.report {
                     Some(m) => format!("{:>2}  {} {:.5}  {}  P {:.2}  TE {:.2}{}", i + 1, a.value_label, r.neff.0, m.class.label(), m.dop, m.te_fraction, r.group.map_or(String::new(), |g| format!("  G{}", g + 1))),
                     None => format!("{:>2}  {} {:.5}  no intensity", i + 1, a.value_label, r.neff.0),
@@ -1652,7 +1653,7 @@ impl App {
             } else {
                 p.line(egui_plot::Line::new(format!("max {fname}"), egui_plot::PlotPoints::from(max_pts.clone())));
                 p.line(egui_plot::Line::new(format!("min {fname}"), egui_plot::PlotPoints::from(min_pts.clone())));
-                p.vline(egui_plot::VLine::new("now", current).color(Color32::from_rgb(230, 190, 80)));
+                p.vline(egui_plot::VLine::new("now", current).color(shown_colour));
             }
         });
         // a click on the plot shows the solution nearest to it (the same as the slider and the arrows)

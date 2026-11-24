@@ -7,7 +7,7 @@ use crate::app::App;
 use crate::kit;
 use crate::shell::Sheet;
 use crate::theme;
-use eframe::egui::{self, Color32, RichText, Sense, Vec2};
+use eframe::egui::{self, RichText, Sense, Vec2};
 use nyx_engine::facade::store::util::{ago, now_secs};
 use nyx_engine::facade::store::{Entry, Status, WorkflowDir};
 
@@ -349,7 +349,7 @@ fn filter_menu(ui: &mut egui::Ui, label: &str, value: &mut String, options: &[St
 
 fn workflow_card(ui: &mut egui::Ui, e: &Entry, spark: &[f64], width: f32) -> egui::Response {
     let ctx = ui.ctx().clone();
-    let colors = [theme::accent(ui.ctx()), Color32::from_rgb(0x3A, 0x4A, 0x9B), Color32::from_rgb(0xC9, 0x7F, 0x1F), Color32::from_rgb(0x2F, 0x7A, 0x66)];
+    let colors = [theme::accent(ui.ctx()), theme::series(0), theme::series(1), theme::series(2)];
     let color = colors[e.wf.id.bytes().last().unwrap_or(0) as usize % colors.len()];
     let ok_last = e.wf.experiments.last().is_some_and(|x| x.runs.ok > 0 && x.runs.failed == 0);
     let r = egui::Frame::new().fill(theme::card(&ctx)).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).corner_radius(12).inner_margin(egui::Margin::same(14)).show(ui, |ui| ui.vertical(|ui| {

@@ -5,7 +5,7 @@
 //! what the forms can make the Rust builder can make and the reverse. The list is evaluated when it changes (about a millisecond for a
 //! typical model); meshing stays behind the Build button.
 
-use eframe::egui::{self, Color32, ComboBox, RichText, TextEdit, Ui};
+use eframe::egui::{self, ComboBox, RichText, TextEdit, Ui};
 use nyx_engine::facade::ViewMesh;
 use nyx_engine::facade::geom::eval::Evaluated;
 use nyx_engine::facade::geom::expr::{Env, Expr};
@@ -14,7 +14,6 @@ use std::sync::Arc;
 use nyx_engine::facade::geom::model::*;
 use nyx_engine::facade::geom::select::Selector;
 
-const RED: Color32 = Color32::from_rgb(220, 100, 100);
 
 /// What the editor remembers between frames: the last list it evaluated and the outcome.
 #[derive(Default)]
@@ -177,7 +176,7 @@ fn selector_edit(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, s: &
     }
     if r.has_focus() {
         if let Err(e) = Selector::parse(&text) {
-            ui.colored_label(RED, e.to_string());
+            ui.colored_label(crate::theme::danger(ui.ctx()), e.to_string());
         }
         ui.data_mut(|d| d.insert_temp(id, text));
     } else if r.lost_focus() {
@@ -185,9 +184,9 @@ fn selector_edit(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, s: &
     }
     if let Some(ev) = ev {
         match ev.resolve(s) {
-            Ok(r) if r.set.ids.is_empty() => ui.colored_label(RED, "selects nothing"),
+            Ok(r) if r.set.ids.is_empty() => ui.colored_label(crate::theme::danger(ui.ctx()), "selects nothing"),
             Ok(r) => ui.label(RichText::new(format!("{} {:?}", r.set.ids.len(), r.set.kind).to_lowercase()).weak()),
-            Err(e) => ui.colored_label(RED, e.to_string()),
+            Err(e) => ui.colored_label(crate::theme::danger(ui.ctx()), e.to_string()),
         };
     }
     changed
@@ -676,20 +675,20 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
     st.refresh(list);
 
     if let Some(e) = &st.error {
-        ui.colored_label(RED, e);
+        ui.colored_label(crate::theme::danger(ui.ctx()), e);
     }
     if let Some(n) = &st.notice {
-        ui.colored_label(RED, n);
+        ui.colored_label(crate::theme::danger(ui.ctx()), n);
     }
     for w in &st.warnings {
-        ui.colored_label(Color32::from_rgb(220, 170, 80), w);
+        ui.colored_label(crate::theme::activity_text(ui.ctx()), w);
     }
 
     // ---- parameters
     ui.label(RichText::new("Parameters").strong());
     let mut rm = None;
     ui.push_id("geom_params", |ui| {
-        egui::Grid::new("geom_params").num_columns(5).spacing([6.0, 4.0]).show(ui, |ui| {
+        egui::Grid::new("geom_params").num_columns(5).min_col_width(0.0).spacing([6.0, 4.0]).show(ui, |ui| {
             for (k, p) in list.params.iter_mut().enumerate() {
                 let nid = ui.make_persistent_id(("param_name", k));
                 let nr = ui.add(
@@ -702,11 +701,22 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
                 crate::tabs::select_all_on_focus_gain(ui.ctx(), &nr, &p.name);
                 ui.label("=");
                 expr_edit(ui, ("param_val", k), &mut p.value);
-                match st.values.get(k).map(|(_, v)| v) {
-                    Some(Ok(x)) => ui.label(RichText::new(format!("{x:.6e}")).weak().monospace()),
-                    Some(Err(e)) => ui.colored_label(RED, e),
-                    None => ui.label(""),
-                };
+                // the value column is 56 pt wide whatever it holds, so the delete button stays in the panel: a plain number is already what the
+                // box says; an expression gets its value (four digits, the full one on hover) and an error is cut with the whole text on hover
+                ui.scope(|ui| {
+                    ui.set_width(56.0);
+                    match st.values.get(k).map(|(_, v)| v) {
+                        Some(Ok(_)) if matches!(p.value, Expr::Num(_)) => {}
+                        Some(Ok(x)) => {
+                            ui.add(egui::Label::new(RichText::new(format!("{x:.4e}")).weak().monospace()).truncate()).on_hover_text(format!("{x:.9e}"));
+                        }
+                        Some(Err(e)) => {
+                            let red = crate::theme::danger(ui.ctx());
+                            ui.add(egui::Label::new(RichText::new(e.to_string()).color(red)).truncate()).on_hover_text(e.to_string());
+                        }
+                        None => {}
+                    }
+                });
                 if ui.small_button("✕").clicked() {
                     rm = Some(k);
                 }
@@ -734,7 +744,7 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
         let prior = &heads[..k];
         let title = format!("{}  ·  {} {}", f.name, f.op.kind(), summary(&f.op));
         let default_open = n_features <= 4 || st.last_added == Some(f.id);
-        egui::CollapsingHeader::new(RichText::new(title).color(if f.suppressed { Color32::GRAY } else { ui.visuals().text_color() }))
+        egui::CollapsingHeader::new(RichText::new(title).color(if f.suppressed { ui.visuals().weak_text_color() } else { ui.visuals().text_color() }))
             .id_salt(("feature", f.id))
             .default_open(default_open)
             .show(ui, |ui| {
@@ -883,7 +893,7 @@ pub fn show(ui: &mut Ui, st: &mut State, list: &mut FeatureList) -> bool {
             } else if ui.button("Reset").clicked() {
                 st.json = None;
             } else if let Err(e) = &parsed {
-                ui.colored_label(RED, e.to_string());
+                ui.colored_label(crate::theme::danger(ui.ctx()), e.to_string());
             }
         });
     });
