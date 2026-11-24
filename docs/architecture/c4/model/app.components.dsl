@@ -3,15 +3,15 @@ window = component "Window" "The application object around one Engine: window la
     properties {
         "adr" "23, 57, 92"
         "code" "crates/app/src: app.rs, feedback.rs, main.rs, spans.rs, state.rs"
-        "lines" "4045"
+        "lines" "4079"
         "codeDiagram" "4-code/app/window.md"
     }
 }
-shell = component "Shell and dashboard" "The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points." "Rust modules" {
+shell = component "Shell and dashboard" "The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (one bar, five tabs with the viewport always on, the runs page), the sheets (new, search, versions, share, settings) and the example starting points." "Rust modules" {
     properties {
-        "adr" "14, 23, 87, 88, 123"
+        "adr" "14, 23, 87, 88, 123, 124"
         "code" "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs"
-        "lines" "5126"
+        "lines" "5053"
         "codeDiagram" "4-code/app/shell.md"
     }
 }
@@ -19,7 +19,7 @@ inspector = component "Inspector tabs" "The tabs beside the viewport: geometry e
     properties {
         "adr" "23, 57"
         "code" "crates/app/src: forms.rs, geomui.rs, tabs.rs"
-        "lines" "2863"
+        "lines" "2882"
         "codeDiagram" "4-code/app/inspector.md"
     }
 }
@@ -33,17 +33,17 @@ viewport = component "Viewport" "The 2D/3D viewport: camera, drawing of meshes a
 }
 style = component "Look and widgets" "The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written." "Rust modules" {
     properties {
-        "adr" "23, 88, 123"
+        "adr" "23, 88, 123, 124"
         "code" "crates/app/src: cvd.rs, fmt.rs, kit.rs, theme.rs, tokens.rs"
-        "lines" "1312"
+        "lines" "1336"
         "codeDiagram" "4-code/app/style.md"
     }
 }
 headless = component "Scripts and batch" "Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script." "Rust modules" {
     properties {
-        "adr" "23, 89, 93, 123"
+        "adr" "23, 89, 93, 123, 124"
         "code" "crates/app/src: apicmd.rs, batch.rs, console.rs, matcmd.rs, pyscript.rs, runfile.rs, script.rs"
-        "lines" "1376"
+        "lines" "1398"
         "codeDiagram" "4-code/app/headless.md"
     }
 }

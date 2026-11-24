@@ -199,6 +199,13 @@
       "status" : "Accepted",
       "title" : "The window reset: GUI subsystem, absorbing layers as a role, plain headings and quiet bars"
     }, {
+      "content" : "# 124. One bar, five tabs, the viewport always on, the script as a dock, the physics as a dropdown\n\nDate: 2026-11-24\n\n## Status\n\nAccepted by Paul on 2026-11-24 (\"both, one after another\", after reading `docs/ux/UX_RESET_PLAN.md`, sections 2, 3, 5 and 6), implemented on the bookmarks `ux-reset-5-script-dock` and `ux-reset-6-nav`. It amends ADR 88 and ADR 93 (the script editor was a sheet) and ADR 123 (which left navigation and Analysis for later). The shape comes from the sibling project `simgui` (one row of tabs, one viewport, a mode slider and a summary list), read from its screenshots, not run.\n\n## Context\n\nAfter ADR 123 the window still had four levels of navigation (workflow tabs; Concept, Build and Analysis; Geometry and Mesh preview; Boundaries, Study and Sweep), a rail of experiments that took 250 px, an inspector of 440 px, and a script sheet that covered the model. At 1500 px with the script open (as a dock, on top of the old layout) the viewport was 300 px wide. The Analysis page opened on a table that overran its panel and on a plot of `eigenvalue_im` against the run number; the field of the result, the modes and the summary were on another page, reached through a click on a run. Five filled accent controls were on screen at once (tab, section, sub-pill, physics pill, Compute). Choosing a physics changed `Project.active`, which is in the saved spec, so the autosave (`shell::flush`) compared another hash and stored a version and reread the workspace for a choice that changed no setting.\n\n## Decision\n\n* **The script is a dock on the right** (`sheets::script_dock`, drawn by `shell_ui` beside any page), resizable (340 to 900 px), toggled by Ctrl+Shift+R, the Script button of the bar and the File menu; its buttons are Run script, Check, Fill from model and a File menu (load, save, external `.py`); the editor takes the height, the check and the output sit under it. The model stays in view and what a script changes shows at once. The sheet remains only in the classic window (`--classic`, the tests of the plain window), which has no shell. A bottom dock was considered and rejected: it takes the height the viewport needs for a cross-section.\n* **The physics of the project are one dropdown in the bar** (`wfview::physics_menu`): the ones in the project, then \"Add ...\" for the others (up to three), then \"Remove ... from the project\", the destructive entry last and apart. The pills and the remove button no longer sit in the inspector of the shell window; the text about what physics exchange is shown only when the project has more than one.\n* **Which physics is on show is window state, not a change of the workflow.** `shell::spec_key` hashes the spec without `active`; `flush` and the draft test compare that key, so a switch writes no version and rereads nothing. A Compute still stores the exact spec (`shell_compute` clears the stored key before its flush), so a run is tied to a version that names the physics it solved; the store (`commit_spec`) decides whether that is a new version. The saved `active` is the one of the last real change or run. The file format is unchanged (ADR 63).\n* **One bar, five tabs, the viewport always on.** `Part` (Concept, Build, Analysis) and the sub-pills are gone. The bar (`wf_bar`) holds the experiment menu and the physics dropdown on the left and, on the right, `Show: Geometry | Mesh | Result`, `Runs (N)` (from the second run on), Script and Compute, the one filled button. The left panel (`wf_inspector`, 320 to 640 px, resizable) is one row of text tabs (`kit::tabs`: the one on show in bold with a 2 px accent line) over the editor of the tab: Geometry, Materials, Physics, Study (the sweep is a section of it, closed by default) and Results. The viewport is the centre of every one of them. While a run of the workflow goes, the live run screen replaces the panels, as before.\n* **Results is the page the person asked for.** The Results tab is `tab_results` (the result list, the mode slider with `<` and `>` and the label of the mode, the Field and Colours lists, the range, mesh edges, Fit view, the Summary list, the polarization when there is one, Export). Under the viewport, when the result has several solutions, `results_panel` plots them against the mode number; the status line under that gives the facts of the mesh and the name of the result. A new result opens the Results tab and the field (`push_result`). The \"Field viewer\" page and its \"Back to runs\" are gone.\n* **The runs are a page of their own** (`wf_runs`, `Sub::Runs`), not the first thing seen: the plot only when at least two runs differ in the plotted quantity (a flat line of identical runs says so in words instead), \"Functions on these runs\" behind a closed header, then the filter, the columns menu and the table, which fills the page and clips to it. Compare opens from it and returns to it. The engine commands and the data are as they were; only the default presentation changed.\n* **Experiments are a menu of the bar** (`experiment_menu`: choose, new blank, fork, link), not a rail. Versions, Share, Pin, Done, Notes, Open folder, the tag input and Close are one `More` menu of the header; the save state is a dot with its words as a tooltip when the title leaves little room.\n* **One accent.** The filled accent colour is Compute and the accent line of the tab and of the workflow tab; the `Show` choices and the experiment, physics and `More` menus use the plain selection. The second Compute button of the Study tab and the tab headings that repeated the tab name are not drawn in the shell window.\n* **Names.** The menu and palette actions are `ShowGeometry`, `ShowMaterials`, `ShowPhysics`, `ShowStudy`, `ShowSweep`, `ShowResults` (Alt+1 to Alt+6) and `ShowRuns`; the script command `section` takes `geometry|materials|physics|study|sweep|results|runs` and keeps `concept`, `build` and `analysis` (geometry, physics, results) for `tools/ux-shots.sh` and older scripts; `view field` opens the Results tab; `sheet script` opens the dock.\n\n## Consequences\n\n* At 1500 px the viewport is about 830 px wide with the script closed and 375 px with it open (300 px with the dock on the old layout, measured on the shots of 2026-11-24).\n* No engine command, schema, contract exemplar or file format changed (ADR 19, 63): `docs/architecture/contracts/` and `VERSIONS.md` have no new line. Which physics a saved workflow opens with is the one of its last stored change or run.\n* The tests that clicked \"2 · Build\", \"3 · Analysis\", \"Your script...\" and \"Run .nys script\", and read the inspector on the right of the window, use the new tabs and places (`app::tests::e2e_gui_*`); new tests: `shell::tests` (the spec key, a switch writes no version), `menu::tests` (the actions open the tabs and the runs page), `app::tests::a_new_result_opens_the_results_tab_with_the_field`.\n* Not decided here and so not changed: whether experiments, versions and the dashboard stay at all (they stay, as menus); the name \"Workflows\"; the first tab of the workflow strip that scrolls half out of view; the removal of the unused bundled italic font (ADR 123); the light theme, 150 percent scaling and 3D results, which were not looked at in the shots of this change.\n\n## Code\n\n`crates/app/src/{wfview,shell,sheets,menu,script,kit,tabs,sweepui,app}.rs`, `docs/ux/UX_RESET_PLAN.md`, `docs/UX_STATUS.md`. Tests: `shell::tests`, `menu::tests`, `app::tests`.\n",
+      "date" : "2026-11-23T23:00:00Z",
+      "format" : "Markdown",
+      "id" : "124",
+      "status" : "Accepted",
+      "title" : "One bar, five tabs, the viewport always on, the script as a dock, the physics as a dropdown"
+    }, {
       "content" : "# 13. Pure Rust; nothing Python ships; HDF5 is optional; the toolchain is pinned\n\nDate: 2026-10-28\n\n## Status\n\nAccepted (`README.md`, `CLAUDE.md`, a047506).\n\n## Context\n\nnyx is a desktop application for researchers on Windows. Python and C dependencies make it hard to build, ship and reproduce. Two parts of the ported work were developed against Python or C tools (the SLEPc comparison harness, HDF5).\n\n## Decision\n\n* The application, library and MCP server are pure Rust. `*.py` is git-ignored on purpose. Any GDS layout is built with gdsfactory, never raw gdstk (Paul's rule; this is a layout-tool rule, not a build dependency).\n* HDF5/XDMF results are behind the `hdf5-metno` feature of `femcore` (`hdf5` in `app`; `phdf5` adds MPI-IO). They need the HDF5 library; the default build does not.\n* `faer` supplies dense/sparse linear algebra, `spade` the Delaunay triangulation, `quick-xml` the project XML, `serde`/`serde_json` the data model, `rayon` the pool, `egui`/`eframe` the window. Projects save as JSON or XML (`.nyx.json`, `.nyx.xml`) from the same serde value (`xmlio`).\n* `rust-toolchain.toml` pins the compiler; `Cargo.toml` says `rust-version = 1.84`. Always build with `--release`: the solvers are unusably slow unoptimised.\n\n## Consequences\n\n* The state of the checks depends on the toolchain: clippy `-D warnings` is not clean with 1.99.1 and `cargo fmt --check` fails widely (R23).\n* XML is a derived encoding of a serde value, not a schema of its own: field names of the Rust types are the file format, and nothing versions them (R20).\n* The ports' Python harnesses live outside this repository.\n\n## Code\n\n`Cargo.toml`, `rust-toolchain.toml`, `crates/femcore/Cargo.toml`, `crates/femcore/src/xmlio.rs`, `h5io.rs`, `crates/app/src/batch.rs`.\n\n## Contract\n\n`contracts/problem_spec` exercises the JSON and XML encodings of the `ProblemSpec` part of a project; a contract for the whole `Project` is not written (it lives in the `app` crate, R16).\n",
       "date" : "2026-10-27T23:00:00Z",
       "format" : "Markdown",
@@ -865,7 +872,7 @@
             "structurizr.dsl.identifier" : "nyx.app.window",
             "codeDiagram" : "4-code/app/window.md",
             "code" : "crates/app/src: app.rs, feedback.rs, main.rs, spans.rs, state.rs",
-            "lines" : "4045",
+            "lines" : "4079",
             "adr" : "23, 57, 92"
           },
           "relationships" : [ {
@@ -928,7 +935,7 @@
           "tags" : "Element,Component",
           "technology" : "Rust modules"
         }, {
-          "description" : "The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points.",
+          "description" : "The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (one bar, five tabs with the viewport always on, the runs page), the sheets (new, search, versions, share, settings) and the example starting points.",
           "documentation" : { },
           "id" : "8",
           "name" : "Shell and dashboard",
@@ -936,8 +943,8 @@
             "structurizr.dsl.identifier" : "nyx.app.shell",
             "codeDiagram" : "4-code/app/shell.md",
             "code" : "crates/app/src: activity.rs, dashboard.rs, examples.rs, menu.rs, sheets.rs, shell.rs, sweepui.rs, wfview.rs",
-            "lines" : "5126",
-            "adr" : "14, 23, 87, 88, 123"
+            "lines" : "5053",
+            "adr" : "14, 23, 87, 88, 123, 124"
           },
           "relationships" : [ {
             "description" : "uses engine: crate root, engine +2",
@@ -972,7 +979,7 @@
             "structurizr.dsl.identifier" : "nyx.app.inspector",
             "codeDiagram" : "4-code/app/inspector.md",
             "code" : "crates/app/src: forms.rs, geomui.rs, tabs.rs",
-            "lines" : "2863",
+            "lines" : "2882",
             "adr" : "23, 57"
           },
           "relationships" : [ {
@@ -1051,8 +1058,8 @@
             "structurizr.dsl.identifier" : "nyx.app.style",
             "codeDiagram" : "4-code/app/style.md",
             "code" : "crates/app/src: cvd.rs, fmt.rs, kit.rs, theme.rs, tokens.rs",
-            "lines" : "1312",
-            "adr" : "23, 88, 123"
+            "lines" : "1336",
+            "adr" : "23, 88, 123, 124"
           },
           "tags" : "Element,Component",
           "technology" : "Rust modules"
@@ -1065,8 +1072,8 @@
             "structurizr.dsl.identifier" : "nyx.app.headless",
             "codeDiagram" : "4-code/app/headless.md",
             "code" : "crates/app/src: apicmd.rs, batch.rs, console.rs, matcmd.rs, pyscript.rs, runfile.rs, script.rs",
-            "lines" : "1376",
-            "adr" : "23, 89, 93, 123"
+            "lines" : "1398",
+            "adr" : "23, 89, 93, 123, 124"
           },
           "relationships" : [ {
             "description" : "uses engine: apiref, commandlist +3",

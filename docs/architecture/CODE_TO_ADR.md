@@ -181,11 +181,11 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | feature `portable-kernels` |
 | `crates/nyx-storage/*` | 107, 62, 99 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer, XDMF, sweep checkpoint |
 | `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
-| `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123 | colour tokens as data, the looks built from them, the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
+| `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123, 124 | colour tokens as data, the looks built from them, the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
 | `crates/app/src/console.rs` | 123, 122 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
 | `crates/app/src/{feedback,spans}.rs` | 92 | the problem and size lines of an edit, the polarization thread, and the timing spans of the frame log |
-| `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |
+| `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23, 124 | the workflow view: the one bar, the five tabs with the viewport always on, the Results tab, the runs page, the script dock, the spec key that ignores the physics on show |
 | `crates/app/src/*` | 23 | |
 | `crates/app/*` | 23 | |
 | `crates/nyx-mcp/tests/{contracts,stdio}.rs` | 94, 97, 19, 15 | the `mcp_tools.v3` snapshot (four tools), the handshake, and the gate of S7: the P0 workflows in script mode against the per-command baseline |

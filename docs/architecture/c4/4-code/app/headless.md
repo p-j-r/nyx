@@ -4,8 +4,8 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 
 > Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md)  
-**Size:** 7 files, 1376 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md)  
+**Size:** 7 files, 1398 lines.
 
 ## Files
 
@@ -17,7 +17,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 | `crates/app/src/matcmd.rs` | 559 |  |
 | `crates/app/src/pyscript.rs` | 55 |  |
 | `crates/app/src/runfile.rs` | 237 |  |
-| `crates/app/src/script.rs` | 318 |  |
+| `crates/app/src/script.rs` | 340 |  |
 
 ## What it uses
 
@@ -25,7 +25,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 |---|---|---|
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | apiref, commandlist, crate root, engine, material_fetch | Done, Engine, Problem, Scalar, default_materials_folder, default_name_from_target |
 | [container `script` (nyx-script)](../../3-components/script.md) | crate root, host, stubs | Limits, Options, check, nyx_pyi, run |
-| [Shell and dashboard](./shell.md) | examples, shell | Page, Part, Sheet, Start, Sub, list |
+| [Shell and dashboard](./shell.md) | examples, shell | Page, Sheet, Start, Sub, list |
 | [Look and widgets](./style.md) | cvd | Kind, simulate_rgba |
 | [Window](./window.md) | app, state | App, Msg |
 

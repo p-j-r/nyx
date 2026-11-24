@@ -4,9 +4,9 @@ One page per component, C4 level 4. [Component view](../../3-components/app.md) 
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Window](./window.md) | 5 | 4045 | 82 | 17 |
-| [Shell and dashboard](./shell.md) | 8 | 5126 | 103 | 23 |
-| [Inspector tabs](./inspector.md) | 3 | 2863 | 19 | 2 |
+| [Window](./window.md) | 5 | 4079 | 83 | 17 |
+| [Shell and dashboard](./shell.md) | 8 | 5053 | 104 | 22 |
+| [Inspector tabs](./inspector.md) | 3 | 2882 | 19 | 2 |
 | [Viewport](./viewport.md) | 4 | 1674 | 37 | 12 |
-| [Look and widgets](./style.md) | 5 | 1312 | 100 | 7 |
-| [Scripts and batch](./headless.md) | 7 | 1376 | 13 | 1 |
+| [Look and widgets](./style.md) | 5 | 1336 | 101 | 7 |
+| [Scripts and batch](./headless.md) | 7 | 1398 | 13 | 1 |

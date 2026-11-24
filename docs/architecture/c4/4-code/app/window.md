@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 5 files, 4045 lines.
+**Size:** 5 files, 4079 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 3328 |  |
+| `crates/app/src/app.rs` | 3362 |  |
 | `crates/app/src/feedback.rs` | 221 |  |
 | `crates/app/src/main.rs` | 157 |  |
 | `crates/app/src/spans.rs` | 42 |  |
@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 | [container `script` (nyx-script)](../../3-components/script.md) | crate root, host | Limits, Options, check, find_worker, mcp_dir, run |
 | [Scripts and batch](./headless.md) | pyscript | spawn |
 | [Inspector tabs](./inspector.md) | geomui | State |
-| [Shell and dashboard](./shell.md) | activity, examples, menu, sheets, shell, sweepui | Act, Active, Deferred, Page, RunCtx, ScriptSheet, Sheet, Shell, Start, params_of +1 |
+| [Shell and dashboard](./shell.md) | activity, examples, menu, sheets, shell, sweepui | Act, Active, Deferred, Page, RunCtx, ScriptSheet, Sheet, Shell, Start, Sub +2 |
 | [Look and widgets](./style.md) | cvd, fmt, kit, theme | Kind, State, accent, activity_text, apply, card, danger, edge, ink, install_fonts +7 |
 | [Viewport](./viewport.md) | colormap, regions, viewport | Colormap, Content, Paint, Viewport, assign, assign_with_pml, keys_by_material, palette |
 
@@ -105,7 +105,7 @@ classDiagram
         +adopt()
         +push_edits() bool
         +set_error(e)
-        +more_40_methods()
+        +more_41_methods()
     }
   }
   namespace feedback_rs {
@@ -267,26 +267,27 @@ classDiagram
 | fn | `App::open_path` | `app.rs:549` | `pub fn open_path(&mut self, path: PathBuf)` |
 | fn | `App::compute` | `app.rs:584` | `pub fn compute(&mut self)` —  Solves the active physics (with the physics it takes fields from), meshing first when the geometry or mesh settings changed. |
 | fn | `App::take_solved` | `app.rs:719` | `pub(crate) fn take_solved(&mut self, summary: &Value)` —  A solve came back: the mesh it used, and one result view per physics it solved. |
-| fn | `App::sync_rules` | `app.rs:800` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
-| fn | `App::save_project` | `app.rs:824` | `pub fn save_project(&mut self, as_new: bool)` |
-| fn | `App::export_script` | `app.rs:843` | `pub fn export_script(&mut self)` —  File &gt; Export as script: the project as a script that rebuilds it (`project_script`, ADR 94), written where an agent finds it by name, the |
-| fn | `App::load_project` | `app.rs:864` | `pub fn load_project(&mut self, path: &std::path::Path)` |
-| fn | `App::load_example` | `app.rs:877` | `pub fn load_example(&mut self, i: usize)` |
-| fn | `App::result_csv` | `app.rs:892` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
-| fn | `App::export_csv` | `app.rs:920` | `pub fn export_csv(&mut self)` |
-| fn | `App::export_analysis` | `app.rs:933` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
-| fn | `App::run_python_script` | `app.rs:949` | `pub fn run_python_script(&mut self)` |
-| fn | `App::fill_nys_from_model` | `app.rs:962` | `pub fn fill_nys_from_model(&mut self)` |
-| fn | `App::open_nys_script` | `app.rs:972` | `pub fn open_nys_script(&mut self)` |
-| fn | `App::check_nys_script` | `app.rs:997` | `pub fn check_nys_script(&mut self)` |
-| fn | `App::run_nys_script` | `app.rs:1016` | `pub fn run_nys_script(&mut self)` |
-| fn | `App::new_project` | `app.rs:1150` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
-| fn | `App::refresh_connect` | `app.rs:1241` | `pub(crate) fn refresh_connect(&mut self)` —  Re-reads what Claude Code's and Claude Desktop's config files say about nyx. |
-| fn | `App::connect_menu` | `app.rs:1250` | `pub(crate) fn connect_menu(&mut self, ui: &mut egui::Ui)` —  The Connect menu: one row per Claude app with a Connect/Disconnect button, so the AI interface (`nyx-mcp`) |
-| fn | `App::region_paint` | `app.rs:1462` | `pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint` —  The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions |
-| fn | `App::viewport_ui` | `app.rs:1504` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
-| fn | `App::set_condition_on` | `app.rs:1599` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
-| fn | `App::set_problem` | `app.rs:1609` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
+| fn | `App::sync_rules` | `app.rs:808` | `pub fn sync_rules(&mut self)` —  Resolves the selectors of the conditions of the active physics to the boundary numbers of the mesh on show (to draw them and to |
+| fn | `App::save_project` | `app.rs:832` | `pub fn save_project(&mut self, as_new: bool)` |
+| fn | `App::export_script` | `app.rs:851` | `pub fn export_script(&mut self)` —  File &gt; Export as script: the project as a script that rebuilds it (`project_script`, ADR 94), written where an agent finds it by name, the |
+| fn | `App::load_project` | `app.rs:872` | `pub fn load_project(&mut self, path: &std::path::Path)` |
+| fn | `App::load_example` | `app.rs:885` | `pub fn load_example(&mut self, i: usize)` |
+| fn | `App::result_csv` | `app.rs:900` | `pub fn result_csv(&self) -> Option<String>` —  CSV of the current solution: coordinates of every dof and all fields. |
+| fn | `App::export_csv` | `app.rs:928` | `pub fn export_csv(&mut self)` |
+| fn | `App::export_analysis` | `app.rs:941` | `pub fn export_analysis(&mut self, kind: &str)` —  Writes the polarization analysis of the result on show: `csv` (one row per mode) or `svg` (the Poincare sphere). |
+| fn | `App::run_python_script` | `app.rs:957` | `pub fn run_python_script(&mut self)` |
+| fn | `App::fill_nys_from_model` | `app.rs:970` | `pub fn fill_nys_from_model(&mut self)` |
+| fn | `App::open_nys_script` | `app.rs:980` | `pub fn open_nys_script(&mut self)` |
+| fn | `App::toggle_nys_script` | `app.rs:989` | `pub fn toggle_nys_script(&mut self)` —  The key and the button of the script: opens the dock, or closes it when it is open. |
+| fn | `App::check_nys_script` | `app.rs:1014` | `pub fn check_nys_script(&mut self)` |
+| fn | `App::run_nys_script` | `app.rs:1033` | `pub fn run_nys_script(&mut self)` |
+| fn | `App::new_project` | `app.rs:1167` | `pub fn new_project(&mut self, physics: &str, three_d: bool, what: &str)` —  Replaces the project by a new blank one (nothing is kept of the old geometry, conditions or results). |
+| fn | `App::refresh_connect` | `app.rs:1258` | `pub(crate) fn refresh_connect(&mut self)` —  Re-reads what Claude Code's and Claude Desktop's config files say about nyx. |
+| fn | `App::connect_menu` | `app.rs:1267` | `pub(crate) fn connect_menu(&mut self, ui: &mut egui::Ui)` —  The Connect menu: one row per Claude app with a Connect/Disconnect button, so the AI interface (`nyx-mcp`) |
+| fn | `App::region_paint` | `app.rs:1479` | `pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint` —  The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions |
+| fn | `App::viewport_ui` | `app.rs:1521` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::set_condition_on` | `app.rs:1616` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
+| fn | `App::set_problem` | `app.rs:1626` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
 | const | `REST` | `feedback.rs:18` | `Duration` —  An edit rests this long before a trial mesh is made of it. |
 | const | `SLOW` | `feedback.rs:20` | `f64` —  A trial mesh that takes longer than this (seconds) turns the automatic preview off: the rule of plan question 2 (about 100 ms). |
 | enum | `SizeView` | `feedback.rs:24` | variants: `None`, `Pending`, `Ready`, `Refused`, `Slow` —  What the size line shows. |

@@ -1,5 +1,7 @@
 # nyx window: reset plan (2026-11-24)
 
+Status 2026-11-24: built, in ADR 123 and 124: 1 (console, one executable, option B), 2 (script dock, on the right), 3 and 5 (one bar, five tabs, Results opened on the field, the runs page), 4 (plain headings; the name 'Workflows' is not changed), 7, 8, 9, and the cause found for 6 (a physics switch wrote a version: fixed; a lag that is not that is not reproduced). `docs/UX_STATUS.md` lists what is left. Where the plan asked Paul to decide, the implementer chose: option B for the console, a right dock, experiments and versions kept as menus; Paul's words were "the points look good" and "both, one after another". Shots of the result: `docs/ux/shots/reset-*.png`.
+
 Source: the dist build `nyx-main-9480093a` driven with `nyx --script` (shots in `runs/ux/`, git-ignored) plus a read of `crates/app/src`. Verified = seen in a shot or in code. Hypothesis = not yet measured.
 
 The pattern behind most items: earlier passes (`UX_REVIEW.md`, `UX_ACTION_PLAN.md`) added structure and decoration (italic serif titles, a section strip, sub-pills, sheets, banners) and never removed any. This plan mostly removes.

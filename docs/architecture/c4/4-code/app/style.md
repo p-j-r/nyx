@@ -4,8 +4,8 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 
 > The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md)  
-**Size:** 5 files, 1312 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md)  
+**Size:** 5 files, 1336 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 |---|---:|---|
 | `crates/app/src/cvd.rs` | 90 |  |
 | `crates/app/src/fmt.rs` | 223 |  |
-| `crates/app/src/kit.rs` | 334 |  |
+| `crates/app/src/kit.rs` | 358 |  |
 | `crates/app/src/theme.rs` | 337 |  |
 | `crates/app/src/tokens.rs` | 328 |  |
 
@@ -93,7 +93,7 @@ classDiagram
         +pill(ui, on, text) Response
         +chip(ui, text) Response
         +badge(ui, fill, fg, text)
-        +more_11_functions()
+        +more_12_functions()
     }
   }
   namespace theme_rs {
@@ -184,14 +184,15 @@ classDiagram
 | fn | `glyph` | `kit.rs:115` | `pub fn glyph(ui: &mut Ui, state: State) -> Response` —  The glyph of a state, 14 px square. |
 | fn | `paint_glyph` | `kit.rs:122` | `pub fn paint_glyph(ui: &Ui, c: egui::Pos2, state: State)` |
 | fn | `status` | `kit.rs:172` | `pub fn status(ui: &mut Ui, state: State, label: impl Into<String>)` —  A state with its word (or `label` instead of the word): glyph, then text in the colour that reads on the page. |
-| struct | `TabHit` | `kit.rs:188` | fields: `select`, `close` —  What `tab` reports: a click on the tab and a click on its close target. |
-| fn | `tab` | `kit.rs:195` | `pub fn tab(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, title: &str, selected: bool, state: Option<State>, closable: bool) -> TabHit` —  One tab of the top bar: 28 px high, a state glyph, the title, and (when `closable`) a 24 x 24 close target. Selected = tint and a 2 px accent |
-| fn | `mono` | `kit.rs:244` | `pub fn mono(text: impl Into<String>) -> RichText` |
-| fn | `muted` | `kit.rs:248` | `pub fn muted(ui: &Ui, text: impl Into<String>) -> RichText` |
-| fn | `title` | `kit.rs:252` | `pub fn title(text: impl Into<String>, size: f32) -> RichText` |
-| fn | `sparkline` | `kit.rs:257` | `pub fn sparkline(ui: &mut Ui, values: &[f64], color: Color32, size: Vec2)` —  A line of values as a polyline in a box (dashboard cards). |
-| fn | `bar` | `kit.rs:274` | `pub fn bar(ui: &mut Ui, fraction: Option<f32>, width: f32)` —  A determinate progress bar in plum on a pale track; `None` shows a sliding block (no percentage reported). |
-| fn | `modal` | `kit.rs:304` | `pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui)) -> bool` —  A modal sheet: dims the page, swallows clicks outside and shows `f` in a centred card. Returns `true` when it should close |
+| fn | `tabs` | `kit.rs:189` | `pub fn tabs(ui: &mut Ui, labels: &[&str], on: usize) -> Option<usize>` —  A row of text tabs (ADR 124): the one on show in the text colour and bold, with a 2 px accent line under it; the others muted. Returns the index clicked. |
+| struct | `TabHit` | `kit.rs:212` | fields: `select`, `close` —  What `tab` reports: a click on the tab and a click on its close target. |
+| fn | `tab` | `kit.rs:219` | `pub fn tab(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, title: &str, selected: bool, state: Option<State>, closable: bool) -> TabHit` —  One tab of the top bar: 28 px high, a state glyph, the title, and (when `closable`) a 24 x 24 close target. Selected = tint and a 2 px accent |
+| fn | `mono` | `kit.rs:268` | `pub fn mono(text: impl Into<String>) -> RichText` |
+| fn | `muted` | `kit.rs:272` | `pub fn muted(ui: &Ui, text: impl Into<String>) -> RichText` |
+| fn | `title` | `kit.rs:276` | `pub fn title(text: impl Into<String>, size: f32) -> RichText` |
+| fn | `sparkline` | `kit.rs:281` | `pub fn sparkline(ui: &mut Ui, values: &[f64], color: Color32, size: Vec2)` —  A line of values as a polyline in a box (dashboard cards). |
+| fn | `bar` | `kit.rs:298` | `pub fn bar(ui: &mut Ui, fraction: Option<f32>, width: f32)` —  A determinate progress bar in plum on a pale track; `None` shows a sliding block (no percentage reported). |
+| fn | `modal` | `kit.rs:328` | `pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui)) -> bool` —  A modal sheet: dims the page, swallows clicks outside and shows `f` in a centred card. Returns `true` when it should close |
 | fn | `State::word` | `kit.rs:100` | `pub fn word(self) -> &'static str` |
 | fn | `title_family` | `theme.rs:13` | `pub fn title_family() -> FontFamily` —  The family that once held the serif italic of page titles (ADR 123 retired it: nothing is drawn in it, it falls back to the interface face). |
 | fn | `title` | `theme.rs:18` | `pub fn title(size: f32) -> FontId` —  A heading: the plain interface face, smaller than the size asked for (the sizes were chosen for a display italic; ADR 123). |
