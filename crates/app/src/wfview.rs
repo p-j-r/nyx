@@ -611,16 +611,29 @@ impl App {
             egui::Panel::bottom("wf_modes").default_size(180.0).size_range(90.0..=(room * 0.4)).resizable(true).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| self.results_panel(ui));
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.small_button("Fit").clicked() {
-                    self.vp.fit_token += 1;
-                }
-                if !self.show_results {
-                    ui.checkbox(&mut self.show_numbers, "Boundary numbers");
-                }
-            });
-            egui::Frame::new().corner_radius(12).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).show(ui, |ui| {
+            let canvas = egui::Frame::new().corner_radius(12).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).show(ui, |ui| {
                 crate::spans::span("viewport_ui", || self.viewport_ui(ui));
+            });
+            // two small buttons in the bottom right corner of the canvas (they used to be a row above it): fit the view, and the boundary numbers of the mesh
+            let (w, h) = (if self.show_results { 40.0 } else { 78.0 }, 22.0);
+            let tools = egui::Rect::from_min_size(canvas.response.rect.right_bottom() - egui::vec2(w + 10.0, h + 8.0), egui::vec2(w, h));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(tools), |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.spacing_mut().button_padding = egui::vec2(6.0, 1.0);
+                    let fill = crate::theme::with_alpha(theme::card(&ctx), 225);
+                    let fit = ui.add(egui::Button::new(RichText::new("Fit").size(11.5)).fill(fill).min_size(egui::vec2(32.0, h)));
+                    if fit.on_hover_text("Fit the view (double-click the canvas does the same)").clicked() {
+                        self.vp.fit_token += 1;
+                    }
+                    if !self.show_results {
+                        let on = self.show_numbers;
+                        let nums = ui.add(egui::Button::new(RichText::new("#").size(11.5)).fill(fill).selected(on).min_size(egui::vec2(h, h)));
+                        if nums.on_hover_text("Boundary numbers").clicked() {
+                            self.show_numbers = !on;
+                        }
+                    }
+                });
             });
         });
     }
