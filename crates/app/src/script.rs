@@ -62,6 +62,11 @@ impl App {
                     "results" => Tab::Results,
                     "analysis" => Tab::Analysis,
                     _ => Tab::Geometry,
+                };
+                let shown = if self.tab == Tab::Analysis { Tab::Results } else { self.tab };
+                if let Some(w) = self.shell.current_mut() {
+                    w.tab = shown;
+                    w.sub = crate::shell::Sub::Main;
                 }
             }
             "compute" => self.shell_compute(),
@@ -111,15 +116,24 @@ impl App {
                     }
                 }
             },
+            // `section NAME`: a tab of the left panel of the open workflow (ADR 124). `concept`, `build` and `analysis` are the names of the older window and
+            // keep working for the scripts of `tools/ux-shots.sh`: geometry, physics and results. `runs` is the page of the table and the plots.
             "section" => {
+                use crate::shell::Sub;
+                let (tab, sub) = match arg.as_str() {
+                    "materials" => (Tab::Materials, Sub::Main),
+                    "physics" | "build" => (Tab::Physics, Sub::Main),
+                    "study" | "sweep" => (Tab::Study, Sub::Main),
+                    "results" | "analysis" => (Tab::Results, Sub::Main),
+                    "runs" => (Tab::Results, Sub::Runs),
+                    _ => (Tab::Geometry, Sub::Main),
+                };
                 if let Some(w) = self.shell.current_mut() {
-                    w.sub = crate::shell::Sub::Main;
-                    w.part = match arg.as_str() {
-                        "build" => crate::shell::Part::Build,
-                        "analysis" => crate::shell::Part::Analysis,
-                        _ => crate::shell::Part::Concept,
-                    };
+                    w.tab = tab;
+                    w.sub = sub;
+                    w.sweep.shown = arg == "sweep";
                 }
+                self.tab = tab;
             }
             // `theme light|dark`: the look of the window for the shots of `tools/ux-shots.sh` (not saved to the workspace settings)
             "theme" => {
@@ -241,11 +255,13 @@ impl App {
             }
             "view" => {
                 self.show_results = arg == "result" || arg == "field";
-                // `view field`: the page of the result's fields (where the Results tab, with its validated state, is laid out)
+                // `view field`: the Results tab (where the validated state of the result is laid out) with the field on show
                 if arg == "field" {
                     if let Some(w) = self.shell.current_mut() {
-                        w.sub = crate::shell::Sub::Field;
+                        w.tab = Tab::Results;
+                        w.sub = crate::shell::Sub::Main;
                     }
+                    self.tab = Tab::Results;
                 }
             }
             // camera moves, for timing and screenshots: `rotate DYAW DPITCH` (radians), `pan DX DY` (pixels), `zoom FACTOR`

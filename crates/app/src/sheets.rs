@@ -388,27 +388,28 @@ impl App {
             let ui = &mut cols[1];
             let browse: [(&str, &[(&str, crate::menu::Act)]); 3] = [
                 (
-                    "CONCEPT",
+                    "MODEL",
                     &[
                         ("Use-case templates", crate::menu::Act::New),
-                        ("Geometry & parameters", crate::menu::Act::ConceptGeometry),
-                        ("Materials & regions", crate::menu::Act::ConceptMaterials),
+                        ("Geometry & parameters", crate::menu::Act::ShowGeometry),
+                        ("Materials & regions", crate::menu::Act::ShowMaterials),
                     ],
                 ),
                 (
-                    "BUILD",
+                    "PHYSICS AND STUDY",
                     &[
                         ("Mesh preview & rebuild", crate::menu::Act::BuildMesh),
-                        ("Boundaries & conditions", crate::menu::Act::BuildConditions),
-                        ("Study, wavelength & solver", crate::menu::Act::BuildStudy),
-                        ("Parameter sweep", crate::menu::Act::BuildSweep),
+                        ("Physics & conditions", crate::menu::Act::ShowPhysics),
+                        ("Study, wavelength & solver", crate::menu::Act::ShowStudy),
+                        ("Parameter sweep", crate::menu::Act::ShowSweep),
                         ("Mesh convergence check", crate::menu::Act::CheckConvergence),
                     ],
                 ),
                 (
-                    "ANALYSIS & SCRIPTS",
+                    "RESULTS AND SCRIPTS",
                     &[
-                        ("Runs table, plot & compare", crate::menu::Act::AnalysisRuns),
+                        ("Field, modes & summary", crate::menu::Act::ShowResults),
+                        ("Runs table, plot & compare", crate::menu::Act::ShowRuns),
                         ("Script (.nys) editor & runner", crate::menu::Act::ScriptEditor),
                         ("Export as .nys script", crate::menu::Act::ExportScript),
                     ],
@@ -967,12 +968,13 @@ fn action_matches_query(it: &crate::menu::Item, q_raw: &str) -> bool {
     }
     let hay = format!("{} {} {}", it.menu, it.label, it.keys).to_lowercase();
     let extra = match it.act {
-        crate::menu::Act::BuildStudy => "frequency wavelength modes eigenfrequency solver order p1 p2 target neff study",
-        crate::menu::Act::BuildConditions => "boundary boundaries condition conditions pml pec port source load constraint physics",
-        crate::menu::Act::BuildSweep => "sweep parameter range points batch",
-        crate::menu::Act::ConceptGeometry => "geometry dimensions parameters width height thickness rect circle polygon cad step",
-        crate::menu::Act::ConceptMaterials => "material materials silicon silica sapphire refractive index epsilon conductivity",
-        crate::menu::Act::AnalysisRuns => "analysis runs plot compare table filter export csv field modes polarization poincare",
+        crate::menu::Act::ShowStudy => "frequency wavelength modes eigenfrequency solver order p1 p2 target neff study",
+        crate::menu::Act::ShowPhysics => "boundary boundaries condition conditions pml pec port source load constraint physics",
+        crate::menu::Act::ShowSweep => "sweep parameter range points batch",
+        crate::menu::Act::ShowGeometry => "geometry dimensions parameters width height thickness rect circle polygon cad step",
+        crate::menu::Act::ShowMaterials => "material materials silicon silica sapphire refractive index epsilon conductivity",
+        crate::menu::Act::ShowResults => "results field modes summary colours polarization poincare",
+        crate::menu::Act::ShowRuns => "analysis runs plot compare table filter export csv",
         crate::menu::Act::ScriptEditor => "script .nys python monty code automate batch editor runfile",
         crate::menu::Act::ExportScript => "export script .nys save code",
         crate::menu::Act::BuildMesh => "mesh remesh elements cells triangulation",
@@ -1009,11 +1011,11 @@ mod tests {
                 .map(|it| it.act)
                 .collect()
         };
-        assert!(find("wavelength").contains(&crate::menu::Act::BuildStudy));
-        assert!(find("freq").contains(&crate::menu::Act::BuildStudy));
+        assert!(find("wavelength").contains(&crate::menu::Act::ShowStudy));
+        assert!(find("freq").contains(&crate::menu::Act::ShowStudy));
         assert!(find(".nys").contains(&crate::menu::Act::ScriptEditor));
-        assert!(find("material").contains(&crate::menu::Act::ConceptMaterials));
-        assert!(find("geom").contains(&crate::menu::Act::ConceptGeometry));
+        assert!(find("material").contains(&crate::menu::Act::ShowMaterials));
+        assert!(find("geom").contains(&crate::menu::Act::ShowGeometry));
         assert!(find("mesh").contains(&crate::menu::Act::BuildMesh));
     }
 

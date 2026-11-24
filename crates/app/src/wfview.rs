@@ -1,24 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
-//! The workflow view: header, experiments list, the three sections (1 Concept, 2 Build, 3 Analysis) and what hangs off them (the live run,
-//! the runs table and plot, compare, the field viewer and the model screen).
+//! The workflow view (ADR 124): the header, the one bar (experiment, physics, what is shown, Script, Compute), the five tabs of the left panel with the viewport always on the right, and what hangs off them (the live run,
+//! the page of the runs with its table and plot, compare).
 //!
 //! The editors are the ones of `tabs.rs`; this file only decides where they sit. While a solve of this workflow runs, editing is locked.
 //! Anything the app cannot do yet (sweeps, surrogate models, stored fields) is shown as such, never with made-up numbers.
 
 use crate::app::App;
-use crate::dashboard::physics_label;
 use crate::kit;
-use crate::shell::{OpenWf, Page, Part, Sheet, Sub};
+use crate::shell::{OpenWf, Page, Sheet, Sub};
 use crate::state::Tab;
 use crate::theme;
-use eframe::egui::{self, Color32, RichText, Sense, Vec2};
+use eframe::egui::{self, Color32, RichText, Sense};
 use nyx_engine::facade::store::runs::{Filter, RunPatch, RunRecord, RunStatus};
 use nyx_engine::facade::store::util::{ago, now_secs, parse_iso};
 use std::time::Instant;
 
 pub enum Act {
-    Part(Part),
+    Tab(Tab),
     Sub(Sub),
     LoadExp(String),
     NewExp,
@@ -59,14 +58,11 @@ impl App {
         let locked = self.locked(id);
         let ctx = ui.ctx().clone();
         self.wf_header(ui, &mut w, &mut acts);
-        self.wf_sidebar(ui, &mut w, &mut acts, locked);
-        self.wf_sectionbar(ui, &mut w, &mut acts, locked);
-        match (w.sub, w.part) {
-            (Sub::Compare, _) => self.wf_compare(ui, &mut w, &mut acts),
-            (Sub::Field, _) => self.wf_field(ui, &mut w, &mut acts),
-            (Sub::Main, Part::Concept) => self.wf_concept(ui, &mut w, locked),
-            (Sub::Main, Part::Build) => self.wf_build(ui, &mut w, &mut acts, locked),
-            (Sub::Main, Part::Analysis) => self.wf_analysis(ui, &mut w, &mut acts),
+        self.wf_bar(ui, &mut w, &mut acts, locked);
+        match w.sub {
+            Sub::Compare => self.wf_compare(ui, &mut w, &mut acts),
+            Sub::Runs if !locked => self.wf_runs(ui, &mut w, &mut acts),
+            _ => self.wf_model(ui, &mut w, &mut acts, locked),
         }
         if w.notes_open {
             let mut open = true;
@@ -98,11 +94,12 @@ impl App {
 
     fn apply_act(&mut self, id: &str, a: Act) {
         match a {
-            Act::Part(p) => {
+            Act::Tab(t) => {
                 if let Some(w) = self.shell.open.get_mut(id) {
-                    w.part = p;
+                    w.tab = t;
                     w.sub = Sub::Main;
                 }
+                self.tab = t;
                 self.picking = None;
             }
             Act::Sub(s) => {
@@ -228,11 +225,15 @@ impl App {
             Act::Close => self.close_tab(id),
             Act::ExportCsv => self.export_runs_csv(id),
             Act::Script => self.toggle_nys_script(),
+            // a run was clicked (or the polarization asked for): the field of the result on show, in the viewport, with the Results tab beside it
             Act::Field(rid) => {
                 if let Some(w) = self.shell.open.get_mut(id) {
                     w.focus = Some(rid);
-                    w.sub = Sub::Field;
+                    w.tab = Tab::Results;
+                    w.sub = Sub::Main;
                 }
+                self.tab = Tab::Results;
+                self.show_results = self.current.is_some();
             }
         }
     }
@@ -252,22 +253,22 @@ impl App {
 
     // ------------------------------------------------------------------------------------------------------ header
 
+    /// The title and the save state; the tags are chips, and versions, share and the other actions of the workflow are one menu (ADR 124).
     fn wf_header(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
         let ctx = ui.ctx().clone();
-        egui::Panel::top("wf_header").frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::symmetric(18, 10)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::top("wf_header").frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::symmetric(18, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let eid = egui::Id::unique(("title_edit", &w.id));
                 let focused = ctx.memory(|m| m.has_focus(eid));
                 let mut buf = if focused { w.draft_buf.clone() } else { w.title() };
-                let width = buf.chars().count().max(10) as f32 * 14.0;
-                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width.min(460.0)).text_color(theme::text(&ctx)));
+                let width = (buf.chars().count().max(10) as f32 * 11.0).min((ui.available_width() - 340.0).max(200.0));
+                let r = ui.add(egui::TextEdit::singleline(&mut buf).id(eid).font(theme::title(30.0)).frame(egui::Frame::NONE).desired_width(width).text_color(theme::text(&ctx)));
                 if focused || r.has_focus() {
                     w.draft_buf = buf.clone();
                 }
                 if r.lost_focus() && buf.trim() != w.title() {
                     acts.push(Act::Title(buf.clone()));
                 }
-                // tags
                 let mut tags = w.tags.clone();
                 let mut changed = false;
                 tags.retain(|t| {
@@ -278,25 +279,19 @@ impl App {
                     keep
                 });
                 ui.spacing_mut().item_spacing.x = 8.0;
-                let t = ui.add(egui::TextEdit::singleline(&mut w.tag_input).hint_text("+ tag").desired_width(70.0).frame(egui::Frame::NONE));
-                if t.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !w.tag_input.trim().is_empty() {
-                    tags.push(w.tag_input.trim().to_lowercase());
-                    w.tag_input.clear();
-                    changed = true;
-                }
-                if changed {
-                    acts.push(Act::Tags(tags));
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if kit::ghost(ui, "Share").clicked() {
-                        self.shell.sheet = Sheet::Share;
-                    }
-                    let v = w.dir.as_ref().map(|d| d.wf.version).unwrap_or(0);
-                    if ui.add_enabled(w.dir.is_some(), egui::Button::new(format!("Versions  v{v}")).min_size(Vec2::new(0.0, 30.0))).on_disabled_hover_text("Versions start with the first change").clicked() {
-                        self.shell.sheet = Sheet::Versions;
-                        self.shell.version_sel = None;
-                    }
-                    ui.menu_button("More", |ui| {
+                    ui.menu_button("More ▾", |ui| {
+                        let v = w.dir.as_ref().map(|d| d.wf.version).unwrap_or(0);
+                        if ui.add_enabled(w.dir.is_some(), egui::Button::new(format!("Versions  v{v}"))).on_disabled_hover_text("Versions start with the first change").clicked() {
+                            self.shell.sheet = Sheet::Versions;
+                            self.shell.version_sel = None;
+                            ui.close();
+                        }
+                        if ui.button("Share / export").clicked() {
+                            self.shell.sheet = Sheet::Share;
+                            ui.close();
+                        }
+                        ui.separator();
                         let (pinned, done) = w.dir.as_ref().map(|d| (d.wf.pinned, d.wf.status == nyx_engine::facade::store::Status::Done)).unwrap_or((false, false));
                         if ui.button(if pinned { "Unpin from the dashboard" } else { "Pin to the dashboard" }).clicked() {
                             acts.push(Act::Pin);
@@ -314,97 +309,78 @@ impl App {
                             acts.push(Act::OpenFolder);
                             ui.close();
                         }
+                        ui.separator();
+                        ui.label(kit::muted(ui, "Add a tag").size(12.5));
+                        let t = ui.add(egui::TextEdit::singleline(&mut w.tag_input).hint_text("name, then Enter").desired_width(150.0));
+                        if t.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !w.tag_input.trim().is_empty() {
+                            tags.push(w.tag_input.trim().to_lowercase());
+                            w.tag_input.clear();
+                            changed = true;
+                        }
+                        ui.separator();
                         if ui.button("Close tab (Ctrl+W)").clicked() {
                             acts.push(Act::Close);
                             ui.close();
                         }
                     });
+                    // the words of the save state give way to one word when the title leaves little room; the whole sentence is the tooltip
                     let (text, short) = match (&w.dir, w.saved_at) {
                         (None, _) => ("Draft: nothing is saved until you change something".to_string(), "Draft"),
                         (Some(_), Some(t)) => (format!("Saved automatically · {}", ago(now_secs() - t.elapsed().as_secs() as i64, now_secs())), "Saved"),
                         (Some(d), None) => (format!("Saved · {}", ago(d.wf.touched_secs(), now_secs())), "Saved"),
                     };
-                    // the short word when the title and the tags leave too little room (a narrow window, a scaled interface)
                     let wide = ui.painter().layout_no_wrap(text.clone(), egui::TextStyle::Body.resolve(ui.style()), theme::muted(&ctx)).size().x;
-                    ui.label(kit::muted(ui, if wide + 24.0 <= ui.available_width() { text } else { short.to_string() }));
+                    let shown = if wide + 24.0 <= ui.available_width() { text.clone() } else { short.to_string() };
+                    ui.label(kit::muted(ui, shown)).on_hover_text(text);
                     kit::glyph(ui, if w.dir.is_some() { kit::State::Done } else { kit::State::Idle });
                 });
+                if changed {
+                    acts.push(Act::Tags(tags));
+                }
             });
         });
     }
 
-    // ------------------------------------------------------------------------------------------------------ experiments
+    // ------------------------------------------------------------------------------------------------------ the bar
 
-    fn wf_sidebar(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
-        let ctx = ui.ctx().clone();
-        egui::Panel::left("wf_experiments").exact_size(250.0).resizable(false).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                kit::label_caps(ui, "Experiments", "");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.menu_button("+", |ui| {
-                        if ui.add_enabled(!locked, egui::Button::new("New blank experiment")).clicked() {
-                            acts.push(Act::NewExp);
-                            ui.close();
-                        }
-                        if ui.add_enabled(!locked, egui::Button::new("Fork this experiment")).on_hover_text("Copies the set-up and remembers its parent").clicked() {
-                            acts.push(Act::Fork);
-                            ui.close();
-                        }
-                        if let Some(d) = &w.dir {
-                            let others: Vec<(String, String)> = d.wf.experiments.iter().filter(|e| e.id != w.exp).map(|e| (e.id.clone(), e.title.clone())).collect();
-                            if !others.is_empty() {
-                                ui.menu_button("Link this to...", |ui| {
-                                    for (eid, title) in others {
-                                        for label in ["same geometry", "validates", "compares"] {
-                                            if ui.button(format!("{label}: {title}")).clicked() {
-                                                acts.push(Act::Link(w.exp.clone(), eid.clone(), label.into()));
-                                                ui.close();
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    });
-                });
-            });
-            ui.add_space(6.0);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 150.0).show(ui, |ui| {
-                #[allow(clippy::type_complexity)]
-                let exps: Vec<(String, String, Option<String>, usize, String, Vec<(String, String)>)> = match &w.dir {
-                    Some(d) => d.wf.experiments.iter().map(|e| (e.id.clone(), e.title.clone(), e.parent.clone(), e.runs.count, format!("{} · {}D", physics_label(&e.card.physics), e.card.dim), e.links.iter().map(|l| (l.to.clone(), l.label.clone())).collect())).collect(),
-                    None => vec![("e1".into(), "Experiment 1".into(), None, 0, format!("{} · {}D", physics_label(&self.active().unwrap_or_default()), self.doc.mesh.as_ref().map(|m| m.dim).unwrap_or(2)), vec![])],
-                };
-                for (eid, title, parent, runs, what, links) in exps {
-                    let on = eid == w.exp;
-                    let indent = if parent.is_some() { 14.0 } else { 0.0 };
-                    ui.horizontal(|ui| {
-                        ui.add_space(indent);
-                        let r = egui::Frame::new().fill(if on { theme::card(&ctx) } else { Color32::TRANSPARENT }).stroke(egui::Stroke::new(if on { 1.5 } else { 0.0 }, theme::accent(&ctx))).corner_radius(10).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| ui.vertical(|ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(RichText::new(&title).strong());
-                            let sub = match &parent {
-                                Some(p) => format!("fork of {p} · {}", crate::fmt::plural(runs, "run")),
-                                None => format!("{} · {what}", crate::fmt::plural(runs, "run")),
-                            };
-                            ui.label(kit::muted(ui, sub));
-                            for (to, label) in &links {
-                                ui.label(kit::muted(ui, format!("{label} {to}")).size(12.0));
-                            }
-                        }));
-                        if ui.interact(r.response.rect, ui.scope_id().with(("exp", &eid)), Sense::click()).clicked() && !on && !locked {
-                            acts.push(Act::LoadExp(eid.clone()));
-                        }
-                    });
+    /// The experiments of the workflow as one menu of the bar (ADR 124): choose one, start a blank one, fork this one, link two. It replaces the rail on the left.
+    fn experiment_menu(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
+        let exps: Vec<(String, String, Option<String>, usize)> = match &w.dir {
+            Some(d) => d.wf.experiments.iter().map(|e| (e.id.clone(), e.title.clone(), e.parent.clone(), e.runs.count)).collect(),
+            None => vec![("e1".into(), "Experiment 1".into(), None, 0)],
+        };
+        let current = exps.iter().find(|e| e.0 == w.exp).map(|e| e.1.clone()).unwrap_or_else(|| "Experiment 1".into());
+        ui.add_enabled_ui(!locked, |ui| {
+            ui.menu_button(format!("{current} ▾"), |ui| {
+                for (eid, title, parent, runs) in &exps {
+                    let label = format!("{}{}  ·  {}", if parent.is_some() { "↳ " } else { "" }, title, crate::fmt::plural(*runs, "run"));
+                    if ui.selectable_label(*eid == w.exp, label).clicked() && *eid != w.exp {
+                        acts.push(Act::LoadExp(eid.clone()));
+                        ui.close();
+                    }
                 }
-                ui.add_space(8.0);
                 ui.separator();
-                if ui.selectable_label(w.notes_open, "Notes").clicked() {
-                    w.notes_open = !w.notes_open;
+                if ui.button("New blank experiment").clicked() {
+                    acts.push(Act::NewExp);
+                    ui.close();
                 }
-            });
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                ui.label(kit::muted(ui, "Fork copies an experiment and remembers its parent. Link relates any two.").size(12.5));
+                if ui.button("Fork this experiment").on_hover_text("Copies the set-up and remembers its parent").clicked() {
+                    acts.push(Act::Fork);
+                    ui.close();
+                }
+                let others: Vec<(String, String)> = exps.iter().filter(|e| e.0 != w.exp).map(|e| (e.0.clone(), e.1.clone())).collect();
+                if w.dir.is_some() && !others.is_empty() {
+                    ui.menu_button("Link this to...", |ui| {
+                        for (eid, title) in others {
+                            for label in ["same geometry", "validates", "compares"] {
+                                if ui.button(format!("{label}: {title}")).clicked() {
+                                    acts.push(Act::Link(w.exp.clone(), eid.clone(), label.into()));
+                                    ui.close();
+                                }
+                            }
+                        }
+                    });
+                }
             });
         });
     }
@@ -448,208 +424,179 @@ impl App {
         });
     }
 
-    // ------------------------------------------------------------------------------------------------------ section bar
-
-    fn wf_sectionbar(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
+    /// The one bar of the workflow (ADR 124): the experiment and the physics on the left; on the right what is shown (the geometry, the mesh, the result, the runs),
+    /// the script and the one filled button, Compute. While a run of this workflow goes, only what it is doing and Cancel.
+    fn wf_bar(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
         let ctx = ui.ctx().clone();
-        egui::Panel::top("wf_sections").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 10)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        egui::Panel::top("wf_bar").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+            // in a narrow window (or beside the script dock) what is shown goes to a row of its own: nothing overlaps
+            let narrow = ui.available_width() < 960.0;
             ui.horizontal(|ui| {
-                for (p, label) in [(Part::Concept, "1 · Concept"), (Part::Build, "2 · Build"), (Part::Analysis, "3 · Analysis")] {
-                    let on = w.part == p && w.sub == Sub::Main || (w.sub != Sub::Main && p == Part::Analysis && w.part == p);
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    if kit::pill(ui, on, label).clicked() && !locked {
-                        acts.push(Act::Part(p));
-                    }
-                }
                 ui.spacing_mut().item_spacing.x = 10.0;
-                ui.add_space(8.0);
+                self.experiment_menu(ui, w, acts, locked);
                 self.physics_menu(ui, locked);
                 if locked {
                     kit::glyph(ui, kit::State::Running);
                     ui.label(RichText::new("Running").strong());
-                    ui.label(kit::muted(ui, "editing is locked until it finishes or you cancel"));
-                } else {
-                    // the hint gives way (and is cut with an ellipsis) when the window is narrow or the interface is scaled: Compute keeps its place
-                    let hint = match w.part {
-                        Part::Concept => "What are we simulating? Geometry, materials and the essential physics.",
-                        Part::Build => "How is it computed? Mesh, boundaries, study and solver.",
-                        Part::Analysis => "What came out? Runs, plots, comparisons and fields.",
-                    };
-                    let room = (ui.available_width() - 440.0).max(40.0);
-                    ui.scope(|ui| {
-                        ui.set_max_width(room);
-                        ui.add(egui::Label::new(kit::muted(ui, hint)).truncate());
-                    });
+                    if !narrow {
+                        ui.label(kit::muted(ui, "editing is locked until it finishes or you cancel"));
+                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if locked {
-                        if kit::danger(ui, "Cancel   Esc").clicked() {
-                            acts.push(Act::Cancel);
-                        }
-                    } else {
-                        let can = self.busy.is_none() && self.doc.mesh.is_some();
-                        if kit::primary_enabled(ui, can, "Compute   F5").on_disabled_hover_text(if self.busy.is_some() { "Something else is running" } else { "There is no mesh to solve on yet" }).clicked() {
-                            acts.push(Act::Compute);
-                        }
-                        if kit::ghost(ui, "Script (.nys)").on_hover_text("Write, load, check or run a .nys script (Ctrl+Shift+R)").clicked() {
-                            acts.push(Act::Script);
-                        }
-                        if w.part == Part::Analysis && w.selected.len() >= 2 && kit::ghost(ui, format!("Compare {} selected", w.selected.len())).clicked() {
-                            acts.push(Act::Sub(Sub::Compare));
-                        }
-                        if w.part == Part::Build {
-                            let ok: Vec<f64> = w.runs.iter().filter(|r| r.status == RunStatus::Ok).map(|r| r.sec).collect();
-                            if !ok.is_empty() {
-                                ui.label(kit::muted(ui, format!("{} · about {:.1} s each · no mesh stored", crate::fmt::plural(ok.len(), "run"), ok.iter().sum::<f64>() / ok.len() as f64)));
-                            }
-                        }
+                    self.bar_actions(ui, acts, locked);
+                    if !narrow && !locked {
+                        self.bar_show(ui, w, acts);
                     }
                 });
             });
-        });
-    }
-
-    // ------------------------------------------------------------------------------------------------------ concept and build
-
-    /// The viewport with its two view buttons (geometry, mesh preview).
-    fn wf_viewport(&mut self, ui: &mut egui::Ui, strip: &str) {
-        let ctx = ui.ctx().clone();
-        // a status bar of one line, not a card (ADR 123): the facts of the model on show, muted; what it means is in the tooltip
-        egui::Panel::bottom("wf_strip").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 4)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            ui.add(egui::Label::new(kit::muted(ui, strip).size(12.5)).truncate())
-                .on_hover_text("Compute solves on exactly this mesh; it is rebuilt from the recipe, never stored.");
-        });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
-            let narrow = ui.available_width() < 480.0;
-            ui.horizontal(|ui| {
-                if kit::pill(ui, !self.show_edges, "Geometry").clicked() {
-                    self.show_edges = false;
-                    self.show_results = false;
-                }
-                if kit::pill(ui, self.show_edges, "Mesh preview").clicked() {
-                    self.show_edges = true;
-                    self.show_results = false;
-                }
-                // the counts give way (cut with an ellipsis) before the Fit button and the checkbox on the right do
-                let room = (ui.available_width() - 250.0).max(0.0);
-                ui.scope(|ui| {
-                    ui.set_max_width(room);
-                    if room < 60.0 {
-                        return;
-                    }
-                    if let Some(m) = &self.doc.mesh {
-                        ui.add(egui::Label::new(kit::muted(ui, format!("{}D · {} cells · {} points", m.dim, m.n_cells(), m.n_points()))).truncate());
-                    } else if let Some(e) = &self.doc.mesh_error {
-                        ui.add(egui::Label::new(RichText::new(e.to_string()).color(theme::danger(ui.ctx()))).truncate());
-                    } else {
-                        ui.label(kit::muted(ui, "meshing..."));
-                    }
-                });
-                if !narrow {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.checkbox(&mut self.show_numbers, "Boundary numbers");
-                        if ui.small_button("Fit").clicked() {
-                            self.vp.fit_token += 1;
-                        }
-                    });
-                }
-            });
-            if narrow {
-                // a narrow viewport (a small window, a scaled interface): the two controls go to a row of their own
+            if narrow && !locked {
                 ui.horizontal(|ui| {
-                    if ui.small_button("Fit").clicked() {
-                        self.vp.fit_token += 1;
-                    }
-                    ui.checkbox(&mut self.show_numbers, "Boundary numbers");
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.bar_show(ui, w, acts));
                 });
             }
-            egui::Frame::new().corner_radius(12).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).show(ui, |ui| {
-                crate::spans::span("viewport_ui", || self.viewport_ui(ui));
-            });
         });
     }
 
-    fn card_line(&mut self, w: &mut OpenWf) -> String {
-        let hash = nyx_engine::facade::store::util::hash_bytes(self.spec_json().unwrap_or_default().as_bytes());
-        if w.card_for != hash {
-            w.card_summary = self.spec_json().ok().and_then(|x| serde_json::from_str::<serde_json::Value>(&x).ok().map(|v| nyx_engine::store_link::card_of(&v))).map(|c| format!("{}  ·  {}", c.summary, c.materials.join("  ·  "))).unwrap_or_default();
-            w.card_for = hash;
+    /// Compute (the one filled button) and Script, or Cancel while this workflow runs. Drawn right to left: the last one added is the leftmost.
+    fn bar_actions(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Act>, locked: bool) {
+        if locked {
+            if kit::danger(ui, "Cancel   Esc").clicked() {
+                acts.push(Act::Cancel);
+            }
+            return;
         }
-        w.card_summary.clone()
+        let can = self.busy.is_none() && self.doc.mesh.is_some();
+        if kit::primary_enabled(ui, can, "Compute   F5").on_disabled_hover_text(if self.busy.is_some() { "Something else is running" } else { "There is no mesh to solve on yet" }).clicked() {
+            acts.push(Act::Compute);
+        }
+        if kit::ghost(ui, "Script").on_hover_text("Write, load, check or run a .nys script in a dock on the right (Ctrl+Shift+R)").clicked() {
+            acts.push(Act::Script);
+        }
     }
 
-    fn wf_concept(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, locked: bool) {
-        let ctx = ui.ctx().clone();
-        let line = self.card_line(w);
-        egui::Panel::right("wf_concept_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            ui.add_enabled_ui(!locked, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    // the physics are chosen in the bar above (ADR 124); here only what the one on show is
-                    if let Some(p) = self.active() {
-                        let info = match self.engine.project().spec(&p) {
-                            Some(s) => format!("{} · {} · P{}", short_physics(&p), s.study.kind, s.order),
-                            None => short_physics(&p),
-                        };
-                        ui.label(RichText::new(info).strong());
-                    }
-                    if kit::ghost(ui, "Study & solver →").on_hover_text("Go to 2 · Build > Study and solver (wavelength, modes, solver)").clicked() {
-                        w.part = Part::Build;
-                        w.build_tab = Tab::Study;
-                        w.sweep.shown = false;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    for (t, l) in [(Tab::Geometry, "Geometry"), (Tab::Materials, "Materials")] {
-                        if kit::pill(ui, w.concept_tab == t, l).clicked() {
-                            w.concept_tab = t;
-                        }
-                    }
-                });
-                ui.separator();
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    self.tab = w.concept_tab;
-                    self.inspector_tab(ui, w.concept_tab);
-                    ui.add_space(10.0);
-                    ui.label(kit::muted(ui, "Meshing, boundaries and solver options live in Build.").size(12.5));
-                });
-            });
-        });
-        self.wf_viewport(ui, &line);
+    /// What is shown: the three views of the model, and the runs from the second run on. Drawn right to left (the runs first, `Show` last).
+    fn bar_show(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
+        ui.add_space(6.0);
+        let runs = w.runs.iter().filter(|r| r.status == RunStatus::Ok).count();
+        if runs >= 2 || matches!(w.sub, Sub::Runs | Sub::Compare) {
+            let on = matches!(w.sub, Sub::Runs | Sub::Compare);
+            if ui.selectable_label(on, format!("Runs ({runs})")).on_hover_text("The table, the plot and the comparison of the runs of this experiment").clicked() {
+                acts.push(Act::Sub(Sub::Runs));
+            }
+        }
+        let in_model = w.sub == Sub::Main;
+        let has_result = !self.results.is_empty();
+        if ui.add_enabled(has_result, egui::Button::selectable(in_model && self.show_results, "Result")).on_disabled_hover_text("Compute first: there is no result to show").clicked() {
+            self.show_results = true;
+            w.sub = Sub::Main;
+            w.tab = Tab::Results;
+            self.tab = Tab::Results;
+        }
+        if ui.selectable_label(in_model && !self.show_results && self.show_edges, "Mesh").on_hover_text("The mesh the study solves on").clicked() {
+            self.show_edges = true;
+            self.show_results = false;
+            w.sub = Sub::Main;
+        }
+        if ui.selectable_label(in_model && !self.show_results && !self.show_edges, "Geometry").on_hover_text("The regions of the model").clicked() {
+            self.show_edges = false;
+            self.show_results = false;
+            w.sub = Sub::Main;
+        }
+        ui.label(kit::muted(ui, "Show"));
     }
 
-    fn wf_build(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
-        let ctx = ui.ctx().clone();
+    // ------------------------------------------------------------------------------------------------------ the model
+
+    /// The model page (ADR 124): the tabs of what is edited and read on the left (Geometry, Materials, Physics, Study, Results), the viewport always on the right.
+    fn wf_model(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
         if locked {
             self.wf_live(ui, w, acts);
             return;
         }
-        egui::Panel::right("wf_build_inspector").default_size((ui.available_width() * 0.42).clamp(360.0, 460.0)).size_range(360.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for (t, l) in [(Tab::Physics, "Boundaries and conditions"), (Tab::Study, "Study and solver")] {
-                    if kit::pill(ui, !w.sweep.shown && w.build_tab == t, l).clicked() {
-                        w.build_tab = t;
-                        w.sweep.shown = false;
-                    }
-                }
-                if kit::pill(ui, w.sweep.shown, "Sweep").clicked() {
-                    w.sweep.shown = true;
-                }
-            });
-            ui.separator();
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                if w.sweep.shown {
-                    self.sweep_section(ui, w, acts);
-                } else {
-                    self.tab = w.build_tab;
-                    self.inspector_tab(ui, w.build_tab);
-                }
-            });
-        });
+        self.wf_inspector(ui, w, acts);
         let strip = match &self.doc.mesh {
             Some(m) => format!("Mesh · {}D · {} points · {} cells · {} boundary facets", m.dim, m.n_points(), m.n_cells(), m.n_facets()),
             None => "Mesh · not built yet".into(),
         };
         self.wf_viewport(ui, &strip);
+    }
+
+    /// The left panel: one row of five tabs, then the editor of the tab. The sweep is a part of Study; the polarization is a part of Results.
+    fn wf_inspector(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
+        let ctx = ui.ctx().clone();
+        egui::Panel::left("wf_inspector").default_size(400.0).size_range(320.0..=640.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+            const TABS: [Tab; 5] = [Tab::Geometry, Tab::Materials, Tab::Physics, Tab::Study, Tab::Results];
+            let on = TABS.iter().position(|t| *t == w.tab).unwrap_or(0);
+            let labels: Vec<&str> = TABS.iter().map(|t| t.name()).collect();
+            if let Some(i) = kit::tabs(ui, &labels, on) {
+                acts.push(Act::Tab(TABS[i]));
+            }
+            ui.add_space(6.0);
+            ui.separator();
+            // both axes: a row of a tab that is wider than the panel scrolls; it does not widen the panel (a vertical-only area takes the width of its content)
+            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+                self.tab = w.tab;
+                match w.tab {
+                    Tab::Study => {
+                        self.inspector_tab(ui, Tab::Study);
+                        ui.add_space(10.0);
+                        ui.separator();
+                        let head = format!("{}  Sweep", if w.sweep.shown { "▾" } else { "▸" });
+                        if ui.add(egui::Label::new(RichText::new(head).strong().size(16.0)).sense(Sense::click())).on_hover_text("Run one parameter over a range").clicked() {
+                            w.sweep.shown = !w.sweep.shown;
+                        }
+                        if w.sweep.shown {
+                            self.sweep_section(ui, w, acts);
+                        }
+                    }
+                    Tab::Results => {
+                        crate::spans::span("inspector_tab", || self.inspector_tab(ui, Tab::Results));
+                        if self.has_analysis() {
+                            ui.separator();
+                            self.inspector_tab(ui, Tab::Analysis);
+                        }
+                        if self.current.is_some() {
+                            ui.add_space(6.0);
+                            if kit::ghost(ui, "Export the field as CSV").clicked() {
+                                self.export_csv();
+                            }
+                        }
+                    }
+                    t => self.inspector_tab(ui, t),
+                }
+            });
+        });
+    }
+
+    /// The viewport, always there. Under it, when the result has several modes, the strip of the solutions; under that the status line with the facts of the mesh.
+    fn wf_viewport(&mut self, ui: &mut egui::Ui, strip: &str) {
+        let ctx = ui.ctx().clone();
+        // a status bar of one line, not a card (ADR 123): the facts of the model on show, muted; what it means is in the tooltip
+        let status = match self.current.filter(|_| self.show_results) {
+            Some(i) => format!("{strip}  ·  result: {}", self.results[i].name),
+            None => strip.to_string(),
+        };
+        egui::Panel::bottom("wf_strip").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 4)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+            ui.add(egui::Label::new(kit::muted(ui, status).size(12.5)).truncate())
+                .on_hover_text("Compute solves on exactly this mesh; it is rebuilt from the recipe, never stored.");
+        });
+        if self.bottom_open && self.show_results && self.current.is_some_and(|i| self.results[i].sols.len() > 1) {
+            egui::Panel::bottom("wf_modes").default_size(180.0).resizable(true).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| self.results_panel(ui));
+        }
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.small_button("Fit").clicked() {
+                    self.vp.fit_token += 1;
+                }
+                if !self.show_results {
+                    ui.checkbox(&mut self.show_numbers, "Boundary numbers");
+                }
+            });
+            egui::Frame::new().corner_radius(12).stroke(egui::Stroke::new(1.0, theme::line(&ctx))).show(ui, |ui| {
+                crate::spans::span("viewport_ui", || self.viewport_ui(ui));
+            });
+        });
     }
 
     /// The live run screen: where the solver is, the runs so far and what it did.
@@ -792,47 +739,55 @@ impl App {
         });
     }
 
-    fn wf_analysis(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
+    /// The runs of the experiment (ADR 124): the plot from two runs on, the functions on the runs behind a header, and the table. It is a page of its own beside the model
+    /// (`Runs` in the bar); the field of a run is the Results tab and the viewport, not a page here.
+    fn wf_runs(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
         let ctx = ui.ctx().clone();
         let filter = Filter::parse(&w.filter_text);
         let active_filter = filter.clone().unwrap_or_default();
-        egui::Panel::right("wf_analysis_side").exact_size((ui.available_width() * 0.42).clamp(300.0, 400.0)).resizable(false).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                kit::plain_card(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let (xk, yk, pts) = Self::series(w, false, &active_filter);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{} against {}", if yk.is_empty() { "metric" } else { &yk }, xk)).strong().size(16.0));
-                    });
-                    let mut keys_x: Vec<String> = vec!["run".into()];
-                    let mut keys_y: Vec<String> = vec![];
-                    for r in &w.runs {
-                        keys_x.extend(r.params.keys().cloned());
-                        keys_y.extend(r.metrics.keys().cloned());
-                    }
-                    keys_x.sort();
-                    keys_x.dedup();
-                    keys_y.sort();
-                    keys_y.dedup();
-                    ui.horizontal(|ui| {
-                        combo(ui, "x", &mut w.plot_x, &xk, &keys_x);
-                        combo(ui, "y", &mut w.plot_y, &yk, &keys_y);
-                    });
-                    if pts.is_empty() {
-                        ui.add_space(20.0);
-                        ui.label(kit::muted(ui, "Nothing to plot yet. Each Compute adds one point."));
-                        ui.add_space(20.0);
-                    } else {
-                        self.runs_plot(ui, w, 210.0);
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14))).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if kit::ghost(ui, "← Model").on_hover_text("Back to the model and its viewport").clicked() {
+                    acts.push(Act::Sub(Sub::Main));
+                }
+                ui.label(RichText::new(format!("Runs of {}", w.exp)).strong().size(15.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if w.selected.len() >= 2 && kit::ghost(ui, format!("Compare {} selected", w.selected.len())).clicked() {
+                        acts.push(Act::Sub(Sub::Compare));
                     }
                 });
-                ui.add_space(14.0);
-                kit::label_caps(ui, "Run a function on these runs", "");
-                ui.add_space(4.0);
+            });
+            ui.add_space(6.0);
+            let (xk, yk, pts) = Self::series(w, false, &active_filter);
+            let flat = pts.windows(2).all(|p| (p[0].2 - p[1].2).abs() <= 1e-12 * p[0].2.abs().max(1e-300)) && xk == "run";
+            if pts.len() >= 2 && !flat {
+                let mut keys_x: Vec<String> = vec!["run".into()];
+                let mut keys_y: Vec<String> = vec![];
+                for r in &w.runs {
+                    keys_x.extend(r.params.keys().cloned());
+                    keys_y.extend(r.metrics.keys().cloned());
+                }
+                keys_x.sort();
+                keys_x.dedup();
+                keys_y.sort();
+                keys_y.dedup();
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{} against {}", if yk.is_empty() { "metric" } else { &yk }, xk)).strong());
+                    combo(ui, "x", &mut w.plot_x, &xk, &keys_x);
+                    combo(ui, "y", &mut w.plot_y, &yk, &keys_y);
+                });
+                self.runs_plot(ui, w, 200.0);
+            } else if pts.len() >= 2 {
+                ui.label(kit::muted(ui, "The runs are the same so far, so there is nothing to plot: change a parameter, or sweep one (Study tab)."));
+            } else if !w.runs.is_empty() {
+                ui.label(kit::muted(ui, "A plot needs two runs. Each Compute adds one."));
+            }
+            ui.add_space(4.0);
+            egui::CollapsingHeader::new("Functions on these runs").default_open(false).show(ui, |ui| {
                 let has_pol = self.has_analysis();
                 ui.horizontal_wrapped(|ui| {
                     for f in ["Metric vs parameter", "Best run", "Difference of two runs", "Sensitivity"] {
-                        if kit::pill(ui, w.function == f, f).clicked() {
+                        if ui.selectable_label(w.function == f, f).clicked() {
                             w.function = f.into();
                         }
                     }
@@ -843,8 +798,6 @@ impl App {
                         acts.push(Act::Script);
                     }
                 });
-                ui.add_space(8.0);
-                let (xk, yk, pts) = Self::series(w, false, &active_filter);
                 let out = match w.function.as_str() {
                     "Best run" => pts.iter().max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal)).map(|p| format!("Highest {yk}: {} at {xk} = {} ({:.6})", p.0, fmt_value(&xk, p.1), p.2)).unwrap_or_else(|| "No runs to rank.".into()),
                     "Sensitivity" => match slope(&pts) {
@@ -857,37 +810,8 @@ impl App {
                     _ => format!("{} plotted.", crate::fmt::plural(pts.len(), "run")),
                 };
                 ui.label(RichText::new(out).size(13.0));
-                if let Some(cur) = self.current {
-                    if self.results.get(cur).is_some_and(|rv| rv.sols.len() > 1) {
-                        ui.add_space(10.0);
-                        let mut pick_sol: Option<usize> = None;
-                        kit::plain_card(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            let rv = &self.results[cur];
-                            ui.label(RichText::new(format!("Modes / solutions of latest solve ({})", rv.sols.len())).strong());
-                            for (si, s) in rv.sols.iter().enumerate() {
-                                let pol = rv.analysis.as_ref().and_then(|a| a.rows.get(si)).and_then(|r| r.report.as_ref()).map(|m| format!(" · {} (TE {:.0}%)", m.class.label(), m.te_fraction * 100.0)).unwrap_or_default();
-                                ui.horizontal(|ui| {
-                                    let on = rv.sol == si;
-                                    if ui.selectable_label(on, kit::mono(format!("{}{pol}", s.label)).size(12.0)).on_hover_text("Click to open this solution in the Field viewer").clicked() {
-                                        pick_sol = Some(si);
-                                    }
-                                });
-                            }
-                        });
-                        if let Some(si) = pick_sol {
-                            self.results[cur].sol = si;
-                            self.results[cur].values_cache = None;
-                            let rid = w.runs.last().map(|r| r.id.clone()).unwrap_or_default();
-                            acts.push(Act::Field(rid));
-                        }
-                    }
-                }
-                ui.add_space(6.0);
-                ui.label(kit::muted(ui, "Click a row to open its fields. Tick rows to compare them.").size(12.5));
             });
-        });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(14))).show(ui, |ui| {
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let hint = "params.w between 450 nm and 550 nm and metrics.neff_re > 2.4";
                 let bad = filter.is_err();
@@ -1032,7 +956,7 @@ impl App {
                 ui.label(kit::muted(ui, format!("{} › {}", w.title(), w.exp)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if kit::primary(ui, "Back to runs").clicked() {
-                        acts.push(Act::Sub(Sub::Main));
+                        acts.push(Act::Sub(Sub::Runs));
                     }
                 });
             });
@@ -1113,50 +1037,6 @@ impl App {
                 });
             });
         });
-    }
-
-    fn wf_field(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
-        let ctx = ui.ctx().clone();
-        let live = self.current.is_some();
-        egui::Panel::right("wf_field_side").exact_size(380.0).resizable(false).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
-            if kit::primary(ui, "Back to runs").clicked() {
-                acts.push(Act::Sub(Sub::Main));
-            }
-            ui.add_space(6.0);
-            if live {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    crate::spans::span("inspector_tab", || self.inspector_tab(ui, Tab::Results));
-                    if self.has_analysis() {
-                        ui.separator();
-                        self.inspector_tab(ui, Tab::Analysis);
-                    }
-                    ui.add_space(6.0);
-                    if kit::ghost(ui, "Export the field as CSV").clicked() {
-                        self.export_csv();
-                    }
-                });
-            } else {
-                ui.label(RichText::new("Fields of this run are not stored").strong());
-                ui.label(kit::muted(ui, "Heavy results are kept for the session only. Compute again to see the fields."));
-            }
-        });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
-            let label = w.focus.clone().filter(|f| !f.is_empty()).map(|f| format!("Field viewer · {}", f.split('_').next().unwrap_or(&f))).unwrap_or_else(|| "Field viewer".into());
-            ui.label(kit::title(label, 26.0));
-            if live {
-                self.show_results = true;
-            }
-            crate::spans::span("viewport_ui", || self.viewport_ui(ui));
-        });
-    }
-}
-
-fn short_physics(p: &str) -> String {
-    match p {
-        "dfs" => "Diffusion".into(),
-        "sms" => "Solid".into(),
-        "ems" => "EM waves".into(),
-        other => other.to_string(),
     }
 }
 

@@ -34,20 +34,13 @@ pub enum Start {
     Blank { physics: String, three_d: bool },
 }
 
-/// The three sections of an experiment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Part {
-    Concept,
-    Build,
-    Analysis,
-}
-
-/// What fills the workflow view's centre besides the section itself.
+/// What fills the centre of the workflow view (ADR 124): the model with its viewport (the tab of the left panel names what is edited or read), the table
+/// and plots of the runs, or the comparison of the ticked runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sub {
     Main,
+    Runs,
     Compare,
-    Field,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,10 +65,9 @@ pub struct OpenWf {
     pub tags: Vec<String>,
     pub tag_input: String,
     pub exp: String,
-    pub part: Part,
+    /// the tab of the left panel: Geometry, Materials, Physics, Study or Results
+    pub tab: crate::state::Tab,
     pub sub: Sub,
-    pub concept_tab: crate::state::Tab,
-    pub build_tab: crate::state::Tab,
     pub runs: Vec<RunRecord>,
     pub runs_bad: usize,
     pub filter_text: String,
@@ -95,8 +87,6 @@ pub struct OpenWf {
     pub compare_metric: String,
     pub draft_buf: String,
     pub focus: Option<String>,
-    pub card_for: String,
-    pub card_summary: String,
     pub sweep: crate::sweepui::Form,
 }
 
@@ -111,10 +101,8 @@ impl OpenWf {
             tags: vec![],
             tag_input: String::new(),
             exp: "e1".into(),
-            part: Part::Concept,
+            tab: crate::state::Tab::Geometry,
             sub: Sub::Main,
-            concept_tab: crate::state::Tab::Geometry,
-            build_tab: crate::state::Tab::Physics,
             runs: vec![],
             runs_bad: 0,
             filter_text: String::new(),
@@ -134,8 +122,6 @@ impl OpenWf {
             compare_metric: String::new(),
             draft_buf: String::new(),
             focus: None,
-            card_for: String::new(),
-            card_summary: String::new(),
             sweep: Default::default(),
         }
     }

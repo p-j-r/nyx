@@ -184,6 +184,30 @@ pub fn status(ui: &mut Ui, state: State, label: impl Into<String>) {
     });
 }
 
+/// A row of text tabs (ADR 124): the one on show in the text colour and bold, with a 2 px accent line under it; the others muted. Returns the index clicked.
+/// Quiet on purpose: the accent is for the selection and the one action, not for every control.
+pub fn tabs(ui: &mut Ui, labels: &[&str], on: usize) -> Option<usize> {
+    let ctx = ui.ctx().clone();
+    let mut hit = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 16.0;
+        for (i, l) in labels.iter().enumerate() {
+            let sel = i == on;
+            let t = RichText::new(*l).size(14.5).color(if sel { theme::text(&ctx) } else { theme::muted(&ctx) });
+            let r = ui.add(egui::Label::new(if sel { t.strong() } else { t }).sense(Sense::click()));
+            if sel {
+                let y = r.rect.bottom() + 4.0;
+                ui.painter().line_segment([egui::pos2(r.rect.left(), y), egui::pos2(r.rect.right(), y)], Stroke::new(2.0, theme::accent(&ctx)));
+            }
+            if r.clicked() {
+                hit = Some(i);
+            }
+            r.on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
+    });
+    hit
+}
+
 /// What `tab` reports: a click on the tab and a click on its close target.
 pub struct TabHit {
     pub select: Response,

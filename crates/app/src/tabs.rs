@@ -224,6 +224,13 @@ impl App {
         });
     }
 
+    /// The heading of a tab: the classic window needs it; in the window of the shell the row of tabs above names the tab already (ADR 124).
+    fn tab_heading(&self, ui: &mut Ui, text: &str) {
+        if !self.shell.active() {
+            ui.heading(text);
+        }
+    }
+
     /// One inspector tab on its own: the workflow view lays the six tabs out in its three sections.
     pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab) {
         match t {
@@ -239,7 +246,7 @@ impl App {
     // ------------------------------------------------------------------ geometry
 
     fn tab_geometry(&mut self, ui: &mut Ui) {
-        ui.heading("Geometry");
+        self.tab_heading(ui, "Geometry");
         ui.weak("Axes: x lateral, y the direction of propagation, z the surface normal (right-handed). A 2D cross-section is drawn in x-z with y pointing into the page; crystal orientations, constraint and load components and the names of result fields use x, y, z.");
         let mut g = self.geom_edit.clone();
         let mut m = self.mesh_edit.clone();
@@ -405,7 +412,7 @@ impl App {
         let pname = physics.name();
         let Some(spec0) = self.engine.project().spec(&active).cloned() else { return };
         let mut spec = spec0.clone();
-        ui.heading("Materials");
+        self.tab_heading(ui, "Materials");
         ui.label(format!("What each region of the model is made of, for {pname}. A material is a file of the library (units written in it, optical models evaluated at the wavelength of the study) or numbers typed here."));
         let regions = self.material_regions();
         if regions.is_empty() {
@@ -863,7 +870,7 @@ impl App {
     fn tab_physics(&mut self, ui: &mut Ui) {
         let ids: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).collect();
         let in_project: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
-        ui.heading("Physics");
+        self.tab_heading(ui, "Physics");
         // in the window of the shell the physics are one dropdown of the toolbar (ADR 124); the classic window keeps the pills here
         let in_shell = self.shell.active();
         ui.horizontal_wrapped(|ui| {
@@ -1124,6 +1131,10 @@ impl App {
         if spec != spec0 {
             self.set_problem(&active, &spec);
         }
+        // in the window of the shell Compute is the one filled button of the bar (ADR 124)
+        if self.shell.active() {
+            return;
+        }
         ui.add_space(8.0);
         let ok = self.can_queue_compute() && self.doc.mesh.is_some();
         if ui.add_enabled(ok, egui::Button::new(RichText::new("  Compute  ").strong().color(crate::theme::on_accent(ui.ctx()))).fill(crate::theme::accent(ui.ctx()))).clicked() {
@@ -1138,7 +1149,7 @@ impl App {
             ui.weak("No results yet. Press Compute.");
             return;
         };
-        ui.heading("Results");
+        self.tab_heading(ui, "Results");
         crate::spans::span("stale_band", || self.stale_band(ui));
         crate::spans::span("validated_line", || self.validated_line(ui));
         if self.results.len() > 1 {

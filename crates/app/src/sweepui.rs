@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
-//! The Sweep section of a workflow's Build page (UX plan U5, ADR 88): vary one model parameter over a range, see what it costs before it
+//! The Sweep section of the Study tab of a workflow (UX plan U5, ADR 88, 124): vary one model parameter over a range, see what it costs before it
 //! starts, watch the points come in and keep each finished point as a run of the workflow. Everything is the engine's own: the plan is the engine's
 //! dry run of the command (`check_list`, the same count `nyx check` prints), the points are `sweep_run` jobs of the queue at priority 3 (so a
 //! Compute asked for meanwhile goes before them), the table is `sweep_table`, Cancel is `sweep_cancel`. The window adds only what it must: the
@@ -299,11 +299,10 @@ impl App {
         let ctx = ui.ctx().clone();
         let params = numeric_params(&self.geom_edit);
         let f = &mut w.sweep;
-        ui.label(RichText::new("Sweep").strong().size(16.0));
         ui.label(kit::muted(ui, "Vary one parameter of the model over a range. Each point is a run of this workflow; the points wait in the queue behind anything you start yourself."));
         ui.add_space(6.0);
         if params.is_empty() {
-            ui.label(kit::muted(ui, "This model has no numeric parameter to vary. Add one in the Concept section (a named number the geometry uses)."));
+            ui.label(kit::muted(ui, "This model has no numeric parameter to vary. Add one in the Geometry tab (a named number the geometry uses)."));
             return;
         }
         if !params.iter().any(|(n, _)| *n == f.param) {

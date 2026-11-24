@@ -783,6 +783,14 @@ impl App {
         }
         self.show_results = true;
         self.vp.fit_token += 1;
+        // in the window of the shell a new result opens its tab beside the field (ADR 124)
+        if self.shell.active() {
+            if let Some(w) = self.shell.current_mut() {
+                w.tab = Tab::Results;
+                w.sub = crate::shell::Sub::Main;
+            }
+            self.tab = Tab::Results;
+        }
     }
 
     fn after_mesh_change(&mut self) {
@@ -1654,12 +1662,12 @@ impl eframe::App for App {
             self.toggle_nys_script();
         }
         for (pressed, act) in [
-            (alt1, crate::menu::Act::ConceptGeometry),
-            (alt2, crate::menu::Act::ConceptMaterials),
-            (alt3, crate::menu::Act::BuildConditions),
-            (alt4, crate::menu::Act::BuildStudy),
-            (alt5, crate::menu::Act::BuildSweep),
-            (alt6, crate::menu::Act::AnalysisRuns),
+            (alt1, crate::menu::Act::ShowGeometry),
+            (alt2, crate::menu::Act::ShowMaterials),
+            (alt3, crate::menu::Act::ShowPhysics),
+            (alt4, crate::menu::Act::ShowStudy),
+            (alt5, crate::menu::Act::ShowSweep),
+            (alt6, crate::menu::Act::ShowResults),
         ] {
             if pressed {
                 self.do_act(ctx, act);
@@ -2068,6 +2076,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// ADR 124: in a workflow a new result opens its tab and shows the field.
+    #[test]
+    fn a_new_result_opens_the_results_tab_with_the_field() {
+        let mut a = app();
+        let root = std::env::temp_dir().join(format!("nyx-results-tab-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        a.attach_workspace(root.clone());
+        let path = examples::list().into_iter().find(|e| e.path.to_string_lossy().contains("02_cantilever")).unwrap().path;
+        a.new_draft("Fresh", crate::shell::Start::Example(path));
+        wait_idle(&mut a, 30);
+        assert!(a.shell.active());
+        assert_eq!(a.shell.current_mut().unwrap().tab, Tab::Geometry, "a workflow opens on its geometry");
+        a.shell_compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        assert!(!a.results.is_empty());
+        assert!(a.show_results, "the field is on show");
+        let w = a.shell.current_mut().unwrap();
+        assert_eq!(w.tab, Tab::Results, "the tab of the result is open beside the field");
+        assert_eq!(w.sub, crate::shell::Sub::Main);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Review I-9: a result that was just computed is never stale, whichever way it was asked for (the plain window or a workflow, which
     /// records the run and saves the model around the solve), for the physics of the examples that solve fast.
     #[test]
@@ -2312,13 +2343,11 @@ mod tests {
         assert!(!a.results.is_empty());
         {
             let w = a.shell.current_mut().expect("a workflow is open");
-            w.part = crate::shell::Part::Build;
             w.sub = crate::shell::Sub::Main;
-            // the Concept page has the Geometry form (element size, sizing, adaptive, absorbing layers, sweep of the mesh); the Sweep form of
-            // the Build page comes last
+            // the Geometry tab has the form of the mesh (element size, sizing, adaptive, absorbing layers, sweep of the mesh); the Sweep form of the
+            // Study tab comes last
             w.sweep.shown = false;
-            w.part = crate::shell::Part::Concept;
-            w.concept_tab = Tab::Geometry;
+            w.tab = Tab::Geometry;
         }
         frames(&mut a, 3, 0.0);
 
@@ -2366,7 +2395,7 @@ mod tests {
         // the sweep form of the Build page: its values and its count changed, the plan redrawn; only Run sweep submits
         {
             let w = a.shell.current_mut().unwrap();
-            w.part = crate::shell::Part::Build;
+            w.tab = Tab::Study;
             w.sweep.shown = true;
             w.sweep.n = 9;
             w.sweep.from = "1e-3".into();
@@ -2547,12 +2576,12 @@ mod tests {
                 a.open_nys_script();
             }
             for (pressed, act) in [
-                (alt1, crate::menu::Act::ConceptGeometry),
-                (alt2, crate::menu::Act::ConceptMaterials),
-                (alt3, crate::menu::Act::BuildConditions),
-                (alt4, crate::menu::Act::BuildStudy),
-                (alt5, crate::menu::Act::BuildSweep),
-                (alt6, crate::menu::Act::AnalysisRuns),
+                (alt1, crate::menu::Act::ShowGeometry),
+                (alt2, crate::menu::Act::ShowMaterials),
+                (alt3, crate::menu::Act::ShowPhysics),
+                (alt4, crate::menu::Act::ShowStudy),
+                (alt5, crate::menu::Act::ShowSweep),
+                (alt6, crate::menu::Act::ShowResults),
             ] {
                 if pressed {
                     let c = ui.ctx().clone();
@@ -2632,7 +2661,7 @@ mod tests {
     }
 
     fn gui_scroll_inspector(a: &mut App, dy: f32) -> Vec<(String, egui::Rect)> {
-        let pos = egui::pos2(1200.0, 500.0);
+        let pos = egui::pos2(200.0, 500.0);
         let mut raw = egui::RawInput::default();
         raw.events.push(egui::Event::PointerMoved(pos));
         gui_frame_sized_scroll(a, raw, E2E_SCREEN, dy);
@@ -2845,7 +2874,7 @@ mod tests {
         let mut param_boxes_f1: Vec<egui::Rect> = gui_focusable_rects(&a)
             .into_iter()
             .map(|(_, _, r)| r)
-            .filter(|r| r.center().y > params_hdr_f1.max.y && r.center().y < add_param_f1.min.y && r.min.x > 700.0)
+            .filter(|r| r.center().y > params_hdr_f1.max.y && r.center().y < add_param_f1.min.y && r.max.x < 700.0)
             .collect();
         param_boxes_f1.sort_by(|a, b| a.min.x.partial_cmp(&b.min.x).unwrap());
         assert_eq!(param_boxes_f1.len(), 2, "expected param_name and param_val boxes on frame 1: {param_boxes_f1:?}");
@@ -2904,7 +2933,7 @@ mod tests {
         let mut pboxes: Vec<egui::Rect> = gui_focusable_rects(&a)
             .into_iter()
             .map(|(_, _, r)| r)
-            .filter(|r| r.center().y > params_hdr.max.y && r.center().y < add_param.min.y && r.min.x > 700.0)
+            .filter(|r| r.center().y > params_hdr.max.y && r.center().y < add_param.min.y && r.max.x < 700.0)
             .collect();
         pboxes.sort_by_key(|a| (a.center().y as i32 / 14, a.min.x as i32));
         assert_eq!(pboxes.len(), 4, "expected 4 parameter boxes (2 rows x 2 cols): {pboxes:?}");
@@ -2964,7 +2993,7 @@ mod tests {
                 .max_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap())
                 .expect("max (x, z) label");
 
-            let fboxes: Vec<egui::Rect> = gui_focusable_rects(&a).into_iter().map(|(_, _, r)| r).filter(|r| r.min.x > 700.0).collect();
+            let fboxes: Vec<egui::Rect> = gui_focusable_rects(&a).into_iter().map(|(_, _, r)| r).filter(|r| r.max.x < 700.0).collect();
             let name_box = fboxes
                 .iter()
                 .copied()
@@ -3022,7 +3051,7 @@ mod tests {
         let mut all_boxes: Vec<egui::Rect> = gui_focusable_rects(&a)
             .into_iter()
             .map(|(_, _, r)| r)
-            .filter(|r| r.min.x > 700.0)
+            .filter(|r| r.max.x < 700.0)
             .collect();
         all_boxes.sort_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap());
         assert!(all_boxes.len() >= 3, "expected at least 3 region name boxes in Overlay: {all_boxes:?}");
@@ -3039,17 +3068,17 @@ mod tests {
 
         // Click "Materials" pill and assign silica / silica / silicon
         gui_click_text(&mut a, "Materials");
-        assert_eq!(a.shell.open[&wid].concept_tab, Tab::Materials);
+        assert_eq!(a.shell.open[&wid].tab, Tab::Materials);
         // Assign "silica" to all regions via "apply material...", then override "Si" to "silicon"
         gui_click_text(&mut a, "apply material...");
         gui_click_combo_item(&mut a, "silica");
         let mut texts = gui_frame(&mut a, egui::RawInput::default());
-        if !texts.iter().any(|(t, r)| t == "Si" && r.min.x > 700.0) {
+        if !texts.iter().any(|(t, r)| t == "Si" && r.max.x < 700.0) {
             texts = gui_scroll_inspector(&mut a, -350.0);
         }
         let si_label = texts
             .iter()
-            .filter(|(t, r)| t == "Si" && r.min.x > 700.0)
+            .filter(|(t, r)| t == "Si" && r.max.x < 700.0)
             .map(|(_, r)| *r)
             .next()
             .expect("Si region label in Materials tab");
@@ -3062,11 +3091,9 @@ mod tests {
         gui_click_at(&mut a, si_combo.center());
         gui_click_combo_item(&mut a, "silicon");
 
-        // Click "2 · Build", then click the rendered "Study and solver" pill rect
-        gui_click_text(&mut a, "2 · Build");
-        assert_eq!(a.shell.open[&wid].part, crate::shell::Part::Build);
-        gui_click_text(&mut a, "Study and solver");
-        assert_eq!(a.shell.open[&wid].build_tab, Tab::Study);
+        // Click the "Study" tab of the left panel
+        gui_click_text(&mut a, "Study");
+        assert_eq!(a.shell.open[&wid].tab, Tab::Study);
 
         // Set wavelength 1550 nm (freq ≈ 193.414e12), n_target = 2.85, n_modes = 4, P2
         let texts = gui_frame(&mut a, egui::RawInput::default());
@@ -3223,11 +3250,9 @@ mod tests {
         assert!(a.nys.open, "Ctrl+Shift+R should open ScriptSheet");
         a.nys.open = false;
 
-        // Click "3 · Analysis" -> click "Your script..."
-        gui_click_text(&mut a, "3 · Analysis");
-        assert_eq!(a.shell.open[&wid].part, crate::shell::Part::Analysis);
-        gui_click_text(&mut a, "Your script...");
-        assert!(a.nys.open, "Clicking 'Your script...' in Analysis opens ScriptSheet");
+        // Click "Script" in the bar: the dock opens
+        gui_click_text(&mut a, "Script");
+        assert!(a.nys.open, "Clicking 'Script' in the bar opens the script dock");
 
         // Put the exact 15-command soi300_by_script.nys script into the script editor
         let script = "\

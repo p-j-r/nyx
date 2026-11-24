@@ -5,7 +5,7 @@
 //! handled by the window (`shell_shortcuts`, and egui's own Ctrl +/- for the zoom), so nothing fires twice.
 
 use crate::app::App;
-use crate::shell::{Page, Part, Sheet, Sub};
+use crate::shell::{Page, Sheet, Sub};
 use crate::state::Tab;
 use eframe::egui;
 
@@ -19,12 +19,13 @@ pub enum Act {
     Quit,
     Palette,
     Dashboard,
-    ConceptGeometry,
-    ConceptMaterials,
-    BuildConditions,
-    BuildStudy,
-    BuildSweep,
-    AnalysisRuns,
+    ShowGeometry,
+    ShowMaterials,
+    ShowPhysics,
+    ShowStudy,
+    ShowSweep,
+    ShowResults,
+    ShowRuns,
     Settings,
     ZoomIn,
     ZoomOut,
@@ -50,7 +51,7 @@ pub struct Item {
 }
 
 /// Menus in order; the items of a menu in the order of this table.
-pub const ACTIONS: [Item; 27] = [
+pub const ACTIONS: [Item; 28] = [
     Item { menu: "File", label: "New workflow", keys: "Ctrl+N", act: Act::New },
     Item { menu: "File", label: "Open a .nyx file", keys: "Ctrl+O", act: Act::Open },
     Item { menu: "File", label: "Script (.nys)...", keys: "Ctrl+Shift+R", act: Act::ScriptEditor },
@@ -59,12 +60,13 @@ pub const ACTIONS: [Item; 27] = [
     Item { menu: "File", label: "Quit", keys: "", act: Act::Quit },
     Item { menu: "Edit", label: "Search or run anything", keys: "Ctrl+K", act: Act::Palette },
     Item { menu: "View", label: "Dashboard", keys: "", act: Act::Dashboard },
-    Item { menu: "View", label: "1 · Concept: Geometry", keys: "Alt+1", act: Act::ConceptGeometry },
-    Item { menu: "View", label: "1 · Concept: Materials", keys: "Alt+2", act: Act::ConceptMaterials },
-    Item { menu: "View", label: "2 · Build: Boundaries & conditions", keys: "Alt+3", act: Act::BuildConditions },
-    Item { menu: "View", label: "2 · Build: Study & solver", keys: "Alt+4", act: Act::BuildStudy },
-    Item { menu: "View", label: "2 · Build: Sweep", keys: "Alt+5", act: Act::BuildSweep },
-    Item { menu: "View", label: "3 · Analysis", keys: "Alt+6", act: Act::AnalysisRuns },
+    Item { menu: "View", label: "Geometry", keys: "Alt+1", act: Act::ShowGeometry },
+    Item { menu: "View", label: "Materials", keys: "Alt+2", act: Act::ShowMaterials },
+    Item { menu: "View", label: "Physics and conditions", keys: "Alt+3", act: Act::ShowPhysics },
+    Item { menu: "View", label: "Study and solver", keys: "Alt+4", act: Act::ShowStudy },
+    Item { menu: "View", label: "Sweep", keys: "Alt+5", act: Act::ShowSweep },
+    Item { menu: "View", label: "Results", keys: "Alt+6", act: Act::ShowResults },
+    Item { menu: "View", label: "Runs, plots and compare", keys: "", act: Act::ShowRuns },
     Item { menu: "View", label: "Settings", keys: "", act: Act::Settings },
     Item { menu: "View", label: "Zoom in", keys: "Ctrl+=", act: Act::ZoomIn },
     Item { menu: "View", label: "Zoom out", keys: "Ctrl+-", act: Act::ZoomOut },
@@ -92,6 +94,20 @@ pub fn menus() -> Vec<&'static str> {
 }
 
 impl App {
+    /// Shows a tab of the left panel of the open workflow (the one of the last tab of the window when it was on the Dashboard), with the centre on the model or the runs.
+    fn show_tab(&mut self, tab: Tab, sub: Sub, sweep: bool) {
+        self.shell.sheet = Sheet::None;
+        if let Some(id) = self.ensure_active_workflow() {
+            if let Some(w) = self.shell.open.get_mut(&id) {
+                w.tab = tab;
+                w.sub = sub;
+                w.sweep.shown = sweep;
+            }
+            self.tab = tab;
+            self.picking = None;
+        }
+    }
+
     fn ensure_active_workflow(&mut self) -> Option<String> {
         if let Page::Workflow(id) = self.shell.page.clone() {
             return Some(id);
@@ -163,76 +179,13 @@ impl App {
                 self.flush();
                 self.shell.page = Page::Dashboard;
             }
-            Act::ConceptGeometry => {
-                self.shell.sheet = Sheet::None;
-                if let Some(id) = self.ensure_active_workflow() {
-                    if let Some(w) = self.shell.open.get_mut(&id) {
-                        w.part = Part::Concept;
-                        w.sub = Sub::Main;
-                        w.concept_tab = Tab::Geometry;
-                    }
-                    self.tab = Tab::Geometry;
-                    self.picking = None;
-                }
-            }
-            Act::ConceptMaterials => {
-                self.shell.sheet = Sheet::None;
-                if let Some(id) = self.ensure_active_workflow() {
-                    if let Some(w) = self.shell.open.get_mut(&id) {
-                        w.part = Part::Concept;
-                        w.sub = Sub::Main;
-                        w.concept_tab = Tab::Materials;
-                    }
-                    self.tab = Tab::Materials;
-                    self.picking = None;
-                }
-            }
-            Act::BuildConditions => {
-                self.shell.sheet = Sheet::None;
-                if let Some(id) = self.ensure_active_workflow() {
-                    if let Some(w) = self.shell.open.get_mut(&id) {
-                        w.part = Part::Build;
-                        w.sub = Sub::Main;
-                        w.build_tab = Tab::Physics;
-                        w.sweep.shown = false;
-                    }
-                    self.tab = Tab::Physics;
-                }
-            }
-            Act::BuildStudy => {
-                self.shell.sheet = Sheet::None;
-                if let Some(id) = self.ensure_active_workflow() {
-                    if let Some(w) = self.shell.open.get_mut(&id) {
-                        w.part = Part::Build;
-                        w.sub = Sub::Main;
-                        w.build_tab = Tab::Study;
-                        w.sweep.shown = false;
-                    }
-                    self.tab = Tab::Study;
-                    self.picking = None;
-                }
-            }
-            Act::BuildSweep => {
-                self.shell.sheet = Sheet::None;
-                if let Some(id) = self.ensure_active_workflow() {
-                    if let Some(w) = self.shell.open.get_mut(&id) {
-                        w.part = Part::Build;
-                        w.sub = Sub::Main;
-                        w.sweep.shown = true;
-                    }
-                    self.picking = None;
-                }
-            }
-            Act::AnalysisRuns => {
-                self.shell.sheet = Sheet::None;
-                if let Some(id) = self.ensure_active_workflow() {
-                    if let Some(w) = self.shell.open.get_mut(&id) {
-                        w.part = Part::Analysis;
-                        w.sub = Sub::Main;
-                    }
-                    self.picking = None;
-                }
-            }
+            Act::ShowGeometry => self.show_tab(Tab::Geometry, Sub::Main, false),
+            Act::ShowMaterials => self.show_tab(Tab::Materials, Sub::Main, false),
+            Act::ShowPhysics => self.show_tab(Tab::Physics, Sub::Main, false),
+            Act::ShowStudy => self.show_tab(Tab::Study, Sub::Main, false),
+            Act::ShowSweep => self.show_tab(Tab::Study, Sub::Main, true),
+            Act::ShowResults => self.show_tab(Tab::Results, Sub::Main, false),
+            Act::ShowRuns => self.show_tab(Tab::Results, Sub::Runs, false),
             Act::Settings => {
                 self.shell.sheet = Sheet::None;
                 self.shell.page = Page::Settings;
@@ -367,29 +320,30 @@ mod tests {
             Page::Workflow(id) => id.clone(),
             other => panic!("expected workflow page, got {other:?}"),
         };
-        a.do_act(&ctx, Act::BuildStudy);
-        assert_eq!(a.shell.open[&wid].part, Part::Build);
-        assert_eq!(a.shell.open[&wid].build_tab, Tab::Study);
+        a.do_act(&ctx, Act::ShowStudy);
+        assert_eq!(a.shell.open[&wid].tab, Tab::Study);
         assert!(!a.shell.open[&wid].sweep.shown);
 
-        a.do_act(&ctx, Act::BuildSweep);
-        assert_eq!(a.shell.open[&wid].part, Part::Build);
+        a.do_act(&ctx, Act::ShowSweep);
+        assert_eq!(a.shell.open[&wid].tab, Tab::Study);
         assert!(a.shell.open[&wid].sweep.shown);
 
-        a.do_act(&ctx, Act::ConceptMaterials);
-        assert_eq!(a.shell.open[&wid].part, Part::Concept);
-        assert_eq!(a.shell.open[&wid].concept_tab, Tab::Materials);
+        a.do_act(&ctx, Act::ShowMaterials);
+        assert_eq!(a.shell.open[&wid].tab, Tab::Materials);
 
-        a.do_act(&ctx, Act::AnalysisRuns);
-        assert_eq!(a.shell.open[&wid].part, Part::Analysis);
+        a.do_act(&ctx, Act::ShowResults);
+        assert_eq!(a.shell.open[&wid].tab, Tab::Results);
+        a.do_act(&ctx, Act::ShowRuns);
+        assert_eq!(a.shell.open[&wid].sub, Sub::Runs);
+        a.do_act(&ctx, Act::ShowPhysics);
+        assert_eq!(a.shell.open[&wid].sub, Sub::Main, "a tab of the model leaves the runs");
 
         a.do_act(&ctx, Act::Dashboard);
         assert_eq!(a.shell.page, Page::Dashboard);
         // Running a workflow navigation action from Dashboard jumps back to the open workflow tab
-        a.do_act(&ctx, Act::ConceptGeometry);
+        a.do_act(&ctx, Act::ShowGeometry);
         assert_eq!(a.shell.page, Page::Workflow(wid.clone()));
-        assert_eq!(a.shell.open[&wid].part, Part::Concept);
-        assert_eq!(a.shell.open[&wid].concept_tab, Tab::Geometry);
+        assert_eq!(a.shell.open[&wid].tab, Tab::Geometry);
 
         a.do_act(&ctx, Act::ScriptEditor);
         assert!(a.nys.open);
