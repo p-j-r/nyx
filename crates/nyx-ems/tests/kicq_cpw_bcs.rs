@@ -820,3 +820,254 @@ fn fr18_fr21_fr22_fr23_lossless_al_sc_squid_asymmetry_q50_and_tls_meta() {
     assert!(q_val > 10.0 && q_val < 150.0, "expected low-Q (~50) regime, got Q = {q_val:.2}");
     assert!(eq_q50 < 1e-12, "FR-22 equipartition_error at Q={q_val:.1} was {eq_q50:e} (>= 1e-12)");
 }
+
+#[test]
+fn fr26_refined_rank1_lumped_port_and_floating_jj_order1_and_order2() {
+    // Both a grounded lumped_port AND a floating rank-1 lumped_jj sheet are refined so they have
+    // interior and lateral-vacuum vertices; both order = 1 and order = 2 must converge cleanly
+    // with 0 spurious near-zero modes and pass the post-assembly G_red^T b_red = 0 guard.
+    let mut m = Model::new_3d();
+    let si = m.box_("si_box", (-500e-6, -900e-6, -240e-6), (500e-6, 900e-6, 0.0));
+    let air = m.box_("air_box", (-500e-6, -900e-6, 0.0), (500e-6, 900e-6, 240e-6));
+
+    let feed_r = m.rect("feed_r", (-360e-6, -650e-6), (-220e-6, 650e-6));
+    m.sheet("feed", feed_r, 0.0);
+    let port_r = m.rect("port_r", (-360e-6, -900e-6), (-220e-6, -650e-6));
+    m.sheet("port_in", port_r, 0.0);
+
+    let pad_a = m.rect("pad_a_r", (60e-6, -480e-6), (340e-6, -70e-6));
+    m.sheet("pad_a", pad_a, 0.0);
+    let pad_b = m.rect("pad_b_r", (60e-6, 70e-6), (340e-6, 480e-6));
+    m.sheet("pad_b", pad_b, 0.0);
+    let jj_r = m.rect("jj_r", (130e-6, -70e-6), (270e-6, 70e-6));
+    m.sheet("jj_sheet", jj_r, 0.0);
+
+    m.overlay(&[("si", si), ("air", air)]);
+    m.size("sz_port", geom::select::Selector::parse("port_in:edge").unwrap(), Some(50e-6.into()), None, None);
+    m.size("sz_jj", geom::select::Selector::parse("jj_sheet:edge").unwrap(), Some(45e-6.into()), None, None);
+    let plan = MeshPlan::simple(300e-6);
+    let g = mesh_model(&m.list, &plan).expect("FR-26 refined port+JJ mesh");
+    let exchange = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let resolver = GeomResolver(&g);
+
+    for order in [1u8, 2u8] {
+        let mut spec = ProblemSpec::new("ems", order, "cavity");
+        spec.study.params = json!({ "n_modes": 2, "f_search": 6.0e9 });
+        spec.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        spec.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        for s in ["feed", "pad_a", "pad_b"] {
+            spec.bcs.push(BcSpec { on: s.into(), kind: "pec".into(), params: json!({}) });
+        }
+        spec.bcs.push(BcSpec {
+            on: "port_in".into(),
+            kind: "lumped_port".into(),
+            params: json!({ "name": "port_in", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+        });
+        spec.bcs.push(BcSpec {
+            on: "jj_sheet".into(),
+            kind: "lumped_jj".into(),
+            params: json!({
+                "name": "Q1_JJ",
+                "E_j_Hz": 16.0e9,
+                "C_j": 30.0e-15,
+                "direction": [0.0, 1.0, 0.0],
+                "formulation": "rank1"
+            }),
+        });
+        let res = Ems.solve(&exchange, &spec, &mut Ctx::new(&resolver)).expect("FR-26 solve must converge");
+        assert!(!res.solutions.is_empty());
+        for sol in &res.solutions {
+            let f_re = sol.eigenvalue.expect("eigenvalue present")[0];
+            assert!(f_re > 1.0e8, "FR-26 order {order}: spurious near-zero mode {f_re:e} Hz");
+        }
+        let eq = res.scalar("equipartition_error").expect("equipartition_error emitted");
+        assert!(eq < 1e-9, "FR-26 order {order}: equipartition_error = {eq:e} >= 1e-9");
+    }
+}
+
+#[test]
+fn fr29_assemble_maxwell_bitwise_deterministic_across_chunks() {
+    // Build a > 3000-cell 3D mesh spanning multiple FIXED_CELL_CHUNK=2048 blocks and verify
+    // assemble_maxwell produces bit-identical K and M values across repeated runs.
+    let mesh = femcore::testkit::block(0.03, 0.02, 0.015, 9, 9, 9);
+    assert!(mesh.n_cells() > 3000, "expected > 3000 cells, got {}", mesh.n_cells());
+    let ned = nyx_ems::cavity::Ned3::new(&mesh, 1, (0..mesh.n_points() as u32).collect());
+    let mut e = [[femcore::linalg::csr::c(0.0, 0.0); 3]; 3];
+    for (a, row) in e.iter_mut().enumerate() {
+        row[a] = femcore::linalg::csr::c(11.45, -1e-4);
+    }
+    let eps = vec![e; mesh.n_cells()];
+    let mu_inv = vec![[femcore::linalg::csr::c(1.0, 0.0); 3]; mesh.n_cells()];
+    let (k1, m1) = nyx_ems::cavity::assemble_maxwell(&mesh, &ned, &eps, &mu_inv);
+    let (k2, m2) = nyx_ems::cavity::assemble_maxwell(&mesh, &ned, &eps, &mu_inv);
+    assert_eq!(k1.indptr(), k2.indptr());
+    assert_eq!(k1.indices(), k2.indices());
+    assert_eq!(
+        k1.values().iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect::<Vec<_>>(),
+        k2.values().iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        m1.values().iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect::<Vec<_>>(),
+        m2.values().iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fr30_perturbative_ibc_parity_with_direct_and_coarse_p1_stability() {
+    // Part 1: Parity on a fine P2 3D cavity wall (single-sided exterior face) with small kinetic inductance & R_s
+    let boxm = femcore::testkit::block(0.024, 0.018, 0.012, 6, 6, 3);
+    let box_ex = Mesh::from_solver_mesh(&boxm).unwrap();
+    struct BoxRes;
+    impl LabelResolver for BoxRes {
+        fn domains(&self, r: &str) -> Result<Vec<i32>, Error> {
+            match r {
+                "air" => Ok(vec![1]),
+                _ => Err(Error::invalid(format!("no region {r}"))),
+            }
+        }
+        fn boundaries(&self, s: &str) -> Result<Vec<i32>, Error> {
+            match s {
+                "y0" => Ok(vec![2]),
+                _ => Err(Error::invalid(format!("no boundary {s}"))),
+            }
+        }
+    }
+    let bres = BoxRes;
+    let run_box = |mode: Option<&str>| -> nyx_physics::SolveResult {
+        let mut s = ProblemSpec::new("ems", 2, "cavity");
+        s.study.params = json!({ "n_modes": 1, "f_search": 10.0e9 });
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        if let Some(m) = mode {
+            s.bcs.push(BcSpec {
+                on: "y0".into(),
+                kind: "surface_impedance".into(),
+                params: json!({ "L_k_sq": 1.0e-10, "R_s": 5.0e-3, "f_ref": 10.417e9, "ibc_mode": m }),
+            });
+        }
+        Ems.solve(&box_ex, &s, &mut Ctx::new(&bres)).unwrap()
+    };
+    let r_pec = run_box(None);
+    let r_dir = run_box(Some("direct"));
+    let r_pert = run_box(Some("perturbative"));
+    let f_pec = r_pec.solutions[0].value.unwrap();
+    let f_dir = r_dir.solutions[0].value.unwrap();
+    let f_pert = r_pert.solutions[0].value.unwrap();
+    let df_dir = f_dir - f_pec;
+    let df_pert = f_pert - f_pec;
+    let rel_shift_err = (df_pert - df_dir).abs() / df_dir.abs().max(1e-30);
+    let q_dir = r_dir.scalar("Q1").expect("direct Q1");
+    let q_pert = r_pert.scalar("Q1").expect("perturbative Q1");
+    let rel_q_err = (q_pert - q_dir).abs() / q_dir.max(1e-30);
+    eprintln!(
+        "FR-30 P2 exterior cavity wall: df_dir = {:.4e} Hz, df_pert = {:.4e} Hz (rel err = {:.3}%), Q_dir = {:.3e}, Q_pert = {:.3e} (rel err = {:.3}%)",
+        df_dir,
+        df_pert,
+        rel_shift_err * 100.0,
+        q_dir,
+        q_pert,
+        rel_q_err * 100.0
+    );
+    assert!(df_dir < 0.0 && df_pert < 0.0, "kinetic inductance must lower resonant frequency");
+    assert!(
+        rel_shift_err < 0.05,
+        "FR-30 exterior wall perturbative vs direct df err = {:.3}% (>= 5%)",
+        rel_shift_err * 100.0
+    );
+    assert!(rel_q_err < 0.05, "FR-30 exterior wall perturbative vs direct Q err = {:.3}% (>= 5%)", rel_q_err * 100.0);
+
+    // Check CircuitRom matches perturbed eigenvalue & Q_cond
+    let rom_pert = CircuitRom::of(&r_pert).expect("CircuitRom on perturbative IBC");
+    let rom_f = rom_eigenfrequencies(&rom_pert).unwrap();
+    let rom_fc = rom_complex_eigenfrequencies(&rom_pert).unwrap();
+    assert!((rom_f[0] - f_pert).abs() / f_pert < 1e-5, "CircuitRom f_re {} vs {}", rom_f[0], f_pert);
+    let q_rom = rom_fc[0].re / (2.0 * rom_fc[0].im.abs());
+    assert!((q_rom - q_pert).abs() / q_pert < 1e-4, "CircuitRom Q {} vs {}", q_rom, q_pert);
+
+    // Part 2: Parity on a fine-P2 interior 2-sided microstrip/parallel-plate resonator (h << w, tests exact [n x H] jump!)
+    let mut mm = Model::new_3d();
+    let si = mm.box_("si", (-1200e-6, 0.0, -300e-6), (1200e-6, 3600e-6, 0.0));
+    let air = mm.box_("air", (-1200e-6, 0.0, 0.0), (1200e-6, 3600e-6, 300e-6));
+    let strip = mm.rect("strip_r", (-1200e-6, 0.0), (1200e-6, 3600e-6));
+    mm.sheet("strip", strip, 0.0);
+    mm.overlay(&[("si", si), ("air", air)]);
+    let mut ms_plan = MeshPlan::simple(700e-6);
+    ms_plan.opts.dz_min = Some(100e-6);
+    ms_plan.opts.max_z_slabs = Some(6);
+    let g_ms = mesh_model(&mm.list, &ms_plan).expect("fine P2 2-sided interior sheet mesh");
+    let ex_ms = Mesh::from_solver_mesh(&g_ms.mesh).unwrap();
+    let res_ms = GeomResolver(&g_ms);
+    let run_ms = |mode: Option<&str>| -> nyx_physics::SolveResult {
+        let mut s = ProblemSpec::new("ems", 2, "cavity");
+        s.study.params = json!({ "n_modes": 1, "f_search": 12.5e9 });
+        s.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        match mode {
+            None => s.bcs.push(BcSpec { on: "strip".into(), kind: "pec".into(), params: json!({}) }),
+            Some(m) => s.bcs.push(BcSpec {
+                on: "strip".into(),
+                kind: "surface_impedance".into(),
+                params: json!({ "L_k_sq": 1.0e-12, "R_s": 2.0e-4, "f_ref": 12.5e9, "ibc_mode": m }),
+            }),
+        }
+        Ems.solve(&ex_ms, &s, &mut Ctx::new(&res_ms)).unwrap()
+    };
+    let ms_pec = run_ms(None).solutions[0].value.unwrap();
+    let ms_dir_res = run_ms(Some("direct"));
+    let ms_pert_res = run_ms(Some("perturbative"));
+    let ms_dir = ms_dir_res.solutions[0].value.unwrap();
+    let ms_pert = ms_pert_res.solutions[0].value.unwrap();
+    let ms_df_dir = ms_dir - ms_pec;
+    let ms_df_pert = ms_pert - ms_pec;
+    let ms_rel = (ms_df_pert - ms_df_dir).abs() / ms_df_dir.abs().max(1e-30);
+    eprintln!(
+        "FR-30 P2 interior 2-sided sheet: f_pec = {:.6} GHz, df_dir = {:.4e} Hz, df_pert = {:.4e} Hz (rel err = {:.2}%)",
+        ms_pec / 1e9,
+        ms_df_dir,
+        ms_df_pert,
+        ms_rel * 100.0
+    );
+    assert!(ms_df_dir < 0.0 && ms_df_pert < 0.0);
+    assert!(ms_rel < 0.05, "FR-30 interior 2-sided sheet perturbative vs direct err = {:.2}% (>= 5%)", ms_rel * 100.0);
+
+    // Part 3: Coarse-P1 narrow strip stability (`auto` -> `perturbative`) + `direct` coarse warning check
+    let g_coarse = build_cpw_3d_mesh(20e-6, 12e-6, 400e-6, 6.0e-3, 400e-6, 400e-6, 800e-6);
+    let ex_c = Mesh::from_solver_mesh(&g_coarse.mesh).unwrap();
+    let res_c = GeomResolver(&g_coarse);
+    let run_coarse = |mode: Option<&str>| -> nyx_physics::SolveResult {
+        let mut s = ProblemSpec::new("ems", 1, "cavity");
+        s.study.params = json!({ "n_modes": 1, "f_search": 9.5e9 });
+        s.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        for sh in ["cpw_trace", "cpw_gnd_l", "cpw_gnd_r"] {
+            match mode {
+                None => s.bcs.push(BcSpec { on: sh.into(), kind: "pec".into(), params: json!({}) }),
+                Some(m) => s.bcs.push(BcSpec {
+                    on: sh.into(),
+                    kind: "surface_impedance".into(),
+                    params: json!({ "L_k_sq": 1.0e-13, "R_s": 0.0, "ibc_mode": m }),
+                }),
+            }
+        }
+        Ems.solve(&ex_c, &s, &mut Ctx::new(&res_c)).unwrap()
+    };
+    let c_pec = run_coarse(None).solutions[0].value.unwrap();
+    let c_dir_res = run_coarse(Some("direct"));
+    let c_auto_res = run_coarse(Some("auto"));
+    let c_auto = c_auto_res.solutions[0].value.unwrap();
+    assert!(
+        c_dir_res.log.iter().any(|l| l.contains("coarse strip resolution")),
+        "FR-30 coarse P1 direct mode must emit coarse strip resolution warning; log = {:?}",
+        c_dir_res.log
+    );
+    assert!(
+        c_auto_res.log.iter().any(|l| l.contains("perturbative mode active")),
+        "FR-30 coarse P1 auto mode must select perturbative; log = {:?}",
+        c_auto_res.log
+    );
+    let auto_shift_pct = (c_auto - c_pec).abs() / c_pec * 100.0;
+    assert!(
+        c_auto < c_pec && auto_shift_pct < 2.0,
+        "FR-30 coarse P1 auto/perturbative shift must be small and physical (< 2%), got {:.3}%",
+        auto_shift_pct
+    );
+}

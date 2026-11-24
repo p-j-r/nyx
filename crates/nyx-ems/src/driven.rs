@@ -18,7 +18,7 @@
 //! and an isometric QR image-space basis $\mathbf{U} \in \mathbb{R}^{n_{\text{red}}\times s}$ for microsecond
 //! full-space residual certification across all sweep frequencies.
 
-use crate::cavity::{assemble_maxwell, basis3, Ned3};
+use crate::cavity::{assemble_maxwell, basis3, gradient_full, safe_curved_jacobian, Ned3};
 use crate::ibc::{assemble_ibc_and_jj_3d, reduce_real_csr, reduce_real_vec, AssembledJjPort, SheetCellKind, MU0};
 use crate::modes::C0;
 use crate::ports::{
@@ -28,8 +28,13 @@ use crate::problem::{Problem, Study};
 use crate::rom::build_tls_meta;
 use femcore::fem::{geometry, CurvedTet};
 use femcore::fields::{local_bary, node_average, CellFields};
+use femcore::linalg::ams::{Ams, AmsOptions};
+use femcore::linalg::blr::{BlrOptions, ShiftedBlrLu};
 use femcore::linalg::csr::{c, CCsr, RCsr, C};
+use femcore::linalg::direct::{FactorBackend, ShiftedSolver};
 use femcore::linalg::driver::{thin_svd_c64, DirectSolver};
+use femcore::linalg::ksp::{Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances};
+use femcore::linalg::linop::LinearOperator;
 use femcore::pml::cell_stretches;
 use nyx_physics::{cell_fields_of, Discretisation, DrivenPortData, Field, FieldFrame, Scalar, Solution, SolveResult};
 use std::collections::BTreeSet;
@@ -174,10 +179,14 @@ pub struct DrivenAssembly {
     pub max_hdm_solves: usize,
     pub strict_prom_tol: bool,
     pub seed_freqs_hz: Vec<f64>,
+    pub solver: String,
+    pub blr_tol: f64,
     pub d_ruiz: Vec<f64>,
     /// Affine operator terms $\hat{\mathbf{A}}_m = \mathbf{D} \mathbf{A}_m \mathbf{D}$ ($m = 0 \dots 3 + P_{\text{wave}} - 1$):
     /// `[K_tot, C_tot, M_tot, W_0, ..., W_{P_wave - 1}]`.
     pub terms_hat: Vec<CCsr>,
+    /// Optional reduced interior gradient `G_red` and edge vectors for `solver == "ams_fgmres"` (`order == 1`).
+    pub ams_data: Option<(RCsr, Vec<[f64; 3]>)>,
     pub ports: Vec<DrivenPortEntry>,
     pub lumped_ports: Vec<AssembledLumpedPort>,
     pub waveports: Vec<AssembledWavePort>,
@@ -253,6 +262,8 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         max_hdm_solves,
         strict_prom_tol,
         seed_freqs_hz,
+        solver,
+        blr_tol,
     } = problem.study.clone()
     else {
         return Err("assemble_emw_driven requires a Driven study".into());
@@ -340,6 +351,7 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     let wp_labels: Vec<i32> = problem.waveports.iter().flat_map(|b| b.labels.iter().copied()).collect();
 
     let mut fixed_set = BTreeSet::new();
+    let mut pec_verts = BTreeSet::new();
     for f in 0..mesh.n_facets() {
         let label = mesh.facet_labels[f];
         if exterior[f]
@@ -354,12 +366,18 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
             for d in ned.boundary_dofs(mesh, [fv[0], fv[1], fv[2]]) {
                 fixed_set.insert(d);
             }
+            for &v in fv {
+                pec_verts.insert(v as usize);
+            }
         }
     }
     if let Some(ref ij) = ibc_jj {
         for &fv in &ij.pec_tris {
             for d in ned.boundary_dofs(mesh, fv) {
                 fixed_set.insert(d);
+            }
+            for v in fv {
+                pec_verts.insert(v as usize);
             }
         }
     }
@@ -501,6 +519,33 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         ports.push(DrivenPortEntry { name: wp.bc.name.clone(), kind: DrivenPortKind::Wave { wave_index }, b_hat });
     }
 
+    let ams_data = if solver == "ams_fgmres" && order == 1 && problem.periodic.is_empty() {
+        let nv = mesh.n_points();
+        let node_fixed: Vec<usize> = pec_verts.into_iter().collect();
+        let nred_nodes = femcore::periodic::Reduction::build(nv, &[], &node_fixed);
+        let g_full = gradient_full(mesh, &ned);
+        let g_nodes = femcore::linalg::amg_elastic::spmm(&g_full, &nred_nodes.prolong().real_part());
+        let (mut indptr, mut indices, mut data) = (vec![0usize], Vec::new(), Vec::new());
+        let mut edge_vecs = Vec::with_capacity(nred);
+        let edges = mesh.edges();
+        for &r in &red.roots {
+            for q in g_nodes.indptr()[r]..g_nodes.indptr()[r + 1] {
+                indices.push(g_nodes.indices()[q] as usize);
+                data.push(g_nodes.values()[q]);
+            }
+            indptr.push(indices.len());
+            let (a, b) = edges[r];
+            let (lo, hi) = if ned.vkey[a as usize] < ned.vkey[b as usize] { (a, b) } else { (b, a) };
+            let plo = mesh.point(lo as usize);
+            let phi = mesh.point(hi as usize);
+            edge_vecs.push([phi[0] - plo[0], phi[1] - plo[1], phi[2] - plo[2]]);
+        }
+        let g_red = RCsr::from_raw(nred, nred_nodes.n_reduced(), indptr, indices, data);
+        Some((g_red, edge_vecs))
+    } else {
+        None
+    };
+
     Ok(DrivenAssembly {
         order,
         n,
@@ -515,8 +560,11 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         max_hdm_solves,
         strict_prom_tol,
         seed_freqs_hz,
+        solver,
+        blr_tol,
         d_ruiz,
         terms_hat,
+        ams_data,
         ports,
         lumped_ports,
         waveports,
@@ -676,12 +724,200 @@ fn s_to_z_and_y(s_mat: &[Vec<C>], z0_ports: &[f64]) -> (Vec<Vec<[f64; 2]>>, Vec<
     (s_out, z_out, y_out)
 }
 
+/// Unified linear solver backend for 3D driven frequency-domain solves (FR-33).
+enum DrivenLinearSolver {
+    /// Sparse direct solver (`auto`, `direct`, `lblt` via `DirectSolver<C>` -> `SymLblt` / `LuColamd`).
+    Direct { solver: Box<DirectSolver<C>>, requested: String },
+    /// Nested-dissection Block Low-Rank multifrontal LU (`blr` via `ShiftedBlrLu<C>`) with iterative refinement.
+    Blr { solver: Box<ShiftedBlrLu<C>>, a_cur: CCsr, opts: BlrOptions, symbolic_count: usize },
+    /// Auxiliary-space Maxwell (`Ams<C>`) preconditioned flexible GMRES (`ams_fgmres`) on unscaled complex operator.
+    AmsFgmres { a_unscaled: CCsr, pc: Box<Ams<C>>, d_ruiz: Vec<f64>, symbolic_count: usize },
+}
+
+fn unscale_sym_c(mat: &CCsr, d_ruiz: &[f64]) -> CCsr {
+    let mut out = mat.clone();
+    let n = out.nrows();
+    for i in 0..n {
+        let inv_di = 1.0 / d_ruiz[i];
+        let range = out.row_range(i);
+        let cols: Vec<u32> = out.indices()[range.clone()].to_vec();
+        let vals = &mut out.values_mut()[range];
+        for (v, &col) in vals.iter_mut().zip(&cols) {
+            *v *= inv_di / d_ruiz[col as usize];
+        }
+    }
+    out
+}
+
+fn format_backend(b: FactorBackend) -> &'static str {
+    match b {
+        FactorBackend::None => "None",
+        FactorBackend::CholeskyAmd => "CholeskyAmd",
+        FactorBackend::CholeskyNd => "CholeskyNd",
+        FactorBackend::LbltAmd => "LbltAmd",
+        FactorBackend::LbltNd => "LbltNd",
+        FactorBackend::LuColamd => "LuColamd",
+        FactorBackend::LuAmd => "LuAmd",
+        FactorBackend::LuNd => "LuNd",
+        FactorBackend::BlrNd => "BlrNd",
+    }
+}
+
+impl DrivenLinearSolver {
+    fn build_or_update(slot: &mut Option<Self>, asm: &DrivenAssembly, omega: f64, a_mat: &CCsr) -> Result<(), String> {
+        match asm.solver.as_str() {
+            "blr" => {
+                let opts = BlrOptions { tol: asm.blr_tol, ..BlrOptions::default() };
+                let prev_sym = match slot.as_ref() {
+                    Some(Self::Blr { symbolic_count, .. }) => *symbolic_count,
+                    _ => 0,
+                };
+                // Drop previous factors first so peak RAM never holds two BLR factorizations simultaneously.
+                *slot = None;
+                let mut blr =
+                    ShiftedBlrLu::new(a_mat, None, &opts).map_err(|e| format!("BLR symbolic analysis failed: {e}"))?;
+                femcore::par::on_factor_pool(|| blr.set_shift(c(0.0, 0.0)))
+                    .map_err(|e| format!("BLR numeric factorisation failed: {e}"))?;
+                *slot =
+                    Some(Self::Blr { solver: Box::new(blr), a_cur: a_mat.clone(), opts, symbolic_count: prev_sym + 1 });
+                Ok(())
+            }
+            "ams_fgmres" => {
+                let Some((ref g_red, ref edge_vecs)) = asm.ams_data else {
+                    return Err(
+                        "driven solver 'ams_fgmres' currently requires order = 1 without periodic boundaries (use 'blr', 'lblt', or 'auto' otherwise)"
+                            .into(),
+                    );
+                };
+                let prev_sym = match slot.as_ref() {
+                    Some(Self::AmsFgmres { symbolic_count, .. }) => *symbolic_count,
+                    _ => 0,
+                };
+                *slot = None;
+                let a_unscaled = unscale_sym_c(a_mat, &asm.d_ruiz);
+                // Shifted-Laplacian preconditioner: P = A + (1.5 + 0.5 i) k0^2 M_unscaled = K + i k0 C + ... + (0.5 + 0.5 i) k0^2 M
+                let k0 = omega / C0;
+                let m_unscaled = unscale_sym_c(&asm.terms_hat[2], &asm.d_ruiz);
+                let p_unscaled = a_unscaled.add_scaled(&m_unscaled, c(1.5 * k0 * k0, 0.5 * k0 * k0));
+                let pc = Ams::new(&p_unscaled, g_red, edge_vecs, &AmsOptions::default())
+                    .map_err(|e| format!("AMS preconditioner setup failed: {e}"))?;
+                *slot = Some(Self::AmsFgmres {
+                    a_unscaled,
+                    pc: Box::new(pc),
+                    d_ruiz: asm.d_ruiz.clone(),
+                    symbolic_count: prev_sym + 1,
+                });
+                Ok(())
+            }
+            _ => {
+                // "auto", "direct", "lblt"
+                match slot.as_mut() {
+                    Some(Self::Direct { solver, .. }) => solver.update_matrix(a_mat),
+                    _ => {
+                        *slot = Some(Self::Direct {
+                            solver: Box::new(DirectSolver::new(a_mat, false)?),
+                            requested: asm.solver.clone(),
+                        });
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
+    fn symbolic_count(&self) -> usize {
+        match self {
+            Self::Direct { solver, .. } => solver.stats().symbolic_count,
+            Self::Blr { symbolic_count, .. } => *symbolic_count,
+            Self::AmsFgmres { symbolic_count, .. } => *symbolic_count,
+        }
+    }
+
+    fn backend_name(&self) -> String {
+        match self {
+            Self::Direct { solver, requested } => {
+                let b = format_backend(solver.stats().backend);
+                if requested == "lblt"
+                    && !matches!(solver.stats().backend, FactorBackend::LbltNd | FactorBackend::LbltAmd)
+                {
+                    format!("{b} (fallback from lblt)")
+                } else {
+                    b.to_string()
+                }
+            }
+            Self::Blr { solver, .. } => format_backend(solver.stats().backend).to_string(),
+            Self::AmsFgmres { .. } => "AmsFgmres".to_string(),
+        }
+    }
+
+    fn solve_many(&self, rhs_cols: &[Vec<C>]) -> Result<Vec<Vec<C>>, String> {
+        match self {
+            Self::Direct { solver, .. } => Ok(solver.solve_many(rhs_cols)),
+            Self::Blr { solver, a_cur, opts, .. } => {
+                let n = solver.dim();
+                let mut out = Vec::with_capacity(rhs_cols.len());
+                let mut r = vec![c(0.0, 0.0); n];
+                for b in rhs_cols {
+                    let mut x = b.clone();
+                    solver.solve_block_in_place(&mut x, 1);
+                    if opts.tol > 0.0 {
+                        let bn = b.iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt().max(1e-300);
+                        for _ in 0..4 {
+                            a_cur.apply(&x, &mut r);
+                            let mut rn2 = 0.0;
+                            for (ri, &bi) in r.iter_mut().zip(b) {
+                                *ri = bi - *ri;
+                                rn2 += ri.norm_sqr();
+                            }
+                            if rn2.sqrt() <= 1e-11 * bn {
+                                break;
+                            }
+                            solver.solve_block_in_place(&mut r, 1);
+                            for (xi, &dri) in x.iter_mut().zip(&r) {
+                                *xi += dri;
+                            }
+                        }
+                    }
+                    out.push(x);
+                }
+                Ok(out)
+            }
+            Self::AmsFgmres { a_unscaled, pc, d_ruiz, .. } => {
+                let n = d_ruiz.len();
+                let gmres_opts = GmresOptions {
+                    tol: Tolerances { rtol: 1e-8, atol: 1e-30, dtol: 1e6, max_it: 400 },
+                    restart: 60,
+                    side: PcSide::Right,
+                    orthog: Orthogonalization::ModifiedGramSchmidt,
+                    flexible: true,
+                    initial_guess_nonzero: false,
+                    record_history: false,
+                };
+                let mut gmres = Gmres::new(gmres_opts);
+                let mut out = Vec::with_capacity(rhs_cols.len());
+                for b_hat in rhs_cols {
+                    let b_unscaled: Vec<C> = b_hat.iter().zip(d_ruiz).map(|(&bi, &di)| bi / di).collect();
+                    let mut x_unscaled = vec![c(0.0, 0.0); n];
+                    let info = gmres.solve(a_unscaled, pc.as_ref(), &b_unscaled, &mut x_unscaled);
+                    if !info.reason.is_converged() {
+                        return Err(format!(
+                            "driven solver 'ams_fgmres' failed to converge after {} iterations ({:?}, residual {:.3e})",
+                            info.iterations, info.reason, info.residual_norm
+                        ));
+                    }
+                    let y_hat: Vec<C> = x_unscaled.iter().zip(d_ruiz).map(|(&xi, &di)| xi / di).collect();
+                    out.push(y_hat);
+                }
+                Ok(out)
+            }
+        }
+    }
+}
+
 /// Real Hermite Tangential Galerkin PROM with isometric QR image-space basis $\mathbf{U}$ for exact
 /// microsecond full-space residual certification across all sweep frequencies.
 struct DrivenProm<'a> {
     asm: &'a DrivenAssembly,
-    /// Persistent sparse LU solver reusing its cached symbolic factorization across all anchor frequencies.
-    solver: Option<DirectSolver<C>>,
     /// Orthonormal real basis columns $\mathbf{q}_i \in \mathbb{R}^{n_{\text{red}}}$ (`r` columns).
     q_cols: Vec<Vec<f64>>,
     /// Reduced operator matrices $\mathbf{A}_{m,r} = \mathbf{Q}^T \hat{\mathbf{A}}_m \mathbf{Q}$ (`M` matrices, each `r x r` row-major).
@@ -717,7 +953,6 @@ impl<'a> DrivenProm<'a> {
         }
         Self {
             asm,
-            solver: None,
             q_cols: Vec::new(),
             a_r: vec![Vec::new(); m_terms],
             b_r: Vec::new(),
@@ -730,10 +965,6 @@ impl<'a> DrivenProm<'a> {
 
     fn dim(&self) -> usize {
         self.q_cols.len()
-    }
-
-    fn symbolic_count(&self) -> usize {
-        self.solver.as_ref().map_or(0, |s| s.stats().symbolic_count)
     }
 
     /// Appends a real candidate vector to $\mathbf{Q}$ (if not already in the span) and updates
@@ -831,12 +1062,10 @@ impl<'a> DrivenProm<'a> {
     /// cached symbolic LU analysis, normalizes each of the `3P` Hermite snapshots (`Y`, `Y'`, `Y''`) directly
     /// to unit $L_2$ norm, compresses the anchor block via complex thin SVD (`s_k >= 1e-6 * s_0`), and adds
     /// the surviving left singular vectors to $\mathbf{Q}$.
-    fn add_hermite_anchor(&mut self, omega_a: f64) -> Result<(), String> {
+    fn add_hermite_anchor(&mut self, omega_a: f64, solver: &mut Option<DrivenLinearSolver>) -> Result<(), String> {
         let a_mat = self.asm.assemble_matrix_at(omega_a);
-        match self.solver.as_mut() {
-            Some(solver) => solver.update_matrix(&a_mat)?,
-            None => self.solver = Some(DirectSolver::new(&a_mat, false)?),
-        }
+        DrivenLinearSolver::build_or_update(solver, self.asm, omega_a, &a_mat)?;
+        let s_ref = solver.as_ref().unwrap();
         let p_ports = self.asm.ports.len();
         let nred = self.asm.nred;
 
@@ -849,9 +1078,9 @@ impl<'a> DrivenProm<'a> {
         }
 
         // 1. Value solve: A(omega_a) Y = RHS(omega_a)
-        let y0_cols = self.solver.as_ref().unwrap().solve_many(&rhs_0);
+        let y0_cols = s_ref.solve_many(&rhs_0)?;
 
-        // 2. First derivative solve on the SAME LU factorization:
+        // 2. First derivative solve on the SAME factorization:
         //    A(omega_a) Y' = RHS'(omega_a) - A'(omega_a) Y
         let mut rhs_1 = Vec::with_capacity(p_ports);
         for q in 0..p_ports {
@@ -861,9 +1090,9 @@ impl<'a> DrivenProm<'a> {
             let col: Vec<C> = (0..nred).map(|i| g1 * b_hat[i] - a1_y0[i]).collect();
             rhs_1.push(col);
         }
-        let y1_cols = self.solver.as_ref().unwrap().solve_many(&rhs_1);
+        let y1_cols = s_ref.solve_many(&rhs_1)?;
 
-        // 3. Second derivative solve on the SAME LU factorization:
+        // 3. Second derivative solve on the SAME factorization:
         //    A(omega_a) Y'' = RHS''(omega_a) - 2 A'(omega_a) Y' - A''(omega_a) Y
         let mut rhs_2 = Vec::with_capacity(p_ports);
         for q in 0..p_ports {
@@ -874,7 +1103,7 @@ impl<'a> DrivenProm<'a> {
             let col: Vec<C> = (0..nred).map(|i| g2 * b_hat[i] - c(2.0, 0.0) * a1_y1[i] - a2_y0[i]).collect();
             rhs_2.push(col);
         }
-        let y2_cols = self.solver.as_ref().unwrap().solve_many(&rhs_2);
+        let y2_cols = s_ref.solve_many(&rhs_2)?;
 
         // Normalize every Y, Y', Y'' snapshot directly to unit L2 norm (bandwidth-independent),
         // then compress the 3P complex block via thin SVD keeping s_k >= 1e-6 * s_0.
@@ -1022,7 +1251,10 @@ fn build_driven_solution(
         for (a, l) in lamn.iter().enumerate() {
             let lam = [l[0], l[1], l[2], l[3]];
             match &curved {
-                Some(ct) => basis3(asm.order, &lam, &ct.jacobian(&lam).0, &gid, &mut w, &mut cu),
+                Some(ct) => {
+                    let gq = safe_curved_jacobian(ct, &lam, &gs);
+                    basis3(asm.order, &lam, &gq, &gid, &mut w, &mut cu);
+                }
                 None => basis3(asm.order, &lam, &gs, &gid, &mut w, &mut cu),
             }
             let mut val = [c(0.0, 0.0); 3];
@@ -1104,6 +1336,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
 
     let mut hdm_solves = 0usize;
     let symbolic_count;
+    let backend_name: String;
     let mut rom_dim = 0usize;
     let mut anchor_freqs_hz = Vec::new();
     let mut max_residual = 0.0_f64;
@@ -1113,6 +1346,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
 
     if let Some(tol) = asm.prom_tol {
         let mut prom = DrivenProm::new(&asm);
+        let mut solver: Option<DrivenLinearSolver> = None;
         let max_solves = asm.max_hdm_solves.max(1);
 
         // Initial greedy anchors: [f_min, f_mid, f_max] merged with optional seed_freqs_hz
@@ -1149,7 +1383,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         let mut anchor_indices: Vec<usize> = Vec::new();
         for (opt_idx, f_anchor) in initial_anchors.into_iter().take(max_solves) {
             femcore::progress::check()?;
-            prom.add_hermite_anchor(2.0 * PI * f_anchor)?;
+            prom.add_hermite_anchor(2.0 * PI * f_anchor, &mut solver)?;
             hdm_solves += 1;
             anchor_freqs_hz.push(f_anchor);
             if let Some(idx) = opt_idx {
@@ -1198,7 +1432,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
                 break;
             };
             anchor_indices.push(next_idx);
-            prom.add_hermite_anchor(omegas[next_idx])?;
+            prom.add_hermite_anchor(omegas[next_idx], &mut solver)?;
             hdm_solves += 1;
             anchor_freqs_hz.push(freqs_hz[next_idx]);
         }
@@ -1210,7 +1444,10 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         }
 
         rom_dim = prom.dim();
-        symbolic_count = prom.symbolic_count();
+        symbolic_count = solver.as_ref().map_or(0, DrivenLinearSolver::symbolic_count);
+        backend_name = solver.as_ref().map_or_else(|| "None".to_string(), DrivenLinearSolver::backend_name);
+        // FR-33: Drop sparse factor buffers immediately after anchor solves finish, before post-sweep & 3D CellFields.
+        drop(solver);
 
         // Extract S, Z, Y across all n_points from reduced coordinates X_r(omega_k) using deterministic fixed-chunk Rayon
         let t_post = Instant::now();
@@ -1267,17 +1504,15 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         }
         rom_sweep_seconds += t_post.elapsed().as_secs_f64();
         rep_x_red = prom.reconstruct_unscaled(&xr_all[rep_freq_idx][0]);
+        drop(prom);
     } else {
-        // Direct point-by-point HDM solve (prom_tol = None), reusing symbolic LU factorization across all frequencies
-        let mut solver: Option<DirectSolver<C>> = None;
+        // Direct point-by-point HDM solve (prom_tol = None), reusing symbolic factorization across all frequencies
+        let mut solver: Option<DrivenLinearSolver> = None;
         let mut min_s_metric = f64::INFINITY;
         for (k, &w) in omegas.iter().enumerate() {
             femcore::progress::check()?;
             let a_mat = asm.assemble_matrix_at(w);
-            match solver.as_mut() {
-                Some(s) => s.update_matrix(&a_mat)?,
-                None => solver = Some(DirectSolver::new(&a_mat, false)?),
-            }
+            DrivenLinearSolver::build_or_update(&mut solver, &asm, w, &a_mat)?;
             let s_ref = solver.as_ref().unwrap();
             hdm_solves += 1;
             anchor_freqs_hz.push(freqs_hz[k]);
@@ -1296,7 +1531,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
             }
             z0_ohm.push(z0_pairs_k);
 
-            let y_cols = s_ref.solve_many(&rhs_cols);
+            let y_cols = s_ref.solve_many(&rhs_cols)?;
             let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
             for p in 0..p_ports {
                 let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
@@ -1321,7 +1556,10 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
             z_matrix.push(z_out);
             y_matrix.push(y_out);
         }
-        symbolic_count = solver.as_ref().map_or(0, |s| s.stats().symbolic_count);
+        symbolic_count = solver.as_ref().map_or(0, DrivenLinearSolver::symbolic_count);
+        backend_name = solver.as_ref().map_or_else(|| "None".to_string(), DrivenLinearSolver::backend_name);
+        // FR-33: Drop sparse solver before `build_driven_solution` allocates 3D `CellFields`.
+        drop(solver);
     }
 
     let f_res_hz = freqs_hz[rep_freq_idx];
@@ -1373,11 +1611,13 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
     }
 
     let log = vec![format!(
-        "driven sweep [{:.4}..{:.4} GHz, {} points, {} port(s)]: {} HDM solve(s), ROM dim {}, max residual {:.2e}, ROM sweep {:.4} s",
+        "driven sweep [{:.4}..{:.4} GHz, {} points, {} port(s), solver={}, backend={}]: {} HDM solve(s), ROM dim {}, max residual {:.2e}, ROM sweep {:.4} s",
         asm.f_min / 1e9,
         asm.f_max / 1e9,
         n_points,
         p_ports,
+        asm.solver,
+        backend_name,
         hdm_solves,
         rom_dim,
         max_residual,

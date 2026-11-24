@@ -264,3 +264,84 @@ fn curved_edges_raise_the_convergence_rate_of_the_pec_sphere_cavity() {
     assert!(rc > rs + 0.5, "curved rate {rc} vs straight {rs}");
     assert!(rows[1].1 * 5.0 < rows[1].0, "at the middle mesh curved {} vs straight {}", rows[1].1, rows[1].0);
 }
+
+#[test]
+fn fr32_p2_quarter_point_cpw_cavity_equipartition_and_zero_spurious_modes() {
+    use femcore::meshing::singularity::{apply_quarter_point_nodes, sheet_rim_vertices, DEFAULT_QUARTER_POINT_XI};
+    use femcore::meshing::{mesh_model, MeshPlan};
+    use geom::model::Model;
+    use nyx_ems::Ems;
+    use nyx_physics::{BcSpec, CircuitRom, Ctx, Error, LabelResolver, MaterialAssign, Mesh, Physics, ProblemSpec};
+    use serde_json::json;
+    use std::collections::BTreeSet;
+
+    // 3D CPW-like strip resonator on Si/air with a lumped_port so CircuitRom & equipartition_error are evaluated.
+    let mut m = Model::new_3d();
+    let si = m.box_("si_box", (-400e-6, -700e-6, -240e-6), (400e-6, 700e-6, 0.0));
+    let air = m.box_("air_box", (-400e-6, -700e-6, 0.0), (400e-6, 700e-6, 240e-6));
+    let strip = m.rect("strip_r", (-80e-6, -480e-6), (80e-6, 480e-6));
+    m.sheet("strip", strip, 0.0);
+    let port_r = m.rect("port_r", (-80e-6, -700e-6), (80e-6, -480e-6));
+    m.sheet("port_in", port_r, 0.0);
+    m.overlay(&[("si", si), ("air", air)]);
+
+    let mut g = mesh_model(&m.list, &MeshPlan::simple(340e-6)).expect("FR-32 CPW strip mesh");
+    let strip_labels = g.boundary("strip");
+    let rim_verts = sheet_rim_vertices(&g.mesh, &strip_labels);
+    assert!(rim_verts.iter().any(|&r| r), "strip must have singular rim vertices");
+    let rep = apply_quarter_point_nodes(&mut g.mesh, &rim_verts, DEFAULT_QUARTER_POINT_XI, &BTreeSet::new());
+    assert!(rep.shifted_edges > 0, "expected quarter-point shifted edges > 0");
+    assert!(g.mesh.has_qp() && g.mesh.has_curved(), "mesh must carry quarter-point curved tets");
+
+    struct Res<'a>(&'a femcore::meshing::geomdrive::MeshedGeom);
+    impl LabelResolver for Res<'_> {
+        fn domains(&self, r: &str) -> Result<Vec<i32>, Error> {
+            let v = self.0.domains(r);
+            if v.is_empty() {
+                Err(Error::invalid(format!("no region {r}")))
+            } else {
+                Ok(v)
+            }
+        }
+        fn boundaries(&self, s: &str) -> Result<Vec<i32>, Error> {
+            let v = self.0.boundary(s);
+            if !v.is_empty() {
+                return Ok(v);
+            }
+            self.0.select(s).map_err(Error::invalid)
+        }
+    }
+    let exchange = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let resolver = Res(&g);
+    let mut spec = ProblemSpec::new("ems", 2, "cavity");
+    spec.study.params = json!({ "n_modes": 2, "f_search": 25.0e9 });
+    spec.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+    spec.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+    spec.bcs.push(BcSpec { on: "strip".into(), kind: "pec".into(), params: json!({}) });
+    spec.bcs.push(BcSpec {
+        on: "port_in".into(),
+        kind: "lumped_port".into(),
+        params: json!({ "name": "port_in", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+    });
+
+    let res = Ems.solve(&exchange, &spec, &mut Ctx::new(&resolver)).expect("FR-32 P2 quarter-point cavity solve");
+    assert!(!res.solutions.is_empty());
+    for sol in &res.solutions {
+        let f_re = sol.eigenvalue.expect("eigenvalue present")[0];
+        assert!(f_re > 1.0e8, "FR-32 quarter-point P2 cavity emitted spurious mode {f_re:e} Hz");
+        for fld in &sol.fields {
+            assert!(fld.values.iter().all(|v| v.is_finite()), "non-finite nodal field {}", fld.name);
+        }
+        for cf in &sol.cell_fields {
+            assert!(
+                cf.re.iter().all(|v| v.is_finite()) && cf.im.iter().all(|v| v.is_finite()),
+                "non-finite cell field {}",
+                cf.name
+            );
+        }
+    }
+    let eq = res.scalar("equipartition_error").expect("equipartition_error emitted");
+    assert!(eq < 1e-9, "FR-32 quarter-point P2 cavity equipartition_error = {eq:e} >= 1e-9");
+    let rom = CircuitRom::of(&res).expect("CircuitRom emitted");
+    assert_eq!(rom.modes.len(), res.solutions.len());
+}
