@@ -306,11 +306,6 @@ pub fn collect_pack_spec(opts: &PackCollectOpts<'_>) -> Result<(PackSpec, Option
             "examples",
             Some("nyx.json"),
         ),
-        (
-            opts.repo_root.join("crates/app/assets/fonts"),
-            "fonts",
-            None,
-        ),
     ] {
         if !folder.is_dir() {
             bail!("missing asset directory '{}'", folder.display());
@@ -348,11 +343,6 @@ pub fn collect_pack_spec(opts: &PackCollectOpts<'_>) -> Result<(PackSpec, Option
     for (src, rel) in [
         (opts.repo_root.join("LICENSE"), "LICENSE"),
         (opts.repo_root.join("NOTICE"), "NOTICE"),
-        (
-            opts.repo_root
-                .join("crates/app/assets/fonts/OFL-EBGaramond.txt"),
-            "OFL-EBGaramond.txt",
-        ),
     ] {
         if !src.is_file() {
             bail!("missing license file '{}'", src.display());
@@ -912,7 +902,7 @@ fn classify_zip_or_dir_rel(rel: &str, os: TargetOs) -> Result<(FileBase, String,
     }
     let role = if matches!(
         clean.as_str(),
-        "LICENSE" | "NOTICE" | "OFL-EBGaramond.txt" | "THIRD_PARTY_NOTICES.txt"
+        "LICENSE" | "NOTICE" | "THIRD_PARTY_NOTICES.txt"
     ) {
         FileRole::License
     } else {
@@ -1228,7 +1218,7 @@ fn classify_mac_contents_rel(rel: &str) -> Result<(FileBase, String, FileRole, u
     if let Some(rest) = rel.strip_prefix("Resources/") {
         let role = if matches!(
             rest,
-            "LICENSE" | "NOTICE" | "OFL-EBGaramond.txt" | "THIRD_PARTY_NOTICES.txt"
+            "LICENSE" | "NOTICE" | "THIRD_PARTY_NOTICES.txt"
         ) {
             FileRole::License
         } else {

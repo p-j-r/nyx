@@ -27,10 +27,6 @@ them, and the AGPL and the commercial licence do not apply to them.
     linalg, and mesh, meshing, adapt       modules come from the ports is in
     as far as docs/ports lists them        docs/ports/*/PROVENANCE.md, with the
                                            third-party notices
-  * crates/app/assets/fonts              EB Garamond Italic: SIL Open Font
-                                           License 1.1 (OFL-EBGaramond.txt next
-                                           to the font; shown in the About
-                                           sheet of the application)
   * fonts that egui carries              Ubuntu-Light, Hack, NotoEmoji and
                                            emoji-icon-font keep their own
                                            licences (see the egui project);

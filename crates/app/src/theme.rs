@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
 //! The nyx look: every colour of the shell comes from `tokens.rs` (ADR 88) through the functions here, in a light and a dark look, both installed
-//! once (`apply_mode`) so a switch of the theme only changes which one is active. Body text is Inter, numbers JetBrains Mono and titles EB Garamond
-//! italic when they are installed (next to the executable in `fonts/`, or on the system); otherwise Segoe UI, Cascadia/Consolas and Georgia italic
-//! are used, and finally egui's own fonts.
+//! once (`apply_mode`) so a switch of the theme only changes which one is active. Body text is Inter and numbers JetBrains Mono when they are
+//! installed (next to the executable in `fonts/`, or on the system); otherwise Segoe UI and Cascadia/Consolas are used, and finally egui's own fonts. No font is shipped with nyx (ADR 124 retired the serif italic of ADR 123).
 
 use crate::tokens::{self, Mode, Pair, Rgb};
 use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Theme, Visuals};
 use std::sync::Arc;
-
-/// The family that once held the serif italic of page titles (ADR 123 retired it: nothing is drawn in it, it falls back to the interface face).
-pub fn title_family() -> FontFamily {
-    FontFamily::Name("title".into())
-}
 
 /// A heading: the plain interface face, smaller than the size asked for (the sizes were chosen for a display italic; ADR 123).
 pub fn title(size: f32) -> FontId {
@@ -322,15 +316,6 @@ pub fn install_fonts(ctx: &egui::Context) {
     }
     if let Some(b) = first_font(&["JetBrainsMono-Regular.ttf", "JetBrainsMono.ttf", "CascadiaMono.ttf", "consola.ttf"]) {
         add("mono", b, &[FontFamily::Monospace], true);
-    }
-    fonts.families.insert(title_family(), vec![]);
-    // a family must also fall back to the default proportional fonts for symbols the file lacks
-    let prop = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let t = fonts.families.entry(title_family()).or_default();
-    for n in prop {
-        if !t.contains(&n) {
-            t.push(n);
-        }
     }
     ctx.set_fonts(fonts);
 }

@@ -782,7 +782,7 @@ impl App {
 
     // ------------------------------------------------------------------------------------------------------ about
 
-    /// The version, what the fonts are and under which licence: the OFL asks that the licence text travels with the font and is shown.
+    /// The version, the licence and what the fonts are (no font is shipped with nyx; the fonts inside egui keep their own licences).
     fn sheet_about(&mut self, ui: &mut egui::Ui) {
         ui.label(kit::title("nyx", 42.0));
         ui.label(RichText::new("creative chaos.").font(theme::title(20.0)));
@@ -792,13 +792,9 @@ impl App {
         ui.label("nyx is dual licensed: you may use it under the GNU Affero General Public License, version 3, or under a commercial licence, whichever you choose.");
         ui.label("Copyright (C) 2026 p-j-r. nyx comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law. You may convey it under the terms of the AGPL; the full text is the file LICENSE that comes with nyx and https://www.gnu.org/licenses/agpl-3.0.html. NOTICE lists the parts that keep their own licences (the geometry kernel and the ported solvers and meshers: BSD-2-Clause).");
         ui.add_space(10.0);
-        kit::label_caps(ui, "Fonts and their licences", "");
-        ui.label("Titles: EB Garamond Italic, Copyright 2017 The EB Garamond Project Authors, SIL Open Font License 1.1 (full text below). It is shipped in fonts/EBGaramond-Italic[wght].ttf alongside its licence fonts/OFL-EBGaramond.txt; when it is not found the window uses Georgia Italic.");
+        kit::label_caps(ui, "Fonts", "");
         ui.label("Text and numbers: Inter and JetBrains Mono when installed (not shipped with nyx), otherwise Segoe UI and Cascadia or Consolas.");
         ui.label("Fallback fonts inside egui (Ubuntu-Light, Hack, NotoEmoji, emoji-icon-font) keep their own licences; see the egui project.");
-        ui.add_space(10.0);
-        kit::label_caps(ui, "SIL Open Font License 1.1 (EB Garamond)", "");
-        ui.label(kit::mono(include_str!("../assets/fonts/OFL-EBGaramond.txt")).size(12.0));
     }
 
     // ------------------------------------------------------------------------------------------------------ settings

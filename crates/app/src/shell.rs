@@ -228,8 +228,6 @@ pub struct Shell {
     pub confirm_cancel: bool,
     /// scripts left out of the file being shared
     pub share_exclude: Vec<String>,
-    /// tab id that should be scrolled into view in the bounded tab bar
-    pub scroll_to_tab: Option<String>,
 }
 
 impl Shell {
@@ -271,7 +269,6 @@ impl Shell {
             notice: None,
             confirm_cancel: false,
             share_exclude: vec![],
-            scroll_to_tab: None,
         }
     }
 
@@ -506,7 +503,6 @@ impl App {
     pub fn show_workflow(&mut self, id: &str) {
         self.flush();
         self.shell.page = Page::Workflow(id.to_string());
-        self.shell.scroll_to_tab = Some(id.to_string());
         let eid = self.shell.open.get(id).map(|w| w.exp.clone()).unwrap_or_default();
         if self.shell.loaded.as_ref() != Some(&(id.to_string(), eid.clone())) {
             self.load_experiment(id, &eid);
@@ -579,7 +575,6 @@ impl App {
             w.last_hash = spec_key(&spec);
         }
         self.shell.loaded = Some((id.clone(), "e1".into()));
-        self.shell.scroll_to_tab = Some(id.clone());
         self.shell.page = Page::Workflow(id);
         self.shell.sheet = Sheet::None;
         self.status = if shown { format!("Opened {title}: its project, mesh and results. Nothing is saved until you change something.") } else { "New workflow. Nothing is saved until you change something.".into() };
@@ -877,37 +872,43 @@ impl App {
             let mut go_dash = crate::kit::tab(ui, "dashboard", "Dashboard", on_dash, None, false).select.clicked();
             let mut close = None;
             let mut show = None;
-            let right_reserve = 460.0 + busy_w;
+            let right_reserve = 420.0 + busy_w;
             let max_tabs_w = (ui.available_width() - right_reserve).max(80.0);
-            egui::ScrollArea::horizontal().id_salt("tabbar_scroll").max_width(max_tabs_w).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    for id in self.shell.tabs.clone() {
-                        let Some(w) = self.shell.open.get(&id) else { continue };
-                        let on = self.shell.page == Page::Workflow(id.clone());
-                        let title = crate::fmt::ellipsize(&w.title(), 22);
-                        let running = running_wf.as_deref() == Some(&id);
-                        let state = if running { crate::kit::State::Running } else if w.dir.is_none() { crate::kit::State::Idle } else { crate::kit::State::Done };
-                        let hit = crate::kit::tab(ui, ("tab", &id), &title, on, Some(state), true);
-                        if on && self.shell.scroll_to_tab.as_deref() == Some(id.as_str()) {
-                            hit.select.scroll_to_me(Some(egui::Align::Center));
-                            self.shell.scroll_to_tab = None;
-                        }
-                        hit.select.clone().on_hover_text(state.word());
-                        if hit.select.clicked() {
-                            show = Some(id.clone());
-                        }
-                        if hit.select.middle_clicked() {
-                            close = Some(id.clone());
-                        }
-                        if let Some(c) = hit.close {
-                            if c.on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
-                                close = Some(id.clone());
-                            }
-                        }
+            // the workflow tabs that fit (ADR 124): the titles shorten before a tab is dropped, and a tab that does not fit whole is not drawn (the ▾ menu lists them all);
+            // nothing scrolls, so no tab is ever half out of view
+            let ids: Vec<String> = self.shell.tabs.iter().filter(|i| self.shell.open.contains_key(*i)).cloned().collect();
+            let active = ids.iter().position(|i| self.shell.page == Page::Workflow(i.clone()));
+            let gap = ui.spacing().item_spacing.x;
+            let mut chars = 22;
+            let (titles, from, to) = loop {
+                let titles: Vec<String> = ids.iter().map(|i| crate::fmt::ellipsize(&self.shell.open[i].title(), chars)).collect();
+                let widths: Vec<f32> = titles.iter().map(|t| crate::kit::tab_width(ui, t, true, true)).collect();
+                let (from, to) = fit_window(&widths, gap, max_tabs_w, active);
+                if (from == 0 && to == ids.len()) || chars <= 16 {
+                    break (titles, from, to);
+                }
+                chars -= 2;
+            };
+            for id in &ids[from..to] {
+                let w = &self.shell.open[id];
+                let on = self.shell.page == Page::Workflow(id.clone());
+                let title = &titles[ids.iter().position(|i| i == id).unwrap_or(0)];
+                let running = running_wf.as_deref() == Some(id.as_str());
+                let state = if running { crate::kit::State::Running } else if w.dir.is_none() { crate::kit::State::Idle } else { crate::kit::State::Done };
+                let hit = crate::kit::tab(ui, ("tab", id), title, on, Some(state), true);
+                hit.select.clone().on_hover_text(format!("{} · {}", w.title(), state.word()));
+                if hit.select.clicked() {
+                    show = Some(id.clone());
+                }
+                if hit.select.middle_clicked() {
+                    close = Some(id.clone());
+                }
+                if let Some(c) = hit.close {
+                    if c.on_hover_text("Close the tab (Ctrl+W). The workflow is already saved.").clicked() {
+                        close = Some(id.clone());
                     }
-                });
-            });
+                }
+            }
             if ui.add(egui::Button::new(RichText::new("+").size(18.0)).min_size(Vec2::new(34.0, 34.0))).on_hover_text("New workflow (Ctrl+N)").clicked() {
                 self.shell.sheet = Sheet::New;
             }
@@ -929,7 +930,7 @@ impl App {
                     self.shell.sheet = Sheet::New;
                     ui.close();
                 }
-            }).response.on_hover_text("All open tabs");
+            }).response.on_hover_text(if from > 0 || to < ids.len() { format!("All open tabs ({} of {} are shown)", to - from, ids.len()) } else { "All open tabs".to_string() });
             if go_dash {
                 self.flush();
                 self.shell.page = Page::Dashboard;
@@ -991,6 +992,34 @@ impl App {
             self.new_draft(&title, Start::Example(p));
         }
     }
+}
+
+/// Which of the workflow tabs are drawn (ADR 124): `[from, to)`, the first run of whole tabs, starting as early as possible, that fits in `avail` and holds the
+/// active tab. A tab that does not fit whole is not drawn; at least one tab is always drawn when there is one.
+pub fn fit_window(widths: &[f32], gap: f32, avail: f32, active: Option<usize>) -> (usize, usize) {
+    let n = widths.len();
+    if n == 0 {
+        return (0, 0);
+    }
+    let reach = |from: usize| {
+        let (mut sum, mut to) = (0.0, from);
+        while to < n {
+            let need = widths[to] + if to > from { gap } else { 0.0 };
+            if sum + need > avail {
+                break;
+            }
+            sum += need;
+            to += 1;
+        }
+        to.max(from + 1).min(n)
+    };
+    for from in 0..n {
+        let to = reach(from);
+        if active.is_none_or(|a| a < to) || from == n - 1 {
+            return (from, to);
+        }
+    }
+    (0, n)
 }
 
 /// What decides that a spec changed (ADR 124): the hash of the spec without `active`. Which physics is on show is the window's state; choosing another one must not
@@ -1098,6 +1127,23 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tab_strip_draws_whole_tabs_only_and_keeps_the_active_one() {
+        let w = [100.0; 6];
+        // all fit: 6 * 100 + 5 * 10 = 650
+        assert_eq!(fit_window(&w, 10.0, 650.0, Some(5)), (0, 6));
+        // four fit (430); the active tab is the first: the window starts at the first tab
+        assert_eq!(fit_window(&w, 10.0, 450.0, Some(0)), (0, 4));
+        // the active tab is the last: the window moves until it holds it, no tab is cut
+        let (from, to) = fit_window(&w, 10.0, 450.0, Some(5));
+        assert_eq!((from, to), (2, 6));
+        // nothing is active (the dashboard is shown): from the first tab
+        assert_eq!(fit_window(&w, 10.0, 450.0, None), (0, 4));
+        // not even one fits: the active tab is drawn anyway
+        assert_eq!(fit_window(&w, 10.0, 50.0, Some(3)), (3, 4));
+        assert_eq!(fit_window(&[], 10.0, 50.0, None), (0, 0));
+    }
 
     #[test]
     fn params_of_uses_clean_parameter_names_without_parameter_prefix() {

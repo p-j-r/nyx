@@ -179,7 +179,7 @@ pub fn render_third_party_notices(crates: &[CrateLicense], target_triple: Option
     out.push_str(
         "Ports and fonts keeping their own licences (BSD-2-Clause, SIL OFL 1.1) are detailed\n",
     );
-    out.push_str("in NOTICE and OFL-EBGaramond.txt in this directory.\n\n");
+    out.push_str("in NOTICE in this directory.\n\n");
     if let Some(triple) = target_triple {
         out.push_str(&format!(
             "Resolved Cargo dependency graph target: {triple}\n"

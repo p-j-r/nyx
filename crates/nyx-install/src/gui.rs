@@ -520,7 +520,7 @@ impl eframe::App for WizardApp {
                                 ));
                                 ui.label(
                                     RichText::new(
-                                        "Includes bundled BSD-2-Clause geometry/solver modules, SIL OFL 1.1 EB Garamond font, \
+                                        "Includes bundled BSD-2-Clause geometry/solver modules \
                                          and THIRD_PARTY_NOTICES.txt.",
                                     )
                                     .size(12.0)

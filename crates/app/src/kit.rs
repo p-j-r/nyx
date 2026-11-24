@@ -216,6 +216,18 @@ pub struct TabHit {
 
 /// One tab of the top bar: 28 px high, a state glyph, the title, and (when `closable`) a 24 x 24 close target. Selected = tint and a 2 px accent
 /// bar under it; keyboard focus draws the 2 px accent ring; a screen reader gets the title as a selectable button.
+/// The width of a tab of `text_w` points of title (the same sum `tab` allocates).
+fn tab_width_of(text_w: f32, has_state: bool, closable: bool) -> f32 {
+    let (pad, gap, close_w) = (10.0, 6.0, 24.0);
+    pad + if has_state { 14.0 + gap } else { 0.0 } + text_w + if closable { gap + close_w + 2.0 } else { pad }
+}
+
+/// How wide `tab` draws this title, so a bar can decide which tabs fit before it draws any.
+pub fn tab_width(ui: &Ui, title: &str, has_state: bool, closable: bool) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    tab_width_of(ui.painter().layout_no_wrap(title.to_string(), font, Color32::WHITE).size().x, has_state, closable)
+}
+
 pub fn tab(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, title: &str, selected: bool, state: Option<State>, closable: bool) -> TabHit {
     let ctx = ui.ctx().clone();
     let id = ui.make_persistent_id(id);
@@ -225,7 +237,7 @@ pub fn tab(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, title: &str,
     let (pad, gap, h) = (10.0, 6.0, 28.0);
     let glyph_w = if state.is_some() { 14.0 + gap } else { 0.0 };
     let close_w = if closable { 24.0 } else { 0.0 };
-    let w = pad + glyph_w + galley.size().x + if closable { gap + close_w + 2.0 } else { pad };
+    let w = tab_width_of(galley.size().x, state.is_some(), closable);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
     let close_rect = egui::Rect::from_min_size(egui::pos2(rect.right() - 2.0 - close_w, rect.center().y - 12.0), Vec2::splat(24.0));
     let select_rect = if closable { egui::Rect::from_min_max(rect.min, egui::pos2(close_rect.left(), rect.max.y)) } else { rect };

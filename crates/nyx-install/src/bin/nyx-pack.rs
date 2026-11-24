@@ -95,16 +95,8 @@ fn stage_macos_dmg_root(
 
     copy_dir_recursive(&repo_root.join("materials"), &res_dir.join("materials"))?;
     copy_dir_recursive(&repo_root.join("examples"), &res_dir.join("examples"))?;
-    copy_dir_recursive(
-        &repo_root.join("crates/app/assets/fonts"),
-        &res_dir.join("fonts"),
-    )?;
     std::fs::copy(repo_root.join("LICENSE"), res_dir.join("LICENSE"))?;
     std::fs::copy(repo_root.join("NOTICE"), res_dir.join("NOTICE"))?;
-    std::fs::copy(
-        repo_root.join("crates/app/assets/fonts/OFL-EBGaramond.txt"),
-        res_dir.join("OFL-EBGaramond.txt"),
-    )?;
     std::fs::write(res_dir.join("THIRD_PARTY_NOTICES.txt"), notices_txt)?;
     let icns = build_icns(&std::fs::read(repo_root.join("docs/brand/nyx-mark.png"))?)?;
     std::fs::write(res_dir.join("Nyx.icns"), &icns)?;
