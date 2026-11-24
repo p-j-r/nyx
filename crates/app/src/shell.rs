@@ -383,7 +383,7 @@ impl App {
     pub fn flush(&mut self) {
         let Some((wid, eid)) = self.shell.loaded.clone() else { return };
         let Ok(spec) = self.spec_json() else { return };
-        let h = hash_bytes(spec.as_bytes());
+        let h = spec_key(&spec);
         let Some(w) = self.shell.open.get_mut(&wid) else { return };
         if w.dir.is_none() {
             w.draft_spec = spec.clone();
@@ -392,7 +392,7 @@ impl App {
             return;
         }
         if w.dir.is_none() {
-            if spec == w.spec0 {
+            if spec_key(&spec) == spec_key(&w.spec0) {
                 w.last_hash = h;
                 return;
             }
@@ -430,7 +430,7 @@ impl App {
                 if !w.notes.is_empty() {
                     let _ = d.set_notes(&w.notes);
                 }
-                w.last_hash = hash_bytes(first.as_bytes());
+                w.last_hash = spec_key(&first);
                 w.dir = Some(d);
                 self.save_tabs();
                 Ok(())
@@ -458,7 +458,7 @@ impl App {
             match self.engine.call("project_load", &serde_json::json!({ "json": spec })) {
                 Ok(_) => {
                     self.adopt_project();
-                    let h = hash_bytes(spec.as_bytes());
+                    let h = spec_key(&spec);
                     if let Some(w) = self.shell.open.get_mut(wid) {
                         w.last_hash = h;
                     }
@@ -473,7 +473,7 @@ impl App {
         match self.engine.call("project_open", &serde_json::json!({ "path": path.to_str().unwrap_or_default() })) {
             Ok(_) => {
                 self.adopt_project();
-                let h = self.spec_json().map(|x| hash_bytes(x.as_bytes())).unwrap_or_default();
+                let h = self.spec_json().map(|x| spec_key(&x)).unwrap_or_default();
                 if let Some(w) = self.shell.open.get_mut(wid) {
                     w.last_hash = h;
                     w.notes = w.dir.as_ref().map(|d| d.notes()).unwrap_or_default();
@@ -590,7 +590,7 @@ impl App {
         if let Some(w) = self.shell.open.get_mut(&id) {
             w.spec0 = spec.clone();
             w.draft_spec = spec.clone();
-            w.last_hash = hash_bytes(spec.as_bytes());
+            w.last_hash = spec_key(&spec);
         }
         self.shell.loaded = Some((id.clone(), "e1".into()));
         self.shell.scroll_to_tab = Some(id.clone());
@@ -649,6 +649,10 @@ impl App {
         // a run needs a folder: a draft gets it now (the run is its first change)
         if self.shell.open.get(&wid).is_some_and(|w| w.dir.is_none()) && self.persist_draft(&wid, &spec).is_err() {
             return;
+        }
+        // a run is tied to the version that holds exactly this spec, which names the physics on show: the store decides whether that is a new version
+        if let Some(w) = self.shell.open.get_mut(&wid) {
+            w.last_hash.clear();
         }
         self.flush();
         let params = params_of(&spec);
@@ -777,6 +781,10 @@ impl App {
             self.refresh_entries();
         }
         egui::Panel::top("tabbar").frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::symmetric(14, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| self.top_bar(ui));
+        // the script is a dock on the right, beside the page, not a sheet over it (ADR 124)
+        if self.nys.open {
+            self.script_dock(ui);
+        }
         match self.shell.page.clone() {
             Page::Dashboard => self.dashboard_ui(ui),
             Page::Workflow(id) => self.workflow_ui(ui, &id),
@@ -999,6 +1007,20 @@ impl App {
     }
 }
 
+/// What decides that a spec changed (ADR 124): the hash of the spec without `active`. Which physics is on show is the window's state; choosing another one must not
+/// write a version of the workflow nor reread the workspace. The next real change stores it with the rest.
+pub fn spec_key(spec: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(spec) {
+        Ok(mut v) => {
+            if let Some(o) = v.as_object_mut() {
+                o.remove("active");
+            }
+            hash_bytes(v.to_string().as_bytes())
+        }
+        Err(_) => hash_bytes(spec.as_bytes()),
+    }
+}
+
 /// Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec.
 pub fn params_of(json: &str) -> BTreeMap<String, f64> {
     let mut m = BTreeMap::new();
@@ -1137,5 +1159,40 @@ mod tests {
         app.close_tab(&id_a);
         assert_eq!(app.shell.page, Page::Dashboard);
         assert_eq!(app.shell.loaded, None);
+    }
+
+    #[test]
+    fn the_spec_key_ignores_the_physics_on_show_and_nothing_else() {
+        let mut eng = nyx_engine::Engine::new();
+        crate::examples::blank(&mut eng, "ems", false).unwrap();
+        eng.call("add_physics", &serde_json::json!({ "physics": "sms" })).unwrap();
+        let a = eng.project().to_json();
+        eng.call("set_active", &serde_json::json!({ "physics": "sms" })).unwrap();
+        let b = eng.project().to_json();
+        eng.call("set_active", &serde_json::json!({ "physics": "ems" })).unwrap();
+        assert_ne!(a, b, "the saved text does name the physics on show");
+        assert_eq!(spec_key(&a), spec_key(&b), "a switch of the physics on show is not a change of the workflow");
+        eng.call("set_param", &serde_json::json!({ "name": "w", "value": 5e-7 })).unwrap();
+        assert_ne!(spec_key(&a), spec_key(&eng.project().to_json()), "a parameter is a change");
+    }
+
+    #[test]
+    fn choosing_the_physics_on_show_writes_no_version() {
+        let mut app = App::with_context(egui::Context::default());
+        let root = std::env::temp_dir().join(format!("nyx-active-switch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        app.attach_workspace(root.clone());
+        app.new_draft("Two physics", Start::Blank { physics: "ems".into(), three_d: false });
+        let id = app.shell.tabs[0].clone();
+        app.cmd("add_physics", serde_json::json!({ "physics": "sms" }));
+        app.flush();
+        let version = |a: &App| a.shell.open[&id].dir.as_ref().map(|d| d.wf.version);
+        let before = version(&app);
+        assert!(before.is_some(), "the first change made the folder");
+        let other = if app.active().as_deref() == Some("ems") { "sms" } else { "ems" };
+        app.cmd("set_active", serde_json::json!({ "physics": other }));
+        app.flush();
+        assert_eq!(version(&app), before, "a switch of the physics on show wrote a version");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -227,7 +227,7 @@ impl App {
             }
             Act::Close => self.close_tab(id),
             Act::ExportCsv => self.export_runs_csv(id),
-            Act::Script => self.open_nys_script(),
+            Act::Script => self.toggle_nys_script(),
             Act::Field(rid) => {
                 if let Some(w) = self.shell.open.get_mut(id) {
                     w.focus = Some(rid);
@@ -409,6 +409,45 @@ impl App {
         });
     }
 
+    /// The physics of the project as one dropdown (ADR 124): choose the one on show, add another, remove the one on show. A switch changes what the window shows, not the
+    /// workflow (`shell::spec_key`).
+    fn physics_menu(&mut self, ui: &mut egui::Ui, locked: bool) {
+        let in_project: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
+        let free: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).filter(|i| !in_project.contains(i)).collect();
+        let active = self.active().unwrap_or_default();
+        let shown = if active.is_empty() { "none".to_string() } else { self.physics_name(&active) };
+        ui.add_enabled_ui(!locked, |ui| {
+            egui::ComboBox::from_id_salt("wf_physics").selected_text(format!("Physics: {shown}")).show_ui(ui, |ui| {
+                for p in &in_project {
+                    if ui.selectable_label(active == *p, self.physics_name(p)).clicked() && active != *p {
+                        self.cmd("set_active", serde_json::json!({ "physics": p }));
+                        self.picking = None;
+                        self.rules_dirty = true;
+                    }
+                }
+                if !free.is_empty() && in_project.len() < 3 {
+                    ui.separator();
+                    for id in &free {
+                        if ui.selectable_label(false, format!("Add {}", self.physics_name(id))).clicked() {
+                            self.cmd("add_physics", serde_json::json!({ "physics": id }));
+                            self.cmd("set_active", serde_json::json!({ "physics": id }));
+                            self.picking = None;
+                            self.rules_dirty = true;
+                        }
+                    }
+                }
+                if !active.is_empty() {
+                    ui.separator();
+                    if ui.selectable_label(false, format!("Remove {} from the project", self.physics_name(&active))).clicked() {
+                        self.cmd("remove_physics", serde_json::json!({ "physics": active }));
+                        self.picking = None;
+                        self.rules_dirty = true;
+                    }
+                }
+            });
+        });
+    }
+
     // ------------------------------------------------------------------------------------------------------ section bar
 
     fn wf_sectionbar(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>, locked: bool) {
@@ -424,6 +463,7 @@ impl App {
                 }
                 ui.spacing_mut().item_spacing.x = 10.0;
                 ui.add_space(8.0);
+                self.physics_menu(ui, locked);
                 if locked {
                     kit::glyph(ui, kit::State::Running);
                     ui.label(RichText::new("Running").strong());
@@ -544,23 +584,13 @@ impl App {
         egui::Panel::right("wf_concept_inspector").default_size(440.0).size_range(380.0..=700.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             ui.add_enabled_ui(!locked, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let active = self.active();
-                    let codes: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
-                    if codes.len() == 1 {
-                        let p = &codes[0];
-                        let info = match self.engine.project().spec(p) {
-                            Some(s) => format!("{} · {} · P{}", short_physics(p), s.study.kind, s.order),
-                            None => short_physics(p),
+                    // the physics are chosen in the bar above (ADR 124); here only what the one on show is
+                    if let Some(p) = self.active() {
+                        let info = match self.engine.project().spec(&p) {
+                            Some(s) => format!("{} · {} · P{}", short_physics(&p), s.study.kind, s.order),
+                            None => short_physics(&p),
                         };
-                        ui.label(RichText::new(info).strong().color(theme::accent(&ctx)));
-                    } else {
-                        for p in &codes {
-                            if kit::pill(ui, active.as_deref() == Some(p.as_str()), short_physics(p)).clicked() {
-                                self.cmd("set_active", serde_json::json!({ "physics": p }));
-                                self.rules_dirty = true;
-                                self.picking = None;
-                            }
-                        }
+                        ui.label(RichText::new(info).strong());
                     }
                     if kit::ghost(ui, "Study & solver →").on_hover_text("Go to 2 · Build > Study and solver (wavelength, modes, solver)").clicked() {
                         w.part = Part::Build;

@@ -209,6 +209,12 @@ impl App {
                     "versions" => Sheet::Versions,
                     "share" => Sheet::Share,
                     "about" => Sheet::About,
+                    // `sheet script` opens the script dock (ADR 124), the way the key does
+                    "script" => {
+                        self.nys.open = false;
+                        self.open_nys_script();
+                        Sheet::None
+                    }
                     _ => Sheet::None,
                 };
             }

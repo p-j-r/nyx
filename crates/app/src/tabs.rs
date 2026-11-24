@@ -864,7 +864,12 @@ impl App {
         let ids: Vec<String> = self.engine.registry().ids().iter().map(|s| s.to_string()).collect();
         let in_project: Vec<String> = self.engine.project().physics.iter().map(|s| s.physics.clone()).collect();
         ui.heading("Physics");
+        // in the window of the shell the physics are one dropdown of the toolbar (ADR 124); the classic window keeps the pills here
+        let in_shell = self.shell.active();
         ui.horizontal_wrapped(|ui| {
+            if in_shell {
+                return;
+            }
             let active = self.active();
             for id in &in_project {
                 if ui.selectable_label(active.as_deref() == Some(id.as_str()), RichText::new(self.physics_name(id)).strong()).clicked() {
@@ -887,7 +892,7 @@ impl App {
             }
         });
         let Some(active) = self.active() else {
-            ui.weak("The project has no physics: add one above.");
+            ui.weak(if in_shell { "The project has no physics: add one from the Physics menu in the bar above." } else { "The project has no physics: add one above." });
             return;
         };
         let Some(physics) = self.engine.registry().get(&active) else { return };
@@ -896,17 +901,20 @@ impl App {
         let Some(spec0) = self.engine.project().spec(&active).cloned() else { return };
         let mut spec = spec0.clone();
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            if ui.small_button("remove this physics from the project").clicked() {
-                self.cmd("remove_physics", json!({ "physics": active }));
-                self.rules_dirty = true;
-            }
-        });
-        if !imports.is_empty() {
+        if !in_shell {
+            ui.horizontal(|ui| {
+                if ui.small_button("remove this physics from the project").clicked() {
+                    self.cmd("remove_physics", json!({ "physics": active }));
+                    self.rules_dirty = true;
+                }
+            });
+        }
+        // what physics exchange is said only when there is another physics to exchange with
+        if in_project.len() > 1 && !imports.is_empty() {
             let from: Vec<String> = imports.iter().map(|i| format!("{} ({})", i.role, i.field)).collect();
             ui.weak(format!("Takes from other physics of the project: {}.", from.join(", ")));
         }
-        if !exports.is_empty() {
+        if in_project.len() > 1 && !exports.is_empty() {
             ui.weak(format!("Offers to others: {}.", exports.iter().map(|e| e.role.clone()).collect::<Vec<_>>().join(", ")));
         }
         if !opts.is_empty() {

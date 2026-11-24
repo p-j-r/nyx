@@ -977,6 +977,15 @@ impl App {
         }
     }
 
+    /// The key and the button of the script: opens the dock, or closes it when it is open.
+    pub fn toggle_nys_script(&mut self) {
+        if self.nys.open {
+            self.nys.open = false;
+        } else {
+            self.open_nys_script();
+        }
+    }
+
     fn nys_root(&self) -> PathBuf {
         if let crate::shell::Page::Workflow(id) = &self.shell.page {
             if let Some(d) = self.shell.open.get(id).and_then(|w| w.dir.as_ref()) {
@@ -1642,7 +1651,7 @@ impl eframe::App for App {
             self.shell_compute();
         }
         if ctrl_shift_r {
-            self.open_nys_script();
+            self.toggle_nys_script();
         }
         for (pressed, act) in [
             (alt1, crate::menu::Act::ConceptGeometry),
@@ -3255,8 +3264,8 @@ nyx.result_info(physics=\"ems\")
             a.nys.check_msg
         );
 
-        // Click "Run .nys script" and poll until done
-        gui_click_text(&mut a, "Run .nys script");
+        // Click "Run script" and poll until done
+        gui_click_text(&mut a, "Run script");
         let t0 = Instant::now();
         while a.nys.running {
             gui_frame(&mut a, egui::RawInput::default());

@@ -37,7 +37,8 @@ const TEMPLATES: [(&str, &str, Option<usize>); 7] = [
 
 impl App {
     pub fn sheets_ui(&mut self, ctx: &egui::Context) {
-        if self.nys.open {
+        // in the window of the shell the script is a dock (`script_dock`, ADR 124); the plain window of the tests keeps the sheet
+        if self.nys.open && !self.shell.active() {
             if kit::modal(ctx, "nys_script", 920.0, |ui| self.sheet_script(ui)) {
                 self.nys.open = false;
             }
@@ -57,64 +58,104 @@ impl App {
         }
     }
 
+    /// The script as a dock on the right of the window (ADR 124): the model stays in view, the editor takes the height, the check and the output sit under it.
+    pub fn script_dock(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        egui::Panel::right("nys_dock")
+            .default_size(460.0)
+            .size_range(340.0..=900.0)
+            .resizable(true)
+            .frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(12)).stroke(egui::Stroke::new(1.0, theme::line(&ctx))))
+            .show(ui, |ui| self.sheet_script(ui));
+    }
+
     fn sheet_script(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        ui.label(kit::title("Script (.nys)", 34.0));
-        ui.label(kit::muted(ui, "Python-syntax script run by nyx-script-worker on the open setup. Changes to geometry, materials, mesh and solves update this workflow directly."));
-        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Script").strong().size(15.0));
+            ui.label(kit::muted(ui, ".nys"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("✕").on_hover_text("Close the script (Ctrl+Shift+R)").clicked() {
+                    self.nys.open = false;
+                }
+            });
+        });
+        ui.label(kit::muted(ui, "Python syntax, run on the open setup by nyx-script-worker. What it changes shows in the model at once.").size(12.5));
+        ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            if kit::ghost(ui, "Load .nys...").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).pick_file() {
-                    match std::fs::read_to_string(&p) {
-                        Ok(text) => {
-                            self.nys.code = text.trim_start_matches('\u{feff}').to_string();
-                            self.nys.path = Some(p);
-                            self.nys.check_msg = None;
-                        }
-                        Err(e) => self.set_error(format!("Could not read script: {e}")),
-                    }
-                }
-            }
-            if kit::ghost(ui, "Save .nys...").clicked() {
-                let default_name = self.nys.path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("script.nys").to_string();
-                if let Some(p) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).set_file_name(default_name).save_file() {
-                    match std::fs::write(&p, &self.nys.code) {
-                        Ok(()) => {
-                            self.status = format!("Saved {}", p.display());
-                            self.nys.path = Some(p);
-                        }
-                        Err(e) => self.set_error(format!("Could not write script: {e}")),
-                    }
-                }
-            }
-            if kit::ghost(ui, "Fill from model").on_hover_text("Replace the editor contents with the .nys commands that build the current model").clicked() {
-                self.fill_nys_from_model();
+            let can_run = !self.nys.running && self.busy.is_none();
+            if kit::primary_enabled(ui, can_run, if self.nys.running { "Running..." } else { "Run script" }).on_hover_text("Run the script on the open setup").clicked() {
+                self.run_nys_script();
             }
             if kit::ghost(ui, "Check").on_hover_text("Parse and validate every nyx command and argument without running").clicked() {
                 self.check_nys_script();
             }
-            let can_run = !self.nys.running && self.busy.is_none();
-            if kit::primary_enabled(ui, can_run, if self.nys.running { "Running..." } else { "Run .nys script" }).clicked() {
-                self.run_nys_script();
+            if kit::ghost(ui, "Fill from model").on_hover_text("Replace the editor contents with the .nys commands that build the current model").clicked() {
+                self.fill_nys_from_model();
             }
-            if kit::ghost(ui, "External .py on CSV...").on_hover_text("Run an external Python script on the exported project JSON and result CSV").clicked() {
-                self.run_python_script();
-            }
+            ui.menu_button("File ▾", |ui| {
+                if ui.button("Load .nys...").clicked() {
+                    self.load_nys_file();
+                    ui.close();
+                }
+                if ui.button("Save .nys...").clicked() {
+                    self.save_nys_file();
+                    ui.close();
+                }
+                if ui.button("External .py on CSV...").on_hover_text("Run an external Python script on the exported project JSON and result CSV").clicked() {
+                    self.run_python_script();
+                    ui.close();
+                }
+            });
         });
         if let Some(p) = &self.nys.path {
             ui.label(kit::mono(p.display().to_string()).size(12.0));
         }
-        ui.add_space(6.0);
-        egui::ScrollArea::vertical().id_salt("nys_code_scroll").max_height(280.0).show(ui, |ui| {
+        ui.add_space(4.0);
+        // the editor takes what the messages under it leave
+        let has_msgs = self.nys.running || self.nys.check_msg.is_some() || self.nys.output.is_some();
+        let editor_h = if has_msgs { (ui.available_height() * 0.58).max(160.0) } else { (ui.available_height() - 8.0).max(160.0) };
+        let row_h = ui.text_style_height(&egui::TextStyle::Monospace).max(10.0);
+        egui::ScrollArea::vertical().id_salt("nys_code_scroll").max_height(editor_h).auto_shrink([false, false]).show(ui, |ui| {
             ui.add(
                 egui::TextEdit::multiline(&mut self.nys.code)
                     .code_editor()
-                    .desired_rows(15)
+                    .desired_rows((editor_h / row_h).floor().max(6.0) as usize)
                     .desired_width(f32::INFINITY)
                     .lock_focus(true)
                     .hint_text("# Write .nys commands here, e.g.\n# mesh_build()\n# solve()"),
             );
         });
+        self.script_messages(ui, &ctx);
+    }
+
+    fn load_nys_file(&mut self) {
+        if let Some(p) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).pick_file() {
+            match std::fs::read_to_string(&p) {
+                Ok(text) => {
+                    self.nys.code = text.trim_start_matches('\u{feff}').to_string();
+                    self.nys.path = Some(p);
+                    self.nys.check_msg = None;
+                }
+                Err(e) => self.set_error(format!("Could not read script: {e}")),
+            }
+        }
+    }
+
+    fn save_nys_file(&mut self) {
+        let default_name = self.nys.path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("script.nys").to_string();
+        if let Some(p) = rfd::FileDialog::new().add_filter("nyx script", &["nys"]).set_file_name(default_name).save_file() {
+            match std::fs::write(&p, &self.nys.code) {
+                Ok(()) => {
+                    self.status = format!("Saved {}", p.display());
+                    self.nys.path = Some(p);
+                }
+                Err(e) => self.set_error(format!("Could not write script: {e}")),
+            }
+        }
+    }
+
+    fn script_messages(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if self.nys.running {
             ui.add_space(6.0);
             kit::status(ui, kit::State::Running, "Running script in nyx-script-worker...");
@@ -124,9 +165,9 @@ impl App {
             match chk {
                 Ok(msg) => kit::status(ui, kit::State::Done, msg.clone()),
                 Err(err) => {
-                    kit::card(ui, theme::raised(&ctx), theme::danger(&ctx), 10, |ui| {
+                    kit::card(ui, theme::raised(ctx), theme::danger(ctx), 10, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.colored_label(theme::danger(&ctx), RichText::new("Static check failed").strong());
+                        ui.colored_label(theme::danger(ctx), RichText::new("Static check failed").strong());
                         ui.label(kit::mono(err.as_str()).size(12.0));
                     });
                 }
@@ -138,16 +179,16 @@ impl App {
                 Ok(text) => {
                     kit::plain_card(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(RichText::new("Script output").strong().color(theme::success(&ctx)));
+                        ui.label(RichText::new("Script output").strong().color(theme::success(ctx)));
                         egui::ScrollArea::vertical().id_salt("nys_out_scroll").max_height(180.0).show(ui, |ui| {
                             ui.add(egui::TextEdit::multiline(&mut text.as_str()).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
                         });
                     });
                 }
                 Err(err) => {
-                    kit::card(ui, theme::raised(&ctx), theme::danger(&ctx), 10, |ui| {
+                    kit::card(ui, theme::raised(ctx), theme::danger(ctx), 10, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.colored_label(theme::danger(&ctx), RichText::new("Script run failed").strong());
+                        ui.colored_label(theme::danger(ctx), RichText::new("Script run failed").strong());
                         egui::ScrollArea::vertical().id_salt("nys_err_scroll").max_height(180.0).show(ui, |ui| {
                             ui.label(kit::mono(err.as_str()).size(12.0));
                         });
