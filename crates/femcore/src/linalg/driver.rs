@@ -306,36 +306,96 @@ fn to_faer(a: &[f64], nrows: usize, ncols: usize) -> faer::Mat<f64> {
 }
 
 /// Eigen decomposition of a symmetric dense matrix (row-major, only the lower triangle is read): ascending eigenvalues and the
-/// eigenvectors (`vecs[j]` is the j-th).
+/// eigenvectors (`vecs[j]` is the j-th). Uses `Par::Seq` for `n <= 512` (`ADR 11`).
 pub fn dense_eigh(a: &[f64], n: usize) -> Result<(Vec<f64>, Vec<Vec<f64>>), String> {
-    let m = to_faer(a, n, n);
-    let e = m.self_adjoint_eigen(faer::Side::Lower).map_err(|e| format!("eigendecomposition failed: {e:?}"))?;
-    let (u, s) = (e.U(), e.S());
-    let vals: Vec<f64> = (0..n).map(|i| s.column_vector()[i]).collect();
+    use faer::dyn_stack::{MemBuffer, MemStack};
+    use faer::linalg::evd::{ComputeEigenvectors, self_adjoint_evd, self_adjoint_evd_scratch};
+
+    if n == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let m = faer::Mat::from_fn(n, n, |i, j| if i >= j { a[i * n + j] } else { a[j * n + i] });
+    let par = crate::linalg::faer_glue::dense_par_dim(n);
+    let mut u = faer::Mat::<f64>::zeros(n, n);
+    let mut s = faer::diag::Diag::<f64>::zeros(n);
+    let mut mem = MemBuffer::new(self_adjoint_evd_scratch::<f64>(
+        n,
+        ComputeEigenvectors::Yes,
+        par,
+        Default::default(),
+    ));
+    let res = self_adjoint_evd(
+        m.as_ref(),
+        s.as_mut(),
+        Some(u.as_mut()),
+        par,
+        MemStack::new(&mut mem),
+        Default::default(),
+    );
+    crate::linalg::faer_glue::clear_upper_vector_state();
+    res.map_err(|e| format!("eigendecomposition failed: {e:?}"))?;
+    let vals: Vec<f64> = (0..n).map(|i| s[i]).collect();
     let vecs: Vec<Vec<f64>> = (0..n).map(|j| (0..n).map(|i| u[(i, j)]).collect()).collect();
     Ok((vals, vecs))
 }
 
 /// Generalised symmetric-definite problem `K x = lambda M x` (dense, row-major, `M` positive definite) through the Cholesky factor
-/// of `M`: ascending eigenvalues and `M`-orthonormal eigenvectors.
+/// of `M`: ascending eigenvalues and `M`-orthonormal eigenvectors. Uses `Par::Seq` for `n <= 512` (`ADR 11`).
 pub fn dense_gen_eigh(k: &[f64], m: &[f64], n: usize) -> Result<(Vec<f64>, Vec<Vec<f64>>), String> {
-    let mm = to_faer(m, n, n);
-    let llt = mm.llt(faer::Side::Lower).map_err(|e| format!("mass matrix is not positive definite: {e:?}"))?;
-    let l = llt.L();
+    use faer::dyn_stack::{MemBuffer, MemStack};
+    use faer::linalg::cholesky::llt::factor::{cholesky_in_place, cholesky_in_place_scratch};
+    use faer::linalg::evd::{ComputeEigenvectors, self_adjoint_evd, self_adjoint_evd_scratch};
+
+    if n == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let par = crate::linalg::faer_glue::dense_par_dim(n);
+    let mut mm = to_faer(m, n, n);
+    {
+        let mut llt_mem = MemBuffer::new(cholesky_in_place_scratch::<f64>(n, par, Default::default()));
+        let res = cholesky_in_place(
+            mm.as_mut(),
+            Default::default(),
+            par,
+            MemStack::new(&mut llt_mem),
+            Default::default(),
+        );
+        crate::linalg::faer_glue::clear_upper_vector_state();
+        res.map_err(|e| format!("mass matrix is not positive definite: {e:?}"))?;
+    }
+    let l = mm.as_ref();
     // C = L^-1 K L^-T
     let mut c = to_faer(k, n, n);
-    faer::linalg::triangular_solve::solve_lower_triangular_in_place(l, c.as_mut(), faer::get_global_parallelism());
+    faer::linalg::triangular_solve::solve_lower_triangular_in_place(l, c.as_mut(), par);
     let mut ct = c.transpose().to_owned();
-    faer::linalg::triangular_solve::solve_lower_triangular_in_place(l, ct.as_mut(), faer::get_global_parallelism());
+    faer::linalg::triangular_solve::solve_lower_triangular_in_place(l, ct.as_mut(), par);
     // symmetrise against round-off
     let cs = faer::Mat::from_fn(n, n, |i, j| 0.5 * (ct[(i, j)] + ct[(j, i)]));
-    let e = cs.self_adjoint_eigen(faer::Side::Lower).map_err(|e| format!("eigendecomposition failed: {e:?}"))?;
-    let (u, s) = (e.U(), e.S());
-    let vals: Vec<f64> = (0..n).map(|i| s.column_vector()[i]).collect();
+    let mut u = faer::Mat::<f64>::zeros(n, n);
+    let mut s = faer::diag::Diag::<f64>::zeros(n);
+    {
+        let mut evd_mem = MemBuffer::new(self_adjoint_evd_scratch::<f64>(
+            n,
+            ComputeEigenvectors::Yes,
+            par,
+            Default::default(),
+        ));
+        let res = self_adjoint_evd(
+            cs.as_ref(),
+            s.as_mut(),
+            Some(u.as_mut()),
+            par,
+            MemStack::new(&mut evd_mem),
+            Default::default(),
+        );
+        crate::linalg::faer_glue::clear_upper_vector_state();
+        res.map_err(|e| format!("eigendecomposition failed: {e:?}"))?;
+    }
+    let vals: Vec<f64> = (0..n).map(|i| s[i]).collect();
     // x = L^-T y
-    let mut y = faer::Mat::from_fn(n, n, |i, j| u[(i, j)]);
-    faer::linalg::triangular_solve::solve_upper_triangular_in_place(l.transpose(), y.as_mut(), faer::get_global_parallelism());
-    let vecs: Vec<Vec<f64>> = (0..n).map(|j| (0..n).map(|i| y[(i, j)]).collect()).collect();
+    faer::linalg::triangular_solve::solve_upper_triangular_in_place(l.transpose(), u.as_mut(), par);
+    crate::linalg::faer_glue::clear_upper_vector_state();
+    let vecs: Vec<Vec<f64>> = (0..n).map(|j| (0..n).map(|i| u[(i, j)]).collect()).collect();
     Ok((vals, vecs))
 }
 
@@ -366,12 +426,33 @@ pub fn thin_svd_c64(cols: &[Vec<C64>]) -> Result<(Vec<f64>, Vec<Vec<C64>>), Stri
         if cols.iter().flatten().any(|v| !v.is_finite()) {
             return Err("thin SVD failed: matrix contains NaN or infinity".into());
         }
+        use faer::dyn_stack::{MemBuffer, MemStack};
+        use faer::linalg::svd::{ComputeSvdVectors, svd, svd_scratch};
         let m = faer::Mat::<faer::c64>::from_fn(n, k, |i, j| cols[j][i]);
-        let svd = m.thin_svd().map_err(|_| "thin SVD failed to converge".to_string());
+        let par = crate::linalg::faer_glue::dense_par(n * k);
+        let mut s_diag = faer::diag::Diag::<faer::c64>::zeros(n);
+        let mut u = faer::Mat::<faer::c64>::zeros(n, n);
+        let mut mem = MemBuffer::new(svd_scratch::<faer::c64>(
+            n,
+            k,
+            ComputeSvdVectors::Thin,
+            ComputeSvdVectors::No,
+            par,
+            Default::default(),
+        ));
+        let res = svd(
+            m.as_ref(),
+            s_diag.as_mut(),
+            Some(u.as_mut()),
+            None,
+            par,
+            MemStack::new(&mut mem),
+            Default::default(),
+        )
+        .map_err(|_| "thin SVD failed to converge".to_string());
         crate::linalg::faer_glue::clear_upper_vector_state();
-        let svd = svd?;
-        let s: Vec<f64> = (0..n).map(|i| svd.S().column_vector()[i].re).collect();
-        let u = svd.U();
+        res?;
+        let s: Vec<f64> = (0..n).map(|i| s_diag[i].re).collect();
         let u_cols: Vec<Vec<C64>> = (0..n).map(|j| (0..n).map(|i| u[(i, j)]).collect()).collect();
         Ok((s, u_cols))
     }
@@ -608,16 +689,21 @@ struct ParShiftInvert<'a, T: FaerScalar> {
 impl<T: FaerScalar> ParShiftInvert<'_, T> {
     fn solve_block(&self, y: &mut [T], nrhs: usize) {
         let n = self.fac.dim();
-        let nt = if self.min_n > 0 && nrhs > 1 && n >= self.min_n { crate::par::threads().min(nrhs) } else { 1 };
-        if nt <= 1 {
+        if self.min_n == 0 || nrhs <= 1 || n < self.min_n {
             self.fac.solve_block_in_place(&mut y[..n * nrhs], nrhs);
             return;
         }
-        let cols = nrhs.div_ceil(nt);
-        y[..n * nrhs].par_chunks_mut(cols * n).for_each(|chunk| {
-            let k = chunk.len() / n;
-            self.fac.solve_block_in_place(chunk, k);
-        });
+        // Always solve 1 column per call when column-parallel mode is enabled so `NYX_THREADS=1`
+        // and `NYX_THREADS=N` execute the exact same triangular-solve kernel (`ADR 11`).
+        if crate::par::threads() <= 1 {
+            for chunk in y[..n * nrhs].chunks_mut(n) {
+                self.fac.solve_block_in_place(chunk, 1);
+            }
+        } else {
+            y[..n * nrhs].par_chunks_mut(n).for_each(|chunk| {
+                self.fac.solve_block_in_place(chunk, 1);
+            });
+        }
     }
 }
 
@@ -654,16 +740,21 @@ struct QepShiftInvert<'a> {
 impl QepShiftInvert<'_> {
     fn solve_block(&self, rhs: &mut [C64], nrhs: usize) {
         let n = self.fac.dim();
-        let nt = if self.min_n > 0 && nrhs > 1 && n >= self.min_n { crate::par::threads().min(nrhs) } else { 1 };
-        if nt <= 1 {
+        if self.min_n == 0 || nrhs <= 1 || n < self.min_n {
             self.fac.solve_block_in_place(&mut rhs[..n * nrhs], nrhs);
             return;
         }
-        let cols = nrhs.div_ceil(nt);
-        rhs[..n * nrhs].par_chunks_mut(cols * n).for_each(|chunk| {
-            let k = chunk.len() / n;
-            self.fac.solve_block_in_place(chunk, k);
-        });
+        // Always solve 1 column per call when column-parallel mode is enabled so `NYX_THREADS=1`
+        // and `NYX_THREADS=N` execute the exact same triangular-solve kernel (`ADR 11`).
+        if crate::par::threads() <= 1 {
+            for chunk in rhs[..n * nrhs].chunks_mut(n) {
+                self.fac.solve_block_in_place(chunk, 1);
+            }
+        } else {
+            rhs[..n * nrhs].par_chunks_mut(n).for_each(|chunk| {
+                self.fac.solve_block_in_place(chunk, 1);
+            });
+        }
     }
 }
 
@@ -1028,6 +1119,65 @@ mod tests {
                 let target = if a == b { 1.0 } else { 0.0 };
                 assert!((dot - C64::new(target, 0.0)).norm() < 1e-12, "u_{a}^H u_{b} = {dot}");
             }
+        }
+    }
+
+    #[test]
+    fn direct_solver_stats_reports_factor_backend() {
+        let a_sym = tridiag_c64(20, C64::new(4.0, 0.2), C64::new(-1.0, 0.05));
+        let s_sym = DirectSolver::new(&a_sym, false).unwrap();
+        assert!(
+            matches!(s_sym.stats().backend, FactorBackend::LbltAmd | FactorBackend::LbltNd),
+            "expected LBLT backend, got {:?}",
+            s_sym.stats().backend
+        );
+
+        let mut trips = Vec::new();
+        for i in 0..20 {
+            trips.push((i, i, C64::new(4.0, 0.1)));
+            if i + 1 < 20 {
+                trips.push((i, i + 1, C64::new(-1.0, 0.2)));
+                trips.push((i + 1, i, C64::new(-0.5, -0.3)));
+            }
+        }
+        let a_unsym = CCsr::from_triplets(20, 20, &trips).unwrap();
+        let s_unsym = DirectSolver::new(&a_unsym, false).unwrap();
+        assert_eq!(s_unsym.stats().backend, FactorBackend::LuColamd);
+    }
+
+    #[test]
+    fn small_dense_eigh_and_gen_eigh_are_bit_identical_across_pools() {
+        let n = 48;
+        let mut k = vec![0.0f64; n * n];
+        let mut m = vec![0.0f64; n * n];
+        for i in 0..n {
+            for j in 0..=i {
+                let v = ((i * 31 + j * 17 + 7) % 97) as f64 / 97.0 - 0.5;
+                let kv = if i == j { 6.0 + v } else { 0.1 * v };
+                let mv = if i == j { 3.0 + 0.1 * v.abs() } else { 0.02 * v };
+                k[i * n + j] = kv;
+                k[j * n + i] = kv;
+                m[i * n + j] = mv;
+                m[j * n + i] = mv;
+            }
+        }
+        let run_in = |nt: usize| {
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(nt).build().unwrap();
+            pool.install(|| {
+                let (w1, v1) = dense_eigh(&k, n).unwrap();
+                let (w2, v2) = dense_gen_eigh(&k, &m, n).unwrap();
+                (w1, v1, w2, v2)
+            })
+        };
+        let (w1_1, v1_1, w2_1, v2_1) = run_in(1);
+        let (w1_8, v1_8, w2_8, v2_8) = run_in(8);
+        assert_eq!(w1_1.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), w1_8.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        assert_eq!(w2_1.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), w2_8.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        for (a, b) in v1_1.iter().flatten().zip(v1_8.iter().flatten()) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        for (a, b) in v2_1.iter().flatten().zip(v2_8.iter().flatten()) {
+            assert_eq!(a.to_bits(), b.to_bits());
         }
     }
 }

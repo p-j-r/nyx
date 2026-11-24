@@ -19,6 +19,7 @@ use crate::linalg::faer_glue::{FaerScalar, clear_upper_vector_state};
 use crate::linalg::linop::LinearOperator;
 use crate::linalg::ordering::{FillOrdering, adjacency_from_lower, nested_dissection};
 use crate::linalg::scalar::Scalar;
+use crate::linalg::vecops;
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::matmul;
 use faer::linalg::triangular_solve;
@@ -32,6 +33,7 @@ use faer::sparse::linalg::cholesky::{
 use faer::sparse::linalg::lu::{LuRef, NumericLu, SymbolicLu, factorize_symbolic_lu};
 use faer::sparse::{SparseColMatRef, SymbolicSparseColMatRef};
 use faer::{Accum, Conj, MatMut, MatRef, Par, Side};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,11 +112,26 @@ pub enum Threads {
     Fixed(usize),
 }
 
+/// Dimension threshold above which [`Threads::Global`] may use multi-threaded `faer` sparse
+/// factorisations (paired with deterministic compensated-residual iterative refinement in
+/// [`ShiftedFactorization::solve_block_in_place`] to uphold `ADR 11`).
+pub(crate) const PAR_FACTOR_MIN_N: usize = 60_000;
+
+/// Returns `true` when `NYX_DETERMINISTIC_FACTOR` requests strictly sequential (`Par::Seq`)
+/// sparse and dense factorisations for bitwise thread-count invariance (`ADR 11`).
+#[inline]
+pub(crate) fn deterministic_factor_env() -> bool {
+    matches!(
+        std::env::var("NYX_DETERMINISTIC_FACTOR").ok().as_deref().map(str::trim),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
+}
+
 impl Threads {
     pub(crate) fn par(self) -> Par {
         match self {
             Threads::Global => {
-                if crate::par::factor_threads() <= 1 {
+                if crate::par::factor_threads() <= 1 || deterministic_factor_env() {
                     Par::Seq
                 } else {
                     faer::get_global_parallelism()
@@ -127,12 +144,18 @@ impl Threads {
     }
 
     /// Parallelism for factorising a sparse matrix of dimension `n`: under [`Threads::Global`],
-    /// systems up to 60,000 unknowns factorise with `Par::Seq` so direct solves below the 3D AMG
-    /// crossover threshold are 100% bit-deterministic across `NYX_THREADS` while avoiding supernode
-    /// thread-synchronisation overhead on small/medium problems.
+    /// systems up to 60,000 unknowns (or whenever `NYX_DETERMINISTIC_FACTOR=1` is set) factorise
+    /// with `Par::Seq` so direct solves are bit-deterministic across `NYX_THREADS` while avoiding
+    /// supernode thread-synchronisation overhead on small/medium problems.
     pub(crate) fn par_for_factor(self, n: usize) -> Par {
         match self {
-            Threads::Global if n <= 60_000 || crate::par::factor_threads() <= 1 => Par::Seq,
+            Threads::Global
+                if n <= PAR_FACTOR_MIN_N
+                    || crate::par::factor_threads() <= 1
+                    || deterministic_factor_env() =>
+            {
+                Par::Seq
+            }
             _ => self.par(),
         }
     }
@@ -376,8 +399,91 @@ fn extract_lower<T: Scalar>(full: &Assembled<T>, n: usize) -> Assembled<T> {
     Assembled { col_ptr, row_idx, a, b }
 }
 
-fn csc_spmv<T: Scalar>(n: usize, col_ptr: &[u32], row_idx: &[u32], vals: &[T], x: &[T], y: &mut [T]) {
-    y.fill(T::ZERO);
+/// Error-free product `a * b = p + e` using exact FMA (`f64::mul_add`).
+#[inline]
+fn two_prod(a: f64, b: f64) -> (f64, f64) {
+    let p = a * b;
+    let e = a.mul_add(b, -p);
+    (p, e)
+}
+
+/// Error-free sum `a + b = s + e` (Knuth 2Sum).
+#[inline]
+fn two_sum(a: f64, b: f64) -> (f64, f64) {
+    let s = a + b;
+    let v = s - a;
+    let e = (a - (s - v)) + (b - v);
+    (s, e)
+}
+
+/// Compensated double-double (`f64 + f64`) complex/real accumulator for 106-bit residual
+/// evaluation `r = b - (A - sigma B) x` during deterministic iterative refinement (`ADR 11`).
+#[derive(Clone, Copy, Default)]
+struct CompAcc {
+    re_hi: f64,
+    re_lo: f64,
+    im_hi: f64,
+    im_lo: f64,
+}
+
+impl CompAcc {
+    #[inline]
+    fn from_scalar<T: Scalar>(v: T) -> Self {
+        Self { re_hi: v.re(), re_lo: 0.0, im_hi: v.im(), im_lo: 0.0 }
+    }
+
+    #[inline]
+    fn add_real_prod(&mut self, a: f64, b: f64) {
+        let (p, pe) = two_prod(a, b);
+        let (s, se) = two_sum(self.re_hi, p);
+        self.re_hi = s;
+        self.re_lo += se + pe;
+    }
+
+    #[inline]
+    fn add_imag_prod(&mut self, a: f64, b: f64) {
+        let (p, pe) = two_prod(a, b);
+        let (s, se) = two_sum(self.im_hi, p);
+        self.im_hi = s;
+        self.im_lo += se + pe;
+    }
+
+    /// `self -= val * x` in compensated arithmetic.
+    #[inline]
+    fn sub_prod<T: Scalar>(&mut self, val: T, x: T) {
+        if T::IS_COMPLEX {
+            let (vr, vi) = (val.re(), val.im());
+            let (xr, xi) = (x.re(), x.im());
+            self.add_real_prod(-vr, xr);
+            self.add_real_prod(vi, xi);
+            self.add_imag_prod(-vr, xi);
+            self.add_imag_prod(-vi, xr);
+        } else {
+            self.add_real_prod(-val.re(), x.re());
+        }
+    }
+
+    #[inline]
+    fn finish<T: Scalar>(self) -> T {
+        if T::IS_COMPLEX {
+            T::from_parts(self.re_hi + self.re_lo, self.im_hi + self.im_lo)
+        } else {
+            T::from_f64(self.re_hi + self.re_lo)
+        }
+    }
+}
+
+/// Deterministic compensated residual `r = b - A x` using a pre-assembled full CSC matrix `vals`.
+fn csc_residual_vals<T: Scalar>(
+    n: usize,
+    col_ptr: &[u32],
+    row_idx: &[u32],
+    vals: &[T],
+    b: &[T],
+    x: &[T],
+    r: &mut [T],
+) {
+    let mut acc: Vec<CompAcc> = b.iter().map(|&bi| CompAcc::from_scalar(bi)).collect();
     for c in 0..n {
         let xc = x[c];
         if xc == T::ZERO {
@@ -386,9 +492,102 @@ fn csc_spmv<T: Scalar>(n: usize, col_ptr: &[u32], row_idx: &[u32], vals: &[T], x
         let start = col_ptr[c] as usize;
         let end = col_ptr[c + 1] as usize;
         for k in start..end {
-            y[row_idx[k] as usize] += vals[k] * xc;
+            acc[row_idx[k] as usize].sub_prod(vals[k], xc);
         }
     }
+    for (ri, a) in r.iter_mut().zip(acc) {
+        *ri = a.finish();
+    }
+}
+
+/// Deterministic compensated residual `r = b - (A - sigma B) x` from full CSC `Assembled<T>`
+/// without requiring a retained shifted `vals` buffer.
+fn csc_residual_shifted_full<T: Scalar>(asm: &Assembled<T>, sigma: T, b: &[T], x: &[T], r: &mut [T]) {
+    let n = b.len();
+    let mut acc: Vec<CompAcc> = b.iter().map(|&bi| CompAcc::from_scalar(bi)).collect();
+    let has_sigma = sigma != T::ZERO;
+    for c in 0..n {
+        let xc = x[c];
+        if xc == T::ZERO {
+            continue;
+        }
+        let neg_sigma_xc = if has_sigma { -(sigma * xc) } else { T::ZERO };
+        let start = asm.col_ptr[c] as usize;
+        let end = asm.col_ptr[c + 1] as usize;
+        for k in start..end {
+            let row = asm.row_idx[k] as usize;
+            let ak = asm.a[k];
+            if ak != T::ZERO {
+                acc[row].sub_prod(ak, xc);
+            }
+            if has_sigma {
+                let bk = asm.b[k];
+                if bk != T::ZERO {
+                    // Subtract (-sigma * bk) * xc  <==>  sub_prod(bk, -sigma * xc)
+                    acc[row].sub_prod(bk, neg_sigma_xc);
+                }
+            }
+        }
+    }
+    for (ri, a) in r.iter_mut().zip(acc) {
+        *ri = a.finish();
+    }
+}
+
+/// Deterministic compensated residual `r = b - (A - sigma B) x` from lower-triangle CSC `Assembled<T>`
+/// (mirroring `r > c` with `conj` when `hermitian`, or plain transpose when complex-symmetric).
+fn csc_residual_shifted_lower<T: Scalar>(
+    lower: &Assembled<T>,
+    sigma: T,
+    hermitian: bool,
+    b: &[T],
+    x: &[T],
+    r: &mut [T],
+) {
+    let n = b.len();
+    let mut acc: Vec<CompAcc> = b.iter().map(|&bi| CompAcc::from_scalar(bi)).collect();
+    let has_sigma = sigma != T::ZERO;
+    for c in 0..n {
+        let xc = x[c];
+        let neg_sigma_xc = if has_sigma { -(sigma * xc) } else { T::ZERO };
+        let start = lower.col_ptr[c] as usize;
+        let end = lower.col_ptr[c + 1] as usize;
+        for k in start..end {
+            let row = lower.row_idx[k] as usize;
+            let ak = lower.a[k];
+            let bk = lower.b[k];
+            if xc != T::ZERO {
+                if ak != T::ZERO {
+                    acc[row].sub_prod(ak, xc);
+                }
+                if has_sigma && bk != T::ZERO {
+                    acc[row].sub_prod(bk, neg_sigma_xc);
+                }
+            }
+            if row > c {
+                let xr = x[row];
+                if xr != T::ZERO {
+                    let ak_u = if hermitian { ak.conj() } else { ak };
+                    if ak_u != T::ZERO {
+                        acc[c].sub_prod(ak_u, xr);
+                    }
+                    if has_sigma && bk != T::ZERO {
+                        let bk_u = if hermitian { bk.conj() } else { bk };
+                        let s_u = if hermitian { sigma.conj() } else { sigma };
+                        acc[c].sub_prod(bk_u, -(s_u * xr));
+                    }
+                }
+            }
+        }
+    }
+    for (ri, a) in r.iter_mut().zip(acc) {
+        *ri = a.finish();
+    }
+}
+
+struct ProbeCheck {
+    ok: bool,
+    initial_rel_err: f64,
 }
 
 fn order_to_perm(order: &[usize]) -> (Vec<u32>, Vec<u32>) {
@@ -1185,7 +1384,12 @@ pub struct ShiftedFactorization<T: FaerScalar> {
     lower: Option<Assembled<T>>,
     /// Copies of the inputs kept only while `full` is not built (positive definite case).
     src: Option<(Csr<T>, Option<Csr<T>>)>,
-    vals: Vec<T>,
+    /// Last factorised shift `sigma` for `A - sigma B` (used by deterministic iterative refinement).
+    sigma: T,
+    /// When true, `solve_block_in_place` performs 1-2 steps of deterministic compensated-residual
+    /// iterative refinement (`r = b - (A - sigma B) x`) to eliminate parallel factor roundoff or
+    /// moderately conditioned LBLT pivot growth (`ADR 11`, `FR-29`, `FR-33`).
+    refine_solves: bool,
     sym_lu: Option<SymbolicLu<u32>>,
     sym_lu_est_nnz: usize,
     sym_llt: Option<SymbolicCholesky<u32>>,
@@ -1203,6 +1407,7 @@ pub struct ShiftedFactorization<T: FaerScalar> {
     /// Fill-reducing ordering for Cholesky and symmetric indefinite `LBL^H`/`LBL^T`; set before the first factorisation.
     pub ordering: FillOrdering,
     stats: FactorStats,
+    solves: AtomicUsize,
 }
 
 impl<T: FaerScalar> ShiftedFactorization<T> {
@@ -1220,7 +1425,6 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             let tm = build_transpose_map(&f, n);
             (Some(f), Some(tm), None, None)
         };
-        let nnz = full.as_ref().map_or_else(|| lower.as_ref().map_or(0, |l| 2 * l.row_idx.len()), |f| f.row_idx.len());
         Ok(Self {
             n,
             definiteness,
@@ -1228,7 +1432,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             tmap,
             lower,
             src,
-            vals: vec![T::ZERO; nnz],
+            sigma: T::ZERO,
+            refine_solves: false,
             sym_lu: None,
             sym_lu_est_nnz: 0,
             sym_llt: None,
@@ -1257,7 +1462,26 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 factor_nnz: 0,
                 solve_secs_total: 0.0,
             },
+            solves: AtomicUsize::new(0),
         })
+    }
+
+    /// Releases all symmetric Cholesky / `LBL^H` / `LBL^T` factor allocations so peak memory never
+    /// holds both symmetric LBLT and COLAMD LU factors simultaneously (`FR-33`).
+    fn release_lblt_buffers(&mut self) {
+        self.llt_vals = Vec::new();
+        self.sym_lblt_plan = None;
+        self.lblt_subdiag = Vec::new();
+        self.lblt_perm_fwd = Vec::new();
+        self.lblt_perm_inv = Vec::new();
+        self.sym_llt = None;
+    }
+
+    /// Releases COLAMD LU factor allocations when switching back to a symmetric factor backend.
+    fn release_lu_buffers(&mut self) {
+        self.sym_lu = None;
+        self.sym_lu_est_nnz = 0;
+        self.lu_num = NumericLu::new();
     }
 
     /// Replaces the *values* of `A` (and `B`) without redoing the symbolic analysis, for matrices
@@ -1292,10 +1516,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         } else {
             let (a, b) = self.src.as_ref().expect("source matrices kept while the full pattern is missing");
             let f = assemble(a, b.as_ref(), false)?;
-            let nnz = f.row_idx.len();
             self.tmap = Some(build_transpose_map(&f, self.n));
             self.full = Some(f);
-            self.vals = vec![T::ZERO; nnz];
         }
         Ok(())
     }
@@ -1366,28 +1588,54 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         Ok(())
     }
 
-    fn verify_probe_residual(&self, full_vals: &[T], solve_one: impl FnOnce(&mut [T])) -> bool {
+    /// Probes the symmetric indefinite factor on a deterministic vector, performing up to 2 cheap
+    /// compensated-residual iterative refinement steps before rejecting against `1e-8` so moderately
+    /// conditioned complex-symmetric matrices stay on low-fill `SymLblt`/`HermLblt` (`FR-33`).
+    fn verify_probe_residual(&self, full_vals: &[T], solve_one: impl Fn(&mut [T])) -> ProbeCheck {
         let n = self.n;
         let mut probe = Vec::with_capacity(n);
-        let mut p_norm_sq = 0.0f64;
         for i in 0..n {
             let v = (((i.wrapping_mul(2654435761) ^ 0x5a5a_a5a5) % 10007) as f64 / 5003.5) - 1.0;
-            let s = T::from_f64(v);
-            p_norm_sq += s.modulus_sq();
-            probe.push(s);
+            probe.push(T::from_f64(v));
         }
-        let p_norm = p_norm_sq.sqrt().max(1e-300);
+        let p_norm = vecops::norm2(&probe).max(1e-300);
         let mut x = probe.clone();
         solve_one(&mut x);
         if !x.iter().all(|v| v.is_finite()) {
-            return false;
+            return ProbeCheck { ok: false, initial_rel_err: f64::INFINITY };
         }
         let full = self.full.as_ref().unwrap();
-        let mut ax = vec![T::ZERO; n];
-        csc_spmv(n, &full.col_ptr, &full.row_idx, full_vals, &x, &mut ax);
-        let err_sq: f64 = ax.iter().zip(&probe).map(|(a, b)| (*a - *b).modulus_sq()).sum();
-        let rel_err = err_sq.sqrt() / p_norm;
-        rel_err.is_finite() && rel_err <= 1e-8
+        let mut r = vec![T::ZERO; n];
+        csc_residual_vals(n, &full.col_ptr, &full.row_idx, full_vals, &probe, &x, &mut r);
+        let initial_rel_err = vecops::norm2(&r) / p_norm;
+        if !initial_rel_err.is_finite() {
+            return ProbeCheck { ok: false, initial_rel_err: f64::INFINITY };
+        }
+        if initial_rel_err <= 1e-8 {
+            return ProbeCheck { ok: true, initial_rel_err };
+        }
+        // Up to 2 steps of cheap iterative refinement before falling back to COLAMD LU.
+        let mut rel_err = initial_rel_err;
+        let mut dx = vec![T::ZERO; n];
+        for _ in 0..2 {
+            dx.copy_from_slice(&r);
+            solve_one(&mut dx);
+            if !dx.iter().all(|v| v.is_finite()) {
+                return ProbeCheck { ok: false, initial_rel_err };
+            }
+            for (xi, &dxi) in x.iter_mut().zip(&dx) {
+                *xi += dxi;
+            }
+            csc_residual_vals(n, &full.col_ptr, &full.row_idx, full_vals, &probe, &x, &mut r);
+            rel_err = vecops::norm2(&r) / p_norm;
+            if !rel_err.is_finite() {
+                return ProbeCheck { ok: false, initial_rel_err };
+            }
+            if rel_err <= 1e-8 {
+                return ProbeCheck { ok: true, initial_rel_err };
+            }
+        }
+        ProbeCheck { ok: rel_err <= 1e-8, initial_rel_err }
     }
 
     fn try_cholesky(&mut self, sigma: T) -> Result<bool, SolverError> {
@@ -1395,7 +1643,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         let par = self.threads.factor.par_for_factor(n);
         self.ensure_sym_llt()?;
         let lower = self.lower.as_ref().expect("lower pattern exists for PositiveDefinite");
-        let mut vals = std::mem::take(&mut self.vals);
+        let mut vals = Vec::with_capacity(lower.row_idx.len());
         Self::shifted_values(lower, sigma, &mut vals);
         let sym = self.sym_llt.as_ref().unwrap();
         let mat = SparseColMatRef::new(Self::pattern(lower, n), T::faer_slice(&vals));
@@ -1412,9 +1660,12 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         );
         clear_upper_vector_state();
         self.stats.numeric_secs_last = t0.elapsed().as_secs_f64();
-        self.vals = vals;
+        drop(vals);
         match res {
             Ok(_) => {
+                self.release_lu_buffers();
+                self.sigma = sigma;
+                self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq;
                 self.have = Used::Cholesky;
                 self.active = ActiveFactor::Cholesky;
                 self.stats.used = Used::Cholesky;
@@ -1430,7 +1681,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     }
 
     /// Supernodal/simplicial Hermitian `LBL^H` (`faer::intranode_lblt`) for real-symmetric or
-    /// complex-Hermitian indefinite matrices, guarded by finiteness + 1-vector backward residual `<= 1e-8`.
+    /// complex-Hermitian indefinite matrices, guarded by finiteness + IR-verified probe residual `<= 1e-8`.
     fn try_herm_lblt(&mut self, sigma: T, full_vals: &[T]) -> Result<bool, SolverError> {
         let n = self.n;
         if n == 0 {
@@ -1464,13 +1715,15 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         );
         clear_upper_vector_state();
         let fac_secs = t0.elapsed().as_secs_f64();
+        drop(mem);
+        drop(lvals);
 
         if !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite()) {
             return Ok(false);
         }
 
         let solve_par = self.threads.solve.par();
-        let ok = self.verify_probe_residual(full_vals, |x| {
+        let probe = self.verify_probe_residual(full_vals, |x| {
             let sym = self.sym_llt.as_ref().unwrap();
             let mut smem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(1, solve_par));
             let perm = PermRef::new_checked(&self.lblt_perm_fwd, &self.lblt_perm_inv, n);
@@ -1484,10 +1737,13 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             lblt.solve_in_place_with_conj(Conj::No, xm, solve_par, MemStack::new(&mut smem));
             clear_upper_vector_state();
         });
-        if !ok {
+        if !probe.ok {
             return Ok(false);
         }
 
+        self.release_lu_buffers();
+        self.sigma = sigma;
+        self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || probe.initial_rel_err > 1e-14;
         self.stats.numeric_secs_last = fac_secs;
         self.have = Used::Lu;
         self.active = ActiveFactor::HermLblt;
@@ -1502,7 +1758,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
 
     /// Non-conjugate supernodal/simplicial complex-symmetric `LBL^T` (`A = A^T != A^H`, e.g. PML /
     /// lossy dielectrics / surface impedance), reusing `faer`'s `SymbolicCholesky` (AMD/ND/Auto) and
-    /// BLAS-3 dense kernels, guarded by finiteness + 1-vector backward residual `<= 1e-8`.
+    /// BLAS-3 dense kernels, guarded by finiteness + IR-verified probe residual `<= 1e-8`.
     fn try_sym_lblt(&mut self, sigma: T, full_vals: &[T]) -> Result<bool, SolverError> {
         let n = self.n;
         if n == 0 {
@@ -1546,12 +1802,13 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             }
         };
         let fac_secs = t0.elapsed().as_secs_f64();
+        drop(lvals);
         if !fac_ok || !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite()) {
             return Ok(false);
         }
 
         let solve_par = self.threads.solve.par();
-        let ok = self.verify_probe_residual(full_vals, |x| {
+        let probe = self.verify_probe_residual(full_vals, |x| {
             let sym = self.sym_llt.as_ref().unwrap();
             match sym.raw() {
                 SymbolicCholeskyRaw::Supernodal(sup) => solve_supernodal_sym_lblt(
@@ -1568,10 +1825,13 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 SymbolicCholeskyRaw::Simplicial(simp) => solve_simplicial_sym_ldlt(sym, simp, &self.llt_vals, x, 1),
             }
         });
-        if !ok {
+        if !probe.ok {
             return Ok(false);
         }
 
+        self.release_lu_buffers();
+        self.sigma = sigma;
+        self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || probe.initial_rel_err > 1e-14;
         self.stats.numeric_secs_last = fac_secs;
         self.have = Used::Lu;
         self.active = ActiveFactor::SymLblt;
@@ -1584,9 +1844,12 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         Ok(true)
     }
 
-    fn do_colamd_lu(&mut self, full_vals: &[T]) -> Result<(), SolverError> {
+    fn do_colamd_lu(&mut self, sigma: T, full_vals: &[T]) -> Result<(), SolverError> {
         let n = self.n;
         let par = self.threads.factor.par_for_factor(n);
+        // Explicitly drop all symmetric LBLT/Cholesky factor buffers BEFORE allocating COLAMD LU
+        // so peak RAM never holds both factorisations simultaneously (`FR-33`).
+        self.release_lblt_buffers();
         if self.sym_lu.is_none() {
             let t0 = Instant::now();
             let full = self.full.as_ref().unwrap();
@@ -1607,6 +1870,9 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             } else {
                 0
             };
+            if self.definiteness != Definiteness::PositiveDefinite {
+                self.lower = None;
+            }
             self.sym_lu = Some(sym);
             self.sym_lu_est_nnz = est_nnz;
             self.stats.analyse_secs += t0.elapsed().as_secs_f64();
@@ -1627,6 +1893,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         clear_upper_vector_state();
         self.stats.numeric_secs_last = t0.elapsed().as_secs_f64();
         if ok {
+            self.sigma = sigma;
+            self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq;
             self.have = Used::Lu;
             self.active = ActiveFactor::ColamdLu;
             self.stats.used = Used::Lu;
@@ -1640,7 +1908,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
 
     fn do_lu(&mut self, sigma: T) -> Result<(), SolverError> {
         self.ensure_full()?;
-        let mut vals = std::mem::take(&mut self.vals);
+        let mut vals = Vec::with_capacity(self.full.as_ref().unwrap().row_idx.len());
         Self::shifted_values(self.full.as_ref().unwrap(), sigma, &mut vals);
 
         let policy = backend_policy();
@@ -1663,21 +1931,22 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         };
 
         let res = match policy {
-            BackendPolicy::ForceColamd => self.do_colamd_lu(&vals),
+            BackendPolicy::ForceColamd => self.do_colamd_lu(sigma, &vals),
             BackendPolicy::ForceLblt => {
                 if (is_herm && self.try_herm_lblt(sigma, &vals)?)
                     || (is_cplx_sym && self.try_sym_lblt(sigma, &vals)?)
                 {
                     Ok(())
                 } else {
-                    self.do_colamd_lu(&vals)
+                    self.release_lblt_buffers();
+                    self.do_colamd_lu(sigma, &vals)
                 }
             }
             BackendPolicy::Auto => {
                 // If COLAMD LU was already analysed for an earlier shift (e.g. unsymmetric or
                 // previous fallback), keep reusing it so `symbolic_count` stays 1.
                 if self.sym_lu.is_some() {
-                    self.do_colamd_lu(&vals)
+                    self.do_colamd_lu(sigma, &vals)
                 } else if (is_herm && self.try_herm_lblt(sigma, &vals)?)
                     || (is_cplx_sym && self.try_sym_lblt(sigma, &vals)?)
                 {
@@ -1685,47 +1954,19 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     // supernodal Bunch-Kaufman with AMD/ND/Auto ordering.
                     Ok(())
                 } else {
-                    // Unsymmetric or LBL^T pivot fallback: faer COLAMD LU with full partial pivoting.
-                    self.do_colamd_lu(&vals)
+                    // Unsymmetric or LBL^T pivot fallback: free LBLT buffers before COLAMD LU.
+                    self.release_lblt_buffers();
+                    self.do_colamd_lu(sigma, &vals)
                 }
             }
         };
 
-        self.vals = vals;
+        drop(vals);
         res
     }
-}
 
-impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
-    fn dim(&self) -> usize {
-        self.n
-    }
-
-    fn set_shift(&mut self, sigma: T) -> Result<(), SolverError> {
-        let t_asm = Instant::now();
-        let mut done = false;
-        let result = (|| {
-            if self.definiteness == Definiteness::PositiveDefinite {
-                if self.try_cholesky(sigma)? {
-                    done = true;
-                } else {
-                    self.stats.cholesky_fallbacks += 1;
-                }
-            }
-            if !done { self.do_lu(sigma) } else { Ok(()) }
-        })();
-        // Assembly is a few streaming passes; report factor time separately from the total.
-        self.stats.assemble_secs_last = (t_asm.elapsed().as_secs_f64() - self.stats.numeric_secs_last).max(0.0);
-        if result.is_ok() {
-            self.stats.numeric_secs_total += self.stats.numeric_secs_last;
-            self.stats.numeric_count += 1;
-        }
-        result
-    }
-
-    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
+    fn solve_raw_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
         let n = self.n;
-        assert!(rhs.len() >= n * nrhs);
         let par = self.threads.solve.par();
         match self.active {
             ActiveFactor::Cholesky => {
@@ -1787,8 +2028,101 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
         clear_upper_vector_state();
     }
 
+    fn compute_shifted_residual(&self, b: &[T], x: &[T], r: &mut [T]) {
+        if let Some(full) = &self.full {
+            csc_residual_shifted_full(full, self.sigma, b, x, r);
+        } else if let Some(lower) = &self.lower {
+            let herm = matches!(self.active, ActiveFactor::Cholesky | ActiveFactor::HermLblt);
+            csc_residual_shifted_lower(lower, self.sigma, herm, b, x, r);
+        } else {
+            r.fill(T::ZERO);
+        }
+    }
+}
+
+impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
+    fn dim(&self) -> usize {
+        self.n
+    }
+
+    fn set_shift(&mut self, sigma: T) -> Result<(), SolverError> {
+        let t_asm = Instant::now();
+        let mut done = false;
+        let result = (|| {
+            if self.definiteness == Definiteness::PositiveDefinite {
+                if self.try_cholesky(sigma)? {
+                    done = true;
+                } else {
+                    self.stats.cholesky_fallbacks += 1;
+                }
+            }
+            if !done { self.do_lu(sigma) } else { Ok(()) }
+        })();
+        // Assembly is a few streaming passes; report factor time separately from the total.
+        self.stats.assemble_secs_last = (t_asm.elapsed().as_secs_f64() - self.stats.numeric_secs_last).max(0.0);
+        if result.is_ok() {
+            self.stats.numeric_secs_total += self.stats.numeric_secs_last;
+            self.stats.numeric_count += 1;
+        }
+        result
+    }
+
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
+        let n = self.n;
+        assert!(rhs.len() >= n * nrhs);
+        self.solves.fetch_add(nrhs, Ordering::Relaxed);
+        if !self.refine_solves || n == 0 || nrhs == 0 {
+            self.solve_raw_block_in_place(rhs, nrhs);
+            return;
+        }
+
+        // Save RHS for 1-2 steps of deterministic compensated-residual iterative refinement
+        // (`r = b - (A - sigma B) x`, `dx = M^{-1} r`, `x += dx`) to suppress parallel faer
+        // factor roundoff and moderate LBLT pivot growth below `1e-14` (`ADR 11`, `FR-29`, `FR-33`).
+        let b_orig = rhs[..n * nrhs].to_vec();
+        self.solve_raw_block_in_place(rhs, nrhs);
+
+        let mut r = vec![T::ZERO; n];
+        let mut dx = vec![T::ZERO; n];
+        let mut x_prev = vec![T::ZERO; n];
+        for c in 0..nrhs {
+            let b_c = &b_orig[c * n..(c + 1) * n];
+            let x_c = &mut rhs[c * n..(c + 1) * n];
+            let b_norm = vecops::norm2(b_c);
+            if b_norm == 0.0 || !b_norm.is_finite() || !x_c.iter().all(|v| v.is_finite()) {
+                continue;
+            }
+            self.compute_shifted_residual(b_c, x_c, &mut r);
+            let mut r_norm = vecops::norm2(&r);
+            if r_norm == 0.0 || !r_norm.is_finite() {
+                continue;
+            }
+            for _step in 0..2 {
+                dx.copy_from_slice(&r);
+                self.solve_raw_block_in_place(&mut dx, 1);
+                if !dx.iter().all(|v| v.is_finite()) {
+                    break;
+                }
+                let dx_norm = vecops::norm2(&dx);
+                x_prev.copy_from_slice(x_c);
+                vecops::axpy(T::ONE, &dx, x_c);
+                let x_norm = vecops::norm2(x_c).max(1e-300);
+                self.compute_shifted_residual(b_c, x_c, &mut r);
+                let r_next = vecops::norm2(&r);
+                if !r_next.is_finite() || r_next > r_norm * (1.0 + 1e-12) {
+                    x_c.copy_from_slice(&x_prev);
+                    break;
+                }
+                r_norm = r_next;
+                if dx_norm <= 1e-15 * x_norm || r_norm <= 1e-15 * b_norm {
+                    break;
+                }
+            }
+        }
+    }
+
     fn stats(&self) -> FactorStats {
-        self.stats
+        FactorStats { solves: self.solves.load(Ordering::Relaxed), ..self.stats }
     }
 }
 
@@ -1873,5 +2207,170 @@ impl<T: FaerScalar> crate::linalg::linop::Preconditioner<T> for DirectSolve<T> {
     fn apply(&self, r: &[T], z: &mut [T]) {
         z.copy_from_slice(r);
         self.fac.solve_block_in_place(z, 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linalg::maxwell::nedelec_cube;
+    use crate::linalg::rng::random_vector;
+    use crate::linalg::scalar::C64;
+
+    #[test]
+    fn lblt_fallback_releases_all_lblt_buffers_before_colamd_lu() {
+        // Structurally and numerically symmetric matrix with a zero leading diagonal pivot
+        // where simplicial `LDL^T` fails and falls back to COLAMD LU:
+        // [ 0  1  0  0 ]
+        // [ 1  0  1  0 ]
+        // [ 0  1  0  1 ]
+        // [ 0  0  1  0 ]
+        let trips = vec![
+            (0, 1, C64::new(1.0, 0.2)),
+            (1, 0, C64::new(1.0, 0.2)),
+            (1, 2, C64::new(0.5, -0.1)),
+            (2, 1, C64::new(0.5, -0.1)),
+            (2, 3, C64::new(1.0, 0.3)),
+            (3, 2, C64::new(1.0, 0.3)),
+        ];
+        let a = Csr::from_triplets(4, 4, &trips).unwrap();
+        let mut fac = ShiftedFactorization::new(&a, None, Definiteness::General).unwrap();
+        fac.set_shift(C64::ZERO).unwrap();
+
+        assert_eq!(fac.stats().backend, FactorBackend::LuColamd);
+        assert_eq!(fac.llt_vals.capacity(), 0, "llt_vals must be deallocated on COLAMD fallback");
+        assert!(fac.sym_llt.is_none(), "sym_llt must be dropped on COLAMD fallback");
+        assert!(fac.sym_lblt_plan.is_none(), "sym_lblt_plan must be dropped on COLAMD fallback");
+        assert_eq!(fac.lblt_subdiag.capacity(), 0, "lblt_subdiag must be deallocated");
+        assert_eq!(fac.lblt_perm_fwd.capacity(), 0, "lblt_perm_fwd must be deallocated");
+        assert_eq!(fac.lblt_perm_inv.capacity(), 0, "lblt_perm_inv must be deallocated");
+
+        let b = vec![
+            C64::new(1.0, 0.5),
+            C64::new(-2.0, 0.3),
+            C64::new(0.7, -1.1),
+            C64::new(3.0, 0.2),
+        ];
+        let mut x = b.clone();
+        fac.solve_block_in_place(&mut x, 1);
+        let mut ax = vec![C64::ZERO; 4];
+        a.spmv(&x, &mut ax);
+        let err = ax.iter().zip(&b).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt();
+        assert!(err < 1e-13, "COLAMD fallback solve residual {err:e}");
+    }
+
+    #[test]
+    fn verify_probe_residual_ir_rescues_marginal_factor() {
+        // Diagonal complex-symmetric system where an approximate factor M^{-1} has 1e-6 error
+        // (would fail a single-shot 1e-8 check), rescued by <=2 steps of IR to < 1e-14.
+        let n = 64;
+        let trips: Vec<(usize, usize, C64)> = (0..n)
+            .map(|i| (i, i, C64::new(2.0 + 0.1 * i as f64, 0.3)))
+            .collect();
+        let a = Csr::from_triplets(n, n, &trips).unwrap();
+        let fac = ShiftedFactorization::new(&a, None, Definiteness::General).unwrap();
+        let full = fac.full.as_ref().unwrap();
+        let full_vals = full.a.clone();
+        let diag: Vec<C64> = (0..n).map(|i| C64::new(2.0 + 0.1 * i as f64, 0.3)).collect();
+
+        let probe = fac.verify_probe_residual(&full_vals, |x| {
+            for (xi, &di) in x.iter_mut().zip(&diag) {
+                // Perturb inverse by 5e-6 so single-shot residual is ~5e-6 > 1e-8.
+                *xi = (*xi / di) * C64::new(1.0 + 5e-6, -2e-6);
+            }
+        });
+        assert!(probe.initial_rel_err > 1e-6, "expected initial_rel_err > 1e-6, got {:e}", probe.initial_rel_err);
+        assert!(probe.ok, "IR inside verify_probe_residual must rescue 5e-6 factor to <= 1e-8");
+    }
+
+    #[test]
+    fn complex_symmetric_nedelec_stays_on_sym_lblt_and_matches_across_threads() {
+        let cube = nedelec_cube(5);
+        let k = cube.stiffness.to_complex();
+        let m = cube.mass.to_complex();
+        // Complex-symmetric shifted curl-curl near resonance: K + (-k0^2 + i*gamma) M (A = A^T != A^H)
+        let sigma = C64::new(19.5, -0.05);
+        let n = k.nrows();
+        let rhs = random_vector::<C64>(n * 2, 12345);
+
+        let mut fac_seq = ShiftedFactorization::new(&k, Some(&m), Definiteness::General).unwrap();
+        fac_seq.ordering = FillOrdering::NestedDissection;
+        fac_seq.threads = ThreadPolicy { factor: Threads::Sequential, solve: Threads::Sequential };
+        fac_seq.set_shift(sigma).unwrap();
+        assert!(
+            matches!(fac_seq.stats().backend, FactorBackend::LbltNd | FactorBackend::LbltAmd),
+            "expected SymLblt backend, got {:?}",
+            fac_seq.stats().backend
+        );
+
+        let mut fac_par = ShiftedFactorization::new(&k, Some(&m), Definiteness::General).unwrap();
+        fac_par.ordering = FillOrdering::NestedDissection;
+        fac_par.threads = ThreadPolicy { factor: Threads::Fixed(8), solve: Threads::Sequential };
+        fac_par.set_shift(sigma).unwrap();
+        assert!(fac_par.refine_solves, "parallel factorisation must enable deterministic IR");
+        // Also enable IR on sequential reference so both hit 106-bit compensated accuracy
+        fac_seq.refine_solves = true;
+
+        let mut x_seq = rhs.clone();
+        let mut x_par = rhs.clone();
+        fac_seq.solve_block_in_place(&mut x_seq, 2);
+        fac_par.solve_block_in_place(&mut x_par, 2);
+
+        let diff = x_seq
+            .iter()
+            .zip(&x_par)
+            .map(|(a, b)| (*a - *b).norm_sqr())
+            .sum::<f64>()
+            .sqrt();
+        let norm = vecops::norm2(&x_seq).max(1e-300);
+        let rel = diff / norm;
+        assert!(rel < 1e-13, "parallel vs sequential SymLblt drift {rel:e} >= 1e-13");
+        assert_eq!(fac_seq.stats().solves, 2);
+        assert_eq!(fac_par.stats().solves, 2);
+    }
+
+    #[test]
+    fn large_n_over_60k_shifted_complex_symmetric_is_deterministic_1_vs_8_threads() {
+        // n = 62_000 > PAR_FACTOR_MIN_N (60_000): exercises the parallel factorisation path
+        // paired with compensated-residual iterative refinement across Threads::Sequential vs Fixed(8).
+        let n = 62_000;
+        let mut trips = Vec::with_capacity(5 * n);
+        for i in 0..n {
+            trips.push((i, i, C64::new(4.0, 0.02)));
+            if i + 1 < n {
+                let v = C64::new(-1.0, 0.005);
+                trips.push((i, i + 1, v));
+                trips.push((i + 1, i, v));
+            }
+            if i + 2 < n {
+                let v = C64::new(-0.25, -0.002);
+                trips.push((i, i + 2, v));
+                trips.push((i + 2, i, v));
+            }
+        }
+        let a = Csr::from_triplets(n, n, &trips).unwrap();
+        let sigma = C64::new(1.5, -0.001); // strongly indefinite shift inside spectrum
+        let b = random_vector::<C64>(n, 777);
+
+        let mut fac_1 = ShiftedFactorization::new(&a, None, Definiteness::General).unwrap();
+        fac_1.ordering = FillOrdering::Amd;
+        fac_1.threads = ThreadPolicy { factor: Threads::Sequential, solve: Threads::Sequential };
+        fac_1.set_shift(sigma).unwrap();
+        assert!(fac_1.refine_solves, "n > 60_000 must enable deterministic IR regardless of thread count");
+
+        let mut fac_8 = ShiftedFactorization::new(&a, None, Definiteness::General).unwrap();
+        fac_8.ordering = FillOrdering::Amd;
+        fac_8.threads = ThreadPolicy { factor: Threads::Fixed(8), solve: Threads::Sequential };
+        fac_8.set_shift(sigma).unwrap();
+        assert!(fac_8.refine_solves);
+
+        let mut x1 = b.clone();
+        let mut x8 = b.clone();
+        fac_1.solve_block_in_place(&mut x1, 1);
+        fac_8.solve_block_in_place(&mut x8, 1);
+
+        let diff = x1.iter().zip(&x8).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt();
+        let rel = diff / vecops::norm2(&x1).max(1e-300);
+        assert!(rel < 1e-13, "n=62000 1-vs-8 thread drift {rel:e} >= 1e-13");
     }
 }

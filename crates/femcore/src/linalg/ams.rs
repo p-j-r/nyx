@@ -27,8 +27,10 @@ use crate::linalg::amg::{Amg, AmgOptions, gauss_seidel};
 use crate::linalg::csr::Csr;
 use crate::linalg::direct::SolverError;
 use crate::linalg::faer_glue::FaerScalar;
+use crate::linalg::ksp::{Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances};
 use crate::linalg::linop::Preconditioner;
-use crate::linalg::scalar::Scalar;
+use crate::linalg::scalar::{C64, Scalar};
+use crate::linalg::vecops;
 use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
@@ -554,5 +556,416 @@ impl<T: FaerScalar> Preconditioner<T> for AmsP2<T> {
             self.smooth(b, &mut sc.x, false);
         }
         z.copy_from_slice(&sc.x);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------------ Deterministic AMS + FGMRES/GMRES solver (FR-33)
+
+/// Options for [`AmsFgmresSolver`] (deterministic right-preconditioned FGMRES/GMRES driven by
+/// [`Ams`] for $P_1$ or [`AmsP2`] for $P_2$).
+#[derive(Debug, Clone)]
+pub struct AmsFgmresOptions {
+    /// Target relative residual `‖A x − b‖₂ / ‖b‖₂` (default `1e-9`).
+    pub rtol: f64,
+    /// Absolute residual stopping tolerance (default `1e-14`).
+    pub atol: f64,
+    /// Maximum Krylov iterations per RHS column (default `500`).
+    pub max_it: usize,
+    /// Restart dimension `m` of FGMRES/GMRES(m) (default `50`).
+    pub restart: usize,
+    /// Use Flexible GMRES (`true`, default) instead of standard right-preconditioned GMRES.
+    pub flexible: bool,
+    /// Options of the $P_1$ Hiptmair–Xu [`Ams`] preconditioner.
+    pub ams: AmsOptions,
+    /// Options of the $P_2$ Hiptmair–Xu [`AmsP2`] preconditioner.
+    pub ams_p2: AmsP2Options,
+}
+
+impl Default for AmsFgmresOptions {
+    fn default() -> Self {
+        Self {
+            rtol: 1e-9,
+            atol: 1e-14,
+            max_it: 500,
+            restart: 50,
+            flexible: true,
+            ams: AmsOptions::default(),
+            ams_p2: AmsP2Options::default(),
+        }
+    }
+}
+
+/// Summary statistics of one [`AmsFgmresSolver::solve_one`] or [`AmsFgmresSolver::solve_many`] call.
+#[derive(Debug, Clone, Default)]
+pub struct AmsFgmresStats {
+    /// Total Krylov iterations summed across all solved RHS columns.
+    pub total_iterations: usize,
+    /// Worst independently recomputed relative residual `max_j ‖A x_j − b_j‖₂ / ‖b_j‖₂`.
+    pub max_relative_residual: f64,
+    /// `true` iff every RHS column met the convergence tolerance.
+    pub all_converged: bool,
+    /// Approximate total sparse non-zeros stored by the `Ams` / `AmsP2` preconditioner hierarchy.
+    pub preconditioner_nnz: usize,
+}
+
+enum AmsTopologyKind {
+    P1 { g: Csr<f64>, edge_vectors: Vec<[f64; 3]> },
+    P2(AmsP2Topology),
+}
+
+enum AmsPrecondKind<T: FaerScalar> {
+    P1(Box<Ams<T>>),
+    P2(Box<AmsP2<T>>),
+}
+
+impl<T: FaerScalar> AmsPrecondKind<T> {
+    fn nnz_storage(&self) -> usize {
+        match self {
+            Self::P1(a) => a.nnz_storage(),
+            Self::P2(a) => a.nnz_storage(),
+        }
+    }
+}
+
+impl<T: FaerScalar> Preconditioner<T> for AmsPrecondKind<T> {
+    fn apply(&self, r: &[T], z: &mut [T]) {
+        match self {
+            Self::P1(a) => a.apply(r, z),
+            Self::P2(a) => a.apply(r, z),
+        }
+    }
+}
+
+/// Assembles the complex-symmetric driven curl-curl operator and its shifted-Laplacian auxiliary
+/// preconditioner matrix:
+/// - `A = K + i k_0 C - k_0^2 M`
+/// - `M_pc = K + i k_0 C + k_0^2 M`
+///
+/// Using `+k_0^2 M` in `M_pc` keeps the real part of the auxiliary nodal operators (`G^T M_pc G`
+/// and `Π_c^T M_pc Π_c`) elliptic/positive definite across the frequency band so `Amg<C64>` stays
+/// non-singular while clustering the gradient kernel of `M_pc^{-1} A` tightly near `-1`.
+pub fn assemble_shifted_curl_curl(
+    k: &Csr<C64>,
+    c_damp: Option<&Csr<C64>>,
+    m: &Csr<C64>,
+    k0: f64,
+) -> (Csr<C64>, Csr<C64>) {
+    let k0_sq = k0 * k0;
+    let kc = match c_damp {
+        Some(c) if k0 != 0.0 => Csr::axpby(C64::ONE, k, C64::new(0.0, k0), c),
+        _ => k.clone(),
+    };
+    let a_sys = Csr::axpby(C64::ONE, &kc, C64::new(-k0_sq, 0.0), m);
+    let a_pc = Csr::axpby(C64::ONE, &kc, C64::new(k0_sq, 0.0), m);
+    (a_sys, a_pc)
+}
+
+/// Deterministic preconditioned FGMRES/GMRES solver driven by [`Ams`] ($P_1$) or [`AmsP2`] ($P_2$)
+/// for multi-RHS real or complex-symmetric curl-curl systems `(K + i k_0 C - k_0^2 M) X = B` (`FR-33`).
+///
+/// All inner products, norms, basis updates, and SpMVs use `femcore::linalg::vecops` / `basis`
+/// fixed-chunk reductions (`CHUNK = 2048`), giving bit-identical results across `NYX_THREADS` (`ADR 11`).
+pub struct AmsFgmresSolver<T: FaerScalar> {
+    a: Csr<T>,
+    topo: AmsTopologyKind,
+    pc: AmsPrecondKind<T>,
+    opts: AmsFgmresOptions,
+}
+
+impl<T: FaerScalar> AmsFgmresSolver<T> {
+    /// Builds a $P_1$ `Ams`-preconditioned FGMRES/GMRES solver for `a`.
+    ///
+    /// Pass `pc_matrix = Some(m_pc)` (e.g. `K + i k_0 C + k_0^2 M`) when `a` is indefinite,
+    /// or `None` to build [`Ams`] directly on `a`.
+    pub fn new_p1(
+        a: &Csr<T>,
+        pc_matrix: Option<&Csr<T>>,
+        g: &Csr<f64>,
+        edge_vectors: &[[f64; 3]],
+        opts: AmsFgmresOptions,
+    ) -> Result<Self, SolverError> {
+        let n = a.nrows();
+        if n == 0 || a.ncols() != n {
+            return Err(SolverError::InvalidArgument("AmsFgmresSolver matrix must be square and non-empty"));
+        }
+        if g.nrows() != n || edge_vectors.len() != n {
+            return Err(SolverError::InvalidArgument("gradient and edge_vectors must match matrix dimension"));
+        }
+        let pc_mat = pc_matrix.unwrap_or(a);
+        if pc_mat.nrows() != n || pc_mat.ncols() != n {
+            return Err(SolverError::InvalidArgument("pc_matrix must match matrix dimension"));
+        }
+        let ams = Ams::new(pc_mat, g, edge_vectors, &opts.ams)?;
+        Ok(Self {
+            a: a.clone(),
+            topo: AmsTopologyKind::P1 { g: g.clone(), edge_vectors: edge_vectors.to_vec() },
+            pc: AmsPrecondKind::P1(Box::new(ams)),
+            opts,
+        })
+    }
+
+    /// Builds a $P_2$ `AmsP2`-preconditioned FGMRES/GMRES solver for `a`.
+    pub fn new_p2(
+        a: &Csr<T>,
+        pc_matrix: Option<&Csr<T>>,
+        topo: &AmsP2Topology,
+        opts: AmsFgmresOptions,
+    ) -> Result<Self, SolverError> {
+        let n = a.nrows();
+        if n == 0 || a.ncols() != n {
+            return Err(SolverError::InvalidArgument("AmsFgmresSolver matrix must be square and non-empty"));
+        }
+        let pc_mat = pc_matrix.unwrap_or(a);
+        if pc_mat.nrows() != n || pc_mat.ncols() != n {
+            return Err(SolverError::InvalidArgument("pc_matrix must match matrix dimension"));
+        }
+        let ams = AmsP2::new(pc_mat, topo, &opts.ams_p2)?;
+        Ok(Self {
+            a: a.clone(),
+            topo: AmsTopologyKind::P2(topo.clone()),
+            pc: AmsPrecondKind::P2(Box::new(ams)),
+            opts,
+        })
+    }
+
+    /// Updates the system matrix `a` (and optional auxiliary preconditioner matrix `pc_matrix`) at a
+    /// new frequency while reusing the stored discrete gradient / prolongation topology.
+    pub fn update_matrix(&mut self, a: &Csr<T>, pc_matrix: Option<&Csr<T>>) -> Result<(), SolverError> {
+        let n = self.a.nrows();
+        if a.nrows() != n || a.ncols() != n {
+            return Err(SolverError::InvalidArgument("updated matrix dimension does not match solver dimension"));
+        }
+        let pc_mat = pc_matrix.unwrap_or(a);
+        if pc_mat.nrows() != n || pc_mat.ncols() != n {
+            return Err(SolverError::InvalidArgument("pc_matrix must match solver dimension"));
+        }
+        self.pc = match &self.topo {
+            AmsTopologyKind::P1 { g, edge_vectors } => {
+                AmsPrecondKind::P1(Box::new(Ams::new(pc_mat, g, edge_vectors, &self.opts.ams)?))
+            }
+            AmsTopologyKind::P2(topo) => AmsPrecondKind::P2(Box::new(AmsP2::new(pc_mat, topo, &self.opts.ams_p2)?)),
+        };
+        self.a = a.clone();
+        Ok(())
+    }
+
+    pub fn dim(&self) -> usize {
+        self.a.nrows()
+    }
+
+    pub fn preconditioner_nnz(&self) -> usize {
+        self.pc.nnz_storage()
+    }
+
+    pub fn options(&self) -> &AmsFgmresOptions {
+        &self.opts
+    }
+
+    /// Solves `A x = rhs` for a single right-hand side using deterministic FGMRES/GMRES.
+    pub fn solve_one(&self, rhs: &[T]) -> (Vec<T>, AmsFgmresStats) {
+        let n = self.a.nrows();
+        assert_eq!(rhs.len(), n, "rhs length must match matrix dimension");
+        let gmres_opts = GmresOptions {
+            tol: Tolerances { rtol: self.opts.rtol, atol: self.opts.atol, max_it: self.opts.max_it, ..Default::default() },
+            restart: self.opts.restart.max(2),
+            side: PcSide::Right,
+            orthog: Orthogonalization::ClassicalGramSchmidtIfNeeded,
+            flexible: self.opts.flexible,
+            ..Default::default()
+        };
+        let mut gmres = Gmres::<T>::new(gmres_opts);
+        let mut x = vec![T::ZERO; n];
+        let info = gmres.solve(&self.a, &self.pc, rhs, &mut x);
+        let mut r = vec![T::ZERO; n];
+        self.a.spmv(&x, &mut r);
+        vecops::aypx(-T::ONE, rhs, &mut r);
+        let b_norm = vecops::norm2(rhs);
+        let rel = if b_norm == 0.0 { vecops::norm2(&r) } else { vecops::norm2(&r) / b_norm };
+        let converged = info.reason.is_converged() && rel <= (self.opts.rtol * 10.0).max(self.opts.atol);
+        (
+            x,
+            AmsFgmresStats {
+                total_iterations: info.iterations,
+                max_relative_residual: rel,
+                all_converged: converged,
+                preconditioner_nnz: self.pc.nnz_storage(),
+            },
+        )
+    }
+
+    /// Solves `A X = B` across multiple right-hand-side columns using deterministic FGMRES/GMRES.
+    pub fn solve_many(&self, rhs_cols: &[Vec<T>]) -> (Vec<Vec<T>>, AmsFgmresStats) {
+        let mut xs = Vec::with_capacity(rhs_cols.len());
+        let mut total_iterations = 0usize;
+        let mut max_relative_residual = 0.0f64;
+        let mut all_converged = true;
+        for b in rhs_cols {
+            let (x, st) = self.solve_one(b);
+            total_iterations += st.total_iterations;
+            max_relative_residual = max_relative_residual.max(st.max_relative_residual);
+            all_converged &= st.all_converged;
+            xs.push(x);
+        }
+        (
+            xs,
+            AmsFgmresStats {
+                total_iterations,
+                max_relative_residual,
+                all_converged,
+                preconditioner_nnz: self.pc.nnz_storage(),
+            },
+        )
+    }
+}
+
+impl AmsFgmresSolver<C64> {
+    /// Builds a $P_1$ `Ams<C64>` FGMRES/GMRES solver for `(K + i k_0 C - k_0^2 M) X = B`
+    /// preconditioned by the shifted-Laplacian auxiliary matrix `K + i k_0 C + k_0^2 M`.
+    pub fn new_shifted_complex_p1(
+        k: &Csr<C64>,
+        c_damp: Option<&Csr<C64>>,
+        m: &Csr<C64>,
+        k0: f64,
+        g: &Csr<f64>,
+        edge_vectors: &[[f64; 3]],
+        opts: AmsFgmresOptions,
+    ) -> Result<Self, SolverError> {
+        let (a_sys, a_pc) = assemble_shifted_curl_curl(k, c_damp, m, k0);
+        Self::new_p1(&a_sys, Some(&a_pc), g, edge_vectors, opts)
+    }
+
+    /// Builds a $P_2$ `AmsP2<C64>` FGMRES/GMRES solver for `(K + i k_0 C - k_0^2 M) X = B`
+    /// preconditioned by the shifted-Laplacian auxiliary matrix `K + i k_0 C + k_0^2 M`.
+    pub fn new_shifted_complex_p2(
+        k: &Csr<C64>,
+        c_damp: Option<&Csr<C64>>,
+        m: &Csr<C64>,
+        k0: f64,
+        topo: &AmsP2Topology,
+        opts: AmsFgmresOptions,
+    ) -> Result<Self, SolverError> {
+        let (a_sys, a_pc) = assemble_shifted_curl_curl(k, c_damp, m, k0);
+        Self::new_p2(&a_sys, Some(&a_pc), topo, opts)
+    }
+}
+
+/// Convenience helper solving `A X = B` for multiple RHS columns using $P_1$ [`Ams`] + deterministic FGMRES.
+pub fn solve_ams_fgmres_many<T: FaerScalar>(
+    a: &Csr<T>,
+    pc_matrix: Option<&Csr<T>>,
+    g: &Csr<f64>,
+    edge_vectors: &[[f64; 3]],
+    rhs_cols: &[Vec<T>],
+    opts: &AmsFgmresOptions,
+) -> Result<(Vec<Vec<T>>, AmsFgmresStats), SolverError> {
+    let solver = AmsFgmresSolver::new_p1(a, pc_matrix, g, edge_vectors, opts.clone())?;
+    Ok(solver.solve_many(rhs_cols))
+}
+
+/// Convenience helper solving `A X = B` for multiple RHS columns using $P_2$ [`AmsP2`] + deterministic FGMRES.
+pub fn solve_ams_p2_fgmres_many<T: FaerScalar>(
+    a: &Csr<T>,
+    pc_matrix: Option<&Csr<T>>,
+    topo: &AmsP2Topology,
+    rhs_cols: &[Vec<T>],
+    opts: &AmsFgmresOptions,
+) -> Result<(Vec<Vec<T>>, AmsFgmresStats), SolverError> {
+    let solver = AmsFgmresSolver::new_p2(a, pc_matrix, topo, opts.clone())?;
+    Ok(solver.solve_many(rhs_cols))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linalg::maxwell::{nedelec_cube, nedelec_p2_cube};
+    use crate::linalg::rng::random_vector;
+
+    #[test]
+    fn ams_fgmres_complex_symmetric_p1_multi_rhs_and_deterministic() {
+        let cube = nedelec_cube(4);
+        let k = cube.stiffness.to_complex();
+        let m = cube.mass.to_complex();
+        // Complex-symmetric driven curl-curl system: K + i k0 C - k0^2 M (indefinite, A = A^T != A^H)
+        let c_damp = Csr::axpby(C64::new(0.4, 0.0), &m, C64::ZERO, &m);
+        let k0 = 3.2f64; // k0^2 = 10.24 < first resonance 2*pi^2 ~= 19.74, plus lossy damping
+        let opts = AmsFgmresOptions { rtol: 1e-9, max_it: 250, restart: 40, ..Default::default() };
+
+        let mut solver = AmsFgmresSolver::new_shifted_complex_p1(
+            &k,
+            Some(&c_damp),
+            &m,
+            k0,
+            &cube.gradient,
+            &cube.edge_vectors,
+            opts.clone(),
+        )
+        .unwrap();
+        let n = solver.dim();
+        assert!(solver.preconditioner_nnz() > 0);
+        let rhs_cols = vec![
+            random_vector::<C64>(n, 11),
+            random_vector::<C64>(n, 22),
+            random_vector::<C64>(n, 33),
+        ];
+
+        let run_in = |nt: usize| {
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(nt).build().unwrap();
+            pool.install(|| {
+                let s = AmsFgmresSolver::new_shifted_complex_p1(
+                    &k,
+                    Some(&c_damp),
+                    &m,
+                    k0,
+                    &cube.gradient,
+                    &cube.edge_vectors,
+                    opts.clone(),
+                )
+                .unwrap();
+                s.solve_many(&rhs_cols)
+            })
+        };
+
+        let (sols_1, st_1) = run_in(1);
+        assert!(st_1.all_converged, "P1 AMS+FGMRES did not converge: {st_1:?}");
+        assert!(st_1.max_relative_residual < 1e-8, "residual {:e}", st_1.max_relative_residual);
+
+        let (sols_8, st_8) = run_in(8);
+        assert_eq!(st_1.total_iterations, st_8.total_iterations);
+        for (c1, c8) in sols_1.iter().zip(&sols_8) {
+            for (a, b) in c1.iter().zip(c8) {
+                assert_eq!(a.re.to_bits(), b.re.to_bits(), "re bit mismatch across threads");
+                assert_eq!(a.im.to_bits(), b.im.to_bits(), "im bit mismatch across threads");
+            }
+        }
+
+        // Frequency update at a higher frequency (k0^2 > first resonance = strongly indefinite!)
+        let (a2, pc2) = assemble_shifted_curl_curl(&k, Some(&c_damp), &m, 4.8);
+        solver.update_matrix(&a2, Some(&pc2)).unwrap();
+        let (_sols2, st2) = solver.solve_many(&rhs_cols[..2]);
+        assert!(st2.all_converged, "P1 AMS+FGMRES indefinite frequency did not converge: {st2:?}");
+        assert!(st2.max_relative_residual < 1e-8);
+    }
+
+    #[test]
+    fn ams_p2_fgmres_complex_symmetric_multi_rhs() {
+        let cube = nedelec_p2_cube(3);
+        let k = cube.stiffness.to_complex();
+        let m = cube.mass.to_complex();
+        let c_damp = Csr::axpby(C64::new(0.4, 0.0), &m, C64::ZERO, &m);
+        let topo = AmsP2Topology {
+            p1_to_p2: cube.p1_to_p2.clone(),
+            gradient_p1: cube.gradient_p1.clone(),
+            gradient_p2: Some(cube.gradient_p2.clone()),
+            edge_vectors: cube.edge_vectors.clone(),
+            blocks: cube.blocks.clone(),
+        };
+        let opts = AmsFgmresOptions { rtol: 1e-9, max_it: 250, restart: 40, ..Default::default() };
+        let solver = AmsFgmresSolver::new_shifted_complex_p2(&k, Some(&c_damp), &m, 3.5, &topo, opts).unwrap();
+        let n = solver.dim();
+        let rhs_cols = vec![random_vector::<C64>(n, 44), random_vector::<C64>(n, 55)];
+        let (_sols, st) = solver.solve_many(&rhs_cols);
+        assert!(st.all_converged, "P2 AMS+FGMRES did not converge: {st:?}");
+        assert!(st.max_relative_residual < 1e-8, "P2 residual {:e}", st.max_relative_residual);
+        assert!(st.preconditioner_nnz > 0);
     }
 }

@@ -49,6 +49,7 @@ use crate::linalg::lowrank::{LowRank, aca_full};
 use crate::linalg::ordering::nested_dissection_tree;
 use crate::linalg::scalar::Scalar;
 use crate::linalg::vecops::{axpy, dotc, norm2};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -564,13 +565,17 @@ pub fn factor_numeric<T: FaerScalar>(
         drop(f);
         let perm = dense_lu(&mut f11, p).ok_or(SolverError::Singular)?;
         if u > 0 {
-            // rows of F₁₂ in the pivoted order, then U₁₂ = L₁₁⁻¹ P F₁₂, L₂₁ = F₂₁ U₁₁⁻¹
-            let src = f12.clone();
+            // rows of F₁₂ in the pivoted order (one column scratch at a time, avoiding a full p×u clone),
+            // then U₁₂ = L₁₁⁻¹ P F₁₂, L₂₁ = F₂₁ U₁₁⁻¹
+            let mut col_tmp = vec![T::ZERO; p];
             for c in 0..u {
+                let col = &mut f12[c * p..(c + 1) * p];
+                col_tmp.copy_from_slice(col);
                 for i in 0..p {
-                    f12[c * p + i] = src[c * p + perm[i]];
+                    col[i] = col_tmp[perm[i]];
                 }
             }
+            drop(col_tmp);
             solve_unit_lower(&f11, p, &mut f12, u);
             solve_upper_right(&f11, p, &mut f21, u);
             gemm_sub(&mut f22, &f21, &f12, u, u, p);
@@ -579,7 +584,12 @@ pub fn factor_numeric<T: FaerScalar>(
         let compress = opts.tol > 0.0 && p >= opts.min_front;
         let (piv, l21, u12) = if compress {
             let piv = PivotLu::blocked(&f11, p, opts, &mut st);
-            (piv, compress_panel(&f21, u, p, opts, &mut st), compress_panel(&f12, p, u, opts, &mut st))
+            drop(f11);
+            let l21 = compress_panel(&f21, u, p, opts, &mut st);
+            drop(f21);
+            let u12 = compress_panel(&f12, p, u, opts, &mut st);
+            drop(f12);
+            (piv, l21, u12)
         } else {
             (PivotLu::Dense(f11), Panel::dense(f21, u, p), Panel::dense(f12, p, u))
         };
@@ -710,7 +720,7 @@ pub struct ShiftedBlrLu<T: FaerScalar> {
     opts: BlrOptions,
     factors: Option<BlrFactors<T>>,
     stats: FactorStats,
-    solves: std::cell::Cell<usize>,
+    solves: AtomicUsize,
 }
 
 impl<T: FaerScalar> ShiftedBlrLu<T> {
@@ -741,13 +751,81 @@ impl<T: FaerScalar> ShiftedBlrLu<T> {
                 factor_nnz: 0,
                 solve_secs_total: 0.0,
             },
-            solves: std::cell::Cell::new(0),
+            solves: AtomicUsize::new(0),
         })
     }
 
-    /// Statistics of the current factorisation.
+    /// Replaces the numeric matrices while reusing the cached symbolic nested-dissection tree
+    /// (`symbolic_count` stays 1). The new sparsity pattern must be contained in the analysed pattern;
+    /// call [`ShiftedSolver::set_shift`] afterwards before solving.
+    pub fn replace_matrices(&mut self, a: &Csr<T>, b: Option<&Csr<T>>) -> Result<(), SolverError> {
+        let n = self.sym.n;
+        if a.nrows() != n || a.ncols() != n {
+            return Err(SolverError::InvalidArgument("matrix does not match the symbolic analysis"));
+        }
+        if b.is_some_and(|m| m.nrows() != n || m.ncols() != n) {
+            return Err(SolverError::InvalidArgument("B matrix does not match the symbolic analysis"));
+        }
+        self.factors = None;
+        self.a = a.clone();
+        self.b = b.cloned();
+        Ok(())
+    }
+
+    /// Statistics of the current BLR factorisation (compression ratio, ranks, stored/exact entries).
     pub fn blr_stats(&self) -> Option<&BlrStats> {
         self.factors.as_ref().map(|f| &f.stats)
+    }
+
+    pub fn symbolic(&self) -> &BlrSymbolic {
+        &self.sym
+    }
+
+    pub fn options(&self) -> &BlrOptions {
+        &self.opts
+    }
+
+    /// Solves multiple right-hand-side columns against the current BLR factorisation.
+    pub fn solve_many(&self, bs: &[Vec<T>]) -> Vec<Vec<T>> {
+        let f = self.factors.as_ref().expect("set_shift must be called before solving");
+        let out: Vec<Vec<T>> = bs
+            .iter()
+            .map(|b| {
+                let mut x = b.clone();
+                solve_with(&self.sym, f, &mut x);
+                x
+            })
+            .collect();
+        self.solves.fetch_add(bs.len(), Ordering::Relaxed);
+        out
+    }
+
+    /// Solves `a x = b` to `rtol` by deterministic iterative refinement using the current BLR factor.
+    pub fn solve_refined(&self, a: &Csr<T>, b: &[T], x: &mut [T], max_it: usize, rtol: f64) -> (usize, f64) {
+        let f = self.factors.as_ref().expect("set_shift must be called before solving");
+        let n = self.sym.n;
+        assert!(b.len() == n && x.len() == n);
+        x.copy_from_slice(b);
+        solve_with(&self.sym, f, x);
+        self.solves.fetch_add(1, Ordering::Relaxed);
+        let bn = norm2(b).max(f64::MIN_POSITIVE);
+        let mut r = vec![T::ZERO; n];
+        let mut best = f64::INFINITY;
+        for it in 0..=max_it {
+            a.spmv(x, &mut r);
+            for (ri, bi) in r.iter_mut().zip(b) {
+                *ri = *bi - *ri;
+            }
+            let rel = norm2(&r) / bn;
+            if rel <= rtol || it == max_it || rel > 0.9 * best {
+                return (it, rel);
+            }
+            best = rel;
+            solve_with(&self.sym, f, &mut r);
+            self.solves.fetch_add(1, Ordering::Relaxed);
+            axpy(T::ONE, &r, x);
+        }
+        unreachable!()
     }
 }
 
@@ -757,14 +835,22 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedBlrLu<T> {
     }
 
     fn set_shift(&mut self, sigma: T) -> Result<(), SolverError> {
+        // Release previous numeric factors before building the new shift so peak RAM never holds two shifts.
+        self.factors = None;
         let t0 = Instant::now();
-        let shifted = match &self.b {
-            Some(b) => Csr::axpby(T::ONE, &self.a, -sigma, b),
-            None => Csr::axpby(T::ONE, &self.a, -sigma, &Csr::identity(self.sym.n)),
+        let owned_shifted;
+        let mat = if sigma == T::ZERO {
+            &self.a
+        } else {
+            owned_shifted = match &self.b {
+                Some(b) => Csr::axpby(T::ONE, &self.a, -sigma, b),
+                None => Csr::axpby(T::ONE, &self.a, -sigma, &Csr::identity(self.sym.n)),
+            };
+            &owned_shifted
         };
         self.stats.assemble_secs_last = t0.elapsed().as_secs_f64();
         let t1 = Instant::now();
-        let f = factor_numeric(&self.sym, &shifted, &self.opts)?;
+        let f = factor_numeric(&self.sym, mat, &self.opts)?;
         self.stats.numeric_secs_last = t1.elapsed().as_secs_f64();
         self.stats.numeric_secs_total += self.stats.numeric_secs_last;
         self.stats.numeric_count += 1;
@@ -781,10 +867,73 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedBlrLu<T> {
         for c in 0..nrhs {
             solve_with(&self.sym, f, &mut rhs[c * n..(c + 1) * n]);
         }
-        self.solves.set(self.solves.get() + nrhs);
+        self.solves.fetch_add(nrhs, Ordering::Relaxed);
     }
 
     fn stats(&self) -> FactorStats {
-        FactorStats { solves: self.solves.get(), ..self.stats }
+        FactorStats { solves: self.solves.load(Ordering::Relaxed), ..self.stats }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linalg::maxwell::nedelec_cube;
+    use crate::linalg::rng::random_vector;
+    use crate::linalg::scalar::C64;
+
+    #[test]
+    fn shifted_blr_lu_complex_symmetric_nedelec_3d() {
+        let cube = nedelec_cube(4);
+        let k = cube.stiffness.to_complex();
+        let m = cube.mass.to_complex();
+        // Complex-symmetric driven operator A = K + i k0 C - k0^2 M (A = A^T != A^H)
+        let k0 = 3.5f64;
+        let a_loss = Csr::axpby(C64::ONE, &k, C64::new(0.0, 0.15 * k0), &m);
+        let sigma = C64::new(k0 * k0, 0.0);
+        let a_exact = Csr::axpby(C64::ONE, &a_loss, -sigma, &m);
+        assert!(a_exact.is_symmetric(1e-12));
+        assert!(!a_exact.is_hermitian(1e-6));
+
+        let opts = BlrOptions { tol: 1e-6, leaf: 32, block: 32, min_front: 48, accept_ratio: 0.7 };
+        let mut blr = ShiftedBlrLu::<C64>::new(&a_loss, Some(&m), &opts).unwrap();
+        blr.set_shift(sigma).unwrap();
+
+        assert_eq!(blr.stats().backend, FactorBackend::BlrNd);
+        assert_eq!(blr.stats().symbolic_count, 1);
+        assert_eq!(blr.stats().numeric_count, 1);
+        let bs = blr.blr_stats().expect("blr_stats must be populated after set_shift");
+        assert!(bs.exact_entries > 0 && bs.stored_entries > 0);
+        assert!(bs.compression() <= 1.0001);
+
+        let n = a_exact.nrows();
+        let rhs0 = random_vector::<C64>(n, 101);
+        let rhs1 = random_vector::<C64>(n, 202);
+        let sols = blr.solve_many(&[rhs0.clone(), rhs1.clone()]);
+        for (x, b) in sols.iter().zip([&rhs0, &rhs1]) {
+            let mut ax = vec![C64::ZERO; n];
+            a_exact.spmv(x, &mut ax);
+            let err = ax.iter().zip(b).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt();
+            let rel = err / norm2(b).max(1e-300);
+            assert!(rel < 1e-4, "BLR direct solve relative residual too large: {rel:e}");
+        }
+
+        let mut x_ref = vec![C64::ZERO; n];
+        let (_it, rel_ref) = blr.solve_refined(&a_exact, &rhs0, &mut x_ref, 5, 1e-12);
+        assert!(rel_ref < 1e-11, "BLR refined residual {rel_ref:e}");
+
+        // Frequency update via replace_matrices reuses symbolic tree (`symbolic_count == 1`)
+        let k0_2 = 4.2f64;
+        let a_2 = Csr::axpby(C64::ONE, &k, C64::new(-k0_2 * k0_2, 0.15 * k0_2), &m);
+        blr.replace_matrices(&a_2, None).unwrap();
+        blr.set_shift(C64::ZERO).unwrap();
+        assert_eq!(blr.stats().symbolic_count, 1);
+        assert_eq!(blr.stats().numeric_count, 2);
+        let mut x2 = rhs0.clone();
+        blr.solve_block_in_place(&mut x2, 1);
+        let mut ax2 = vec![C64::ZERO; n];
+        a_2.spmv(&x2, &mut ax2);
+        let rel2 = ax2.iter().zip(&rhs0).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt() / norm2(&rhs0);
+        assert!(rel2 < 1e-4, "BLR updated frequency residual {rel2:e}");
     }
 }
