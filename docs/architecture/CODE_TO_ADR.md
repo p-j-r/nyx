@@ -46,7 +46,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/chip_report.md` | 22 | |
 | `docs/photonic_use_cases.md` | 21, 22 | |
 | `docs/SQUADDS_BENCHMARK_REPORT.md` | 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 119, 120, 121 | SQuADDS cQED statistical parity, AF-1..AF-6 ablation, and cryogenic hardware validation report |
-| `docs/SQUADDS_BUG_FEATURE_REQUESTS.md` | 11, 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 120, 121 | Post-SQuADDS benchmark bug-fix and solver/meshing feature requests (FR-25..FR-33) covering Core Bugs 1-5 and Limitations L1-L4 |
+| `docs/SQUADDS_BUG_FEATURE_REQUESTS.md` | 11, 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 120, 121, 125, 126, 127 | Post-SQuADDS benchmark bug-fix and solver/meshing feature requests (FR-25..FR-33) covering Core Bugs 1-5 and Limitations L1-L4 |
 | `docs/brand/*` | 23 | |
 | `docs/mockups/*` | 14, 23 | |
 | `docs/ports/README.md` | 5, 7, 8 | |
@@ -86,7 +86,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/LICENSE` | 3 | |
 | `crates/geom/rustfmt.toml` | 13 | only formatted crate (R23) |
 | `crates/geom/Cargo.toml` | 3, 13 | serde only |
-| `crates/femcore/src/linalg/*` | 33, 8, 11 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver |
+| `crates/femcore/src/linalg/*` | 33, 8, 11, 117, 125, 127 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver |
 | `crates/femcore/src/mesh/mod.rs` | 4, 82 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
 | `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
 | `crates/femcore/src/mesh/cells.rs` | 5, 82 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
@@ -95,7 +95,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
 | `crates/femcore/src/meshing/mod.rs` | 6, 7, 18, 50, 51, 52, 82 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
 | `crates/femcore/src/meshing/geomdrive.rs` | 2, 6, 82 | |
-| `crates/femcore/src/meshing/mesher.rs` | 6, 2, 66, 110 | 2D triangulation core; `extrude_y` with `Layer::fill`, `extrude_y_with_remap`, and `sweep_model_3d` |
+| `crates/femcore/src/meshing/mesher.rs` | 6, 2, 66, 110, 126 | 2D triangulation core; `extrude_y` with `Layer::fill`, `extrude_y_with_remap`, `sweep_model_3d`, and cross-gap dielectric edge splitting |
 | `crates/femcore/src/meshing/mesher3d.rs` | 40, 55, 82, 83, 110 | lattice (isosurface stuffing) tetrahedral mesher on `Domain3`, with parent->child periodic axis conformance |
 | `crates/femcore/src/meshing/refine3d.rs` | 40, 110 | Rivara longest-edge refinement of a `CellMesh<3>`, with synchronous parent->child periodic twin bisection |
 | `crates/femcore/src/meshing/curve3.rs` | 82, 110 | curved edges: mid-edge geometry nodes from the exact surface, Jacobian validity, periodic mid-edge sync |
@@ -109,7 +109,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
 | `crates/femcore/src/meshing/sizing.rs` | 17, 25 | the neutral Sizing a physics reports to the mesher (re-exported by nyx-physics) |
 | `crates/femcore/src/meshing/validate/*` | 7 | |
-| `crates/femcore/src/meshing/sheet3d.rs` | 102, 114, 116, 120, 121 | conformal 3D sheet-stack mesher (`Op::Sheet`, `<sheet>:edge`, PSLG guard, `gap_cells`, `z_coarsen`, Z-slab/cell guards, thin slabs, curved/QP enrichment) |
+| `crates/femcore/src/meshing/sheet3d.rs` | 102, 114, 116, 120, 121, 126 | conformal 3D sheet-stack mesher (`Op::Sheet`, `<sheet>:edge`, PSLG guard, `gap_cells` medial-axis seeding, `z_coarsen` `max_cells` enforcement, thin slabs, curved/QP enrichment) |
 | `crates/femcore/src/meshing/sheet3d_amr.rs` | 120, 102, 114 | `OverlayOracle2` 2D-overlay and `full_3d` sheet-preserving adaptive mesh refinement helpers |
 | `crates/femcore/src/meshing/sheet3d_curve.rs` | 121, 82, 102 | exact 2D `Curve::Circle` / `Curve::Ellipse` mid-edge node projection and relaxation on extruded `sheet3d` meshes |
 | `crates/femcore/src/meshing/singularity.rs` | 120, 115, 82 | Barsoum quarter-point P2 rim shifting (with curved-rim clamping) and Morrison–Lewis radical corner grading |
@@ -223,23 +223,23 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
 | `crates/nyx-ems/src/bloch.rs` | 110, 45, 9 | 3-stage fixed-frequency 3D Floquet-Bloch waveguide and leaky grating solver (`Study::Bloch`) |
 | `crates/nyx-ems/tests/{bloch3d,group_index_and_scalars}.rs` | 110, 45 | 3D Bloch modes, Brillouin-zone shifts, dispersive Poynting `v_g`/`n_g`, mode shares, and midplane symmetry tests |
-| `crates/nyx-ems/src/{ibc,rom}.rs` | 104, 109 | superconducting thin-film IBC, rank-1 `lumped_jj`, physical $H$/$K$ normalization, passive `CircuitRom`, and `TlsMeta` |
+| `crates/nyx-ems/src/{ibc,rom}.rs` | 104, 109, 125, 127 | superconducting thin-film IBC (`direct`/`perturbative`/`auto`), per-terminal `rank1` `lumped_jj`, physical $H$/$K$ normalization, passive `CircuitRom`, and `TlsMeta` |
 | `crates/nyx-ems/tests/kicq_cpw_bcs.rs` | 104 | 3D CPW BCS kinetic inductance shift and lumped JJ equipartition tests (Test 3) |
-| `crates/nyx-ems/src/{driven,ports}.rs` | 106 | driven frequency-domain solver, `lumped_port`, 2D boundary-mode `waveport`, and Hermite Tangential Galerkin PROM |
-| `crates/nyx-ems/tests/driven_prom.rs` | 106 | 3D driven PROM, waveport, and BBQ admittance verification (Test 6) |
-| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106, 109, 110 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, Bloch, and driven kernels |
-| `crates/nyx-analysis/src/capacitance.rs` | 103, 115, 118, 120, 121 | `capacitance_matrix` (Schur elimination, `Xmon`/`TransmonPocket` reduction, 3D `metal_thickness_m` edge correction, Prager–Synge Loewner brackets, AC conductance/$Q$, AMR history) and `inductance_matrix` |
+| `crates/nyx-ems/src/{driven,ports}.rs` | 106, 125, 127 | driven frequency-domain solver (`auto`/`direct`/`lblt`/`blr`/`ams_fgmres`), per-terminal `lumped_port`, 2D boundary-mode `waveport`, and Hermite Tangential Galerkin PROM |
+| `crates/nyx-ems/tests/driven_prom.rs` | 106, 127 | 3D driven PROM, waveport, BBQ admittance, and `FR-33` `blr`/`ams_fgmres` symbolic-reuse verification (Test 6) |
+| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106, 109, 110, 125, 127 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, Bloch, and driven kernels |
+| `crates/nyx-analysis/src/capacitance.rs` | 103, 115, 118, 120, 121, 125, 126 | `capacitance_matrix` (Schur elimination, `Xmon`/`TransmonPocket` reduction, 3D `metal_thickness_m` outer-die guard, Prager–Synge Loewner brackets, AC conductance/$Q$, 3-level Stieltjes–Padé AMR extrapolation) and `inductance_matrix` |
 | `crates/nyx-analysis/src/view3d.rs` | 111, 99 | un-averaged 8-subtet P2 3D slices, cutaways, marching-tets isosurfaces, mesh views, and Bloch phase tiling |
 | `crates/nyx-analysis/src/network.rs` | 118, 105, 106 | unified `NetworkAnalysis` (`id: "network"`): companion QEP, ROM `Z/Y/S`, Schur BBQ, Taubin $S_{21}$ circle fit, Touchstone v1.1 |
-| `crates/nyx-analysis/src/{epr,hamiltonian,tls}.rs` | 105, 118, 121 | `epr` KICQ analysis, `hamiltonian` (`normal_fock` / `craig_bampton`, `f_cav_Hz`/`g_matrix_Hz`/`kappa_cav_Hz`/`t1_purcell_s`, `sweep_port`, DC-SQUID), and BVH/TOML/thick-sidewall `tls_participation` |
+| `crates/nyx-analysis/src/{epr,hamiltonian,tls}.rs` | 105, 118, 121, 125, 127 | `epr` KICQ analysis, `hamiltonian` (`normal_fock` / `craig_bampton`, `f_cav_Hz`/`g_matrix_Hz`/`kappa_cav_Hz`/`t1_purcell_s`, `sweep_port`, DC-SQUID), and BVH/TOML/hybrid quasi-electrostatic `tls_participation` |
 | `crates/nyx-analysis/tests/wave1_cqed_analyses.rs` | 118, 105 | verification suite for `NetworkAnalysis`, `hamiltonian` SQUID/Purcell/CB, 3D `I_edge` thickness capacitance, and BVH/TOML TLS |
 | `crates/nyx-analysis/tests/capacitance_bounds.rs` | 120, 103, 115 | Prager–Synge Loewner bound propagation (`[E_C_low_Hz, E_C_up_Hz]`) and 3D transmon midpoint accuracy gain tests |
 | `crates/nyx-analysis/tests/tls_thick_sheet.rs` | 121, 105 | conformal thick-metal and substrate-trench 3D TLS sidewall classification without knife-edge double-counting |
 | `crates/nyx-analysis/tests/cqed_capacitance_reduction.rs` | 115, 103 | analytical verification of Schur elimination, Eqs. 17-18 transmon reduction, and resonator `g_Hz` / `chi_Hz` |
 | `crates/nyx-analysis/tests/figure3d.rs` | 111, 99 | 3D figure kinds, dielectric jump preservation, Bloch tiling, latency, and `NYX_THREADS` bit-exact PNG tests |
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
-| `crates/nyx-analysis/tests/squadds_smoke.rs` | 103, 105, 118, 120 | PR CI smoke suite for TransmonCross Mode G2 + `far_field` + `I_edge`, DC-SQUID `Dissipator` sweep, and `MUNINN` 3D TLS |
-| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, 2D/3D mode figures) |
+| `crates/nyx-analysis/tests/squadds_smoke.rs` | 103, 105, 118, 120, 125 | PR CI smoke suite for TransmonCross Mode G2 + `far_field` + `I_edge` (`bug1`), DC-SQUID `Dissipator` sweep, and `MUNINN` 3D TLS |
+| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115, 127 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, 2D/3D mode figures) |
 | `crates/nyx-engine/tests/layering.rs` | 26, 107 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |
@@ -277,8 +277,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/cqed_qcap_e2e.rs` | 112, 113, 114, 115 | end-to-end superconducting qubit capacitance (`QFR-1..QFR-7`) integration tests through `Engine::call` |
 | `crates/nyx-engine/tests/squadds_fr_e2e.rs` | 116, 117, 118, 119 | end-to-end SQuADDS (`FR-01..FR-24`) integration tests through `Engine::call` |
 | `crates/nyx-engine/tests/accuracy_features_e2e.rs` | 120, 121 | end-to-end Phase A sub-$0.1\%$ electrostatic accuracy features (`AF-1..AF-6`) and Cross-Feature Compatibility Rules 1–5 tests |
-| `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, and thread determinism |
-| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
+| `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 125, 126, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, `bug2`–`bug5`, and thread determinism |
+| `crates/nyx-engine/tests/fr25_33_e2e.rs` | 125, 126, 127 | end-to-end post-SQuADDS (`FR-25..FR-33`) integration tests through `Engine::call` (`ibc_mode: "perturbative"`, hybrid quasi-electrostatic TLS, and `ems::driven` `blr`/`ams_fgmres` + memory calibration) |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |
 | `crates/nyx-script/src/kernel.rs` | 94, 93, 113 | the kernel: Monty session with per-turn suspension budget, proactive dump recycle, `reset`, `nyx.aio` futures, and worker recovery |

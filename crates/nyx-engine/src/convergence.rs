@@ -1083,14 +1083,15 @@ impl ConvergenceJob {
         let sizing_order = self.scratch(self.project.clone()).sizing().map(|s| s.order);
         let mut base = self.project.clone();
         force_single_adapt_pass(&mut base);
+        let other_proj = refined(&base, factor, scale_sizes, sizing_order);
         let present = self.mesh_inline(&base)?;
-        let other = self.mesh_inline(&refined(&base, factor, scale_sizes, sizing_order))?;
+        let other = self.mesh_inline(&other_proj)?;
         let (coarse_m, fine_m) = if factor < 1.0 { (&present, &other) } else { (&other, &present) };
         let (c, f) = (coarse_m.mesh().n_cells() as u64, fine_m.mesh().n_cells() as u64);
         let (dc, df) = (coarse_m.mesh().dim() as u8, fine_m.mesh().dim() as u8);
         let (cost_c, cost_f) = (
-            crate::preview::cost_of(&self.history, &targets, dc, c),
-            crate::preview::cost_of(&self.history, &targets, df, f),
+            crate::preview::cost_of_project(&self.history, &base, &targets, dc, c),
+            crate::preview::cost_of_project(&self.history, &other_proj, &targets, df, f),
         );
         let secs = |v: &Value| v["solve"]["seconds"].as_f64();
         let total = secs(&cost_c).zip(secs(&cost_f)).map(|(a, b)| a + b);
@@ -1207,7 +1208,7 @@ fn check(
             )));
         }
         if let Some(max) = this.limits.max_seconds {
-            let cost = crate::preview::cost_of(&this.history, &targets, other_dim, other_cells);
+            let cost = crate::preview::cost_of_project(&this.history, &other_project, &targets, other_dim, other_cells);
             if let Some(s) = cost["solve"]["seconds"].as_f64().filter(|s| *s > max) {
                 return Err(Error::invalid(format!(
                     "the solve on the {other_label} mesh ({other_cells} cells) is expected to take about {s:.0} s from the solves this machine has run, more than max_seconds {max}: the check was not started. Coarsen the mesh, use a factor nearer 1 (now {factor}), or raise max_seconds"

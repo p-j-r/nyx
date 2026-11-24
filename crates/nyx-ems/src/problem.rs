@@ -206,6 +206,8 @@ pub enum Study {
         max_hdm_solves: usize,
         strict_prom_tol: bool,
         seed_freqs_hz: Vec<f64>,
+        solver: String,
+        blr_tol: f64,
     },
 }
 
@@ -237,6 +239,12 @@ impl Study {
     }
 }
 
+/// Allowed values for `surface_impedance` `ibc_mode`.
+pub const IBC_MODE_CHOICES: [&str; 3] = ["direct", "perturbative", "auto"];
+
+/// Allowed values for `Study::Driven` `solver`.
+pub const DRIVEN_SOLVER_CHOICES: [&str; 5] = ["auto", "direct", "lblt", "blr", "ams_fgmres"];
+
 /// Kinetic-inductance / surface-impedance sheet boundary condition (`Z_s = R_s + i omega L_k_sq`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceImpedanceBc {
@@ -249,6 +257,7 @@ pub struct SurfaceImpedanceBc {
     pub f_ref: f64,
     pub film_model: String,
     pub lossless: bool,
+    pub ibc_mode: String,
 }
 
 /// Lumped Josephson junction / nonlinear port boundary condition (`cavity` and `driven` studies).
@@ -383,10 +392,11 @@ impl Problem {
             Study::AxisymmetricModes { f_search, .. } | Study::Cavity { f_search, .. } => {
                 (!f_search.is_finite()).then_some("search frequency")
             }
-            Study::Driven { f_min, f_max, freqs_hz, prom_tol, seed_freqs_hz, .. } => (!f_min.is_finite())
+            Study::Driven { f_min, f_max, freqs_hz, prom_tol, seed_freqs_hz, blr_tol, .. } => (!f_min.is_finite())
                 .then_some("minimum frequency")
                 .or((!f_max.is_finite()).then_some("maximum frequency"))
                 .or(prom_tol.is_some_and(|t| !t.is_finite()).then_some("PROM tolerance"))
+                .or((!blr_tol.is_finite()).then_some("BLR tolerance"))
                 .or(freqs_hz.as_ref().is_some_and(|v| v.iter().any(|f| !f.is_finite())).then_some("freqs_hz"))
                 .or(seed_freqs_hz.iter().any(|f| !f.is_finite()).then_some("seed_freqs_hz")),
         };
@@ -571,7 +581,28 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     )));
                 }
             }
-            Study::Driven { f_min, f_max, n_points, freqs_hz, prom_tol, max_hdm_solves, strict_prom_tol, seed_freqs_hz }
+            let solver = sp.text("solver");
+            if !DRIVEN_SOLVER_CHOICES.contains(&solver.as_str()) {
+                return Err(Error::invalid(format!(
+                    "driven study: unknown solver '{solver}' (expected one of {DRIVEN_SOLVER_CHOICES:?})"
+                )));
+            }
+            let blr_tol = sp.number("blr_tol");
+            if !blr_tol.is_finite() || blr_tol < 0.0 {
+                return Err(Error::invalid(format!("driven study requires finite blr_tol >= 0 (got {blr_tol})")));
+            }
+            Study::Driven {
+                f_min,
+                f_max,
+                n_points,
+                freqs_hz,
+                prom_tol,
+                max_hdm_solves,
+                strict_prom_tol,
+                seed_freqs_hz,
+                solver,
+                blr_tol,
+            }
         }
         other => return Err(Error::Unsupported(format!("ems has no study '{other}'"))),
     };
@@ -680,6 +711,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 let f_ref_given = p.optional_number("f_ref").unwrap_or(0.0);
                 let f_ref = if f_ref_given > 0.0 { f_ref_given } else { study.reference_freq() };
                 let lossless = p.boolean("lossless");
+                let ibc_mode_raw = p.text("ibc_mode");
+                let ibc_mode = if ibc_mode_raw.is_empty() { "direct".to_string() } else { ibc_mode_raw };
+                if !IBC_MODE_CHOICES.contains(&ibc_mode.as_str()) {
+                    return Err(Error::invalid(format!(
+                        "surface_impedance: unknown ibc_mode '{ibc_mode}' (expected one of {IBC_MODE_CHOICES:?})"
+                    )));
+                }
                 let film_model = p.text("film_model");
                 let mut fm = FilmModel::parse(&film_model).ok_or_else(|| {
                     Error::invalid(format!(
@@ -732,6 +770,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     f_ref,
                     film_model: fm.as_str().to_string(),
                     lossless,
+                    ibc_mode,
                 });
             }
             "lumped_jj" => {

@@ -180,7 +180,7 @@ impl Engine {
         // not checked: can it be? The check solves on a mesh finer by the planned factor; its size follows from the cells and the dimension
         let (cells, dim) = (stored.model.mesh().n_cells() as u64, stored.model.mesh().dim() as u8);
         let refined = (cells as f64 / PLANNED_FACTOR.powi(dim as i32)).ceil() as u64;
-        let chain = crate::estimate::chain_key(&[physics.to_string()]);
+        let chain = crate::estimate::chain_key_for_project(&self.project, &[physics.to_string()]);
         if let (Some(est), Some((total, _))) = (self.history.estimate(&chain, dim, refined), (self.memory_probe)()) {
             if est.bytes_with_margin as f64 > total as f64 * crate::estimate::REFUSE_ABOVE {
                 return Validated {

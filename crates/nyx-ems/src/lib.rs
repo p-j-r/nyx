@@ -48,7 +48,7 @@ pub use ports::{
 };
 pub use problem::{
     decode, symmetry_facet_flags, LumpedJjBc, LumpedPortBc, Problem, Study, SurfaceImpedanceBc, Symmetry, WavePortBc,
-    SYMMETRY_CHOICES,
+    DRIVEN_SOLVER_CHOICES, IBC_MODE_CHOICES, SYMMETRY_CHOICES,
 };
 pub use rom::{rom_complex_eigenfrequencies, rom_eigenfrequencies};
 
@@ -151,6 +151,21 @@ impl Physics for Ems {
                     ParamDesc::integer("max_hdm_solves", "Maximum HDM solves", 16, 1, "maximum number of greedy full-order HDM anchor factorizations during PROM sweep").range(Some(1.0), Some(64.0)),
                     ParamDesc::boolean("strict_prom_tol", "Strict PROM tolerance", false, "return an error if max_prom_residual still exceeds prom_tol after max_hdm_solves"),
                     ParamDesc::numbers("seed_freqs_hz", "Seed anchor frequencies", "Hz", "optional initial PROM anchor frequencies merged with [f_min, f_mid, f_max]"),
+                    ParamDesc::choice(
+                        "solver",
+                        "Linear solver backend",
+                        &["auto", "direct", "lblt", "blr", "ams_fgmres"],
+                        "auto",
+                        "sparse linear solver backend for driven frequency-domain solves ('auto', 'direct', 'lblt', 'blr', or 'ams_fgmres')",
+                    ),
+                    ParamDesc::number(
+                        "blr_tol",
+                        "BLR compression tolerance",
+                        "",
+                        1e-6,
+                        "relative low-rank compression tolerance for the 'blr' multifrontal LU backend",
+                    )
+                    .range(Some(0.0), None),
                 ],
             },
         ]
@@ -216,6 +231,13 @@ impl Physics for Ems {
                     ParamDesc::number("f_ref", "Reference frequency", "Hz", 0.0, "reference frequency for Z_s evaluation (0 or null uses the study frequency)").range(Some(0.0), None),
                     ParamDesc::choice("film_model", "Thin-film model", &["two_sided", "kerr", "thin_limit"], "two_sided", "thin-film current distribution model"),
                     ParamDesc::boolean("lossless", "Lossless kinetic inductance", false, "zero surface resistance R_s after BCS evaluation so 3D cavity solves use the fast real symmetric eigensolver while retaining L_k_sq"),
+                    ParamDesc::choice(
+                        "ibc_mode",
+                        "IBC formulation mode",
+                        &["direct", "perturbative", "auto"],
+                        "direct",
+                        "surface-impedance formulation: 'direct' adds Robin stiffness directly to the system matrix, 'perturbative' enforces strong PEC during eigensolve and computes Wheeler surface-current shifts in Stage 3, and 'auto' selects 'perturbative' for sub-grid P1 thin films",
+                    ),
                 ],
             },
             BcDesc {

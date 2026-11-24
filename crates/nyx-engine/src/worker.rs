@@ -249,7 +249,7 @@ fn serve_job(dir: &Path) -> Result<(), String> {
     let size = e.results_snapshot().ok().filter(|s| !s.results.is_empty()).map(|s| {
         let chain: Vec<String> = s.results.iter().map(|(c, _)| c.clone()).collect();
         json!({
-            "chain": crate::estimate::chain_key(&chain),
+            "chain": crate::estimate::chain_key_for_project(&s.project, &chain),
             "dim": s.model.mesh().dim(),
             "cells": s.model.mesh().n_cells(),
             "dofs": s.results.iter().map(|(_, r)| r.dofs).max().unwrap_or(0),

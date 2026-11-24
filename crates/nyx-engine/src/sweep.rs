@@ -389,7 +389,7 @@ impl Engine {
                         ("failed", Some(e.to_string()), run, numbers, dofs, Some(cells))
                     }
                     None => {
-                        self.learn(&results, cells as u64, model.mesh().dim() as u8, &worker);
+                        self.learn(&project, &results, cells as u64, model.mesh().dim() as u8, &worker);
                         let run = self.record_point(
                             &project,
                             RunOutcome::Solved(&results),

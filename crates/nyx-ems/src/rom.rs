@@ -6,7 +6,7 @@
 //! assembly, and dielectric `TlsMeta` generation.
 
 use crate::cavity::{gradient_full, EmwAssembly};
-use crate::ibc::{jj_inv_l_tot, sorted3, EPS0, MU0};
+use crate::ibc::{jj_inv_l_tot, sorted3, PerturbativeIbcEvaluator, EPS0, MU0};
 use crate::modes::C0;
 use crate::problem::Problem;
 use femcore::fem::solve_dirichlet;
@@ -26,18 +26,49 @@ fn dot_real(a: &[f64], b: &[f64]) -> f64 {
 }
 
 #[inline]
+fn two_sum_f64(a: f64, b: f64) -> (f64, f64) {
+    let s = a + b;
+    let v = s - a;
+    (s, (a - (s - v)) + (b - v))
+}
+
+#[inline]
+fn two_prod_f64(a: f64, b: f64) -> (f64, f64) {
+    let p = a * b;
+    (p, a.mul_add(b, -p))
+}
+
+#[inline]
 fn quad_form_real_mat_complex_vec(mat: &RCsr, x: &[C]) -> f64 {
-    let mut acc = 0.0;
+    let mut hi = 0.0_f64;
+    let mut lo = 0.0_f64;
     for i in 0..mat.nrows() {
         let xi = x[i];
         let (cols, vals) = mat.row(i);
-        let mut row_sum = c(0.0, 0.0);
+        let (mut r_re_hi, mut r_re_lo) = (0.0_f64, 0.0_f64);
+        let (mut r_im_hi, mut r_im_lo) = (0.0_f64, 0.0_f64);
         for (&col, &v) in cols.iter().zip(vals) {
-            row_sum += x[col as usize] * v;
+            let xc = x[col as usize];
+            let (p_re, e_re) = two_prod_f64(xc.re, v);
+            let (s_re, se_re) = two_sum_f64(r_re_hi, p_re);
+            r_re_hi = s_re;
+            r_re_lo += se_re + e_re;
+
+            let (p_im, e_im) = two_prod_f64(xc.im, v);
+            let (s_im, se_im) = two_sum_f64(r_im_hi, p_im);
+            r_im_hi = s_im;
+            r_im_lo += se_im + e_im;
         }
-        acc += (xi.conj() * row_sum).re;
+        let row_re = r_re_hi + r_re_lo;
+        let row_im = r_im_hi + r_im_lo;
+        for (a, b) in [(xi.re, row_re), (xi.im, row_im)] {
+            let (p, pe) = two_prod_f64(a, b);
+            let (s, se) = two_sum_f64(hi, p);
+            hi = s;
+            lo += se + pe;
+        }
     }
-    acc
+    hi + lo
 }
 
 /// Computes the physical scaling factor `s_E > 0` such that `U_elec,m = (1/4) eps_0 (s_E x_m)^H M_tot (s_E x_m) = 1 J`,
@@ -532,6 +563,7 @@ pub fn build_circuit_rom(
     solved_vectors: &[Vec<C>],
     freq_indices: &[(C, usize)],
     modes: Vec<ModeEnergyRow>,
+    pert_eval: Option<&PerturbativeIbcEvaluator>,
 ) -> Result<CircuitRom, String> {
     let mut ports: Vec<RomPort> = asm
         .jj_ports
@@ -648,7 +680,7 @@ pub fn build_circuit_rom(
     } else {
         asm.c_port_red.clone()
     };
-    let c_r = if c_tot_rom.nnz() > 0 {
+    let mut c_r = if c_tot_rom.nnz() > 0 {
         let cq_cols: Vec<Vec<f64>> = q_cols.iter().map(|q| c_tot_rom.matvec(q)).collect();
         let mut cr = vec![vec![0.0; r_tot]; r_tot];
         for a in 0..r_tot {
@@ -672,6 +704,195 @@ pub fn build_circuit_rom(
         }
         for (j, lp) in asm.lumped_ports.iter().enumerate() {
             b_r[a][n_jj + j] = dot_real(qa, &lp.b_red);
+        }
+    }
+
+    // FR-30: Apply perturbative surface-current kinetic inductance and surface resistance to `k_r` and `c_r`.
+    if let Some(pe) = pert_eval {
+        if r_tot > 0 {
+            let q_full_cols: Vec<Vec<f64>> = q_cols
+                .iter()
+                .map(|qa| {
+                    let mut full = vec![0.0_f64; asm.n];
+                    for i in 0..asm.n {
+                        let r = asm.red.index_of[i];
+                        if r != usize::MAX {
+                            full[i] = asm.red.ratio[i].re * qa[r];
+                        }
+                    }
+                    full
+                })
+                .collect();
+            let (dk_kin, g_r_mat) = pe.eval_rom_grams(&q_full_cols);
+            let k_r_unpert = k_r.clone();
+
+            let has_dk = dk_kin.iter().flatten().any(|&v| v.abs() > 0.0);
+            if has_dk {
+                let mut k_flat = vec![0.0_f64; r_tot * r_tot];
+                let mut eye = vec![0.0_f64; r_tot * r_tot];
+                for i in 0..r_tot {
+                    eye[i * r_tot + i] = 1.0;
+                    for j in 0..r_tot {
+                        k_flat[i * r_tot + j] = 0.5 * (k_r[i][j] + k_r[j][i]);
+                    }
+                }
+                let (k_evals, k_evecs) = dense_gen_eigh(&k_flat, &eye, r_tot)?;
+                let lam_max = k_evals.iter().copied().fold(0.0_f64, f64::max);
+                let pos: Vec<usize> = (0..r_tot).filter(|&idx| k_evals[idx] > 1e-14 * lam_max).collect();
+                let p = pos.len();
+                if p > 0 && lam_max > 0.0 {
+                    let mut eye_plus_s = vec![0.0_f64; p * p];
+                    let mut eye_p = vec![0.0_f64; p * p];
+                    for a in 0..p {
+                        eye_p[a * p + a] = 1.0;
+                        let va = &k_evecs[pos[a]];
+                        let inv_sa = 1.0 / k_evals[pos[a]].sqrt();
+                        // dk_va = dk_kin * va
+                        let mut dk_va = vec![0.0_f64; r_tot];
+                        for i in 0..r_tot {
+                            dk_va[i] = dot_real(&dk_kin[i], va);
+                        }
+                        for b in a..p {
+                            let vb = &k_evecs[pos[b]];
+                            let inv_sb = 1.0 / k_evals[pos[b]].sqrt();
+                            let s_ab = dot_real(vb, &dk_va) * inv_sa * inv_sb;
+                            let val = s_ab + if a == b { 1.0 } else { 0.0 };
+                            eye_plus_s[a * p + b] = val;
+                            eye_plus_s[b * p + a] = val;
+                        }
+                    }
+                    let (d_vals, u_vecs) = dense_gen_eigh(&eye_plus_s, &eye_p, p)?;
+                    let mut inv_ip_s = vec![vec![0.0_f64; p]; p];
+                    for a in 0..p {
+                        for b in a..p {
+                            let mut acc = 0.0;
+                            for k in 0..p {
+                                acc += u_vecs[k][a] * u_vecs[k][b] / d_vals[k].max(1.0);
+                            }
+                            inv_ip_s[a][b] = acc;
+                            inv_ip_s[b][a] = acc;
+                        }
+                    }
+                    // W[i][a] = k_evecs[pos[a]][i] * sqrt(lam_a)
+                    let mut w_mat = vec![vec![0.0_f64; p]; r_tot];
+                    for a in 0..p {
+                        let s_lam = k_evals[pos[a]].sqrt();
+                        let va = &k_evecs[pos[a]];
+                        for i in 0..r_tot {
+                            w_mat[i][a] = va[i] * s_lam;
+                        }
+                    }
+                    let mut k_r_new = vec![vec![0.0_f64; r_tot]; r_tot];
+                    for i in 0..r_tot {
+                        let mut tmp = vec![0.0_f64; p];
+                        for b in 0..p {
+                            tmp[b] = dot_real(&w_mat[i], &inv_ip_s[b]);
+                        }
+                        for j in i..r_tot {
+                            let kij = dot_real(&tmp, &w_mat[j]);
+                            k_r_new[i][j] = kij;
+                            k_r_new[j][i] = kij;
+                        }
+                    }
+                    k_r = k_r_new;
+                }
+            }
+
+            let has_gr = g_r_mat.iter().flatten().any(|&v| v.abs() > 0.0);
+            if has_gr {
+                let mut k_tot_unpert = vec![0.0_f64; r_tot * r_tot];
+                let mut k_tot_new = vec![0.0_f64; r_tot * r_tot];
+                let mut m_tot = vec![0.0_f64; r_tot * r_tot];
+                for i in 0..r_tot {
+                    for j in 0..r_tot {
+                        k_tot_unpert[i * r_tot + j] = k_r_unpert[i][j];
+                        k_tot_new[i * r_tot + j] = k_r[i][j];
+                        m_tot[i * r_tot + j] = m_r[i][j];
+                    }
+                }
+                for (p_idx, port) in ports.iter().enumerate() {
+                    let inv_l = jj_inv_l_tot(port.l_j_h.unwrap_or(0.0), port.e_l_hz.unwrap_or(0.0));
+                    let ak = MU0 * inv_l;
+                    let am = port.c_j_f / EPS0;
+                    if ak == 0.0 && am == 0.0 {
+                        continue;
+                    }
+                    for i in 0..r_tot {
+                        let bi = b_r[i][p_idx];
+                        for j in 0..r_tot {
+                            let bj = b_r[j][p_idx];
+                            k_tot_unpert[i * r_tot + j] += ak * bi * bj;
+                            k_tot_new[i * r_tot + j] += ak * bi * bj;
+                            m_tot[i * r_tot + j] += am * bi * bj;
+                        }
+                    }
+                }
+                let (lam_new, z_new) = dense_gen_eigh(&k_tot_new, &m_tot, r_tot)?;
+                let k0_ref_sq = (2.0 * PI * asm.f0 / C0).powi(2).max(1e-30);
+                let mut inv_denoms = Vec::with_capacity(r_tot);
+                let mut mz_cols = Vec::with_capacity(r_tot);
+                for m in 0..r_tot {
+                    let zm = &z_new[m];
+                    let mut u_unpert = 0.0;
+                    let mut mz = vec![0.0_f64; r_tot];
+                    for i in 0..r_tot {
+                        let mut krow = 0.0;
+                        let mut mrow = 0.0;
+                        for j in 0..r_tot {
+                            krow += k_tot_unpert[i * r_tot + j] * zm[j];
+                            mrow += m_tot[i * r_tot + j] * zm[j];
+                        }
+                        u_unpert += zm[i] * krow;
+                        mz[i] = mrow;
+                    }
+                    let u_new = lam_new[m].max(0.0);
+                    let ratio = if u_new > 1e-14 * k0_ref_sq && u_unpert > u_new { u_unpert / u_new } else { 1.0 };
+                    let denom = (u_unpert.max(k0_ref_sq) * ratio).sqrt();
+                    inv_denoms.push(1.0 / denom);
+                    mz_cols.push(mz);
+                }
+                // T[i][j] = sum_m z_new[m][i] * inv_denoms[m] * mz_cols[m][j]
+                let mut t_mat = vec![vec![0.0_f64; r_tot]; r_tot];
+                for m in 0..r_tot {
+                    let zm = &z_new[m];
+                    let mzm = &mz_cols[m];
+                    let id = inv_denoms[m];
+                    for i in 0..r_tot {
+                        let zi = zm[i] * id;
+                        for j in 0..r_tot {
+                            t_mat[i][j] += zi * mzm[j];
+                        }
+                    }
+                }
+                // C_pert = (1 / (mu_0 * c_0)) * T^T * G_R * T
+                let inv_eta0 = 1.0 / (MU0 * C0);
+                let mut gt = vec![vec![0.0_f64; r_tot]; r_tot];
+                for i in 0..r_tot {
+                    for j in 0..r_tot {
+                        let mut acc = 0.0;
+                        for k in 0..r_tot {
+                            acc += g_r_mat[i][k] * t_mat[k][j];
+                        }
+                        gt[i][j] = acc;
+                    }
+                }
+                if c_r.is_empty() {
+                    c_r = vec![vec![0.0_f64; r_tot]; r_tot];
+                }
+                for i in 0..r_tot {
+                    for j in i..r_tot {
+                        let mut acc = 0.0;
+                        for k in 0..r_tot {
+                            acc += t_mat[k][i] * gt[k][j];
+                        }
+                        let val = inv_eta0 * acc;
+                        c_r[i][j] += val;
+                        if i != j {
+                            c_r[j][i] += val;
+                        }
+                    }
+                }
+            }
         }
     }
 

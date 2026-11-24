@@ -67,6 +67,10 @@ pub mod toar;
 pub mod ts;
 pub mod vecops;
 
+pub use ams::{
+    Ams, AmsFgmresOptions, AmsFgmresSolver, AmsFgmresStats, AmsOptions, AmsP2, AmsP2Options, AmsP2Topology,
+    assemble_shifted_curl_curl, solve_ams_fgmres_many, solve_ams_p2_fgmres_many,
+};
 pub use csr::Csr;
 pub use linop::{FnOperator, Identity, LinearOperator, Preconditioner};
 pub use scalar::{C64, Scalar};

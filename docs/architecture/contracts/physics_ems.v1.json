@@ -249,6 +249,22 @@
           "name": "lossless",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "surface-impedance formulation: 'direct' adds Robin stiffness directly to the system matrix, 'perturbative' enforces strong PEC during eigensolve and computes Wheeler surface-current shifts in Stage 3, and 'auto' selects 'perturbative' for sub-grid P1 thin films",
+          "kind": {
+            "default": "direct",
+            "options": [
+              "direct",
+              "perturbative",
+              "auto"
+            ],
+            "type": "choice"
+          },
+          "label": "IBC formulation mode",
+          "name": "ibc_mode",
+          "required": false,
+          "unit": ""
         }
       ]
     },
@@ -935,6 +951,16 @@
                       ],
                       "type": "string"
                     },
+                    "ibc_mode": {
+                      "default": "direct",
+                      "description": "IBC formulation mode. surface-impedance formulation: 'direct' adds Robin stiffness directly to the system matrix, 'perturbative' enforces strong PEC during eigensolve and computes Wheeler surface-current shifts in Stage 3, and 'auto' selects 'perturbative' for sub-grid P1 thin films",
+                      "enum": [
+                        "direct",
+                        "perturbative",
+                        "auto"
+                      ],
+                      "type": "string"
+                    },
                     "lossless": {
                       "default": false,
                       "description": "Lossless kinetic inductance. zero surface resistance R_s after BCS evaluation so 3D cavity solves use the fast real symmetric eigensolver while retaining L_k_sq",
@@ -1555,6 +1581,12 @@
               "params": {
                 "additionalProperties": false,
                 "properties": {
+                  "blr_tol": {
+                    "default": 1e-6,
+                    "description": "BLR compression tolerance. relative low-rank compression tolerance for the 'blr' multifrontal LU backend",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
                   "f_max": {
                     "default": 8000000000.0,
                     "description": "Stop frequency [Hz]. maximum sweep frequency (>= f_min, required unless freqs_hz is given)",
@@ -1601,6 +1633,18 @@
                       "type": "number"
                     },
                     "type": "array"
+                  },
+                  "solver": {
+                    "default": "auto",
+                    "description": "Linear solver backend. sparse linear solver backend for driven frequency-domain solves ('auto', 'direct', 'lblt', 'blr', or 'ams_fgmres')",
+                    "enum": [
+                      "auto",
+                      "direct",
+                      "lblt",
+                      "blr",
+                      "ams_fgmres"
+                    ],
+                    "type": "string"
                   },
                   "strict_prom_tol": {
                     "default": false,
@@ -1997,6 +2041,37 @@
           "name": "seed_freqs_hz",
           "required": false,
           "unit": "Hz"
+        },
+        {
+          "doc": "sparse linear solver backend for driven frequency-domain solves ('auto', 'direct', 'lblt', 'blr', or 'ams_fgmres')",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "direct",
+              "lblt",
+              "blr",
+              "ams_fgmres"
+            ],
+            "type": "choice"
+          },
+          "label": "Linear solver backend",
+          "name": "solver",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "relative low-rank compression tolerance for the 'blr' multifrontal LU backend",
+          "kind": {
+            "default": 1e-6,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "BLR compression tolerance",
+          "name": "blr_tol",
+          "required": false,
+          "unit": ""
         }
       ]
     }

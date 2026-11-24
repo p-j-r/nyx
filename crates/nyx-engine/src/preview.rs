@@ -15,9 +15,9 @@
 //! of numbers, never the mesh a solve uses. "No mesh or solve without a request" (plan P3) is kept: the caller asks, the answer is a value.
 
 use crate::engine::Engine;
-use crate::estimate::{chain_key, Estimate, History};
+use crate::estimate::{chain_key, chain_key_for_project, Estimate, History};
 use crate::meshing::Mesher;
-use crate::project::MeshSettings;
+use crate::project::{MeshSettings, Project};
 use nyx_analysis::ModeAnalysis;
 use nyx_physics::{Error, Sizing, SolveResult};
 use serde::Serialize;
@@ -48,9 +48,8 @@ const HEAVY_CELLS: (u64, u64) = (15_000, 100_000);
 /// What a solve of `targets` on a mesh of `cells` cells costs, from the solves `history` has seen (the answer of `mesh_build` and `convergence_check`
 /// carries it): `solve` is `null` while there are too few runs (no number is invented), `warning` is there for a mesh that is large for the way it is
 /// used (L3).
-pub(crate) fn cost_of(history: &History, targets: &[String], dim: u8, cells: u64) -> serde_json::Value {
+pub(crate) fn cost_of_chain(history: &History, chain: String, dim: u8, cells: u64) -> serde_json::Value {
     use serde_json::json;
-    let chain = chain_key(targets);
     let solve = history.estimate(&chain, dim, cells).map(
         |e| json!({ "seconds": e.seconds, "memory_bytes": e.bytes, "runs": e.runs, "extrapolated": e.extrapolated }),
     );
@@ -59,6 +58,21 @@ pub(crate) fn cost_of(history: &History, targets: &[String], dim: u8, cells: u64
         v["warning"] = json!(w);
     }
     v
+}
+
+#[allow(dead_code)]
+pub(crate) fn cost_of(history: &History, targets: &[String], dim: u8, cells: u64) -> serde_json::Value {
+    cost_of_chain(history, chain_key(targets), dim, cells)
+}
+
+pub(crate) fn cost_of_project(
+    history: &History,
+    project: &Project,
+    targets: &[String],
+    dim: u8,
+    cells: u64,
+) -> serde_json::Value {
+    cost_of_chain(history, chain_key_for_project(project, targets), dim, cells)
 }
 
 fn heavy_warning(dim: u8, cells: u64) -> Option<String> {
@@ -101,7 +115,7 @@ impl Engine {
     /// solves this machine has run (`null` while there are too few: no number is invented) and, for a mesh that is large for the way it is used, a
     /// warning in plain words (L3).
     pub(crate) fn cost_json(&self, targets: &[String], dim: u8, cells: u64) -> serde_json::Value {
-        cost_of(&self.history, targets, dim, cells)
+        cost_of_project(&self.history, &self.project, targets, dim, cells)
     }
 
     /// The first problem of this project with `geometry` and `mesh` in place of its own, in plain words, or `Ok` when it passes
@@ -127,7 +141,8 @@ impl Engine {
         scratch.project.geometry = geometry.clone();
         scratch.project.mesh = mesh.clone();
         let sizing = scratch.sizing();
-        let chain = chain_key(&scratch.default_targets());
+        let targets = scratch.default_targets();
+        let chain = chain_key_for_project(&scratch.project, &targets);
         let sweep_dim = if mesh.sweep.is_some() { 3 } else { geometry.dim };
         Ok(SizeTask {
             mesher: self.mesher.clone(),

@@ -363,6 +363,7 @@ pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Resul
         modes.push((f, x));
     }
     modes.sort_by(|a, b| (a.0.re - f_target).abs().partial_cmp(&(b.0.re - f_target).abs()).unwrap());
+    modes.truncate(nev);
     if modes.is_empty() {
         return Err("no mode converged near the target frequency".into());
     }

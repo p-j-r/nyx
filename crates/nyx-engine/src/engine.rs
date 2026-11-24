@@ -600,7 +600,11 @@ impl Engine {
                     // the queue worker has appended rows since this engine read the file
                     history.reload();
                 }
-                let est = history.estimate(&crate::estimate::chain_key(&chain), model.mesh().dim() as u8, model.mesh().n_cells() as u64);
+                let est = history.estimate(
+                    &crate::estimate::chain_key_for_project(&project, &chain),
+                    model.mesh().dim() as u8,
+                    model.mesh().n_cells() as u64,
+                );
                 if let Some(est) = &est {
                     *slot.lock().expect("estimate") = Some(est.clone());
                     // a solve handed to the queue is admitted there, when it is its turn and the memory is free then
@@ -1103,7 +1107,7 @@ impl Engine {
                     self.store_results(results, keep, id, &solved_on, None);
                     return Err(e);
                 }
-                self.learn(&results, cells, dim, &worker);
+                self.learn(&project, &results, cells, dim, &worker);
                 let run = self.record_with_options(
                     &project,
                     RunOutcome::Solved(&results),
@@ -1215,7 +1219,14 @@ impl Engine {
 
     /// Learns what a finished worker run cost: its peak memory against the size of the problem, for the estimates of later solves. Only runs
     /// whose chain finished and whose worker measured its memory count (an in-process run cannot say how much of the process was its own).
-    pub(crate) fn learn(&self, results: &[SolveResult], cells: u64, dim: u8, worker: &Option<crate::jobs::WorkerRun>) {
+    pub(crate) fn learn(
+        &self,
+        project: &Project,
+        results: &[SolveResult],
+        cells: u64,
+        dim: u8,
+        worker: &Option<crate::jobs::WorkerRun>,
+    ) {
         // a run of the queue worker is in the history already: it added the row itself, whoever was watching
         if worker.as_ref().is_some_and(|w| w.shared) {
             return;
@@ -1226,7 +1237,7 @@ impl Engine {
         }
         let chain: Vec<String> = results.iter().map(|r| r.physics.clone()).collect();
         self.history.add(crate::estimate::Row {
-            chain: crate::estimate::chain_key(&chain),
+            chain: crate::estimate::chain_key_for_project(project, &chain),
             dim,
             cells,
             dofs: results.iter().map(|r| r.dofs as u64).max().unwrap_or(0),

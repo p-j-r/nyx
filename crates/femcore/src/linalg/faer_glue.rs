@@ -7,7 +7,7 @@
 use crate::linalg::dense::{Dense, DenseError};
 use crate::linalg::scalar::{C64, Scalar};
 use faer::traits::ComplexField;
-use faer::{Mat, MatMut, Par, Side};
+use faer::{Mat, MatMut, Par};
 
 /// Scalars that `faer` can handle, with the conversions to its element type (identical
 /// layouts: `f64` and `Complex<f64>` are faer's own `f64` and `c64`).
@@ -61,6 +61,9 @@ impl FaerScalar for C64 {
 }
 
 pub(crate) fn hermitian_eig<T: FaerScalar>(a: &Dense<T>) -> Result<(Vec<f64>, Dense<T>), DenseError> {
+    use faer::dyn_stack::{MemBuffer, MemStack};
+    use faer::linalg::evd::{ComputeEigenvectors, self_adjoint_evd, self_adjoint_evd_scratch};
+
     assert_eq!(a.rows(), a.cols());
     let n = a.rows();
     if !a.is_finite() {
@@ -71,11 +74,27 @@ pub(crate) fn hermitian_eig<T: FaerScalar>(a: &Dense<T>) -> Result<(Vec<f64>, De
     }
     // Mirror the lower triangle so the input is exactly Hermitian whatever the caller stored.
     let m = Mat::<T::Elem>::from_fn(n, n, |i, j| if i >= j { a[(i, j)].to_faer() } else { a[(j, i)].conj().to_faer() });
-    let evd = m.self_adjoint_eigen(Side::Lower).map_err(|_| DenseError::NoConvergence);
+    let par = dense_par_dim(n);
+    let mut u = Mat::<T::Elem>::zeros(n, n);
+    let mut s = faer::diag::Diag::<T::Elem>::zeros(n);
+    let mut mem = MemBuffer::new(self_adjoint_evd_scratch::<T::Elem>(
+        n,
+        ComputeEigenvectors::Yes,
+        par,
+        Default::default(),
+    ));
+    let evd = self_adjoint_evd(
+        m.as_ref(),
+        s.as_mut(),
+        Some(u.as_mut()),
+        par,
+        MemStack::new(&mut mem),
+        Default::default(),
+    )
+    .map_err(|_| DenseError::NoConvergence);
     clear_upper_vector_state();
-    let evd = evd?;
-    let (u, s) = (evd.U(), evd.S());
-    let w: Vec<f64> = (0..n).map(|i| Scalar::re(T::from_faer(s.column_vector()[i]))).collect();
+    evd?;
+    let w: Vec<f64> = (0..n).map(|i| Scalar::re(T::from_faer(s[i]))).collect();
     let q = Dense::from_fn(n, n, |i, j| T::from_faer(u[(i, j)]));
     Ok((w, q))
 }
@@ -127,16 +146,38 @@ pub(crate) fn clear_upper_vector_state() {}
 /// Thin SVD of the `n × cols` complex matrix `data` (column-major, `n ≥ cols`): singular values in
 /// decreasing order and the left singular vectors as an `n × cols` column-major vector.
 pub(crate) fn thin_svd_c64(data: &[C64], n: usize, cols: usize) -> Result<(Vec<f64>, Vec<C64>), DenseError> {
+    use faer::dyn_stack::{MemBuffer, MemStack};
+    use faer::linalg::svd::{ComputeSvdVectors, svd, svd_scratch};
+
     assert!(data.len() >= n * cols && n >= cols);
     if data.iter().any(|v| !v.is_finite()) {
         return Err(DenseError::NonFinite);
     }
     let m = Mat::<faer::c64>::from_fn(n, cols, |i, j| data[j * n + i]);
-    let svd = m.thin_svd().map_err(|_| DenseError::NoConvergence);
+    let par = dense_par(n * cols);
+    let mut s_diag = faer::diag::Diag::<faer::c64>::zeros(cols);
+    let mut u = Mat::<faer::c64>::zeros(n, cols);
+    let mut mem = MemBuffer::new(svd_scratch::<faer::c64>(
+        n,
+        cols,
+        ComputeSvdVectors::Thin,
+        ComputeSvdVectors::No,
+        par,
+        Default::default(),
+    ));
+    let res = svd(
+        m.as_ref(),
+        s_diag.as_mut(),
+        Some(u.as_mut()),
+        None,
+        par,
+        MemStack::new(&mut mem),
+        Default::default(),
+    )
+    .map_err(|_| DenseError::NoConvergence);
     clear_upper_vector_state();
-    let svd = svd?;
-    let s: Vec<f64> = (0..cols).map(|i| svd.S().column_vector()[i].re).collect();
-    let u = svd.U();
+    res?;
+    let s: Vec<f64> = (0..cols).map(|i| s_diag[i].re).collect();
     let mut out = vec![C64::ZERO; n * cols];
     for j in 0..cols {
         for i in 0..n {
@@ -152,16 +193,39 @@ pub(crate) type SvdUv = (Vec<f64>, Vec<C64>, Vec<C64>);
 /// Thin SVD like [`thin_svd_c64`] but also returning the right singular vectors `V`
 /// (`cols × cols`, column-major), so that `A = U diag(s) Vᴴ`.
 pub(crate) fn thin_svd_uv_c64(data: &[C64], n: usize, cols: usize) -> Result<SvdUv, DenseError> {
+    use faer::dyn_stack::{MemBuffer, MemStack};
+    use faer::linalg::svd::{ComputeSvdVectors, svd, svd_scratch};
+
     assert!(data.len() >= n * cols && n >= cols);
     if data.iter().any(|v| !v.is_finite()) {
         return Err(DenseError::NonFinite);
     }
     let m = Mat::<faer::c64>::from_fn(n, cols, |i, j| data[j * n + i]);
-    let svd = m.thin_svd().map_err(|_| DenseError::NoConvergence);
+    let par = dense_par(n * cols);
+    let mut s_diag = faer::diag::Diag::<faer::c64>::zeros(cols);
+    let mut u = Mat::<faer::c64>::zeros(n, cols);
+    let mut v = Mat::<faer::c64>::zeros(cols, cols);
+    let mut mem = MemBuffer::new(svd_scratch::<faer::c64>(
+        n,
+        cols,
+        ComputeSvdVectors::Thin,
+        ComputeSvdVectors::Thin,
+        par,
+        Default::default(),
+    ));
+    let res = svd(
+        m.as_ref(),
+        s_diag.as_mut(),
+        Some(u.as_mut()),
+        Some(v.as_mut()),
+        par,
+        MemStack::new(&mut mem),
+        Default::default(),
+    )
+    .map_err(|_| DenseError::NoConvergence);
     clear_upper_vector_state();
-    let svd = svd?;
-    let s: Vec<f64> = (0..cols).map(|i| svd.S().column_vector()[i].re).collect();
-    let (u, v) = (svd.U(), svd.V());
+    res?;
+    let s: Vec<f64> = (0..cols).map(|i| s_diag[i].re).collect();
     let mut uo = vec![C64::ZERO; n * cols];
     let mut vo = vec![C64::ZERO; cols * cols];
     for j in 0..cols {
@@ -209,8 +273,34 @@ pub fn generalized_eig_c64(a: &Dense<C64>, b: &Dense<C64>) -> Result<(Vec<C64>, 
 
 // ---- dense kernels of the low-rank multifrontal solver (`blr.rs`) ---------------------------------------
 
-fn dense_par(work: usize) -> Par {
-    if work >= 256 * 256 { faer::get_global_parallelism() } else { Par::Seq }
+/// Dimension threshold up to which small-to-medium dense eigensolves, LU, triangular solves, and GEMMs stay
+/// strictly `Par::Seq` so they are bit-identical across `NYX_THREADS` (`ADR 11`) and avoid Rayon barrier overhead.
+pub(crate) const SMALL_DENSE_SEQ_N: usize = 1024;
+
+/// Parallelism for a dense `n × n` decomposition (`n <= 1024` is strictly `Par::Seq`).
+#[inline]
+pub(crate) fn dense_par_dim(n: usize) -> Par {
+    if n <= SMALL_DENSE_SEQ_N
+        || crate::linalg::direct::deterministic_factor_env()
+        || crate::par::threads() <= 1
+    {
+        Par::Seq
+    } else {
+        faer::get_global_parallelism()
+    }
+}
+
+/// Parallelism for dense BLR/SVD work of size `work` (`<= 512 × 512` is strictly `Par::Seq`).
+#[inline]
+pub(crate) fn dense_par(work: usize) -> Par {
+    if work <= SMALL_DENSE_SEQ_N * SMALL_DENSE_SEQ_N
+        || crate::linalg::direct::deterministic_factor_env()
+        || crate::par::threads() <= 1
+    {
+        Par::Seq
+    } else {
+        faer::get_global_parallelism()
+    }
 }
 
 /// In-place LU with partial pivoting of the `n × n` column-major matrix `a` (unit lower `L` below the diagonal, `U`
@@ -222,10 +312,11 @@ pub(crate) fn dense_lu<T: FaerScalar>(a: &mut [T], n: usize) -> Option<Vec<usize
     if n == 0 {
         return Some(Vec::new());
     }
+    let par = dense_par(n * n);
     let (mut perm, mut inv) = (vec![0usize; n], vec![0usize; n]);
-    let mut mem = MemBuffer::new(lu_in_place_scratch::<usize, T::Elem>(n, n, Par::Seq, Default::default()));
+    let mut mem = MemBuffer::new(lu_in_place_scratch::<usize, T::Elem>(n, n, par, Default::default()));
     let m = MatMut::from_column_major_slice_mut(T::faer_slice_mut(a), n, n);
-    let _ = lu_in_place(m, &mut perm, &mut inv, dense_par(n * n), MemStack::new(&mut mem), Default::default());
+    let _ = lu_in_place(m, &mut perm, &mut inv, par, MemStack::new(&mut mem), Default::default());
     clear_upper_vector_state();
     if (0..n).any(|i| {
         let d = a[i * n + i];

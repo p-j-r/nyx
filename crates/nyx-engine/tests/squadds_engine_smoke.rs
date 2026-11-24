@@ -571,8 +571,9 @@ fn unified_qubit_cavity_m1_m2_m3_equivalence_smoke() {
     assert!(c_env > 1.0e-15, "expected positive C_env, got {c_env:e}");
 
     let kubo = KuboTransmon::new(c_env, c_j_f, e_j_hz);
+    // On S^1, sum_{m!=k} 16 E_C |<k|n|m>|^2 / f_{mk} = 1 - E_k''(0)/(8 E_C) (+3.44e-10 Bloch dispersion for k=1 at E_J/E_C ~ 144).
     assert!((kubo.trk_sum_g - 1.0).abs() < 1.0e-10, "TRK sum (g) violated: {}", kubo.trk_sum_g);
-    assert!((kubo.trk_sum_e - 1.0).abs() < 1.0e-10, "TRK sum (e) violated: {}", kubo.trk_sum_e);
+    assert!((kubo.trk_sum_e - 1.0).abs() < 1.0e-9, "TRK sum (e) violated: {}", kubo.trk_sum_e);
 
     // Synthesize 2-port feedline S-parameters over separate local ground/excited dip windows
     let synth_band = |center_hz: f64, excited: bool| -> (f64, f64) {

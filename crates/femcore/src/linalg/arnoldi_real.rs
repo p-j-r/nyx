@@ -6,10 +6,40 @@
 
 use crate::linalg::csr::RCsr as Csr;
 use crate::linalg::driver::DirectSolver;
-use rayon::prelude::*;
+use crate::linalg::faer_glue::{clear_upper_vector_state, dense_par_dim};
+use crate::linalg::par;
+
+/// Fixed chunk length for thread-invariant reductions and vector updates (`ADR 11`).
+const CHUNK: usize = 4096;
+
+/// Sequential fixed-chunk dot product matching the chunk reduction order of [`dot`].
+#[inline]
+fn dot_chunked_serial(a: &[f64], b: &[f64]) -> f64 {
+    debug_assert_eq!(a.len(), b.len());
+    let mut total = 0.0f64;
+    for (ac, bc) in a.chunks(CHUNK).zip(b.chunks(CHUNK)) {
+        let mut s = 0.0f64;
+        for (&x, &y) in ac.iter().zip(bc) {
+            s += x * y;
+        }
+        total += s;
+    }
+    total
+}
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
+    assert_eq!(a.len(), b.len());
+    let nch = a.len().div_ceil(CHUNK);
+    let parts = par::chunk_map(nch, worth_par(a.len()), |c| {
+        let s = c * CHUNK;
+        let e = (s + CHUNK).min(a.len());
+        let mut acc = 0.0f64;
+        for (&x, &y) in a[s..e].iter().zip(&b[s..e]) {
+            acc += x * y;
+        }
+        acc
+    });
+    parts.into_iter().sum()
 }
 
 
@@ -60,32 +90,28 @@ fn max_dim_for(n: usize, nev: usize, opts: &EigOpts) -> usize {
     cap.min(n)
 }
 
-fn par_threads(work: usize) -> usize {
+fn worth_par(work: usize) -> bool {
     // a task on the shared pool costs about 10 microseconds, a few thousand multiply-adds
-    if work < 100_000 { 1 } else { crate::par::threads() }
+    work >= 100_000 && crate::par::threads() > 1
 }
 
-/// `<q_k, w>` for every vector `q_k`, one thread per group of vectors.
+/// `<q_k, w>` for every vector `q_k`, with thread-invariant fixed-chunk dot reductions (`ADR 11`).
 fn par_dots(vs: &[Vec<f64>], w: &[f64]) -> Vec<f64> {
     let m = vs.len();
-    let mut out = vec![0.0; m];
-    let nt = par_threads(m * w.len());
-    let chunk = m.div_ceil(nt).max(1);
-    out.par_chunks_mut(chunk).enumerate().for_each(|(ci, o)| {
-        for (k, x) in o.iter_mut().enumerate() {
-            *x = dot(&vs[ci * chunk + k], w);
-        }
-    });
-    out
+    if m == 0 {
+        return Vec::new();
+    }
+    if m == 1 {
+        return vec![dot(&vs[0], w)];
+    }
+    par::chunk_map(m, worth_par(m * w.len()), |k| dot_chunked_serial(&vs[k], w))
 }
 
-/// `sum_k y_k q_k` with the rows split over threads.
+/// `sum_k y_k q_k` with rows split in thread-invariant fixed [`CHUNK`] blocks (`ADR 11`).
 fn par_combine(vs: &[Vec<f64>], y: &[f64], n: usize) -> Vec<f64> {
     let mut out = vec![0.0; n];
-    let nt = par_threads(vs.len() * n);
-    let chunk = n.div_ceil(nt).max(1);
-    out.par_chunks_mut(chunk).enumerate().for_each(|(ci, o)| {
-        let r0 = ci * chunk;
+    par::for_chunks_mut(&mut out, CHUNK, worth_par(vs.len() * n), |ci, o| {
+        let r0 = ci * CHUNK;
         let len = o.len();
         for (q, &yk) in vs.iter().zip(y) {
             if yk != 0.0 {
@@ -98,16 +124,16 @@ fn par_combine(vs: &[Vec<f64>], y: &[f64], n: usize) -> Vec<f64> {
     out
 }
 
-/// `w -= sum_k c_k q_k`, rows split over threads.
+/// `w -= sum_k c_k q_k`, rows split in thread-invariant fixed [`CHUNK`] blocks (`ADR 11`).
 fn par_subtract(w: &mut [f64], vs: &[Vec<f64>], coef: &[f64]) {
-    let nt = par_threads(vs.len() * w.len());
-    let chunk = w.len().div_ceil(nt).max(1);
-    w.par_chunks_mut(chunk).enumerate().for_each(|(ci, o)| {
-        let r0 = ci * chunk;
+    par::for_chunks_mut(w, CHUNK, worth_par(vs.len() * w.len()), |ci, o| {
+        let r0 = ci * CHUNK;
         let len = o.len();
         for (q, &ck) in vs.iter().zip(coef) {
-            for (x, a) in o.iter_mut().zip(&q[r0..r0 + len]) {
-                *x -= ck * a;
+            if ck != 0.0 {
+                for (x, a) in o.iter_mut().zip(&q[r0..r0 + len]) {
+                    *x -= ck * a;
+                }
             }
         }
     });
@@ -261,12 +287,102 @@ struct GeneralEig {
 }
 
 /// Eigenpairs of a general real matrix (row-major), for the projected matrix of the Arnoldi process.
+/// Keeps small dense eigensolves (`n <= 512`) strictly `Par::Seq` for thread-count determinism (`ADR 11`).
 fn eig_general(a: &[f64], n: usize) -> Result<Vec<GeneralEig>, String> {
+    use faer::dyn_stack::{MemBuffer, MemStack};
+    use faer::linalg::evd::{ComputeEigenvectors, evd_real, evd_scratch};
+
     let m = faer::Mat::from_fn(n, n, |i, j| a[i * n + j]);
-    let e = m.eigen().map_err(|e| format!("eigendecomposition failed: {e:?}"))?;
-    let (u, s) = (e.U(), e.S());
-    Ok((0..n).map(|j| {
-        let z = s.column_vector()[j];
-        GeneralEig { value: (z.re, z.im), vector: (0..n).map(|i| (u[(i, j)].re, u[(i, j)].im)).collect() }
-    }).collect())
+    let par = dense_par_dim(n);
+    let mut u_real = faer::Mat::<f64>::zeros(n, n);
+    let mut s_re = faer::diag::Diag::<f64>::zeros(n);
+    let mut s_im = faer::diag::Diag::<f64>::zeros(n);
+    let mut mem = MemBuffer::new(evd_scratch::<f64>(
+        n,
+        ComputeEigenvectors::No,
+        ComputeEigenvectors::Yes,
+        par,
+        Default::default(),
+    ));
+    let res = evd_real(
+        m.as_ref(),
+        s_re.as_mut(),
+        s_im.as_mut(),
+        None,
+        Some(u_real.as_mut()),
+        par,
+        MemStack::new(&mut mem),
+        Default::default(),
+    );
+    clear_upper_vector_state();
+    res.map_err(|e| format!("eigendecomposition failed: {e:?}"))?;
+
+    let mut out = Vec::with_capacity(n);
+    let mut j = 0usize;
+    while j < n {
+        let im = s_im[j];
+        if im == 0.0 {
+            out.push(GeneralEig {
+                value: (s_re[j], 0.0),
+                vector: (0..n).map(|i| (u_real[(i, j)], 0.0)).collect(),
+            });
+            j += 1;
+        } else {
+            let re = s_re[j];
+            out.push(GeneralEig {
+                value: (re, im),
+                vector: (0..n).map(|i| (u_real[(i, j)], u_real[(i, j + 1)])).collect(),
+            });
+            out.push(GeneralEig {
+                value: (re, -im),
+                vector: (0..n).map(|i| (u_real[(i, j)], -u_real[(i, j + 1)])).collect(),
+            });
+            j += 2;
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn in_pool<R: Send>(threads: usize, f: impl FnOnce() -> R + Send) -> R {
+        rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(f)
+    }
+
+    #[test]
+    fn fixed_chunk_vector_ops_are_bit_identical_across_thread_counts() {
+        let n = 100_003;
+        let m = 12;
+        let mut rng = Rng(0x1234_5678_9ABC_DEF0);
+        let vs: Vec<Vec<f64>> = (0..m).map(|_| (0..n).map(|_| rng.next()).collect()).collect();
+        let w: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+        let coef: Vec<f64> = (0..m).map(|_| rng.next()).collect();
+
+        let (d1, c1, s1) = in_pool(1, || {
+            let d = par_dots(&vs, &w);
+            let c = par_combine(&vs, &coef, n);
+            let mut ws = w.clone();
+            par_subtract(&mut ws, &vs, &coef);
+            (d, c, ws)
+        });
+        let (d8, c8, s8) = in_pool(8, || {
+            let d = par_dots(&vs, &w);
+            let c = par_combine(&vs, &coef, n);
+            let mut ws = w.clone();
+            par_subtract(&mut ws, &vs, &coef);
+            (d, c, ws)
+        });
+        assert_eq!(d1.len(), d8.len());
+        for (a, b) in d1.iter().zip(&d8) {
+            assert_eq!(a.to_bits(), b.to_bits(), "par_dots differs between 1 and 8 threads");
+        }
+        for (a, b) in c1.iter().zip(&c8) {
+            assert_eq!(a.to_bits(), b.to_bits(), "par_combine differs between 1 and 8 threads");
+        }
+        for (a, b) in s1.iter().zip(&s8) {
+            assert_eq!(a.to_bits(), b.to_bits(), "par_subtract differs between 1 and 8 threads");
+        }
+    }
 }

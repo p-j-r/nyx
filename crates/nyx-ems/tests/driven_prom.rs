@@ -1075,3 +1075,115 @@ fn fr24_cpw_even_lumped_port_matches_endcap_and_validates_contact() {
         "shorted lumped_port must return Error::Invalid, got {err_short:?}"
     );
 }
+
+#[test]
+fn fr33_driven_solver_backends_and_factor_backend_logging() {
+    let g = build_coupled_feedline_resonator_mesh();
+    let exchange = Mesh::from_solver_mesh(&g.mesh).unwrap();
+    let resolver = GeomResolver(&g);
+
+    let make_spec = |solver: &str, blr_tol: f64, prom_tol: serde_json::Value| -> ProblemSpec {
+        let mut s = ProblemSpec::new("ems", 1, "driven");
+        s.study.params = json!({
+            "freqs_hz": [5.0e9, 6.0e9],
+            "prom_tol": prom_tol,
+            "solver": solver,
+            "blr_tol": blr_tol
+        });
+        s.materials.insert("si".into(), MaterialAssign::Props([("eps_r".to_string(), 11.45)].into()));
+        s.materials.insert("air".into(), MaterialAssign::Props([("eps_r".to_string(), 1.0)].into()));
+        for sheet in ["feed_trace", "res_pad1", "res_pad2"] {
+            s.bcs.push(BcSpec { on: sheet.into(), kind: "pec".into(), params: json!({}) });
+        }
+        s.bcs.push(BcSpec {
+            on: "port1_sheet".into(),
+            kind: "lumped_port".into(),
+            params: json!({ "name": "port1", "Z_0": 50.0, "direction": [0.0, 1.0, 0.0] }),
+        });
+        s.bcs.push(BcSpec {
+            on: "port2_sheet".into(),
+            kind: "lumped_port".into(),
+            params: json!({ "name": "port2", "Z_0": 50.0, "direction": [0.0, -1.0, 0.0] }),
+        });
+        s
+    };
+
+    // Baseline: auto (PROM)
+    let res_auto = Ems.solve(&exchange, &make_spec("auto", 1e-6, json!(1e-3)), &mut Ctx::new(&resolver)).unwrap();
+    let d_auto = DrivenPortData::of(&res_auto).unwrap();
+    assert!(
+        res_auto.log.iter().any(|l| l.contains("solver=auto") && l.contains("backend=")),
+        "auto must log solver & backend: {:?}",
+        res_auto.log
+    );
+
+    // Direct, LBLT, BLR, and AMS+FGMRES must match auto on S-parameters and log their backend
+    for (solver_name, expected_tag, prom_tol) in [
+        ("direct", "backend=", json!(1e-3)),
+        ("lblt", "backend=", json!(1e-3)),
+        ("blr", "backend=BlrNd", json!(1e-3)),
+        ("ams_fgmres", "backend=AmsFgmres", json!(null)),
+    ] {
+        let res = Ems.solve(&exchange, &make_spec(solver_name, 1e-6, prom_tol), &mut Ctx::new(&resolver)).unwrap();
+        let d = DrivenPortData::of(&res).unwrap();
+        assert!(
+            res.log.iter().any(|l| l.contains(&format!("solver={solver_name}")) && l.contains(expected_tag)),
+            "{solver_name} log missing expected tag '{expected_tag}': {:?}",
+            res.log
+        );
+        if matches!(solver_name, "blr" | "ams_fgmres") {
+            assert_eq!(
+                res.scalar("symbolic_count"),
+                Some(1.0),
+                "{solver_name} must reuse cached symbolic/topology across frequencies (hdm_solves = {})",
+                d.hdm_solves
+            );
+        }
+        let mut max_diff = 0.0_f64;
+        for k in 0..d_auto.freqs_hz.len() {
+            for p in 0..2 {
+                for q in 0..2 {
+                    let s0 = c(d_auto.s_matrix[k][p][q][0], d_auto.s_matrix[k][p][q][1]);
+                    let s1 = c(d.s_matrix[k][p][q][0], d.s_matrix[k][p][q][1]);
+                    max_diff = max_diff.max((s1 - s0).norm());
+                }
+            }
+        }
+        eprintln!("FR-33 driven solver={solver_name}: max |S - S_auto| = {max_diff:.3e}, log = {:?}", res.log);
+        assert!(max_diff < 1e-3, "FR-33 solver={solver_name} S-matrix diff = {max_diff:.3e} >= 1e-3");
+    }
+
+    // Order-2 P2 AMS+FGMRES parity check (`AmsFgmresSolver::new_shifted_complex_p2` + `update_matrix`)
+    let make_p2_spec = |solver: &str| -> ProblemSpec {
+        let mut s = make_spec(solver, 1e-6, json!(null));
+        s.order = 2;
+        s
+    };
+    let res_p2_auto = Ems.solve(&exchange, &make_p2_spec("auto"), &mut Ctx::new(&resolver)).unwrap();
+    let res_p2_ams = Ems.solve(&exchange, &make_p2_spec("ams_fgmres"), &mut Ctx::new(&resolver)).unwrap();
+    assert_eq!(res_p2_ams.scalar("symbolic_count"), Some(1.0));
+    assert!(
+        res_p2_ams.log.iter().any(|l| l.contains("solver=ams_fgmres") && l.contains("backend=AmsFgmres")),
+        "P2 ams_fgmres log: {:?}",
+        res_p2_ams.log
+    );
+    let d_p2_auto = DrivenPortData::of(&res_p2_auto).unwrap();
+    let d_p2_ams = DrivenPortData::of(&res_p2_ams).unwrap();
+    let mut max_p2_diff = 0.0_f64;
+    for k in 0..d_p2_auto.freqs_hz.len() {
+        for p in 0..2 {
+            for q in 0..2 {
+                let s0 = c(d_p2_auto.s_matrix[k][p][q][0], d_p2_auto.s_matrix[k][p][q][1]);
+                let s1 = c(d_p2_ams.s_matrix[k][p][q][0], d_p2_ams.s_matrix[k][p][q][1]);
+                max_p2_diff = max_p2_diff.max((s1 - s0).norm());
+            }
+        }
+    }
+    eprintln!("FR-33 P2 driven solver=ams_fgmres: max |S - S_auto| = {max_p2_diff:.3e}, log = {:?}", res_p2_ams.log);
+    assert!(max_p2_diff < 1e-3, "FR-33 P2 solver=ams_fgmres S-matrix diff = {max_p2_diff:.3e} >= 1e-3");
+
+    // Validation: unknown solver name is rejected
+    let err_bad =
+        Ems.solve(&exchange, &make_spec("bogus_solver", 1e-6, json!(null)), &mut Ctx::new(&resolver)).unwrap_err();
+    assert!(matches!(err_bad, Error::Invalid(_)), "unknown solver must return Error::Invalid, got {err_bad:?}");
+}

@@ -1019,12 +1019,17 @@ pub(crate) fn subdivided_tet_quad(n_sub: usize) -> Vec<([f64; 4], f64)> {
     out
 }
 
+fn result_is_order_1(ef: &EFieldAccessor<'_>, result: &SolveResult) -> bool {
+    ef.order == 1 || result.order == 1 || result.log.iter().any(|l| l.starts_with("Nedelec order 1,"))
+}
+
 fn run_tls_3d(
     disc: &Discretisation,
     ef: &EFieldAccessor<'_>,
     meta: &TlsMeta,
     p: &TlsParams,
     c_e: f64,
+    is_p1_field: bool,
 ) -> Result<TlsReport, Error> {
     let geo = geometry(disc);
     let quad3 = quad_rule(3, 4);
@@ -1266,7 +1271,7 @@ fn run_tls_3d(
     let q_tls = if loss_tan_total > 0.0 { 1.0 / loss_tan_total } else { f64::INFINITY };
 
     let edge_singularity_underresolved =
-        ef.order == 1 && !perim.has_resolved_3d_step && !perim.bvh.is_empty() && perim.h_edge_mean > 5.0 * d_film;
+        is_p1_field && !perim.has_resolved_3d_step && !perim.bvh.is_empty() && perim.h_edge_mean > 5.0 * d_film;
 
     let mut conv = json!({
         "dim": 3,
@@ -1413,9 +1418,10 @@ pub fn tls_participation_quasi_electrostatic(
         let ef = EFieldAccessor::new(&synth_sol, disc.dim, disc.n_cells())?;
         let mut p_mode = p.clone();
         p_mode.solution = m_idx;
+        let is_p1_field = result_is_order_1(&ef, electro_result);
         let mut rep = match disc.dim {
             2 => run_tls_2d(&disc, &ef, &meta, &p_mode, 0.5)?,
-            3 => run_tls_3d(&disc, &ef, &meta, &p_mode, 0.5)?,
+            3 => run_tls_3d(&disc, &ef, &meta, &p_mode, 0.5, is_p1_field)?,
             d => {
                 return Err(Error::invalid(format!(
                     "tls_participation_quasi_electrostatic supports 2D and 3D meshes, not {d}D"
@@ -1464,10 +1470,11 @@ pub fn tls_participation_with_params(mesh: &Mesh, result: &SolveResult, params: 
     let sol = &result.solutions[p.solution];
     let ef = EFieldAccessor::new(sol, disc.dim, disc.n_cells())?;
     let c_e = if result.physics == "ems" { 0.25 } else { 0.5 };
+    let is_p1_field = result_is_order_1(&ef, result);
 
     match disc.dim {
         2 => run_tls_2d(&disc, &ef, &meta, &p, c_e),
-        3 => run_tls_3d(&disc, &ef, &meta, &p, c_e),
+        3 => run_tls_3d(&disc, &ef, &meta, &p, c_e, is_p1_field),
         d => Err(Error::invalid(format!("tls_participation supports 2D and 3D meshes, not {d}D"))),
     }
 }

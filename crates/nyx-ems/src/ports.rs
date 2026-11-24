@@ -12,7 +12,7 @@
 //!   anchors), and modal wave impedance `Z_{0,p}(omega) = omega mu_0 / beta_p(omega)`, and assembles
 //!   the sparse 3D waveport boundary matrix `W_p` and modal vector `b_p`.
 
-use crate::cavity::{basis3, Ned3};
+use crate::cavity::{basis3, safe_curved_jacobian, Ned3};
 use crate::ibc::{build_face_to_cell_3d, sorted3, MU0};
 use crate::modes::{assemble_modes_with_bcs, solve_mode_pairs, EpsCell, C0};
 use crate::problem::{symmetry_facet_flags, LumpedPortBc, Problem, SurfaceImpedanceBc, WavePortBc};
@@ -180,17 +180,35 @@ pub fn eval_triangle_tangential_basis_ordered(
         lam4[lf[0]] = l2[0];
         lam4[lf[1]] = l2[1];
         lam4[lf[2]] = l2[2];
-        match &curved {
-            Some(ct) => basis3(ned.order, &lam4, &ct.jacobian(&lam4).0, &gid, &mut w, &mut cu),
-            None => basis3(ned.order, &lam4, &gs, &gid, &mut w, &mut cu),
-        }
+        let (area_q, n_q) = match &curved {
+            Some(ct) => {
+                let gq = safe_curved_jacobian(ct, &lam4, &gs);
+                basis3(ned.order, &lam4, &gq, &gid, &mut w, &mut cu);
+                let d = ct.dx_dlam(&lam4);
+                let nr = cross3(sub3(d[lf[1]], d[lf[0]]), sub3(d[lf[2]], d[lf[0]]));
+                let nl = norm3(nr);
+                if nl > 1e-30 {
+                    let mut nq = [nr[0] / nl, nr[1] / nl, nr[2] / nl];
+                    if dot3(nq, n_out) < 0.0 {
+                        nq = [-nq[0], -nq[1], -nq[2]];
+                    }
+                    (0.5 * nl, nq)
+                } else {
+                    (area, n_out)
+                }
+            }
+            None => {
+                basis3(ned.order, &lam4, &gs, &gid, &mut w, &mut cu);
+                (area, n_out)
+            }
+        };
         let mut row = Vec::with_capacity(nb_face);
         for &s in &local_slots {
             let ws = w[s];
-            let wn = dot3(ws, n_out);
-            row.push([ws[0] - wn * n_out[0], ws[1] - wn * n_out[1], ws[2] - wn * n_out[2]]);
+            let wn = dot3(ws, n_q);
+            row.push([ws[0] - wn * n_q[0], ws[1] - wn * n_q[1], ws[2] - wn * n_q[2]]);
         }
-        weights.push(quad2.w[q] * area);
+        weights.push(quad2.w[q] * area_q);
         psi_q.push(row);
     }
 

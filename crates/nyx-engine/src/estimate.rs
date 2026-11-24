@@ -333,6 +333,34 @@ pub fn chain_key(targets: &[String]) -> String {
     t.join(",")
 }
 
+/// Calibration chain key aware of `ems:driven` `(solver_backend, order)` profiles (`FR-33`),
+/// keeping non-`ems:driven` targets identical to [`chain_key`] so existing cavity/static history stays intact.
+pub fn chain_key_for_project(project: &crate::project::Project, targets: &[String]) -> String {
+    let mut tokens: Vec<String> = targets
+        .iter()
+        .map(|t| {
+            if let Some(spec) = project.spec(t) {
+                if spec.physics == "ems" && spec.study.kind == "driven" {
+                    let solver = spec
+                        .study
+                        .params
+                        .get("solver")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("auto");
+                    let order = spec.order.clamp(1, 2);
+                    return format!("ems:driven:{solver}:p{order}");
+                }
+            }
+            t.clone()
+        })
+        .collect();
+    tokens.sort_unstable();
+    tokens.dedup();
+    tokens.join(",")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,5 +418,34 @@ mod tests {
         assert_eq!(again.rows().len(), 2);
         assert!(again.estimate("ems", 3, 2000).is_some());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driven_ems_keys_calibration_by_solver_backend_and_order() {
+        let mut p = crate::project::Project::new("Driven", 3);
+        let mut s = nyx_physics::ProblemSpec::new("ems", 1, "driven");
+        s.study.params = json!({ "f_min": 4e9, "f_max": 8e9, "solver": "blr" });
+        p.physics.push(s);
+        assert_eq!(chain_key_for_project(&p, &["ems".into()]), "ems:driven:blr:p1");
+
+        p.physics[0].order = 2;
+        p.physics[0].study.params = json!({ "f_min": 4e9, "f_max": 8e9, "solver": "ams_fgmres" });
+        assert_eq!(chain_key_for_project(&p, &["ems".into()]), "ems:driven:ams_fgmres:p2");
+
+        // Non-driven ems keeps plain "ems" key
+        p.physics[0] = nyx_physics::ProblemSpec::new("ems", 1, "cavity");
+        assert_eq!(chain_key_for_project(&p, &["ems".into()]), "ems");
+
+        // Legacy "ems" or "ems:driven:direct:p2" history rows never block "blr" / "ams_fgmres" / "lblt"
+        let rows = [
+            row(100_000, 40.0),
+            row(200_000, 95.0),
+            Row { chain: "ems:driven:direct:p2".into(), ..row(100_000, 45.0) },
+            Row { chain: "ems:driven:direct:p2".into(), ..row(200_000, 110.0) },
+        ];
+        assert!(estimate(&rows, "ems:driven:direct:p2", 3, 150_000).is_some());
+        assert!(estimate(&rows, "ems:driven:lblt:p1", 3, 150_000).is_none());
+        assert!(estimate(&rows, "ems:driven:blr:p1", 3, 150_000).is_none());
+        assert!(estimate(&rows, "ems:driven:ams_fgmres:p1", 3, 150_000).is_none());
     }
 }
