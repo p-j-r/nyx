@@ -431,6 +431,8 @@ impl App {
         egui::Panel::top("wf_bar").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             // in a narrow window (or beside the script dock) what is shown goes to a row of its own: nothing overlaps
             let narrow = ui.available_width() < 960.0;
+            // narrower than the two menus and the buttons side by side (a 150 percent scale, or the script dock in a small window): the buttons go to the row below too
+            let stacked = ui.available_width() < 700.0 && !locked;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 self.experiment_menu(ui, w, acts, locked);
@@ -443,7 +445,9 @@ impl App {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.bar_actions(ui, acts, locked);
+                    if !stacked {
+                        self.bar_actions(ui, acts, locked);
+                    }
                     if !narrow && !locked {
                         self.bar_show(ui, w, acts);
                     }
@@ -453,6 +457,12 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.bar_show(ui, w, acts));
+                });
+            }
+            if stacked {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.bar_actions(ui, acts, locked));
                 });
             }
         });
@@ -581,8 +591,10 @@ impl App {
             ui.add(egui::Label::new(kit::muted(ui, status).size(12.5)).truncate())
                 .on_hover_text("Compute solves on exactly this mesh; it is rebuilt from the recipe, never stored.");
         });
-        if self.bottom_open && self.show_results && self.current.is_some_and(|i| self.results[i].sols.len() > 1) {
-            egui::Panel::bottom("wf_modes").default_size(180.0).resizable(true).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| self.results_panel(ui));
+        // the strip of the modes needs room to be a plot: in a short window (a 150 percent scale) it leaves the height to the viewport, the slider and the Summary still choose the mode
+        let room = ui.available_height();
+        if self.bottom_open && self.show_results && room > 380.0 && self.current.is_some_and(|i| self.results[i].sols.len() > 1) {
+            egui::Panel::bottom("wf_modes").default_size(180.0).size_range(90.0..=(room * 0.4)).resizable(true).frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| self.results_panel(ui));
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
             ui.horizontal(|ui| {

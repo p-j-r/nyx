@@ -1239,8 +1239,12 @@ impl App {
                 rv.manual_range = Some(r);
             }
             if rv.sols.iter().any(|s| s.disp.is_some()) {
+                ui.label("deformation scale");
                 ui.horizontal(|ui| {
-                    ui.label("deformation scale");
+                    // the label is above so that the slider has the width of the panel less its box and two buttons; its rail is made visible as for the modes
+                    ui.spacing_mut().slider_width = (ui.available_width() - 200.0).clamp(60.0, 200.0);
+                    let rail = ui.visuals().text_color().gamma_multiply(0.35);
+                    ui.visuals_mut().widgets.inactive.bg_fill = rail;
                     let max = (rv.auto_warp * 10.0).max(1.0);
                     ui.add(egui::Slider::new(&mut rv.warp, 0.0..=max).logarithmic(false).custom_formatter(|v, _| format!("{:.3e}", v)));
                     if ui.small_button("auto").clicked() {
@@ -1631,7 +1635,11 @@ impl App {
         let at: Vec<f64> = if is_eigen || is_modes { (0..nsol).map(|i| i as f64 + 1.0).collect() } else { xs.clone() };
         let chosen = rv.sol.min(nsol - 1);
         let shown_colour = ui.visuals().warn_fg_color;
-        let out = egui_plot::Plot::new("summary_plot").set_margin_fraction(egui::vec2(0.08, 0.3)).height(ui.available_height().max(90.0)).x_axis_label(xlabel).y_axis_label(if is_eigen { "frequency (Hz)" } else if is_modes { "|neff|" } else { fname.as_str() }).legend(egui_plot::Legend::default()).show(ui, |p| {
+        // frequencies are drawn in the unit of their size (10 GHz, not 10000000000)
+        let top = if is_eigen { xs.iter().fold(0.0f64, |m, x| m.max(x.abs())) } else { 0.0 };
+        let (fscale, funit) = if top >= 1e9 { (1e9, "GHz") } else if top >= 1e6 { (1e6, "MHz") } else if top >= 1e3 { (1e3, "kHz") } else { (1.0, "Hz") };
+        let ylabel = if is_eigen { format!("frequency ({funit})") } else if is_modes { "|neff|".to_string() } else { fname.clone() };
+        let out = egui_plot::Plot::new("summary_plot").set_margin_fraction(egui::vec2(0.08, 0.3)).height(ui.available_height().max(90.0)).x_axis_label(xlabel).y_axis_label(ylabel).y_axis_formatter(move |m, _| if is_eigen { format!("{}", m.value / fscale) } else { format!("{}", m.value) }).legend(egui_plot::Legend::default()).show(ui, |p| {
             if is_eigen {
                 p.points(egui_plot::Points::new("f", egui_plot::PlotPoints::from(xs.iter().enumerate().map(|(i, _)| [i as f64 + 1.0, xs[i]]).collect::<Vec<_>>())).radius(4.0));
                 p.points(egui_plot::Points::new("", egui_plot::PlotPoints::from(vec![[chosen as f64 + 1.0, xs[chosen]]])).radius(7.0).color(shown_colour));
