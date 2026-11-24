@@ -141,9 +141,11 @@ pub struct SheetCorner {
 }
 
 impl SheetCorner {
-    /// True when the interior angle deviates from a smooth `180 deg` straight edge (`|omega - pi| > 0.05 rad`).
+    /// True when the interior angle deviates genuinely from a smooth `180 deg` straight or filleted edge
+    /// (`|omega - pi| > 0.35 rad`, ~20 deg — preserving 30/45/60/90/135/270 deg physical corners while
+    /// ignoring dense polyline chords along smooth circular arcs and corner fillets).
     pub fn is_sharp(&self) -> bool {
-        (self.omega_rad - PI).abs() > 0.05 && self.omega_rad > 1e-4 && self.omega_rad < TAU - 1e-4
+        (self.omega_rad - PI).abs() > 0.35 && self.omega_rad > 1e-4 && self.omega_rad < TAU - 1e-4
     }
 
     /// Graded element size `h(d)` at point `p` induced by this corner.

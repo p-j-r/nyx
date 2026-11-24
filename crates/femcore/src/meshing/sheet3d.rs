@@ -28,7 +28,7 @@
 use crate::adapt::drive::AdaptReport;
 use crate::mesh::SimplexMesh;
 use crate::meshing::geomdrive::MeshedGeom;
-use crate::meshing::mesher::{mesh_chains, Chain, Fill, MeshParams};
+use crate::meshing::mesher::{mesh_chains_with_seeds, Chain, Fill, MeshParams, SheetChainExtras};
 use crate::meshing::physics_size::PhysicsSizing;
 use crate::meshing::{wave_sizes_by_region, MeshPlan, Mesher, PmlMode, Sizing};
 use geom::complex::{EdgeGeom, FaceGeom};
@@ -42,6 +42,37 @@ use std::collections::{HashMap, HashSet};
 
 fn det3(a: V3, b: V3, c: V3) -> f64 {
     a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])
+}
+
+fn norm3(a: V3) -> f64 {
+    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
+}
+
+/// Minimum corner scaled Jacobian of a straight tetrahedron normalized so a regular tetrahedron has `1.0`
+/// (`min_k (sqrt(2) * |det|) / (||e1|| ||e2|| ||e3||)`).
+fn tet_scaled_jacobian(p0: V3, p1: V3, p2: V3, p3: V3) -> f64 {
+    let e01 = sub3(p1, p0);
+    let e02 = sub3(p2, p0);
+    let e03 = sub3(p3, p0);
+    let vol6 = det3(e01, e02, e03).abs();
+    if !(vol6 > 0.0 && vol6.is_finite()) {
+        return 0.0;
+    }
+    let num = std::f64::consts::SQRT_2 * vol6;
+    let l01 = norm3(e01);
+    let l02 = norm3(e02);
+    let l03 = norm3(e03);
+    let l12 = norm3(sub3(p2, p1));
+    let l13 = norm3(sub3(p3, p1));
+    let l23 = norm3(sub3(p3, p2));
+    let mut min_j = f64::INFINITY;
+    for prod in [l01 * l02 * l03, l01 * l12 * l13, l02 * l12 * l23, l03 * l13 * l23] {
+        if !(prod > 0.0) {
+            return 0.0;
+        }
+        min_j = min_j.min(num / prod);
+    }
+    min_j
 }
 
 fn cross2_pts(o: V2, a: V2, b: V2) -> f64 {
@@ -118,6 +149,57 @@ fn seg_seg_closest(a0: V2, a1: V2, b0: V2, b1: V2) -> (f64, V2, V2) {
         }
     }
     best
+}
+
+/// Computes the facing overlap centerline `(m0, m1, d_min)` between two rim subsegments `(a0, a1)` and `(b0, b1)`
+/// with outward-into-dielectric unit normals `na`, `nb`. Returns `None` if the segments do not face each other
+/// within `d_max`.
+fn facing_overlap_centerline(a0: V2, a1: V2, na: V2, b0: V2, b1: V2, nb: V2, d_max: f64) -> Option<(V2, V2, f64)> {
+    let dot_nn = na[0] * nb[0] + na[1] * nb[1];
+    if dot_nn >= 0.25 {
+        return None;
+    }
+    let (d, pa, pb) = seg_seg_closest(a0, a1, b0, b1);
+    if !(d > 0.0 && d <= d_max) {
+        return None;
+    }
+    let dp = [pb[0] - pa[0], pb[1] - pa[1]];
+    let dot_a = dp[0] * na[0] + dp[1] * na[1];
+    let dot_b = -dp[0] * nb[0] - dp[1] * nb[1];
+    if !(dot_a > 0.15 * d && dot_b > 0.15 * d) {
+        return None;
+    }
+    let da = [a1[0] - a0[0], a1[1] - a0[1]];
+    let la2 = da[0] * da[0] + da[1] * da[1];
+    if la2 > 1e-30 {
+        let tb0 = ((b0[0] - a0[0]) * da[0] + (b0[1] - a0[1]) * da[1]) / la2;
+        let tb1 = ((b1[0] - a0[0]) * da[0] + (b1[1] - a0[1]) * da[1]) / la2;
+        let t_lo = tb0.min(tb1).clamp(0.0, 1.0);
+        let t_hi = tb0.max(tb1).clamp(0.0, 1.0);
+        if (t_hi - t_lo) * la2.sqrt() >= 0.25 * d {
+            let qa0 = [a0[0] + t_lo * da[0], a0[1] + t_lo * da[1]];
+            let qa1 = [a0[0] + t_hi * da[0], a0[1] + t_hi * da[1]];
+            let qb0 = closest_point_on_seg(qa0, b0, b1);
+            let qb1 = closest_point_on_seg(qa1, b0, b1);
+            let d0 = dist2(qa0, qb0);
+            let d1 = dist2(qa1, qb1);
+            if d0 <= 1.6 * d && d1 <= 1.6 * d {
+                let m0 = [0.5 * (qa0[0] + qb0[0]), 0.5 * (qa0[1] + qb0[1])];
+                let m1 = [0.5 * (qa1[0] + qb1[0]), 0.5 * (qa1[1] + qb1[1])];
+                return Some((m0, m1, d));
+            }
+        }
+    }
+    let m = [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1])];
+    Some((m, m, d))
+}
+
+#[derive(Clone, Copy)]
+struct GapZone {
+    a: V2,
+    b: V2,
+    h: f64,
+    bbox: Aabb,
 }
 
 #[derive(Clone, Copy)]
@@ -339,7 +421,10 @@ pub fn subdivide_z_interval(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64, ra
 
     let mut lo = vec![0.0];
     let mut hi = vec![span];
-    while hi.last().unwrap() - lo.last().unwrap() > s0 + s1 {
+    while {
+        let rem = hi.last().unwrap() - lo.last().unwrap();
+        rem > s0 + s1 || (s0.max(s1) > 0.5 * span && rem > 2.0 * s0.min(s1))
+    } {
         if s0 <= s1 {
             let next = lo.last().unwrap() + s0;
             lo.push(next);
@@ -388,7 +473,10 @@ fn subdivide_z_interval_far(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64, ra
     let r_far = 1.52_f64.max(ratio);
     let mut lo = vec![0.0];
     let mut hi = vec![span];
-    while hi.last().unwrap() - lo.last().unwrap() > s0 + s1 {
+    while {
+        let rem = hi.last().unwrap() - lo.last().unwrap();
+        rem > s0 + s1 || (s0.max(s1) > 0.5 * span && rem > 2.0 * s0.min(s1))
+    } {
         if s0 <= s1 {
             let cur = *lo.last().unwrap();
             lo.push(cur + s0);
@@ -436,12 +524,31 @@ struct SlabTransition {
 /// 1. All frozen boundary/interface vertices remain untouched;
 /// 2. Collapsed edges are vertex-disjoint and every collapsed-edge triangle `(u, v, c)` has `c` uncollapsed;
 /// 3. The 2D Link Condition holds at every collapse so `M_{m+1}` is strictly manifold without duplicate edges;
-/// 4. Every surviving 2D triangle stays strictly CCW with quality `>= 0.25`, and all 3 Dompierre tetrahedra on the
-///    unit transition slab `[0, 1]` have consistent strictly positive volume.
-fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64, h_max_edge: f64) -> (Level2D, SlabTransition) {
+/// 4. No active cap-equivalence cell component loses its last surviving triangle;
+/// 5. Every surviving 2D triangle stays strictly CCW with quality `>= MIN_TRI_QUALITY`, and all 3D Dompierre prism / wedge
+///    tetrahedra on the transition slab have strictly positive volume and `scaled_jacobian >= 0.08`.
+fn coarsen_2d_once(
+    cur: &Level2D,
+    pts2: &[V2],
+    frozen_v: &[bool],
+    h_target: f64,
+    h_max_edge: f64,
+    dz_slab: f64,
+    comp_of_cell: &[usize],
+) -> (Level2D, SlabTransition) {
+    const MIN_TRI_QUALITY: f64 = 0.15;
+    const MIN_TET_SCALED_JACOBIAN: f64 = 0.08;
     let n2 = pts2.len();
     let mut work_tris = cur.tris.clone();
     let ntri = cur.tris.len();
+
+    let n_comps = comp_of_cell.iter().copied().max().map_or(0, |m| m + 1);
+    let mut comp_tri_count = vec![0usize; n_comps];
+    for &(_, ov_c) in &cur.tris {
+        if let Some(&cid) = comp_of_cell.get(ov_c) {
+            comp_tri_count[cid] += 1;
+        }
+    }
 
     // Build initial candidate half-edges `(v -> u)` sorted deterministically by length
     let mut seen_undir: HashSet<(u32, u32)> = HashSet::new();
@@ -467,7 +574,7 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
     }
     candidates.sort_unstable();
 
-    // Map each vertex in `cur.tris` to its incident original triangle indices (for fast 3D unit-slab prism check)
+    // Map each vertex in `cur.tris` to its incident original triangle indices (for fast 3D transition prism check)
     let mut orig_v_tris: Vec<Vec<usize>> = vec![Vec::new(); n2];
     for (ti, &(v, _)) in cur.tris.iter().enumerate() {
         for &w in &v {
@@ -553,6 +660,33 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
             continue;
         }
 
+        // Never drop the last surviving triangle of any cap-equivalence cell component
+        let comp0 = comp_of_cell.get(work_tris[shared_tris[0].0].1).copied();
+        let comp1 = comp_of_cell.get(work_tris[shared_tris[1].0].1).copied();
+        match (comp0, comp1) {
+            (Some(g0), Some(g1)) if g0 == g1 => {
+                if comp_tri_count[g0] <= 2 {
+                    continue;
+                }
+            }
+            (Some(g0), Some(g1)) => {
+                if comp_tri_count[g0] <= 1 || comp_tri_count[g1] <= 1 {
+                    continue;
+                }
+            }
+            (Some(g0), None) => {
+                if comp_tri_count[g0] <= 1 {
+                    continue;
+                }
+            }
+            (None, Some(g1)) => {
+                if comp_tri_count[g1] <= 1 {
+                    continue;
+                }
+            }
+            (None, None) => {}
+        }
+
         // Exact 2D Link Condition: N(u) \cap N(v) == {c1, c2}
         let common_cnt = nbrs_v.iter().filter(|w| nbrs_u.contains(w)).count();
         if common_cnt != 2 {
@@ -574,7 +708,7 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
                 }
             }
             let (p0, p1, p2) = (pts2[tv[0] as usize], pts2[tv[1] as usize], pts2[tv[2] as usize]);
-            if tri_quality_ccw(p0, p1, p2) < 0.12 {
+            if tri_quality_ccw(p0, p1, p2) < MIN_TRI_QUALITY {
                 geom_ok = false;
                 break;
             }
@@ -592,7 +726,7 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
             continue;
         }
 
-        // Check 3D Dompierre prism/wedge positivity on unit slab `[0, 1]` for all original triangles in `star(u) \cup star(v)`
+        // Check 3D Dompierre prism/wedge positivity & scaled Jacobian >= 0.08 for all original triangles in `star(u) \cup star(v)`
         let cid = n_collapses;
         collapse_pair_of[u_keep as usize] = Some((cid, 0));
         collapse_pair_of[v_rem as usize] = Some((cid, 1));
@@ -617,6 +751,11 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
                 prism_ok = false;
                 break;
             }
+            let (q0, q1, q2) = (pts2[tv[0] as usize], pts2[tv[1] as usize], pts2[tv[2] as usize]);
+            let h_tri = dist2(q0, q1).max(dist2(q1, q2)).max(dist2(q2, q0)).max(1e-12 * h_max_edge);
+            // Enforce transition-tet `scaled_jacobian >= 0.08` on near-isotropic `dz_eff`
+            // so sheared/degenerate collapses are rejected while preserving >= 3x bulk reduction.
+            let dz_eff = dz_slab.clamp(0.85 * h_tri, 1.15 * h_tri).max(1e-12 * h_max_edge);
             if let Some((u_col, v_col, c_opp)) = col_edge {
                 let rc = rank_of(c_opp, &collapse_pair_of);
                 if !(rank_of(u_col, &collapse_pair_of) < rc && rank_of(v_col, &collapse_pair_of) < rc) {
@@ -634,6 +773,20 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
                     prism_ok = false;
                     break;
                 }
+                let uf = [pts2[u_col as usize][0], pts2[u_col as usize][1], 0.0];
+                let vf = [pts2[v_col as usize][0], pts2[v_col as usize][1], 0.0];
+                let cf = [pts2[c_opp as usize][0], pts2[c_opp as usize][1], 0.0];
+                let uc = [pts2[u_col as usize][0], pts2[u_col as usize][1], dz_eff];
+                let cc = [pts2[c_top as usize][0], pts2[c_top as usize][1], dz_eff];
+                for [p0, p1, p2, p3] in [[uf, vf, cf, cc], [uf, vf, cc, uc]] {
+                    if tet_scaled_jacobian(p0, p1, p2, p3) < MIN_TET_SCALED_JACOBIAN {
+                        prism_ok = false;
+                        break;
+                    }
+                }
+                if !prism_ok {
+                    break;
+                }
                 continue;
             }
             let mut x = tv;
@@ -645,16 +798,18 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
             ];
             let (m0, m1, m2) = (map_v[x[0] as usize], map_v[x[1] as usize], map_v[x[2] as usize]);
             let t = [
-                [pts2[m0 as usize][0], pts2[m0 as usize][1], 1.0],
-                [pts2[m1 as usize][0], pts2[m1 as usize][1], 1.0],
-                [pts2[m2 as usize][0], pts2[m2 as usize][1], 1.0],
+                [pts2[m0 as usize][0], pts2[m0 as usize][1], dz_eff],
+                [pts2[m1 as usize][0], pts2[m1 as usize][1], dz_eff],
+                [pts2[m2 as usize][0], pts2[m2 as usize][1], dz_eff],
             ];
             let area_sign = cross2_pts([b[0][0], b[0][1]], [b[1][0], b[1][1]], [b[2][0], b[2][1]]);
             let area_mag = area_sign.abs();
             let sigma = area_sign.signum();
             for [p0, p1, p2, p3] in [[b[0], b[1], b[2], t[2]], [b[0], b[1], t[2], t[1]], [b[0], t[0], t[1], t[2]]] {
                 let d3 = det3(sub3(p1, p0), sub3(p2, p0), sub3(p3, p0));
-                if sigma * d3 <= 1e-6 * area_mag {
+                if sigma * d3 <= 1e-6 * area_mag * dz_eff
+                    || tet_scaled_jacobian(p0, p1, p2, p3) < MIN_TET_SCALED_JACOBIAN
+                {
                     prism_ok = false;
                     break;
                 }
@@ -674,6 +829,12 @@ fn coarsen_2d_once(cur: &Level2D, pts2: &[V2], frozen_v: &[bool], h_target: f64,
         n_collapses += 1;
         tri_alive[shared_tris[0].0] = false;
         tri_alive[shared_tris[1].0] = false;
+        if let Some(g0) = comp0 {
+            comp_tri_count[g0] -= 1;
+        }
+        if let Some(g1) = comp1 {
+            comp_tri_count[g1] -= 1;
+        }
         let moved_tris: Vec<usize> = work_v_tris[v_rem as usize]
             .iter()
             .copied()
@@ -723,6 +884,12 @@ struct Sheet3dSizing {
     edge3_h: Vec<f64>,
     cell_h: Vec<f64>,
     ov_edge_h: Vec<f64>,
+    ov_edge_explicit_fine: Vec<bool>,
+    edge_sheet_owner: Vec<u32>,
+    dielectric_gap_cells: HashSet<i32>,
+    gap_zones: Vec<GapZone>,
+    gap_seeds: Vec<(V2, f64)>,
+    sheet_local_gap_by_z: Vec<(f64, f64)>,
     sharp_corners_by_z: Vec<(f64, Vec<crate::meshing::singularity::SheetCorner>)>,
     all_sharp_corners: Vec<crate::meshing::singularity::SheetCorner>,
 }
@@ -888,6 +1055,7 @@ fn compute_sheet3d_sizing(
     }
 
     let mut ov_edge_h = vec![h_global; nedge];
+    let mut ov_edge_explicit_fine = vec![false; nedge];
     for (e, ed) in ov.edges.iter().enumerate() {
         ov_edge_h[e] = [ed.left, ed.right].into_iter().flatten().map(|c| cell_h[c as usize]).fold(h_global, f64::min);
     }
@@ -895,6 +1063,9 @@ fn compute_sheet3d_sizing(
         if let FaceGeom::Lateral { edge, .. } = f.geom {
             let e = edge as usize;
             if e < nedge {
+                if face_h[fi] < h_global * 0.999 {
+                    ov_edge_explicit_fine[e] = true;
+                }
                 ov_edge_h[e] = ov_edge_h[e].min(face_h[fi]);
             }
         }
@@ -903,6 +1074,9 @@ fn compute_sheet3d_sizing(
         if let EdgeGeom::Horizontal { edge, .. } = e3.geom {
             let e = edge as usize;
             if e < nedge {
+                if edge3_h[ei] < h_global * 0.999 {
+                    ov_edge_explicit_fine[e] = true;
+                }
                 ov_edge_h[e] = ov_edge_h[e].min(edge3_h[ei]);
             }
         }
@@ -914,13 +1088,16 @@ fn compute_sheet3d_sizing(
     let want_qp = plan.opts.singular_edges.as_deref() == Some("quarter_point");
     let eff_gap_cells = plan.opts.gap_cells.map(|gc| if want_qp { gc.max(2.0) } else { gc });
 
-    // Coplanar gap proximity pass across all 2D sheet planes:
+    // Coplanar gap proximity pass across all 2D sheet planes (FR-27, FR-28):
     // 1. When `gap_cells = Some(gc)`, clamps `ov_edge_h[e] <= d_gap / gc` symmetrically on both facing rims.
-    // 2. Even when `gap_cells = None`, prevents unsplit cyclic-trapezoid Ruppert encroachment across narrow gaps
-    //    facing explicitly sized conductors or curved-hole pockets (QFR-5).
+    // 2. Automatically detects facing coplanar sheet rims with distinct sheet/terminal ownership within
+    //    `d < 0.25 * h_global` (implicit `eff_gap_cells >= 2.0`), pre-discretizing straight gap walls before
+    //    `cdt.refine()`, and inserts deterministic gap-centerline seeds along facing narrow gaps (`d <= 0.35 * h_global`).
     let mut sheet_zs: Vec<f64> = Vec::new();
+    let mut all_sheet_names: Vec<&str> = Vec::new();
     for f in &cx.faces {
         if f.is_sheet() {
+            all_sheet_names.push(f.name.as_str());
             if let FaceGeom::Cap { z, .. } = f.geom {
                 if !sheet_zs.iter().any(|&zs| (zs - z).abs() <= tol) {
                     sheet_zs.push(z);
@@ -928,15 +1105,39 @@ fn compute_sheet3d_sizing(
             }
         }
     }
-    if eff_gap_cells.is_some() || has_explicit_fine {
-        struct RimEdge {
+    all_sheet_names.sort_unstable();
+    all_sheet_names.dedup();
+    let sheet_id_of: HashMap<&str, u32> =
+        all_sheet_names.iter().enumerate().map(|(i, &s)| (s, (i + 1) as u32)).collect();
+
+    let mut edge_sheet_owner = vec![0u32; nedge];
+    let mut dielectric_gap_cells: HashSet<i32> = HashSet::new();
+    let mut gap_zones: Vec<GapZone> = Vec::new();
+    let mut gap_seeds: Vec<(V2, f64)> = Vec::new();
+    let mut sheet_local_gap_by_z: Vec<(f64, f64)> = Vec::new();
+
+    if !sheet_zs.is_empty() {
+        struct RimEdge<'a> {
             e: usize,
             v0: u32,
             v1: u32,
+            sheet: &'a str,
+            len: f64,
             bbox: Aabb,
             segs: Vec<(V2, V2, V2)>,
         }
+        let n_active_layers = st
+            .layers
+            .iter()
+            .filter(|l| l.region_of.iter().flatten().any(|&r| meshable[r as usize]))
+            .count()
+            .max(1);
+        let search_r = if eff_gap_cells.is_some() || has_explicit_fine { h_global } else { 0.35 * h_global };
+        // Respect explicit `eff_gap_cells` when provided; default to `2.0` for automatic narrow-gap detection (FR-28).
+        let auto_gc = eff_gap_cells.unwrap_or(2.0);
+
         for &z_s in &sheet_zs {
+            let mut local_gap_max = 0.0_f64;
             let mut cell_sheet: Vec<Option<&str>> = vec![None; ncell];
             for f in &cx.faces {
                 if f.is_sheet() {
@@ -947,7 +1148,7 @@ fn compute_sheet3d_sizing(
                     }
                 }
             }
-            let mut rims: Vec<RimEdge> = Vec::new();
+            let mut rims: Vec<RimEdge<'_>> = Vec::new();
             for (e, ed) in ov.edges.iter().enumerate() {
                 if ed.left.is_none() || ed.right.is_none() {
                     continue;
@@ -957,10 +1158,18 @@ fn compute_sheet3d_sizing(
                 if ls.is_some() == rs.is_some() {
                     continue;
                 }
+                let sheet_name = ls.or(rs).unwrap();
+                let gap_cell = if ls.is_some() { ed.right.unwrap() } else { ed.left.unwrap() };
+                dielectric_gap_cells.insert(gap_cell as i32 + 1);
+                let sid = sheet_id_of[sheet_name];
+                if edge_sheet_owner[e] == 0 || sid < edge_sheet_owner[e] {
+                    edge_sheet_owner[e] = sid;
+                }
                 let n_sign = if ls.is_some() { 1.0 } else { -1.0 };
                 let curve = &ov.curves[ed.curve as usize];
                 let nsub = if matches!(curve, Curve::Line { .. }) { 1 } else { 8 };
                 let mut segs = Vec::with_capacity(nsub);
+                let mut total_len = 0.0_f64;
                 for k in 0..nsub {
                     let ta = ed.t0 + (ed.t1 - ed.t0) * (k as f64 / nsub as f64);
                     let tb = ed.t0 + (ed.t1 - ed.t0) * ((k + 1) as f64 / nsub as f64);
@@ -977,18 +1186,22 @@ fn compute_sheet3d_sizing(
                     } else {
                         curve.eval(tb)
                     };
+                    total_len += dist2(pa, pb);
                     let n = ov.edge_normal(e as u32, tm);
                     segs.push((pa, pb, [n_sign * n[0], n_sign * n[1]]));
                 }
-                rims.push(RimEdge { e, v0: ed.v0, v1: ed.v1, bbox: ed.bbox, segs });
+                rims.push(RimEdge { e, v0: ed.v0, v1: ed.v1, sheet: sheet_name, len: total_len, bbox: ed.bbox, segs });
             }
 
             let rim_bvh = Bvh2::build(
                 rims.iter().enumerate().map(|(i, r)| BvhItem2 { id: i, bbox: r.bbox, min_h: 0.0 }).collect(),
             );
             let mut gap_clamps: Vec<(usize, f64)> = Vec::new();
+            // Auto narrow-gap clamps: (edge_idx, h_want, overlap_len, centerline_m0, centerline_m1)
+            let mut auto_clamps: Vec<(usize, f64, f64, V2, V2)> = Vec::new();
+            let mut raw_centerlines: Vec<(V2, V2, f64, usize, usize)> = Vec::new();
             for (i, ra) in rims.iter().enumerate() {
-                rim_bvh.for_each_within_box(&ra.bbox, h_global, |j| {
+                rim_bvh.for_each_within_box(&ra.bbox, search_r, |j| {
                     if j <= i {
                         return;
                     }
@@ -1006,7 +1219,7 @@ fn compute_sheet3d_sizing(
                         }
                     }
                     let Some((d, pa, pb, na, nb)) = best else { return };
-                    if !(d > 1e-15 * h_global && d < h_global) {
+                    if !(d > 1e-15 * h_global && d < search_r) {
                         return;
                     }
                     let dp = [pb[0] - pa[0], pb[1] - pa[1]];
@@ -1015,6 +1228,9 @@ fn compute_sheet3d_sizing(
                     let dot_nn = na[0] * nb[0] + na[1] * nb[1];
                     if !(dot_a > 0.15 * d && dot_b > 0.15 * d && dot_nn < 0.25) {
                         return;
+                    }
+                    if d < 0.25 * h_global {
+                        local_gap_max = local_gap_max.max(d);
                     }
                     if let Some(gc) = eff_gap_cells {
                         let h_gap = d / gc;
@@ -1027,12 +1243,122 @@ fn compute_sheet3d_sizing(
                         gap_clamps.push((ra.e, h_cap));
                         gap_clamps.push((rb.e, h_cap));
                     }
+                    // FR-28: Auto narrow-gap detection & centerline seeding for distinct sheet/terminal ownership
+                    // (active when `gap_cells` is set, when `quarter_point`/`corner_grading` is enabled within
+                    // `d <= 0.35 * h_global`, or for severe narrow gaps `d < 0.06 * h_global`; leaves moderate
+                    // baseline gaps with `gap_cells = None` unperturbed so explicit `gap_cells` comparisons remain exact).
+                    let enable_auto_gap =
+                        eff_gap_cells.is_some() || want_qp || plan.opts.corner_grading || d < 0.06 * h_global;
+                    if ra.sheet != rb.sheet && d <= 0.35 * h_global && enable_auto_gap {
+                        let pm_best = [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1])];
+                        let clear_gap = ov.locate(pm_best).is_some_and(|c| cell_sheet[c as usize].is_none());
+                        if !clear_gap {
+                            return;
+                        }
+                        let d_lim = (1.5 * d).min(0.35 * h_global);
+                        let mut any_cl = false;
+                        for &(a0, a1, na) in &ra.segs {
+                            for &(b0, b1, nb) in &rb.segs {
+                                if let Some((m0, m1, d_seg)) =
+                                    facing_overlap_centerline(a0, a1, na, b0, b1, nb, d_lim)
+                                {
+                                    let mc = [0.5 * (m0[0] + m1[0]), 0.5 * (m0[1] + m1[1])];
+                                    if !ov.locate(mc).is_some_and(|c| cell_sheet[c as usize].is_none()) {
+                                        continue;
+                                    }
+                                    any_cl = true;
+                                    raw_centerlines.push((m0, m1, d_seg, ra.e, rb.e));
+                                    if d_seg < 0.25 * h_global {
+                                        let h_auto = d_seg / auto_gc;
+                                        let ov_len = dist2(m0, m1).max(d_seg);
+                                        auto_clamps.push((ra.e, h_auto, ov_len, m0, m1));
+                                        auto_clamps.push((rb.e, h_auto, ov_len, m0, m1));
+                                    }
+                                }
+                            }
+                        }
+                        if !any_cl {
+                            raw_centerlines.push((pm_best, pm_best, d, ra.e, rb.e));
+                            if d < 0.25 * h_global {
+                                let h_auto = d / auto_gc;
+                                auto_clamps.push((ra.e, h_auto, d, pm_best, pm_best));
+                                auto_clamps.push((rb.e, h_auto, d, pm_best, pm_best));
+                            }
+                        }
+                    }
                 });
             }
             for (ei, hc) in gap_clamps {
                 ov_edge_h[ei] = ov_edge_h[ei].min(hc);
             }
+            if !auto_clamps.is_empty() {
+                // Budget-aware scaling when `gap_cells` was not explicitly requested and `max_cells` is set
+                let mut auto_scale = 1.0_f64;
+                if plan.opts.gap_cells.is_none() {
+                    if let Some(mc) = eff_max_cells {
+                        let est_slabs = plan.opts.max_z_slabs.unwrap_or(8).max(n_active_layers) as f64;
+                        let budget_tris_2d = (mc as f64) / (3.0 * est_slabs);
+                        let mut min_h_per_edge: HashMap<usize, (f64, f64)> = HashMap::new();
+                        for &(ei, hw, ov_len, _, _) in &auto_clamps {
+                            let entry = min_h_per_edge.entry(ei).or_insert((hw, ov_len));
+                            entry.0 = entry.0.min(hw);
+                            entry.1 = entry.1.max(ov_len);
+                        }
+                        let est_gap_tris: f64 =
+                            min_h_per_edge.values().map(|&(hw, len)| 3.0 * (len / hw.max(1e-15))).sum();
+                        let cap_tris = (0.35 * budget_tris_2d).max(128.0);
+                        if est_gap_tris > cap_tris {
+                            auto_scale = est_gap_tris / cap_tris;
+                        }
+                    }
+                }
+                let rim_len_by_edge: HashMap<usize, f64> = rims.iter().map(|r| (r.e, r.len)).collect();
+                for (ei, hw_raw, ov_len, m0, m1) in auto_clamps {
+                    let hw = hw_raw * auto_scale;
+                    if hw >= ov_edge_h[ei] {
+                        continue;
+                    }
+                    let e_len = rim_len_by_edge.get(&ei).copied().unwrap_or(ov_len);
+                    if e_len <= 4.0 * ov_len || plan.opts.gap_cells.is_some() {
+                        ov_edge_h[ei] = ov_edge_h[ei].min(hw);
+                    } else {
+                        let lo = [m0[0].min(m1[0]), m0[1].min(m1[1]), 0.0];
+                        let hi = [m0[0].max(m1[0]), m0[1].max(m1[1]), 0.0];
+                        gap_zones.push(GapZone { a: m0, b: m1, h: hw, bbox: Aabb { lo, hi } });
+                    }
+                }
+            }
+            // Generate deterministic gap-centerline seed vertices along facing narrow gaps (`d <= 0.35 * h_global`)
+            for (m0, m1, d_seg, ea, eb) in raw_centerlines {
+                let h_wall = ov_edge_h[ea].min(ov_edge_h[eb]);
+                let step = h_wall.clamp(0.75 * d_seg, 1.25 * d_seg).max(1e-15);
+                let cl_len = dist2(m0, m1);
+                if cl_len <= 1e-12 * d_seg {
+                    if ov.locate(m0).is_some_and(|c| cell_sheet[c as usize].is_none()) {
+                        gap_seeds.push((m0, d_seg));
+                    }
+                } else {
+                    let n_pts = ((cl_len / step).ceil() as usize).clamp(1, 2000);
+                    for k in 0..n_pts {
+                        let t = (k as f64 + 0.5) / (n_pts as f64);
+                        let p = [m0[0] + t * (m1[0] - m0[0]), m0[1] + t * (m1[1] - m0[1])];
+                        if ov.locate(p).is_some_and(|c| cell_sheet[c as usize].is_none()) {
+                            gap_seeds.push((p, d_seg));
+                        }
+                    }
+                }
+            }
+            if local_gap_max > 0.0 {
+                sheet_local_gap_by_z.push((z_s, local_gap_max));
+            }
         }
+        gap_seeds.sort_by(|a, b| {
+            a.0[0]
+                .total_cmp(&b.0[0])
+                .then_with(|| a.0[1].total_cmp(&b.0[1]))
+                .then_with(|| a.1.total_cmp(&b.1))
+        });
+        gap_seeds.dedup_by(|a, b| dist2(a.0, b.0) <= 1e-12 * a.1.min(b.1));
     }
 
     let mut sharp_corners_by_z = Vec::new();
@@ -1057,6 +1383,12 @@ fn compute_sheet3d_sizing(
         edge3_h,
         cell_h,
         ov_edge_h,
+        ov_edge_explicit_fine,
+        edge_sheet_owner,
+        dielectric_gap_cells,
+        gap_zones,
+        gap_seeds,
+        sheet_local_gap_by_z,
         sharp_corners_by_z,
         all_sharp_corners,
     })
@@ -1076,11 +1408,54 @@ fn build_overlay_mesh_2d_with_sizing(
     let max_dev = sz.max_dev;
     let grade = 0.35;
 
-    let mut fine_edges: Vec<(usize, f64)> =
-        (0..nedge).filter(|&e| sz.ov_edge_h[e] < h_global * 0.999).map(|e| (e, sz.ov_edge_h[e])).collect();
-    fine_edges.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-    let fine_cells: Vec<(usize, f64)> =
+    // FR-31: Identify outer-perimeter edges and outer-ring overlay cells so interior edge discretization,
+    // fill seeds, and CDT coordinate normalization inside a fixed `inner_vac_box` stay invariant to outer-box extent.
+    let mut cell_touches_outer = vec![false; ncell];
+    let mut edge_is_outer = vec![false; nedge];
+    for (e, ed) in ov.edges.iter().enumerate() {
+        if ed.left.is_none() || ed.right.is_none() {
+            edge_is_outer[e] = true;
+            if let Some(c) = ed.left {
+                cell_touches_outer[c as usize] = true;
+            }
+            if let Some(c) = ed.right {
+                cell_touches_outer[c as usize] = true;
+            }
+        }
+    }
+    let mut interior_bb = Aabb::EMPTY;
+    for (c, r) in ov.regions.iter().enumerate() {
+        if !cell_touches_outer[c] {
+            interior_bb = interior_bb.union(&r.bbox);
+        }
+    }
+
+    let cmp_bbox = |a: &Aabb, b: &Aabb| {
+        a.lo[0]
+            .total_cmp(&b.lo[0])
+            .then_with(|| a.lo[1].total_cmp(&b.lo[1]))
+            .then_with(|| a.hi[0].total_cmp(&b.hi[0]))
+            .then_with(|| a.hi[1].total_cmp(&b.hi[1]))
+    };
+
+    let mut fine_edges: Vec<(usize, f64)> = (0..nedge)
+        .filter(|&e| {
+            sz.ov_edge_h[e] < h_global * 0.999 && (!edge_is_outer[e] || sz.ov_edge_explicit_fine[e])
+        })
+        .map(|e| (e, sz.ov_edge_h[e]))
+        .collect();
+    fine_edges.sort_by(|a, b| {
+        a.1.total_cmp(&b.1)
+            .then_with(|| cmp_bbox(&ov.edges[a.0].bbox, &ov.edges[b.0].bbox))
+            .then(a.0.cmp(&b.0))
+    });
+    let mut fine_cells: Vec<(usize, f64)> =
         (0..ncell).filter(|&c| sz.cell_h[c] < h_global * 0.999).map(|c| (c, sz.cell_h[c])).collect();
+    fine_cells.sort_by(|a, b| {
+        a.1.total_cmp(&b.1)
+            .then_with(|| cmp_bbox(&ov.regions[a.0].bbox, &ov.regions[b.0].bbox))
+            .then(a.0.cmp(&b.0))
+    });
     let fine_edge_bvh = Bvh2::build(
         fine_edges
             .iter()
@@ -1093,22 +1468,49 @@ fn build_overlay_mesh_2d_with_sizing(
             .map(|&(c, ch)| BvhItem2 { id: c, bbox: ov.regions[c].bbox, min_h: ch })
             .collect(),
     );
+    let gap_zone_bvh = Bvh2::build(
+        sz.gap_zones
+            .iter()
+            .enumerate()
+            .map(|(i, gz)| BvhItem2 { id: i, bbox: gz.bbox, min_h: gz.h })
+            .collect(),
+    );
+    let gap_zones_ref = &sz.gap_zones;
     let corners_ref = &sz.all_sharp_corners;
+    // When `dz_min` is configured, floor corner-graded XY sizing at `0.35 * dz_min` so sharp corners on
+    // narrow-gap fingers do not generate extreme sub-`dz` needle prisms and runaway 2D triangle counts.
+    let corner_h_floor = plan.opts.dz_min.map_or(0.0, |dz| 0.35 * dz);
     let local_h_2d = |p: V2| -> f64 {
         let h = fine_edge_bvh.min_graded(p, grade, h_global, |e, eh, _db| {
             let d = dist2(ov.project_edge(e as u32, p), p);
             eh + grade * d
         });
+        let h = gap_zone_bvh.min_graded(p, grade, h, |gi, gh, _db| {
+            let gz = &gap_zones_ref[gi];
+            let d = dist2(closest_point_on_seg(p, gz.a, gz.b), p);
+            gh + grade * d
+        });
         let mut h = fine_cell_bvh.min_graded(p, grade, h, |_c, ch, db| ch + grade * db);
         if !corners_ref.is_empty() {
-            h = crate::meshing::singularity::corner_graded_h_at(p, corners_ref, h);
+            let hc = crate::meshing::singularity::corner_graded_h_at(p, corners_ref, h);
+            h = h.min(hc.max(corner_h_floor));
         }
         h
     };
 
-    // Discretize every 1D PSLG edge of stack.overlay once (graded along the curve)
+    // Discretize every 1D PSLG edge of stack.overlay once (graded along the curve), ordered with
+    // interior edges first in deterministic geometric order so interior CDT topology is outer-box invariant.
+    let mut edge_order: Vec<usize> = (0..nedge).collect();
+    edge_order.sort_by(|&a, &b| {
+        edge_is_outer[a]
+            .cmp(&edge_is_outer[b])
+            .then_with(|| cmp_bbox(&ov.edges[a].bbox, &ov.edges[b].bbox))
+            .then(a.cmp(&b))
+    });
     let mut chains = Vec::with_capacity(nedge);
-    for (e, ed) in ov.edges.iter().enumerate() {
+    let mut chain_owner = Vec::with_capacity(nedge);
+    for e in edge_order {
+        let ed = &ov.edges[e];
         let eh = sz.ov_edge_h[e];
         let mut t_pts = ov.discretize_edge(e as u32, DiscretizeOpts { max_dev, max_len: eh });
         let curve = &ov.curves[ed.curve as usize];
@@ -1133,20 +1535,34 @@ fn build_overlay_mesh_2d_with_sizing(
         pts[0] = [v0p[0], v0p[1]];
         pts[last] = [v1p[0], v1p[1]];
         chains.push(Chain { pts, label: (e + 1) as i32, part: e });
+        chain_owner.push(sz.edge_sheet_owner[e]);
     }
+
+    // Snap fill lattice origins to an origin-anchored grid `(k * h, 2 * m * dy)` so interior fill
+    // seeds never shift phase when an outer bounding box changes from `R_1` to `R_2` (FR-31).
+    let snap_fill_lo = |lo: [f64; 2], h: f64| -> [f64; 2] {
+        let dy = h * 3f64.sqrt() / 2.0;
+        let step_y = 2.0 * dy;
+        [(lo[0] / h).floor() * h, (lo[1] / step_y).floor() * step_y]
+    };
 
     // Interior lattice fills for fine cells, graded collars around fine 1D edges, and sharp corner balls
     let mut fills: Vec<Fill> = Vec::new();
     for &(c, ch) in &fine_cells {
         let bb = ov.regions[c].bbox;
         fills.push(Fill {
-            lo: [bb.lo[0], bb.lo[1]],
+            lo: snap_fill_lo([bb.lo[0], bb.lo[1]], ch),
             hi: [bb.hi[0], bb.hi[1]],
             h: ch,
             owner: Box::new(move |p| ov.locate(p) == Some(c as u32) && local_h_2d(p) >= 0.4 * ch),
         });
     }
     for &(e, eh) in &fine_edges {
+        // Avoid flooding narrow PEC fingers with redundant collar fills on auto-clamped gap edges
+        // (gap centerline seeds + Ruppert gradation already handle the gap cleanly).
+        if !sz.ov_edge_explicit_fine[e] && plan.opts.gap_cells.is_none() {
+            continue;
+        }
         for (mult, reach_k) in [(1.2, 2.2), (2.4, 5.0)] {
             let h_band = eh * mult;
             if h_band >= h_global * 0.999 {
@@ -1156,7 +1572,7 @@ fn build_overlay_mesh_2d_with_sizing(
             let bb = ov.edges[e].bbox.pad(reach);
             let cell_h_ref = &sz.cell_h;
             fills.push(Fill {
-                lo: [bb.lo[0], bb.lo[1]],
+                lo: snap_fill_lo([bb.lo[0], bb.lo[1]], h_band),
                 hi: [bb.hi[0], bb.hi[1]],
                 h: h_band,
                 owner: Box::new(move |p| {
@@ -1168,16 +1584,18 @@ fn build_overlay_mesh_2d_with_sizing(
         }
     }
     if !corners_ref.is_empty() {
-        for sc in corners_ref {
+        let mut sorted_corners: Vec<crate::meshing::singularity::SheetCorner> = corners_ref.clone();
+        sorted_corners.sort_by(|a, b| a.pos[0].total_cmp(&b.pos[0]).then_with(|| a.pos[1].total_cmp(&b.pos[1])));
+        for sc in sorted_corners {
             for (mult, rad_k) in [(0.25, 0.5), (0.55, 1.2)] {
-                let h_c = (sc.h_edge * mult).max(sc.h_min());
+                let h_c = (sc.h_edge * mult).max(sc.h_min()).max(corner_h_floor);
                 if h_c >= h_global * 0.999 {
                     continue;
                 }
                 let r_fill = sc.h_edge * rad_k;
                 let cp = sc.pos;
                 fills.push(Fill {
-                    lo: [cp[0] - r_fill, cp[1] - r_fill],
+                    lo: snap_fill_lo([cp[0] - r_fill, cp[1] - r_fill], h_c),
                     hi: [cp[0] + r_fill, cp[1] + r_fill],
                     h: h_c,
                     owner: Box::new(move |p| {
@@ -1194,16 +1612,33 @@ fn build_overlay_mesh_2d_with_sizing(
     for r in &ov.regions {
         ov_bb = ov_bb.union(&r.bbox);
     }
+    let ref_frame = if !interior_bb.is_empty() {
+        let int_ext = (interior_bb.hi[0] - interior_bb.lo[0]).max(interior_bb.hi[1] - interior_bb.lo[1]);
+        if int_ext > 1e-6 * h_global {
+            Some(([interior_bb.lo[0], interior_bb.lo[1]], [interior_bb.hi[0], interior_bb.hi[1]]))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let corner_h_min = corners_ref
         .iter()
         .map(|c| c.h_min())
         .fold(h_global, f64::min);
+    let gap_h_min = sz
+        .gap_zones
+        .iter()
+        .map(|gz| gz.h)
+        .chain(sz.gap_seeds.iter().map(|&(_, d)| 0.5 * d))
+        .fold(corner_h_min, f64::min);
     let h_fine_min = sz
         .cell_h
         .iter()
         .copied()
         .chain(sz.ov_edge_h.iter().copied())
-        .fold(corner_h_min, f64::min)
+        .fold(gap_h_min, f64::min)
         .max(1e-12 * h_global);
     let cell_active: Vec<bool> =
         (0..ncell).map(|c| st.layers.iter().any(|l| l.region_of[c].is_some_and(|r| sz.meshable[r as usize]))).collect();
@@ -1215,7 +1650,27 @@ fn build_overlay_mesh_2d_with_sizing(
             None
         }
     };
-    let (m2, mc_rep) = mesh_chains(
+
+    // FR-28 budget plumbing: derive a bounded 2D additional-vertex budget from `eff_max_cells` and active z-slabs
+    let n_active_layers = st
+        .layers
+        .iter()
+        .filter(|l| l.region_of.iter().flatten().any(|&r| sz.meshable[r as usize]))
+        .count()
+        .max(1);
+    let est_slabs = plan.opts.max_z_slabs.unwrap_or(n_active_layers.max(4)).max(n_active_layers);
+    let max_cells_2d = sz.eff_max_cells.map(|mc| {
+        let slab_div = if plan.opts.z_coarsen { est_slabs.min(8) } else { est_slabs };
+        (mc / (3usize.saturating_mul(slab_div).max(1))).max(512)
+    });
+
+    let extras = SheetChainExtras {
+        gap_seeds: &sz.gap_seeds,
+        chain_owner: &chain_owner,
+        dielectric_domains: &sz.dielectric_gap_cells,
+        ref_frame,
+    };
+    let (m2, mc_rep) = mesh_chains_with_seeds(
         &chains,
         &fills,
         &MeshParams {
@@ -1226,9 +1681,10 @@ fn build_overlay_mesh_2d_with_sizing(
             hi: [ov_bb.hi[0], ov_bb.hi[1]],
             max_steiner_multiplier: plan.opts.max_steiner_multiplier,
             strict_mesh: plan.opts.strict_mesh,
-            max_cells: None,
+            max_cells: max_cells_2d,
         },
         &domain_at,
+        Some(&extras),
     )?;
     drop(fills);
     Ok((m2, mc_rep.warnings))
@@ -1312,7 +1768,7 @@ pub fn apply_sheet_post_enrichment(
 #[allow(clippy::too_many_arguments)]
 fn extrude_overlay_2d_inner(
     ev: Evaluated,
-    labels: geom::labels::LabelMap,
+    mut labels: geom::labels::LabelMap,
     m2: &SimplexMesh,
     plan: &MeshPlan,
     sz: &Sheet3dSizing,
@@ -1478,7 +1934,9 @@ fn extrude_overlay_2d_inner(
     };
 
     let z_ratio = plan.opts.z_growth_ratio.unwrap_or(1.35);
-    let mut active_layers: Vec<(usize, f64, f64, f64, f64, f64, bool)> = Vec::new();
+    // (layer_idx, z0, z1, dz0, dz1, has_sheet_z0, has_sheet_z1, h_layer, is_thin_sheet_slab)
+    type ActiveLayerSpec = (usize, f64, f64, f64, f64, bool, bool, f64, bool);
+    let mut active_layers: Vec<ActiveLayerSpec> = Vec::new();
     for (k, l) in st.layers.iter().enumerate() {
         let active_in_layer = l.region_of.iter().flatten().any(|&r| meshable[r as usize]);
         if !active_in_layer {
@@ -1497,9 +1955,11 @@ fn extrude_overlay_2d_inner(
                     (sh.thickness > 0.0 && l.z0 >= sh.z - tol && l.z1 <= sh.z + sh.thickness + tol)
                         || (sh.etch_depth > 0.0 && l.z0 >= sh.z - sh.etch_depth - tol && l.z1 <= sh.z + tol)
                 }));
-        let dz0 = sheet_dz_at(l.z0, h_layer).unwrap_or(h_layer);
-        let dz1 = sheet_dz_at(l.z1, h_layer).unwrap_or(h_layer);
-        active_layers.push((k, l.z0, l.z1, dz0, dz1, h_layer, is_thin_sheet_slab));
+        let sdz0 = sheet_dz_at(l.z0, h_layer);
+        let sdz1 = sheet_dz_at(l.z1, h_layer);
+        let dz0 = sdz0.unwrap_or(h_layer);
+        let dz1 = sdz1.unwrap_or(h_layer);
+        active_layers.push((k, l.z0, l.z1, dz0, dz1, sdz0.is_some(), sdz1.is_some(), h_layer, is_thin_sheet_slab));
     }
     if active_layers.is_empty() {
         return Err("the 3D model has no active layers to mesh".into());
@@ -1512,18 +1972,34 @@ fn extrude_overlay_2d_inner(
             ));
         }
     }
-    let build_layer_zs = |alpha: f64| -> Vec<(usize, Vec<f64>)> {
+    // Phase 1 (`preserve_sheet_dz = true`): keep near-sheet `dz` anchored at `dz_min` while accelerating
+    // bulk `h_layer` and geometric growth `z_ratio` so narrow-gap sheets do not suffer vertical stretching.
+    // Phase 2 (`preserve_sheet_dz = false`): fallback only if even steep geometric grading still exceeds `max_z_slabs`.
+    let build_layer_zs = |alpha: f64, preserve_sheet_dz: bool| -> Vec<(usize, Vec<f64>)> {
         active_layers
             .iter()
-            .map(|&(k, z0, z1, dz0, dz1, h_layer, is_thin_sheet_slab)| {
+            .map(|&(k, z0, z1, dz0, dz1, has_s0, has_s1, h_layer, is_thin_sheet_slab)| {
                 if is_thin_sheet_slab {
                     return (k, vec![z0, z1]);
                 }
                 let (d0, d1, hl, rt) = if alpha <= 1.0 {
                     (dz0, dz1, h_layer, z_ratio)
+                } else if preserve_sheet_dz {
+                    let span = (z1 - z0).max(0.0);
+                    let bulk_alpha = if !has_s0 && !has_s1 { alpha * alpha } else { alpha };
+                    let d0_eff = if has_s0 { dz0.min(span) } else { (dz0 * bulk_alpha).min(span) };
+                    let d1_eff = if has_s1 { dz1.min(span) } else { (dz1 * bulk_alpha).min(span) };
+                    let hl_eff = (h_layer * bulk_alpha).min(span);
+                    let rt_eff = (z_ratio * alpha.powf(0.45)).min(8.0);
+                    (d0_eff, d1_eff, hl_eff, rt_eff)
                 } else {
                     let span = (z1 - z0).max(0.0);
-                    ((dz0 * alpha).min(span), (dz1 * alpha).min(span), (h_layer * alpha).min(span), z_ratio + 0.15 * (alpha - 1.0))
+                    (
+                        (dz0 * alpha).min(span),
+                        (dz1 * alpha).min(span),
+                        (h_layer * alpha).min(span),
+                        (z_ratio + 0.15 * (alpha - 1.0)).min(8.0),
+                    )
                 };
                 let zs = if plan.opts.z_coarsen {
                     subdivide_z_interval_far(z0, z1, d0, d1, hl, rt)
@@ -1534,36 +2010,66 @@ fn extrude_overlay_2d_inner(
             })
             .collect()
     };
-    let mut per_layer_zs = build_layer_zs(1.0);
+    let mut per_layer_zs = build_layer_zs(1.0, true);
     if let Some(max_slabs) = plan.opts.max_z_slabs {
         let count_slabs = |v: &[(usize, Vec<f64>)]| -> usize { v.iter().map(|(_, zs)| zs.len().saturating_sub(1)).sum() };
         if count_slabs(&per_layer_zs) > max_slabs {
-            let mut lo_a = 1.0_f64;
-            let mut hi_a = 2.0_f64;
-            while count_slabs(&build_layer_zs(hi_a)) > max_slabs && hi_a < 1e12 {
-                lo_a = hi_a;
-                hi_a *= 2.0;
-            }
-            let mut best_zs = build_layer_zs(hi_a);
-            for _ in 0..48 {
-                let mid_a = 0.5 * (lo_a + hi_a);
-                let cand = build_layer_zs(mid_a);
-                if count_slabs(&cand) <= max_slabs {
-                    hi_a = mid_a;
-                    best_zs = cand;
-                } else {
-                    lo_a = mid_a;
+            // Try preserving exact near-sheet `dz` first by increasing far-field `h_layer` & geometric growth `z_ratio`
+            let mut preserve_ok = false;
+            let mut hi_p = 1.0_f64;
+            while hi_p < 64.0 {
+                hi_p *= 2.0;
+                if count_slabs(&build_layer_zs(hi_p, true)) <= max_slabs {
+                    preserve_ok = true;
+                    break;
                 }
             }
-            per_layer_zs = best_zs;
+            if preserve_ok {
+                let mut lo_a = 1.0_f64;
+                let mut hi_a = hi_p;
+                let mut best_zs = build_layer_zs(hi_a, true);
+                for _ in 0..40 {
+                    let mid_a = 0.5 * (lo_a + hi_a);
+                    let cand = build_layer_zs(mid_a, true);
+                    if count_slabs(&cand) <= max_slabs {
+                        hi_a = mid_a;
+                        best_zs = cand;
+                    } else {
+                        lo_a = mid_a;
+                    }
+                }
+                per_layer_zs = best_zs;
+            } else {
+                let mut lo_a = 1.0_f64;
+                let mut hi_a = 2.0_f64;
+                while count_slabs(&build_layer_zs(hi_a, false)) > max_slabs && hi_a < 1e12 {
+                    lo_a = hi_a;
+                    hi_a *= 2.0;
+                }
+                let mut best_zs = build_layer_zs(hi_a, false);
+                for _ in 0..48 {
+                    let mid_a = 0.5 * (lo_a + hi_a);
+                    let cand = build_layer_zs(mid_a, false);
+                    if count_slabs(&cand) <= max_slabs {
+                        hi_a = mid_a;
+                        best_zs = cand;
+                    } else {
+                        lo_a = mid_a;
+                    }
+                }
+                per_layer_zs = best_zs;
+            }
             while count_slabs(&per_layer_zs) > max_slabs {
                 let mut best_drop: Option<(f64, usize, usize)> = None;
                 for (li, (_, zs)) in per_layer_zs.iter().enumerate() {
                     if zs.len() <= 2 {
                         continue;
                     }
+                    let (_, _, _, _, _, has_s0, has_s1, _, _) = active_layers[li];
                     for zi in 1..(zs.len() - 1) {
-                        let merged_step = zs[zi + 1] - zs[zi - 1];
+                        // Prefer dropping bulk planes over the first near-sheet plane
+                        let near_sheet = (has_s0 && zi == 1) || (has_s1 && zi + 2 == zs.len());
+                        let merged_step = (zs[zi + 1] - zs[zi - 1]) * if near_sheet { 1e6 } else { 1.0 };
                         if best_drop.is_none_or(|b| merged_step < b.0) {
                             best_drop = Some((merged_step, li, zi));
                         }
@@ -1602,7 +2108,7 @@ fn extrude_overlay_2d_inner(
     let n2 = m2.n_points();
 
     // Build lookup tables for horizontal cap faces (including 2D sheets) and vertical lateral faces
-    let face_label: Vec<i32> = (0..nf as u32)
+    let mut face_label: Vec<i32> = (0..nf as u32)
         .map(|fi| labels.label_of_edge(fi).ok_or_else(|| format!("face '{}' has no boundary label", cx.facet_name(fi))))
         .collect::<Result<Vec<i32>, String>>()?;
     let face_normal: Vec<V3> = (0..nf as u32)
@@ -1758,6 +2264,30 @@ fn extrude_overlay_2d_inner(
             }
         }
 
+        let emitted_labels: HashSet<i32> = facet_labels.iter().copied().collect();
+        let registered_labels: HashSet<i32> = labels.boundaries.iter().map(|b| b.id).collect();
+        let mut missing_active: Vec<i32> = cap_at
+            .values()
+            .chain(lat_at.values())
+            .map(|&fi| face_label[fi])
+            .filter(|lab| !emitted_labels.contains(lab))
+            .collect();
+        missing_active.sort_unstable();
+        missing_active.dedup();
+        if !missing_active.is_empty() {
+            return Err(format!(
+                "sheet3d facet-label bijection failed (z_coarsen=false): active boundary label(s) {missing_active:?} have 0 emitted facets"
+            ));
+        }
+        let mut orphan_emitted: Vec<i32> =
+            emitted_labels.iter().copied().filter(|l| !registered_labels.contains(l)).collect();
+        orphan_emitted.sort_unstable();
+        if !orphan_emitted.is_empty() {
+            return Err(format!(
+                "sheet3d facet-label bijection failed (z_coarsen=false): emitted orphan boundary label(s) {orphan_emitted:?} absent from LabelMap"
+            ));
+        }
+
         let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
         let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
         let ran_pml = matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty();
@@ -1788,12 +2318,55 @@ fn extrude_overlay_2d_inner(
     }
 
     // `z_coarsen = true`: Conforming pure-tetrahedral vertical coarsening away from sheet planes
-    let mut sheet_plane_info: Vec<(usize, f64, f64)> = Vec::new();
+    let mut sheet_plane_info: Vec<(usize, f64, f64, f64)> = Vec::new();
     for (zp, &z) in z_planes.iter().enumerate() {
         if let Some(hs) = sheet_dz_at(z, h_global) {
-            sheet_plane_info.push((zp, z, hs));
+            let h_local_gap = sz
+                .sheet_local_gap_by_z
+                .iter()
+                .find(|&&(zs, _)| (zs - z).abs() <= tol)
+                .map_or(0.0, |&(_, g)| g);
+            sheet_plane_info.push((zp, z, hs, h_local_gap));
         }
     }
+
+    // Build canonical cap equivalence signature per face:
+    // (face name, region pair, pinned boundary id if pinned, sorted group indices)
+    let pinned_by_id: HashMap<i32, bool> = labels.boundaries.iter().map(|b| (b.id, b.pinned)).collect();
+    let mut groups_by_id: HashMap<i32, Vec<usize>> = HashMap::new();
+    for (gi, g) in labels.groups.iter().enumerate() {
+        for &lab in &g.labels {
+            groups_by_id.entry(lab).or_default().push(gi);
+        }
+    }
+    for v in groups_by_id.values_mut() {
+        v.sort_unstable();
+        v.dedup();
+    }
+    let face_pinned: Vec<Option<i32>> = face_label
+        .iter()
+        .map(|&lab| if pinned_by_id.get(&lab).copied().unwrap_or(false) { Some(lab) } else { None })
+        .collect();
+    let face_groups: Vec<Vec<usize>> =
+        face_label.iter().map(|lab| groups_by_id.get(lab).cloned().unwrap_or_default()).collect();
+    let cap_sig_eq = |i0: usize, i1: usize| -> bool {
+        cx.faces[i0].name == cx.faces[i1].name
+            && cx.faces[i0].first == cx.faces[i1].first
+            && cx.faces[i0].second == cx.faces[i1].second
+            && face_pinned[i0] == face_pinned[i1]
+            && face_groups[i0] == face_groups[i1]
+    };
+
+    let ncell = ov.regions.len();
+    let mut dsu_parent: Vec<usize> = (0..ncell).collect();
+    let dsu_find = |parent: &mut [usize], mut x: usize| -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    };
+
     let pts2: Vec<V2> = (0..n2 as u32).map(pt2).collect();
     let mut frozen_v = vec![false; n2];
     for &((a, b), ref sides) in &edge_list {
@@ -1813,13 +2386,23 @@ fn extrude_overlay_2d_inner(
                 let f1 = cap_at.get(&(c1 as u32, zp)).filter(|&&fi| !cx.faces[fi].is_sheet());
                 match (f0, f1) {
                     (None, None) => false,
-                    (Some(&i0), Some(&i1)) => cx.faces[i0].name != cx.faces[i1].name,
+                    (Some(&i0), Some(&i1)) => !cap_sig_eq(i0, i1),
                     _ => true,
                 }
             });
             if diff_layer || diff_non_sheet_cap {
                 frozen_v[a as usize] = true;
                 frozen_v[b as usize] = true;
+            } else {
+                let r0 = dsu_find(&mut dsu_parent, c0);
+                let r1 = dsu_find(&mut dsu_parent, c1);
+                if r0 != r1 {
+                    if r0 < r1 {
+                        dsu_parent[r1] = r0;
+                    } else {
+                        dsu_parent[r0] = r1;
+                    }
+                }
             }
         }
     }
@@ -1829,21 +2412,23 @@ fn extrude_overlay_2d_inner(
             frozen_v[b as usize] = true;
         }
     }
+    let comp_of_cell: Vec<usize> = (0..ncell).map(|c| dsu_find(&mut dsu_parent, c)).collect();
 
-    // Determine coarsening level `level_of_zp[zp]` (`0` inside `|z - z_sheet| <= 4 * h_sheet` & >= 2 slabs per side)
+    // Determine coarsening level `level_of_zp[zp]` (`0` inside `slab_dist < 2 || d_min < max(4 * h_s, 1.5 * min(h_local_gap, 2.5 * h_s))`)
     let mut level_of_zp = if sheet_plane_info.is_empty() {
         vec![0usize; nz]
     } else {
         let mut lvl = vec![usize::MAX / 2; nz];
-        for &(zp_s, z_s, h_s) in &sheet_plane_info {
+        for &(zp_s, z_s, h_s, h_local_gap) in &sheet_plane_info {
             lvl[zp_s] = 0;
+            let protect_dist = (4.0 * h_s).max(1.5 * h_local_gap.min(2.5 * h_s));
             for s in 0..nslab {
                 if slab_layer[s].is_none() {
                     continue;
                 }
                 let d_min = (z_planes[s] - z_s).abs().min((z_planes[s + 1] - z_s).abs());
                 let slab_dist = if s >= zp_s { s - zp_s } else { zp_s - 1 - s };
-                if slab_dist < 2 || d_min < 4.0 * h_s - tol {
+                if slab_dist < 2 || d_min < protect_dist - tol {
                     lvl[s] = 0;
                     lvl[s + 1] = 0;
                 }
@@ -1917,7 +2502,7 @@ fn extrude_overlay_2d_inner(
         let mut z_dist_min = f64::INFINITY;
         for (zp, &lv) in level_of_zp.iter().enumerate() {
             if lv == m + 1 {
-                for &(_, z_s, _) in &sheet_plane_info {
+                for &(_, z_s, _, _) in &sheet_plane_info {
                     z_dist_min = z_dist_min.min((z_planes[zp] - z_s).abs());
                 }
             }
@@ -1927,7 +2512,19 @@ fn extrude_overlay_2d_inner(
         } else {
             0.95 * h_layer_max
         };
-        let (next_lvl, tr) = coarsen_2d_once(&levels_2d[m], &pts2, &frozen_v, h_target, h_layer_max);
+        let mut dz_slab_min = f64::INFINITY;
+        for (s, &layer_opt) in slab_layer.iter().enumerate().take(nslab) {
+            if layer_opt.is_none() {
+                continue;
+            }
+            let (ls, lt) = (level_of_zp[s], level_of_zp[s + 1]);
+            if (ls == m && lt == m + 1) || (ls == m + 1 && lt == m) {
+                dz_slab_min = dz_slab_min.min((z_planes[s + 1] - z_planes[s]).abs());
+            }
+        }
+        let dz_slab = if dz_slab_min.is_finite() && dz_slab_min > 0.0 { dz_slab_min } else { h_target };
+        let (next_lvl, tr) =
+            coarsen_2d_once(&levels_2d[m], &pts2, &frozen_v, h_target, h_layer_max, dz_slab, &comp_of_cell);
         levels_2d.push(next_lvl);
         transitions.push(tr);
     }
@@ -1940,6 +2537,94 @@ fn extrude_overlay_2d_inner(
     for v in &mut level_of_zp {
         if *v > effective_max {
             *v = effective_max;
+        }
+    }
+
+    // Coalesce coplanar non-sheet cap patches on coarsened z-planes (`level_of_zp[zp] > 0`) that belong to
+    // the same unfrozen cell component and carry identical BC/region semantics onto one canonical `face_label`,
+    // remapping and pruning `labels` consistently so no active boundary ID can ever lose all its facets.
+    let mut label_remap: HashMap<i32, i32> = HashMap::new();
+    for zp in 0..nz {
+        let m = level_of_zp[zp];
+        if m == 0 {
+            continue;
+        }
+        let mut cell_has_tri = vec![false; ncell];
+        for &(_, ov_c) in &levels_2d[m].tris {
+            if ov_c < ncell {
+                cell_has_tri[ov_c] = true;
+            }
+        }
+        type CapSigKey = (usize, String, Option<u32>, Option<u32>, Option<i32>, Vec<usize>);
+        let mut by_comp_sig: HashMap<CapSigKey, Vec<(u32, usize)>> = HashMap::new();
+        for (&(cell, czp), &fi) in &cap_at {
+            if czp != zp || cx.faces[fi].is_sheet() {
+                continue;
+            }
+            let comp = comp_of_cell.get(cell as usize).copied().unwrap_or(cell as usize);
+            let key = (
+                comp,
+                cx.faces[fi].name.clone(),
+                cx.faces[fi].first,
+                cx.faces[fi].second,
+                face_pinned[fi],
+                face_groups[fi].clone(),
+            );
+            by_comp_sig.entry(key).or_default().push((cell, fi));
+        }
+        for mut members in by_comp_sig.into_values() {
+            if members.len() <= 1 {
+                continue;
+            }
+            members.sort_by_key(|&(c, fi)| (face_label[fi], c));
+            let canon_id = members
+                .iter()
+                .filter(|&&(c, _)| cell_has_tri.get(c as usize).copied().unwrap_or(false))
+                .map(|&(_, fi)| face_label[fi])
+                .min()
+                .unwrap_or_else(|| face_label[members[0].1]);
+            for &(_, fi) in &members {
+                let old_id = face_label[fi];
+                if old_id != canon_id {
+                    label_remap.insert(old_id, canon_id);
+                    face_label[fi] = canon_id;
+                }
+            }
+        }
+    }
+    if !label_remap.is_empty() {
+        let mut absorbed_entities: HashMap<i32, Vec<u32>> = HashMap::new();
+        labels.boundaries.retain(|b| {
+            if let Some(&target) = label_remap.get(&b.id) {
+                absorbed_entities.entry(target).or_default().extend(b.entities.iter().copied());
+                false
+            } else {
+                true
+            }
+        });
+        for b in &mut labels.boundaries {
+            if let Some(extra) = absorbed_entities.remove(&b.id) {
+                b.entities.extend(extra);
+                b.entities.sort_unstable();
+                b.entities.dedup();
+            }
+        }
+        for g in &mut labels.groups {
+            for lab in &mut g.labels {
+                if let Some(&target) = label_remap.get(lab) {
+                    *lab = target;
+                }
+            }
+            g.labels.sort_unstable();
+            g.labels.dedup();
+        }
+        for (&old_id, &target) in &label_remap {
+            if let Some(tm) = labels.sheet_thickness_m.remove(&old_id) {
+                labels.sheet_thickness_m.entry(target).or_insert(tm);
+            }
+            if let Some(te) = labels.sheet_etch_depth_m.remove(&old_id) {
+                labels.sheet_etch_depth_m.entry(target).or_insert(te);
+            }
         }
     }
 
@@ -2135,6 +2820,29 @@ fn extrude_overlay_2d_inner(
         }
     }
 
+    let emitted_labels: HashSet<i32> = facet_labels.iter().copied().collect();
+    let registered_labels: HashSet<i32> = labels.boundaries.iter().map(|b| b.id).collect();
+    let mut missing_active: Vec<i32> = cap_at
+        .values()
+        .chain(lat_at.values())
+        .map(|&fi| face_label[fi])
+        .filter(|lab| !emitted_labels.contains(lab))
+        .collect();
+    missing_active.sort_unstable();
+    missing_active.dedup();
+    if !missing_active.is_empty() {
+        return Err(format!(
+            "sheet3d facet-label bijection failed (z_coarsen=true): active boundary label(s) {missing_active:?} have 0 emitted facets"
+        ));
+    }
+    let mut orphan_emitted: Vec<i32> = emitted_labels.iter().copied().filter(|l| !registered_labels.contains(l)).collect();
+    orphan_emitted.sort_unstable();
+    if !orphan_emitted.is_empty() {
+        return Err(format!(
+            "sheet3d facet-label bijection failed (z_coarsen=true): emitted orphan boundary label(s) {orphan_emitted:?} absent from LabelMap"
+        ));
+    }
+
     let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
     let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
     let ran_pml = matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty();
@@ -2207,4 +2915,392 @@ pub fn mesh_sheet_stack_3d(
     let (m2, warnings) = build_overlay_mesh_2d_with_sizing(&ev, plan, &sz)?;
     let g = extrude_overlay_2d_inner(ev, labels, &m2, plan, &sz, waves, None, false, warnings)?;
     Ok((g, None))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meshing::geomdrive::evaluate;
+    use geom::expr::Expr;
+    use geom::model::Model;
+    use geom::select::Selector;
+
+    fn pt2(x: f64, y: f64) -> [Expr; 2] {
+        [Expr::Num(x), Expr::Num(y)]
+    }
+
+    #[test]
+    fn fr27_z_coarsen_preserves_all_active_cap_labels_and_positive_tet_volumes() {
+        let (half, pad, h_sub, h_air, h_bot) = (500e-6, 1200e-6, 750e-6, 890e-6, 900e-6);
+        let build_ev = || {
+            let mut m = Model::new_3d();
+            let vac = m.box_(
+                "vac_box",
+                (-half - pad, -half - pad, -h_sub - h_bot - pad),
+                (half + pad, half + pad, h_air + pad),
+            );
+            let sub = m.box_("sub_box", (-half, -half, -h_sub), (half, half, 0.0));
+            let cross = m.polygons(
+                "cross_poly",
+                vec![vec![
+                    pt2(-15e-6, -120e-6),
+                    pt2(15e-6, -120e-6),
+                    pt2(15e-6, -15e-6),
+                    pt2(120e-6, -15e-6),
+                    pt2(120e-6, 15e-6),
+                    pt2(15e-6, 15e-6),
+                    pt2(15e-6, 120e-6),
+                    pt2(-15e-6, 120e-6),
+                    pt2(-15e-6, 15e-6),
+                    pt2(-120e-6, 15e-6),
+                    pt2(-120e-6, -15e-6),
+                    pt2(-15e-6, -15e-6),
+                ]],
+                vec![],
+            );
+            let claw = m.polygons(
+                "claw_poly",
+                vec![vec![
+                    pt2(-45e-6, 132e-6),
+                    pt2(45e-6, 132e-6),
+                    pt2(45e-6, 190e-6),
+                    pt2(30e-6, 190e-6),
+                    pt2(30e-6, 147e-6),
+                    pt2(-30e-6, 147e-6),
+                    pt2(-30e-6, 190e-6),
+                    pt2(-45e-6, 190e-6),
+                ]],
+                vec![],
+            );
+            let gnd = m.polygons(
+                "gnd_poly",
+                vec![vec![pt2(-half, -half), pt2(half, -half), pt2(half, half), pt2(-half, half)]],
+                vec![vec![pt2(-140e-6, -140e-6), pt2(140e-6, -140e-6), pt2(140e-6, 210e-6), pt2(-140e-6, 210e-6)]],
+            );
+            m.sheet("cross", cross, 0.0);
+            m.sheet("claw", claw, 0.0);
+            m.sheet("ground_plane", gnd, 0.0);
+            m.overlay(&[("vacuum", vac), ("substrate", sub)]);
+            m.size("sz_cross", Selector::parse("cross:edge").unwrap(), Some(Expr::Num(10e-6)), None, None);
+            m.size("sz_claw", Selector::parse("claw:edge").unwrap(), Some(Expr::Num(8e-6)), None, None);
+            evaluate(&m.list).unwrap()
+        };
+
+        let mut p_off = MeshPlan::simple(340e-6);
+        p_off.opts.z_coarsen = false;
+        p_off.opts.dz_min = Some(5e-6);
+        p_off.opts.z_growth_ratio = Some(1.6);
+        p_off.opts.max_z_slabs = Some(22);
+        let (g_off, _) = mesh_sheet_stack_3d(build_ev(), &p_off, None).unwrap();
+
+        let mut p_on = p_off.clone();
+        p_on.opts.z_coarsen = true;
+        let (g_on, _) = mesh_sheet_stack_3d(build_ev(), &p_on, None).unwrap();
+
+        // Every boundary ID in `outer`, `cross`, `claw`, `ground_plane` must exist in `mesh.facet_labels`
+        let emitted: HashSet<i32> = g_on.mesh.facet_labels.iter().copied().collect();
+        for sel in ["outer", "name(cross)", "name(claw)", "name(ground_plane)"] {
+            let labs = g_on.select(sel).unwrap();
+            assert!(!labs.is_empty(), "selector '{sel}' resolved empty");
+            for lab in labs {
+                assert!(emitted.contains(&lab), "selector '{sel}' label {lab} missing from facet_labels");
+            }
+        }
+        // Strictly positive tet volumes across 100% of cells
+        for c in 0..g_on.mesh.n_cells() {
+            let v = g_on.mesh.cell(c);
+            let p = |id: u32| {
+                let s = g_on.mesh.point(id as usize);
+                [s[0], s[1], s[2]]
+            };
+            let d = det3(sub3(p(v[1]), p(v[0])), sub3(p(v[2]), p(v[0])), sub3(p(v[3]), p(v[0])));
+            assert!(d > 0.0 && d.is_finite(), "non-positive tet volume at cell {c}: {d:e}");
+        }
+        // Deep-stack 3D tet reduction
+        assert!(
+            g_on.mesh.n_cells() < g_off.mesh.n_cells(),
+            "expected z_coarsen=true ({}) < z_coarsen=false ({})",
+            g_on.mesh.n_cells(),
+            g_off.mesh.n_cells()
+        );
+    }
+
+    #[test]
+    fn fr28_narrow_gap_centerline_seeding_eliminates_cross_terminal_bridging() {
+        let mut m = Model::new_3d();
+        let half = 120e-6;
+        let sub = m.box_("sub", (-half, -half, -100e-6), (half, half, 0.0));
+        let vac = m.box_("vac", (-half, -half, 0.0), (half, half, 100e-6));
+        let w = 4e-6;
+        let g = 2e-6;
+        let r = w / 2.0;
+        let n_arc = 16usize;
+        let mut pa = vec![pt2(-50e-6, -6e-6), pt2(-40e-6, -6e-6), pt2(-40e-6, -3e-6)];
+        for i in 0..=n_arc {
+            let th = -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * (i as f64) / (n_arc as f64);
+            pa.push(pt2(36e-6 + r * th.cos(), -1e-6 + r * th.sin()));
+        }
+        pa.push(pt2(-40e-6, 1e-6));
+        pa.push(pt2(-40e-6, 6e-6));
+        pa.push(pt2(-50e-6, 6e-6));
+
+        let mut pb = vec![pt2(50e-6, 10e-6), pt2(40e-6, 10e-6), pt2(40e-6, 1e-6 + g + w)];
+        for i in 0..=n_arc {
+            let th = std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * (i as f64) / (n_arc as f64);
+            pb.push(pt2(-36e-6 + r * th.cos(), 1e-6 + g + r + r * th.sin()));
+        }
+        pb.push(pt2(40e-6, 1e-6 + g));
+        pb.push(pt2(40e-6, -2e-6));
+        pb.push(pt2(50e-6, -2e-6));
+
+        let poly_a = m.polygons("pa", vec![pa], vec![]);
+        let poly_b = m.polygons("pb", vec![pb], vec![]);
+        m.sheet("cap_a", poly_a, 0.0);
+        m.sheet("cap_b", poly_b, 0.0);
+        m.overlay(&[("sub", sub), ("vac", vac)]);
+
+        let ev = evaluate(&m.list).unwrap();
+        let mut plan = MeshPlan::simple(80e-6);
+        plan.opts.gap_cells = None; // must auto-detect 2 um gap!
+        plan.opts.max_steiner_multiplier = Some(8);
+        plan.opts.corner_grading = true;
+        plan.opts.singular_edges = Some("quarter_point".into());
+        let labels = ev.label_map().unwrap();
+        let sz = compute_sheet3d_sizing(&ev, &labels, &plan, None).unwrap();
+        assert!(!sz.gap_seeds.is_empty(), "expected deterministic centerline gap seeds for 2 um gap");
+        let (m2, _) = build_overlay_mesh_2d_with_sizing(&ev, &plan, &sz).unwrap();
+
+        // Audit m2 directly: zero dielectric triangles may have vertices touching both cap_a and cap_b rims with 0 interior vertices
+        let st = ev.complex().stack.as_ref().unwrap();
+        let mut cell_sheet_id: Vec<u32> = vec![0; st.overlay.regions.len()];
+        for f in &ev.complex().faces {
+            if f.is_sheet() {
+                if let FaceGeom::Cap { cell, .. } = f.geom {
+                    cell_sheet_id[cell as usize] = if f.name == "cap_a" { 1 } else { 2 };
+                }
+            }
+        }
+        let nv = m2.n_points();
+        let mut v_touch = vec![0u8; nv];
+        for ti in 0..m2.n_cells() {
+            let ov_c = (m2.cell_labels[ti] - 1) as usize;
+            let sid = cell_sheet_id[ov_c];
+            if sid > 0 {
+                for &vi in m2.cell(ti) {
+                    v_touch[vi as usize] |= 1u8 << (sid - 1);
+                }
+            }
+        }
+        let mut n_bridging = 0usize;
+        for ti in 0..m2.n_cells() {
+            let ov_c = (m2.cell_labels[ti] - 1) as usize;
+            if cell_sheet_id[ov_c] != 0 {
+                continue;
+            }
+            let v = m2.cell(ti);
+            let m0 = v_touch[v[0] as usize];
+            let m1 = v_touch[v[1] as usize];
+            let m2_v = v_touch[v[2] as usize];
+            if m0 != 0 && m1 != 0 && m2_v != 0 && ((m0 | m1 | m2_v) == 3) {
+                n_bridging += 1;
+            }
+        }
+        assert_eq!(n_bridging, 0, "found {n_bridging} cross-terminal bridging triangles across 2 um gap");
+
+        // Also verify the exact 6-finger filleted IDC geometry from bug4_sheet3d_narrow_gap_steiner_locking
+        let mut m6 = Model::new_3d();
+        let h6 = 260e-6;
+        let vb = m6.box_("vac_bot", (-h6, -h6, -500e-6), (h6, h6, -250e-6));
+        let sb = m6.box_("sub_box", (-h6, -h6, -250e-6), (h6, h6, 0.0));
+        let vt = m6.box_("vac_top", (-h6, -h6, 0.0), (h6, h6, 250e-6));
+        let mut bus_a = vec![pt2(-75e-6, -22e-6), pt2(-60e-6, -22e-6)];
+        let mut bus_b = vec![pt2(75e-6, 22e-6), pt2(60e-6, 22e-6)];
+        let pitch = 2.0 * (w + g);
+        let n_arc6 = 20usize;
+        for k in 0..3 {
+            let yc = -15e-6 + (k as f64) * pitch;
+            bus_a.push(pt2(-60e-6, yc - r));
+            for i in 0..=n_arc6 {
+                let th = -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * (i as f64) / (n_arc6 as f64);
+                bus_a.push(pt2(48e-6 + r * th.cos(), yc + r * th.sin()));
+            }
+            bus_a.push(pt2(-60e-6, yc + r));
+        }
+        bus_a.push(pt2(-60e-6, 22e-6));
+        bus_a.push(pt2(-75e-6, 22e-6));
+        for k in (0..3).rev() {
+            let yc = -15e-6 + (w + g) + (k as f64) * pitch;
+            bus_b.push(pt2(60e-6, yc + r));
+            for i in 0..=n_arc6 {
+                let th = std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * (i as f64) / (n_arc6 as f64);
+                bus_b.push(pt2(-48e-6 + r * th.cos(), yc + r * th.sin()));
+            }
+            bus_b.push(pt2(60e-6, yc - r));
+        }
+        bus_b.push(pt2(60e-6, -22e-6));
+        bus_b.push(pt2(75e-6, -22e-6));
+        let mut hole = Vec::new();
+        let (hx, hy, hr) = (85e-6, 30e-6, 4e-6);
+        for &(cx0, cy0, th0) in &[
+            (hx - hr, -hy + hr, -std::f64::consts::FRAC_PI_2),
+            (hx - hr, hy - hr, 0.0),
+            (-hx + hr, hy - hr, std::f64::consts::FRAC_PI_2),
+            (-hx + hr, -hy + hr, std::f64::consts::PI),
+        ] {
+            for i in 0..=n_arc6 {
+                let th = th0 + std::f64::consts::FRAC_PI_2 * (i as f64) / (n_arc6 as f64);
+                hole.push(pt2(cx0 + hr * th.cos(), cy0 + hr * th.sin()));
+            }
+        }
+        let pa6 = m6.polygons_with("p_a", vec![bus_a], vec![], 1e-9, 0.0);
+        let pb6 = m6.polygons_with("p_b", vec![bus_b], vec![], 1e-9, 0.0);
+        let pg6 = m6.polygons_with(
+            "p_gnd",
+            vec![vec![pt2(-h6, -h6), pt2(h6, -h6), pt2(h6, h6), pt2(-h6, h6)]],
+            vec![hole],
+            1e-9,
+            0.0,
+        );
+        m6.sheet("cap_a", pa6, 0.0);
+        m6.sheet("cap_b", pb6, 0.0);
+        m6.sheet("gnd", pg6, 0.0);
+        m6.overlay(&[("vacuum_bot", vb), ("substrate", sb), ("vacuum_top", vt)]);
+        let ev6 = evaluate(&m6.list).unwrap();
+        let mut plan6 = MeshPlan::simple(95e-6);
+        plan6.opts.dz_min = Some(2e-6);
+        plan6.opts.z_growth_ratio = Some(2.4);
+        plan6.opts.max_z_slabs = Some(12);
+        plan6.opts.max_steiner_multiplier = Some(8);
+        plan6.opts.singular_edges = Some("quarter_point".into());
+        plan6.opts.quarter_point_xi = Some(0.25);
+        plan6.opts.corner_grading = true;
+        let labels6 = ev6.label_map().unwrap();
+        let sz6 = compute_sheet3d_sizing(&ev6, &labels6, &plan6, None).unwrap();
+        let (m2_6, warns6) = build_overlay_mesh_2d_with_sizing(&ev6, &plan6, &sz6).unwrap();
+        let (g6, _) = mesh_sheet_stack_3d(ev6, &plan6, None).unwrap();
+        // Inspect z planes and bridging on bug4 geometry
+        let mut zs: Vec<i64> = (0..g6.mesh.n_points()).map(|i| (g6.mesh.point(i)[2] * 1e9).round() as i64).collect();
+        zs.sort_unstable();
+        zs.dedup();
+        let st6 = g6.eval.complex().stack.as_ref().unwrap();
+        let mut csid6 = vec![0u8; st6.overlay.regions.len()];
+        for f in &g6.eval.complex().faces {
+            if f.is_sheet() {
+                if let FaceGeom::Cap { cell, .. } = f.geom {
+                    csid6[cell as usize] = match f.name.as_str() {
+                        "cap_a" => 1,
+                        "cap_b" => 2,
+                        "gnd" => 4,
+                        _ => 0,
+                    };
+                }
+            }
+        }
+        let mut vt6 = vec![0u8; m2_6.n_points()];
+        for ti in 0..m2_6.n_cells() {
+            let sid = csid6[(m2_6.cell_labels[ti] - 1) as usize];
+            if sid != 0 {
+                for &vi in m2_6.cell(ti) {
+                    vt6[vi as usize] |= sid;
+                }
+            }
+        }
+        let mut n_bridge6 = 0usize;
+        let mut n_ab_edges6 = 0usize;
+        for ti in 0..m2_6.n_cells() {
+            if csid6[(m2_6.cell_labels[ti] - 1) as usize] != 0 {
+                continue;
+            }
+            let v = m2_6.cell(ti);
+            let m0 = vt6[v[0] as usize];
+            let m1 = vt6[v[1] as usize];
+            let m2v = vt6[v[2] as usize];
+            if m0 != 0 && m1 != 0 && m2v != 0 && (m0 | m1 | m2v).count_ones() >= 2 {
+                n_bridge6 += 1;
+            }
+            for (a, b) in [(v[0], v[1]), (v[1], v[2]), (v[2], v[0])] {
+                let ma = vt6[a as usize];
+                let mb = vt6[b as usize];
+                if ma != 0 && mb != 0 && (ma & mb) == 0 {
+                    n_ab_edges6 += 1;
+                }
+            }
+        }
+        assert_eq!(n_bridge6, 0, "6-finger filleted IDC had {n_bridge6} cross-terminal bridging triangles");
+        assert_eq!(n_ab_edges6, 0, "6-finger filleted IDC had {n_ab_edges6} direct cross-terminal edges");
+        assert!(warns6.is_empty(), "unexpected 2D refinement warnings on 6-finger IDC: {warns6:?}");
+        // Verify near-sheet dz = 2 um is preserved under max_z_slabs = 12 (no vertical stretching to 50 um)
+        assert!(
+            zs.contains(&2000) && zs.contains(&-2000),
+            "near-sheet +/-2 um z-planes must be preserved under max_z_slabs=12, got {zs:?}"
+        );
+        // Verify 100% strictly positive tet volumes on the 3D mesh
+        for c in 0..g6.mesh.n_cells() {
+            let v = g6.mesh.cell(c);
+            let p = |id: u32| {
+                let s = g6.mesh.point(id as usize);
+                [s[0], s[1], s[2]]
+            };
+            let d = det3(sub3(p(v[1]), p(v[0])), sub3(p(v[2]), p(v[0])), sub3(p(v[3]), p(v[0])));
+            assert!(d > 0.0 && d.is_finite(), "non-positive tet volume at cell {c}: {d:e}");
+        }
+    }
+
+    #[test]
+    fn fr31_interior_mesh_inside_inner_vac_box_is_invariant_to_outer_box_extent() {
+        let build_2d = |r_outer: f64| -> SimplexMesh {
+            let mut m = Model::new_3d();
+            let vac_out = m.box_("vac_out", (-r_outer, -r_outer, -300e-6), (r_outer, r_outer, 300e-6));
+            let vac_in = m.box_("inner_vac_box", (-250e-6, -250e-6, -200e-6), (250e-6, 250e-6, 200e-6));
+            let sub = m.box_("sub_box", (-150e-6, -150e-6, -150e-6), (150e-6, 150e-6, 0.0));
+            let p1 = m.polygons(
+                "p1",
+                vec![vec![pt2(-80e-6, -40e-6), pt2(-10e-6, -40e-6), pt2(-10e-6, 40e-6), pt2(-80e-6, 40e-6)]],
+                vec![],
+            );
+            let p2 = m.polygons(
+                "p2",
+                vec![vec![pt2(10e-6, -40e-6), pt2(80e-6, -40e-6), pt2(80e-6, 40e-6), pt2(10e-6, 40e-6)]],
+                vec![],
+            );
+            m.sheet("pad1", p1, 0.0);
+            m.sheet("pad2", p2, 0.0);
+            m.overlay(&[("vac_out", vac_out), ("inner_vac_box", vac_in), ("sub", sub)]);
+            m.size("sz_p1", Selector::parse("pad1:edge").unwrap(), Some(Expr::Num(15e-6)), None, None);
+            m.size("sz_p2", Selector::parse("pad2:edge").unwrap(), Some(Expr::Num(15e-6)), None, None);
+            m.size("sz_in", Selector::parse("region(inner_vac_box)").unwrap(), Some(Expr::Num(60e-6)), None, None);
+
+            let ev = evaluate(&m.list).unwrap();
+            let plan = MeshPlan::simple(120e-6);
+            build_sized_overlay_mesh_2d(&ev, &plan, None).unwrap()
+        };
+
+        let m_r1 = build_2d(380e-6);
+        let m_r2 = build_2d(760e-6);
+
+        let interior_pts = |m: &SimplexMesh| -> Vec<(i64, i64)> {
+            let mut out: Vec<(i64, i64)> = (0..m.n_points())
+                .filter_map(|i| {
+                    let x = m.points[2 * i];
+                    let y = m.points[2 * i + 1];
+                    if x.abs() < 245e-6 && y.abs() < 245e-6 {
+                        Some(((x * 1e12).round() as i64, (y * 1e12).round() as i64))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            out.sort_unstable();
+            out
+        };
+        let p_r1 = interior_pts(&m_r1);
+        let p_r2 = interior_pts(&m_r2);
+        assert!(!p_r1.is_empty());
+        assert_eq!(
+            p_r1, p_r2,
+            "interior 2D vertices inside inner_vac_box must be invariant to outer box expansion R1 -> R2 ({} vs {})",
+            p_r1.len(),
+            p_r2.len()
+        );
+    }
 }

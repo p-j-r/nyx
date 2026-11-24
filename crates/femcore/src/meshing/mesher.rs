@@ -75,12 +75,23 @@ pub(crate) struct MeshChainsReport {
     pub warnings: Vec<String>,
 }
 
+/// Optional 3D sheet-stack extras passed by `sheet3d`: deterministic gap-centerline seeds,
+/// per-chain terminal ownership IDs for cross-terminal bridging audits, dielectric gap domain IDs,
+/// and a fixed interior reference frame for outer-box meshing invariance (`FR-28`, `FR-31`).
+pub(crate) struct SheetChainExtras<'a> {
+    pub gap_seeds: &'a [([f64; 2], f64)],
+    pub chain_owner: &'a [u32],
+    pub dielectric_domains: &'a HashSet<i32>,
+    pub ref_frame: Option<([f64; 2], [f64; 2])>,
+}
+
 #[derive(Clone, Copy)]
 struct SegEntry {
     a: [f64; 2],
     b: [f64; 2],
     part: usize,
     label: i32,
+    owner: u32,
     orig_idx: usize,
     bbox: [f64; 4],
 }
@@ -102,13 +113,14 @@ struct SegBvh2 {
 }
 
 impl SegBvh2 {
-    fn build(chains: &[Chain]) -> Self {
+    fn build(chains: &[Chain], chain_owner: &[u32]) -> Self {
         let mut segs = Vec::new();
-        for ch in chains {
+        for (ci, ch) in chains.iter().enumerate() {
+            let owner = chain_owner.get(ci).copied().unwrap_or(0);
             for w in ch.pts.windows(2) {
                 let orig_idx = segs.len();
                 let bbox = [w[0][0].min(w[1][0]), w[0][1].min(w[1][1]), w[0][0].max(w[1][0]), w[0][1].max(w[1][1])];
-                segs.push(SegEntry { a: w[0], b: w[1], part: ch.part, label: ch.label, orig_idx, bbox });
+                segs.push(SegEntry { a: w[0], b: w[1], part: ch.part, label: ch.label, owner, orig_idx, bbox });
             }
         }
         let mut nodes = Vec::with_capacity(segs.len().saturating_mul(2));
@@ -238,10 +250,14 @@ struct OctaveFillGrid {
 }
 
 impl OctaveFillGrid {
-    fn new(l0: f64, h_fine_min: f64, fills: &[Fill]) -> Self {
+    fn new(l0: f64, h_fine_min: f64, fills: &[Fill], extra_hs: impl Iterator<Item = f64>) -> Self {
         let mut k_max = 0usize;
         for f in fills {
             let k = Self::octave_of_static(f.h, h_fine_min);
+            k_max = k_max.max(k);
+        }
+        for h in extra_hs {
+            let k = Self::octave_of_static(h, h_fine_min);
             k_max = k_max.max(k);
         }
         let levels = (0..=k_max)
@@ -364,12 +380,25 @@ pub(crate) fn mesh_chains(
     mp: &MeshParams,
     domain_at: &dyn Fn([f64; 2]) -> Option<i32>,
 ) -> Result<(SimplexMesh, MeshChainsReport), String> {
+    mesh_chains_with_seeds(chains, fills, mp, domain_at, None)
+}
+
+/// Extended entry point for `sheet3d` supporting deterministic gap-centerline seeds, cross-terminal
+/// bridging triangle audits with localized angle-fallback refinement, and fixed interior reference frames.
+pub(crate) fn mesh_chains_with_seeds(
+    chains: &[Chain],
+    fills: &[Fill],
+    mp: &MeshParams,
+    domain_at: &dyn Fn([f64; 2]) -> Option<i32>,
+    extras: Option<&SheetChainExtras<'_>>,
+) -> Result<(SimplexMesh, MeshChainsReport), String> {
     let (lo, hi, h_global) = (mp.lo, mp.hi, mp.h);
-    let scale = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-300);
+    let (ref_lo, ref_hi) = extras.and_then(|e| e.ref_frame).unwrap_or((lo, hi));
+    let scale = (ref_hi[0] - ref_lo[0]).max(ref_hi[1] - ref_lo[1]).max(1e-300);
     // triangulate in coordinates centred on the shapes and scaled to about one, so rounding errors are
     // relative to the size of the model whatever its units or position (nanometre structures
     // sit at 1e-6 offsets and would otherwise get slivers)
-    let c0 = [0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1])];
+    let c0 = [0.5 * (ref_lo[0] + ref_hi[0]), 0.5 * (ref_lo[1] + ref_hi[1])];
     let nrm = |p: [f64; 2]| [(p[0] - c0[0]) / scale, (p[1] - c0[1]) / scale];
     let den = |p: [f64; 2]| [p[0] * scale + c0[0], p[1] * scale + c0[1]];
     let mut cdt: ConstrainedDelaunayTriangulation<Point2<f64>> = ConstrainedDelaunayTriangulation::new();
@@ -386,16 +415,35 @@ pub(crate) fn mesh_chains(
             prev = Some(v);
         }
     }
+    let n_chain_verts = cdt.num_vertices();
     // interior lattice points where a shape asks for a finer size than the global one. A point is
     // inserted only where this shape is the one that paints the cell (later shapes override), so
     // overlapping shapes do not interleave two lattices, and never close to a boundary sample or to
     // an earlier lattice point (which would give needle triangles)
     let h_fine_min = mp.h_fine_min.max(1e-300);
     let lcell = (0.6 * h_fine_min).max(1e-9 * scale);
-    let seg_bvh = SegBvh2::build(chains);
-    if !fills.is_empty() {
-        let mut octave_grid = OctaveFillGrid::new(lcell, h_fine_min, fills);
-        for fill in fills {
+    let chain_owner = extras.map_or(&[][..], |e| e.chain_owner);
+    let gap_seeds = extras.map_or(&[][..], |e| e.gap_seeds);
+    let seg_bvh = SegBvh2::build(chains, chain_owner);
+    let fill_vert_cap = mp.max_cells.map(|mc| n_chain_verts.saturating_add(mc));
+    if !fills.is_empty() || !gap_seeds.is_empty() {
+        let mut octave_grid = OctaveFillGrid::new(lcell, h_fine_min, fills, gap_seeds.iter().map(|&(_, d)| d));
+        // Deterministic gap-centerline seed vertices first so direct cross-gap triangles cannot form
+        for &(p_mid, d_gap) in gap_seeds {
+            if fill_vert_cap.is_some_and(|cap| cdt.num_vertices() >= cap) {
+                break;
+            }
+            if d_gap > 0.0
+                && domain_at(p_mid).is_some()
+                && !seg_bvh.any_within(p_mid, 0.25 * d_gap)
+                && !octave_grid.near_any(p_mid, 0.45 * d_gap, d_gap)
+            {
+                let pn = nrm(p_mid);
+                let _ = cdt.insert(Point2::new(pn[0], pn[1]));
+                octave_grid.insert(p_mid, d_gap);
+            }
+        }
+        'fill_loop: for fill in fills {
             let (h, blo, bhi) = (fill.h, fill.lo, fill.hi);
             let dy = h * 3f64.sqrt() / 2.0;
             let mut row = 0;
@@ -403,6 +451,9 @@ pub(crate) fn mesh_chains(
             while y < bhi[1] {
                 let mut x = blo[0] + if row % 2 == 0 { 0.5 * h } else { h };
                 while x < bhi[0] {
+                    if fill_vert_cap.is_some_and(|cap| cdt.num_vertices() >= cap) {
+                        break 'fill_loop;
+                    }
                     if (fill.owner)([x, y]) {
                         let near_boundary = seg_bvh.any_within([x, y], 0.4 * h);
                         if !near_boundary && !octave_grid.near_any([x, y], 0.6 * h, h) {
@@ -427,16 +478,165 @@ pub(crate) fn mesh_chains(
         Some(mc) => max_add.min(mc),
         None => max_add,
     };
-    let params = RefinementParameters::<f64>::new()
-        // no exclude_outer_faces: it decides inside/outside by constraint parity, which nested or
-        // overlapping shapes break; unwanted cells are dropped by the shape test below instead
-        .keep_constraint_edges()
-        .with_angle_limit(AngleLimit::from_deg(mp.min_angle_deg.clamp(0.0, 33.0)))
-        .with_max_allowed_area(0.5 * (h_global / scale) * (h_global / scale))
-        .with_min_required_area(1e-14)
-        .with_max_additional_vertices(max_add);
-    let ref_res = cdt.refine(params);
+    let make_ref_params = |angle_deg: f64, budget: usize| {
+        RefinementParameters::<f64>::new()
+            // no exclude_outer_faces: it decides inside/outside by constraint parity, which nested or
+            // overlapping shapes break; unwanted cells are dropped by the shape test below instead
+            .keep_constraint_edges()
+            .with_angle_limit(AngleLimit::from_deg(angle_deg.clamp(0.0, 33.0)))
+            .with_max_allowed_area(0.5 * (h_global / scale) * (h_global / scale))
+            .with_min_required_area(1e-14)
+            .with_max_additional_vertices(budget)
+    };
+    let mut ref_res = cdt.refine(make_ref_params(mp.min_angle_deg, max_add));
+
+    // FR-28: Cross-terminal bridging triangle audit & deterministic edge splitting + localized quality fallback
+    let mut bridging_splits_total = 0usize;
+    let audit_and_split_bridging =
+        |cdt: &mut ConstrainedDelaunayTriangulation<Point2<f64>>,
+         dielectric_domains: &HashSet<i32>|
+         -> usize {
+            if chain_owner.is_empty() || dielectric_domains.is_empty() {
+                return 0;
+            }
+            let owner_tol = (1e-6 * scale).max(1e-12);
+            let mut total_inserted = 0usize;
+            let mut cand_idxs: Vec<usize> = Vec::new();
+            for _pass in 0..3 {
+                let nv = cdt.num_vertices();
+                let mut on_constraint = vec![false; nv];
+                for e in cdt.undirected_edges() {
+                    if e.is_constraint_edge() {
+                        let [va, vb] = e.vertices();
+                        on_constraint[va.fix().index()] = true;
+                        on_constraint[vb.fix().index()] = true;
+                    }
+                }
+                let mut v_owners: Vec<Vec<u32>> = vec![Vec::new(); nv];
+                for vi in 0..nv {
+                    if !on_constraint[vi] {
+                        continue;
+                    }
+                    let vp = cdt.vertex(spade::handles::FixedVertexHandle::from_index(vi)).position();
+                    let p_phys = den([vp.x, vp.y]);
+                    seg_bvh.candidates_within(p_phys, owner_tol, &mut cand_idxs);
+                    for &si in &cand_idxs {
+                        let s = &seg_bvh.segs[si];
+                        if s.owner > 0
+                            && dist_point_segment(p_phys, s.a, s.b) <= owner_tol
+                            && !v_owners[vi].contains(&s.owner)
+                        {
+                            v_owners[vi].push(s.owner);
+                        }
+                    }
+                }
+                let owners_disjoint = |a: &[u32], b: &[u32]| -> bool {
+                    !a.is_empty() && !b.is_empty() && a.iter().all(|oa| !b.contains(oa))
+                };
+                let mut bridging_edges: Vec<(u64, usize, usize, [f64; 2], f64)> = Vec::new();
+                let mut seen_edges: HashSet<(usize, usize)> = HashSet::new();
+                for f in cdt.inner_faces() {
+                    let [va, vb, vc] = f.vertices();
+                    let (pa, pb, pc) = (va.position(), vb.position(), vc.position());
+                    let cen = den([(pa.x + pb.x + pc.x) / 3.0, (pa.y + pb.y + pc.y) / 3.0]);
+                    if !domain_at(cen).is_some_and(|dom| dielectric_domains.contains(&dom)) {
+                        continue;
+                    }
+                    // Audit every unconstrained edge of a dielectric gap triangle that directly connects
+                    // two distinct non-outer sheet terminals across the gap (prevents both 0-interior-vertex
+                    // bridging triangles AND direct terminal-to-terminal diagonal edges across narrow gaps).
+                    for de in f.adjacent_edges() {
+                        if de.is_constraint_edge() {
+                            continue;
+                        }
+                        let u = de.from().fix().index();
+                        let v = de.to().fix().index();
+                        if !owners_disjoint(&v_owners[u], &v_owners[v]) {
+                            continue;
+                        }
+                        let (lo_v, hi_v) = (u.min(v), u.max(v));
+                        if !seen_edges.insert((lo_v, hi_v)) {
+                            continue;
+                        }
+                        let pu = den([de.from().position().x, de.from().position().y]);
+                        let pv = den([de.to().position().x, de.to().position().y]);
+                        let len = (pv[0] - pu[0]).hypot(pv[1] - pu[1]);
+                        let mid = [0.5 * (pu[0] + pv[0]), 0.5 * (pu[1] + pv[1])];
+                        bridging_edges.push((len.to_bits(), lo_v, hi_v, mid, len));
+                    }
+                }
+                if bridging_edges.is_empty() {
+                    break;
+                }
+                bridging_edges.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+                let mut inserted_this_pass = 0usize;
+                for &(_, _, _, mid, len) in &bridging_edges {
+                    if domain_at(mid).is_some() && !seg_bvh.any_within(mid, 0.12 * len) {
+                        let pn = nrm(mid);
+                        if cdt.insert(Point2::new(pn[0], pn[1])).is_ok() {
+                            inserted_this_pass += 1;
+                            total_inserted += 1;
+                        }
+                    }
+                }
+                if inserted_this_pass == 0 {
+                    break;
+                }
+            }
+            total_inserted
+        };
+
+    if let Some(ex) = extras {
+        bridging_splits_total += audit_and_split_bridging(&mut cdt, ex.dielectric_domains);
+    }
+
+    if bridging_splits_total > 0 || !ref_res.refinement_complete {
+        let used_add = cdt.num_vertices().saturating_sub(n_init);
+        let fallback_budget = match mp.max_cells {
+            Some(mc) => {
+                let rem = mc.saturating_sub(used_add);
+                if bridging_splits_total > 0 {
+                    rem.max(bridging_splits_total.saturating_mul(2).min(mc / 4 + 256))
+                } else {
+                    rem
+                }
+            }
+            None => (max_add / 2).max(2048),
+        };
+        if fallback_budget > 0 {
+            let mut angles: Vec<f64> = Vec::new();
+            if bridging_splits_total > 0 && ref_res.refinement_complete {
+                angles.push(mp.min_angle_deg);
+            }
+            for &deg in &[20.0_f64, 15.0_f64] {
+                if (deg < mp.min_angle_deg - 1e-6 || !ref_res.refinement_complete)
+                    && !angles.iter().any(|&a| (a - deg).abs() < 1e-6)
+                {
+                    angles.push(deg);
+                }
+            }
+            for deg in angles {
+                let before = cdt.num_vertices();
+                let res_fb = cdt.refine(make_ref_params(deg, fallback_budget));
+                if res_fb.refinement_complete {
+                    ref_res.refinement_complete = true;
+                    break;
+                }
+                if cdt.num_vertices() == before {
+                    continue;
+                }
+            }
+        }
+        if let Some(ex) = extras {
+            bridging_splits_total += audit_and_split_bridging(&mut cdt, ex.dielectric_domains);
+        }
+    }
     let added_vertices = cdt.num_vertices().saturating_sub(n_init);
+    if bridging_splits_total > 0 {
+        crate::progress::note(format!(
+            "2D cross-terminal bridging guard split {bridging_splits_total} bridging edge(s)"
+        ));
+    }
 
     // cells: faces whose centroid is inside some shape (the last containing shape wins)
     let nvert = cdt.num_vertices();
