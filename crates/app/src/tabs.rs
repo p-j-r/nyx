@@ -1596,7 +1596,7 @@ impl App {
         let nsol = rv.sols.len();
         ui.horizontal(|ui| {
             ui.label(RichText::new(rv.name.clone()).strong());
-            ui.weak(format!("{} solution(s)", nsol));
+            ui.weak(if nsol > 1 { format!("{nsol} solutions · click the plot to show one") } else { "1 solution".to_string() });
         });
         if nsol < 2 {
             ui.weak("Single solution: use the viewport probe (hover) for values.");
@@ -1623,20 +1623,47 @@ impl App {
         }
         let current = xs[rv.sol.min(nsol - 1)];
         let is_eigen = is_eigen_plot;
-        egui_plot::Plot::new("summary_plot").height(ui.available_height().max(90.0)).x_axis_label(xlabel).y_axis_label(if is_eigen { "frequency (Hz)" } else if is_modes { "|neff|" } else { fname.as_str() }).legend(egui_plot::Legend::default()).show(ui, |p| {
+        // where each solution sits on the x axis: the mode number for modes, else its own value
+        let at: Vec<f64> = if is_eigen || is_modes { (0..nsol).map(|i| i as f64 + 1.0).collect() } else { xs.clone() };
+        let chosen = rv.sol.min(nsol - 1);
+        let out = egui_plot::Plot::new("summary_plot").height(ui.available_height().max(90.0)).x_axis_label(xlabel).y_axis_label(if is_eigen { "frequency (Hz)" } else if is_modes { "|neff|" } else { fname.as_str() }).legend(egui_plot::Legend::default()).show(ui, |p| {
             if is_eigen {
                 p.points(egui_plot::Points::new("f", egui_plot::PlotPoints::from(xs.iter().enumerate().map(|(i, _)| [i as f64 + 1.0, xs[i]]).collect::<Vec<_>>())).radius(4.0));
+                p.points(egui_plot::Points::new("shown", egui_plot::PlotPoints::from(vec![[chosen as f64 + 1.0, xs[chosen]]])).radius(7.0).color(Color32::from_rgb(230, 190, 80)));
             } else if is_modes {
                 // neff per mode
                 let pts: Vec<[f64; 2]> = rv.sols.iter().enumerate().map(|(i, s)| [i as f64 + 1.0, s.neff.map(|n| n.0.hypot(n.1)).unwrap_or(0.0)]).collect();
+                let shown = pts[chosen];
                 p.points(egui_plot::Points::new("|neff|", egui_plot::PlotPoints::from(pts)).radius(4.0));
+                p.points(egui_plot::Points::new("shown", egui_plot::PlotPoints::from(vec![shown])).radius(7.0).color(Color32::from_rgb(230, 190, 80)));
             } else {
                 p.line(egui_plot::Line::new(format!("max {fname}"), egui_plot::PlotPoints::from(max_pts.clone())));
                 p.line(egui_plot::Line::new(format!("min {fname}"), egui_plot::PlotPoints::from(min_pts.clone())));
                 p.vline(egui_plot::VLine::new("now", current).color(Color32::from_rgb(230, 190, 80)));
             }
         });
+        // a click on the plot shows the solution nearest to it (the same as the slider and the arrows)
+        if out.response.clicked() {
+            if let Some(pos) = out.response.interact_pointer_pos() {
+                let x = out.transform.value_from_position(pos).x;
+                if let Some(i) = nearest_solution(&at, x) {
+                    let rv = &mut self.results[cur];
+                    if i != rv.sol {
+                        rv.sol = i;
+                        rv.values_cache = None;
+                    }
+                }
+            }
+        }
     }
+}
+
+/// The index of the solution drawn closest (along x) to `x`; `None` when there is none or `x` is not a number.
+pub fn nearest_solution(at: &[f64], x: f64) -> Option<usize> {
+    if x.is_nan() {
+        return None;
+    }
+    at.iter().enumerate().filter(|(_, a)| a.is_finite()).min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs())).map(|(i, _)| i)
 }
 
 /// What the Reduce form can take of a field.
@@ -1653,6 +1680,19 @@ pub fn reduce_number(v: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_click_on_the_mode_plot_picks_the_nearest_solution() {
+        let at = [1.0, 2.0, 3.0, 4.0];
+        assert_eq!(nearest_solution(&at, 0.2), Some(0));
+        assert_eq!(nearest_solution(&at, 2.4), Some(1));
+        assert_eq!(nearest_solution(&at, 2.6), Some(2));
+        assert_eq!(nearest_solution(&at, 99.0), Some(3));
+        // times, not mode numbers
+        assert_eq!(nearest_solution(&[0.0, 0.5, 5.0], 1.0), Some(1));
+        assert_eq!(nearest_solution(&[], 1.0), None);
+        assert_eq!(nearest_solution(&at, f64::NAN), None);
+    }
 
     #[test]
     fn parse_si_f64_handles_units_and_rejects_expressions() {

@@ -2099,6 +2099,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A click on the plot under the viewport (the mode strip) shows the solution nearest to the click, as the slider does.
+    #[test]
+    fn a_click_on_the_mode_plot_shows_that_mode() {
+        let mut a = app();
+        a.load_example(example("02_cantilever"));
+        wait_idle(&mut a, 30);
+        a.compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        let cur = a.current.expect("a result");
+        // three solutions to choose from, whatever the study of the example
+        let first = a.results[cur].sols[0].clone();
+        a.results[cur].sols = vec![first.clone(), first.clone(), first];
+        a.results[cur].sol = 0;
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 360.0));
+        let draw = |a: &mut App, events: Vec<egui::Event>| {
+            let raw = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+            let ctx = a.ctx.clone();
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| a.results_panel(ui));
+            });
+            out.textures_delta.clear();
+        };
+        draw(&mut a, vec![]);
+        draw(&mut a, vec![]);
+        // the plot fills the panel under the name line: click near its right edge, then near its left edge (inside the axis labels)
+        let click = |a: &mut App, pos: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            draw(a, vec![egui::Event::PointerMoved(pos), button(true)]);
+            draw(a, vec![button(false)]);
+            draw(a, vec![]);
+        };
+        click(&mut a, egui::pos2(560.0, 200.0));
+        assert_eq!(a.results[cur].sol, 2, "a click at the right edge shows the last solution");
+        click(&mut a, egui::pos2(130.0, 200.0));
+        assert_eq!(a.results[cur].sol, 0, "a click at the left edge shows the first solution");
+    }
+
     /// Review I-9: a result that was just computed is never stale, whichever way it was asked for (the plain window or a workflow, which
     /// records the run and saves the model around the solve), for the physics of the examples that solve fast.
     #[test]
