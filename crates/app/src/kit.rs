@@ -225,7 +225,7 @@ fn tab_width_of(text_w: f32, has_state: bool, closable: bool) -> f32 {
 /// How wide `tab` draws this title, so a bar can decide which tabs fit before it draws any.
 pub fn tab_width(ui: &Ui, title: &str, has_state: bool, closable: bool) -> f32 {
     let font = egui::TextStyle::Button.resolve(ui.style());
-    tab_width_of(ui.painter().layout_no_wrap(title.to_string(), font, Color32::WHITE).size().x, has_state, closable)
+    tab_width_of(ui.painter().layout_no_wrap(title.to_string(), font, ui.visuals().text_color()).size().x, has_state, closable)
 }
 
 pub fn tab(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, title: &str, selected: bool, state: Option<State>, closable: bool) -> TabHit {

@@ -1178,6 +1178,10 @@ impl App {
                         rv.sol -= 1;
                     }
                     let mut s = rv.sol;
+                    ui.spacing_mut().slider_width = (ui.available_width() - 230.0).clamp(60.0, 260.0);
+                    // the rail takes the colour of an unpressed widget, which is the panel's own: give it the text colour, faded, so it can be seen
+                    let rail = ui.visuals().text_color().gamma_multiply(0.35);
+                    ui.visuals_mut().widgets.inactive.bg_fill = rail;
                     ui.add(egui::Slider::new(&mut s, 0..=nsol - 1).show_value(false));
                     rv.sol = s;
                     if ui.small_button(">").clicked() && rv.sol + 1 < nsol {
@@ -1626,16 +1630,17 @@ impl App {
         // where each solution sits on the x axis: the mode number for modes, else its own value
         let at: Vec<f64> = if is_eigen || is_modes { (0..nsol).map(|i| i as f64 + 1.0).collect() } else { xs.clone() };
         let chosen = rv.sol.min(nsol - 1);
-        let out = egui_plot::Plot::new("summary_plot").height(ui.available_height().max(90.0)).x_axis_label(xlabel).y_axis_label(if is_eigen { "frequency (Hz)" } else if is_modes { "|neff|" } else { fname.as_str() }).legend(egui_plot::Legend::default()).show(ui, |p| {
+        let shown_colour = ui.visuals().warn_fg_color;
+        let out = egui_plot::Plot::new("summary_plot").set_margin_fraction(egui::vec2(0.08, 0.3)).height(ui.available_height().max(90.0)).x_axis_label(xlabel).y_axis_label(if is_eigen { "frequency (Hz)" } else if is_modes { "|neff|" } else { fname.as_str() }).legend(egui_plot::Legend::default()).show(ui, |p| {
             if is_eigen {
                 p.points(egui_plot::Points::new("f", egui_plot::PlotPoints::from(xs.iter().enumerate().map(|(i, _)| [i as f64 + 1.0, xs[i]]).collect::<Vec<_>>())).radius(4.0));
-                p.points(egui_plot::Points::new("shown", egui_plot::PlotPoints::from(vec![[chosen as f64 + 1.0, xs[chosen]]])).radius(7.0).color(Color32::from_rgb(230, 190, 80)));
+                p.points(egui_plot::Points::new("", egui_plot::PlotPoints::from(vec![[chosen as f64 + 1.0, xs[chosen]]])).radius(7.0).color(shown_colour));
             } else if is_modes {
                 // neff per mode
                 let pts: Vec<[f64; 2]> = rv.sols.iter().enumerate().map(|(i, s)| [i as f64 + 1.0, s.neff.map(|n| n.0.hypot(n.1)).unwrap_or(0.0)]).collect();
                 let shown = pts[chosen];
                 p.points(egui_plot::Points::new("|neff|", egui_plot::PlotPoints::from(pts)).radius(4.0));
-                p.points(egui_plot::Points::new("shown", egui_plot::PlotPoints::from(vec![shown])).radius(7.0).color(Color32::from_rgb(230, 190, 80)));
+                p.points(egui_plot::Points::new("", egui_plot::PlotPoints::from(vec![shown])).radius(7.0).color(shown_colour));
             } else {
                 p.line(egui_plot::Line::new(format!("max {fname}"), egui_plot::PlotPoints::from(max_pts.clone())));
                 p.line(egui_plot::Line::new(format!("min {fname}"), egui_plot::PlotPoints::from(min_pts.clone())));
