@@ -7,11 +7,14 @@
 //! `api list` and `api show COMMAND` print the command reference (see `apicmd`), `check FILE` and `run FILE` check and run a JSON-lines list of engine commands without a window (see `runfile`), `--script "cmd; cmd; ..."` drives the window for tests and screenshots (see `script`), `--batch PROJECT.nyx.json` solves
 //! without a window (see `batch`). Modules: `app` (state and layout), the Connect menu (in `app`, backed by the `nyx-connect` crate), `tabs` (the inspector), `viewport` and `scene` (drawing),
 //! `pyscript` (the optional Python script), `state` (the mesh and result on show), `examples`, `colormap`, `theme`.
+//! On Windows the program is of the GUI subsystem: no console opens with the window; the command-line modes join the terminal that started them (`console`, ADR 123).
+#![cfg_attr(windows, windows_subsystem = "windows")]
 mod activity;
 mod apicmd;
 mod app;
 mod batch;
 mod colormap;
+mod console;
 mod cvd;
 mod dashboard;
 mod examples;
@@ -42,6 +45,9 @@ fn main() -> eframe::Result {
     nyx_engine::process::opt_out_of_power_throttling();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     args.retain(|a| !a.starts_with("-psn_"));
+    if console::wants_console(&args) {
+        console::attach_parent();
+    }
     if matches!(args.first().map(String::as_str), Some("--version" | "-V")) {
         println!("nyx {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
