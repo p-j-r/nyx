@@ -54,8 +54,8 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Storage types and read budget](../4-code/storage/types.md) | 1 | 165 | 107, 62, 99 | FieldStorageLayout (L1 Deflate-3, L2 Shuffle+LZF packed 5D, L3 Contiguous packed 5D), ReadBudgetConfig (512 MiB default ceiling), MeshData, ModeHeader, PackedComponentMeta and bitwise f64 verification helpers. |
-| [Streaming HDF5 reader](../4-code/storage/reader.md) | 1 | 770 | 107, 62, 99 | Bounded-memory streaming reader over hdf5_pure::File::open_streaming: checked_mul read-budget guards, O(1) mode-header scan, mesh reader (with optional curved edges), and transparent single-mode cell-field slicing across L2/L3 packed 5D and legacy L1/v3 files. |
+| [Storage types and read budget](../4-code/storage/types.md) | 1 | 202 | 107, 62, 99 | FieldStorageLayout (L1 Deflate-3, L2 Shuffle+LZF packed 5D, L3 Contiguous packed 5D), ReadBudgetConfig (512 MiB default ceiling), MeshData, ModeHeader, PackedComponentMeta and bitwise f64 verification helpers. |
+| [Streaming HDF5 reader](../4-code/storage/reader.md) | 1 | 784 | 107, 62, 99 | Bounded-memory streaming reader over hdf5_pure::File::open_streaming: checked_mul read-budget guards, O(1) mode-header scan, mesh reader (with optional curved edges), and transparent single-mode cell-field slicing across L2/L3 packed 5D and legacy L1/v3 files. |
 | [Packed and streaming HDF5 writer](../4-code/storage/writer.md) | 1 | 484 | 107, 62, 99 | Whole-file atomic writer (write_nyx_packed) and bounded-RSS incremental mode-by-mode streaming appender (init_nyx_packed_streaming, append_solved_mode_in_place via File::open_rw and append_staged). |
 | [Direct-path XDMF generator](../4-code/storage/xdmf.md) | 1 | 146 | 107, 62, 99 | Direct-path XDMF 3.0 XML companion generator (generate_direct_xdmf, write_direct_xdmf) referencing internal HDF5 dataset paths without /viz hard links. |
 | [Sweep checkpoint and atomic IO](../4-code/storage/sweep.md) | 1 | 284 | 107, 87 | Incremental in-place parameter-sweep checkpointing (SweepCheckpoint over unlimited chunked datasets via File::open_rw) and Windows NTFS atomic file replacement helpers. |

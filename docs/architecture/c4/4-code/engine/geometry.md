@@ -5,21 +5,23 @@ C4 level 4 (code) of the component **Geometry operations** (`engine.geometry`) i
 > Every edit of a geom feature list as a function that does it or says why not, and the descriptors of the geom operations (they live here because geom depends on serde only).
 
 **Decisions:** [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
-**Size:** 2 files, 771 lines.
+**Size:** 3 files, 1343 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/geomdesc.rs` | 563 |  |
+| `crates/nyx-engine/src/gds.rs` | 569 |  |
+| `crates/nyx-engine/src/geomdesc.rs` | 566 |  |
 | `crates/nyx-engine/src/geometry.rs` | 208 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `geom` (geom)](../../3-components/geom.md) | error, eval, expr, model, select | Evaluator, Expr, Feature, FeatureList, GeomError, Op, Origin, Param, Selector, Tier +1 |
+| [container `geom` (geom)](../../3-components/geom.md) | error, eval, expr, gds, model, select | Env, Evaluator, Expr, Feature, FeatureList, GdsImportOptions, GeomError, Op, Origin, Param +4 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | error | Error |
+| [Commands](./commands.md) | engine, path_guard | Engine, confine |
 
 ## Used by
 
@@ -34,6 +36,13 @@ Public types with their public fields (or variants) and methods, free functions 
 
 ```mermaid
 classDiagram
+  namespace gds_rs {
+    class Engine {
+        <<impl block>>
+        +import_gds(args) Result
+        +add_chip_stack(args) Result
+    }
+  }
   namespace geomdesc_rs {
     class Ty {
         <<enumeration>>
@@ -112,17 +121,19 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
+| fn | `Engine::import_gds` | `gds.rs:93` | `pub fn import_gds(&mut self, args: &Value) -> Result<Value, Error>` —  Imports GDSII layers as 2D conductive `Sheet` features at height `z` in a 3D project. |
+| fn | `Engine::add_chip_stack` | `gds.rs:300` | `pub fn add_chip_stack(&mut self, args: &Value) -> Result<Value, Error>` —  Pure `geom` feature-list helper that constructs a 3D chip dielectric stack `(VacBot, Si, VacTop)` |
 | enum | `Ty` | `geomdesc.rs:24` | variants: `Expr`, `Exprs`, `Points`, `Rings`, `Axis`, `Feature`, `Features`, `Text`, `TextList`, `Selector`, `Sides`, `Keep`, ... —  How the value of one field is written in a tool call. |
 | struct | `FieldDesc` | `geomdesc.rs:60` | fields: `name`, `ty`, `doc`, `required`, `default` |
 | enum | `Group` | `geomdesc.rs:71` | variants: `Shape`, `Build`, `Labels`, `Boundary` —  What an operation makes, for grouping tools. |
 | struct | `OpDesc` | `geomdesc.rs:94` | fields: `kind`, `title`, `doc`, `group`, `dims`, `fields` |
 | fn | `all` | `geomdesc.rs:116` | `pub fn all() -> Vec<OpDesc>` —  Every operation, in a fixed order (shapes, builders, naming, boundary). |
-| fn | `kind_of` | `geomdesc.rs:246` | `pub fn kind_of(op: &Op) -> &'static str` —  The kind name of an operation. Exhaustive on purpose: a new `Op` variant does not compile until it is added here and in `all`. |
-| fn | `find` | `geomdesc.rs:276` | `pub fn find(kind: &str) -> Option<OpDesc>` |
-| fn | `tool_name` | `geomdesc.rs:281` | `pub fn tool_name(kind: &str) -> String` —  The tool name for an operation: `add_` and the snake_case kind (`add_rounded_rect`). |
-| fn | `schema` | `geomdesc.rs:357` | `pub fn schema(d: &OpDesc) -> Value` —  The JSON Schema of the arguments of one operation (the `inputSchema` of its tool, without the fields every add tool shares). |
-| fn | `build_op` | `geomdesc.rs:472` | `pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op>` —  Builds the operation `kind` from the arguments of a tool call. Features are named by name (or id), selectors are text; optional |
-| fn | `args_of` | `geomdesc.rs:514` | `pub fn args_of(list: &FeatureList, op: &Op) -> Value` —  The arguments of an existing operation in the form `build_op` takes (features by name, selectors as text): what an editing tool shows |
+| fn | `kind_of` | `geomdesc.rs:249` | `pub fn kind_of(op: &Op) -> &'static str` —  The kind name of an operation. Exhaustive on purpose: a new `Op` variant does not compile until it is added here and in `all`. |
+| fn | `find` | `geomdesc.rs:279` | `pub fn find(kind: &str) -> Option<OpDesc>` |
+| fn | `tool_name` | `geomdesc.rs:284` | `pub fn tool_name(kind: &str) -> String` —  The tool name for an operation: `add_` and the snake_case kind (`add_rounded_rect`). |
+| fn | `schema` | `geomdesc.rs:360` | `pub fn schema(d: &OpDesc) -> Value` —  The JSON Schema of the arguments of one operation (the `inputSchema` of its tool, without the fields every add tool shares). |
+| fn | `build_op` | `geomdesc.rs:475` | `pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op>` —  Builds the operation `kind` from the arguments of a tool call. Features are named by name (or id), selectors are text; optional |
+| fn | `args_of` | `geomdesc.rs:517` | `pub fn args_of(list: &FeatureList, op: &Op) -> Value` —  The arguments of an existing operation in the form `build_op` takes (features by name, selectors as text): what an editing tool shows |
 | fn | `Group::name` | `geomdesc.rs:83` | `pub fn name(self) -> &'static str` |
 | fn | `add_feature` | `geometry.rs:46` | `pub fn add_feature(list: &mut FeatureList, kind: &str, name: Option<&str>, args: &Value) -> Result<String, Error>` —  Adds the feature `kind` built from `args` (see `geomdesc`); returns the name it was given. |
 | fn | `update_feature` | `geometry.rs:67` | `pub fn update_feature(list: &mut FeatureList, name: &str, fields: &Value) -> Result<(), Error>` —  Changes some fields of a feature; `fields` holds only the fields to change, in the same form `add_feature` takes. |

@@ -4,15 +4,15 @@ C4 level 4 (code) of the component **Viewport** (`app.viewport`) in the containe
 
 > The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 4 files, 1598 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md)  
+**Size:** 4 files, 1674 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/app/src/colormap.rs` | 158 |  |
-| `crates/app/src/regions.rs` | 196 |  |
+| `crates/app/src/regions.rs` | 272 |  |
 | `crates/app/src/scene.rs` | 279 |  |
 | `crates/app/src/viewport.rs` | 965 |  |
 
@@ -28,7 +28,7 @@ C4 level 4 (code) of the component **Viewport** (`app.viewport`) in the containe
 | Component | Modules | Items |
 |---|---|---|
 | [Inspector tabs](./inspector.md) | colormap | Colormap |
-| [Window](./window.md) | colormap, regions, viewport | Colormap, Content, Paint, Viewport, assign, keys_by_material, palette |
+| [Window](./window.md) | colormap, regions, viewport | Colormap, Content, Paint, Viewport, assign, assign_with_pml, keys_by_material, palette |
 
 ## Class diagram
 
@@ -59,16 +59,19 @@ classDiagram
         Solid
         Hatched
         Grey
+        Pml
     }
     class Row {
         <<struct>>
         +slot usize
         +name String
         +labels Vec~i32~
+        +style Style
     }
     class Paint {
         <<struct>>
         +slot_of HashMap
+        +pml HashMap
         +rows Vec~Row~
         +hatch bool
         +hash u64
@@ -80,6 +83,7 @@ classDiagram
         +style_of(n, hatch) Style
         +fill(style, canvas) Color32
         +assign(labels, key_of, hatch) Paint
+        +assign_with_pml(labels, key_of, hatch, pml) Paint
         +keys_by_material(regions, materials, matches) HashMap
     }
   }
@@ -152,6 +156,7 @@ classDiagram
         +format_value(v) String
     }
   }
+  Row --> Style
   Paint --> Row
   SceneData --> Colors
   Content --> Paint
@@ -167,15 +172,16 @@ classDiagram
 | fn | `palette` | `colormap.rs:124` | `pub fn palette(i: usize, mode: Mode) -> Color32` —  One of the eight validated categorical colours for the canvas of `mode` (any two are told apart under protan and deutan vision, see |
 | fn | `Colormap::name` | `colormap.rs:25` | `pub fn name(self) -> &'static str` —  Turbo is a rainbow: its lightness goes up and down, so equal steps of the value do not look like equal steps. It says so in its name. |
 | fn | `Colormap::sample` | `colormap.rs:38` | `pub fn sample(self, t: f32) -> Color32` —  Colour at `t` in [0, 1]. (The Turbo polynomial coefficients are the published ones, with all their digits.) |
-| enum | `Style` | `regions.rs:15` | variants: `Solid`, `Hatched`, `Grey` —  How a slot is drawn. |
-| fn | `style_of` | `regions.rs:25` | `pub fn style_of(n: usize, hatch: bool) -> Style` —  The style of slot `n` (0-based). Without a hatch pass (3D surfaces) slots 9 and up are grey, so a colour is never used twice without a cue. |
-| fn | `fill` | `regions.rs:34` | `pub fn fill(style: Style, canvas: Mode) -> Color32` —  The fill of a style on the canvas of `canvas` (opaque). |
-| struct | `Row` | `regions.rs:43` | fields: `slot`, `name`, `labels` —  One legend row: the regions that share a slot. |
-| struct | `Paint` | `regions.rs:53` | fields: `slot_of`, `rows`, `hatch`, `hash` —  The colour plan of one model: a slot per region number. |
-| fn | `assign` | `regions.rs:73` | `pub fn assign(labels: &[i32], key_of: impl Fn(i32) -> String, hatch: bool) -> Paint` —  Hands out the slots: `labels` in any order, `key_of` the colour key of a label (material name or the region's own name). |
-| fn | `keys_by_material` | `regions.rs:101` | `pub fn keys_by_material(regions: &[(i32, String)], materials: &BTreeMap<String, Option<String>>, matches: impl Fn(&str) -> Vec<i32>) -> HashMap<i32, String>` —  The key of every region number by its material: `regions` are (number, name), `materials` the region patterns of the active problem with their |
-| fn | `Paint::style` | `regions.rs:64` | `pub fn style(&self, label: i32) -> Style` |
-| fn | `Paint::slot` | `regions.rs:67` | `pub fn slot(&self, label: i32) -> Option<usize>` |
+| enum | `Style` | `regions.rs:17` | variants: `Solid`, `Hatched`, `Grey`, `Pml` —  How a slot is drawn. |
+| fn | `style_of` | `regions.rs:29` | `pub fn style_of(n: usize, hatch: bool) -> Style` —  The style of slot `n` (0-based). Without a hatch pass (3D surfaces) slots 9 and up are grey, so a colour is never used twice without a cue. |
+| fn | `fill` | `regions.rs:38` | `pub fn fill(style: Style, canvas: Mode) -> Color32` —  The fill of a style on the canvas of `canvas` (opaque). |
+| struct | `Row` | `regions.rs:54` | fields: `slot`, `name`, `labels`, `style` —  One legend row: the regions that share a slot. |
+| struct | `Paint` | `regions.rs:66` | fields: `slot_of`, `pml`, `rows`, `hatch`, `hash` —  The colour plan of one model: a slot per region number. |
+| fn | `assign` | `regions.rs:91` | `pub fn assign(labels: &[i32], key_of: impl Fn(i32) -> String, hatch: bool) -> Paint` —  Hands out the slots: `labels` in any order, `key_of` the colour key of a label (material name or the region's own name). |
+| fn | `assign_with_pml` | `regions.rs:97` | `pub fn assign_with_pml(labels: &[i32], key_of: impl Fn(i32) -> String, hatch: bool, pml: &BTreeMap<i32, f64>) -> Paint` —  The same, with the absorbing layers: `pml` holds the strength of the layer of every region number that is one (the largest, when several |
+| fn | `keys_by_material` | `regions.rs:143` | `pub fn keys_by_material(regions: &[(i32, String)], materials: &BTreeMap<String, Option<String>>, matches: impl Fn(&str) -> Vec<i32>) -> HashMap<i32, String>` —  The key of every region number by its material: `regions` are (number, name), `materials` the region patterns of the active problem with their |
+| fn | `Paint::style` | `regions.rs:79` | `pub fn style(&self, label: i32) -> Style` |
+| fn | `Paint::slot` | `regions.rs:85` | `pub fn slot(&self, label: i32) -> Option<usize>` |
 | enum | `Colors` | `scene.rs:26` | variants: `PerTri`, `PerVertex` —  Base colours: one per triangle (mesh view) or one per vertex (result field). |
 | struct | `SceneData` | `scene.rs:32` | fields: `pos`, `colors` —  What the data pass produces. |
 | struct | `SceneTimes` | `scene.rs:40` | fields: `data`, `rotation`, `camera` —  Which passes ran in the last `update`, and how long they took (milliseconds), for the frame log. |

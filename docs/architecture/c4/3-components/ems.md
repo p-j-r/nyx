@@ -47,7 +47,7 @@ graph TB
     66-. "<div>uses femcore: material,<br />material::spec +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     66-. "<div>uses physics: crate root,<br />decode</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     66-. "<div>uses axisym</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
-    66-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
+    66-. "<div>uses bloch, cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
     66-. "<div>uses driven, ports</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
     66-. "<div>uses rom</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     66-. "<div>uses crate root, modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
@@ -61,16 +61,18 @@ graph TB
     70-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
     71-. "<div>uses femcore: fem, fields +11</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     71-. "<div>uses physics: crate root,<br />frame +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    71-. "<div>uses ports</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
     71-. "<div>uses ibc, rom</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     71-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
+    71-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
     71-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
     73-. "<div>uses femcore: edge, fem +10</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     73-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     73-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
-    73-. "<div>uses ibc, rom</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
+    73-. "<div>uses crate root, ibc +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     73-. "<div>uses crate root, modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
     73-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
-    72-. "<div>uses femcore: edge, fem +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    72-. "<div>uses femcore: edge, fem +8</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     72-. "<div>uses physics: cqed, crate<br />root</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     72-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
     72-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
@@ -81,7 +83,7 @@ graph TB
     68-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     68-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
     68-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
-    69-. "<div>uses femcore: edge, fem +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    69-. "<div>uses femcore: edge, fem +8</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     69-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     69-. "<div>uses ibc</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     69-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
@@ -92,21 +94,22 @@ graph TB
     74-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
     74-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     74-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
-    67-. "<div>uses femcore: material,<br />material::bcs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    67-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    67-. "<div>uses femcore:<br />linalg::csr::assembly,<br />material +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    67-. "<div>uses physics: cqed, crate<br />root +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     67-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->66
     67-. "<div>uses ibc</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
+    67-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
 
   end```
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Physics adapter](../4-code/ems/adapter.md) | 1 | 376 | 45, 25, 104, 106 | The Physics implementation of ems: descriptors, validation, solve entry. |
-| [Typed problem](../4-code/ems/problem.md) | 1 | 510 | 45, 104, 106 | The typed ems problem the kernels read, decoded from the envelope. |
-| [Mode kernel](../4-code/ems/modes.md) | 1 | 486 | 45, 9 | Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed). |
-| [Complex-mode kernel](../4-code/ems/modescx.md) | 1 | 500 | 45 | Complex-valued mode analysis: lossy media and perfectly matched layers. |
-| [Axisymmetric kernel](../4-code/ems/axisym.md) | 1 | 502 | 46 | Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities). |
-| [3D cavity kernel](../4-code/ems/cavity.md) | 1 | 1145 | 45, 104 | Electromagnetic eigenmodes of 3D cavities and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export. |
-| [Thin-film IBC and Josephson ROM](../4-code/ems/ibc.md) | 2 | 1577 | 104 | Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata. |
-| [Driven frequency-domain and PROM](../4-code/ems/driven.md) | 2 | 2102 | 106 | Driven 3D frequency-domain curl-curl solver with lumped/waveport excitations and Hermite Tangential Galerkin PROM sweep acceleration. |
-| [Optical mode sets](../4-code/ems/optical.md) | 1 | 99 | 45, 21 | The mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields. |
+| [Physics adapter](../4-code/ems/adapter.md) | 1 | 444 | 45, 25, 104, 106 | The Physics implementation of ems: descriptors, validation, solve entry. |
+| [Typed problem](../4-code/ems/problem.md) | 1 | 908 | 45, 104, 106 | The typed ems problem the kernels read, decoded from the envelope. |
+| [Mode kernel](../4-code/ems/modes.md) | 1 | 526 | 45, 9 | Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed). |
+| [Complex-mode kernel](../4-code/ems/modescx.md) | 1 | 717 | 45 | Complex-valued mode analysis: lossy media and perfectly matched layers. |
+| [Axisymmetric kernel](../4-code/ems/axisym.md) | 1 | 507 | 46 | Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities). |
+| [3D cavity kernel](../4-code/ems/cavity.md) | 2 | 2145 | 45, 104 | Electromagnetic eigenmodes of 3D cavities and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export. |
+| [Thin-film IBC and Josephson ROM](../4-code/ems/ibc.md) | 2 | 1791 | 104 | Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata. |
+| [Driven frequency-domain and PROM](../4-code/ems/driven.md) | 2 | 2575 | 106 | Driven 3D frequency-domain curl-curl solver with lumped/waveport excitations and Hermite Tangential Galerkin PROM sweep acceleration. |
+| [Optical mode sets](../4-code/ems/optical.md) | 1 | 103 | 45, 21 | The mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields. |

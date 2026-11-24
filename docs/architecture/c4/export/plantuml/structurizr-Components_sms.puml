@@ -104,7 +104,7 @@ nyx.nyxsms.Floquetkernel --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "us
 nyx.nyxsms.Floquetkernel --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Floquetkernel --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Floquetkernel --> nyx.nyxsms.Solidkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses solid\n<size:16>[Rust paths]</size>"
-nyx.nyxsms.Lowreflectingboundary --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, linalg::csr +3\n<size:16>[Rust paths]</size>"
+nyx.nyxsms.Lowreflectingboundary --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: fem, linalg::csr +4\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Lowreflectingboundary --> nyx.nyxphysics <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics: crate root, result\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Lowreflectingboundary --> nyx.nyxsms.Typedproblem <<Relationship-UmVsYXRpb25zaGlw>> : "uses problem\n<size:16>[Rust paths]</size>"
 nyx.nyxsms.Lowreflectingboundary --> nyx.nyxsms.Solidkernel <<Relationship-UmVsYXRpb25zaGlw>> : "uses solid\n<size:16>[Rust paths]</size>"

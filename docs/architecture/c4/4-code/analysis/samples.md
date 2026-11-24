@@ -5,19 +5,19 @@ C4 level 4 (code) of the component **Field samples** (`analysis.samples`) in the
 > The modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates.
 
 **Decisions:** [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 1 file, 153 lines.
+**Size:** 1 file, 161 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-analysis/src/samples.rs` | 153 |  |
+| `crates/nyx-analysis/src/samples.rs` | 161 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fields, optical | fine_rule, geometry, local_bary, shape |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fields, optical | fine_rule, geometry, local_bary, quad_rule, shape |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, error, frame, result | CellField, Error, FieldFrame, Mesh, Solution, SolveResult, discretise |
 | [Mode report](./modes.md) | modes | AnalysisOptions, ModeInput |
 | [Polarization](./polarization.md) | polarization | Cx, Sample, TimeConvention |
@@ -50,6 +50,6 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `PolarizationInput` | `samples.rs:22` | fields: `modes`, `options` —  The modes of a result, ready for `analyze_modes`, and the options that go with them. |
-| fn | `applies` | `samples.rs:29` | `pub fn applies(result: &SolveResult) -> bool` —  Whether a result has what the polarization analysis needs: a stated frame and, in every solution, the three complex field components as |
-| fn | `polarization_input` | `samples.rs:41` | `pub fn polarization_input(mesh: &Mesh, result: &SolveResult) -> Result<PolarizationInput, Error>` —  Reads the modes of `result` (solved on `mesh`) as weighted samples. |
+| struct | `PolarizationInput` | `samples.rs:23` | fields: `modes`, `options` —  The modes of a result, ready for `analyze_modes`, and the options that go with them. |
+| fn | `applies` | `samples.rs:30` | `pub fn applies(result: &SolveResult) -> bool` —  Whether a result has what the polarization analysis needs: a stated frame and, in every solution, the three complex field components as |
+| fn | `polarization_input` | `samples.rs:42` | `pub fn polarization_input(mesh: &Mesh, result: &SolveResult) -> Result<PolarizationInput, Error>` —  Reads the modes of `result` (solved on `mesh`) as weighted samples. |

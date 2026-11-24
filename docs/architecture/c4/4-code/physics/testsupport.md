@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Test support** (`physics.testsupport`) in t
 > The golden-file harness and the contract-test helpers shared by every physics crate.
 
 **Decisions:** [ADR 10](../../../adr/0010-golden-files-are-the-numerical-oracle.md), [ADR 19](../../../adr/0019-versioned-interface-contracts.md)  
-**Size:** 2 files, 233 lines.
+**Size:** 2 files, 257 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-physics/src/contract.rs` | 52 |  |
-| `crates/nyx-physics/src/testkit.rs` | 181 |  |
+| `crates/nyx-physics/src/testkit.rs` | 205 |  |
 
 ## What it uses
 
@@ -63,4 +63,4 @@ classDiagram
 | fn | `check_exemplar` | `contract.rs:39` | `pub fn check_exemplar(manifest_dir: &str, name: &str, got: &Value)` —  Compares `got` with the exemplar file `name` (call with `env!("CARGO_MANIFEST_DIR")`). Panics with the instruction to version the change. |
 | fn | `record` | `testkit.rs:13` | `pub fn record(r: &SolveResult) -> Value` —  The record of a result that goes into a golden file. |
 | fn | `golden` | `testkit.rs:83` | `pub fn golden(dir: &std::path::Path, name: &str, r: &SolveResult, tol: f64)` —  Checks (or, with NYX_WRITE_GOLDEN, writes) the record of `r` against the golden file `name`. |
-| fn | `cell_fields_reproduce_the_plot_fields` | `testkit.rs:156` | `pub fn cell_fields_reproduce_the_plot_fields(mesh: &crate::Discretisation, r: &SolveResult)` —  The fields stage hands out the same quantities as the plot fields before the average over the cells at a node: every cell field has the |
+| fn | `cell_fields_reproduce_the_plot_fields` | `testkit.rs:180` | `pub fn cell_fields_reproduce_the_plot_fields(mesh: &crate::Discretisation, r: &SolveResult)` —  The fields stage hands out the same quantities as the plot fields before the average over the cells at a node: every cell field has the |

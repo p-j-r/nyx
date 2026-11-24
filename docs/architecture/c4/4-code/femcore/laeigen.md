@@ -40,7 +40,7 @@ C4 level 4 (code) of the component **Eigensolvers** (`femcore.laeigen`) in the c
 |---|---|---|
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::arnoldi_real | EigOpts |
 | [ems: Mode kernel](../ems/modes.md) | linalg::arnoldi_real | EigOpts |
-| [Linear algebra driver](./ladriver.md) | linalg::arnoldi_real, linalg::eps, linalg::lobpcg | EigOpts, EigPairs, EpsError, EpsOptions, EpsReason, HistoryEntry, Kind, LobpcgOptions +5 |
+| [Linear algebra driver](./ladriver.md) | linalg::arnoldi_real, linalg::eps, linalg::jd, linalg::lobpcg | EigOpts, EigPairs, EpsError, EpsOptions, EpsReason, HistoryEntry, JdOptions, Kind +7 |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::nep | NepError, NonlinearEigenProblem |
 | [sms: Solid kernel](../sms/solid.md) | linalg::arnoldi_real | EigOpts, EigPairs |
 

@@ -62,7 +62,7 @@ graph TB
     62-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     62-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->57
     62-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
-    64-. "<div>uses femcore: fem,<br />linalg::csr +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    64-. "<div>uses femcore: fem,<br />linalg::csr +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     64-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     64-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->57
     64-. "<div>uses solid</div><div style='font-size: 70%'>[Rust paths]</div>" .->58
@@ -95,4 +95,4 @@ graph TB
 | [Waveguide kernel](../4-code/sms/waveguide.md) | 1 | 158 | 101 | Elastic modes of a 2.5D waveguide on its 2D (x, z) cross-section (`exp(-i q y)`), with full 3D anisotropic crystal orientation, planar PML coordinate stretching and the planar kinetic-energy weight of a mode per component and class of cells. |
 | [Floquet kernel](../4-code/sms/floquet.md) | 1 | 130 | 42 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals). |
 | [Absorbing-layer kernel](../4-code/sms/pml.md) | 1 | 266 | 42, 101 | Eigenfrequencies of elastic bodies with perfectly matched layers and optional Floquet-periodic boundaries. |
-| [Low-reflecting boundary](../4-code/sms/lrb.md) | 1 | 298 | 42 | Low-reflecting boundaries for solid mechanics. |
+| [Low-reflecting boundary](../4-code/sms/lrb.md) | 1 | 312 | 42 | Low-reflecting boundaries for solid mechanics. |

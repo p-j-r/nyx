@@ -3,7 +3,7 @@ api = component "Analysis API" "The entry points an engine calls: an analysis is
     properties {
         "adr" "56, 103, 105"
         "code" "crates/nyx-analysis/src: lib.rs"
-        "lines" "119"
+        "lines" "127"
         "codeDiagram" "4-code/analysis/api.md"
     }
 }
@@ -11,15 +11,15 @@ capacitance = component "Capacitance and inductance matrices" "Maxwell/mutual ca
     properties {
         "adr" "103"
         "code" "crates/nyx-analysis/src: capacitance.rs"
-        "lines" "143"
+        "lines" "1259"
         "codeDiagram" "4-code/analysis/capacitance.md"
     }
 }
 cqed = component "cQED quantization and TLS participation" "KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, and edge-regularized 3D TLS participation ratios." "Rust modules" {
     properties {
         "adr" "105"
-        "code" "crates/nyx-analysis/src: epr.rs, hamiltonian.rs, tls.rs"
-        "lines" "3360"
+        "code" "crates/nyx-analysis/src: epr.rs, hamiltonian.rs, network.rs, tls.rs"
+        "lines" "6980"
         "codeDiagram" "4-code/analysis/cqed.md"
     }
 }
@@ -27,7 +27,7 @@ samples = component "Field samples" "The modes of a SolveResult as weighted samp
     properties {
         "adr" "56"
         "code" "crates/nyx-analysis/src: samples.rs"
-        "lines" "153"
+        "lines" "161"
         "codeDiagram" "4-code/analysis/samples.md"
     }
 }
@@ -50,8 +50,8 @@ modes = component "Mode report" "One report per mode, a table, the Poincare pict
 figures = component "Mode figures" "The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named." "Rust modules" {
     properties {
         "adr" "99, 56"
-        "code" "crates/nyx-analysis/src: canvas.rs, figure.rs, modeview.rs, raster.rs, section.rs"
-        "lines" "1756"
+        "code" "crates/nyx-analysis/src: canvas.rs, figure.rs, modeview.rs, raster.rs, section.rs, view3d.rs"
+        "lines" "5000"
         "codeDiagram" "4-code/analysis/figures.md"
     }
 }

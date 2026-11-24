@@ -40,7 +40,7 @@ graph TB
     66-. "<div>uses femcore: material,<br />material::spec +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     66-. "<div>uses physics: crate root,<br />decode</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     66-. "<div>uses axisym</div><div style='font-size: 70%'>[Rust paths]</div>" .->70
-    66-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
+    66-. "<div>uses bloch, cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
     66-. "<div>uses driven, ports</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
     66-. "<div>uses rom</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     66-. "<div>uses crate root, modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
@@ -54,16 +54,18 @@ graph TB
     70-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
     71-. "<div>uses femcore: fem, fields +11</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     71-. "<div>uses physics: crate root,<br />frame +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    71-. "<div>uses ports</div><div style='font-size: 70%'>[Rust paths]</div>" .->73
     71-. "<div>uses ibc, rom</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     71-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
+    71-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
     71-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
     73-. "<div>uses femcore: edge, fem +10</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     73-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     73-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
-    73-. "<div>uses ibc, rom</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
+    73-. "<div>uses crate root, ibc +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     73-. "<div>uses crate root, modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
     73-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
-    72-. "<div>uses femcore: edge, fem +6</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    72-. "<div>uses femcore: edge, fem +8</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     72-. "<div>uses physics: cqed, crate<br />root</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     72-. "<div>uses cavity</div><div style='font-size: 70%'>[Rust paths]</div>" .->71
     72-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
@@ -74,7 +76,7 @@ graph TB
     68-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     68-. "<div>uses optical</div><div style='font-size: 70%'>[Rust paths]</div>" .->74
     68-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
-    69-. "<div>uses femcore: edge, fem +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    69-. "<div>uses femcore: edge, fem +8</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     69-. "<div>uses physics: crate root,<br />result</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     69-. "<div>uses ibc</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
     69-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
@@ -85,9 +87,10 @@ graph TB
     74-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
     74-. "<div>uses modes_complex</div><div style='font-size: 70%'>[Rust paths]</div>" .->69
     74-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->67
-    67-. "<div>uses femcore: material,<br />material::bcs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    67-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    67-. "<div>uses femcore:<br />linalg::csr::assembly,<br />material +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    67-. "<div>uses physics: cqed, crate<br />root +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     67-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->66
     67-. "<div>uses ibc</div><div style='font-size: 70%'>[Rust paths]</div>" .->72
+    67-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->68
 
   end

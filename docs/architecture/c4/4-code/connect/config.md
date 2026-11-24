@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Host config** (`connect.config`) in the con
 > Reads and rewrites a host's JSON config: status of the nyx entry, connect, disconnect, list.
 
 **Decisions:** [ADR 28](../../../adr/0028-nyx-connect-is-one-crate-with-a-versioned-report.md)  
-**Size:** 1 file, 174 lines.
+**Size:** 1 file, 185 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-connect/src/config.rs` | 174 |  |
+| `crates/nyx-connect/src/config.rs` | 185 |  |
 
 ## What it uses
 
@@ -26,7 +26,7 @@ C4 level 4 (code) of the component **Host config** (`connect.config`) in the con
 |---|---|---|
 | [app: Window](../app/window.md) | config | HostInfo, Status, connect, disconnect, list |
 | [Command line](./cli.md) | config | Status, connect, disconnect, list |
-| [Report](./report.md) | config | Done, HostInfo, Status, connect, disconnect, list, status |
+| [Report](./report.md) | config | Done, HostInfo, Status, connect, disconnect, disconnect_matching, list, status |
 
 ## Class diagram
 
@@ -63,6 +63,7 @@ classDiagram
       +list(env, exe) Vec~HostInfo~
       +connect(env, id, exe) Result
       +disconnect(env, id) Result
+      +disconnect_matching(env, id, expected_exe) Result
   }
   HostInfo --> Status
 ```
@@ -78,3 +79,4 @@ classDiagram
 | fn | `list` | `config.rs:72` | `pub fn list(env: &Env, exe: &Path) -> Vec<HostInfo>` —  Every host with its status, for a settings panel. |
 | fn | `connect` | `config.rs:109` | `pub fn connect(env: &Env, id: &str, exe: &Path) -> Result<Done, String>` —  Adds or updates the `nyx` entry. Other servers and settings in the file are kept, in their order, and so are keys the user added to the |
 | fn | `disconnect` | `config.rs:129` | `pub fn disconnect(env: &Env, id: &str) -> Result<Done, String>` —  Removes the `nyx` entry and leaves everything else. |
+| fn | `disconnect_matching` | `config.rs:146` | `pub fn disconnect_matching(env: &Env, id: &str, expected_exe: &Path) -> Result<Done, String>` —  Removes the `nyx` entry ONLY when its configured `command` matches `expected_exe` (`Status::Connected`). |

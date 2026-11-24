@@ -40,12 +40,12 @@ graph TB
     end
 
     16-. "<div>One engine command per script<br />call; the path guard</div><div style='font-size: 70%'>[Rust API]</div>" .->28
-    12-. "<div>uses engine: apiref,<br />commandlist +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    12-. "<div>uses engine: apiref,<br />commandlist +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
     12-. "<div>uses script: crate root, host<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->16
     12-. "<div>uses examples, shell</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
     12-. "<div>uses cvd</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     12-. "<div>uses app, state</div><div style='font-size: 70%'>[Rust paths]</div>" .->7
-    9-. "<div>uses engine: crate root,<br />project</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
+    9-. "<div>uses engine: crate root,<br />engine +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->28
     9-. "<div>uses examples</div><div style='font-size: 70%'>[Rust paths]</div>" .->8
     9-. "<div>uses fmt, theme</div><div style='font-size: 70%'>[Rust paths]</div>" .->11
     9-. "<div>uses colormap</div><div style='font-size: 70%'>[Rust paths]</div>" .->10
@@ -68,9 +68,9 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Window](../4-code/app/window.md) | 5 | 3851 | 23, 57, 92 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
-| [Shell and dashboard](../4-code/app/shell.md) | 8 | 5092 | 14, 23, 87, 88 | The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
-| [Inspector tabs](../4-code/app/inspector.md) | 3 | 2536 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
-| [Viewport](../4-code/app/viewport.md) | 4 | 1598 | 23, 88 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames. |
-| [Look and widgets](../4-code/app/style.md) | 5 | 1308 | 23, 88 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written. |
-| [Scripts and batch](../4-code/app/headless.md) | 5 | 733 | 23, 89, 93 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script. |
+| [Window](../4-code/app/window.md) | 5 | 4045 | 23, 57, 92 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop. |
+| [Shell and dashboard](../4-code/app/shell.md) | 8 | 5126 | 14, 23, 87, 88, 123 | The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points. |
+| [Inspector tabs](../4-code/app/inspector.md) | 3 | 2863 | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind. |
+| [Viewport](../4-code/app/viewport.md) | 4 | 1674 | 23, 88, 123 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames. |
+| [Look and widgets](../4-code/app/style.md) | 5 | 1312 | 23, 88, 123 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written. |
+| [Scripts and batch](../4-code/app/headless.md) | 7 | 1376 | 23, 89, 93, 123 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script. |

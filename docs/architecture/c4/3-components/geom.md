@@ -40,15 +40,20 @@ graph TB
     125-. "<div>uses planar, stack</div><div style='font-size: 70%'>[Rust paths]</div>" .->127
     125-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->130
     125-. "<div>uses sim</div><div style='font-size: 70%'>[Rust paths]</div>" .->128
+    124-. "<div>uses scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->125
+    124-. "<div>uses arrange, complex +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->126
+    124-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->130
     124-. "<div>uses select</div><div style='font-size: 70%'>[Rust paths]</div>" .->128
     126-. "<div>uses scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->125
     126-. "<div>uses error, model</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
     126-. "<div>uses stack</div><div style='font-size: 70%'>[Rust paths]</div>" .->127
     126-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->130
+    126-. "<div>uses bvh</div><div style='font-size: 70%'>[Rust paths]</div>" .->128
     127-. "<div>uses eval, scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->125
     127-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
     127-. "<div>uses arrange, complex +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->126
     127-. "<div>uses math</div><div style='font-size: 70%'>[Rust paths]</div>" .->130
+    127-. "<div>uses bvh</div><div style='font-size: 70%'>[Rust paths]</div>" .->128
     127-. "<div>uses tess</div><div style='font-size: 70%'>[Rust paths]</div>" .->129
     128-. "<div>uses eval, scene</div><div style='font-size: 70%'>[Rust paths]</div>" .->125
     128-. "<div>uses error, expr +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->124
@@ -63,10 +68,10 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Feature list](../4-code/geom/featurelist.md) | 5 | 1468 | 2, 3, 63 | The serialisable feature list (single source of truth for code and GUI), its operations and validation, parameter expressions, printing as Rust builder calls, and the error type. |
-| [Evaluation](../4-code/geom/evaluation.md) | 3 | 1456 | 2, 6 | The Evaluator turns a feature list into an evaluated model at a chosen tier with a cache; scenes instantiate profiles with transforms and patterns; change detection between evaluations for sweeps. |
-| [2D kernel](../4-code/geom/kernel2d.md) | 5 | 3323 | 3, 18, 102 | Primitives, planar curves, the planar arrangement of all boundary pieces, the evaluated region complex, and batch polygon ring cleanup with shared-corner-pinned RDP simplification. |
-| [3D kernel](../4-code/geom/kernel3d.md) | 3 | 2245 | 3, 1 | Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model. |
-| [Queries and selectors](../4-code/geom/queries.md) | 4 | 1915 | 2, 3, 7, 18 | Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data. |
+| [Feature list](../4-code/geom/featurelist.md) | 6 | 3578 | 2, 3, 63 | The serialisable feature list (single source of truth for code and GUI), its operations and validation, parameter expressions, printing as Rust builder calls, and the error type. |
+| [Evaluation](../4-code/geom/evaluation.md) | 3 | 1641 | 2, 6 | The Evaluator turns a feature list into an evaluated model at a chosen tier with a cache; scenes instantiate profiles with transforms and patterns; change detection between evaluations for sweeps. |
+| [2D kernel](../4-code/geom/kernel2d.md) | 5 | 4357 | 3, 18, 102 | Primitives, planar curves, the planar arrangement of all boundary pieces, the evaluated region complex, and batch polygon ring cleanup with shared-corner-pinned RDP simplification. |
+| [3D kernel](../4-code/geom/kernel3d.md) | 3 | 2496 | 3, 1 | Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model. |
+| [Queries and selectors](../4-code/geom/queries.md) | 5 | 2319 | 2, 3, 7, 18 | Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data. |
 | [Display tessellation](../4-code/geom/tessellation.md) | 1 | 280 | 3 | Tessellation for the viewport and picking only, never for meshing. |
 | [Math helpers](../4-code/geom/math.md) | 1 | 340 | 3 | Small vector, box and similarity-transform helpers. |

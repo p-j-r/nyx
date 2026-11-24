@@ -40,13 +40,13 @@ graph TB
     41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->98
     49-. "<div>uses femcore: material::spec,<br />progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     49-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    49-. "<div>uses electro</div><div style='font-size: 70%'>[Rust paths]</div>" .->52
+    49-. "<div>uses electro, planar_bem</div><div style='font-size: 70%'>[Rust paths]</div>" .->52
     49-. "<div>uses heat</div><div style='font-size: 70%'>[Rust paths]</div>" .->51
     49-. "<div>uses magneto</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
     49-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
     54-. "<div>uses femcore: fields,<br />material +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     54-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    52-. "<div>uses femcore: fem, fields +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    52-. "<div>uses femcore: adapt::electro,<br />adapt::estimate +14</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     52-. "<div>uses physics: cqed, crate<br />root +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     52-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
     52-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
@@ -59,16 +59,16 @@ graph TB
     53-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
     53-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
     50-. "<div>uses femcore: material,<br />material::bcs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    50-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    50-. "<div>uses physics: cqed, decode +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     50-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->49
 
   end```
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Physics adapter](../4-code/dfs/adapter.md) | 1 | 294 | 41, 25, 103 | The Physics implementation of dfs: descriptors, validation, solve entry. |
-| [Typed problem](../4-code/dfs/problem.md) | 1 | 314 | 41, 103 | The typed dfs problem the kernels read, decoded from the ProblemSpec envelope. |
+| [Physics adapter](../4-code/dfs/adapter.md) | 1 | 501 | 41, 25, 103 | The Physics implementation of dfs: descriptors, validation, solve entry. |
+| [Typed problem](../4-code/dfs/problem.md) | 1 | 606 | 41, 103 | The typed dfs problem the kernels read, decoded from the ProblemSpec envelope. |
 | [Heat kernel](../4-code/dfs/heat.md) | 1 | 277 | 41, 9 | Heat transfer on P1/P2 simplices, stationary and transient. |
-| [Electrostatics kernel](../4-code/dfs/electro.md) | 1 | 607 | 41, 9, 103 | Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions. |
+| [Electrostatics kernel](../4-code/dfs/electro.md) | 3 | 3451 | 41, 9, 103 | Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions. |
 | [Magnetostatics kernel](../4-code/dfs/magneto.md) | 1 | 1129 | 103 | Gauge-stabilized London magnetostatics (2D cross-section, planar stream function, mixed 3D A-phi) and inductance matrix extraction. |
 | [Shared helpers](../4-code/dfs/common.md) | 1 | 58 | 41 | Per-cell gradients and values shared by the heat and electrostatics kernels. |

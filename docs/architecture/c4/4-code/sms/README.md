@@ -12,4 +12,4 @@ One page per component, C4 level 4. [Component view](../../3-components/sms.md) 
 | [Waveguide kernel](./waveguide.md) | 1 | 158 | 2 | 0 |
 | [Floquet kernel](./floquet.md) | 1 | 130 | 6 | 2 |
 | [Absorbing-layer kernel](./pml.md) | 1 | 266 | 6 | 2 |
-| [Low-reflecting boundary](./lrb.md) | 1 | 298 | 10 | 2 |
+| [Low-reflecting boundary](./lrb.md) | 1 | 312 | 10 | 2 |

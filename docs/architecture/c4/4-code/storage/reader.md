@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Streaming HDF5 reader** (`storage.reader`) 
 > Bounded-memory streaming reader over hdf5_pure::File::open_streaming: checked_mul read-budget guards, O(1) mode-header scan, mesh reader (with optional curved edges), and transparent single-mode cell-field slicing across L2/L3 packed 5D and legacy L1/v3 files.
 
 **Decisions:** [ADR 107](../../../adr/0107-pure-rust-hdf5-storage-and-packed-lzf-layout.md), [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md)  
-**Size:** 1 file, 770 lines.
+**Size:** 1 file, 784 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-storage/src/reader.rs` | 770 |  |
+| `crates/nyx-storage/src/reader.rs` | 784 |  |
 
 ## What it uses
 
@@ -92,7 +92,7 @@ classDiagram
 | struct | `NyxSolutionData` | `reader.rs:48` | fields: `eig_re`, `eig_im`, `label`, `cell_fields`, `fields_order_json`, `fields`, `viz_fields` —  Per-solution data in a legacy `nyx-results` v3 file. |
 | struct | `NyxV3Summary` | `reader.rs:63` | fields: `format`, `version`, `writer`, `processes`, `project_bytes`, `mesh_cell_labels`, `mesh_cells_shape`, `mesh_cells`, `mesh_facet_labels`, `mesh_facets_shape`, `mesh_facets`, `mesh_points_shape`, ... —  Complete representation of a `nyx-results` v3 file for Gate 2 (`EC-01`) & Gate 3 (`EC-02`) 0-ULP verification. |
 | struct | `NyxReader` | `reader.rs:204` |  Bounded-memory streaming HDF5 reader for `nyx-results` files (Layouts L1, L2, and L3). |
-| fn | `fuzz_walk_untrusted` | `reader.rs:765` | `pub fn fuzz_walk_untrusted(bytes: &[u8], budget: ReadBudgetConfig) -> Result<usize>` —  Walks an untrusted HDF5 byte buffer enforcing [`ReadBudgetConfig`] (`checked_mul` byte ceiling |
+| fn | `fuzz_walk_untrusted` | `reader.rs:779` | `pub fn fuzz_walk_untrusted(bytes: &[u8], budget: ReadBudgetConfig) -> Result<usize>` —  Walks an untrusted HDF5 byte buffer enforcing [`ReadBudgetConfig`] (`checked_mul` byte ceiling |
 | fn | `NyxV3Summary::verify_0_ulp` | `reader.rs:96` | `pub fn verify_0_ulp(&self, expected: &Self, check_viz_links: bool) -> Result<()>` —  Verifies exact 0-ULP (`to_bits()`) bitwise equality against another [`NyxV3Summary`]. |
 | fn | `NyxReader::open` | `reader.rs:211` | `pub fn open(path: &Path, budget: ReadBudgetConfig) -> Result<Self>` —  Opens an `.h5` file in streaming (`pread`) mode without buffering datasets into RAM. |
 | fn | `NyxReader::from_bytes` | `reader.rs:217` | `pub fn from_bytes(bytes: Vec<u8>, budget: ReadBudgetConfig) -> Result<Self>` —  Opens an in-memory `.h5` image with [`ReadBudgetConfig`] protection (used by untrusted fuzzing). |

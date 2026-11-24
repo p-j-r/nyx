@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Protocol loop** (`mcp.protocol`) in the con
 > Newline-delimited JSON-RPC 2.0 over stdio, no async runtime and no SDK; initialize, ping, tools/list and tools/call. `--dir` (workflows and saved scripts), `--root` (the folder a script's file arguments may name); `--job` is the engine's solve worker.
 
 **Decisions:** [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md)  
-**Size:** 1 file, 709 lines.
+**Size:** 1 file, 813 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-mcp/src/main.rs` | 709 |  |
+| `crates/nyx-mcp/src/main.rs` | 813 |  |
 
 ## What it uses
 
@@ -32,7 +32,6 @@ classDiagram
   class Server {
       <<struct>>
       -new(dir, root, queue, max_wait, rx) Server
-      -header() Value
       -initialize(params) Value
       -handle(msg) Option~Value~
   }
@@ -62,13 +61,12 @@ classDiagram
 | fn | `home` | `main.rs:47` | `fn home() -> Option<PathBuf>` |
 | fn | `default_dir` | `main.rs:51` | `fn default_dir() -> PathBuf` |
 | fn | `default_root` | `main.rs:57` | `fn default_root(dir_given: bool, dir: &Path) -> PathBuf` —  The folder the file arguments of a script's commands must lie in (the engine's path guard, ADR 93): `--root`, else the workspace when |
-| fn | `session_id` | `main.rs:106` | `fn session_id() -> String` —  A short id for this process: the session a result belongs to. |
-| struct | `Server` | `main.rs:188` |  |
-| fn | `serve` | `main.rs:631` | `fn serve(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64)` |
-| fn | `usage` | `main.rs:653` | `fn usage()` |
-| fn | `take_opt` | `main.rs:661` | `fn take_opt(args: &mut Vec<String>, flag: &str) -> Option<PathBuf>` —  Takes `--flag VALUE` out of the arguments. |
-| fn | `main` | `main.rs:672` | `fn main()` |
-| fn | `Server::new` | `main.rs:213` | `fn new(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64, rx: mpsc::Receiver<Incoming>) -> Server` |
-| fn | `Server::header` | `main.rs:310` | `fn header(&self) -> Value` |
-| fn | `Server::initialize` | `main.rs:315` | `fn initialize(&mut self, params: &Value) -> Value` |
-| fn | `Server::handle` | `main.rs:595` | `fn handle(&mut self, msg: &Value) -> Option<Value>` —  One incoming message; `None` means no reply (notifications). |
+| fn | `session_id` | `main.rs:109` | `fn session_id() -> String` —  A short id for this process: the session a result belongs to. |
+| struct | `Server` | `main.rs:266` |  |
+| fn | `serve` | `main.rs:735` | `fn serve(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64)` |
+| fn | `usage` | `main.rs:757` | `fn usage()` |
+| fn | `take_opt` | `main.rs:765` | `fn take_opt(args: &mut Vec<String>, flag: &str) -> Option<PathBuf>` —  Takes `--flag VALUE` out of the arguments. |
+| fn | `main` | `main.rs:776` | `fn main()` |
+| fn | `Server::new` | `main.rs:288` | `fn new(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64, rx: mpsc::Receiver<Incoming>) -> Server` |
+| fn | `Server::initialize` | `main.rs:394` | `fn initialize(&mut self, params: &Value) -> Value` |
+| fn | `Server::handle` | `main.rs:699` | `fn handle(&mut self, msg: &Value) -> Option<Value>` —  One incoming message; `None` means no reply (notifications). |

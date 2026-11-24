@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 5 files, 848 lines.
+**Size:** 5 files, 850 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/lib.rs` | 50 |  |
+| `crates/femcore/src/lib.rs` | 52 |  |
 | `crates/femcore/src/par.rs` | 163 |  |
 | `crates/femcore/src/progress.rs` | 297 |  |
 | `crates/femcore/src/validate.rs` | 48 |  |
@@ -28,24 +28,29 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | par | map_chunks, threads_up_to |
+| [analysis: Mode figures](../analysis/figures.md) | par | map_chunks |
 | [dfs: Physics adapter](../dfs/adapter.md) | progress | Progress |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | par | threads |
 | [ems: Physics adapter](../ems/adapter.md) | progress | Progress |
 | [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads_up_to |
-| [ems: Driven frequency-domain and PROM](../ems/driven.md) | progress | check |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | par, progress | check, map_chunks |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
 | [engine: Commands](../engine/commands.md) | par, progress | install, note, stage, threads |
 | [engine: Job runner and queue](../engine/jobs.md) | progress, warm | Call, Progress, Warm, from_bytes, install, stage, to_bytes |
-| [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, stage |
+| [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, Progress, stage |
 | [engine: Registry and facade](../engine/registry.md) | progress | Progress |
 | [engine: Results files](../engine/resultsIO.md) | progress | Progress, install, stage |
 | [Adaptation drivers](./adaptdrive.md) | progress | check |
+| [Error estimators](./estimators.md) | par |  |
 | [Finite-element basics](./fem.md) | par, progress | check, lap_since, stage, threads, threads_up_to |
 | [Matrices and vectors](./lacore.md) | par | threads |
+| [Direct solvers](./ladirect.md) | par | factor_threads |
 | [Linear algebra driver](./ladriver.md) | par, progress, warm | begin, on_factor_pool, threads |
 | [Eigensolvers](./laeigen.md) | par, progress, warm | begin, check, threads |
 | [Preconditioners](./laprecond.md) | par, progress | check, lap_since, note, stage, threads |
 | [Mesh](./mesh.md) | par | threads |
+| [Meshing facade](./meshing.md) | progress | note |
 | [3D meshing](./meshing3d.md) | par, progress | check, lap, threads |
 | [Metric fields](./metric.md) | par |  |
 | [physics: Physics trait and registry](../physics/trait.md) | progress | Progress |

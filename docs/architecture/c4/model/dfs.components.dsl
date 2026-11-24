@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of dfs: descri
     properties {
         "adr" "41, 25, 103"
         "code" "crates/nyx-dfs/src: lib.rs"
-        "lines" "294"
+        "lines" "501"
         "codeDiagram" "4-code/dfs/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed dfs problem the kernels read, dec
     properties {
         "adr" "41, 103"
         "code" "crates/nyx-dfs/src: problem.rs"
-        "lines" "314"
+        "lines" "606"
         "codeDiagram" "4-code/dfs/problem.md"
     }
 }
@@ -26,8 +26,8 @@ heat = component "Heat kernel" "Heat transfer on P1/P2 simplices, stationary and
 electro = component "Electrostatics kernel" "Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions." "Rust modules" {
     properties {
         "adr" "41, 9, 103"
-        "code" "crates/nyx-dfs/src: electro.rs"
-        "lines" "607"
+        "code" "crates/nyx-dfs/src: ac_loss.rs, electro.rs, planar_bem.rs"
+        "lines" "3451"
         "codeDiagram" "4-code/dfs/electro.md"
     }
 }

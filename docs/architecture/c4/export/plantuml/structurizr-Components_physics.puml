@@ -84,7 +84,8 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
 nyx.nyxphysics.cQEDresultpayloads --> nyx.nyxphysics.Resultandframe <<Relationship-UmVsYXRpb25zaGlw>> : "uses result\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Descriptorsandschemas --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: meshing::sizing\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Descriptorsandschemas --> nyx.nyxphysics.Physicstraitandregistry <<Relationship-UmVsYXRpb25zaGlw>> : "uses physics\n<size:16>[Rust paths]</size>"
-nyx.nyxphysics.Problemenvelope --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material, material::elastic +2\n<size:16>[Rust paths]</size>"
+nyx.nyxphysics.Problemenvelope --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material, material::coupled +4\n<size:16>[Rust paths]</size>"
+nyx.nyxphysics.Problemenvelope --> nyx.nyxphysics.cQEDresultpayloads <<Relationship-UmVsYXRpb25zaGlw>> : "uses cqed\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Problemenvelope --> nyx.nyxphysics.Descriptorsandschemas <<Relationship-UmVsYXRpb25zaGlw>> : "uses desc\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Problemenvelope --> nyx.nyxphysics.Resultandframe <<Relationship-UmVsYXRpb25zaGlw>> : "uses result\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Problemenvelope --> nyx.nyxphysics.Physicstraitandregistry <<Relationship-UmVsYXRpb25zaGlw>> : "uses error, physics\n<size:16>[Rust paths]</size>"
@@ -97,7 +98,7 @@ nyx.nyxphysics.Testsupport --> nyx.nyxphysics.Physicstraitandregistry <<Relation
 nyx.nyxphysics.Physicstraitandregistry --> nyx.femcore <<Relationship-UmVsYXRpb25zaGlw>> : "uses femcore: material::spec, mesh +2\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.cQEDresultpayloads <<Relationship-UmVsYXRpb25zaGlw>> : "uses cqed\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.Descriptorsandschemas <<Relationship-UmVsYXRpb25zaGlw>> : "uses crate root, desc\n<size:16>[Rust paths]</size>"
-nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.Problemenvelope <<Relationship-UmVsYXRpb25zaGlw>> : "uses spec, validate\n<size:16>[Rust paths]</size>"
+nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.Problemenvelope <<Relationship-UmVsYXRpb25zaGlw>> : "uses decode, spec +1\n<size:16>[Rust paths]</size>"
 nyx.nyxphysics.Physicstraitandregistry --> nyx.nyxphysics.Resultandframe <<Relationship-UmVsYXRpb25zaGlw>> : "uses frame, result\n<size:16>[Rust paths]</size>"
 
 @enduml

@@ -3,7 +3,7 @@ types = component "Storage types and read budget" "FieldStorageLayout (L1 Deflat
     properties {
         "adr" "107, 62, 99"
         "code" "crates/nyx-storage/src: lib.rs"
-        "lines" "165"
+        "lines" "202"
         "codeDiagram" "4-code/storage/types.md"
     }
 }
@@ -11,7 +11,7 @@ reader = component "Streaming HDF5 reader" "Bounded-memory streaming reader over
     properties {
         "adr" "107, 62, 99"
         "code" "crates/nyx-storage/src: reader.rs"
-        "lines" "770"
+        "lines" "784"
         "codeDiagram" "4-code/storage/reader.md"
     }
 }

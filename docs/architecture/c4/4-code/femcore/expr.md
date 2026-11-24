@@ -26,6 +26,7 @@ C4 level 4 (code) of the component **Expressions** (`femcore.expr`) in the conta
 
 | Component | Modules | Items |
 |---|---|---|
+| [analysis: Mode figures](../analysis/figures.md) | fieldexpr, formula | Fun, Named, Names, Op, Tree |
 | [dfs: Heat kernel](../dfs/heat.md) | expr | eval_at |
 | [engine: Commands](../engine/commands.md) | fieldexpr, formula | Fun, MAX_POWER, Named, Names, Op, Tree |
 

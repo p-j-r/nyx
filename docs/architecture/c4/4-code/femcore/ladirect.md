@@ -5,30 +5,31 @@ C4 level 4 (code) of the component **Direct solvers** (`femcore.ladirect`) in th
 > Shifted sparse direct solves with symbolic reuse, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md)  
-**Size:** 6 files, 3054 lines.
+**Size:** 6 files, 4306 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/linalg/blr.rs` | 789 | **Low-rank (block low-rank, BLR) multifrontal sparse LU** (port item S4, the sparse-solver half). |
-| `crates/femcore/src/linalg/direct.rs` | 633 | Shifted sparse direct solves `(A − σB)⁻¹` with symbolic-factorisation reuse (port item S1). |
+| `crates/femcore/src/linalg/blr.rs` | 791 | **Low-rank (block low-rank, BLR) multifrontal sparse LU** (port item S4, the sparse-solver half). |
+| `crates/femcore/src/linalg/direct.rs` | 1878 | Shifted sparse direct solves `(A − σB)⁻¹` with symbolic-factorisation reuse (port item S1). |
 | `crates/femcore/src/linalg/lowrank.rs` | 622 | **Low-rank (rank-structured) matrices and a fast direct solver** (port item S4): adaptive cross approximation, the HODLR format (hierarchically off-diagonal low-rank) and its `O(n log² n)` direct solve. |
-| `crates/femcore/src/linalg/mixed.rs` | 286 | **Mixed-precision shifted factorisation** with iterative refinement (port item S3): the sparse LU of `A − σB` is computed in single precision (`f32` for real, `Complex<f32>` for complex matrices) — about half the factor memory and a... |
+| `crates/femcore/src/linalg/mixed.rs` | 289 | **Mixed-precision shifted factorisation** with iterative refinement (port item S3): the sparse LU of `A − σB` is computed in single precision (`f32` for real, `Complex<f32>` for complex matrices) — about half the factor memory and a... |
 | `crates/femcore/src/linalg/ordering.rs` | 252 | Fill-reducing ordering by **graph nested dissection** (port item S2), for the sparse Cholesky of [`crate::linalg::direct::ShiftedFactorization`]. |
-| `crates/femcore/src/linalg/sparse_lu.rs` | 472 | A sparse LU factorisation that **accepts a user fill-reducing ordering** (port item S2, LU half). |
+| `crates/femcore/src/linalg/sparse_lu.rs` | 474 | A sparse LU factorisation that **accepts a user fill-reducing ordering** (port item S2, LU half). |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
 | [Matrices and vectors](./lacore.md) | linalg::csr, linalg::faer_glue, linalg::linop, linalg::scalar, linalg::vecops | C64, Csr, FaerScalar, LinearOperator, Preconditioner, Scalar, axpy, clear_upper_vector_state, dense_lu, dotc +4 |
+| [Runtime services](./runtime.md) | par | factor_threads |
 
 ## Used by
 
 | Component | Modules | Items |
 |---|---|---|
-| [Linear algebra driver](./ladriver.md) | linalg::direct, linalg::ordering | Definiteness, FactorStats, FillOrdering, ShiftInvertOperator, ShiftedFactorization, ShiftedSolver, SolverError, ThreadPolicy |
+| [Linear algebra driver](./ladriver.md) | linalg::direct, linalg::ordering | Definiteness, FactorBackend, FactorStats, FillOrdering, ShiftInvertOperator, ShiftedFactorization, ShiftedSolver, SolverError +2 |
 | [Eigensolvers](./laeigen.md) | linalg::direct | Definiteness, ShiftedFactorization, ShiftedSolver, SolverError, Threads |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::direct | Definiteness, FactorStats, ShiftedFactorization, ShiftedSolver, SolverError |
 | [Preconditioners](./laprecond.md) | linalg::direct | Definiteness, DirectSolve, ShiftedFactorization, ShiftedSolver, SolverError |
@@ -113,12 +114,25 @@ classDiagram
         Cholesky
         Lu
     }
+    class FactorBackend {
+        <<enumeration>>
+        None
+        CholeskyAmd
+        CholeskyNd
+        LbltAmd
+        LbltNd
+        LuColamd
+        LuAmd
+        LuNd
+        BlrNd
+    }
     class Threads {
         <<enumeration>>
         Global
         Sequential
         Fixed
         ~par() Par
+        ~par_for_factor(n) Par
     }
     class ThreadPolicy {
         <<struct>>
@@ -134,8 +148,8 @@ classDiagram
         +numeric_count usize
         +assemble_secs_last f64
         +used Used
-        +cholesky_fallbacks usize
-        +more_3_fields
+        +backend FactorBackend
+        +more_4_fields
     }
     class ShiftedSolver {
         <<interface>>
@@ -322,6 +336,7 @@ classDiagram
   ShiftedBlrLu ..|> ShiftedSolver
   ThreadPolicy --> Threads
   FactorStats --> Used
+  FactorStats --> FactorBackend
   ShiftedFactorization --> ThreadPolicy
   ShiftedFactorization --> FillOrdering
   ShiftedFactorization ..|> ShiftedSolver
@@ -360,27 +375,29 @@ classDiagram
 | fn | `BlrLu::solve_block_in_place` | `linalg/blr.rs:630` | `pub fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize)` |
 | fn | `BlrLu::solve_refined` | `linalg/blr.rs:639` | `pub fn solve_refined(&self, a: &Csr<T>, b: &[T], x: &mut [T], max_it: usize, rtol: f64) -> (usize, f64)` —  Solves `A x = b` to `rtol` by iterative refinement with this (approximate) factorisation: `x += M⁻¹(b − A x)`. |
 | fn | `ShiftedBlrLu::new` | `linalg/blr.rs:717` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>, opts: &BlrOptions) -> Result<Self, SolverError>` |
-| fn | `ShiftedBlrLu::blr_stats` | `linalg/blr.rs:748` | `pub fn blr_stats(&self) -> Option<&BlrStats>` —  Statistics of the current factorisation. |
-| enum | `SolverError` | `linalg/direct.rs:31` | variants: `Singular`, `NotPositiveDefinite`, `OutOfMemory`, `TooLarge`, `InvalidArgument` |
-| enum | `Definiteness` | `linalg/direct.rs:58` | variants: `General`, `PositiveDefinite` —  What the caller knows about `A − σB`, which decides the factorisation. |
-| enum | `Used` | `linalg/direct.rs:68` | variants: `None`, `Cholesky`, `Lu` —  Which factorisation was used for the last shift. |
-| enum | `Threads` | `linalg/direct.rs:76` | variants: `Global`, `Sequential`, `Fixed` —  Thread policy for one phase of a sparse factorisation. |
-| struct | `ThreadPolicy` | `linalg/direct.rs:103` | fields: `factor`, `solve` —  Parallelism of numeric factorisation and of the triangular solves. |
-| struct | `FactorStats` | `linalg/direct.rs:116` | fields: `analyse_secs`, `symbolic_count`, `numeric_secs_total`, `numeric_secs_last`, `numeric_count`, `assemble_secs_last`, `used`, `cholesky_fallbacks`, `solves`, `factor_nnz`, `solve_secs_total` —  Timings and counters of a [`ShiftedFactorization`] (seconds). |
-| trait | `ShiftedSolver` | `linalg/direct.rs:141` | methods: `dim`, `set_shift`, `solve_block_in_place`, `stats` —  "Factorise at a shift, then solve": the interface the eigensolvers use. A backend other than |
-| struct | `Assembled` | `linalg/direct.rs:152` | fields: `col_ptr`, `row_idx`, `a`, `b` —  Union pattern (CSC) of `A`, `B` (or the identity), optionally restricted to the lower |
-| fn | `assemble` | `linalg/direct.rs:159` | `pub(crate) fn assemble<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>, lower: bool) -> Result<Assembled<T>, SolverError>` |
-| fn | `assemble_lower_sorted` | `linalg/direct.rs:226` | `pub(crate) fn assemble_lower_sorted<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>) -> Result<Assembled<T>, SolverError>` —  The lower-triangle union pattern of symmetric `A` and `B` in O(nnz) without sorting: column `c` of the lower triangle is row `c` of |
-| struct | `ShiftedFactorization` | `linalg/direct.rs:273` | fields: `threads`, `ordering` —  `faer`-backed [`ShiftedSolver`] with symbolic reuse. |
-| struct | `ShiftInvertOperator` | `linalg/direct.rs:555` |  The spectral transformation `x ↦ (A − σB)⁻¹ B x` as a [`LinearOperator`], so that the |
-| struct | `ShiftedSolvePreconditioner` | `linalg/direct.rs:595` |  A [`Preconditioner`] (crate::linalg::linop::Preconditioner) from a factorisation of `A − τB`: `z = (A − τB)⁻¹ r`. |
-| struct | `DirectSolve` | `linalg/direct.rs:615` |  An owned exact solver as a [`Preconditioner`] (crate::linalg::linop::Preconditioner): factorises `A` once |
-| fn | `Threads::par` | `linalg/direct.rs:84` | `pub(crate) fn par(self) -> Par` |
-| fn | `ShiftedFactorization::new` | `linalg/direct.rs:298` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>, definiteness: Definiteness) -> Result<Self, SolverError>` —  Prepares the pattern for `A − σB` (`B = None` means the identity). With |
-| fn | `ShiftedFactorization::replace_matrices` | `linalg/direct.rs:341` | `pub fn replace_matrices(&mut self, a: &Csr<T>, b: Option<&Csr<T>>) -> Result<(), SolverError>` —  Replaces the *values* of `A` (and `B`) without redoing the symbolic analysis, for matrices |
-| fn | `ShiftInvertOperator::new` | `linalg/direct.rs:561` | `pub fn new(solver: &'a S, b: Option<&'a Csr<T>>) -> Self` |
-| fn | `ShiftedSolvePreconditioner::new` | `linalg/direct.rs:601` | `pub fn new(solver: &'a S) -> Self` |
-| fn | `DirectSolve::new` | `linalg/direct.rs:620` | `pub fn new(a: &Csr<T>, definiteness: Definiteness) -> Result<Self, SolverError>` |
+| fn | `ShiftedBlrLu::blr_stats` | `linalg/blr.rs:749` | `pub fn blr_stats(&self) -> Option<&BlrStats>` —  Statistics of the current factorisation. |
+| enum | `SolverError` | `linalg/direct.rs:38` | variants: `Singular`, `NotPositiveDefinite`, `OutOfMemory`, `TooLarge`, `InvalidArgument` |
+| enum | `Definiteness` | `linalg/direct.rs:65` | variants: `General`, `PositiveDefinite` —  What the caller knows about `A − σB`, which decides the factorisation. |
+| enum | `Used` | `linalg/direct.rs:75` | variants: `None`, `Cholesky`, `Lu` —  Which factorisation was used for the last shift. |
+| enum | `FactorBackend` | `linalg/direct.rs:83` | variants: `None`, `CholeskyAmd`, `CholeskyNd`, `LbltAmd`, `LbltNd`, `LuColamd`, `LuAmd`, `LuNd`, `BlrNd` —  Specific sparse direct backend and ordering chosen by [`ShiftedFactorization`] (or another [`ShiftedSolver`]). |
+| enum | `Threads` | `linalg/direct.rs:106` | variants: `Global`, `Sequential`, `Fixed` —  Thread policy for one phase of a sparse factorisation. |
+| struct | `ThreadPolicy` | `linalg/direct.rs:150` | fields: `factor`, `solve` —  Parallelism of numeric factorisation and of the triangular solves. |
+| struct | `FactorStats` | `linalg/direct.rs:163` | fields: `analyse_secs`, `symbolic_count`, `numeric_secs_total`, `numeric_secs_last`, `numeric_count`, `assemble_secs_last`, `used`, `backend`, `cholesky_fallbacks`, `solves`, `factor_nnz`, `solve_secs_total` —  Timings and counters of a [`ShiftedFactorization`] (seconds). |
+| trait | `ShiftedSolver` | `linalg/direct.rs:190` | methods: `dim`, `set_shift`, `solve_block_in_place`, `stats` —  "Factorise at a shift, then solve": the interface the eigensolvers use. A backend other than |
+| struct | `Assembled` | `linalg/direct.rs:201` | fields: `col_ptr`, `row_idx`, `a`, `b` —  Union pattern (CSC) of `A`, `B` (or the identity), optionally restricted to the lower |
+| fn | `assemble` | `linalg/direct.rs:208` | `pub(crate) fn assemble<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>, lower: bool) -> Result<Assembled<T>, SolverError>` |
+| fn | `assemble_lower_sorted` | `linalg/direct.rs:275` | `pub(crate) fn assemble_lower_sorted<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>) -> Result<Assembled<T>, SolverError>` —  The lower-triangle union pattern of symmetric `A` and `B` in O(nnz) without sorting: column `c` of the lower triangle is row `c` of |
+| struct | `ShiftedFactorization` | `linalg/direct.rs:1179` | fields: `threads`, `ordering` —  `faer`-backed [`ShiftedSolver`] with symbolic reuse and fill-reducing ordering on the |
+| struct | `ShiftInvertOperator` | `linalg/direct.rs:1800` |  The spectral transformation `x ↦ (A − σB)⁻¹ B x` as a [`LinearOperator`], so that the |
+| struct | `ShiftedSolvePreconditioner` | `linalg/direct.rs:1840` |  A [`Preconditioner`] (crate::linalg::linop::Preconditioner) from a factorisation of `A − τB`: `z = (A − τB)⁻¹ r`. |
+| struct | `DirectSolve` | `linalg/direct.rs:1860` |  An owned exact solver as a [`Preconditioner`] (crate::linalg::linop::Preconditioner): factorises `A` once |
+| fn | `Threads::par` | `linalg/direct.rs:114` | `pub(crate) fn par(self) -> Par` |
+| fn | `Threads::par_for_factor` | `linalg/direct.rs:133` | `pub(crate) fn par_for_factor(self, n: usize) -> Par` —  Parallelism for factorising a sparse matrix of dimension `n`: under [`Threads::Global`], |
+| fn | `ShiftedFactorization::new` | `linalg/direct.rs:1212` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>, definiteness: Definiteness) -> Result<Self, SolverError>` —  Prepares the pattern for `A − σB` (`B = None` means the identity). With |
+| fn | `ShiftedFactorization::replace_matrices` | `linalg/direct.rs:1267` | `pub fn replace_matrices(&mut self, a: &Csr<T>, b: Option<&Csr<T>>) -> Result<(), SolverError>` —  Replaces the *values* of `A` (and `B`) without redoing the symbolic analysis, for matrices |
+| fn | `ShiftInvertOperator::new` | `linalg/direct.rs:1806` | `pub fn new(solver: &'a S, b: Option<&'a Csr<T>>) -> Self` |
+| fn | `ShiftedSolvePreconditioner::new` | `linalg/direct.rs:1846` | `pub fn new(solver: &'a S) -> Self` |
+| fn | `DirectSolve::new` | `linalg/direct.rs:1865` | `pub fn new(a: &Csr<T>, definiteness: Definiteness) -> Result<Self, SolverError>` |
 | struct | `LowRank` | `linalg/lowrank.rs:43` | fields: `m`, `n`, `r`, `u`, `v` —  `A ≈ U Vᴴ` with `U: m × r`, `V: n × r` (column-major). |
 | fn | `aca_partial` | `linalg/lowrank.rs:103` | `pub fn aca_partial<T: Scalar>( m: usize, n: usize, entry: &dyn Fn(usize, usize) -> T, tol: f64, max_rank: usize, ) -> LowRank<T>` —  Adaptive cross approximation with **partial pivoting** (Bebendorf): the block `A[0..m, 0..n]` is given |
 | fn | `aca_full` | `linalg/lowrank.rs:190` | `pub fn aca_full<T: Scalar>(a: &mut [T], m: usize, n: usize, tol: f64, max_rank: usize) -> LowRank<T>` —  ACA with **full pivoting** on an explicit column-major `m × n` block (destroyed; on return it holds the residual): |
@@ -404,11 +421,11 @@ classDiagram
 | fn | `Hodlr::factor` | `linalg/lowrank.rs:488` | `pub fn factor(&self) -> Option<HodlrLu<T>>` —  Factorises the matrix (recursive Woodbury, see the module documentation). `None` if a leaf block or a |
 | fn | `HodlrLu::dim` | `linalg/lowrank.rs:607` | `pub fn dim(&self) -> usize` |
 | fn | `HodlrLu::solve_in_place` | `linalg/lowrank.rs:610` | `pub fn solve_in_place(&self, b: &mut [T])` |
-| trait | `LowPrecision` | `linalg/mixed.rs:31` | methods: `to_low`, `from_low` —  Scalars with a single-precision counterpart usable by `faer`. |
-| struct | `MixedStats` | `linalg/mixed.rs:58` | fields: `refined_solves`, `fallback_solves`, `refinement_steps`, `low_factor_failures`, `low_factor_secs` |
-| struct | `MixedPrecisionLu` | `linalg/mixed.rs:69` | fields: `min_contraction`, `max_refine`, `tol`, `threads` |
-| fn | `MixedPrecisionLu::new` | `linalg/mixed.rs:94` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>) -> Result<Self, SolverError>` |
-| fn | `MixedPrecisionLu::mixed_stats` | `linalg/mixed.rs:130` | `pub fn mixed_stats(&self) -> MixedStats` |
+| trait | `LowPrecision` | `linalg/mixed.rs:32` | methods: `to_low`, `from_low` —  Scalars with a single-precision counterpart usable by `faer`. |
+| struct | `MixedStats` | `linalg/mixed.rs:59` | fields: `refined_solves`, `fallback_solves`, `refinement_steps`, `low_factor_failures`, `low_factor_secs` |
+| struct | `MixedPrecisionLu` | `linalg/mixed.rs:70` | fields: `min_contraction`, `max_refine`, `tol`, `threads` |
+| fn | `MixedPrecisionLu::new` | `linalg/mixed.rs:95` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>) -> Result<Self, SolverError>` |
+| fn | `MixedPrecisionLu::mixed_stats` | `linalg/mixed.rs:132` | `pub fn mixed_stats(&self) -> MixedStats` |
 | enum | `FillOrdering` | `linalg/ordering.rs:16` | variants: `Amd`, `NestedDissection`, `Auto` —  Which fill-reducing ordering the Cholesky path uses. |
 | struct | `NdNode` | `linalg/ordering.rs:62` | fields: `start`, `end`, `children` —  A node of the dissection (assembly) tree: the unknowns `order[start..end]` are eliminated together (a |
 | struct | `NdTree` | `linalg/ordering.rs:72` | fields: `order`, `nodes`, `roots` —  Elimination order together with the dissection tree. Nodes are numbered children-first (a post-order), so |
@@ -430,6 +447,6 @@ classDiagram
 | fn | `SparseLu::solve_in_place` | `linalg/sparse_lu.rs:331` | `pub fn solve_in_place(&self, b: &mut [T])` —  Solves `A x = b` in place. |
 | fn | `SparseLu::solve_block_in_place` | `linalg/sparse_lu.rs:364` | `pub fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize)` —  Solves for `nrhs` right-hand sides stored as consecutive columns. |
 | fn | `ShiftedSparseLu::new` | `linalg/sparse_lu.rs:394` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>, opts: &LuOptions) -> Result<Self, SolverError>` |
-| fn | `ShiftedSparseLu::factorization` | `linalg/sparse_lu.rs:428` | `pub fn factorization(&self) -> Option<&SparseLu<T>>` —  The factorisation of the current shift. |
+| fn | `ShiftedSparseLu::factorization` | `linalg/sparse_lu.rs:429` | `pub fn factorization(&self) -> Option<&SparseLu<T>>` —  The factorisation of the current shift. |
 
 Trait implementations in this component: `BlrOptions: Default`, `BlrLu: Preconditioner`, `ShiftedBlrLu: ShiftedSolver`, `SolverError: Display`, `SolverError: Error`, `ThreadPolicy: Default`, `ShiftedFactorization: ShiftedSolver`, `ShiftInvertOperator: LinearOperator`, `ShiftedSolvePreconditioner: Preconditioner`, `DirectSolve: Preconditioner`, `HodlrOptions: Default`, `Hodlr: LinearOperator`, `HodlrLu: Preconditioner`, `f64: LowPrecision`, `C64: LowPrecision`, `MixedPrecisionLu: ShiftedSolver`, `LuOptions: Default`, `SparseLu: Preconditioner`, `ShiftedSparseLu: ShiftedSolver`

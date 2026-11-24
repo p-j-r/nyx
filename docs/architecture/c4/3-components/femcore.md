@@ -82,9 +82,11 @@ graph TB
     109-. "<div>uses adapt::ops3,<br />adapt::topo3</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
     109-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->117
     109-. "<div>uses linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    109-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
     109-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
     109-. "<div>uses meshing,<br />meshing::geomdrive</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
     109-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    109-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
     121-. "<div>uses linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     121-. "<div>uses section</div><div style='font-size: 70%'>[Rust paths]</div>" .->120
     117-. "<div>uses linalg::csr,<br />linalg::csr::assembly</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
@@ -98,11 +100,15 @@ graph TB
     101-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
     101-. "<div>uses meshing,<br />meshing::geomdrive +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
     101-. "<div>uses adapt::metric,<br />adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    110-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->117
     110-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
     112-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    112-. "<div>uses par</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
     111-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     111-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
-    111-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
+    111-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
+    111-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
+    111-. "<div>uses linalg::ams</div><div style='font-size: 70%'>[Rust paths]</div>" .->115
     111-. "<div>uses par, progress +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
     114-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     114-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
@@ -114,7 +120,7 @@ graph TB
     116-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
     116-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
     116-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
-    115-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    115-. "<div>uses linalg::csr,<br />linalg::csr::assembly +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     115-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
     115-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
     115-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
@@ -123,21 +129,22 @@ graph TB
     105-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
     105-. "<div>uses adapt::work</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
     105-. "<div>uses meshing::pml_box</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    102-. "<div>uses geom: diff, eval +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->123
+    102-. "<div>uses geom: complex, curve +8</div><div style='font-size: 70%'>[Rust paths]</div>" .->123
     102-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
     102-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
     102-. "<div>uses props</div><div style='font-size: 70%'>[Rust paths]</div>" .->117
     102-. "<div>uses material</div><div style='font-size: 70%'>[Rust paths]</div>" .->118
     102-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    102-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
+    102-. "<div>uses meshing::adapt3d,<br />meshing::curve3 +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
     102-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
+    102-. "<div>uses progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
     102-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
-    103-. "<div>uses geom: complex, eval +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->123
+    103-. "<div>uses geom: complex, curve +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->123
     103-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
     103-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
     103-. "<div>uses fem</div><div style='font-size: 70%'>[Rust paths]</div>" .->117
     103-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    103-. "<div>uses meshing,<br />meshing::geomdrive +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
+    103-. "<div>uses meshing,<br />meshing::geomdrive +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
     103-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
     103-. "<div>uses par, progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->122
     103-. "<div>uses meshing::pml_geom,<br />meshing::pml_geom3</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
@@ -163,30 +170,30 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Mesh](../4-code/femcore/mesh.md) | 5 | 1724 | 4, 5, 32 | The native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics. |
+| [Mesh](../4-code/femcore/mesh.md) | 5 | 1775 | 4, 5, 32 | The native mixed-cell mesh, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics. |
 | [Mesh files](../4-code/femcore/meshio.md) | 3 | 878 | 16 | The compact lossless .fmsh format for meshes and results and its entropy coder. |
 | [Fixtures and test kit](../4-code/femcore/fixtures.md) | 3 | 586 | 41, 10, 60 | Test meshes and the SOI wire cross-section used by the tests of every physics crate. |
-| [Meshing facade](../4-code/femcore/meshing.md) | 6 | 1823 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
-| [3D meshing](../4-code/femcore/meshing3d.md) | 6 | 2690 | 40, 50, 51, 55, 82, 83, 102 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing. |
-| [Structured absorbing layers](../4-code/femcore/structpml.md) | 4 | 1408 | 7, 52, 5 | Structured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels. |
+| [Meshing facade](../4-code/femcore/meshing.md) | 9 | 4475 | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core. |
+| [3D meshing](../4-code/femcore/meshing3d.md) | 6 | 5416 | 40, 50, 51, 55, 82, 83, 102 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing. |
+| [Structured absorbing layers](../4-code/femcore/structpml.md) | 4 | 1468 | 7, 52, 5 | Structured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels. |
 | [Meshing validation harness](../4-code/femcore/meshcheck.md) | 4 | 980 | 7 | A small independent scalar Helmholtz solver with PML used to validate meshes. |
-| [Metric fields](../4-code/femcore/metric.md) | 6 | 1846 | 7, 5 | Riemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers. |
-| [Adaptation operators](../4-code/femcore/adaptops.md) | 4 | 2255 | 7, 51 | Edge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification. |
-| [Adaptation drivers](../4-code/femcore/adaptdrive.md) | 4 | 720 | 7, 51 | Passes of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go. |
-| [Error estimators](../4-code/femcore/estimators.md) | 3 | 1125 | 7, 17, 53 | Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements. |
-| [Matrices and vectors](../4-code/femcore/lacore.md) | 17 | 4131 | 33, 8, 11 | The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, problem bundles and test-problem generators. |
-| [Linear algebra driver](../4-code/femcore/ladriver.md) | 3 | 740 | 33 | The door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models. |
-| [Direct solvers](../4-code/femcore/ladirect.md) | 6 | 3054 | 33, 8 | Shifted sparse direct solves with symbolic reuse, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection. |
+| [Metric fields](../4-code/femcore/metric.md) | 6 | 1855 | 7, 5 | Riemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers. |
+| [Adaptation operators](../4-code/femcore/adaptops.md) | 4 | 2512 | 7, 51 | Edge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification. |
+| [Adaptation drivers](../4-code/femcore/adaptdrive.md) | 4 | 721 | 7, 51 | Passes of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go. |
+| [Error estimators](../4-code/femcore/estimators.md) | 4 | 2653 | 7, 17, 53 | Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements. |
+| [Matrices and vectors](../4-code/femcore/lacore.md) | 17 | 4388 | 33, 8, 11 | The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, problem bundles and test-problem generators. |
+| [Linear algebra driver](../4-code/femcore/ladriver.md) | 3 | 1270 | 33 | The door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models. |
+| [Direct solvers](../4-code/femcore/ladirect.md) | 6 | 4306 | 33, 8 | Shifted sparse direct solves with symbolic reuse, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection. |
 | [Krylov solvers](../4-code/femcore/laksp.md) | 9 | 2131 | 33, 8 | CG, MINRES, GMRES, BiCGStab, COCR, QMR, IDR(s), GCRO-DR for real and complex systems. |
 | [Eigensolvers](../4-code/femcore/laeigen.md) | 12 | 4576 | 33, 8, 11 | Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities. |
-| [Preconditioners](../4-code/femcore/laprecond.md) | 8 | 2516 | 33, 8 | Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations. |
-| [Time, nonlinear, sweeps](../4-code/femcore/laother.md) | 10 | 3627 | 33, 8 | Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators. |
-| [Finite-element basics](../4-code/femcore/fem.md) | 6 | 2025 | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
-| [Material specification](../4-code/femcore/material.md) | 10 | 4406 | 29, 30, 34, 35, 101, 104 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, Zimmermann BCS superconducting conductivity, provenance and the library loader. |
-| [Optical mode sets](../4-code/femcore/optical.md) | 1 | 233 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
+| [Preconditioners](../4-code/femcore/laprecond.md) | 8 | 3533 | 33, 8 | Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations. |
+| [Time, nonlinear, sweeps](../4-code/femcore/laother.md) | 10 | 3636 | 33, 8 | Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators. |
+| [Finite-element basics](../4-code/femcore/fem.md) | 8 | 5106 | 9, 4, 45, 69 | Lagrange P1/P2 elements and quadrature, the 2D edge-element basis, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain. |
+| [Material specification](../4-code/femcore/material.md) | 13 | 10051 | 29, 30, 34, 35, 101, 104 | TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, Zimmermann BCS superconducting conductivity, provenance and the library loader. |
+| [Optical mode sets](../4-code/femcore/optical.md) | 1 | 253 | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them. |
 | [Frame and sections](../4-code/femcore/section.md) | 1 | 223 | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y). |
 | [Expressions](../4-code/femcore/expr.md) | 3 | 1568 | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90). |
-| [Runtime services](../4-code/femcore/runtime.md) | 5 | 848 | 9, 11, 96 | The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity. |
+| [Runtime services](../4-code/femcore/runtime.md) | 5 | 850 | 9, 11, 96 | The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity. |
 
 ## Part: Meshing and adaptation
 
@@ -251,13 +258,13 @@ graph TB
     102-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
     102-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
     102-. "<div>uses mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    102-. "<div>uses meshing::curve3,<br />meshing::geomdrive3</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
+    102-. "<div>uses meshing::adapt3d,<br />meshing::curve3 +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->103
     102-. "<div>uses adapt, adapt::field +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
     102-. "<div>uses meshing::pml_geom</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
     103-. "<div>uses adapt::drive,<br />adapt::drive3 +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->108
     103-. "<div>uses adapt::ops3, adapt::topo<br />+1</div><div style='font-size: 70%'>[Rust paths]</div>" .->107
     103-. "<div>uses mesh, mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
-    103-. "<div>uses meshing,<br />meshing::geomdrive +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
+    103-. "<div>uses meshing,<br />meshing::geomdrive +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->102
     103-. "<div>uses adapt::field3,<br />adapt::metric +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->106
     103-. "<div>uses meshing::pml_geom,<br />meshing::pml_geom3</div><div style='font-size: 70%'>[Rust paths]</div>" .->104
     100-. "<div>uses mesh::cells</div><div style='font-size: 70%'>[Rust paths]</div>" .->99
@@ -307,7 +314,9 @@ graph TB
     112-. "<div>uses linalg::csr,<br />linalg::faer_glue +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     111-. "<div>uses linalg::basis,<br />linalg::csr +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     111-. "<div>uses linalg::direct,<br />linalg::ordering</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
-    111-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
+    111-. "<div>uses linalg::arnoldi_real,<br />linalg::eps +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
+    111-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
+    111-. "<div>uses linalg::ams</div><div style='font-size: 70%'>[Rust paths]</div>" .->115
     114-. "<div>uses linalg::basis,<br />linalg::csr +7</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     114-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
     114-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
@@ -317,7 +326,7 @@ graph TB
     116-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
     116-. "<div>uses linalg::nep</div><div style='font-size: 70%'>[Rust paths]</div>" .->114
     116-. "<div>uses linalg::ksp,<br />linalg::ksp::gmres</div><div style='font-size: 70%'>[Rust paths]</div>" .->113
-    115-. "<div>uses linalg::csr,<br />linalg::csr::assembly +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
+    115-. "<div>uses linalg::csr,<br />linalg::csr::assembly +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->110
     115-. "<div>uses linalg::direct</div><div style='font-size: 70%'>[Rust paths]</div>" .->112
     115-. "<div>uses linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->111
 

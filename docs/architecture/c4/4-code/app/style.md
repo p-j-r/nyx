@@ -4,8 +4,8 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 
 > The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 5 files, 1308 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md)  
+**Size:** 5 files, 1312 lines.
 
 ## Files
 
@@ -14,8 +14,8 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 | `crates/app/src/cvd.rs` | 90 |  |
 | `crates/app/src/fmt.rs` | 223 |  |
 | `crates/app/src/kit.rs` | 334 |  |
-| `crates/app/src/theme.rs` | 334 |  |
-| `crates/app/src/tokens.rs` | 327 |  |
+| `crates/app/src/theme.rs` | 337 |  |
+| `crates/app/src/tokens.rs` | 328 |  |
 
 ## What it uses
 
@@ -125,7 +125,7 @@ classDiagram
         +card(ctx) Color32
         +raised(ctx) Color32
         +line(ctx) Color32
-        +more_25_functions()
+        +more_24_functions()
     }
   }
   namespace tokens_rs {
@@ -193,43 +193,42 @@ classDiagram
 | fn | `bar` | `kit.rs:274` | `pub fn bar(ui: &mut Ui, fraction: Option<f32>, width: f32)` —  A determinate progress bar in plum on a pale track; `None` shows a sliding block (no percentage reported). |
 | fn | `modal` | `kit.rs:304` | `pub fn modal(ctx: &egui::Context, id: &str, width: f32, f: impl FnOnce(&mut Ui)) -> bool` —  A modal sheet: dims the page, swallows clicks outside and shows `f` in a centred card. Returns `true` when it should close |
 | fn | `State::word` | `kit.rs:100` | `pub fn word(self) -> &'static str` |
-| fn | `title_family` | `theme.rs:13` | `pub fn title_family() -> FontFamily` —  The serif italic family of page titles. |
-| fn | `title` | `theme.rs:17` | `pub fn title(size: f32) -> FontId` |
-| fn | `rgb` | `theme.rs:22` | `pub fn rgb(c: Rgb) -> Color32` —  A token colour as an egui colour. |
-| fn | `is_dark` | `theme.rs:27` | `pub fn is_dark(ctx: &egui::Context) -> bool` —  True when the colours are the dark ones (`apply_mode`). |
-| fn | `mode` | `theme.rs:31` | `pub fn mode(ctx: &egui::Context) -> Mode` |
-| fn | `role` | `theme.rs:36` | `pub fn role(ctx: &egui::Context, p: Pair) -> Color32` —  The value of a token in the look that is active. |
-| fn | `page` | `theme.rs:40` | `pub fn page(ctx: &egui::Context) -> Color32` |
-| fn | `card` | `theme.rs:43` | `pub fn card(ctx: &egui::Context) -> Color32` |
-| fn | `raised` | `theme.rs:47` | `pub fn raised(ctx: &egui::Context) -> Color32` —  hover and pressed neutral fills, popups, chips |
-| fn | `line` | `theme.rs:51` | `pub fn line(ctx: &egui::Context) -> Color32` —  Dividers and card outlines. Never the edge of a control: that is `edge`. |
-| fn | `edge` | `theme.rs:55` | `pub fn edge(ctx: &egui::Context) -> Color32` —  The edge of buttons, fields and checkboxes (3:1 against the page and the card). |
-| fn | `text` | `theme.rs:58` | `pub fn text(ctx: &egui::Context) -> Color32` |
-| fn | `muted` | `theme.rs:61` | `pub fn muted(ctx: &egui::Context) -> Color32` |
-| fn | `accent` | `theme.rs:64` | `pub fn accent(ctx: &egui::Context) -> Color32` |
-| fn | `on_accent` | `theme.rs:68` | `pub fn on_accent(ctx: &egui::Context) -> Color32` —  Text on an accent fill: white on the plum, ink on the dark pink. |
-| fn | `tint` | `theme.rs:71` | `pub fn tint(ctx: &egui::Context) -> Color32` |
-| fn | `activity` | `theme.rs:75` | `pub fn activity(ctx: &egui::Context) -> Color32` —  Amber: time and attention (running, queued, stale) and nothing else. |
-| fn | `on_activity` | `theme.rs:78` | `pub fn on_activity(ctx: &egui::Context) -> Color32` |
-| fn | `activity_text` | `theme.rs:82` | `pub fn activity_text(ctx: &egui::Context) -> Color32` —  The activity colour as text (on `warm`). |
-| fn | `warm` | `theme.rs:86` | `pub fn warm(ctx: &egui::Context) -> Color32` —  Background of the busy chip and the stale band. |
-| fn | `success` | `theme.rs:89` | `pub fn success(ctx: &egui::Context) -> Color32` |
-| fn | `danger` | `theme.rs:92` | `pub fn danger(ctx: &egui::Context) -> Color32` |
-| fn | `scrim` | `theme.rs:96` | `pub fn scrim(alpha: u8) -> Color32` —  The black scrim behind a sheet and under a shadow (a veil, not a palette colour). |
-| struct | `Look` | `theme.rs:102` | fields: `dark`, `high_contrast`, `reduce_motion` —  The settings of the look that are not the light or dark colours. |
-| fn | `look` | `theme.rs:115` | `pub fn look(ctx: &egui::Context) -> Look` —  The look that was installed last (`apply_look`). |
-| fn | `reduce_motion` | `theme.rs:119` | `pub fn reduce_motion(ctx: &egui::Context) -> bool` |
-| fn | `canvas_mode` | `theme.rs:124` | `pub fn canvas_mode(ctx: &egui::Context, follow_theme: bool) -> Mode` —  The mode of the canvas that is drawn: dark by default also in a light window, the mode of the look when `follow_theme`. |
-| struct | `Ink` | `theme.rs:131` | fields: `mode`, `bg`, `text`, `muted`, `chip`, `line`, `edge` —  Everything drawn on the canvas, in the colours of the canvas and not of the window (a light window can hold a dark canvas): the viewport and the |
-| fn | `ink` | `theme.rs:144` | `pub fn ink(ctx: &egui::Context, follow_theme: bool) -> Ink` |
-| fn | `ink_of` | `theme.rs:148` | `pub fn ink_of(m: Mode) -> Ink` |
-| fn | `with_alpha` | `theme.rs:154` | `pub fn with_alpha(c: Color32, a: u8) -> Color32` —  A colour with the given opacity (0 to 255), not premultiplied. |
-| fn | `system_high_contrast` | `theme.rs:159` | `pub fn system_high_contrast() -> bool` —  True when the system asks for High Contrast: read from Windows (`SPI_GETHIGHCONTRAST`); other platforms have no such flag we read yet. |
-| fn | `resolve_contrast` | `theme.rs:191` | `pub fn resolve_contrast(setting: &str) -> bool` —  The High contrast setting ("auto", "standard", "high") as a yes or no. |
-| fn | `apply` | `theme.rs:200` | `pub fn apply(ctx: &egui::Context)` —  Light visuals (what tests and the first frame use). |
-| fn | `apply_mode` | `theme.rs:247` | `pub fn apply_mode(ctx: &egui::Context, dark: bool)` —  Light or dark with the other options of the look as they were last set (`apply_look`). |
-| fn | `apply_look` | `theme.rs:254` | `pub fn apply_look(ctx: &egui::Context, look: Look)` —  Installs the light and the dark look and makes `look.dark` the active one. Both are installed every time (it is cheap) so nothing depends on |
-| fn | `install_fonts` | `theme.rs:299` | `pub fn install_fonts(ctx: &egui::Context)` —  Installs the fonts that are available (see the module comment). Anything missing falls back to egui's own fonts. |
+| fn | `title_family` | `theme.rs:13` | `pub fn title_family() -> FontFamily` —  The family that once held the serif italic of page titles (ADR 123 retired it: nothing is drawn in it, it falls back to the interface face). |
+| fn | `title` | `theme.rs:18` | `pub fn title(size: f32) -> FontId` —  A heading: the plain interface face, smaller than the size asked for (the sizes were chosen for a display italic; ADR 123). |
+| fn | `rgb` | `theme.rs:23` | `pub fn rgb(c: Rgb) -> Color32` —  A token colour as an egui colour. |
+| fn | `is_dark` | `theme.rs:28` | `pub fn is_dark(ctx: &egui::Context) -> bool` —  True when the colours are the dark ones (`apply_mode`). |
+| fn | `mode` | `theme.rs:32` | `pub fn mode(ctx: &egui::Context) -> Mode` |
+| fn | `role` | `theme.rs:37` | `pub fn role(ctx: &egui::Context, p: Pair) -> Color32` —  The value of a token in the look that is active. |
+| fn | `page` | `theme.rs:41` | `pub fn page(ctx: &egui::Context) -> Color32` |
+| fn | `card` | `theme.rs:44` | `pub fn card(ctx: &egui::Context) -> Color32` |
+| fn | `raised` | `theme.rs:48` | `pub fn raised(ctx: &egui::Context) -> Color32` —  hover and pressed neutral fills, popups, chips |
+| fn | `line` | `theme.rs:52` | `pub fn line(ctx: &egui::Context) -> Color32` —  Dividers and card outlines. Never the edge of a control: that is `edge`. |
+| fn | `edge` | `theme.rs:56` | `pub fn edge(ctx: &egui::Context) -> Color32` —  The edge of buttons, fields and checkboxes (3:1 against the page and the card). |
+| fn | `text` | `theme.rs:59` | `pub fn text(ctx: &egui::Context) -> Color32` |
+| fn | `muted` | `theme.rs:62` | `pub fn muted(ctx: &egui::Context) -> Color32` |
+| fn | `accent` | `theme.rs:65` | `pub fn accent(ctx: &egui::Context) -> Color32` |
+| fn | `on_accent` | `theme.rs:69` | `pub fn on_accent(ctx: &egui::Context) -> Color32` —  Text on an accent fill: white on the plum, ink on the dark pink. |
+| fn | `tint` | `theme.rs:72` | `pub fn tint(ctx: &egui::Context) -> Color32` |
+| fn | `activity` | `theme.rs:76` | `pub fn activity(ctx: &egui::Context) -> Color32` —  Amber: time and attention (running, queued, stale) and nothing else. |
+| fn | `activity_text` | `theme.rs:80` | `pub fn activity_text(ctx: &egui::Context) -> Color32` —  The activity colour as text (on `warm`). |
+| fn | `warm` | `theme.rs:84` | `pub fn warm(ctx: &egui::Context) -> Color32` —  Background of the busy chip and the stale band. |
+| fn | `success` | `theme.rs:87` | `pub fn success(ctx: &egui::Context) -> Color32` |
+| fn | `danger` | `theme.rs:90` | `pub fn danger(ctx: &egui::Context) -> Color32` |
+| fn | `scrim` | `theme.rs:94` | `pub fn scrim(alpha: u8) -> Color32` —  The black scrim behind a sheet and under a shadow (a veil, not a palette colour). |
+| struct | `Look` | `theme.rs:100` | fields: `dark`, `high_contrast`, `reduce_motion` —  The settings of the look that are not the light or dark colours. |
+| fn | `look` | `theme.rs:113` | `pub fn look(ctx: &egui::Context) -> Look` —  The look that was installed last (`apply_look`). |
+| fn | `reduce_motion` | `theme.rs:117` | `pub fn reduce_motion(ctx: &egui::Context) -> bool` |
+| fn | `canvas_mode` | `theme.rs:122` | `pub fn canvas_mode(ctx: &egui::Context, follow_theme: bool) -> Mode` —  The mode of the canvas that is drawn: dark by default also in a light window, the mode of the look when `follow_theme`. |
+| struct | `Ink` | `theme.rs:129` | fields: `mode`, `bg`, `text`, `muted`, `chip`, `line`, `edge` —  Everything drawn on the canvas, in the colours of the canvas and not of the window (a light window can hold a dark canvas): the viewport and the |
+| fn | `ink` | `theme.rs:142` | `pub fn ink(ctx: &egui::Context, follow_theme: bool) -> Ink` |
+| fn | `ink_of` | `theme.rs:146` | `pub fn ink_of(m: Mode) -> Ink` |
+| fn | `with_alpha` | `theme.rs:152` | `pub fn with_alpha(c: Color32, a: u8) -> Color32` —  A colour with the given opacity (0 to 255), not premultiplied. |
+| fn | `system_high_contrast` | `theme.rs:157` | `pub fn system_high_contrast() -> bool` —  True when the system asks for High Contrast: read from Windows (`SPI_GETHIGHCONTRAST`); other platforms have no such flag we read yet. |
+| fn | `resolve_contrast` | `theme.rs:189` | `pub fn resolve_contrast(setting: &str) -> bool` —  The High contrast setting ("auto", "standard", "high") as a yes or no. |
+| fn | `apply` | `theme.rs:198` | `pub fn apply(ctx: &egui::Context)` —  Light visuals (what tests and the first frame use). |
+| fn | `apply_mode` | `theme.rs:245` | `pub fn apply_mode(ctx: &egui::Context, dark: bool)` —  Light or dark with the other options of the look as they were last set (`apply_look`). |
+| fn | `apply_look` | `theme.rs:252` | `pub fn apply_look(ctx: &egui::Context, look: Look)` —  Installs the light and the dark look and makes `look.dark` the active one. Both are installed every time (it is cheap) so nothing depends on |
+| fn | `install_fonts` | `theme.rs:307` | `pub fn install_fonts(ctx: &egui::Context)` —  Installs the fonts that are available (see the module comment). Anything missing falls back to egui's own fonts. |
 | type | `Rgb` | `tokens.rs:8` |  An sRGB colour, 8 bits per channel. |
 | enum | `Mode` | `tokens.rs:12` | variants: `Light`, `Dark` —  Which set of colours: the window follows the system, the canvas has its own choice. |
 | struct | `Pair` | `tokens.rs:19` | fields: `light`, `dark` —  A role with one value per mode. |
@@ -246,16 +245,16 @@ classDiagram
 | const | `ON_ACCENT` | `tokens.rs:72` | `Pair` —  text on an accent fill (white on the dark pink fails, ink passes) |
 | const | `TINT` | `tokens.rs:74` | `Pair` —  selected item background (with a 2 px accent bar) |
 | const | `ACTIVITY` | `tokens.rs:76` | `Pair` —  running, queued, stale: fill |
-| const | `ON_ACTIVITY` | `tokens.rs:78` | `Pair` —  text on an activity fill |
-| const | `ACTIVITY_TEXT` | `tokens.rs:80` | `Pair` —  the activity colour used as text (on `ACTIVITY_TINT`) |
-| const | `ACTIVITY_TINT` | `tokens.rs:82` | `Pair` —  background of the busy chip and the stale band |
-| const | `SUCCESS` | `tokens.rs:84` | `Pair` —  saved, converged, passed (always with a glyph and a word) |
-| const | `DANGER` | `tokens.rs:86` | `Pair` —  failed, destructive (always with a glyph and a word) |
-| const | `CANVAS` | `tokens.rs:88` | `Pair` —  viewport and plot background (default dark in both themes) |
-| const | `CHIP` | `tokens.rs:90` | `Pair` —  region number chip background: the canvas colour of the same mode, with `TEXT` on it |
-| const | `REGION_GREY` | `tokens.rs:92` | `Pair` —  fill of regions beyond the sixteenth (slot 17 and up): neutral, told apart by the number chip only |
-| const | `ROLES` | `tokens.rs:96` | `[(&str, Pair)` —  Every role by its name in `tokens.json`. |
-| const | `REGIONS_ON_DARK_CANVAS` | `tokens.rs:120` | `[Rgb` —  Eight region colours for the dark canvas (the default canvas, also in a light window). Any two can touch: checked with all pairs. |
-| const | `REGIONS_ON_LIGHT_CANVAS` | `tokens.rs:124` | `[Rgb` —  Eight region colours for the light canvas (only when Settings says the canvas follows a light theme). |
-| fn | `regions` | `tokens.rs:128` | `pub fn regions(canvas: Mode) -> &'static [Rgb` —  The region palette for the canvas that is drawn. |
+| const | `ON_ACTIVITY` | `tokens.rs:79` | `Pair` —  text on an activity fill |
+| const | `ACTIVITY_TEXT` | `tokens.rs:81` | `Pair` —  the activity colour used as text (on `ACTIVITY_TINT`) |
+| const | `ACTIVITY_TINT` | `tokens.rs:83` | `Pair` —  background of the busy chip and the stale band |
+| const | `SUCCESS` | `tokens.rs:85` | `Pair` —  saved, converged, passed (always with a glyph and a word) |
+| const | `DANGER` | `tokens.rs:87` | `Pair` —  failed, destructive (always with a glyph and a word) |
+| const | `CANVAS` | `tokens.rs:89` | `Pair` —  viewport and plot background (default dark in both themes) |
+| const | `CHIP` | `tokens.rs:91` | `Pair` —  region number chip background: the canvas colour of the same mode, with `TEXT` on it |
+| const | `REGION_GREY` | `tokens.rs:93` | `Pair` —  fill of regions beyond the sixteenth (slot 17 and up): neutral, told apart by the number chip only |
+| const | `ROLES` | `tokens.rs:97` | `[(&str, Pair)` —  Every role by its name in `tokens.json`. |
+| const | `REGIONS_ON_DARK_CANVAS` | `tokens.rs:121` | `[Rgb` —  Eight region colours for the dark canvas (the default canvas, also in a light window). Any two can touch: checked with all pairs. |
+| const | `REGIONS_ON_LIGHT_CANVAS` | `tokens.rs:125` | `[Rgb` —  Eight region colours for the light canvas (only when Settings says the canvas follows a light theme). |
+| fn | `regions` | `tokens.rs:129` | `pub fn regions(canvas: Mode) -> &'static [Rgb` —  The region palette for the canvas that is drawn. |
 | fn | `Pair::get` | `tokens.rs:25` | `pub const fn get(&self, mode: Mode) -> Rgb` |

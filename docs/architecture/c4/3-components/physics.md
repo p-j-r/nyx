@@ -38,7 +38,8 @@ graph TB
     46-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
     44-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     44-. "<div>uses physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    43-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    43-. "<div>uses femcore: material,<br />material::coupled +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    43-. "<div>uses cqed</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
     43-. "<div>uses desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
     43-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
     43-. "<div>uses error, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
@@ -51,16 +52,16 @@ graph TB
     42-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     42-. "<div>uses cqed</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
     42-. "<div>uses crate root, desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
-    42-. "<div>uses spec, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
+    42-. "<div>uses decode, spec +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
     42-. "<div>uses frame, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
 
   end```
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Physics trait and registry](../4-code/physics/trait.md) | 4 | 308 | 25 | The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns. |
-| [Problem envelope](../4-code/physics/envelope.md) | 3 | 566 | 25, 41, 63 | The one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation. |
-| [Descriptors and schemas](../4-code/physics/descriptors.md) | 2 | 344 | 25 | What a physics tells nyx about itself (studies, conditions, parameters) and the JSON Schemas generated from it for the window, the MCP server and the documentation. |
+| [Physics trait and registry](../4-code/physics/trait.md) | 4 | 330 | 25 | The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns. |
+| [Problem envelope](../4-code/physics/envelope.md) | 3 | 1346 | 25, 41, 63 | The one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation. |
+| [Descriptors and schemas](../4-code/physics/descriptors.md) | 2 | 380 | 25 | What a physics tells nyx about itself (studies, conditions, parameters) and the JSON Schemas generated from it for the window, the MCP server and the documentation. |
 | [Result and frame](../4-code/physics/result.md) | 2 | 290 | 25, 56 | SolveResult as plain serialisable data, and the frame a result states for the analysis of its vector fields. |
-| [cQED result payloads](../4-code/physics/cqed.md) | 1 | 254 | 103, 104, 105, 106 | Typed superconducting quantum-circuit payloads (capacitance and inductance matrices, TLS geometry metadata, passive CircuitRom, driven port parameters). |
-| [Test support](../4-code/physics/testsupport.md) | 2 | 233 | 10, 19 | The golden-file harness and the contract-test helpers shared by every physics crate. |
+| [cQED result payloads](../4-code/physics/cqed.md) | 1 | 356 | 103, 104, 105, 106 | Typed superconducting quantum-circuit payloads (capacitance and inductance matrices, TLS geometry metadata, passive CircuitRom, driven port parameters). |
+| [Test support](../4-code/physics/testsupport.md) | 2 | 257 | 10, 19 | The golden-file harness and the contract-test helpers shared by every physics crate. |

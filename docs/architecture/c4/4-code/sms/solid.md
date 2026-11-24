@@ -32,7 +32,7 @@ C4 level 4 (code) of the component **Solid kernel** (`sms.solid`) in the contain
 | [Physics adapter](./adapter.md) | solid | Setup, solve_solid |
 | [Cross-section study kernel](./crosssection.md) | solid | cell_rho |
 | [Floquet kernel](./floquet.md) | solid | Setup, complex_mode_fields |
-| [Low-reflecting boundary](./lrb.md) | solid | Setup, complex_mode_fields |
+| [Low-reflecting boundary](./lrb.md) | solid | Setup, assemble_solid, complex_mode_fields |
 | [Absorbing-layer kernel](./pml.md) | solid | complex_mode_fields, d_matrix, dof_layout, setup |
 
 ## Class diagram

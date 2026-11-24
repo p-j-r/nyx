@@ -97,12 +97,12 @@ rectangle "nyx\n<size:16>[Software System]</size>" <<Boundary-bnl4>> {
 }
 
 nyx.nyxscript --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "One engine command per script call; the path guard\n<size:16>[Rust API]</size>"
-nyx.app.Scriptsandbatch --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: apiref, commandlist +2\n<size:16>[Rust paths]</size>"
+nyx.app.Scriptsandbatch --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: apiref, commandlist +3\n<size:16>[Rust paths]</size>"
 nyx.app.Scriptsandbatch --> nyx.nyxscript <<Relationship-UmVsYXRpb25zaGlw>> : "uses script: crate root, host +1\n<size:16>[Rust paths]</size>"
 nyx.app.Scriptsandbatch --> nyx.app.Shellanddashboard <<Relationship-UmVsYXRpb25zaGlw>> : "uses examples, shell\n<size:16>[Rust paths]</size>"
 nyx.app.Scriptsandbatch --> nyx.app.Lookandwidgets <<Relationship-UmVsYXRpb25zaGlw>> : "uses cvd\n<size:16>[Rust paths]</size>"
 nyx.app.Scriptsandbatch --> nyx.app.Window <<Relationship-UmVsYXRpb25zaGlw>> : "uses app, state\n<size:16>[Rust paths]</size>"
-nyx.app.Inspectortabs --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, project\n<size:16>[Rust paths]</size>"
+nyx.app.Inspectortabs --> nyx.nyxengine <<Relationship-UmVsYXRpb25zaGlw>> : "uses engine: crate root, engine +2\n<size:16>[Rust paths]</size>"
 nyx.app.Inspectortabs --> nyx.app.Shellanddashboard <<Relationship-UmVsYXRpb25zaGlw>> : "uses examples\n<size:16>[Rust paths]</size>"
 nyx.app.Inspectortabs --> nyx.app.Lookandwidgets <<Relationship-UmVsYXRpb25zaGlw>> : "uses fmt, theme\n<size:16>[Rust paths]</size>"
 nyx.app.Inspectortabs --> nyx.app.Viewport <<Relationship-UmVsYXRpb25zaGlw>> : "uses colormap\n<size:16>[Rust paths]</size>"

@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of ems: descri
     properties {
         "adr" "45, 25, 104, 106"
         "code" "crates/nyx-ems/src: lib.rs"
-        "lines" "376"
+        "lines" "444"
         "codeDiagram" "4-code/ems/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed ems problem the kernels read, dec
     properties {
         "adr" "45, 104, 106"
         "code" "crates/nyx-ems/src: problem.rs"
-        "lines" "510"
+        "lines" "908"
         "codeDiagram" "4-code/ems/problem.md"
     }
 }
@@ -19,7 +19,7 @@ modes = component "Mode kernel" "Full-vector mode analysis of a 2D waveguide cro
     properties {
         "adr" "45, 9"
         "code" "crates/nyx-ems/src: modes.rs"
-        "lines" "486"
+        "lines" "526"
         "codeDiagram" "4-code/ems/modes.md"
     }
 }
@@ -27,7 +27,7 @@ modescx = component "Complex-mode kernel" "Complex-valued mode analysis: lossy m
     properties {
         "adr" "45"
         "code" "crates/nyx-ems/src: modes_complex.rs"
-        "lines" "500"
+        "lines" "717"
         "codeDiagram" "4-code/ems/modescx.md"
     }
 }
@@ -35,15 +35,15 @@ axisym = component "Axisymmetric kernel" "Electromagnetic eigenmodes of a body o
     properties {
         "adr" "46"
         "code" "crates/nyx-ems/src: axisym.rs"
-        "lines" "502"
+        "lines" "507"
         "codeDiagram" "4-code/ems/axisym.md"
     }
 }
 cavity = component "3D cavity kernel" "Electromagnetic eigenmodes of 3D cavities and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export." "Rust modules" {
     properties {
         "adr" "45, 104"
-        "code" "crates/nyx-ems/src: cavity.rs"
-        "lines" "1145"
+        "code" "crates/nyx-ems/src: bloch.rs, cavity.rs"
+        "lines" "2145"
         "codeDiagram" "4-code/ems/cavity.md"
     }
 }
@@ -51,7 +51,7 @@ ibc = component "Thin-film IBC and Josephson ROM" "Superconducting thin-film sur
     properties {
         "adr" "104"
         "code" "crates/nyx-ems/src: ibc.rs, rom.rs"
-        "lines" "1577"
+        "lines" "1791"
         "codeDiagram" "4-code/ems/ibc.md"
     }
 }
@@ -59,7 +59,7 @@ driven = component "Driven frequency-domain and PROM" "Driven 3D frequency-domai
     properties {
         "adr" "106"
         "code" "crates/nyx-ems/src: driven.rs, ports.rs"
-        "lines" "2102"
+        "lines" "2575"
         "codeDiagram" "4-code/ems/driven.md"
     }
 }
@@ -67,7 +67,7 @@ optical = component "Optical mode sets" "The mode solvers' results as an Optical
     properties {
         "adr" "45, 21"
         "code" "crates/nyx-ems/src: optical.rs"
-        "lines" "99"
+        "lines" "103"
         "codeDiagram" "4-code/ems/optical.md"
     }
 }

@@ -48,7 +48,7 @@ graph TB
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
 | [Host table](../4-code/connect/hosts.md) | 2 | 219 | 28 | Where each AI host (Claude Code, Claude Desktop, ...) keeps its MCP config and what an entry looks like; the home folder, application-data folders and the operating system. |
-| [Host config](../4-code/connect/config.md) | 1 | 174 | 28 | Reads and rewrites a host's JSON config: status of the nyx entry, connect, disconnect, list. |
-| [Server probe](../4-code/connect/server.md) | 1 | 173 | 28 | Finds the nyx-mcp program, builds the snippet for a host that is not in the table, and does a real MCP handshake against it. |
+| [Host config](../4-code/connect/config.md) | 1 | 185 | 28 | Reads and rewrites a host's JSON config: status of the nyx entry, connect, disconnect, list. |
+| [Server probe](../4-code/connect/server.md) | 1 | 182 | 28 | Finds the nyx-mcp program, builds the snippet for a host that is not in the table, and does a real MCP handshake against it. |
 | [Report](../4-code/connect/report.md) | 2 | 189 | 28, 19 | The machine-readable form of what nyx-connect finds and does, with its JSON Schema. |
 | [Command line](../4-code/connect/cli.md) | 1 | 172 | 28 | The command-line twin of the Connect menu: list, connect, disconnect, test, optionally as JSON. |

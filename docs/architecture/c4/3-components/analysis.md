@@ -45,13 +45,15 @@ graph TB
     76-. "<div>uses tls</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
     76-. "<div>uses modes</div><div style='font-size: 70%'>[Rust paths]</div>" .->81
     76-. "<div>uses samples</div><div style='font-size: 70%'>[Rust paths]</div>" .->79
+    77-. "<div>uses femcore: fem,<br />linalg::driver</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     77-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     77-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    78-. "<div>uses femcore: fem,<br />linalg::dense +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    77-. "<div>uses tls</div><div style='font-size: 70%'>[Rust paths]</div>" .->78
+    78-. "<div>uses femcore: crate root, fem<br />+5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     78-. "<div>uses physics: cqed, crate<br />root +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     78-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->76
-    82-. "<div>uses femcore: mesh</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    82-. "<div>uses physics: crate root,<br />error +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    82-. "<div>uses femcore: fieldexpr,<br />formula +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    82-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     81-. "<div>uses polarization</div><div style='font-size: 70%'>[Rust paths]</div>" .->80
     79-. "<div>uses femcore: fem, fields +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     79-. "<div>uses physics: crate root,<br />error +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
@@ -62,10 +64,10 @@ graph TB
 
 | Component | Files | Lines | Decisions | What it does |
 |---|---:|---:|---|---|
-| [Analysis API](../4-code/analysis/api.md) | 1 | 119 | 56, 103, 105 | The entry points an engine calls: an analysis is a function of a SolveResult and its mesh. |
-| [Capacitance and inductance matrices](../4-code/analysis/capacitance.md) | 1 | 143 | 103 | Maxwell/mutual capacitance and magnetostatic inductance matrix extraction from multi-RHS dfs results. |
-| [cQED quantization and TLS participation](../4-code/analysis/cqed.md) | 3 | 3360 | 105 | KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, and edge-regularized 3D TLS participation ratios. |
-| [Field samples](../4-code/analysis/samples.md) | 1 | 153 | 56 | The modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates. |
+| [Analysis API](../4-code/analysis/api.md) | 1 | 127 | 56, 103, 105 | The entry points an engine calls: an analysis is a function of a SolveResult and its mesh. |
+| [Capacitance and inductance matrices](../4-code/analysis/capacitance.md) | 1 | 1259 | 103 | Maxwell/mutual capacitance and magnetostatic inductance matrix extraction from multi-RHS dfs results. |
+| [cQED quantization and TLS participation](../4-code/analysis/cqed.md) | 4 | 6980 | 105 | KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, and edge-regularized 3D TLS participation ratios. |
+| [Field samples](../4-code/analysis/samples.md) | 1 | 161 | 56 | The modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates. |
 | [Polarization](../4-code/analysis/polarization.md) | 1 | 938 | 56, 21 | Stokes parameters, Poincare sphere and the classification of an optical mode. |
 | [Mode report](../4-code/analysis/modes.md) | 1 | 622 | 56 | One report per mode, a table, the Poincare picture and the degenerate groups. |
-| [Mode figures](../4-code/analysis/figures.md) | 5 | 1756 | 99, 56 | The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named. |
+| [Mode figures](../4-code/analysis/figures.md) | 6 | 5000 | 99, 56 | The cross-section of a result, the phase, sign and scale of a mode, and the figure of its modes (items drawn as SVG or by a small software rasteriser as PNG); no physics is named. |

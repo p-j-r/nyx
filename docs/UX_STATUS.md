@@ -144,3 +144,12 @@ Paul decided the productivity agent does the merge; nothing here has been merged
 * **Checks after the merge:** `cargo test --release -p nyx` (62 + 7 + 1, includes the colour-literal ratchet: `dashboard.rs` 3, `geomui.rs` 3, `scene.rs` 3, `tabs.rs` 9, `viewport.rs` 9, `wfview.rs` 3); `nyx-engine` `sweep`, `contracts` and `layering` tests; clippy `-D warnings`; `check_code_to_adr.sh`; `tools/ux-shots.sh` (96 shots, exit 0). Build in its own target directory (`CARGO_TARGET_DIR`).
 * **Rules that still hold:** jj only, one writer per workspace, never run jj in the default workspace `nyx2`, never push, never commit to `main`, no `cargo fmt` on `crates/app`.
 * **Still needs a person or the OS** (unchanged, see U6): Narrator, real Windows High Contrast, OS-level 150 and 200 percent, a person with a colour-vision difference, keyboard focus on every control, Linux and macOS menu bar.
+
+## Window reset (2026-11-24, ADR 123)
+
+Plan: `docs/ux/UX_RESET_PLAN.md` (shots read from the build of `9480093a`; reference layout: the sibling project `simgui`). Workspace `../nyx3-ux-reset`, based on `main` (`2b2eb575`), bookmarks `ux-reset-1-console`, `ux-reset-2-pml-colour`, `ux-reset-3-chrome`, `ux-reset-4-docs` (a stack, in that order).
+
+Done: GUI subsystem on Windows (no console window; the CLI modes attach to the parent console), PML as one graded hatched grey row read from every physics, plain headings, the bottom strip as a status bar, the stale chip, C4 spec completed (16 files had no component on `main`).
+Not done, in the order of the plan: the script as a dock, the physics as one dropdown and the single row of tabs with an always-on viewport (plan 5), Analysis opened on the field with a mode slider (plan 3), the tab strip that scrolls its first tab half out of view, the header, the unused EB Garamond file and its notice (touches ADR 122's packager), and whether a physics switch writes a version (plan 6, not reproduced).
+Known failing before this work: `app::tests::editing_every_form_starts_nothing` ("the last edit's trial mesh did not come back") fails on `9480093a` too (checked in `../nyx3`); not caused by these steps.
+Checks run on the stack: `cargo test --release -p nyx --bins` 81 pass, that one test fails; `--test cli` 12 pass; `--test colour_literals` pass; clippy `-D warnings` clean for `nyx`; `check_code_to_adr.sh` clean; C4 build exit 0. Not run: the full workspace test, `--test contracts --test layering` (no engine or crate edge changed).

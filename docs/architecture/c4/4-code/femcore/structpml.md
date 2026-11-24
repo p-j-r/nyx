@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Structured absorbing layers** (`femcore.str
 > Structured PML around a box-shaped or geom-model mesh: prisms, hexahedra, quads, labels.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 52](../../../adr/0052-structured-absorbing-layers-in-3d.md), [ADR 5](../../../adr/0005-native-mixed-cell-mesh.md)  
-**Size:** 4 files, 1408 lines.
+**Size:** 4 files, 1468 lines.
 
 ## Files
 
@@ -13,8 +13,8 @@ C4 level 4 (code) of the component **Structured absorbing layers** (`femcore.str
 |---|---:|---|
 | `crates/femcore/src/meshing/pml3.rs` | 69 | Structured absorbing layers around a tetrahedral mesh in a box: prisms on the faces, hexahedra on the edges and corners, the labels and `Pml` entries the solvers read, and the simplex mesh they run on today. |
 | `crates/femcore/src/meshing/pml_box.rs` | 777 | Structured PML generator around a box-shaped physical mesh. |
-| `crates/femcore/src/meshing/pml_geom.rs` | 297 | Structured absorbing layers for a meshed `geom` model (`PmlMode::Structured`). |
-| `crates/femcore/src/meshing/pml_geom3.rs` | 265 | Structured absorbing layers for a meshed 3D `geom` model (`PmlMode::Structured` in 3D, ADR 52): the 3D counterpart of `pml_geom`. |
+| `crates/femcore/src/meshing/pml_geom.rs` | 298 | Structured absorbing layers for a meshed `geom` model (`PmlMode::Structured`). |
+| `crates/femcore/src/meshing/pml_geom3.rs` | 324 | Structured absorbing layers for a meshed 3D `geom` model (`PmlMode::Structured` in 3D, ADR 52): the 3D counterpart of `pml_geom`. |
 
 ## What it uses
 
@@ -24,7 +24,7 @@ C4 level 4 (code) of the component **Structured absorbing layers** (`femcore.str
 | [Finite-element basics](./fem.md) | props | Materials, Pml, PmlDir |
 | [Mesh](./mesh.md) | mesh, mesh::cells, mesh::quality | CellMesh, CellType, SimplexMesh, SplitReport, cell_scaled_jacobian_min |
 | [Meshing facade](./meshing.md) | meshing::geomdrive | MeshedGeom |
-| [3D meshing](./meshing3d.md) | meshing::adapt3d | FaceTable, interface_facets |
+| [3D meshing](./meshing3d.md) | meshing::adapt3d | FaceTable, interface_facets_with_preserved |
 | [Metric fields](./metric.md) | adapt::work | FacetKey, SimplexMesh, bbox_of, facet_key, simplex_to_adapt |
 
 ## Used by
@@ -162,8 +162,8 @@ classDiagram
 | enum | `PmlMode` | `meshing/pml_geom.rs:26` | variants: `Inline`, `Structured` —  How the absorbing layers of a model are meshed. |
 | struct | `PmlReport` | `meshing/pml_geom.rs:36` | fields: `physical_cells`, `layer_quads`, `dropped_cells`, `layers`, `layers3` —  What `structured_pml` built. |
 | fn | `structured_pml` | `meshing/pml_geom.rs:51` | `pub fn structured_pml(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String>` —  Replaces the absorbing layers of a meshed 2D model by structured ones, cut into triangles for the simplex solvers. A model without a |
-| enum | `Native` | `meshing/pml_geom.rs:68` | variants: `Unchanged`, `Cells` —  What `structured_pml_native` returns. |
-| fn | `structured_pml_native` | `meshing/pml_geom.rs:78` | `pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String>` —  The structured layers without the final cut: a mixed triangle/quadrilateral `CellMesh`, for solvers that take quadrilaterals natively. |
+| enum | `Native` | `meshing/pml_geom.rs:69` | variants: `Unchanged`, `Cells` —  What `structured_pml_native` returns. |
+| fn | `structured_pml_native` | `meshing/pml_geom.rs:79` | `pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String>` —  The structured layers without the final cut: a mixed triangle/quadrilateral `CellMesh`, for solvers that take quadrilaterals natively. |
 | enum | `Native3` | `meshing/pml_geom3.rs:28` | variants: `Unchanged`, `Cells` —  What `structured_pml_3d_native` returns. |
-| fn | `structured_pml_3d` | `meshing/pml_geom3.rs:38` | `pub fn structured_pml_3d(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String>` —  Replaces the absorbing layers of a meshed 3D model by structured ones, cut into tetrahedra for the simplex solvers. A model without a |
-| fn | `structured_pml_3d_native` | `meshing/pml_geom3.rs:72` | `pub fn structured_pml_3d_native(g: MeshedGeom) -> Result<Native3, String>` —  The structured layers without the final cut: a mixed tetrahedron / prism / hexahedron `CellMesh` with triangular and quadrilateral |
+| fn | `structured_pml_3d` | `meshing/pml_geom3.rs:40` | `pub fn structured_pml_3d(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String>` —  Replaces the absorbing layers of a meshed 3D model by structured ones, cut into tetrahedra for the simplex solvers. A model without a |
+| fn | `structured_pml_3d_native` | `meshing/pml_geom3.rs:80` | `pub fn structured_pml_3d_native(g: MeshedGeom) -> Result<Native3, String>` —  The structured layers without the final cut: a mixed tetrahedron / prism / hexahedron `CellMesh` with triangular and quadrilateral |

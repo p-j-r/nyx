@@ -5,22 +5,22 @@ C4 level 4 (code) of the component **Low-reflecting boundary** (`sms.lrb`) in th
 > Low-reflecting boundaries for solid mechanics.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md)  
-**Size:** 1 file, 298 lines.
+**Size:** 1 file, 312 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/lrb.rs` | 298 |  |
+| `crates/nyx-sms/src/lrb.rs` | 312 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, linalg::csr, linalg::csr::assembly, linalg::driver, material | C, CCoo, CCsr, Coo, M6, RCsr, c, eigs_complex |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, linalg::csr, linalg::csr::assembly, linalg::driver, material, section | C, CCoo, CCsr, Coo, M6, RCsr, c, eigs_complex, plane_stiffness |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | Discretisation, Scalar, Solution, SolveResult, cell_fields_of |
 | [Typed problem](./problem.md) | problem | Problem |
-| [Solid kernel](./solid.md) | solid | Setup, complex_mode_fields |
+| [Solid kernel](./solid.md) | solid | Setup, assemble_solid, complex_mode_fields |
 
 ## Used by
 
@@ -79,5 +79,5 @@ classDiagram
 | struct | `LrbAssembly` | `lrb.rs:199` | fields: `order`, `d`, `n`, `kf`, `mf`, `cf`, `free`, `n_modes`, `f_search` —  Stage 1 of the solid kernel with low-reflecting boundaries: stiffness, mass and the boundary damping on the free dofs |
 | struct | `LrbSolve` | `lrb.rs:212` | fields: `omegas`, `vectors`, `converged`, `dim` —  Stage 2 output: complex angular frequencies and the free-dof vectors of the converged modes. |
 | fn | `assemble_lrb` | `lrb.rs:220` | `pub fn assemble_lrb( mesh: &Discretisation, spec: &Problem, st: &crate::solid::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, ) -> Result<LrbAssembly, String>` |
-| fn | `solve_lrb_modes` | `lrb.rs:253` | `pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String>` —  Stage 2: the quadratic eigenpairs nearest the search frequency. |
-| fn | `lrb_fields` | `lrb.rs:263` | `pub fn lrb_fields(mesh: &Discretisation, asm: &LrbAssembly, solved: &LrbSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q. |
+| fn | `solve_lrb_modes` | `lrb.rs:267` | `pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String>` —  Stage 2: the quadratic eigenpairs nearest the search frequency. |
+| fn | `lrb_fields` | `lrb.rs:277` | `pub fn lrb_fields(mesh: &Discretisation, asm: &LrbAssembly, solved: &LrbSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and Q. |

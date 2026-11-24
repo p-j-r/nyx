@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the
 > HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description, and opening a results file as a project with its results.
 
 **Decisions:** [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md), [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md), [ADR 107](../../../adr/0107-pure-rust-hdf5-storage-and-packed-lzf-layout.md)  
-**Size:** 3 files, 1501 lines.
+**Size:** 3 files, 1702 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/h5io.rs` | 1167 |  |
-| `crates/nyx-engine/src/results_file.rs` | 186 |  |
-| `crates/nyx-engine/src/xdmf.rs` | 148 |  |
+| `crates/nyx-engine/src/h5io.rs` | 1346 |  |
+| `crates/nyx-engine/src/results_file.rs` | 205 |  |
+| `crates/nyx-engine/src/xdmf.rs` | 151 |  |
 
 ## What it uses
 
@@ -25,7 +25,7 @@ C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the
 | [container `storage` (nyx-storage)](../../3-components/storage.md) | crate root | FieldStorageLayout, PackedComponentMeta, ReadBudgetConfig |
 | [Commands](./commands.md) | engine | Engine |
 | [Job runner and queue](./jobs.md) | jobs | Opened |
-| [Meshing seam](./meshing.md) | meshing | MeshedModel, Mesher |
+| [Meshing seam](./meshing.md) | amr, meshing | MeshedModel, Mesher, project_has_electro_amr |
 | [Project](./project.md) | project | Project |
 
 ## Used by
@@ -33,8 +33,8 @@ C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the
 | Component | Modules | Items |
 |---|---|---|
 | [Commands](./commands.md) | results_file | read_and_mesh, write_snapshot |
-| [Job runner and queue](./jobs.md) | h5io | read_results, write_results |
-| [Store link](./storeLink.md) | h5io, xdmf | file_bytes, write_results, write_xdmf |
+| [Job runner and queue](./jobs.md) | crate root, h5io | L2ShuffleLzfPacked, read_results, write_results_with_options |
+| [Store link](./storeLink.md) | crate root, h5io, xdmf | L2ShuffleLzfPacked, file_bytes, write_results_with_options, write_xdmf |
 
 ## Class diagram
 
@@ -78,6 +78,7 @@ classDiagram
         +mesh SimplexMesh
         +project String
         +results Vec
+        +fields_saved bool
     }
     class fns_h5io_rs {
         <<module h5io.rs>>
@@ -88,10 +89,10 @@ classDiagram
         +write_results(path, project, mesh, results) Result
         +write_results_mode(path, mode, project, mesh, results) Result
         +write_results_with_layout(path, project, mesh, results, layout) Result
+        +write_results_with_options(path, project, mesh, results, layout, save_fields) Result
         +cell_order_text(dim, order) str
         +read_results_summary(path) Result
-        +read_results(path) Result
-        +more_2_functions()
+        +more_3_functions()
     }
   }
   namespace results_file_rs {
@@ -136,20 +137,21 @@ classDiagram
 | fn | `write_results` | `h5io.rs:332` | `pub fn write_results( path: &Path, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)], ) -> Result<(), String>` —  Writes `results` (physics code and result) solved on `mesh` for `project` into a new file at `path`, serially using `L2ShuffleLzfPacked`. |
 | fn | `write_results_mode` | `h5io.rs:343` | `pub fn write_results_mode( path: &Path, mode: H5Mode, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)], ) -> Result<bool, String>` —  The same in the chosen mode (`Serial` uses `L2ShuffleLzfPacked`; `Parallel` returns an error because `hdf5-pure` has no MPI-IO driver). |
 | fn | `write_results_with_layout` | `h5io.rs:360` | `pub fn write_results_with_layout( path: &Path, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)], layout: FieldStorageLayout, ) -> Result<(), String>` —  Writes `results` solved on `mesh` for `project` into `path` using the requested [`FieldStorageLayout`]. |
-| fn | `cell_order_text` | `h5io.rs:513` | `pub fn cell_order_text(dim: usize, order: usize) -> &'static str` —  The text of the `cell_order` attribute: the cell node order of the cell fields and of `cells`. |
-| struct | `PhysicsSummary` | `h5io.rs:577` | fields: `physics`, `study`, `order`, `dim`, `dofs`, `seconds`, `solutions`, `scalars` —  Summary of one solved physics in a results file, read without loading heavy field or mesh arrays. |
-| struct | `ResultsFileInfo` | `h5io.rs:590` | fields: `project`, `dim`, `points`, `cells`, `results` —  Lightweight metadata summary of a results file (`results_file_info`), read via streaming metadata only. |
-| fn | `read_results_summary` | `h5io.rs:599` | `pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String>` —  Reads the header summary of a results file via `File::open_streaming` without loading mesh or field arrays. |
-| struct | `Stored` | `h5io.rs:637` | fields: `mesh`, `project`, `results` —  What a results file holds. |
-| fn | `read_results` | `h5io.rs:646` | `pub fn read_results(path: &Path) -> Result<Stored, String>` —  Reads a results file back using `File::open_streaming` and the default [`ReadBudgetConfig`]. |
-| fn | `read_results_with_budget` | `h5io.rs:651` | `pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result<Stored, String>` —  Reads a results file back using `File::open_streaming` and an explicit [`ReadBudgetConfig`]. |
-| fn | `file_bytes` | `h5io.rs:828` | `pub fn file_bytes(path: &Path) -> u64` —  The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON. |
+| fn | `write_results_with_options` | `h5io.rs:372` | `pub fn write_results_with_options( path: &Path, project: &Project, mesh: &SimplexMesh, results: &[(String, &SolveResult)], layout: FieldStorageLayout, save_fields: bool, ) -> Result<(), String>` —  Writes `results` solved on `mesh` for `project` into `path` using `layout`, optionally omitting all mesh and field arrays when |
+| fn | `cell_order_text` | `h5io.rs:556` | `pub fn cell_order_text(dim: usize, order: usize) -> &'static str` —  The text of the `cell_order` attribute: the cell node order of the cell fields and of `cells`. |
+| struct | `PhysicsSummary` | `h5io.rs:684` | fields: `physics`, `study`, `order`, `dim`, `dofs`, `seconds`, `solutions`, `scalars` —  Summary of one solved physics in a results file, read without loading heavy field or mesh arrays. |
+| struct | `ResultsFileInfo` | `h5io.rs:697` | fields: `project`, `dim`, `points`, `cells`, `results` —  Lightweight metadata summary of a results file (`results_file_info`), read via streaming metadata only. |
+| fn | `read_results_summary` | `h5io.rs:706` | `pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String>` —  Reads the header summary of a results file via `File::open_streaming` without loading mesh or field arrays. |
+| struct | `Stored` | `h5io.rs:755` | fields: `mesh`, `project`, `results`, `fields_saved` —  What a results file holds. |
+| fn | `read_results` | `h5io.rs:766` | `pub fn read_results(path: &Path) -> Result<Stored, String>` —  Reads a results file back using `File::open_streaming` and [`ReadBudgetConfig::from_env()`]. |
+| fn | `read_results_with_budget` | `h5io.rs:771` | `pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result<Stored, String>` —  Reads a results file back using `File::open_streaming` and an explicit [`ReadBudgetConfig`]. |
+| fn | `file_bytes` | `h5io.rs:1007` | `pub fn file_bytes(path: &Path) -> u64` —  The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON. |
 | fn | `Partition::rows` | `h5io.rs:222` | `pub fn rows(&self, n: usize) -> std::ops::Range<usize>` —  The rows `[start, end)` of `n` this process writes; the blocks of all processes tile `0..n` exactly, with sizes differing by at most one. |
 | struct | `Snapshot` | `results_file.rs:13` | fields: `project`, `model`, `results` —  What a results file is written from: the project, the mesh and the latest result of every physics, as they were when the write was asked for. |
 | fn | `write_snapshot` | `results_file.rs:21` | `pub fn write_snapshot(snapshot: &Snapshot, path: &str, parallel: bool, atomic: bool) -> Result<Value, Error>` —  Writes `snapshot` into the HDF5 file `path` and its XDMF description. With `atomic` the file is written under another name and renamed when it |
 | fn | `read_and_mesh` | `results_file.rs:72` | `pub(crate) fn read_and_mesh( registry: &nyx_physics::Registry, mesher: &std::sync::Arc<dyn crate::meshing::Mesher>, library: &std::sync::Arc<femcore::material::Library>, path: &str, progress: &std::sync::Arc<femcore::progress::Progress>, ) -> Result<crate::jobs::Opened, Error>` —  Reads the results file `path`, meshes its project again on the calling thread (under `progress`) and checks that the mesh is the stored one. |
-| fn | `Engine::results_snapshot` | `results_file.rs:129` | `pub fn results_snapshot(&self) -> Result<Snapshot, Error>` —  The project, the mesh and the latest result of every solved physics, to be written to a file (`write_snapshot`). |
-| fn | `Engine::export_results` | `results_file.rs:147` | `pub fn export_results(&self, path: &str, parallel: bool) -> Result<Value, Error>` —  Writes the project, the mesh and the latest result of every solved physics into an HDF5 file, and waits for it. With `parallel` the file |
-| fn | `Engine::open_results` | `results_file.rs:155` | `pub fn open_results(&mut self, path: &str) -> Result<Value, Error>` —  Opens a results file: its project becomes the project, the project is meshed again and the stored results become the latest results |
-| fn | `Engine::results_file_info` | `results_file.rs:161` | `pub fn results_file_info(&self, path: &str) -> Result<Value, Error>` —  What a results file holds: the project title, the mesh size and, per physics, the study, the solutions and the scalars. |
+| fn | `Engine::results_snapshot` | `results_file.rs:148` | `pub fn results_snapshot(&self) -> Result<Snapshot, Error>` —  The project, the mesh and the latest result of every solved physics, to be written to a file (`write_snapshot`). |
+| fn | `Engine::export_results` | `results_file.rs:166` | `pub fn export_results(&self, path: &str, parallel: bool) -> Result<Value, Error>` —  Writes the project, the mesh and the latest result of every solved physics into an HDF5 file, and waits for it. With `parallel` the file |
+| fn | `Engine::open_results` | `results_file.rs:174` | `pub fn open_results(&mut self, path: &str) -> Result<Value, Error>` —  Opens a results file: its project becomes the project, the project is meshed again and the stored results become the latest results |
+| fn | `Engine::results_file_info` | `results_file.rs:180` | `pub fn results_file_info(&self, path: &str) -> Result<Value, Error>` —  What a results file holds: the project title, the mesh size and, per physics, the study, the solutions and the scalars. |
 | fn | `write_xdmf` | `xdmf.rs:30` | `pub fn write_xdmf( h5_path: &Path, mesh: &SimplexMesh, results: &[(String, &SolveResult)], ) -> Result<std::path::PathBuf, String>` —  Writes the XDMF description of the results in `h5_path` next to it (same name, extension `.xdmf`). Every physics is a collection of |

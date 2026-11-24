@@ -33,13 +33,13 @@ graph TB
     41-. "<div>Mesh, materials</div><div style='font-size: 70%'>[Rust API]</div>" .->98
     49-. "<div>uses femcore: material::spec,<br />progress</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     49-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    49-. "<div>uses electro</div><div style='font-size: 70%'>[Rust paths]</div>" .->52
+    49-. "<div>uses electro, planar_bem</div><div style='font-size: 70%'>[Rust paths]</div>" .->52
     49-. "<div>uses heat</div><div style='font-size: 70%'>[Rust paths]</div>" .->51
     49-. "<div>uses magneto</div><div style='font-size: 70%'>[Rust paths]</div>" .->53
     49-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
     54-. "<div>uses femcore: fields,<br />material +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     54-. "<div>uses physics: crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
-    52-. "<div>uses femcore: fem, fields +5</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    52-. "<div>uses femcore: adapt::electro,<br />adapt::estimate +14</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     52-. "<div>uses physics: cqed, crate<br />root +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     52-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
     52-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
@@ -52,7 +52,7 @@ graph TB
     53-. "<div>uses common</div><div style='font-size: 70%'>[Rust paths]</div>" .->54
     53-. "<div>uses problem</div><div style='font-size: 70%'>[Rust paths]</div>" .->50
     50-. "<div>uses femcore: material,<br />material::bcs +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
-    50-. "<div>uses physics: decode, error<br />+2</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
+    50-. "<div>uses physics: cqed, decode +3</div><div style='font-size: 70%'>[Rust paths]</div>" .->41
     50-. "<div>uses crate root</div><div style='font-size: 70%'>[Rust paths]</div>" .->49
 
   end

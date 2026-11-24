@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Time, nonlinear, sweeps** (`femcore.laother
 > Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md)  
-**Size:** 10 files, 3627 lines.
+**Size:** 10 files, 3636 lines.
 
 ## Files
 
@@ -15,7 +15,7 @@ C4 level 4 (code) of the component **Time, nonlinear, sweeps** (`femcore.laother
 | `crates/femcore/src/linalg/matfree.rs` | 782 | **Matrix-free high-order operators** by sum factorisation (port item M2): the spectral-element (Gauss–Lobatto, "SEM") stiffness and mass operators on a structured box mesh, applied without ever assembling a matrix. |
 | `crates/femcore/src/linalg/opt.rs` | 577 | Optimisation (port item O1; the role of PETSc `TAO`): **L-BFGS**, **nonlinear conjugate gradients** (Polak–Ribière⁺) with a strong-Wolfe line search for smooth unconstrained problems, and the **method of moving asymptotes** (MMA, Sv... |
 | `crates/femcore/src/linalg/snes.rs` | 577 | Nonlinear solvers for `F(x) = 0` (port item L1; the role of PETSc `SNES`): Newton with a backtracking line search and an optional Jacobian lag, Jacobian-free Newton–Krylov (JFNK) with Eisenstat–Walker forcing, Picard iteration and An... |
-| `crates/femcore/src/linalg/sweep.rs` | 403 | Frequency sweeps by **reduced-order modelling** (port item W1): the response `x(ω)` of `T(ω) x = b`, `T(ω) = Σ_j f_j(ω) A_j` (the split form of [`crate::linalg::nep`]: `K − ω²M + iωC`, dispersive materials, frequency-dependent ... |
+| `crates/femcore/src/linalg/sweep.rs` | 412 | Frequency sweeps by **reduced-order modelling** (port item W1): the response `x(ω)` of `T(ω) x = b`, `T(ω) = Σ_j f_j(ω) A_j` (the split form of [`crate::linalg::nep`]: `K − ω²M + iωC`, dispersive materials, frequency-dependent ... |
 | `crates/femcore/src/linalg/ts/bdf.rs` | 511 | Variable-step, variable-order BDF (orders 1–5) for `M y' + K y = f(t)`. |
 | `crates/femcore/src/linalg/ts/mod.rs` | 100 | Time integration of linear semi-discrete systems (port item T1). |
 | `crates/femcore/src/linalg/ts/newmark.rs` | 164 | Newmark-β and generalised-α (Chung–Hulbert 1993) for `M u'' + C u' + K u = f(t)`, fixed step. |

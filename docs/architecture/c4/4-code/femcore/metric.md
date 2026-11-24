@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Metric fields** (`femcore.metric`) in the c
 > Riemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 5](../../../adr/0005-native-mixed-cell-mesh.md)  
-**Size:** 6 files, 1846 lines.
+**Size:** 6 files, 1855 lines.
 
 ## Files
 
@@ -14,9 +14,9 @@ C4 level 4 (code) of the component **Metric fields** (`femcore.metric`) in the c
 | `crates/femcore/src/adapt/field.rs` | 188 | Metric fields: anything that can return the requested metric at a point. |
 | `crates/femcore/src/adapt/field3.rs` | 147 | Metric field of a tetrahedral background mesh: per-vertex metrics interpolated log-Euclideanly inside the tetrahedra (the 3D counterpart of `BackgroundMetric2`), used to carry the metric of a start mesh to the vertices that adaptation cr... |
 | `crates/femcore/src/adapt/metric.rs` | 1010 | Riemannian metrics for mesh adaptation, generic over dimension `D` (2 or 3). |
-| `crates/femcore/src/adapt/mod.rs` | 25 | Adaptation stack. See the milestone table in `docs/STATUS.md`. |
+| `crates/femcore/src/adapt/mod.rs` | 26 | Adaptation stack. See the milestone table in `docs/STATUS.md`. |
 | `crates/femcore/src/adapt/timer.rs` | 38 | Per-phase wall-clock timers, so every long operation reports where its time went. |
-| `crates/femcore/src/adapt/work.rs` | 438 | Simplex meshes (triangles for `D = 2`, tetrahedra for `D = 3`). |
+| `crates/femcore/src/adapt/work.rs` | 446 | Simplex meshes (triangles for `D = 2`, tetrahedra for `D = 3`). |
 
 ## What it uses
 
@@ -30,12 +30,12 @@ C4 level 4 (code) of the component **Metric fields** (`femcore.metric`) in the c
 | Component | Modules | Items |
 |---|---|---|
 | [Adaptation drivers](./adaptdrive.md) | adapt::field, adapt::metric, adapt::timer, adapt::work | MetricField, Phases, SimplexMesh, Sym |
-| [Adaptation operators](./adaptops.md) | adapt::field, adapt::metric, adapt::work | MetricField, SimplexMesh, Sym, edge_length, facet_key, simplex_signed_measure |
-| [Error estimators](./estimators.md) | adapt, adapt::field, adapt::field3, adapt::metric, adapt::work | BackgroundMetric2, BackgroundMetric3, LpOptions, PlotFields, Sym, complexity_for_elements, intersect, isotropic +5 |
+| [Adaptation operators](./adaptops.md) | adapt::field, adapt::metric, adapt::work | MetricField, SimplexMesh, Sym, edge_length, simplex_signed_measure |
+| [Error estimators](./estimators.md) | adapt, adapt::field, adapt::field3, adapt::metric, adapt::work | BackgroundMetric2, BackgroundMetric3, LpOptions, PlotFields, Sym, complexity_for_elements, elements_for_complexity, from_sizes +10 |
 | [Fixtures and test kit](./fixtures.md) | adapt::metric, adapt::work | SimplexMesh, Sym |
 | [Mesh](./mesh.md) | adapt::metric, adapt::work | FacetKey, SimplexMesh, Sym, det, edge_length, facet_key, identity, length +1 |
 | [Meshing validation harness](./meshcheck.md) | adapt::work | bbox_of |
-| [Meshing facade](./meshing.md) | adapt, adapt::field, adapt::field3, adapt::metric, adapt::work | BackgroundMetric2, BackgroundMetric3, MetricField, Sym, intersect, isotropic, simplex_from_adapt, simplex_to_adapt +1 |
+| [Meshing facade](./meshing.md) | adapt, adapt::field, adapt::field3, adapt::metric, adapt::work | BackgroundMetric2, BackgroundMetric3, MetricField, SimplexMesh, Sym, bbox_of, intersect, isotropic +3 |
 | [3D meshing](./meshing3d.md) | adapt::field3, adapt::metric, adapt::work | BackgroundMetric3, SimplexMesh, Sym, isotropic, simplex_to_adapt |
 | [Structured absorbing layers](./structpml.md) | adapt::work | FacetKey, SimplexMesh, bbox_of, facet_key, simplex_to_adapt |
 | [physics: Result and frame](../physics/result.md) | adapt | PlotFields |
@@ -133,7 +133,7 @@ classDiagram
         +push_cell(vs, label)
         +push_facet(vs, label)
         +signed_measure(p) f64
-        +more_10_methods()
+        +more_11_methods()
     }
     class fns_adapt_work_rs {
         <<module adapt/work.rs>>
@@ -194,7 +194,7 @@ classDiagram
 | fn | `lp_metrics` | `adapt/metric.rs:453` | `pub fn lp_metrics<const D: usize>(hess: &[Sym<D>], vol: &[f64], opt: &LpOptions) -> LpResult<D>` —  Hessian to metric with optimal L^p scaling and complexity targeting. |
 | fn | `lp_metrics_with_threads` | `adapt/metric.rs:458` | `pub fn lp_metrics_with_threads<const D: usize>( hess: &[Sym<D>], vol: &[f64], opt: &LpOptions, nt: usize, ) -> LpResult<D>` —  [`lp_metrics`] with an explicit thread count. |
 | fn | `lp_metrics_unfused` | `adapt/metric.rs:595` | `pub fn lp_metrics_unfused<const D: usize>(hess: &[Sym<D>], vol: &[f64], opt: &LpOptions) -> Vec<Sym<D>>` —  Straightforward multi-pass version of [`lp_metrics`] for benchmarking and tests. |
-| trait | `PlotFields` | `adapt/mod.rs:22` | methods: `plot_fields` —  What the estimators read of a result: the plot fields of every solution as `(flat name, values per dof)`. Implemented for the result |
+| trait | `PlotFields` | `adapt/mod.rs:23` | methods: `plot_fields` —  What the estimators read of a result: the plot fields of every solution as `(flat name, values per dof)`. Implemented for the result |
 | struct | `Phases` | `adapt/timer.rs:7` | fields: `entries` —  Ordered list of `(phase, seconds)`; repeated phases accumulate. |
 | fn | `Phases::time` | `adapt/timer.rs:13` | `pub fn time<R>(&mut self, name: &str, f: impl FnOnce() -> R) -> R` —  Run `f` and record its duration under `name`. |
 | fn | `Phases::add` | `adapt/timer.rs:21` | `pub fn add(&mut self, name: &str, secs: f64)` —  Add `secs` to phase `name`. |
@@ -203,10 +203,10 @@ classDiagram
 | type | `FacetKey` | `adapt/work.rs:13` |  Sorted, padded vertex tuple identifying a facet (edge in 2D, triangle or quad in 3D). |
 | fn | `facet_key` | `adapt/work.rs:16` | `pub fn facet_key(vs: &[u32]) -> FacetKey` —  Build the orientation-independent key of a facet with 2 to 4 vertices. |
 | struct | `SimplexMesh` | `adapt/work.rs:26` | fields: `points`, `cells`, `cell_label`, `facets`, `facet_label` —  Conforming simplex mesh in `D` dimensions. |
-| fn | `simplex_signed_measure` | `adapt/work.rs:231` | `pub fn simplex_signed_measure<const D: usize>(p: &[[f64; D]]) -> f64` —  Signed area (2D) or volume (3D) of the simplex with the given `D + 1` vertices. |
-| fn | `bbox_of` | `adapt/work.rs:251` | `pub fn bbox_of<const D: usize>(pts: &[[f64; D]]) -> [[f64` —  Bounding box of a point set. |
-| fn | `simplex_to_adapt` | `adapt/work.rs:316` | `pub fn simplex_to_adapt<const D: usize>(m: &NyxMesh) -> Result<SimplexMesh<D>, String>` —  A nyx simplex mesh of dimension `D` as the mesher's mesh. |
-| fn | `simplex_from_adapt` | `adapt/work.rs:334` | `pub fn simplex_from_adapt<const D: usize>(m: &SimplexMesh<D>) -> NyxMesh` —  The mesher's simplex mesh as a nyx mesh (edges and numbering of unknowns are rebuilt). |
+| fn | `simplex_signed_measure` | `adapt/work.rs:239` | `pub fn simplex_signed_measure<const D: usize>(p: &[[f64; D]]) -> f64` —  Signed area (2D) or volume (3D) of the simplex with the given `D + 1` vertices. |
+| fn | `bbox_of` | `adapt/work.rs:259` | `pub fn bbox_of<const D: usize>(pts: &[[f64; D]]) -> [[f64` —  Bounding box of a point set. |
+| fn | `simplex_to_adapt` | `adapt/work.rs:324` | `pub fn simplex_to_adapt<const D: usize>(m: &NyxMesh) -> Result<SimplexMesh<D>, String>` —  A nyx simplex mesh of dimension `D` as the mesher's mesh. |
+| fn | `simplex_from_adapt` | `adapt/work.rs:342` | `pub fn simplex_from_adapt<const D: usize>(m: &SimplexMesh<D>) -> NyxMesh` —  The mesher's simplex mesh as a nyx mesh (edges and numbering of unknowns are rebuilt). |
 | fn | `SimplexMesh::n_points` | `adapt/work.rs:44` | `pub fn n_points(&self) -> usize` —  Number of vertices. |
 | fn | `SimplexMesh::n_cells` | `adapt/work.rs:49` | `pub fn n_cells(&self) -> usize` —  Number of cells. |
 | fn | `SimplexMesh::n_facets` | `adapt/work.rs:54` | `pub fn n_facets(&self) -> usize` —  Number of labelled boundary facets. |
@@ -225,5 +225,6 @@ classDiagram
 | fn | `SimplexMesh::boundary_keys` | `adapt/work.rs:166` | `pub fn boundary_keys(&self) -> Vec<FacetKey>` —  Facets that belong to exactly one cell, sorted by key (deterministic). |
 | fn | `SimplexMesh::vertex_volumes` | `adapt/work.rs:175` | `pub fn vertex_volumes(&self) -> Vec<f64>` —  Lumped vertex volumes: each cell gives `measure / (D + 1)` to each of its vertices. |
 | fn | `SimplexMesh::check` | `adapt/work.rs:189` | `pub fn check(&self) -> Result<(), String>` —  Structural and geometric validity check (Tier A properties): |
+| fn | `SimplexMesh::check_with_sheets` | `adapt/work.rs:195` | `pub fn check_with_sheets(&self, interior_sheet_labels: &[i32]) -> Result<(), String>` —  Like [`SimplexMesh::check`], additionally allowing interior facets (`cs.len() == 2`) whose |
 
 Trait implementations in this component: `UniformSize: MetricField`, `BackgroundMetric2: MetricField`, `BackgroundMetric3: MetricField`, `LpOptions: Default`

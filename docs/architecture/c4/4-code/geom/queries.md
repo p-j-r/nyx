@@ -5,15 +5,16 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 > Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data.
 
 **Decisions:** [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md)  
-**Size:** 4 files, 1915 lines.
+**Size:** 5 files, 2319 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/geom/src/labels.rs` | 230 | `LabelMap`: the compiled, deterministic mapping between names and the integer labels the solvers consume. Domain label = region (1-based in overlay order, pins honoured and checked); boundary label = one per facet (ordered by provenance,... |
+| `crates/geom/src/bvh.rs` | 269 |  |
+| `crates/geom/src/labels.rs` | 254 | `LabelMap`: the compiled, deterministic mapping between names and the integer labels the solvers consume. Domain label = region (1-based in overlay order, pins honoured and checked); boundary label = one per facet (ordered by provenance,... |
 | `crates/geom/src/query.rs` | 405 | Exact queries on an evaluated 2D model: measures, curve evaluation with first and second derivatives, curvature radii, chord / facet deviation, edge discretisation by deviation and size, midpoint projection (where a quadratic element put... |
-| `crates/geom/src/select.rs` | 1034 | Selectors: small serialisable rules that resolve against an evaluated complex to typed entity sets (regions, facets, vertices). The text form (`name(core.top) \| interface(Si, BOX)`) parses to the serde form and prints back deterministica... |
+| `crates/geom/src/select.rs` | 1145 | Selectors: small serialisable rules that resolve against an evaluated complex to typed entity sets (regions, facets, vertices). The text form (`name(core.top) \| interface(Si, BOX)`) parses to the serde form and prints back deterministica... |
 | `crates/geom/src/sim.rs` | 246 | Simulation operations as *data*: absorbing-layer regions, mesh size rules, periodic face pairs (verified congruent), and the projection oracle. geom describes which entities and how; femcore decides what a condition means and applies it. |
 
 ## What it uses
@@ -23,7 +24,7 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 | [Evaluation](./evaluation.md) | eval, scene | Evaluated, axis_perm |
 | [Feature list](./featurelist.md) | error, expr, model | Axis, Expr, GeomError, GeomResult, Op, RegionKind |
 | [2D kernel](./kernel2d.md) | complex, curve | Complex, Curve, FaceGeom, curve_kind |
-| [Math helpers](./math.md) | math |  |
+| [Math helpers](./math.md) | math | Aabb, V2 |
 
 ## Used by
 
@@ -33,9 +34,11 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 | [engine: Meshing seam](../engine/meshing.md) | labels, select | EntityKind, EntitySet, LabelMap, Selector |
 | [femcore: Fixtures and test kit](../femcore/fixtures.md) | select | Selector |
 | [femcore: Meshing facade](../femcore/meshing.md) | labels, query, select | DiscretizeOpts, EntityKind, LabelMap, Selector |
-| [femcore: 3D meshing](../femcore/meshing3d.md) | labels, query, select | DiscretizeOpts, EntityKind, LabelMap |
+| [femcore: 3D meshing](../femcore/meshing3d.md) | labels, query, select, sim | DiscretizeOpts, EntityKind, LabelMap, PeriodicPair |
 | [Evaluation](./evaluation.md) | sim | SimData |
 | [Feature list](./featurelist.md) | select | Selector |
+| [2D kernel](./kernel2d.md) | bvh | AabbBvh2, Bbox2, ComplexBvh |
+| [3D kernel](./kernel3d.md) | bvh | ComplexBvh |
 | [Display tessellation](./tessellation.md) | query | DiscretizeOpts |
 
 ## Class diagram
@@ -44,6 +47,47 @@ Public types with their public fields (or variants) and methods, free functions 
 
 ```mermaid
 classDiagram
+  namespace bvh_rs {
+    class Bbox2 {
+        <<struct>>
+        +lo V2
+        +hi V2
+        +new(lo, hi) Self
+        +from_aabb_xy(b) Self
+        +is_empty() bool
+        +grow(p)
+        +union(o) Bbox2
+        +pad(d) Bbox2
+        +contains_point(p, pad) bool
+        +overlaps(o, pad) bool
+        +more_2_methods()
+    }
+    class BvhNode2 {
+        <<struct>>
+        +bbox Bbox2
+        +left_or_start u32
+        +right u32
+        +count u32
+    }
+    class AabbBvh2 {
+        <<struct>>
+        +nodes Vec~BvhNode2~
+        +items Vec~u32~
+        +item_boxes Vec~Bbox2~
+        +build(item_boxes) Self
+        +is_empty() bool
+        +query_point(p, pad, visit)
+        +query_box(target, pad, visit)
+        +query_ray_x(p, pad, visit)
+    }
+    class ComplexBvh {
+        <<struct>>
+        +regions AabbBvh2
+        +loops AabbBvh2
+        +edges AabbBvh2
+        +loop_edge_bvhs Vec
+    }
+  }
   namespace labels_rs {
     class DomainLabel {
         <<struct>>
@@ -71,6 +115,8 @@ classDiagram
         +domains Vec~DomainLabel~
         +boundaries Vec~BoundaryLabel~
         +groups Vec~Group~
+        +sheet_thickness_m BTreeMap
+        +sheet_etch_depth_m BTreeMap
         +boundary(name) Vec~i32~
         +name_of_boundary(id) Option
         +domain(name) Option~i32~
@@ -225,6 +271,10 @@ classDiagram
         +project(p, e) Option~V3~
     }
   }
+  BvhNode2 --> Bbox2
+  AabbBvh2 --> BvhNode2
+  AabbBvh2 --> Bbox2
+  ComplexBvh --> AabbBvh2
   LabelMap --> DomainLabel
   LabelMap --> BoundaryLabel
   LabelMap --> Group
@@ -245,19 +295,38 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
+| struct | `Bbox2` | `bvh.rs:12` | fields: `lo`, `hi` —  2D axis-aligned bounding box in the planar curve `(u, v)` frame. |
+| struct | `BvhNode2` | `bvh.rs:97` | fields: `bbox`, `left_or_start`, `right`, `count` —  One node in a flat `Vec`-backed 2D AABB BVH. |
+| struct | `AabbBvh2` | `bvh.rs:110` | fields: `nodes`, `items`, `item_boxes` —  Flat, deterministic 2D AABB bounding volume hierarchy. |
+| struct | `ComplexBvh` | `bvh.rs:262` | fields: `regions`, `loops`, `edges`, `loop_edge_bvhs` —  Spatial acceleration hierarchy attached to a 2D [`crate::complex::Complex`] (in the 2D curve `(u, v)` frame). |
+| fn | `Bbox2::new` | `bvh.rs:21` | `pub fn new(lo: V2, hi: V2) -> Self` |
+| fn | `Bbox2::from_aabb_xy` | `bvh.rs:26` | `pub fn from_aabb_xy(b: &Aabb) -> Self` |
+| fn | `Bbox2::is_empty` | `bvh.rs:35` | `pub fn is_empty(&self) -> bool` |
+| fn | `Bbox2::grow` | `bvh.rs:40` | `pub fn grow(&mut self, p: V2)` |
+| fn | `Bbox2::union` | `bvh.rs:48` | `pub fn union(&self, o: &Bbox2) -> Bbox2` |
+| fn | `Bbox2::pad` | `bvh.rs:62` | `pub fn pad(&self, d: f64) -> Bbox2` |
+| fn | `Bbox2::contains_point` | `bvh.rs:71` | `pub fn contains_point(&self, p: V2, pad: f64) -> bool` |
+| fn | `Bbox2::overlaps` | `bvh.rs:76` | `pub fn overlaps(&self, o: &Bbox2, pad: f64) -> bool` |
+| fn | `Bbox2::overlaps_ray_x` | `bvh.rs:85` | `pub fn overlaps_ray_x(&self, p: V2, pad: f64) -> bool` —  True if this box overlaps the horizontal ray `[p[0], +inf) x {p[1]}` within `pad`. |
+| fn | `Bbox2::center` | `bvh.rs:90` | `pub fn center(&self) -> V2` |
+| fn | `AabbBvh2::build` | `bvh.rs:118` | `pub fn build(item_boxes: Vec<Bbox2>) -> Self` —  Builds a deterministic top-down median-split 2D BVH over `item_boxes`. |
+| fn | `AabbBvh2::is_empty` | `bvh.rs:165` | `pub fn is_empty(&self) -> bool` |
+| fn | `AabbBvh2::query_point` | `bvh.rs:171` | `pub fn query_point(&self, p: V2, pad: f64, mut visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB (padded by `pad`) contains `p`. |
+| fn | `AabbBvh2::query_box` | `bvh.rs:201` | `pub fn query_box(&self, target: &Bbox2, pad: f64, mut visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB overlaps `target` within `pad`. |
+| fn | `AabbBvh2::query_ray_x` | `bvh.rs:231` | `pub fn query_ray_x(&self, p: V2, pad: f64, mut visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB overlaps the horizontal ray `[p[0], +inf) x {p[1]}` within `pad`. |
 | struct | `DomainLabel` | `labels.rs:12` | fields: `id`, `name`, `region`, `kind`, `pinned` |
 | struct | `BoundaryLabel` | `labels.rs:21` | fields: `id`, `name`, `entities`, `pinned` |
 | struct | `Group` | `labels.rs:31` | fields: `name`, `rule`, `labels` —  A named group of boundary labels and the rule that produced it. |
-| struct | `LabelMap` | `labels.rs:38` | fields: `domains`, `boundaries`, `groups` |
-| fn | `compile` | `labels.rs:82` | `pub fn compile(ev: &Evaluated) -> GeomResult<LabelMap>` |
-| fn | `LabelMap::boundary` | `labels.rs:46` | `pub fn boundary(&self, name: &str) -> Vec<i32>` —  All boundary labels whose name is `name` (a face split into fragments has several). |
-| fn | `LabelMap::name_of_boundary` | `labels.rs:55` | `pub fn name_of_boundary(&self, id: i32) -> Option<&str>` |
-| fn | `LabelMap::domain` | `labels.rs:58` | `pub fn domain(&self, name: &str) -> Option<i32>` |
-| fn | `LabelMap::name_of_domain` | `labels.rs:61` | `pub fn name_of_domain(&self, id: i32) -> Option<&str>` |
-| fn | `LabelMap::edges_of_label` | `labels.rs:64` | `pub fn edges_of_label(&self, id: i32) -> Vec<u32>` |
-| fn | `LabelMap::label_of_edge` | `labels.rs:67` | `pub fn label_of_edge(&self, e: u32) -> Option<i32>` |
-| fn | `Evaluated::label_map` | `labels.rs:210` | `pub fn label_map(&self) -> GeomResult<LabelMap>` |
-| fn | `Evaluated::select_labels` | `labels.rs:215` | `pub fn select_labels(&self, sel: &Selector) -> GeomResult<Vec<i32>>` —  Integer labels (boundary labels for facets, domain labels for regions) a selector resolves to. |
+| struct | `LabelMap` | `labels.rs:38` | fields: `domains`, `boundaries`, `groups`, `sheet_thickness_m`, `sheet_etch_depth_m` |
+| fn | `compile` | `labels.rs:88` | `pub fn compile(ev: &Evaluated) -> GeomResult<LabelMap>` |
+| fn | `LabelMap::boundary` | `labels.rs:52` | `pub fn boundary(&self, name: &str) -> Vec<i32>` —  All boundary labels whose name is `name` (a face split into fragments has several). |
+| fn | `LabelMap::name_of_boundary` | `labels.rs:61` | `pub fn name_of_boundary(&self, id: i32) -> Option<&str>` |
+| fn | `LabelMap::domain` | `labels.rs:64` | `pub fn domain(&self, name: &str) -> Option<i32>` |
+| fn | `LabelMap::name_of_domain` | `labels.rs:67` | `pub fn name_of_domain(&self, id: i32) -> Option<&str>` |
+| fn | `LabelMap::edges_of_label` | `labels.rs:70` | `pub fn edges_of_label(&self, id: i32) -> Vec<u32>` |
+| fn | `LabelMap::label_of_edge` | `labels.rs:73` | `pub fn label_of_edge(&self, e: u32) -> Option<i32>` |
+| fn | `Evaluated::label_map` | `labels.rs:234` | `pub fn label_map(&self) -> GeomResult<LabelMap>` |
+| fn | `Evaluated::select_labels` | `labels.rs:239` | `pub fn select_labels(&self, sel: &Selector) -> GeomResult<Vec<i32>>` —  Integer labels (boundary labels for facets, domain labels for regions) a selector resolves to. |
 | struct | `DiscretizeOpts` | `query.rs:22` | fields: `max_dev`, `max_len` |
 | struct | `Fractions` | `query.rs:29` | fields: `u`, `v` —  Parametric position on an entity: one fraction along an edge (`v` is 0), two for a face. |
 | fn | `Evaluated::length` | `query.rs:38` | `pub fn length(&self, edge: u32) -> f64` —  Length of an edge. |
@@ -292,9 +361,9 @@ classDiagram
 | fn | `Selector::or` | `select.rs:505` | `pub fn or(self, o: Selector) -> Selector` |
 | fn | `Selector::and` | `select.rs:508` | `pub fn and(self, o: Selector) -> Selector` |
 | fn | `Selector::minus` | `select.rs:511` | `pub fn minus(self, o: Selector) -> Selector` |
-| fn | `Evaluated::resolve` | `select.rs:882` | `pub fn resolve(&self, sel: &Selector) -> GeomResult<Resolved>` —  Resolves a selector to an entity set plus warnings (an empty result is a warning, not an error). |
-| fn | `Evaluated::resolve_inner` | `select.rs:886` | `pub(crate) fn resolve_inner(&self, sel: &Selector, no_id: bool) -> GeomResult<Resolved>` |
-| fn | `Evaluated::suggest` | `select.rs:897` | `pub fn suggest(&self, picked: &EntitySet) -> Vec<Selector>` —  Selectors, simplest first, that each resolve to exactly `picked`; empty if none does. |
+| fn | `Evaluated::resolve` | `select.rs:993` | `pub fn resolve(&self, sel: &Selector) -> GeomResult<Resolved>` —  Resolves a selector to an entity set plus warnings (an empty result is a warning, not an error). |
+| fn | `Evaluated::resolve_inner` | `select.rs:997` | `pub(crate) fn resolve_inner(&self, sel: &Selector, no_id: bool) -> GeomResult<Resolved>` |
+| fn | `Evaluated::suggest` | `select.rs:1008` | `pub fn suggest(&self, picked: &EntitySet) -> Vec<Selector>` —  Selectors, simplest first, that each resolve to exactly `picked`; empty if none does. |
 | struct | `PmlRegion` | `sim.rs:11` | fields: `region`, `parent`, `window`, `sides`, `thickness`, `layers`, `grading` |
 | struct | `SizeRule` | `sim.rs:24` | fields: `feature`, `entities`, `h`, `max_dev`, `min_layers` |
 | struct | `PeriodicPair` | `sim.rs:33` | fields: `feature`, `a`, `b`, `translation`, `checked_congruent` |

@@ -11,7 +11,7 @@ config = component "Host config" "Reads and rewrites a host's JSON config: statu
     properties {
         "adr" "28"
         "code" "crates/nyx-connect/src: config.rs"
-        "lines" "174"
+        "lines" "185"
         "codeDiagram" "4-code/connect/config.md"
     }
 }
@@ -19,7 +19,7 @@ server = component "Server probe" "Finds the nyx-mcp program, builds the snippet
     properties {
         "adr" "28"
         "code" "crates/nyx-connect/src: server.rs"
-        "lines" "173"
+        "lines" "182"
         "codeDiagram" "4-code/connect/server.md"
     }
 }

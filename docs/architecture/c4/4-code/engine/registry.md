@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 > The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 1 file, 103 lines.
+**Size:** 1 file, 106 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/lib.rs` | 103 |  |
+| `crates/nyx-engine/src/lib.rs` | 106 |  |
 
 ## What it uses
 
@@ -61,5 +61,5 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| fn | `registry` | `lib.rs:67` | `pub fn registry() -> Registry` —  The physics compiled into this build: `dfs`, `sms`, `ems`, each behind the cargo feature of the same name. |
-| fn | `physics_for` | `lib.rs:80` | `pub fn physics_for<'a>(registry: &'a Registry, id: &str) -> Result<&'a dyn nyx_physics::Physics, Error>` —  Looks up the physics a problem names; the error text lists what this build has. |
+| fn | `registry` | `lib.rs:70` | `pub fn registry() -> Registry` —  The physics compiled into this build: `dfs`, `sms`, `ems`, each behind the cargo feature of the same name. |
+| fn | `physics_for` | `lib.rs:83` | `pub fn physics_for<'a>(registry: &'a Registry, id: &str) -> Result<&'a dyn nyx_physics::Physics, Error>` —  Looks up the physics a problem names; the error text lists what this build has. |

@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 > The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, problem bundles and test-problem generators.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 17 files, 4131 lines.
+**Size:** 17 files, 4388 lines.
 
 ## Files
 
@@ -21,7 +21,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | `crates/femcore/src/linalg/faer_glue.rs` | 305 | Everything that touches `faer`'s dense API. |
 | `crates/femcore/src/linalg/kernels.rs` | 253 | Chunk-level numerical kernels, written once and instantiated for `f64` and `Complex<f64>`. |
 | `crates/femcore/src/linalg/linop.rs` | 133 | Operator and preconditioner interfaces. |
-| `crates/femcore/src/linalg/maxwell.rs` | 376 | A small **Nédélec (edge element) test-problem generator**: lowest-order `H(curl)` elements on a structured tetrahedral mesh of the unit cube with perfect-electric-conductor walls. |
+| `crates/femcore/src/linalg/maxwell.rs` | 633 | A small **Nédélec (edge element) test-problem generator**: lowest-order `H(curl)` elements on a structured tetrahedral mesh of the unit cube with perfect-electric-conductor walls. |
 | `crates/femcore/src/linalg/mm.rs` | 292 | Matrix Market (`.mtx`) reading and writing: the export format of port item V1. |
 | `crates/femcore/src/linalg/mod.rs` | 73 | # solvers |
 | `crates/femcore/src/linalg/par.rs` | 120 | Deterministic chunk parallelism. |
@@ -33,6 +33,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 
 | Target | Modules | Items |
 |---|---|---|
+| [Finite-element basics](./fem.md) | fem | quad_rule |
 | [Runtime services](./runtime.md) | par | threads |
 
 ## Used by
@@ -40,26 +41,28 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::dense, linalg::scalar | C64, Dense, Scalar, hermitian_eig, solve_small |
-| [dfs: Electrostatics kernel](../dfs/electro.md) | linalg::csr::assembly | RCsr |
+| [analysis: Mode figures](../analysis/figures.md) | linalg::csr::assembly | C |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | linalg::csr::assembly, linalg::par, linalg::vecops | Coo, RCsr, chunk_map, dotu |
 | [dfs: Heat kernel](../dfs/heat.md) | linalg::csr::assembly | RCsr |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | linalg::csr::assembly | Coo |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Coo, RCsr, c |
-| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
-| [ems: Mode kernel](../ems/modes.md) | linalg::csr, linalg::csr::assembly | CCoo, Coo, RCsr |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue | C, CCoo, CCsr, Coo, Dense, RCsr, c, generalized_eig_c64 |
+| [ems: Mode kernel](../ems/modes.md) | linalg::csr, linalg::csr::assembly | CCoo, Coo, RCsr, c |
 | [ems: Complex-mode kernel](../ems/modescx.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [ems: Optical mode sets](../ems/optical.md) | linalg::csr::assembly | c |
+| [ems: Typed problem](../ems/problem.md) | linalg::csr::assembly | c |
 | [engine: Commands](../engine/commands.md) | linalg::csr::assembly | C |
 | [Error estimators](./estimators.md) | linalg::csr::assembly | C |
 | [Expressions](./expr.md) | linalg::csr::assembly | C |
 | [Finite-element basics](./fem.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
 | [Direct solvers](./ladirect.md) | linalg::csr, linalg::faer_glue, linalg::linop, linalg::scalar, linalg::vecops | C64, Csr, FaerScalar, LinearOperator, Preconditioner, Scalar, axpy, clear_upper_vector_state +6 |
-| [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar +1 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +3 |
+| [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar +1 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +5 |
 | [Eigensolvers](./laeigen.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop +3 | Basis, BasisView, C64, Csr, Dense, DenseError, FaerScalar, Identity +16 |
 | [Krylov solvers](./laksp.md) | linalg::basis, linalg::dense, linalg::linop, linalg::rng, linalg::scalar, linalg::vecops | Basis, C64, Dense, LinearOperator, Preconditioner, Scalar, Scaling, axpy +5 |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::csr, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar +1 | C64, Csr, Dense, FaerScalar, FnOperator, Identity, LinearOperator, Preconditioner +7 |
-| [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar | C64, Csr, FaerScalar, Preconditioner, RCsr, Scalar |
+| [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar | C64, Csr, FaerScalar, Preconditioner, RCsr, RawCols, Scalar, chunk_map +1 |
 | [Optical mode sets](./optical.md) | linalg::csr, linalg::csr::assembly | C, c |
 | [Runtime services](./runtime.md) | linalg::scalar | C64, Scalar |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
@@ -335,12 +338,25 @@ classDiagram
         +pi slice
         +n usize
     }
+    class EdgeElementP2Cube {
+        <<struct>>
+        +stiffness Csr~f64~
+        +mass Csr~f64~
+        +p1_to_p2 Csr~f64~
+        +gradient_p1 Csr~f64~
+        +gradient_p2 Csr~f64~
+        +coords Vec
+        +edge_vectors Vec
+        +blocks Vec
+        +more_2_fields
+    }
     class fns_linalg_maxwell_rs {
         <<module linalg/maxwell.rs>>
         ~cube_coord(n, g) slice
         ~cube_mesh(n) CubeMesh
         +nedelec_cube(n) EdgeElementCube
         +raviart_thomas_cube(n) FaceElementCube
+        +nedelec_p2_cube(n) EdgeElementP2Cube
     }
   }
   namespace linalg_mm_rs {
@@ -434,6 +450,7 @@ classDiagram
   O ..|> LinearOperator
   EdgeElementCube --> Csr
   FaceElementCube --> Csr
+  EdgeElementP2Cube --> Csr
 ```
 
 ## Public items
@@ -597,6 +614,8 @@ classDiagram
 | fn | `nedelec_cube` | `linalg/maxwell.rs:152` | `pub fn nedelec_cube(n: usize) -> EdgeElementCube` —  Generates the cube problem with `n ≥ 2` cells per side. |
 | struct | `FaceElementCube` | `linalg/maxwell.rs:207` | fields: `div_stiffness`, `mass`, `curl`, `pi`, `n` —  Matrices of the lowest-order **Raviart–Thomas** (`H(div)`, face element) space on the same mesh, with the |
 | fn | `raviart_thomas_cube` | `linalg/maxwell.rs:222` | `pub fn raviart_thomas_cube(n: usize) -> FaceElementCube` —  Generates the Raviart–Thomas test problem on the `n × n × n` Kuhn mesh (`n ≥ 2`). |
+| struct | `EdgeElementP2Cube` | `linalg/maxwell.rs:320` | fields: `stiffness`, `mass`, `p1_to_p2`, `gradient_p1`, `gradient_p2`, `coords`, `edge_vectors`, `blocks`, `n`, `n_tets` —  Hierarchical second-order ($P_2$) Nédélec first-kind edge-element cube problem (`H(curl)` with |
+| fn | `nedelec_p2_cube` | `linalg/maxwell.rs:344` | `pub fn nedelec_p2_cube(n: usize) -> EdgeElementP2Cube` —  Generates the hierarchical $P_2$ Nédélec cube problem on an `n × n × n` Kuhn tetrahedral mesh (`n ≥ 2`). |
 | enum | `MmError` | `linalg/mm.rs:18` | variants: `Io`, `Parse`, `ComplexIntoReal` |
 | fn | `write_matrix` | `linalg/mm.rs:52` | `pub fn write_matrix<T: Scalar, W: Write>(mut w: W, a: &Csr<T>) -> Result<(), MmError>` —  Writes `a` in coordinate format, exploiting symmetry/Hermitian structure when exact. |
 | fn | `write_vectors` | `linalg/mm.rs:83` | `pub fn write_vectors<T: Scalar, W: Write>(mut w: W, data: &[T], n: usize, ncols: usize) -> Result<(), MmError>` —  Writes column vectors (`n × ncols`, column-major) in dense array format. |

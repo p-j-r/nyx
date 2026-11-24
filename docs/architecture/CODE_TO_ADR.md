@@ -26,7 +26,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/UX_STATUS.md` | 20, 88 | handoff for the UX review and plan |
 | `docs/HOST_SETUP.md` | 97, 98, 94 | what costs time when an AI host drives nyx, and what to set in the host and do in the agent |
 | `docs/LATENCY_STATUS.md` | 97, 20 | handoff for the latency work L1 to L3 |
-| `docs/ux/*` | 88 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
+| `docs/ux/*` | 88, 123 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
 | `docs/FRAME_UNIFICATION_STATUS.md` | 1 | |
 | `docs/KERNEL_PORT_STATUS.md` | 1, 9, 10, 12 | |
 | `docs/GEOMETRY_ARCHITECTURE.md` | 2, 3, 18 | historical |
@@ -181,7 +181,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | feature `portable-kernels` |
 | `crates/nyx-storage/*` | 107, 62, 99 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer, XDMF, sweep checkpoint |
 | `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
-| `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88 | colour tokens as data, the looks built from them, the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
+| `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123 | colour tokens as data, the looks built from them, the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
+| `crates/app/src/console.rs` | 123, 122 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
 | `crates/app/src/{feedback,spans}.rs` | 92 | the problem and size lines of an edit, the polarization thread, and the timing spans of the frame log |
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23 | |

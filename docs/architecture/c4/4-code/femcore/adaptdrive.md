@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Adaptation drivers** (`femcore.adaptdrive`)
 > Passes of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md)  
-**Size:** 4 files, 720 lines.
+**Size:** 4 files, 721 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/adapt/drive.rs` | 211 | The adaptation driver: iterate split, collapse, flip and smooth passes until the mesh conforms to the metric field. |
-| `crates/femcore/src/adapt/drive3.rs` | 160 | The 3D adaptation driver: iterate split, collapse, flip and smooth passes until the mesh conforms to the metric field (the 3D counterpart of `drive`, with the operators of `ops3`). |
+| `crates/femcore/src/adapt/drive3.rs` | 161 | The 3D adaptation driver: iterate split, collapse, flip and smooth passes until the mesh conforms to the metric field (the 3D counterpart of `drive`, with the operators of `ops3`). |
 | `crates/femcore/src/adapt/geom.rs` | 132 | Geometry oracle for 2D: where may a vertex of a boundary or interface chain go? |
 | `crates/femcore/src/adapt/geom3.rs` | 217 | Geometry oracle for 3D: where may a vertex of a surface patch or a crease curve go? |
 
@@ -30,7 +30,7 @@ C4 level 4 (code) of the component **Adaptation drivers** (`femcore.adaptdrive`)
 |---|---|---|
 | [Adaptation operators](./adaptops.md) | adapt::drive, adapt::geom, adapt::geom3 | AdaptOptions, Geometry2, Geometry3 |
 | [Error estimators](./estimators.md) | adapt::drive3 | adapt3 |
-| [Meshing facade](./meshing.md) | adapt::drive, adapt::drive3, adapt::geom | AdaptOptions, AdaptReport, Geometry2, adapt2_with, adapt3 |
+| [Meshing facade](./meshing.md) | adapt::drive, adapt::drive3, adapt::geom | AdaptOptions, AdaptReport, Geometry2, PolylineGeometry, adapt2_with, adapt3 |
 | [3D meshing](./meshing3d.md) | adapt::drive, adapt::drive3, adapt::geom3 | AdaptReport, FacetGeometry, Geometry3, adapt3_with |
 
 ## Class diagram

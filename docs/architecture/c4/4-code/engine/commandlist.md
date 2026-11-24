@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Command lists** (`engine.commandlist`) in t
 > A JSON-lines list of engine commands is parsed, checked against the catalog and its schemas, planned on a scratch engine (what would be meshed and solved, nothing run) and run in order through Engine::call.
 
 **Decisions:** [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md)  
-**Size:** 1 file, 588 lines.
+**Size:** 1 file, 618 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/commandlist.rs` | 588 |  |
+| `crates/nyx-engine/src/commandlist.rs` | 618 |  |
 
 ## What it uses
 
@@ -21,6 +21,7 @@ C4 level 4 (code) of the component **Command lists** (`engine.commandlist`) in t
 | [container `store` (nyx-store)](../../3-components/store.md) | util | hash_bytes |
 | [API reference](./apiref.md) | apiref | nearest |
 | [Commands](./commands.md) | commands, engine | Access, Engine |
+| [Job runner and queue](./jobs.md) | convergence | Limits, Matching |
 
 ## Used by
 
@@ -106,11 +107,11 @@ classDiagram
 | struct | `Step` | `commandlist.rs:63` | fields: `line`, `cmd`, `kind`, `summary` —  One line of the plan: what the line would do. |
 | struct | `Report` | `commandlist.rs:73` | fields: `commands`, `hash`, `problems`, `steps`, `meshes`, `solves` —  The outcome of `check_list`. |
 | fn | `parse` | `commandlist.rs:93` | `pub fn parse(text: &str) -> (Vec<Line>, Vec<Problem>)` —  Reads a list. Problems come back with the lines that parsed, so a front-end can show them all at once. |
-| struct | `Done` | `commandlist.rs:498` | fields: `line`, `reply`, `seconds`, `stage`, `since_cancel` —  What the observer of `run` is told after each command. |
-| struct | `RunError` | `commandlist.rs:510` | fields: `line`, `cmd`, `message` —  Why a run stopped. |
-| fn | `run` | `commandlist.rs:524` | `pub fn run(engine: &mut Engine, lines: &[Line], observe: &mut dyn FnMut(&Done)) -> Result<(), RunError>` —  Sends the lines to `engine` in order. The run stops at the first command that fails (unless the line expects an error) and at a replay key that |
+| struct | `Done` | `commandlist.rs:528` | fields: `line`, `reply`, `seconds`, `stage`, `since_cancel` —  What the observer of `run` is told after each command. |
+| struct | `RunError` | `commandlist.rs:540` | fields: `line`, `cmd`, `message` —  Why a run stopped. |
+| fn | `run` | `commandlist.rs:554` | `pub fn run(engine: &mut Engine, lines: &[Line], observe: &mut dyn FnMut(&Done)) -> Result<(), RunError>` —  Sends the lines to `engine` in order. The run stops at the first command that fails (unless the line expects an error) and at a replay key that |
 | fn | `Report::ok` | `commandlist.rs:87` | `pub fn ok(&self) -> bool` |
-| fn | `Engine::check_list` | `commandlist.rs:267` | `pub fn check_list(&self, text: &str) -> Report` —  Checks a list: first every line against the catalog, then, when those pass, a dry run on a copy of this engine. Nothing is meshed, solved or |
-| fn | `Engine::check_static` | `commandlist.rs:288` | `pub fn check_static(&self, lines: &[Line]) -> Vec<Problem>` —  The static stage: every command is in the catalog and its arguments fit its schema. |
+| fn | `Engine::check_list` | `commandlist.rs:268` | `pub fn check_list(&self, text: &str) -> Report` —  Checks a list: first every line against the catalog, then, when those pass, a dry run on a copy of this engine. Nothing is meshed, solved or |
+| fn | `Engine::check_static` | `commandlist.rs:289` | `pub fn check_static(&self, lines: &[Line]) -> Vec<Problem>` —  The static stage: every command is in the catalog and its arguments fit its schema. |
 
 Trait implementations in this component: `Problem: Display`, `RunError: Display`

@@ -67,7 +67,7 @@ lrb = component "Low-reflecting boundary" "Low-reflecting boundaries for solid m
     properties {
         "adr" "42"
         "code" "crates/nyx-sms/src: lrb.rs"
-        "lines" "298"
+        "lines" "312"
         "codeDiagram" "4-code/sms/lrb.md"
     }
 }

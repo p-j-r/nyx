@@ -5,16 +5,16 @@ C4 level 4 (code) of the component **Adaptation operators** (`femcore.adaptops`)
 > Edge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md)  
-**Size:** 4 files, 2255 lines.
+**Size:** 4 files, 2512 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/adapt/ops.rs` | 422 | Local mesh operators for 2D metric adaptation: edge split, edge collapse, edge flip, and length-equalising smoothing. |
-| `crates/femcore/src/adapt/ops3.rs` | 903 | Local mesh operators for 3D metric adaptation: edge split, collapse of interior vertices, 3-2 and 2-3 flips, and length-equalising smoothing (the 3D counterparts of `ops`). |
-| `crates/femcore/src/adapt/topo.rs` | 435 | Working mesh for 2D adaptation: triangles, per-vertex metrics, and the classification of vertices and edges that tells the operators what must be preserved. |
-| `crates/femcore/src/adapt/topo3.rs` | 495 | Working mesh for 3D adaptation: tetrahedra, per-vertex metrics, and the classification of vertices that tells the operators what must be preserved (the 3D counterpart of `topo`). |
+| `crates/femcore/src/adapt/ops3.rs` | 1091 | Local mesh operators for 3D metric adaptation: edge split, collapse of interior vertices, 3-2 and 2-3 flips, and length-equalising smoothing (the 3D counterparts of `ops`). |
+| `crates/femcore/src/adapt/topo.rs` | 439 | Working mesh for 2D adaptation: triangles, per-vertex metrics, and the classification of vertices and edges that tells the operators what must be preserved. |
+| `crates/femcore/src/adapt/topo3.rs` | 560 | Working mesh for 3D adaptation: tetrahedra, per-vertex metrics, and the classification of vertices that tells the operators what must be preserved (the 3D counterpart of `topo`). |
 
 ## What it uses
 
@@ -22,7 +22,7 @@ C4 level 4 (code) of the component **Adaptation operators** (`femcore.adaptops`)
 |---|---|---|
 | [Adaptation drivers](./adaptdrive.md) | adapt::drive, adapt::geom, adapt::geom3 | AdaptOptions, Geometry2, Geometry3 |
 | [Mesh](./mesh.md) | mesh::quality | simplex_quality |
-| [Metric fields](./metric.md) | adapt::field, adapt::metric, adapt::work | MetricField, SimplexMesh, Sym, edge_length, facet_key, simplex_signed_measure |
+| [Metric fields](./metric.md) | adapt::field, adapt::metric, adapt::work | MetricField, SimplexMesh, Sym, edge_length, simplex_signed_measure |
 
 ## Used by
 
@@ -99,6 +99,7 @@ classDiagram
         <<enumeration>>
         Bnd
         Iface
+        Sheet
     }
     class ChainInfo {
         <<struct>>
@@ -154,6 +155,7 @@ classDiagram
         <<struct>>
         +sig Sig
         +frozen bool
+        +normal Option
     }
     class CurveInfo {
         <<struct>>
@@ -166,6 +168,7 @@ classDiagram
         +corner_angle_deg f64
         +frozen_labels Vec~i32~
         +fixed_vertices Vec~u32~
+        +interior_sheet_labels Vec~i32~
     }
     class Work3 {
         <<struct>>
@@ -222,42 +225,42 @@ classDiagram
 | fn | `all_edges_of` | `adapt/ops3.rs:109` | `pub fn all_edges_of(w: &Work3) -> Vec<Edge>` —  All edges of the alive tetrahedra, sorted. |
 | fn | `unresolved_frozen` | `adapt/ops3.rs:142` | `pub fn unresolved_frozen(w: &Work3, lmax: f64) -> usize` —  Number of edges on a frozen curve or patch that are longer than `lmax`. |
 | fn | `split_pass` | `adapt/ops3.rs:155` | `pub fn split_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry3, opt: &AdaptOptions3, sample_mid: bool) -> usize` —  Split every edge longer than `opt.lmax`. Returns the number of splits. |
-| fn | `collapse_pass` | `adapt/ops3.rs:415` | `pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize` —  Collapse every edge shorter than `opt.lmin` that can be collapsed (one end moves onto the other, along its patch or curve when it is on one). Returns the number. |
-| fn | `flip_pass` | `adapt/ops3.rs:486` | `pub fn flip_pass(w: &mut Work3) -> usize` —  Quality-improving 3-2 and 2-3 flips of interior edges and faces. Returns the number of flips. |
-| fn | `smooth_pass` | `adapt/ops3.rs:617` | `pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry3, opt: &AdaptOptions3) -> usize` —  One sweep of length-equalising smoothing: every free vertex moves towards the position where its edges would have unit metric length |
-| fn | `edge_removal_pass` | `adapt/ops3.rs:741` | `pub fn edge_removal_pass(w: &mut Work3) -> usize` —  Edge removal: an interior edge with `n` (4 to 7) tetrahedra around it is replaced by the `2(n - 2)` tetrahedra of the best |
-| fn | `surface_flip_pass` | `adapt/ops3.rs:838` | `pub fn surface_flip_pass(w: &mut Work3) -> usize` —  Flip of a boundary edge between two coplanar faces of a boundary patch with exactly two tetrahedra on it: the diagonal of the |
+| fn | `collapse_pass` | `adapt/ops3.rs:569` | `pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize` —  Collapse every edge shorter than `opt.lmin` that can be collapsed (one end moves onto the other, along its patch or curve when it is on one). Returns the number. |
+| fn | `flip_pass` | `adapt/ops3.rs:641` | `pub fn flip_pass(w: &mut Work3) -> usize` —  Quality-improving 3-2 and 2-3 flips of interior edges and faces. Returns the number of flips. |
+| fn | `smooth_pass` | `adapt/ops3.rs:772` | `pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry3, opt: &AdaptOptions3) -> usize` —  One sweep of length-equalising smoothing: every free vertex moves towards the position where its edges would have unit metric length |
+| fn | `edge_removal_pass` | `adapt/ops3.rs:905` | `pub fn edge_removal_pass(w: &mut Work3) -> usize` —  Edge removal: an interior edge with `n` (4 to 7) tetrahedra around it is replaced by the `2(n - 2)` tetrahedra of the best |
+| fn | `surface_flip_pass` | `adapt/ops3.rs:1002` | `pub fn surface_flip_pass(w: &mut Work3) -> usize` —  Flip of a boundary edge between two coplanar faces of a boundary patch with exactly two tetrahedra on it: the diagonal of the |
 | struct | `FxHasher` | `adapt/topo.rs:25` |  Small multiplicative hasher (the well-known Fx scheme) for the integer-keyed maps in the hot |
 | type | `FxMap` | `adapt/topo.rs:47` | `<K, V>` |
 | type | `Edge` | `adapt/topo.rs:50` |  Sorted vertex pair. |
 | fn | `ekey` | `adapt/topo.rs:52` | `pub fn ekey(a: u32, b: u32) -> Edge` |
 | enum | `VClass` | `adapt/topo.rs:57` | variants: `Interior`, `Chain`, `Corner` |
-| enum | `Sig` | `adapt/topo.rs:66` | variants: `Bnd`, `Iface` —  What a chain separates: the label of its boundary facets, or the two cell labels of an |
-| struct | `ChainInfo` | `adapt/topo.rs:72` | fields: `sig`, `frozen` |
-| struct | `TopoOptions` | `adapt/topo.rs:80` | fields: `corner_angle_deg`, `frozen_labels`, `fixed_vertices` —  Options for building the classification. |
-| struct | `Snap` | `adapt/topo.rs:97` | fields: `edges` —  Edge-triangle incidence and vertex stars of the current triangles. |
-| struct | `Work2` | `adapt/topo.rs:117` | fields: `pts`, `met`, `vclass`, `tris`, `tlabel`, `talive`, `touched`, `chains`, `chain_of` |
-| fn | `tri_area` | `adapt/topo.rs:131` | `pub fn tri_area(p: &[[f64; 2]], t: &[u32; 3]) -> f64` |
-| fn | `Snap::star` | `adapt/topo.rs:106` | `pub fn star(&self, v: u32) -> &[u32]` —  Alive triangles incident to vertex `v`, in increasing order. |
-| fn | `Snap::index` | `adapt/topo.rs:111` | `pub fn index(&self, e: &Edge) -> Option<usize>` —  Index of an edge in `edges`. |
-| fn | `Work2::from_mesh` | `adapt/topo.rs:138` | `pub fn from_mesh(mesh: &SimplexMesh<2>, field: &dyn MetricField<2>, opt: &TopoOptions) -> Result<Work2, String>` —  Build from a mesh; the vertex metrics are `field` evaluated at the vertices. |
-| fn | `Work2::n_alive` | `adapt/topo.rs:232` | `pub fn n_alive(&self) -> usize` |
-| fn | `Work2::snapshot` | `adapt/topo.rs:239` | `pub fn snapshot(&self) -> Snap` —  Edge and vertex incidence of the alive triangles. Linear time: vertex stars in CSR form, then |
-| fn | `Work2::check` | `adapt/topo.rs:286` | `pub fn check(&self) -> Result<(), String>` —  Internal consistency: positive areas, manifold edges, every boundary and interface edge |
-| fn | `Work2::to_mesh` | `adapt/topo.rs:327` | `pub fn to_mesh(&self) -> (SimplexMesh<2>, Vec<Sym<2>>)` —  Compact into a simplex mesh (alive triangles, used vertices in index order). Boundary |
+| enum | `Sig` | `adapt/topo.rs:66` | variants: `Bnd`, `Iface`, `Sheet` —  What a chain separates: the label of its boundary facets, the two cell labels of an |
+| struct | `ChainInfo` | `adapt/topo.rs:73` | fields: `sig`, `frozen` |
+| struct | `TopoOptions` | `adapt/topo.rs:81` | fields: `corner_angle_deg`, `frozen_labels`, `fixed_vertices` —  Options for building the classification. |
+| struct | `Snap` | `adapt/topo.rs:98` | fields: `edges` —  Edge-triangle incidence and vertex stars of the current triangles. |
+| struct | `Work2` | `adapt/topo.rs:118` | fields: `pts`, `met`, `vclass`, `tris`, `tlabel`, `talive`, `touched`, `chains`, `chain_of` |
+| fn | `tri_area` | `adapt/topo.rs:132` | `pub fn tri_area(p: &[[f64; 2]], t: &[u32; 3]) -> f64` |
+| fn | `Snap::star` | `adapt/topo.rs:107` | `pub fn star(&self, v: u32) -> &[u32]` —  Alive triangles incident to vertex `v`, in increasing order. |
+| fn | `Snap::index` | `adapt/topo.rs:112` | `pub fn index(&self, e: &Edge) -> Option<usize>` —  Index of an edge in `edges`. |
+| fn | `Work2::from_mesh` | `adapt/topo.rs:139` | `pub fn from_mesh(mesh: &SimplexMesh<2>, field: &dyn MetricField<2>, opt: &TopoOptions) -> Result<Work2, String>` —  Build from a mesh; the vertex metrics are `field` evaluated at the vertices. |
+| fn | `Work2::n_alive` | `adapt/topo.rs:236` | `pub fn n_alive(&self) -> usize` |
+| fn | `Work2::snapshot` | `adapt/topo.rs:243` | `pub fn snapshot(&self) -> Snap` —  Edge and vertex incidence of the alive triangles. Linear time: vertex stars in CSR form, then |
+| fn | `Work2::check` | `adapt/topo.rs:290` | `pub fn check(&self) -> Result<(), String>` —  Internal consistency: positive areas, manifold edges, every boundary and interface edge |
+| fn | `Work2::to_mesh` | `adapt/topo.rs:331` | `pub fn to_mesh(&self) -> (SimplexMesh<2>, Vec<Sym<2>>)` —  Compact into a simplex mesh (alive triangles, used vertices in index order). Boundary |
 | type | `Face` | `adapt/topo3.rs:27` |  Sorted vertex triple. |
 | enum | `VClass3` | `adapt/topo3.rs:30` | variants: `Interior`, `Surface`, `Crease`, `Corner` |
-| struct | `PatchInfo` | `adapt/topo3.rs:39` | fields: `sig`, `frozen` —  A connected piece of surface of one signature. |
-| struct | `CurveInfo` | `adapt/topo3.rs:46` | fields: `sigs`, `frozen` —  A connected run of crease edges. |
-| struct | `TopoOptions3` | `adapt/topo3.rs:54` | fields: `crease_angle_deg`, `corner_angle_deg`, `frozen_labels`, `fixed_vertices` —  Options for building the classification. |
-| struct | `Work3` | `adapt/topo3.rs:72` | fields: `pts`, `met`, `vclass`, `tets`, `tlabel`, `talive`, `patches`, `curves`, `patch_of`, `curve_of` |
-| fn | `fkey` | `adapt/topo3.rs:87` | `pub fn fkey(a: u32, b: u32, c: u32) -> Face` |
-| fn | `tet_volume` | `adapt/topo3.rs:93` | `pub fn tet_volume(p: &[[f64; 3]], t: &[u32; 4]) -> f64` |
-| fn | `tet_faces` | `adapt/topo3.rs:114` | `pub fn tet_faces(t: &[u32; 4]) -> [(Face, u32)` —  The four faces of a tetrahedron, each with the opposite vertex. |
-| fn | `Work3::from_mesh` | `adapt/topo3.rs:128` | `pub fn from_mesh(mesh: &SimplexMesh<3>, field: &dyn MetricField<3>, opt: &TopoOptions3) -> Result<Work3, String>` —  Build from a mesh; the vertex metrics are `field` evaluated at the vertices. |
-| fn | `Work3::compact_tets` | `adapt/topo3.rs:299` | `pub fn compact_tets(&mut self)` —  Drops the dead tetrahedra from the arrays. Operators append the tetrahedra they make and only mark the old ones dead, so without |
-| fn | `Work3::n_alive` | `adapt/topo3.rs:314` | `pub fn n_alive(&self) -> usize` |
-| fn | `Work3::check` | `adapt/topo3.rs:320` | `pub fn check(&self) -> Result<(), String>` —  Internal consistency: positive volumes, manifold faces, every surface face registered in a patch and vice versa, vertex classes |
-| fn | `Work3::to_mesh` | `adapt/topo3.rs:383` | `pub fn to_mesh(&self) -> (SimplexMesh<3>, Vec<Sym<3>>)` —  Compact into a simplex mesh (alive tetrahedra, used vertices in index order). Boundary facets carry the patch's facet label; |
+| struct | `PatchInfo` | `adapt/topo3.rs:39` | fields: `sig`, `frozen`, `normal` —  A connected piece of surface of one signature. |
+| struct | `CurveInfo` | `adapt/topo3.rs:48` | fields: `sigs`, `frozen` —  A connected run of crease edges. |
+| struct | `TopoOptions3` | `adapt/topo3.rs:56` | fields: `crease_angle_deg`, `corner_angle_deg`, `frozen_labels`, `fixed_vertices`, `interior_sheet_labels` —  Options for building the classification. |
+| struct | `Work3` | `adapt/topo3.rs:82` | fields: `pts`, `met`, `vclass`, `tets`, `tlabel`, `talive`, `patches`, `curves`, `patch_of`, `curve_of` |
+| fn | `fkey` | `adapt/topo3.rs:97` | `pub fn fkey(a: u32, b: u32, c: u32) -> Face` |
+| fn | `tet_volume` | `adapt/topo3.rs:103` | `pub fn tet_volume(p: &[[f64; 3]], t: &[u32; 4]) -> f64` |
+| fn | `tet_faces` | `adapt/topo3.rs:124` | `pub fn tet_faces(t: &[u32; 4]) -> [(Face, u32)` —  The four faces of a tetrahedron, each with the opposite vertex. |
+| fn | `Work3::from_mesh` | `adapt/topo3.rs:138` | `pub fn from_mesh(mesh: &SimplexMesh<3>, field: &dyn MetricField<3>, opt: &TopoOptions3) -> Result<Work3, String>` —  Build from a mesh; the vertex metrics are `field` evaluated at the vertices. |
+| fn | `Work3::compact_tets` | `adapt/topo3.rs:332` | `pub fn compact_tets(&mut self)` —  Drops the dead tetrahedra from the arrays. Operators append the tetrahedra they make and only mark the old ones dead, so without |
+| fn | `Work3::n_alive` | `adapt/topo3.rs:347` | `pub fn n_alive(&self) -> usize` |
+| fn | `Work3::check` | `adapt/topo3.rs:353` | `pub fn check(&self) -> Result<(), String>` —  Internal consistency: positive volumes, manifold faces, every surface face registered in a patch and vice versa, vertex classes |
+| fn | `Work3::to_mesh` | `adapt/topo3.rs:430` | `pub fn to_mesh(&self) -> (SimplexMesh<3>, Vec<Sym<3>>)` —  Compact into a simplex mesh (alive tetrahedra, used vertices in index order). Boundary and `Sig::Sheet` facets carry the patch's |
 
 Trait implementations in this component: `AdaptOptions3: Default`, `FxHasher: Hasher`, `TopoOptions: Default`, `TopoOptions3: Default`

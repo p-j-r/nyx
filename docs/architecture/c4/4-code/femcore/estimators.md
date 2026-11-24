@@ -5,12 +5,13 @@ C4 level 4 (code) of the component **Error estimators** (`femcore.estimators`) i
 > Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 17](../../../adr/0017-physics-driven-mesh-sizing.md), [ADR 53](../../../adr/0053-maxwell-residual-estimator-and-the-generic-adaptation-loop.md)  
-**Size:** 3 files, 1125 lines.
+**Size:** 4 files, 2653 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
+| `crates/femcore/src/adapt/electro.rs` | 1528 |  |
 | `crates/femcore/src/adapt/estimate.rs` | 344 | Error estimation and the solve-estimate-adapt loop for the meshes of `meshing`. |
 | `crates/femcore/src/adapt/estimate3.rs` | 317 | Error estimation and the solve-estimate-adapt loop for tetrahedral meshes (the 3D counterpart of `estimate`, without the 2D geometry pipeline: the start mesh is any tetrahedral mesh, adaptation is `adapt::drive3`). |
 | `crates/femcore/src/adapt/maxwell.rs` | 464 | A posteriori error estimator for time-harmonic Maxwell fields on tetrahedra (ADR 53), and the metric it asks for. |
@@ -22,15 +23,20 @@ C4 level 4 (code) of the component **Error estimators** (`femcore.estimators`) i
 | [container `geom` (geom)](../../3-components/geom.md) | model | FeatureList |
 | [Adaptation drivers](./adaptdrive.md) | adapt::drive3 | adapt3 |
 | [Adaptation operators](./adaptops.md) | adapt::ops3, adapt::topo3 | AdaptOptions3, TopoOptions3 |
-| [Finite-element basics](./fem.md) | fem | quad_rule |
+| [Finite-element basics](./fem.md) | fem | CurvedTet, TET_EDGES, build_face_to_cells_3d, facet_rule, geometry, quad_rule, quad_rule_collapsed, shape |
 | [Matrices and vectors](./lacore.md) | linalg::csr::assembly | C |
+| [Material specification](./material.md) | material | M3 |
 | [Mesh](./mesh.md) | mesh | SimplexMesh |
 | [Meshing facade](./meshing.md) | meshing, meshing::geomdrive | Adaptive, GeomMeshOpts, MeshedGeom, adapt_to_field, adapt_to_metrics, evaluate, geometry_floor, mesh_geom_2d |
-| [Metric fields](./metric.md) | adapt, adapt::field, adapt::field3, adapt::metric, adapt::work | BackgroundMetric2, BackgroundMetric3, LpOptions, PlotFields, Sym, complexity_for_elements, intersect, isotropic, lp_metrics, map_eig +3 |
+| [Metric fields](./metric.md) | adapt, adapt::field, adapt::field3, adapt::metric, adapt::work | BackgroundMetric2, BackgroundMetric3, LpOptions, PlotFields, Sym, complexity_for_elements, elements_for_complexity, from_sizes, grade, identity +8 |
+| [Runtime services](./runtime.md) | par |  |
 
 ## Used by
 
-Nothing else in the workspace names this component (entry points are reached by the program or by tests).
+| Component | Modules | Items |
+|---|---|---|
+| [dfs: Electrostatics kernel](../dfs/electro.md) | adapt::electro, adapt::estimate, adapt::estimate3 | DEFAULT_EPS_FLOOR, ElectroEstimatorOptions, Permittivity, electro_goal_indicators, electro_term_indicators, recovered_hessians |
+| [engine: Meshing seam](../engine/meshing.md) | adapt::electro | ElectroMetric2dOptions, ElectroMetric3dOptions, electro_metrics_3d, electro_overlay_metrics_2d, project_indicators_to_overlay_2d |
 
 ## Class diagram
 
@@ -38,6 +44,74 @@ Public types with their public fields (or variants) and methods, free functions 
 
 ```mermaid
 classDiagram
+  namespace adapt_electro_rs {
+    class Permittivity {
+        <<enumeration>>
+        Scalar
+        Tensor
+    }
+    class ElectroEstimatorOptions {
+        <<struct>>
+        +order usize
+        +eps0 f64
+        +permittivity Permittivity
+        +dirichlet_facets slice
+        +robin_alpha Option
+        +include_neumann_exterior bool
+        +skip_domain OptionadynFni32bool
+        +new(order, permittivity, dirichlet_facets) Self
+    }
+    class ElectroTermIndicators {
+        <<struct>>
+        +eta2_by_term Vec
+        +vol_part Vec~f64~
+        +jump_part Vec~f64~
+        +robin_part Vec~f64~
+    }
+    class ElectroGoalIndicators {
+        <<struct>>
+        +eta2 Vec~f64~
+        +total f64
+        +terms ElectroTermIndicators
+    }
+    class ElectroMetric2dOptions {
+        <<struct>>
+        +order usize
+        +q_sing f64
+        +h_max f64
+        +h_min_fraction f64
+        +target_cells f64
+        +max_aspect f64
+        +rim_anisotropy f64
+        +rim_segments slice
+        +more_3_fields
+        +new(order, h_max, h_min_fraction, target_cells) Self
+    }
+    class ElectroMetric3dOptions {
+        <<struct>>
+        +order usize
+        +q_sing f64
+        +h_max f64
+        +h_min_fraction f64
+        +target_cells f64
+        +rim_vertices Option
+        +new(order, h_max, h_min_fraction, target_cells) Self
+    }
+    class fns_adapt_electro_rs {
+        <<module adapt/electro.rs>>
+        +kunert_h_min_tet(p, vol) f64
+        +kunert_h_min_tri(p, area) f64
+        +electro_term_indicators(mesh, potentials, opt) Result
+        +combine_goal_oriented(terms, cap_matrix, eps_floor) Result
+        +electro_goal_indicators(mesh, potentials, cap_matrix, eps_floor, opt) Result
+        +project_indicators_to_overlay_2d(mesh3, m2, eta2_3d, plane_axes) Result
+        +electro_overlay_metrics_2d(m2, eta2_2d, opt, floor) Result
+        +electro_vertex_sizes_3d(mesh, eta2, opt) Result
+        +electro_metrics_3d(mesh, eta2, opt, floor) Result
+        +EPS0 const
+        +DEFAULT_EPS_FLOOR const
+    }
+  }
   namespace adapt_estimate_rs {
     class Estimator {
         <<struct>>
@@ -155,6 +229,8 @@ classDiagram
         +indicator_metrics(mesh, eta2, opt, floor) Result
     }
   }
+  ElectroEstimatorOptions --> Permittivity
+  ElectroGoalIndicators --> ElectroTermIndicators
   LoopSettings --> Estimator
   LoopSettings --> WarmStart
   LoopResult --> Cycle
@@ -167,6 +243,26 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
+| const | `EPS0` | `adapt/electro.rs:22` | `f64` —  Vacuum permittivity `eps_0` in F/m (matching `nyx-dfs` electrostatics). |
+| const | `DEFAULT_EPS_FLOOR` | `adapt/electro.rs:25` | `f64` —  Default relative floor for off-diagonal capacitance weights `W_ij`. |
+| enum | `Permittivity` | `adapt/electro.rs:29` | variants: `Scalar`, `Tensor` —  Per-cell relative permittivity specification (dimensionless). |
+| struct | `ElectroEstimatorOptions` | `adapt/electro.rs:104` | fields: `order`, `eps0`, `permittivity`, `dirichlet_facets`, `robin_alpha`, `include_neumann_exterior`, `skip_domain` —  Options for [`electro_term_indicators`] and [`electro_goal_indicators`]. |
+| struct | `ElectroTermIndicators` | `adapt/electro.rs:141` | fields: `eta2_by_term`, `vol_part`, `jump_part`, `robin_part` —  Per-terminal cell error indicators `eta_{T,i}^2` (in Farads for 1 V terminal excitations). |
+| struct | `ElectroGoalIndicators` | `adapt/electro.rs:154` | fields: `eta2`, `total`, `terms` —  Combined goal-oriented cell error indicators `eta_T^2` across all terminal pairs. |
+| fn | `kunert_h_min_tet` | `adapt/electro.rs:196` | `pub fn kunert_h_min_tet(p: &[[f64; 3]; 4], vol: f64) -> f64` —  Kunert minimum altitude `h_{min,T} = 3 * V / max_face_area` of a 3D tetrahedron. |
+| fn | `kunert_h_min_tri` | `adapt/electro.rs:206` | `pub fn kunert_h_min_tri(p: &[[f64; 2]; 3], area: f64) -> f64` —  Kunert minimum altitude `h_{min,T} = 2 * A / max_edge_len` of a 2D triangle. |
+| fn | `electro_term_indicators` | `adapt/electro.rs:239` | `pub fn electro_term_indicators( mesh: &SimplexMesh, potentials: &[Vec<f64>], opt: &ElectroEstimatorOptions, ) -> Result<ElectroTermIndicators, String>` —  Computes per-terminal dual-weighted residual indicators `eta_{T,i}^2` on `mesh`. |
+| fn | `combine_goal_oriented` | `adapt/electro.rs:914` | `pub fn combine_goal_oriented( terms: ElectroTermIndicators, cap_matrix: &[Vec<f64>], eps_floor: f64, ) -> Result<ElectroGoalIndicators, String>` —  Combines per-terminal indicators `eta_{T,i}^2` into goal-oriented relative capacitance error |
+| fn | `electro_goal_indicators` | `adapt/electro.rs:952` | `pub fn electro_goal_indicators( mesh: &SimplexMesh, potentials: &[Vec<f64>], cap_matrix: &[Vec<f64>], eps_floor: f64, opt: &ElectroEstimatorOptions, ) -> Result<ElectroGoalIndicators, String>` —  Evaluates per-terminal indicators and combines them with `cap_matrix` (`eps_floor` defaults to [`DEFAULT_EPS_FLOOR`]). |
+| fn | `project_indicators_to_overlay_2d` | `adapt/electro.rs:971` | `pub fn project_indicators_to_overlay_2d( mesh3: &SimplexMesh, m2: &SimplexMesh, eta2_3d: &[f64], plane_axes: [usize; 2], ) -> Result<Vec<f64>, String>` —  Projects 3D cell indicators `eta2_3d` onto the 2D overlay triangles of `m2` along `plane_axes` |
+| struct | `ElectroMetric2dOptions` | `adapt/electro.rs:1145` | fields: `order`, `q_sing`, `h_max`, `h_min_fraction`, `target_cells`, `max_aspect`, `rim_anisotropy`, `rim_segments`, `corners`, `corner_ball_factor`, `grade` —  Options for 2D column-projected metric generation [`electro_overlay_metrics_2d`]. |
+| fn | `electro_overlay_metrics_2d` | `adapt/electro.rs:1218` | `pub fn electro_overlay_metrics_2d( m2: &SimplexMesh, eta2_2d: &[f64], opt: &ElectroMetric2dOptions, floor: Option<&[Sym<2>]>, ) -> Result<Vec<Sym<2>>, String>` —  Converts column-projected 2D triangle indicators `eta2_2d` into per-vertex 2D Riemannian metrics |
+| struct | `ElectroMetric3dOptions` | `adapt/electro.rs:1417` | fields: `order`, `q_sing`, `h_max`, `h_min_fraction`, `target_cells`, `rim_vertices` —  Options for 3D electrostatic equidistribution [`electro_vertex_sizes_3d`] / [`electro_metrics_3d`]. |
+| fn | `electro_vertex_sizes_3d` | `adapt/electro.rs:1440` | `pub fn electro_vertex_sizes_3d( mesh: &SimplexMesh, eta2: &[f64], opt: &ElectroMetric3dOptions, ) -> Result<Vec<f64>, String>` —  Computes target 3D per-vertex element sizes `vh[v]` in `[h_max * h_min_fraction, h_max]` from |
+| fn | `electro_metrics_3d` | `adapt/electro.rs:1508` | `pub fn electro_metrics_3d( mesh: &SimplexMesh, eta2: &[f64], opt: &ElectroMetric3dOptions, floor: Option<&[Sym<3>]>, ) -> Result<Vec<Sym<3>>, String>` —  Computes target 3D per-vertex metrics `Vec<Sym<3>>` from 3D cell indicators `eta2`, |
+| fn | `ElectroEstimatorOptions::new` | `adapt/electro.rs:126` | `pub fn new(order: usize, permittivity: Permittivity<'a>, dirichlet_facets: &'a [bool]) -> Self` —  Constructs default options for `order` (`1` or `2`), `permittivity`, and `dirichlet_facets`. |
+| fn | `ElectroMetric2dOptions::new` | `adapt/electro.rs:1172` | `pub fn new(order: usize, h_max: f64, h_min_fraction: f64, target_cells: f64) -> Self` |
+| fn | `ElectroMetric3dOptions::new` | `adapt/electro.rs:1433` | `pub fn new(order: usize, h_max: f64, h_min_fraction: f64, target_cells: f64) -> Self` |
 | struct | `Estimator` | `adapt/estimate.rs:31` | fields: `fields`, `p`, `hmin_fraction`, `max_aspect`, `combine` —  What the metric is built from and how. |
 | fn | `recovered_hessians` | `adapt/estimate.rs:69` | `pub fn recovered_hessians(mesh: &SimplexMesh, u: &[f64]) -> Result<Vec<Sym<2>>, String>` —  Recovered Hessian of a P1 field at every vertex of a triangle mesh, intersected over the domains meeting at the vertex. |
 | fn | `estimator_metrics` | `adapt/estimate.rs:173` | `pub fn estimator_metrics<R: PlotFields>(g: &MeshedGeom, result: &R, est: &Estimator, opts: &GeomMeshOpts, target_cells: f64) -> Result<Vec<Sym<2>>, String>` —  The metric the solution asks for at every vertex of the mesh of `g`, for about `target_cells` triangles, intersected with the floor of the |

@@ -4,21 +4,21 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 
 > The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (concept, build with its Sweep section, analysis), the sheets (new, search, versions, share, settings) and the example starting points.
 
-**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md)  
-**Size:** 8 files, 5092 lines.
+**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md)  
+**Size:** 8 files, 5126 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/activity.rs` | 418 |  |
+| `crates/app/src/activity.rs` | 413 |  |
 | `crates/app/src/dashboard.rs` | 381 |  |
-| `crates/app/src/examples.rs` | 140 |  |
+| `crates/app/src/examples.rs` | 168 |  |
 | `crates/app/src/menu.rs` | 399 |  |
-| `crates/app/src/sheets.rs` | 992 |  |
-| `crates/app/src/shell.rs` | 1129 |  |
+| `crates/app/src/sheets.rs` | 991 |  |
+| `crates/app/src/shell.rs` | 1142 |  |
 | `crates/app/src/sweepui.rs` | 473 |  |
-| `crates/app/src/wfview.rs` | 1160 |  |
+| `crates/app/src/wfview.rs` | 1159 |  |
 
 ## What it uses
 
@@ -34,7 +34,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 |---|---|---|
 | [Scripts and batch](./headless.md) | examples, shell | Page, Part, Sheet, Start, Sub, list |
 | [Inspector tabs](./inspector.md) | examples | list, typical |
-| [Window](./window.md) | activity, examples, menu, sheets, shell, sweepui | Act, Active, Deferred, Page, RunCtx, ScriptSheet, Sheet, Shell +4 |
+| [Window](./window.md) | activity, examples, menu, sheets, shell, sweepui | Act, Active, Deferred, Page, RunCtx, ScriptSheet, Sheet, Shell +3 |
 
 ## Class diagram
 
@@ -83,7 +83,6 @@ classDiagram
         +asked_by(owner) Option
         +priority_word(p) str
         +validation_state(v) State
-        +band_colours(ctx) tuple
     }
   }
   namespace dashboard_rs {
@@ -329,7 +328,6 @@ classDiagram
 | fn | `asked_by` | `activity.rs:125` | `pub fn asked_by(owner: &str) -> Option<&'static str>` —  Who asked, in words, for a row that is not the person's own (the window's engine only ever holds the person's jobs today; the queue entry |
 | fn | `priority_word` | `activity.rs:134` | `pub fn priority_word(p: u8) -> &'static str` —  What the priority numbers mean to a person. |
 | fn | `validation_state` | `activity.rs:351` | `pub fn validation_state(v: nyx_engine::validated::Validation) -> State` —  The glyph state of a validated state. |
-| fn | `band_colours` | `activity.rs:367` | `pub fn band_colours(ctx: &egui::Context) -> (Color32, Color32)` —  The colours of the band drawn on the plot itself: amber fill, the text of an amber fill. |
 | fn | `Activity::of` | `activity.rs:40` | `pub fn of(entries: &[Value], paused: bool) -> Activity` —  From the entries of `queue_list` (finished, failed and cancelled jobs are not activity). |
 | fn | `Activity::running` | `activity.rs:66` | `pub fn running(&self) -> Option<&Row>` |
 | fn | `Activity::waiting` | `activity.rs:70` | `pub fn waiting(&self) -> usize` |
@@ -348,11 +346,11 @@ classDiagram
 | fn | `App::reveal` | `dashboard.rs:42` | `pub fn reveal(&mut self, path: &std::path::Path)` |
 | fn | `App::dashboard_ui` | `dashboard.rs:61` | `pub fn dashboard_ui(&mut self, ui: &mut egui::Ui)` |
 | struct | `Example` | `examples.rs:13` | fields: `path`, `title` —  One example file with the title written in it. |
-| fn | `dirs` | `examples.rs:19` | `pub fn dirs() -> Vec<PathBuf>` —  The folders searched for examples, first with files wins. |
-| fn | `list` | `examples.rs:48` | `pub fn list() -> Vec<Example>` —  The examples of the first folder that has any, in file-name order. |
-| fn | `typical` | `examples.rs:72` | `pub fn typical(name: &str) -> f64` —  A value for a property the descriptor gives no default for: a typical number, so that a new simulation runs before anything is edited. |
-| fn | `blank` | `examples.rs:87` | `pub fn blank(engine: &mut Engine, physics: &str, three_d: bool) -> Result<(), String>` —  Starts a blank simulation in `engine`: a unit plate (one region `plate`, x-z) or, in 3D, the unit cube made by sweeping it along y, |
-| fn | `blank_json` | `examples.rs:135` | `pub fn blank_json(physics: &str, three_d: bool) -> Result<String, String>` —  The JSON text of a blank simulation (`blank`) made on a scratch engine: the spec a new experiment starts from. |
+| fn | `dirs` | `examples.rs:20` | `pub fn dirs() -> Vec<PathBuf>` —  The folders searched for examples, first with files wins: `NYX_EXAMPLES`, split/bundle layouts near `current_exe()` |
+| fn | `list` | `examples.rs:76` | `pub fn list() -> Vec<Example>` —  The examples of the first folder that has any, in file-name order. |
+| fn | `typical` | `examples.rs:100` | `pub fn typical(name: &str) -> f64` —  A value for a property the descriptor gives no default for: a typical number, so that a new simulation runs before anything is edited. |
+| fn | `blank` | `examples.rs:115` | `pub fn blank(engine: &mut Engine, physics: &str, three_d: bool) -> Result<(), String>` —  Starts a blank simulation in `engine`: a unit plate (one region `plate`, x-z) or, in 3D, the unit cube made by sweeping it along y, |
+| fn | `blank_json` | `examples.rs:163` | `pub fn blank_json(physics: &str, three_d: bool) -> Result<String, String>` —  The JSON text of a blank simulation (`blank`) made on a scratch engine: the spec a new experiment starts from. |
 | enum | `Act` | `menu.rs:13` | variants: `New`, `Open`, `ScriptEditor`, `ExportScript`, `CloseTab`, `Quit`, `Palette`, `Dashboard`, `ConceptGeometry`, `ConceptMaterials`, `BuildConditions`, `BuildStudy`, ... |
 | struct | `Item` | `menu.rs:43` | fields: `menu`, `label`, `keys`, `act` |
 | const | `ACTIONS` | `menu.rs:53` | `[Item` —  Menus in order; the items of a menu in the order of this table. |
@@ -364,7 +362,7 @@ classDiagram
 | fn | `Native::take` | `menu.rs:341` | `pub fn take(&self) -> Vec<Act>` —  The actions clicked in the menu since the last call. |
 | struct | `ScriptSheet` | `sheets.rs:18` | fields: `open`, `code`, `path`, `check_msg`, `output`, `running` —  State of the in-window `.nys` script editor and runner sheet. |
 | fn | `App::sheets_ui` | `sheets.rs:39` | `pub fn sheets_ui(&mut self, ctx: &egui::Context)` |
-| fn | `App::settings_ui` | `sheets.rs:765` | `pub fn settings_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::settings_ui` | `sheets.rs:764` | `pub fn settings_ui(&mut self, ui: &mut egui::Ui)` |
 | enum | `Page` | `shell.rs:23` | variants: `Dashboard`, `Workflow`, `Settings` |
 | enum | `Start` | `shell.rs:30` | variants: `Example`, `Results`, `Blank` —  Where a new workflow starts from: an example (or any project file), or a blank simulation. |
 | enum | `Part` | `shell.rs:39` | variants: `Concept`, `Build`, `Analysis` —  The three sections of an experiment. |
@@ -376,7 +374,7 @@ classDiagram
 | struct | `RunCtx` | `shell.rs:181` | fields: `wf_id`, `exp`, `spec_json`, `params`, `started` |
 | struct | `NewState` | `shell.rs:189` | fields: `title`, `template`, `physics`, `three_d`, `all_examples` |
 | struct | `Shell` | `shell.rs:203` | fields: `ws`, `entries`, `spark`, `page`, `tabs`, `open`, `loaded`, `run`, `live_run`, `sheet`, `new`, `palette_q`, ... |
-| fn | `params_of` | `shell.rs:990` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
+| fn | `params_of` | `shell.rs:1003` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
 | fn | `OpenWf::new` | `shell.rs:104` | `pub fn new(id: String) -> OpenWf` |
 | fn | `OpenWf::title` | `shell.rs:143` | `pub fn title(&self) -> String` |
 | fn | `OpenWf::reload_runs` | `shell.rs:150` | `pub fn reload_runs(&mut self)` |
@@ -403,8 +401,8 @@ classDiagram
 | fn | `App::record_end` | `shell.rs:708` | `pub fn record_end(&mut self, status: RunStatus, error: Option<String>)` —  A solve failed or was cancelled. |
 | fn | `App::shell_ui` | `shell.rs:762` | `pub fn shell_ui(&mut self, ui: &mut egui::Ui)` —  The whole window in the shell layout. |
 | fn | `App::pick_nyx_file` | `shell.rs:968` | `pub fn pick_nyx_file(&mut self)` —  File dialog for a `.nyx` file; shows what is inside before anything is saved. |
-| fn | `App::open_received` | `shell.rs:973` | `pub fn open_received(&mut self, p: PathBuf)` |
-| fn | `App::sync_look` | `shell.rs:1053` | `pub fn sync_look(&mut self, ctx: &egui::Context)` —  Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs), |
+| fn | `App::open_received` | `shell.rs:981` | `pub fn open_received(&mut self, p: PathBuf)` |
+| fn | `App::sync_look` | `shell.rs:1066` | `pub fn sync_look(&mut self, ctx: &egui::Context)` —  Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs), |
 | struct | `Plan` | `sweepui.rs:24` | fields: `points`, `meshes`, `solves`, `problems` —  What the engine's dry run says a sweep will cost. |
 | struct | `Form` | `sweepui.rs:41` | fields: `shown`, `param`, `from`, `to`, `n`, `metric` —  The form of the section, one per open workflow. |
 | fn | `values` | `sweepui.rs:61` | `pub fn values(from: f64, to: f64, n: usize) -> Vec<f64>` —  `n` values from `from` to `to`, evenly spaced, ends included (one value when `n` is 1). |

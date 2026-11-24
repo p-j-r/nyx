@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Physics adapter** (`dfs.adapter`) in the co
 > The Physics implementation of dfs: descriptors, validation, solve entry.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md)  
-**Size:** 1 file, 294 lines.
+**Size:** 1 file, 501 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/lib.rs` | 294 |  |
+| `crates/nyx-dfs/src/lib.rs` | 501 |  |
 
 ## What it uses
 
@@ -19,7 +19,7 @@ C4 level 4 (code) of the component **Physics adapter** (`dfs.adapter`) in the co
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, progress | Library, Progress |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root |  |
-| [Electrostatics kernel](./electro.md) | electro | EPS0, ElectroAssembly, assemble_electrostatics, electrostatics_fields, solve_electrostatics, solve_potential |
+| [Electrostatics kernel](./electro.md) | electro, planar_bem | EPS0, ElectroAssembly, LayeredStack, assemble_electrostatics, electrostatics_fields, layered_greens_function, solve_electrostatics, solve_planar_bem, solve_potential |
 | [Heat kernel](./heat.md) | heat | HeatStates, HeatSystem, assemble_heat, heat_fields, solve_heat, solve_heat_states |
 | [Magnetostatics kernel](./magneto.md) | magneto | MU0, solve_magnetostatics |
 | [Typed problem](./problem.md) | problem | Bc, BcKind, Problem, Study, decode |
@@ -50,7 +50,7 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Dfs` | `lib.rs:29` |  |
-| fn | `run` | `lib.rs:269` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
+| struct | `Dfs` | `lib.rs:32` |  |
+| fn | `run` | `lib.rs:416` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
 
 Trait implementations in this component: `Dfs: Physics`

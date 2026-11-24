@@ -31,7 +31,8 @@ graph TB
     46-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
     44-. "<div>uses femcore: meshing::sizing</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     44-. "<div>uses physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
-    43-. "<div>uses femcore: material,<br />material::elastic +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    43-. "<div>uses femcore: material,<br />material::coupled +4</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
+    43-. "<div>uses cqed</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
     43-. "<div>uses desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
     43-. "<div>uses result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
     43-. "<div>uses error, physics</div><div style='font-size: 70%'>[Rust paths]</div>" .->42
@@ -44,7 +45,7 @@ graph TB
     42-. "<div>uses femcore: material::spec,<br />mesh +2</div><div style='font-size: 70%'>[Rust paths]</div>" .->98
     42-. "<div>uses cqed</div><div style='font-size: 70%'>[Rust paths]</div>" .->46
     42-. "<div>uses crate root, desc</div><div style='font-size: 70%'>[Rust paths]</div>" .->44
-    42-. "<div>uses spec, validate</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
+    42-. "<div>uses decode, spec +1</div><div style='font-size: 70%'>[Rust paths]</div>" .->43
     42-. "<div>uses frame, result</div><div style='font-size: 70%'>[Rust paths]</div>" .->45
 
   end

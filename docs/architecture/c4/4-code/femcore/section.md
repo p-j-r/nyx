@@ -39,6 +39,7 @@ C4 level 4 (code) of the component **Frame and sections** (`femcore.section`) in
 | [Finite-element basics](./fem.md) | section | mesh_pml_dirs |
 | [Optical mode sets](./optical.md) | section | PROP_SIGN, local_tensor_signed |
 | [sms: Cross-section study kernel](../sms/crosssection.md) | section | plane_stiffness |
+| [sms: Low-reflecting boundary](../sms/lrb.md) | section | plane_stiffness |
 | [sms: Solid kernel](../sms/solid.md) | section | component_names, plane_stiffness, plane_tensor, stress_name, wafer_axes |
 
 ## Class diagram

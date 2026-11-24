@@ -5,7 +5,7 @@ One page per component, C4 level 4. [Component view](../../3-components/connect.
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
 | [Host table](./hosts.md) | 2 | 219 | 13 | 4 |
-| [Host config](./config.md) | 1 | 174 | 7 | 3 |
-| [Server probe](./server.md) | 1 | 173 | 12 | 1 |
+| [Host config](./config.md) | 1 | 185 | 8 | 3 |
+| [Server probe](./server.md) | 1 | 182 | 12 | 1 |
 | [Report](./report.md) | 2 | 189 | 9 | 0 |
 | [Command line](./cli.md) | 1 | 172 | 8 | 0 |
