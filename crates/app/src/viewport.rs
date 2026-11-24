@@ -343,8 +343,8 @@ impl Viewport {
                 );
                 painter.add(Shape::mesh(self.scene.mesh()));
                 let screen = self.scene.screen();
-                // the hatch of slots 9 to 16 (2D): thin diagonal lines over the solid fill, the one cue that does not depend on colour
-                let hatched = |lab: i32| matches!(paint.style(lab), Style::Hatched(_)) && iso.is_none_or(|s| paint.slot(lab) == Some(s));
+                // the hatch of slots 9 to 16 and of the absorbing layers (2D): thin diagonal lines over the solid fill, the one cue that does not depend on colour
+                let hatched = |lab: i32| matches!(paint.style(lab), Style::Hatched(_) | Style::Pml(_)) && iso.is_none_or(|s| paint.slot(lab) == Some(s));
                 let has_hatch = !is3d && view.tri_label.iter().any(|&l| hatched(l));
                 if show_edges || has_hatch {
                     let limit = edge_limit(is3d);
@@ -573,9 +573,9 @@ impl Viewport {
             }
             // the swatch is drawn the way the canvas draws the slot, hatch included
             let sw = Rect::from_min_size(r.min + Vec2::new(6.0, (ROW - 14.0) / 2.0), Vec2::splat(14.0));
-            let style = regions::style_of(row.slot, paint.hatch);
+            let style = row.style;
             painter.rect_filled(sw, 2.0, regions::fill(style, ink.mode));
-            if matches!(style, Style::Hatched(_)) {
+            if matches!(style, Style::Hatched(_) | Style::Pml(_)) {
                 let p = painter.with_clip_rect(sw);
                 hatch_triangle(&p, [sw.left_top(), sw.right_top(), sw.left_bottom()], 4.0, Stroke::new(1.0, ink.text));
                 hatch_triangle(&p, [sw.right_top(), sw.right_bottom(), sw.left_bottom()], 4.0, Stroke::new(1.0, ink.text));

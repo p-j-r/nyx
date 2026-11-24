@@ -1455,34 +1455,50 @@ impl App {
 
     /// The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions
     /// by), the surfaces of a 3D mesh by boundary number (a surface has no region; the materials belong to the volume).
+    ///
+    /// The plan reads every physics of the project, in project order, never only the active one (ADR 123): the first physics that gives a region a
+    /// material names its colour, and a region that any physics marks as a PML is an absorbing layer, drawn in one grey graded by its strength. So
+    /// switching the physics on show never repaints the model.
     pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint {
-        use crate::regions::{assign, keys_by_material};
+        use crate::regions::{assign, assign_with_pml, keys_by_material};
         use nyx_engine::facade::physics::{LabelResolver, MaterialAssign};
+        use std::collections::BTreeMap;
         if view.dim == 3 {
             let labels = if view.boundary_labels.is_empty() { &view.tri_label } else { &view.boundary_labels };
             return assign(labels, |l| l.to_string(), false);
         }
         let labels = if view.domain_labels.is_empty() { &view.tri_label } else { &view.domain_labels };
         let name_of = |l: i32| self.domain_names.iter().find(|(i, _)| *i == l).map_or_else(|| l.to_string(), |(_, n)| n.clone());
-        let key: HashMap<i32, String> = match (self.shell.settings().region_colouring == "region", self.doc.model.as_ref(), self.active().and_then(|a| self.engine.project().spec(&a).cloned())) {
-            (false, Some(model), Some(spec)) => {
-                let materials = spec
-                    .materials
-                    .iter()
-                    .map(|(region, m)| {
-                        let material = match m {
-                            MaterialAssign::Named(n) => Some(n.clone()),
-                            MaterialAssign::Oriented { material, .. } => Some(material.clone()),
-                            MaterialAssign::Props(_) | MaterialAssign::PropsTensor(_) => None,
-                        };
-                        (region.clone(), material)
-                    })
-                    .collect();
-                keys_by_material(&self.domain_names, &materials, |p| LabelResolver::domains(model.as_ref(), p).unwrap_or_default())
+        let by_material = self.shell.settings().region_colouring != "region";
+        let mut materials: BTreeMap<String, Option<String>> = BTreeMap::new();
+        let mut layers: BTreeMap<i32, f64> = BTreeMap::new();
+        if let Some(model) = self.doc.model.as_ref() {
+            for spec in &self.engine.project().physics {
+                for (region, m) in &spec.materials {
+                    let material = match m {
+                        MaterialAssign::Named(n) => Some(n.clone()),
+                        MaterialAssign::Oriented { material, .. } => Some(material.clone()),
+                        MaterialAssign::Props(_) | MaterialAssign::PropsTensor(_) => None,
+                    };
+                    let entry = materials.entry(region.clone()).or_insert(None);
+                    if entry.is_none() {
+                        *entry = material;
+                    }
+                }
+                for bc in spec.bcs.iter().filter(|bc| bc.kind == "pml") {
+                    let strength = bc.params.get("strength").and_then(|v| v.as_f64()).unwrap_or(3.0);
+                    for l in LabelResolver::domains(model.as_ref(), &bc.on).unwrap_or_default() {
+                        let e = layers.entry(l).or_insert(strength);
+                        *e = e.max(strength);
+                    }
+                }
             }
+        }
+        let key: HashMap<i32, String> = match (by_material, self.doc.model.as_ref()) {
+            (true, Some(model)) => keys_by_material(&self.domain_names, &materials, |p| LabelResolver::domains(model.as_ref(), p).unwrap_or_default()),
             _ => HashMap::new(),
         };
-        assign(labels, |l| key.get(&l).cloned().unwrap_or_else(|| name_of(l)), true)
+        assign_with_pml(labels, |l| key.get(&l).cloned().unwrap_or_else(|| name_of(l)), true, &layers)
     }
 
     pub fn viewport_ui(&mut self, ui: &mut egui::Ui) {
@@ -1539,13 +1555,16 @@ impl App {
             _ => self.vp.show(ui, Content::Empty, false, &ink),
         };
         if let Some(why) = stale {
-            // on the plot itself, so a stale field is never read as current; the button to solve again is in the Results tab and its panel
-            let at = ui.max_rect().left_top() + egui::vec2(10.0, 10.0);
-            let text = format!("Stale: {why}");
-            let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(14.0), crate::activity::band_colours(ui.ctx()).1);
-            let rect = egui::Rect::from_min_size(at, galley.size() + egui::vec2(12.0, 6.0));
-            ui.painter().rect_filled(rect, 4.0, crate::activity::band_colours(ui.ctx()).0);
-            ui.painter().galley(rect.min + egui::vec2(6.0, 3.0), galley, crate::activity::band_colours(ui.ctx()).1);
+            // on the plot itself, so a stale field is never read as current; the button to solve again is in the Results tab and its panel.
+            // A small chip in the style of the trust chip (an amber ring and the word), not a filled amber band over the data; the reason is its tooltip (ADR 123)
+            let ctx = ui.ctx().clone();
+            let at = out.rect.left_top() + egui::vec2(10.0, 10.0);
+            let galley = ui.painter().layout_no_wrap("Stale".to_string(), egui::FontId::proportional(14.0), crate::theme::text(&ctx));
+            let rect = egui::Rect::from_min_size(at, egui::vec2(galley.size().x + 36.0, galley.size().y + 8.0));
+            ui.painter().rect(rect, 4.0, crate::theme::card(&ctx), egui::Stroke::new(1.0, crate::theme::edge(&ctx)), egui::StrokeKind::Inside);
+            crate::kit::paint_glyph(ui, rect.left_center() + egui::vec2(14.0, 0.0), crate::kit::State::Waiting);
+            ui.painter().galley(rect.left_top() + egui::vec2(28.0, 4.0), galley, crate::theme::text(&ctx));
+            let _ = ui.interact(rect, egui::Id::unique("nyx-stale-chip"), egui::Sense::hover()).on_hover_text(format!("Stale: {why}. Compute again to refresh this field."));
         } else if show_results {
             // the trust state of the field on show (P6): a chip on the plot, in the colours of the window, so it reads on either canvas and does not
             // depend on the side panel being wide enough to show the same line
